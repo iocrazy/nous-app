@@ -85,6 +85,6 @@ describe('IssueChatThread — CommentEvent alignment', () => {
     expect(wrapper).not.toBeNull();
     expect(wrapper.className).toMatch(/justify-start/);
     const bubble = wrapper.querySelector('[data-testid="comment-bubble"]') as HTMLElement;
-    expect(bubble.className).toMatch(/bg-zinc-800/);
+    expect(bubble.className).toMatch(/bg-ink-800/);
   });
 });

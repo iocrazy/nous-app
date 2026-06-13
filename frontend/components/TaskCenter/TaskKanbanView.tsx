@@ -49,11 +49,11 @@ const KanbanCard: React.FC<{
       className={`w-full text-left p-2 rounded border transition mb-1.5 ${
         selected
           ? 'border-indigo-500/50 bg-indigo-500/10'
-          : 'border-zinc-800 bg-zinc-900/60 hover:border-zinc-700 hover:bg-zinc-800/60'
+          : 'border-ink-800 bg-ink-900/60 hover:border-ink-700 hover:bg-ink-800/60'
       }`}
     >
       <div className="flex items-center gap-1.5 mb-1">
-        <span className="font-mono text-[9px] text-zinc-500 uppercase tracking-wider">{taskIdLabel(task)}</span>
+        <span className="font-mono text-[9px] text-ink-500 uppercase tracking-wider">{taskIdLabel(task)}</span>
         {(agentId || flowId) && (
           <div className="ml-auto flex items-center gap-1">
             {agentId && (
@@ -65,7 +65,7 @@ const KanbanCard: React.FC<{
           </div>
         )}
       </div>
-      <div className="text-[11px] text-zinc-100 mb-1 line-clamp-2 leading-tight">
+      <div className="text-[11px] text-ink-100 mb-1 line-clamp-2 leading-tight">
         {task.title || '(no title)'}
       </div>
       {task.error_msg && (
@@ -73,7 +73,7 @@ const KanbanCard: React.FC<{
           {task.error_msg}
         </div>
       )}
-      <div className="flex items-center justify-between text-[9px] text-zinc-500">
+      <div className="flex items-center justify-between text-[9px] text-ink-500">
         <span className="flex items-center gap-1">
           <StatusDot status={task.status} />
           {taskTypeLabel(task.task_type)}
@@ -81,7 +81,7 @@ const KanbanCard: React.FC<{
         <span>{relativeTime(task.updated_at ?? task.created_at)}</span>
       </div>
       {task.status === 'processing' && task.progress > 0 && (
-        <div className="mt-1.5 h-0.5 bg-zinc-800 rounded overflow-hidden">
+        <div className="mt-1.5 h-0.5 bg-ink-800 rounded overflow-hidden">
           <div className="h-full bg-blue-500 transition-all" style={{ width: `${Math.min(100, task.progress)}%` }} />
         </div>
       )}
@@ -92,7 +92,7 @@ const KanbanCard: React.FC<{
 export const TaskKanbanView: React.FC<TaskKanbanViewProps> = ({ groups, selectedTaskId, onSelect }) => {
   if (groups.length === 0) {
     return (
-      <div className="flex items-center justify-center py-24 text-sm text-zinc-500">
+      <div className="flex items-center justify-center py-24 text-sm text-ink-500">
         No tasks match the current filters.
       </div>
     );
@@ -101,9 +101,9 @@ export const TaskKanbanView: React.FC<TaskKanbanViewProps> = ({ groups, selected
     <div className="flex gap-3 px-4 py-3 overflow-x-auto" style={{ minHeight: '60vh' }}>
       {groups.map((g) => (
         <div key={g.key} className="flex-shrink-0 w-[280px] flex flex-col">
-          <div className="flex items-center gap-2 px-2 py-1.5 mb-2 border-b border-zinc-800/80 sticky top-0 bg-zinc-950/40">
-            <span className="text-[11px] font-medium text-zinc-300 uppercase tracking-wider">{g.label}</span>
-            <span className="text-[10px] text-zinc-500 ml-auto">{g.tasks.length}</span>
+          <div className="flex items-center gap-2 px-2 py-1.5 mb-2 border-b border-ink-800/80 sticky top-0 bg-ink-950/40">
+            <span className="text-[11px] font-medium text-ink-300 uppercase tracking-wider">{g.label}</span>
+            <span className="text-[10px] text-ink-500 ml-auto">{g.tasks.length}</span>
           </div>
           <div className="flex-1 overflow-y-auto pr-1">
             {g.tasks.map((t) => (
@@ -115,7 +115,7 @@ export const TaskKanbanView: React.FC<TaskKanbanViewProps> = ({ groups, selected
               />
             ))}
             {g.tasks.length === 0 && (
-              <div className="text-[10px] text-zinc-600 italic px-2 py-3 text-center">empty</div>
+              <div className="text-[10px] text-ink-600 italic px-2 py-3 text-center">empty</div>
             )}
           </div>
         </div>

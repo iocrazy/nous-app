@@ -60,10 +60,10 @@ export function ResourcePickerSuggestion({
 
   return (
     <div
-      className="bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl w-[340px] p-1.5"
+      className="bg-ink-900 border border-ink-700 rounded-lg shadow-xl w-[340px] p-1.5"
       data-testid="resource-picker"
     >
-      <div className="flex gap-1 px-1 pb-1.5 border-b border-zinc-800">
+      <div className="flex gap-1 px-1 pb-1.5 border-b border-ink-800">
         {tabs.map((tab) => (
           <button
             key={tab.key || 'all'}
@@ -71,7 +71,7 @@ export function ResourcePickerSuggestion({
             className={`text-[11px] px-2 py-0.5 rounded-full ${
               activeKind === tab.key
                 ? 'bg-indigo-900/60 text-indigo-200'
-                : 'text-zinc-400 hover:text-zinc-200'
+                : 'text-ink-400 hover:text-ink-200'
             }`}
           >
             {tab.label} <span className="opacity-60">{tab.count}</span>
@@ -80,7 +80,7 @@ export function ResourcePickerSuggestion({
       </div>
 
       {items.length === 0 ? (
-        <div className="px-3 py-6 text-center text-[12px] text-zinc-500">
+        <div className="px-3 py-6 text-center text-[12px] text-ink-500">
           {loading ? '…' : t('chat.mentionPicker.noResults', { q: query })}
         </div>
       ) : (
@@ -93,19 +93,19 @@ export function ResourcePickerSuggestion({
                 key={item.id}
                 onClick={() => onSelect(item)}
                 className={`w-full text-left flex items-center gap-2 px-2.5 py-1.5 rounded ${
-                  active ? 'bg-indigo-900/60' : 'hover:bg-zinc-800/50'
+                  active ? 'bg-indigo-900/60' : 'hover:bg-ink-800/50'
                 }`}
                 data-testid="resource-picker-row"
               >
-                <span className="w-7 h-7 flex items-center justify-center bg-zinc-800 rounded">
+                <span className="w-7 h-7 flex items-center justify-center bg-ink-800 rounded">
                   <Icon size={14} />
                 </span>
                 <span className="flex-1 min-w-0">
-                  <span className="block text-[12px] text-zinc-100 truncate">
+                  <span className="block text-[12px] text-ink-100 truncate">
                     {item.name}
-                    <span className="text-zinc-500"> · {item.scope.type}</span>
+                    <span className="text-ink-500"> · {item.scope.type}</span>
                   </span>
-                  <span className="block text-[10px] text-zinc-500">
+                  <span className="block text-[10px] text-ink-500">
                     {_relative(item.updated_at)}
                     {_formatSize(item.size) && ' · ' + _formatSize(item.size)}
                   </span>
@@ -116,7 +116,7 @@ export function ResourcePickerSuggestion({
         </div>
       )}
 
-      <div className="px-2 py-1 text-[10px] text-zinc-500 border-t border-zinc-800 flex justify-between">
+      <div className="px-2 py-1 text-[10px] text-ink-500 border-t border-ink-800 flex justify-between">
         <span>{items.length > 0 && `${items.length} of ${counts.all}`}</span>
         <span>{t('chat.mentionPicker.hintKbd')}</span>
       </div>

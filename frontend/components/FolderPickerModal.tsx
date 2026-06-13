@@ -51,7 +51,7 @@ const FolderNode: React.FC<FolderNodeProps> = ({
         className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer transition-all text-sm select-none ${
           isSelected
             ? 'bg-indigo-500/20 text-indigo-300'
-            : 'hover:bg-zinc-800/80 text-zinc-400 hover:text-zinc-200'
+            : 'hover:bg-ink-800/80 text-ink-400 hover:text-ink-200'
         }`}
         style={{ paddingLeft: `${8 + depth * 16}px` }}
         onClick={() => onSelect(folder.id)}
@@ -59,7 +59,7 @@ const FolderNode: React.FC<FolderNodeProps> = ({
         {hasChildren ? (
           <button
             onClick={(e) => { e.stopPropagation(); onToggleExpand(folder.id); }}
-            className="p-0.5 hover:bg-zinc-700 rounded transition-colors flex-shrink-0"
+            className="p-0.5 hover:bg-ink-700 rounded transition-colors flex-shrink-0"
           >
             {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
           </button>
@@ -91,11 +91,11 @@ const FolderNode: React.FC<FolderNodeProps> = ({
 
 // ── File type icon helper ──
 function getFileIcon(mediaType?: string) {
-  if (!mediaType) return <File size={12} className="text-zinc-500" />;
+  if (!mediaType) return <File size={12} className="text-ink-500" />;
   if (mediaType.startsWith('video')) return <Film size={12} className="text-blue-400" />;
   if (mediaType.startsWith('image')) return <Image size={12} className="text-emerald-400" />;
   if (mediaType.startsWith('audio')) return <Music size={12} className="text-purple-400" />;
-  return <FileText size={12} className="text-zinc-400" />;
+  return <FileText size={12} className="text-ink-400" />;
 }
 
 // ── Main Component ──
@@ -239,18 +239,18 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="w-full max-w-2xl bg-zinc-900 border border-zinc-700/50 rounded-2xl shadow-2xl flex flex-col max-h-[75vh] overflow-hidden"
+        className="w-full max-w-2xl bg-ink-900 border border-ink-700/50 rounded-2xl shadow-2xl flex flex-col max-h-[75vh] overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* ── Header ── */}
-        <div className="px-5 py-4 border-b border-zinc-800/80">
+        <div className="px-5 py-4 border-b border-ink-800/80">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-[15px] font-semibold text-white select-none">
               {actionVerb} {itemCount > 0 ? `${itemCount} item${itemCount > 1 ? 's' : ''} to...` : ''}
             </h2>
             <button
               onClick={onClose}
-              className="p-1.5 hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-white transition-colors"
+              className="p-1.5 hover:bg-ink-800 rounded-lg text-ink-500 hover:text-white transition-colors"
             >
               <X size={16} />
             </button>
@@ -262,7 +262,7 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({
               {movingItems.slice(0, 4).map((item, idx) => (
                 <div
                   key={idx}
-                  className="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-800/80 border border-zinc-700/50 rounded-lg text-xs text-zinc-300 max-w-[160px]"
+                  className="flex items-center gap-1.5 px-2.5 py-1 bg-ink-800/80 border border-ink-700/50 rounded-lg text-xs text-ink-300 max-w-[160px]"
                 >
                   {item.thumbnail ? (
                     <img src={item.thumbnail} alt="" className="w-4 h-4 rounded object-cover flex-shrink-0" />
@@ -273,7 +273,7 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({
                 </div>
               ))}
               {itemCount > 4 && (
-                <span className="text-xs text-zinc-500">+{itemCount - 4} more</span>
+                <span className="text-xs text-ink-500">+{itemCount - 4} more</span>
               )}
             </div>
           )}
@@ -282,17 +282,17 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({
         {/* ── Body: Two-panel ── */}
         <div className="flex flex-1 min-h-0">
           {/* Left Panel — Tree */}
-          <div className="w-[200px] border-r border-zinc-800/80 flex flex-col flex-shrink-0">
+          <div className="w-[200px] border-r border-ink-800/80 flex flex-col flex-shrink-0">
             {/* Search */}
             <div className="p-3 pb-2">
               <div className="relative">
-                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600" />
+                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-600" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search..."
-                  className="w-full bg-zinc-800/60 border border-zinc-700/50 rounded-lg pl-8 pr-2 py-1.5 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 transition-colors"
+                  className="w-full bg-ink-800/60 border border-ink-700/50 rounded-lg pl-8 pr-2 py-1.5 text-xs text-ink-300 placeholder-ink-600 focus:outline-none focus:border-indigo-500/50 transition-colors"
                 />
               </div>
             </div>
@@ -302,7 +302,7 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({
               {!isPersonal && libraries.length > 0 && (
                 <>
                   <div className="px-2 pt-1 pb-1">
-                    <span className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider">Libraries</span>
+                    <span className="text-[10px] font-semibold text-ink-600 uppercase tracking-wider">Libraries</span>
                   </div>
                   {libraries.map((lib) => (
                     <div
@@ -314,7 +314,7 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({
                       className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer transition-all text-sm select-none ${
                         selectedLibraryId === lib.id && selectedFolderId === null
                           ? 'bg-indigo-500/20 text-indigo-300'
-                          : 'hover:bg-zinc-800/80 text-zinc-400 hover:text-zinc-200'
+                          : 'hover:bg-ink-800/80 text-ink-400 hover:text-ink-200'
                       }`}
                     >
                       <LibraryIcon size={14} className="text-indigo-400/70 flex-shrink-0" />
@@ -326,7 +326,7 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({
 
               {/* Folders section */}
               <div className="px-2 pt-2 pb-1">
-                <span className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider">Folders</span>
+                <span className="text-[10px] font-semibold text-ink-600 uppercase tracking-wider">Folders</span>
               </div>
 
               {/* Root */}
@@ -334,11 +334,11 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({
                 className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer transition-all text-sm select-none ${
                   selectedFolderId === null && (isPersonal || libraries.length === 0)
                     ? 'bg-indigo-500/20 text-indigo-300'
-                    : 'hover:bg-zinc-800/80 text-zinc-400 hover:text-zinc-200'
+                    : 'hover:bg-ink-800/80 text-ink-400 hover:text-ink-200'
                 }`}
                 onClick={() => setSelectedFolderId(null)}
               >
-                <Home size={14} className="text-zinc-500 flex-shrink-0" />
+                <Home size={14} className="text-ink-500 flex-shrink-0" />
                 <span className="truncate">{t('resources.rootFolder')}</span>
               </div>
 
@@ -360,16 +360,16 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({
           {/* Right Panel — Contents of selected */}
           <div className="flex-1 flex flex-col min-w-0">
             {/* Breadcrumb */}
-            <div className="flex items-center gap-1 px-4 py-2.5 border-b border-zinc-800/50 text-xs select-none overflow-x-auto">
+            <div className="flex items-center gap-1 px-4 py-2.5 border-b border-ink-800/50 text-xs select-none overflow-x-auto">
               {breadcrumb.map((crumb, idx) => (
                 <React.Fragment key={idx}>
-                  {idx > 0 && <ChevronRight size={11} className="text-zinc-600 flex-shrink-0" />}
+                  {idx > 0 && <ChevronRight size={11} className="text-ink-600 flex-shrink-0" />}
                   <button
                     onClick={() => setSelectedFolderId(crumb.id as string | null)}
                     className={`px-1.5 py-0.5 rounded transition-colors whitespace-nowrap flex-shrink-0 ${
                       idx === breadcrumb.length - 1
-                        ? 'text-zinc-200 font-medium'
-                        : 'text-zinc-500 hover:text-zinc-300'
+                        ? 'text-ink-200 font-medium'
+                        : 'text-ink-500 hover:text-ink-300'
                     }`}
                   >
                     {crumb.name}
@@ -384,18 +384,18 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({
                 rightPanelFolders.map((folder) => (
                   <div
                     key={folder.id}
-                    className="flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer hover:bg-zinc-800/60 text-zinc-300 hover:text-zinc-100 transition-all group"
+                    className="flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer hover:bg-ink-800/60 text-ink-300 hover:text-ink-100 transition-all group"
                     onClick={() => handleRightPanelNav(folder.id)}
                   >
                     <FolderIcon size={16} className="text-amber-400/80 flex-shrink-0" />
                     <span className="text-sm truncate flex-1">{folder.name}</span>
-                    <ChevronRight size={14} className="text-zinc-700 group-hover:text-zinc-500 transition-colors flex-shrink-0" />
+                    <ChevronRight size={14} className="text-ink-700 group-hover:text-ink-500 transition-colors flex-shrink-0" />
                   </div>
                 ))
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-center py-8">
-                  <FolderIcon size={32} className="text-zinc-800 mb-2" />
-                  <p className="text-xs text-zinc-600">No subfolders</p>
+                  <FolderIcon size={32} className="text-ink-800 mb-2" />
+                  <p className="text-xs text-ink-600">No subfolders</p>
                 </div>
               )}
             </div>
@@ -404,7 +404,7 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({
 
         {/* ── New folder inline ── */}
         {creatingFolder && (
-          <div className="px-5 py-2.5 border-t border-zinc-800/50 flex items-center gap-2 bg-zinc-900/80">
+          <div className="px-5 py-2.5 border-t border-ink-800/50 flex items-center gap-2 bg-ink-900/80">
             <FolderPlus size={14} className="text-amber-400 flex-shrink-0" />
             <input
               ref={newFolderRef}
@@ -416,16 +416,16 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({
                 if (e.key === 'Escape') { setCreatingFolder(false); setNewFolderName(''); }
               }}
               placeholder={t('resources.folderName')}
-              className="flex-1 bg-zinc-800/60 border border-zinc-700/50 rounded-lg px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500/50"
+              className="flex-1 bg-ink-800/60 border border-ink-700/50 rounded-lg px-3 py-1.5 text-sm text-ink-200 placeholder-ink-500 focus:outline-none focus:border-indigo-500/50"
             />
           </div>
         )}
 
         {/* ── Footer ── */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-t border-zinc-800/80 bg-zinc-950/30">
+        <div className="flex items-center justify-between px-5 py-3.5 border-t border-ink-800/80 bg-ink-950/30">
           <button
             onClick={() => { setCreatingFolder(true); setNewFolderName(''); }}
-            className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-indigo-400 transition-colors"
+            className="flex items-center gap-1.5 text-sm text-ink-500 hover:text-indigo-400 transition-colors"
           >
             <FolderPlus size={14} />
             New Folder
@@ -433,7 +433,7 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({
           <div className="flex items-center gap-2">
             <button
               onClick={onClose}
-              className="px-4 py-2 text-sm text-zinc-400 hover:text-white bg-zinc-800/60 hover:bg-zinc-700 border border-zinc-700/50 rounded-lg transition-colors"
+              className="px-4 py-2 text-sm text-ink-400 hover:text-white bg-ink-800/60 hover:bg-ink-700 border border-ink-700/50 rounded-lg transition-colors"
             >
               Cancel
             </button>

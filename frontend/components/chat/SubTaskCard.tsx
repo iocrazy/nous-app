@@ -279,7 +279,7 @@ export function SubTaskCard({ call }: SubTaskCardProps): React.ReactElement {
                 href={workforceLinkFor(targetSlug)}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/10 text-zinc-200 hover:bg-white/20"
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/10 text-ink-200 hover:bg-white/20"
               >
                 <ExternalLink size={10} />
                 View {targetSlug} in Workforce

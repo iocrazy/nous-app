@@ -43,7 +43,7 @@ const getAIStatusClass = (status?: string, completedColor: string = 'text-emeral
     case 'failed':
       return 'text-red-400';
     default:
-      return 'text-zinc-600';
+      return 'text-ink-600';
   }
 };
 
@@ -202,10 +202,10 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
 
   return (
     <div
-      className={`group relative flex flex-col bg-zinc-900 rounded-lg overflow-hidden border transition-[background-color,box-shadow] duration-150 active:scale-[0.98] shadow-sm ${
+      className={`group relative flex flex-col bg-ink-900 rounded-lg overflow-hidden border transition-[background-color,box-shadow] duration-150 active:scale-[0.98] shadow-sm ${
         isChecked || isSelected
           ? 'border-indigo-500/50 ring-1 ring-inset ring-indigo-500/30'
-          : 'border-zinc-800 hover:border-zinc-600'
+          : 'border-ink-800 hover:border-ink-600'
       }`}
       onDoubleClick={onDoubleClick}
       onContextMenu={onContextMenu ? (e) => { e.preventDefault(); onContextMenu(e, data); } : undefined}
@@ -221,7 +221,7 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
             className={`w-6 h-6 rounded-full flex items-center justify-center transition-colors ${
               isChecked
                 ? 'bg-indigo-500 text-white shadow-lg'
-                : 'bg-black/50 border border-zinc-400 text-transparent hover:border-zinc-200'
+                : 'bg-black/50 border border-ink-400 text-transparent hover:border-ink-200'
             }`}
           >
             <Check size={12} />
@@ -239,9 +239,9 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
       >
         {/* Cover image (hidden when sprite overlay active) */}
         {!hasCover || imageError ? (
-          <div className="w-full h-full flex flex-col items-center justify-center bg-zinc-800">
-            <ImageIcon size={32} className="text-zinc-600 mb-2" />
-            <span className="text-xs text-zinc-500">Image unavailable</span>
+          <div className="w-full h-full flex flex-col items-center justify-center bg-ink-800">
+            <ImageIcon size={32} className="text-ink-600 mb-2" />
+            <span className="text-xs text-ink-500">Image unavailable</span>
           </div>
         ) : (
           <img
@@ -361,7 +361,7 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
 
       {/* Info & Actions Section - Handles Detail View */}
       <div
-        className="p-2 flex flex-col gap-2 bg-zinc-900 cursor-pointer"
+        className="p-2 flex flex-col gap-2 bg-ink-900 cursor-pointer"
         onClick={(e) => onClick(e)}
       >
         
@@ -374,7 +374,7 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
                  </span>
               ))}
               {data.tags.length > 3 && (
-                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 border border-zinc-700 whitespace-nowrap">+{data.tags.length - 3}</span>
+                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-ink-800 text-ink-500 border border-ink-700 whitespace-nowrap">+{data.tags.length - 3}</span>
               )}
            </div>
         ) : (
@@ -451,14 +451,14 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
         </div>
 
         {/* Author Footer with Date - Inline Layout */}
-        <div className="flex items-center pt-1.5 border-t border-zinc-800/50 gap-1.5">
-             <div className="w-4 h-4 rounded-full bg-zinc-800 flex items-center justify-center overflow-hidden flex-shrink-0 border border-zinc-700">
-                <User size={10} className="text-zinc-500" />
+        <div className="flex items-center pt-1.5 border-t border-ink-800/50 gap-1.5">
+             <div className="w-4 h-4 rounded-full bg-ink-800 flex items-center justify-center overflow-hidden flex-shrink-0 border border-ink-700">
+                <User size={10} className="text-ink-500" />
              </div>
              <div className="flex items-center min-w-0 flex-1">
-                <span className="text-[10px] text-zinc-400 font-medium truncate">@{data.author || 'User'}</span>
-                <span className="text-[10px] text-zinc-600 mx-1">·</span>
-                <span className="text-[9px] text-zinc-500 font-mono flex-shrink-0">
+                <span className="text-[10px] text-ink-400 font-medium truncate">@{data.author || 'User'}</span>
+                <span className="text-[10px] text-ink-600 mx-1">·</span>
+                <span className="text-[9px] text-ink-500 font-mono flex-shrink-0">
                    {formatDate(data.published_at)}
                 </span>
              </div>

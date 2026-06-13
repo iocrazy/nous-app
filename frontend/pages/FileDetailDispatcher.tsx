@@ -74,7 +74,7 @@ export function FileDetailDispatcher() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <Loader2 className="w-6 h-6 animate-spin text-zinc-500" />
+        <Loader2 className="w-6 h-6 animate-spin text-ink-500" />
       </div>
     );
   }

@@ -13,7 +13,7 @@ interface ProjectMembersPanelProps {
 const ROLE_CONFIG: Record<string, { icon: React.ReactNode; label: string; color: string }> = {
   admin: { icon: <Crown size={12} />, label: 'Admin', color: 'text-amber-400 bg-amber-500/10' },
   editor: { icon: <Pencil size={12} />, label: 'Editor', color: 'text-blue-400 bg-blue-500/10' },
-  viewer: { icon: <Eye size={12} />, label: 'Viewer', color: 'text-zinc-400 bg-zinc-500/10' },
+  viewer: { icon: <Eye size={12} />, label: 'Viewer', color: 'text-ink-400 bg-ink-500/10' },
 };
 
 export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
@@ -109,16 +109,16 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
       {/* Panel */}
       <div
         ref={panelRef}
-        className="relative w-96 bg-zinc-900 border-l border-zinc-800 h-full overflow-y-auto animate-in slide-in-from-right duration-200"
+        className="relative w-96 bg-ink-900 border-l border-ink-800 h-full overflow-y-auto animate-in slide-in-from-right duration-200"
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-ink-800">
           <h2 className="text-lg font-semibold text-white">
             {t('projects.members.title', 'Members')}
           </h2>
           <button
             onClick={onClose}
-            className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+            className="p-1.5 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
           >
             <X size={18} />
           </button>
@@ -127,23 +127,23 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
         <div className="p-5 space-y-6">
           {/* Owner */}
           <div>
-            <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-2">
+            <label className="block text-xs font-medium text-ink-500 uppercase tracking-wider mb-2">
               {t('projects.members.owner', 'Owner')}
             </label>
-            <div className="flex items-center gap-3 px-3 py-2.5 bg-zinc-800/50 rounded-lg">
+            <div className="flex items-center gap-3 px-3 py-2.5 bg-ink-800/50 rounded-lg">
               <div className="w-8 h-8 rounded-full bg-indigo-500/30 flex items-center justify-center text-xs font-bold text-indigo-300">
                 {project.owner_id.slice(0, 2).toUpperCase()}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm text-zinc-200 truncate">{project.owner_id}</p>
-                <p className="text-xs text-zinc-500">{t('projects.members.ownerRole', 'Project Owner')}</p>
+                <p className="text-sm text-ink-200 truncate">{project.owner_id}</p>
+                <p className="text-xs text-ink-500">{t('projects.members.ownerRole', 'Project Owner')}</p>
               </div>
             </div>
           </div>
 
           {/* Invite */}
           <div>
-            <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-2">
+            <label className="block text-xs font-medium text-ink-500 uppercase tracking-wider mb-2">
               {t('projects.members.invite', 'Invite Member')}
             </label>
             <div className="flex gap-2">
@@ -151,13 +151,13 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
                 placeholder={t('projects.members.userIdPlaceholder', 'User ID')}
-                className="flex-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="flex-1 px-3 py-2 bg-ink-800 border border-ink-700 rounded-lg text-sm text-ink-200 placeholder-ink-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 onKeyDown={(e) => e.key === 'Enter' && handleInvite()}
               />
               <select
                 value={inviteRole}
                 onChange={(e) => setInviteRole(e.target.value)}
-                className="px-2 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-zinc-300 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="px-2 py-2 bg-ink-800 border border-ink-700 rounded-lg text-sm text-ink-300 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               >
                 <option value="viewer">{t('projects.members.roleViewer', 'Viewer')}</option>
                 <option value="editor">{t('projects.members.roleEditor', 'Editor')}</option>
@@ -167,7 +167,7 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
             <button
               onClick={handleInvite}
               disabled={isInviting || !inviteEmail.trim()}
-              className="mt-2 w-full py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
+              className="mt-2 w-full py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-ink-700 disabled:text-ink-500 text-white rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
             >
               {isInviting ? <Loader2 size={14} className="animate-spin" /> : <UserPlus size={14} />}
               {t('projects.members.addMember', 'Add Member')}
@@ -179,15 +179,15 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
 
           {/* Members List */}
           <div>
-            <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-2">
+            <label className="block text-xs font-medium text-ink-500 uppercase tracking-wider mb-2">
               {t('projects.members.memberList', 'Members')} ({members.length})
             </label>
             {isLoading ? (
               <div className="flex items-center justify-center py-8">
-                <Loader2 size={20} className="animate-spin text-zinc-500" />
+                <Loader2 size={20} className="animate-spin text-ink-500" />
               </div>
             ) : members.length === 0 ? (
-              <p className="text-sm text-zinc-500 py-4 text-center">
+              <p className="text-sm text-ink-500 py-4 text-center">
                 {t('projects.members.noMembers', 'No members yet')}
               </p>
             ) : (
@@ -197,13 +197,13 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
                   return (
                     <div
                       key={member.id}
-                      className="flex items-center gap-3 px-3 py-2.5 bg-zinc-800/50 rounded-lg group"
+                      className="flex items-center gap-3 px-3 py-2.5 bg-ink-800/50 rounded-lg group"
                     >
-                      <div className="w-8 h-8 rounded-full bg-zinc-700 flex items-center justify-center text-xs font-bold text-zinc-300">
+                      <div className="w-8 h-8 rounded-full bg-ink-700 flex items-center justify-center text-xs font-bold text-ink-300">
                         {(member.email || member.user_id).slice(0, 2).toUpperCase()}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm text-zinc-200 truncate">
+                        <p className="text-sm text-ink-200 truncate">
                           {member.email || member.user_id}
                         </p>
                         <span className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${roleConfig.color}`}>
@@ -215,7 +215,7 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
                         <select
                           value={member.role}
                           onChange={(e) => handleRoleChange(member.id, e.target.value)}
-                          className="text-xs bg-zinc-700 border border-zinc-600 rounded px-1.5 py-1 text-zinc-300 focus:outline-none"
+                          className="text-xs bg-ink-700 border border-ink-600 rounded px-1.5 py-1 text-ink-300 focus:outline-none"
                         >
                           <option value="viewer">Viewer</option>
                           <option value="editor">Editor</option>
@@ -223,7 +223,7 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
                         </select>
                         <button
                           onClick={() => handleRemove(member.id)}
-                          className="p-1 text-zinc-500 hover:text-red-400 transition-colors"
+                          className="p-1 text-ink-500 hover:text-red-400 transition-colors"
                         >
                           <Trash2 size={12} />
                         </button>

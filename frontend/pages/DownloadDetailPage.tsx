@@ -181,8 +181,8 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center h-full min-h-[400px]">
-        <Loader2 size={32} className="animate-spin text-zinc-500 mb-3" />
-        <p className="text-zinc-500 text-sm">Loading...</p>
+        <Loader2 size={32} className="animate-spin text-ink-500 mb-3" />
+        <p className="text-ink-500 text-sm">Loading...</p>
       </div>
     );
   }
@@ -190,12 +190,12 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
   if (notFound || !video) {
     return (
       <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-center">
-        <FileQuestion size={48} className="text-zinc-600 mb-4" />
-        <p className="text-zinc-400 text-lg font-medium mb-2">Video not found</p>
-        <p className="text-zinc-500 text-sm mb-6">The video you're looking for doesn't exist or has been removed.</p>
+        <FileQuestion size={48} className="text-ink-600 mb-4" />
+        <p className="text-ink-400 text-lg font-medium mb-2">Video not found</p>
+        <p className="text-ink-500 text-sm mb-6">The video you're looking for doesn't exist or has been removed.</p>
         <button
           onClick={handleBack}
-          className="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors"
+          className="flex items-center gap-2 px-4 py-2 bg-ink-800 hover:bg-ink-700 text-ink-300 rounded-lg transition-colors"
         >
           <ArrowLeft size={16} />
           Go Back
@@ -292,7 +292,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
             >
               <ArrowLeft size={18} />
             </button>
-            <span className="text-xs sm:text-sm text-zinc-200 font-medium truncate">
+            <span className="text-xs sm:text-sm text-ink-200 font-medium truncate">
               {video.title || video.description || 'Media Player'}
             </span>
           </div>
@@ -314,7 +314,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
               <button
                 onClick={() => setShowDownloadMenu(!showDownloadMenu)}
                 disabled={isDownloading || isFetching}
-                className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-medium text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-70"
+                className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-medium text-ink-300 hover:text-white hover:bg-ink-800 rounded-lg transition-colors disabled:opacity-70"
               >
                 {(isDownloading || isFetching) ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
                 <span className="hidden sm:inline">Download</span>
@@ -337,20 +337,20 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
             <div className="relative">
               <button
                 onClick={() => setShowMoreMenu(!showMoreMenu)}
-                className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition-colors"
+                className="p-1.5 text-ink-400 hover:text-ink-200 hover:bg-ink-800 rounded-lg transition-colors"
               >
                 <MoreHorizontal size={16} />
               </button>
               {showMoreMenu && (
                 <>
                   <div className="fixed inset-0 z-10" onClick={() => setShowMoreMenu(false)} />
-                  <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-44">
+                  <div className="absolute right-0 top-full mt-1 z-20 bg-ink-900 border border-ink-700 rounded-lg shadow-xl py-1 w-44">
                     {video.original_url && (
                       <a
                         href={video.original_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
+                        className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-ink-400 hover:bg-ink-800 hover:text-ink-200 transition-colors"
                         onClick={() => setShowMoreMenu(false)}
                       >
                         <ExternalLink size={13} /> Open Original Link
@@ -358,7 +358,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
                     )}
                     {video.original_url && (
                       <button
-                        className="flex items-center gap-2 w-full text-left px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
+                        className="flex items-center gap-2 w-full text-left px-3 py-1.5 text-xs text-ink-400 hover:bg-ink-800 hover:text-ink-200 transition-colors"
                         onClick={() => {
                           setShowMoreMenu(false);
                           navigator.clipboard.writeText(video.original_url);
@@ -368,7 +368,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
                         <Copy size={13} /> Copy Link
                       </button>
                     )}
-                    <div className="border-t border-zinc-700 my-1" />
+                    <div className="border-t border-ink-700 my-1" />
                     <button
                       className="flex items-center gap-2 w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-red-950/50 hover:text-red-300 transition-colors"
                       onClick={() => {
@@ -450,9 +450,9 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
                 />
               ) : (
                 <div className="w-full h-full bg-black rounded-lg flex flex-col items-center justify-center gap-3">
-                  <Music size={48} className="text-zinc-600" />
-                  <p className="text-zinc-400 text-sm font-medium">Audio not available</p>
-                  <p className="text-zinc-500 text-xs max-w-[300px] text-center">
+                  <Music size={48} className="text-ink-600" />
+                  <p className="text-ink-400 text-sm font-medium">Audio not available</p>
+                  <p className="text-ink-500 text-xs max-w-[300px] text-center">
                     This audio hasn't been downloaded yet. Use the Download button to fetch the audio file.
                   </p>
                 </div>
@@ -473,16 +473,16 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
                 {video.video_download_status === 'downloading' || video.video_download_status === 'pending' ? (
                   <>
                     <Loader2 size={48} className="text-indigo-500 animate-spin" />
-                    <p className="text-zinc-300 text-sm font-medium">Downloading...</p>
-                    <p className="text-zinc-500 text-xs">The media file is being downloaded. Please wait.</p>
+                    <p className="text-ink-300 text-sm font-medium">Downloading...</p>
+                    <p className="text-ink-500 text-xs">The media file is being downloaded. Please wait.</p>
                   </>
                 ) : (
                   <>
-                    <VideoIcon size={48} className="text-zinc-600" />
-                    <p className="text-zinc-400 text-sm font-medium">Video not available for streaming</p>
+                    <VideoIcon size={48} className="text-ink-600" />
+                    <p className="text-ink-400 text-sm font-medium">Video not available for streaming</p>
                   </>
                 )}
-                <p className="text-zinc-500 text-xs max-w-[300px] text-center">
+                <p className="text-ink-500 text-xs max-w-[300px] text-center">
                   This video hasn't been downloaded yet. Use the Download button to fetch the media file.
                 </p>
                 {video.original_url && (
@@ -553,14 +553,14 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
                     <div className="relative">
                       <button
                         onClick={() => setShowMoreMenu(!showMoreMenu)}
-                        className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition-colors"
+                        className="p-1.5 text-ink-400 hover:text-ink-200 hover:bg-ink-800 rounded-lg transition-colors"
                       >
                         <MoreHorizontal size={16} />
                       </button>
                       {showMoreMenu && (
                         <>
                           <div className="fixed inset-0 z-10" onClick={() => setShowMoreMenu(false)} />
-                          <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-48">
+                          <div className="absolute right-0 top-full mt-1 z-20 bg-ink-900 border border-ink-700 rounded-lg shadow-xl py-1 w-48">
                             <MobileDownloadMenu
                               video={video}
                               onClose={() => setShowMoreMenu(false)}
@@ -573,13 +573,13 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
                                 href={video.original_url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
+                                className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-white transition-colors"
                                 onClick={() => setShowMoreMenu(false)}
                               >
                                 <ExternalLink size={13} /> Open Original
                               </a>
                             )}
-                            <div className="border-t border-zinc-700 my-1" />
+                            <div className="border-t border-ink-700 my-1" />
                             <button
                               className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-red-400 hover:bg-red-950/50 hover:text-red-300 transition-colors"
                               onClick={(e) => { e.stopPropagation(); setShowMoreMenu(false); setTimeout(() => setShowDeleteDialog(true), 50); }}

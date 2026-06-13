@@ -601,16 +601,16 @@ export const TagsSettings: React.FC = () => {
   const enabledCount = tags.filter((t) => t.enabled !== false).length;
 
   return (
-    <section className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden animate-in fade-in duration-300 flex flex-col max-h-[80vh]">
+    <section className="bg-ink-900 border border-ink-800 rounded-xl overflow-hidden animate-in fade-in duration-300 flex flex-col max-h-[80vh]">
       {/* Header */}
-      <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between">
+      <div className="px-6 py-4 border-b border-ink-800 bg-ink-900/50 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-amber-500/10 rounded-lg text-amber-400">
             <TagIcon size={20} />
           </div>
           <div>
-            <h2 className="font-semibold text-zinc-200">{t('settings.tags.title')}</h2>
-            <p className="text-xs text-zinc-500">
+            <h2 className="font-semibold text-ink-200">{t('settings.tags.title')}</h2>
+            <p className="text-xs text-ink-500">
               {tags.length} tags, {enabledCount} enabled
             </p>
           </div>
@@ -618,7 +618,7 @@ export const TagsSettings: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowCreateForm(true)}
-            className="bg-zinc-100 hover:bg-white text-zinc-900 px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2"
+            className="bg-ink-100 hover:bg-white text-ink-900 px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2"
           >
             <Plus size={16} />
             {t('settings.tags.createNew')}
@@ -644,7 +644,7 @@ export const TagsSettings: React.FC = () => {
           off-screen mid-drag. */}
       <div className="flex flex-1 min-h-0">
         {/* Sidebar */}
-        <div className="w-56 shrink-0 border-r border-zinc-800 bg-zinc-950/30 overflow-y-auto">
+        <div className="w-56 shrink-0 border-r border-ink-800 bg-ink-950/30 overflow-y-auto">
           <div className="p-3 space-y-0.5">
             {/* All */}
             <button
@@ -652,12 +652,12 @@ export const TagsSettings: React.FC = () => {
               className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
                 selectedGroup === null
                   ? 'bg-indigo-500/15 text-indigo-400'
-                  : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'
+                  : 'text-ink-400 hover:bg-ink-800 hover:text-ink-300'
               }`}
             >
               <LayoutGrid size={15} />
               <span className="flex-1 text-left font-medium">All</span>
-              <span className="text-xs text-zinc-500">{tags.length}</span>
+              <span className="text-xs text-ink-500">{tags.length}</span>
             </button>
 
             {/* Uncategorized — also a valid drop target. Dragging a tag
@@ -681,12 +681,12 @@ export const TagsSettings: React.FC = () => {
                   ? 'ring-2 ring-indigo-500 bg-indigo-500/10'
                   : selectedGroup === '__uncategorized__'
                     ? 'bg-indigo-500/15 text-indigo-400'
-                    : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'
+                    : 'text-ink-400 hover:bg-ink-800 hover:text-ink-300'
               }`}
             >
               <Circle size={15} />
               <span className="flex-1 text-left font-medium">Uncategorized</span>
-              <span className="text-xs text-zinc-500">{groupCounts.get('__uncategorized__') || 0}</span>
+              <span className="text-xs text-ink-500">{groupCounts.get('__uncategorized__') || 0}</span>
             </button>
 
             {/* Collision banner — a real group whose name matches the
@@ -723,12 +723,12 @@ export const TagsSettings: React.FC = () => {
 
             {/* Groups header */}
             <div className="flex items-center justify-between pt-4 pb-1 px-3">
-              <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
+              <span className="text-xs font-medium text-ink-500 uppercase tracking-wider">
                 Groups ({visibleGroups.length})
               </span>
               <button
                 onClick={() => setShowCreateGroup(!showCreateGroup)}
-                className="text-zinc-500 hover:text-zinc-300 transition-colors"
+                className="text-ink-500 hover:text-ink-300 transition-colors"
                 title="Add group"
               >
                 {showCreateGroup ? <X size={14} /> : <Plus size={14} />}
@@ -746,7 +746,7 @@ export const TagsSettings: React.FC = () => {
                     onKeyDown={(e) => e.key === 'Enter' && handleCreateGroup()}
                     placeholder="Group name"
                     autoFocus
-                    className="flex-1 min-w-0 px-2.5 py-1.5 rounded-md bg-zinc-800 border border-zinc-700 text-xs text-zinc-200 placeholder-zinc-500 outline-none focus:border-indigo-500"
+                    className="flex-1 min-w-0 px-2.5 py-1.5 rounded-md bg-ink-800 border border-ink-700 text-xs text-ink-200 placeholder-ink-500 outline-none focus:border-indigo-500"
                   />
                   <button
                     onClick={handleCreateGroup}
@@ -794,7 +794,7 @@ export const TagsSettings: React.FC = () => {
                         if (e.key === 'Escape') setRenamingGroupId(null);
                       }}
                       onBlur={() => handleRenameGroupConfirm(group.id)}
-                      className="flex-1 min-w-0 px-2 py-1 rounded-md bg-zinc-800 border border-indigo-500 text-xs text-zinc-200 outline-none"
+                      className="flex-1 min-w-0 px-2 py-1 rounded-md bg-ink-800 border border-indigo-500 text-xs text-ink-200 outline-none"
                     />
                   </div>
                 ) : (
@@ -811,13 +811,13 @@ export const TagsSettings: React.FC = () => {
                   } ${
                     selectedGroup === group.name
                       ? 'bg-indigo-500/15 text-indigo-400'
-                      : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'
+                      : 'text-ink-400 hover:bg-ink-800 hover:text-ink-300'
                   }`}
                 >
-                  <GripVertical size={12} className="text-zinc-600 shrink-0 cursor-grab active:cursor-grabbing" />
+                  <GripVertical size={12} className="text-ink-600 shrink-0 cursor-grab active:cursor-grabbing" />
                   <FolderOpen size={14} className="shrink-0" />
                   <span className="flex-1 text-left truncate">{group.name}</span>
-                  <span className="text-xs text-zinc-500 group-hover/item:hidden">{groupCounts.get(group.name) || 0}</span>
+                  <span className="text-xs text-ink-500 group-hover/item:hidden">{groupCounts.get(group.name) || 0}</span>
                 </button>
                 )}
                 {/* Delete button on hover */}
@@ -831,7 +831,7 @@ export const TagsSettings: React.FC = () => {
                     </button>
                     <button
                       onClick={() => setDeletingGroupId(null)}
-                      className="p-1 rounded text-zinc-400 hover:bg-zinc-700 text-[10px]"
+                      className="p-1 rounded text-ink-400 hover:bg-ink-700 text-[10px]"
                     >
                       <X size={12} />
                     </button>
@@ -839,7 +839,7 @@ export const TagsSettings: React.FC = () => {
                 ) : (
                   <button
                     onClick={(e) => { e.stopPropagation(); setDeletingGroupId(group.id); }}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 hidden group-hover/item:block p-1 rounded text-zinc-600 hover:text-red-400 hover:bg-zinc-800 transition-colors"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 hidden group-hover/item:block p-1 rounded text-ink-600 hover:text-red-400 hover:bg-ink-800 transition-colors"
                   >
                     <Trash2 size={12} />
                   </button>
@@ -854,18 +854,18 @@ export const TagsSettings: React.FC = () => {
             scrolls — drag-to-sidebar stays usable with long tag lists. */}
         <div className="flex-1 min-w-0 flex flex-col">
           {/* Search (pinned) */}
-          <div className="p-4 border-b border-zinc-800 shrink-0">
+          <div className="p-4 border-b border-ink-800 shrink-0">
             <div className="relative">
               <Search
                 size={16}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-500"
               />
               <input
                 type="text"
                 placeholder={t('settings.tags.searchPlaceholder')}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 bg-zinc-950 border border-zinc-800 rounded-lg text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors"
+                className="w-full pl-10 pr-4 py-2.5 bg-ink-950 border border-ink-800 rounded-lg text-sm text-ink-200 placeholder-ink-500 focus:outline-none focus:border-indigo-500 transition-colors"
               />
             </div>
           </div>
@@ -874,10 +874,10 @@ export const TagsSettings: React.FC = () => {
           <div className="p-4 flex-1 overflow-y-auto min-h-0">
             {isLoading ? (
               <div className="flex items-center justify-center py-12">
-                <Loader2 size={24} className="animate-spin text-zinc-500" />
+                <Loader2 size={24} className="animate-spin text-ink-500" />
               </div>
             ) : filteredTags.length === 0 ? (
-              <div className="text-center py-12 text-zinc-500">
+              <div className="text-center py-12 text-ink-500">
                 <TagIcon size={40} className="mx-auto mb-3 opacity-30" />
                 <p>{searchQuery ? t('settings.tags.noResults') : t('settings.tags.empty')}</p>
               </div>
@@ -886,11 +886,11 @@ export const TagsSettings: React.FC = () => {
                 {groupedTags.map(({ name, tags: groupTags }) => (
                   <div key={name}>
                     <div className="flex items-center gap-2 mb-2">
-                      <FolderOpen size={14} className="text-zinc-500" />
-                      <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">
+                      <FolderOpen size={14} className="text-ink-500" />
+                      <span className="text-xs font-medium text-ink-400 uppercase tracking-wider">
                         {name}
                       </span>
-                      <span className="text-xs text-zinc-600">({groupTags.length})</span>
+                      <span className="text-xs text-ink-600">({groupTags.length})</span>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {groupTags.map((tag) => (
@@ -906,7 +906,7 @@ export const TagsSettings: React.FC = () => {
                               </button>
                               <button
                                 onClick={(e) => { e.stopPropagation(); setDeletingTagId(null); }}
-                                className="p-0.5 text-zinc-400 hover:text-zinc-300"
+                                className="p-0.5 text-ink-400 hover:text-ink-300"
                               >
                                 <X size={14} />
                               </button>
@@ -968,7 +968,7 @@ export const TagsSettings: React.FC = () => {
                                 onClick={(e) => handleToggleEnabled(tag, e)}
                                 className={`p-0.5 rounded transition-all ${
                                   tag.enabled === false
-                                    ? 'text-zinc-600 hover:text-zinc-400'
+                                    ? 'text-ink-600 hover:text-ink-400'
                                     : 'text-current opacity-40 hover:opacity-100'
                                 }`}
                                 title={tag.enabled === false ? 'Enable tag' : 'Disable tag'}
@@ -1006,8 +1006,8 @@ export const TagsSettings: React.FC = () => {
       {/* Create Tag Modal */}
       {showCreateForm && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="px-6 py-4 border-b border-zinc-800 flex justify-between items-center">
+          <div className="bg-ink-900 border border-ink-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="px-6 py-4 border-b border-ink-800 flex justify-between items-center">
               <h3 className="text-lg font-bold text-white">
                 {t('settings.tags.createNew')}
               </h3>
@@ -1016,14 +1016,14 @@ export const TagsSettings: React.FC = () => {
                   setShowCreateForm(false);
                   setForceTagNameEqEn(false);
                 }}
-                className="text-zinc-500 hover:text-zinc-300"
+                className="text-ink-500 hover:text-ink-300"
               >
                 <X size={20} />
               </button>
             </div>
             <div className="p-6 space-y-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-zinc-300">
+                <label className="text-sm font-medium text-ink-300">
                   {t('settings.tags.tagName')} (English)
                 </label>
                 <input
@@ -1041,16 +1041,16 @@ export const TagsSettings: React.FC = () => {
                       scheduleTranslate(value, 'en');
                     }
                   }}
-                  className="w-full px-4 py-3 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors"
+                  className="w-full px-4 py-3 bg-ink-950 border border-ink-800 rounded-lg text-ink-200 placeholder-ink-500 focus:outline-none focus:border-indigo-500 transition-colors"
                   autoFocus
                   onKeyDown={(e) => e.key === 'Enter' && handleCreateTag()}
                 />
               </div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <label className="text-sm font-medium text-zinc-300">
+                  <label className="text-sm font-medium text-ink-300">
                     {t('settings.tags.tagName')} (中文)
-                    <span className="text-zinc-500 text-xs ml-2">Optional</span>
+                    <span className="text-ink-500 text-xs ml-2">Optional</span>
                   </label>
                   {/* "= EN" — chrome-extension parity. Toggle: when ON
                       (highlighted), ZH mirrors EN verbatim and the
@@ -1095,7 +1095,7 @@ export const TagsSettings: React.FC = () => {
                     className={`text-[11px] px-2 py-0.5 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                       forceTagNameEqEn
                         ? 'border-indigo-500 bg-indigo-500/15 text-indigo-300'
-                        : 'border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500'
+                        : 'border-ink-700 text-ink-400 hover:text-ink-200 hover:border-ink-500'
                     }`}
                   >
                     = EN
@@ -1112,16 +1112,16 @@ export const TagsSettings: React.FC = () => {
                     scheduleTranslate(value, 'zh');
                   }}
                   readOnly={forceTagNameEqEn}
-                  className={`w-full px-4 py-3 bg-zinc-950 border rounded-lg text-zinc-200 placeholder-zinc-500 focus:outline-none transition-colors ${
+                  className={`w-full px-4 py-3 bg-ink-950 border rounded-lg text-ink-200 placeholder-ink-500 focus:outline-none transition-colors ${
                     forceTagNameEqEn
                       ? 'border-indigo-500/40 cursor-not-allowed opacity-80'
-                      : 'border-zinc-800 focus:border-indigo-500'
+                      : 'border-ink-800 focus:border-indigo-500'
                   }`}
                   onKeyDown={(e) => e.key === 'Enter' && handleCreateTag()}
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium text-zinc-300">
+                <label className="text-sm font-medium text-ink-300">
                   {t('settings.tags.tagColor')}
                 </label>
                 <div className="flex gap-2">
@@ -1142,7 +1142,7 @@ export const TagsSettings: React.FC = () => {
               </div>
               {/* Preview */}
               <div className="pt-2">
-                <label className="text-sm font-medium text-zinc-300 block mb-2">
+                <label className="text-sm font-medium text-ink-300 block mb-2">
                   {t('settings.tags.preview')}
                 </label>
                 <div className="flex gap-2 flex-wrap">
@@ -1165,13 +1165,13 @@ export const TagsSettings: React.FC = () => {
                 </div>
               </div>
             </div>
-            <div className="px-6 py-4 border-t border-zinc-800 bg-zinc-950/50 flex justify-end gap-3">
+            <div className="px-6 py-4 border-t border-ink-800 bg-ink-950/50 flex justify-end gap-3">
               <button
                 onClick={() => {
                   setShowCreateForm(false);
                   setForceTagNameEqEn(false);
                 }}
-                className="px-5 py-2.5 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition-colors font-medium text-sm"
+                className="px-5 py-2.5 rounded-lg border border-ink-700 text-ink-300 hover:bg-ink-800 transition-colors font-medium text-sm"
               >
                 {t('common.cancel')}
               </button>
@@ -1195,21 +1195,21 @@ export const TagsSettings: React.FC = () => {
       {/* Edit Tag Modal */}
       {editingTag && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="px-6 py-4 border-b border-zinc-800 flex justify-between items-center">
+          <div className="bg-ink-900 border border-ink-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="px-6 py-4 border-b border-ink-800 flex justify-between items-center">
               <h3 className="text-lg font-bold text-white">
                 {t('settings.tags.editTag')}
               </h3>
               <button
                 onClick={handleCancelEdit}
-                className="text-zinc-500 hover:text-zinc-300"
+                className="text-ink-500 hover:text-ink-300"
               >
                 <X size={20} />
               </button>
             </div>
             <div className="p-6 space-y-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-zinc-300">
+                <label className="text-sm font-medium text-ink-300">
                   {t('settings.tags.tagName')} (English)
                 </label>
                 <input
@@ -1222,16 +1222,16 @@ export const TagsSettings: React.FC = () => {
                       setEditTagNameZh(value);
                     }
                   }}
-                  className="w-full px-4 py-3 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors"
+                  className="w-full px-4 py-3 bg-ink-950 border border-ink-800 rounded-lg text-ink-200 placeholder-ink-500 focus:outline-none focus:border-indigo-500 transition-colors"
                   autoFocus
                   onKeyDown={(e) => e.key === 'Enter' && handleSaveEdit()}
                 />
               </div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <label className="text-sm font-medium text-zinc-300">
+                  <label className="text-sm font-medium text-ink-300">
                     {t('settings.tags.tagName')} (中文)
-                    <span className="text-zinc-500 text-xs ml-2">Optional</span>
+                    <span className="text-ink-500 text-xs ml-2">Optional</span>
                   </label>
                   {/* "= EN" — toggle. ON: ZH locked to EN value. OFF:
                       free editing. Auto-detect on open: if stored ZH
@@ -1264,7 +1264,7 @@ export const TagsSettings: React.FC = () => {
                     className={`text-[11px] px-2 py-0.5 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                       forceEditTagNameEqEn
                         ? 'border-indigo-500 bg-indigo-500/15 text-indigo-300'
-                        : 'border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500'
+                        : 'border-ink-700 text-ink-400 hover:text-ink-200 hover:border-ink-500'
                     }`}
                   >
                     = EN
@@ -1279,16 +1279,16 @@ export const TagsSettings: React.FC = () => {
                     setEditTagNameZh(e.target.value);
                   }}
                   readOnly={forceEditTagNameEqEn}
-                  className={`w-full px-4 py-3 bg-zinc-950 border rounded-lg text-zinc-200 placeholder-zinc-500 focus:outline-none transition-colors ${
+                  className={`w-full px-4 py-3 bg-ink-950 border rounded-lg text-ink-200 placeholder-ink-500 focus:outline-none transition-colors ${
                     forceEditTagNameEqEn
                       ? 'border-indigo-500/40 cursor-not-allowed opacity-80'
-                      : 'border-zinc-800 focus:border-indigo-500'
+                      : 'border-ink-800 focus:border-indigo-500'
                   }`}
                   onKeyDown={(e) => e.key === 'Enter' && handleSaveEdit()}
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium text-zinc-300">
+                <label className="text-sm font-medium text-ink-300">
                   {t('settings.tags.tagColor')}
                 </label>
                 <div className="flex gap-2">
@@ -1312,7 +1312,7 @@ export const TagsSettings: React.FC = () => {
                   who don't want to drag (touchpad / accessibility) can
                   reassign here instead. */}
               <div className="space-y-2">
-                <label className="text-sm font-medium text-zinc-300">
+                <label className="text-sm font-medium text-ink-300">
                   {t('settings.tags.group', 'Group')}
                 </label>
                 <select
@@ -1320,7 +1320,7 @@ export const TagsSettings: React.FC = () => {
                   onChange={(e) =>
                     setEditTagGroupId(e.target.value === '' ? null : e.target.value)
                   }
-                  className="w-full px-4 py-3 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors"
+                  className="w-full px-4 py-3 bg-ink-950 border border-ink-800 rounded-lg text-ink-200 focus:outline-none focus:border-indigo-500 transition-colors"
                 >
                   <option value="">
                     {t('settings.tags.uncategorized', 'Uncategorized')}
@@ -1334,7 +1334,7 @@ export const TagsSettings: React.FC = () => {
               </div>
               {/* Preview */}
               <div className="pt-2">
-                <label className="text-sm font-medium text-zinc-300 block mb-2">
+                <label className="text-sm font-medium text-ink-300 block mb-2">
                   {t('settings.tags.preview')}
                 </label>
                 <div className="flex gap-2 flex-wrap">
@@ -1357,7 +1357,7 @@ export const TagsSettings: React.FC = () => {
                 </div>
               </div>
             </div>
-            <div className="px-6 py-4 border-t border-zinc-800 bg-zinc-950/50 flex justify-between items-center">
+            <div className="px-6 py-4 border-t border-ink-800 bg-ink-950/50 flex justify-between items-center">
               {confirmingEditDelete ? (
                 /* Inline confirmation — the old setDeletingTagId path
                    rendered the confirm UI in the tag list BEHIND the
@@ -1382,7 +1382,7 @@ export const TagsSettings: React.FC = () => {
                   <button
                     onClick={() => setConfirmingEditDelete(false)}
                     disabled={isDeletingEdit}
-                    className="p-1 text-zinc-400 hover:text-zinc-300 disabled:opacity-50"
+                    className="p-1 text-ink-400 hover:text-ink-300 disabled:opacity-50"
                     title={t('common.cancel', 'Cancel')}
                   >
                     <X size={14} />
@@ -1401,7 +1401,7 @@ export const TagsSettings: React.FC = () => {
                 <button
                   onClick={handleCancelEdit}
                   disabled={isDeletingEdit}
-                  className="px-5 py-2.5 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition-colors font-medium text-sm disabled:opacity-50"
+                  className="px-5 py-2.5 rounded-lg border border-ink-700 text-ink-300 hover:bg-ink-800 transition-colors font-medium text-sm disabled:opacity-50"
                 >
                   {t('common.cancel')}
                 </button>

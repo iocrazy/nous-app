@@ -84,9 +84,9 @@ export const LinkVideoModal: React.FC<LinkVideoModalProps> = ({
       />
 
       {/* Modal */}
-      <div className="relative bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col animate-in fade-in zoom-in-95 duration-200">
+      <div className="relative bg-ink-900 border border-ink-800 rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-zinc-800 flex-shrink-0">
+        <div className="flex items-center justify-between p-6 border-b border-ink-800 flex-shrink-0">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-indigo-500/20 rounded-lg">
               <Video size={20} className="text-indigo-400" />
@@ -97,7 +97,7 @@ export const LinkVideoModal: React.FC<LinkVideoModalProps> = ({
           </div>
           <button
             onClick={handleClose}
-            className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+            className="p-2 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
           >
             <X size={20} />
           </button>
@@ -106,13 +106,13 @@ export const LinkVideoModal: React.FC<LinkVideoModalProps> = ({
         {/* Search */}
         <div className="px-6 pt-4 flex-shrink-0">
           <div className="relative">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-500" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={t('mediatrack.searchVideos')}
-              className="w-full pl-10 pr-4 py-2.5 bg-zinc-800 border border-zinc-700 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all text-sm"
+              className="w-full pl-10 pr-4 py-2.5 bg-ink-800 border border-ink-700 rounded-xl text-white placeholder-ink-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all text-sm"
             />
           </div>
         </div>
@@ -126,7 +126,7 @@ export const LinkVideoModal: React.FC<LinkVideoModalProps> = ({
           )}
 
           {!isLoading && filteredVideos.length === 0 && (
-            <div className="text-center py-10 text-zinc-500 text-sm">
+            <div className="text-center py-10 text-ink-500 text-sm">
               No videos found
             </div>
           )}
@@ -136,10 +136,10 @@ export const LinkVideoModal: React.FC<LinkVideoModalProps> = ({
               key={video.id || video.platform_id}
               onClick={() => handleLink(video)}
               disabled={isLinking !== null}
-              className="w-full flex items-center gap-3 p-3 bg-zinc-800/60 hover:bg-zinc-800 border border-zinc-700/30 hover:border-zinc-600 rounded-xl transition-all text-left disabled:opacity-50"
+              className="w-full flex items-center gap-3 p-3 bg-ink-800/60 hover:bg-ink-800 border border-ink-700/30 hover:border-ink-600 rounded-xl transition-all text-left disabled:opacity-50"
             >
               {/* Thumbnail — local-only; show <Video> icon if not yet downloaded */}
-              <div className="w-16 h-12 bg-zinc-700 rounded-lg flex-shrink-0 overflow-hidden flex items-center justify-center">
+              <div className="w-16 h-12 bg-ink-700 rounded-lg flex-shrink-0 overflow-hidden flex items-center justify-center">
                 {(() => {
                   const coverUrl = getCoverUrl(video, mediaToken ?? undefined);
                   return coverUrl ? (
@@ -152,7 +152,7 @@ export const LinkVideoModal: React.FC<LinkVideoModalProps> = ({
                       }}
                     />
                   ) : (
-                    <Video size={20} className="text-zinc-500" />
+                    <Video size={20} className="text-ink-500" />
                   );
                 })()}
               </div>
@@ -163,7 +163,7 @@ export const LinkVideoModal: React.FC<LinkVideoModalProps> = ({
                   {video.title || video.platform_id}
                 </p>
                 {video.author && (
-                  <p className="text-xs text-zinc-500 mt-0.5">{video.author}</p>
+                  <p className="text-xs text-ink-500 mt-0.5">{video.author}</p>
                 )}
               </div>
 

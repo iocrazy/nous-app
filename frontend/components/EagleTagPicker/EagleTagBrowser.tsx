@@ -145,15 +145,15 @@ export const EagleTagBrowser: React.FC<EagleTagBrowserProps> = ({
   }, [search, newColor, onCreate]);
 
   const searchBar = (
-    <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800">
+    <div className="flex items-center gap-2 px-3 py-2 border-b border-ink-800">
       <div className="flex-1 relative">
-        <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-500" />
+        <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-ink-500" />
         <input
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder={t('resources.searchTags', 'Search tags...')}
-          className="w-full bg-zinc-800 border border-zinc-700/50 rounded pl-7 pr-2 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50"
+          className="w-full bg-ink-800 border border-ink-700/50 rounded pl-7 pr-2 py-1.5 text-xs text-ink-200 placeholder-ink-600 focus:outline-none focus:border-indigo-500/50"
           autoFocus={shouldAutoFocus}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && noExactMatch && onCreate) {
@@ -167,7 +167,7 @@ export const EagleTagBrowser: React.FC<EagleTagBrowserProps> = ({
         <div className="relative">
           <button
             onClick={() => setShowSettings(!showSettings)}
-            className="p-1.5 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+            className="p-1.5 rounded text-ink-400 hover:text-ink-200 hover:bg-ink-800 transition-colors"
           >
             <Settings size={14} />
           </button>
@@ -179,7 +179,7 @@ export const EagleTagBrowser: React.FC<EagleTagBrowserProps> = ({
       {onClose && (
         <button
           onClick={onClose}
-          className="p-1.5 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+          className="p-1.5 rounded text-ink-400 hover:text-ink-200 hover:bg-ink-800 transition-colors"
         >
           <X size={14} />
         </button>
@@ -188,11 +188,11 @@ export const EagleTagBrowser: React.FC<EagleTagBrowserProps> = ({
   );
 
   const createOption = noExactMatch && onCreate && (
-    <div className="border-b border-zinc-800 px-3 py-1.5">
+    <div className="border-b border-ink-800 px-3 py-1.5">
       {!showColorPicker ? (
         <button
           onClick={() => setShowColorPicker(true)}
-          className="flex items-center gap-2 w-full px-2 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 rounded transition-colors"
+          className="flex items-center gap-2 w-full px-2 py-1.5 text-xs text-ink-300 hover:bg-ink-800 rounded transition-colors"
         >
           <Plus size={12} className="text-indigo-400" />
           <span>Create &quot;{search.trim()}&quot;</span>
@@ -200,7 +200,7 @@ export const EagleTagBrowser: React.FC<EagleTagBrowserProps> = ({
       ) : (
         <div className="space-y-1.5 py-1">
           <div className="flex items-center gap-2">
-            <Palette size={10} className="text-zinc-500 shrink-0" />
+            <Palette size={10} className="text-ink-500 shrink-0" />
             <div className="flex gap-1">
               {TAG_COLORS.map((c) => (
                 <button
@@ -234,11 +234,11 @@ export const EagleTagBrowser: React.FC<EagleTagBrowserProps> = ({
         {createOption}
 
         {/* Horizontal category tabs */}
-        <div className="flex items-center gap-1 px-3 py-2 border-b border-zinc-800 overflow-x-auto no-scrollbar">
+        <div className="flex items-center gap-1 px-3 py-2 border-b border-ink-800 overflow-x-auto no-scrollbar">
           <button
             onClick={() => setSelectedGroup(null)}
             className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-              selectedGroup === null ? 'bg-indigo-500/20 text-indigo-300' : 'bg-zinc-800 text-zinc-400'
+              selectedGroup === null ? 'bg-indigo-500/20 text-indigo-300' : 'bg-ink-800 text-ink-400'
             }`}
           >
             All {totalCount}
@@ -246,7 +246,7 @@ export const EagleTagBrowser: React.FC<EagleTagBrowserProps> = ({
           <button
             onClick={() => setSelectedGroup('__uncategorized__')}
             className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-              selectedGroup === '__uncategorized__' ? 'bg-indigo-500/20 text-indigo-300' : 'bg-zinc-800 text-zinc-400'
+              selectedGroup === '__uncategorized__' ? 'bg-indigo-500/20 text-indigo-300' : 'bg-ink-800 text-ink-400'
             }`}
           >
             Uncategorized {uncategorizedCount}
@@ -256,7 +256,7 @@ export const EagleTagBrowser: React.FC<EagleTagBrowserProps> = ({
               key={g.name}
               onClick={() => setSelectedGroup(g.name)}
               className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                selectedGroup === g.name ? 'bg-indigo-500/20 text-indigo-300' : 'bg-zinc-800 text-zinc-400'
+                selectedGroup === g.name ? 'bg-indigo-500/20 text-indigo-300' : 'bg-ink-800 text-ink-400'
               }`}
             >
               {g.name} {g.count}

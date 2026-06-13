@@ -21,7 +21,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
 }) => {
   return (
     <textarea
-      className="w-full rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-mono text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+      className="w-full rounded-lg border border-ink-800 bg-ink-950 p-3 font-mono text-sm text-ink-200 placeholder-ink-600 focus:outline-none focus:border-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}

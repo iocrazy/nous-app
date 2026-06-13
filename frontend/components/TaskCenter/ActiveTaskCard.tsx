@@ -42,7 +42,7 @@ export const ActiveTaskCard: React.FC<ActiveTaskCardProps> = ({ task, now, onCan
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-medium text-zinc-100 truncate">{task.title}</span>
+            <span className="text-xs font-medium text-ink-100 truncate">{task.title}</span>
             <span className="flex items-center gap-1 shrink-0 px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 text-[10px] font-semibold">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
               {t('topbar.running').toUpperCase()}
@@ -50,14 +50,14 @@ export const ActiveTaskCard: React.FC<ActiveTaskCardProps> = ({ task, now, onCan
           </div>
 
           <div className="flex items-center gap-2 mt-0.5">
-            <span className="text-[10px] text-zinc-500">{taskTypeLabel(task.task_type)}</span>
+            <span className="text-[10px] text-ink-500">{taskTypeLabel(task.task_type)}</span>
             {task.subtitle && (
-              <span className="text-[10px] text-zinc-500 truncate">{task.subtitle}</span>
+              <span className="text-[10px] text-ink-500 truncate">{task.subtitle}</span>
             )}
             <span className="text-[10px] text-emerald-500/80 ml-auto shrink-0 tabular-nums">{elapsed}</span>
             <button
               onClick={() => onCancel(task.id)}
-              className="p-0.5 rounded text-zinc-600 hover:text-red-400 transition-colors shrink-0"
+              className="p-0.5 rounded text-ink-600 hover:text-red-400 transition-colors shrink-0"
               title={t('common.cancel')}
             >
               <X size={12} />
@@ -66,17 +66,17 @@ export const ActiveTaskCard: React.FC<ActiveTaskCardProps> = ({ task, now, onCan
 
           {/* Progress */}
           <div className="mt-2 flex items-center gap-2">
-            <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+            <div className="flex-1 h-1.5 bg-ink-800 rounded-full overflow-hidden">
               <div
                 className="h-full rounded-full bg-emerald-500 transition-all duration-300"
                 style={{ width: `${pct}%` }}
               />
             </div>
             {task.progress > 0 && (
-              <span className="text-[10px] text-zinc-400 shrink-0 tabular-nums">{task.progress}%</span>
+              <span className="text-[10px] text-ink-400 shrink-0 tabular-nums">{task.progress}%</span>
             )}
             {task.speed != null && task.speed > 0 && (
-              <span className="text-[10px] text-zinc-600 shrink-0">{formatSpeed(task.speed)}</span>
+              <span className="text-[10px] text-ink-600 shrink-0">{formatSpeed(task.speed)}</span>
             )}
           </div>
         </div>

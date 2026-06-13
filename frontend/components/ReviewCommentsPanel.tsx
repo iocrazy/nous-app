@@ -101,14 +101,14 @@ export const ReviewCommentsPanel: React.FC<ReviewCommentsPanelProps> = ({
   return (
     <div className="flex flex-col h-full">
       {/* Comment Input */}
-      <div className="p-3 border-b border-zinc-700/50">
+      <div className="p-3 border-b border-ink-700/50">
         <textarea
           value={content}
           onChange={(e) => setContent(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={t('mediatrack.review.commentPlaceholder')}
           rows={3}
-          className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 resize-none focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+          className="w-full bg-ink-800 border border-ink-700 rounded-lg px-3 py-2 text-sm text-ink-200 placeholder-ink-500 resize-none focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
         />
         <div className="flex items-center justify-between mt-2">
           <div className="flex items-center gap-2">
@@ -125,7 +125,7 @@ export const ReviewCommentsPanel: React.FC<ReviewCommentsPanelProps> = ({
             )}
             <button
               onClick={() => setCapturedTime(currentTime)}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
+              className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs text-ink-400 hover:text-ink-200 hover:bg-ink-700 transition-colors"
             >
               <Clock className="w-3.5 h-3.5" />
               {t('mediatrack.review.captureTimestamp')}
@@ -155,15 +155,15 @@ export const ReviewCommentsPanel: React.FC<ReviewCommentsPanelProps> = ({
       <div className="flex-1 overflow-y-auto min-h-0">
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
-            <Loader2 className="w-5 h-5 animate-spin text-zinc-500" />
+            <Loader2 className="w-5 h-5 animate-spin text-ink-500" />
           </div>
         ) : comments.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-zinc-500">
+          <div className="flex flex-col items-center justify-center py-12 text-ink-500">
             <MessageSquare className="w-8 h-8 mb-2 opacity-40" />
             <span className="text-sm">{t('mediatrack.review.noComments')}</span>
           </div>
         ) : (
-          <div className="divide-y divide-zinc-800">
+          <div className="divide-y divide-ink-800">
             {comments.map((comment) => (
               <ReviewCommentItem
                 key={comment.id}

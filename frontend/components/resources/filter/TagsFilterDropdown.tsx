@@ -52,7 +52,7 @@ export const TagsFilterDropdown: React.FC<TagsFilterDropdownProps> = ({
 
   if (allTags.length === 0) {
     return (
-      <div className="w-64 px-3 py-4 text-xs text-zinc-500" role="menu" aria-label="Tags filter">
+      <div className="w-64 px-3 py-4 text-xs text-ink-500" role="menu" aria-label="Tags filter">
         {t('resources.filter.noTags', 'No tags yet')}
       </div>
     );
@@ -79,7 +79,7 @@ export const TagsFilterDropdown: React.FC<TagsFilterDropdownProps> = ({
         <button
           type="button"
           onClick={onClearAll}
-          className="border-t border-zinc-800 px-3 py-2 text-xs text-zinc-400 hover:text-zinc-100 text-left"
+          className="border-t border-ink-800 px-3 py-2 text-xs text-ink-400 hover:text-ink-100 text-left"
         >
           {t('resources.filter.clearSelection', 'Clear selection')}
         </button>

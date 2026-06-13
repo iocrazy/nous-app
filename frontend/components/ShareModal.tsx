@@ -135,9 +135,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
         onClick={handleClose}
       />
-      <div className="relative bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200">
+      <div className="relative bg-ink-900 border border-ink-800 rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b border-zinc-800">
+        <div className="flex items-center justify-between p-5 border-b border-ink-800">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-indigo-500/20 rounded-lg">
               <Link2 size={20} className="text-indigo-400" />
@@ -148,7 +148,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
           </div>
           <button
             onClick={handleClose}
-            className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+            className="p-2 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
           >
             <X size={20} />
           </button>
@@ -167,7 +167,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm text-zinc-400">
+                <label className="text-sm text-ink-400">
                   {t('shares.copyLink', 'Copy Link')}
                 </label>
                 <div className="flex gap-2">
@@ -175,7 +175,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                     type="text"
                     readOnly
                     value={shareLink}
-                    className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none"
+                    className="flex-1 bg-ink-800 border border-ink-700 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none"
                   />
                   <button
                     onClick={handleCopyLink}
@@ -205,7 +205,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
             <>
               {/* Share type selector */}
               <div className="space-y-2">
-                <label className="text-sm font-medium text-zinc-300">
+                <label className="text-sm font-medium text-ink-300">
                   {t('shares.shareType', 'Share Type')}
                 </label>
                 <div className="grid grid-cols-4 gap-2">
@@ -216,7 +216,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                       className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border transition-colors ${
                         shareType === type
                           ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-400'
-                          : 'bg-zinc-800/50 border-zinc-700 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'
+                          : 'bg-ink-800/50 border-ink-700 text-ink-400 hover:bg-ink-800 hover:text-ink-300'
                       }`}
                     >
                       {icon}
@@ -228,7 +228,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
 
               {/* Share name input */}
               <div className="space-y-2">
-                <label className="text-sm font-medium text-zinc-300">
+                <label className="text-sm font-medium text-ink-300">
                   {t('shares.shareName', 'Share Name')}
                 </label>
                 <input
@@ -236,24 +236,24 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                   value={shareName}
                   onChange={(e) => setShareName(e.target.value)}
                   placeholder={t('shares.shareNamePlaceholder', 'Enter a name for this share')}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500/50 transition-colors"
+                  className="w-full bg-ink-800 border border-ink-700 rounded-xl px-4 py-2.5 text-sm text-white placeholder-ink-500 focus:outline-none focus:border-indigo-500/50 transition-colors"
                 />
               </div>
 
               {/* Options */}
               <div className="space-y-3">
                 {/* Password protection */}
-                <div className="flex items-center justify-between p-3 bg-zinc-800/50 rounded-xl">
+                <div className="flex items-center justify-between p-3 bg-ink-800/50 rounded-xl">
                   <div className="flex items-center gap-3">
-                    <Lock size={16} className="text-zinc-400" />
-                    <span className="text-sm text-zinc-300">
+                    <Lock size={16} className="text-ink-400" />
+                    <span className="text-sm text-ink-300">
                       {t('shares.password', 'Password Protection')}
                     </span>
                   </div>
                   <button
                     onClick={() => setPasswordEnabled(!passwordEnabled)}
                     className={`relative w-10 h-6 rounded-full transition-colors ${
-                      passwordEnabled ? 'bg-indigo-600' : 'bg-zinc-600'
+                      passwordEnabled ? 'bg-indigo-600' : 'bg-ink-600'
                     }`}
                   >
                     <div
@@ -269,22 +269,22 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder={t('shares.passwordPlaceholder', 'Set a password')}
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500/50 transition-colors"
+                    className="w-full bg-ink-800 border border-ink-700 rounded-xl px-4 py-2.5 text-sm text-white placeholder-ink-500 focus:outline-none focus:border-indigo-500/50 transition-colors"
                   />
                 )}
 
                 {/* Expiration */}
-                <div className="flex items-center justify-between p-3 bg-zinc-800/50 rounded-xl">
+                <div className="flex items-center justify-between p-3 bg-ink-800/50 rounded-xl">
                   <div className="flex items-center gap-3">
-                    <Calendar size={16} className="text-zinc-400" />
-                    <span className="text-sm text-zinc-300">
+                    <Calendar size={16} className="text-ink-400" />
+                    <span className="text-sm text-ink-300">
                       {t('shares.expiration', 'Expiration')}
                     </span>
                   </div>
                   <button
                     onClick={() => setExpirationEnabled(!expirationEnabled)}
                     className={`relative w-10 h-6 rounded-full transition-colors ${
-                      expirationEnabled ? 'bg-indigo-600' : 'bg-zinc-600'
+                      expirationEnabled ? 'bg-indigo-600' : 'bg-ink-600'
                     }`}
                   >
                     <div
@@ -302,17 +302,17 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                 )}
 
                 {/* Allow download */}
-                <div className="flex items-center justify-between p-3 bg-zinc-800/50 rounded-xl">
+                <div className="flex items-center justify-between p-3 bg-ink-800/50 rounded-xl">
                   <div className="flex items-center gap-3">
-                    <Download size={16} className="text-zinc-400" />
-                    <span className="text-sm text-zinc-300">
+                    <Download size={16} className="text-ink-400" />
+                    <span className="text-sm text-ink-300">
                       {t('shares.allowDownload', 'Allow Download')}
                     </span>
                   </div>
                   <button
                     onClick={() => setAllowDownload(!allowDownload)}
                     className={`relative w-10 h-6 rounded-full transition-colors ${
-                      allowDownload ? 'bg-indigo-600' : 'bg-zinc-600'
+                      allowDownload ? 'bg-indigo-600' : 'bg-ink-600'
                     }`}
                   >
                     <div
@@ -324,17 +324,17 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                 </div>
 
                 {/* Watermark */}
-                <div className="flex items-center justify-between p-3 bg-zinc-800/50 rounded-xl">
+                <div className="flex items-center justify-between p-3 bg-ink-800/50 rounded-xl">
                   <div className="flex items-center gap-3">
-                    <Droplets size={16} className="text-zinc-400" />
-                    <span className="text-sm text-zinc-300">
+                    <Droplets size={16} className="text-ink-400" />
+                    <span className="text-sm text-ink-300">
                       {t('shares.watermark', 'Watermark')}
                     </span>
                   </div>
                   <button
                     onClick={() => setWatermark(!watermark)}
                     className={`relative w-10 h-6 rounded-full transition-colors ${
-                      watermark ? 'bg-indigo-600' : 'bg-zinc-600'
+                      watermark ? 'bg-indigo-600' : 'bg-ink-600'
                     }`}
                   >
                     <div
@@ -358,12 +358,12 @@ export const ShareModal: React.FC<ShareModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="flex gap-3 p-5 border-t border-zinc-800">
+        <div className="flex gap-3 p-5 border-t border-ink-800">
           {createdShare ? (
             <button
               type="button"
               onClick={handleClose}
-              className="flex-1 px-4 py-3 text-white bg-zinc-800 hover:bg-zinc-700 rounded-xl font-medium transition-colors"
+              className="flex-1 px-4 py-3 text-white bg-ink-800 hover:bg-ink-700 rounded-xl font-medium transition-colors"
             >
               {t('common.cancel', 'Close')}
             </button>
@@ -372,7 +372,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
               <button
                 type="button"
                 onClick={handleClose}
-                className="flex-1 px-4 py-3 text-zinc-300 bg-zinc-800 hover:bg-zinc-700 rounded-xl font-medium transition-colors"
+                className="flex-1 px-4 py-3 text-ink-300 bg-ink-800 hover:bg-ink-700 rounded-xl font-medium transition-colors"
               >
                 {t('common.cancel', 'Cancel')}
               </button>

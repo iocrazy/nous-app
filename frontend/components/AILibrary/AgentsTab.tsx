@@ -54,7 +54,7 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({ slug, onSlugChange }) => {
 
   if (!slug) {
     return (
-      <div className="flex h-full items-center justify-center p-6 text-sm text-zinc-500">
+      <div className="flex h-full items-center justify-center p-6 text-sm text-ink-500">
         {hasAgents === false
           ? t('aiLibrary.agents.selectAgent', 'No agents yet — use + to create one.')
           : t('aiLibrary.agents.pickFromSidebar', 'Pick an agent from the sidebar.')}

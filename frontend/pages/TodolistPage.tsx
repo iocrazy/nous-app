@@ -215,16 +215,16 @@ export function TodolistPage() {
   if (identifier) {
     if (selectedLoading || (!selectedIssue && !selectedError)) {
       return (
-        <div className="flex flex-col items-center justify-center h-64 text-zinc-500">
-          <ListTodo size={32} className="mb-3 text-zinc-700 animate-pulse" />
+        <div className="flex flex-col items-center justify-center h-64 text-ink-500">
+          <ListTodo size={32} className="mb-3 text-ink-700 animate-pulse" />
           <p className="text-sm">Loading {identifier}…</p>
         </div>
       );
     }
     if (selectedError || !selectedIssue) {
       return (
-        <div className="flex flex-col items-center justify-center h-64 text-zinc-500">
-          <ListTodo size={32} className="mb-3 text-zinc-700" />
+        <div className="flex flex-col items-center justify-center h-64 text-ink-500">
+          <ListTodo size={32} className="mb-3 text-ink-700" />
           <p className="text-sm">{selectedError ?? `Issue ${identifier} not found.`}</p>
           <button
             onClick={() => navigate(`/team/${teamId}/todolist`)}

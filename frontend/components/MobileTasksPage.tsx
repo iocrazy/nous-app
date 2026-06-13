@@ -113,15 +113,15 @@ function MobileTasksPanel({
     // sits BELOW the bottom tab bar (z-[49]) so the pill stays visible &
     // tappable here, and below modals/Profile (z-50). TaskDetailModal portals
     // at z-60, above everything.
-    <div className="sm:hidden fixed inset-0 z-[48] bg-zinc-950 flex flex-col">
+    <div className="sm:hidden fixed inset-0 z-[48] bg-ink-950 flex flex-col">
       {/* Header — leave the page via the bottom tab bar. Clear button deferred. */}
-      <div className="flex items-center justify-center px-4 pt-[max(env(safe-area-inset-top),12px)] pb-3 border-b border-zinc-800/80">
-        <h1 className="text-[17px] font-semibold text-zinc-100">{t('topbar.taskCenter')}</h1>
+      <div className="flex items-center justify-center px-4 pt-[max(env(safe-area-inset-top),12px)] pb-3 border-b border-ink-800/80">
+        <h1 className="text-[17px] font-semibold text-ink-100">{t('topbar.taskCenter')}</h1>
       </div>
 
       {isLoading ? (
-        <div className="flex flex-col items-center justify-center flex-1 text-zinc-500">
-          <div className="w-6 h-6 border-2 border-zinc-600 border-t-indigo-400 rounded-full animate-spin mb-3" />
+        <div className="flex flex-col items-center justify-center flex-1 text-ink-500">
+          <div className="w-6 h-6 border-2 border-ink-600 border-t-indigo-400 rounded-full animate-spin mb-3" />
           <span className="text-sm">{t('common.loading')}</span>
         </div>
       ) : hasTasks ? (
@@ -143,30 +143,30 @@ function MobileTasksPanel({
               <>
                 {/* Active uploads from UploadContext (client-side progress) */}
                 {uploadingItems.map((item) => (
-                  <div key={item.id} className="px-4 py-3 border-b border-zinc-800/50">
+                  <div key={item.id} className="px-4 py-3 border-b border-ink-800/50">
                     <div className="flex items-center gap-3">
                       <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 bg-blue-500/20 text-blue-400">
                         <UploadIcon size={16} />
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between">
-                          <span className="text-sm text-zinc-300 truncate max-w-[200px]">{item.filename}</span>
+                          <span className="text-sm text-ink-300 truncate max-w-[200px]">{item.filename}</span>
                           <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                            <span className="text-[11px] text-zinc-500">{item.percent}%</span>
+                            <span className="text-[11px] text-ink-500">{item.percent}%</span>
                             {item.speed > 0 && (
-                              <span className="text-[11px] text-zinc-600">{uploadFormatSpeed(item.speed)}</span>
+                              <span className="text-[11px] text-ink-600">{uploadFormatSpeed(item.speed)}</span>
                             )}
                           </div>
                         </div>
                         <div className="flex items-center gap-2 mt-0.5">
-                          <span className="text-[11px] text-zinc-600">Upload</span>
+                          <span className="text-[11px] text-ink-600">Upload</span>
                           {item.fileSize > 0 && (
-                            <span className="text-[11px] text-zinc-600">{uploadFormatFileSize(item.fileSize)}</span>
+                            <span className="text-[11px] text-ink-600">{uploadFormatFileSize(item.fileSize)}</span>
                           )}
                         </div>
                       </div>
                     </div>
-                    <div className="mt-2 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                    <div className="mt-2 h-1.5 bg-ink-800 rounded-full overflow-hidden">
                       <div
                         className="h-full rounded-full transition-all duration-300 bg-indigo-500"
                         style={{ width: `${Math.max(item.percent, 2)}%` }}
@@ -186,8 +186,8 @@ function MobileTasksPanel({
                 />
 
                 {uploadingItems.length === 0 && activeItems.length === 0 && (
-                  <div className="flex flex-col items-center justify-center py-16 text-zinc-500">
-                    <CheckCircle2 size={32} className="mb-3 text-zinc-600" />
+                  <div className="flex flex-col items-center justify-center py-16 text-ink-500">
+                    <CheckCircle2 size={32} className="mb-3 text-ink-600" />
                     <span className="text-sm">{t('topbar.noActiveTasks')}</span>
                   </div>
                 )}
@@ -203,8 +203,8 @@ function MobileTasksPanel({
                   onOpenDetail={setDetailTask}
                 />
                 {historyItems.length === 0 && (
-                  <div className="flex flex-col items-center justify-center py-16 text-zinc-500">
-                    <Inbox size={32} className="mb-3 text-zinc-600" />
+                  <div className="flex flex-col items-center justify-center py-16 text-ink-500">
+                    <Inbox size={32} className="mb-3 text-ink-600" />
                     <span className="text-sm">{t('topbar.noItems')}</span>
                   </div>
                 )}
@@ -213,8 +213,8 @@ function MobileTasksPanel({
           </div>
         </>
       ) : (
-        <div className="flex flex-col items-center justify-center flex-1 text-zinc-500">
-          <Inbox size={36} className="mb-3 text-zinc-600" />
+        <div className="flex flex-col items-center justify-center flex-1 text-ink-500">
+          <Inbox size={36} className="mb-3 text-ink-600" />
           <span className="text-sm">{t('topbar.noItems')}</span>
         </div>
       )}

@@ -38,25 +38,25 @@ const Block: React.FC<{ label: string; text: string; tone: 'plain' | 'accent' }>
   tone,
 }) => (
   <div>
-    <div className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1">{label}</div>
+    <div className="text-[10px] uppercase tracking-wide text-ink-500 mb-1">{label}</div>
     <div
       className={`text-[13px] leading-relaxed whitespace-pre-wrap break-words rounded p-3 ${
         tone === 'accent'
-          ? 'text-zinc-100 bg-indigo-500/10 border-l-2 border-indigo-400'
-          : 'text-zinc-300 bg-zinc-950/40 border border-zinc-800'
+          ? 'text-ink-100 bg-indigo-500/10 border-l-2 border-indigo-400'
+          : 'text-ink-300 bg-ink-950/40 border border-ink-800'
       }`}
     >
-      {text || <span className="text-zinc-600">—</span>}
+      {text || <span className="text-ink-600">—</span>}
     </div>
   </div>
 );
 
 const Stat: React.FC<{ label: string; value: string; unit?: string }> = ({ label, value, unit }) => (
   <div className="flex flex-col">
-    <span className="text-[10px] uppercase tracking-wide text-zinc-500">{label}</span>
-    <span className="text-sm font-semibold text-zinc-100">
+    <span className="text-[10px] uppercase tracking-wide text-ink-500">{label}</span>
+    <span className="text-sm font-semibold text-ink-100">
       {value}
-      {unit && <span className="ml-0.5 text-[11px] text-zinc-500">{unit}</span>}
+      {unit && <span className="ml-0.5 text-[11px] text-ink-500">{unit}</span>}
     </span>
   </div>
 );

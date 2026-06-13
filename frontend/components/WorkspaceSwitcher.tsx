@@ -88,7 +88,7 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
   const displayName = isPersonal
     ? (capitalizedName ? `${capitalizedName}'s Workspace` : (t('sidebar.personal') || 'Personal'))
     : (currentTeam?.name || 'Team');
-  const activeColor = isPersonal ? 'bg-zinc-600' : getTeamColor(currentTeam?.name || 'T');
+  const activeColor = isPersonal ? 'bg-ink-600' : getTeamColor(currentTeam?.name || 'T');
   const activeInitial = isPersonal
     ? (userName?.charAt(0)?.toUpperCase() || 'P')
     : (currentTeam?.name.charAt(0).toUpperCase() || 'T');
@@ -113,14 +113,14 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
         {isOpen && (
           <>
             <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
-            <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1.5 z-50 bg-zinc-900 border border-zinc-700/60 rounded-xl shadow-2xl p-1.5 flex flex-col items-center gap-1 animate-dropdown select-none">
+            <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1.5 z-50 bg-ink-900 border border-ink-700/60 rounded-xl shadow-2xl p-1.5 flex flex-col items-center gap-1 animate-dropdown select-none">
               {/* Personal */}
               <button
                 onClick={() => handleSelect(personalTeamId)}
                 className={`w-8 h-8 rounded-lg flex items-center justify-center cursor-pointer transition-all ${
                   isPersonal
-                    ? 'bg-zinc-600 ring-2 ring-indigo-500 ring-offset-1 ring-offset-zinc-950'
-                    : 'bg-zinc-700 hover:bg-zinc-600'
+                    ? 'bg-ink-600 ring-2 ring-indigo-500 ring-offset-1 ring-offset-ink-950'
+                    : 'bg-ink-700 hover:bg-ink-600'
                 }`}
                 title={capitalizedName ? `${capitalizedName}'s Workspace` : (t('sidebar.personal') || 'Personal')}
               >
@@ -139,7 +139,7 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
                     onClick={() => handleSelect(team.id)}
                     className={`w-8 h-8 rounded-lg flex items-center justify-center cursor-pointer transition-all ${color} ${
                       isActive
-                        ? 'ring-2 ring-indigo-500 ring-offset-1 ring-offset-zinc-950'
+                        ? 'ring-2 ring-indigo-500 ring-offset-1 ring-offset-ink-950'
                         : 'opacity-70 hover:opacity-100'
                     }`}
                     title={team.name}
@@ -152,10 +152,10 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
               })}
 
               {/* Create */}
-              <div className="w-6 mx-auto my-0.5 border-t border-zinc-700/60" />
+              <div className="w-6 mx-auto my-0.5 border-t border-ink-700/60" />
               <button
                 onClick={handleCreateTeam}
-                className="w-8 h-8 rounded-lg flex items-center justify-center cursor-pointer text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+                className="w-8 h-8 rounded-lg flex items-center justify-center cursor-pointer text-ink-500 hover:text-ink-300 hover:bg-ink-800 transition-colors"
                 title={t('user.createTeam') || 'Create Team'}
               >
                 <Plus size={16} />
@@ -173,40 +173,40 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
       {/* Trigger — single-line: icon + name + chevron + badge */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center w-full hover:bg-zinc-800/50 rounded-lg px-3 py-2.5 transition-colors group text-left min-w-0"
+        className="flex items-center w-full hover:bg-ink-800/50 rounded-lg px-3 py-2.5 transition-colors group text-left min-w-0"
       >
         <div className={`w-5 h-5 rounded ${activeColor} flex items-center justify-center flex-shrink-0 mr-2.5`}>
           <span className="text-white text-[10px] font-bold leading-none">{activeInitial}</span>
         </div>
-        <span className="text-sm font-semibold text-zinc-200 truncate min-w-0">
+        <span className="text-sm font-semibold text-ink-200 truncate min-w-0">
           {displayName}
         </span>
         <ChevronDown
           size={12}
-          className={`text-zinc-500 flex-shrink-0 ml-1 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+          className={`text-ink-500 flex-shrink-0 ml-1 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
         />
-        <span className="text-[10px] text-zinc-500 flex-shrink-0 ml-2">
+        <span className="text-[10px] text-ink-500 flex-shrink-0 ml-2">
           {t('plans.free')}
         </span>
       </button>
 
       {/* Dropdown */}
       {isOpen && (
-        <div className="absolute left-0 right-0 top-full mt-1 bg-zinc-900 border border-zinc-700/60 rounded-xl shadow-2xl z-50 animate-dropdown overflow-hidden">
+        <div className="absolute left-0 right-0 top-full mt-1 bg-ink-900 border border-ink-700/60 rounded-xl shadow-2xl z-50 animate-dropdown overflow-hidden">
           <div className="py-1">
             {/* Personal workspace */}
             <button
               onClick={() => handleSelect(personalTeamId)}
               className={`flex items-center gap-2.5 w-full px-3 py-2 transition-colors ${
-                isPersonal ? 'bg-zinc-800/60' : 'hover:bg-zinc-800/40'
+                isPersonal ? 'bg-ink-800/60' : 'hover:bg-ink-800/40'
               }`}
             >
-              <div className="w-5 h-5 rounded bg-zinc-600 flex items-center justify-center flex-shrink-0">
+              <div className="w-5 h-5 rounded bg-ink-600 flex items-center justify-center flex-shrink-0">
                 <span className="text-white text-[10px] font-bold leading-none">
                   {userName?.charAt(0)?.toUpperCase() || 'P'}
                 </span>
               </div>
-              <span className="text-sm text-zinc-200 truncate flex-1 text-left">
+              <span className="text-sm text-ink-200 truncate flex-1 text-left">
                 {capitalizedName ? `${capitalizedName}'s Workspace` : (t('sidebar.personal') || 'Personal')}
               </span>
               {isPersonal && (
@@ -223,7 +223,7 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
                   key={team.id}
                   onClick={() => handleSelect(team.id)}
                   className={`flex items-center gap-2.5 w-full px-3 py-2 transition-colors ${
-                    isActive ? 'bg-zinc-800/60' : 'hover:bg-zinc-800/40'
+                    isActive ? 'bg-ink-800/60' : 'hover:bg-ink-800/40'
                   }`}
                 >
                   <div className={`w-5 h-5 rounded ${color} flex items-center justify-center flex-shrink-0`}>
@@ -231,10 +231,10 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
                       {team.name.charAt(0).toUpperCase()}
                     </span>
                   </div>
-                  <span className="text-sm text-zinc-200 truncate flex-1 text-left">
+                  <span className="text-sm text-ink-200 truncate flex-1 text-left">
                     {team.name}
                   </span>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-700/80 text-zinc-400 flex-shrink-0">
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-ink-700/80 text-ink-400 flex-shrink-0">
                     {t('plans.free')}
                   </span>
                   {isActive && (
@@ -245,15 +245,15 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
             })}
 
             {/* Divider + Create */}
-            <div className="my-1 mx-3 border-t border-zinc-800" />
+            <div className="my-1 mx-3 border-t border-ink-800" />
             <button
               onClick={handleCreateTeam}
-              className="flex items-center gap-2.5 w-full px-3 py-2 hover:bg-zinc-800/40 transition-colors"
+              className="flex items-center gap-2.5 w-full px-3 py-2 hover:bg-ink-800/40 transition-colors"
             >
               <div className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0">
-                <Plus size={14} className="text-zinc-400" />
+                <Plus size={14} className="text-ink-400" />
               </div>
-              <span className="text-sm text-zinc-400">
+              <span className="text-sm text-ink-400">
                 {t('user.createTeam') || 'Create new'}
               </span>
             </button>

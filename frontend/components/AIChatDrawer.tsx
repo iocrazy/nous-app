@@ -103,7 +103,7 @@ export function AIChatDrawer({
         aria-hidden={!open}
         aria-label="AI Chat panel"
         style={{ width: DRAWER_WIDTH }}
-        className={`fixed top-0 right-0 z-30 h-screen border-l border-zinc-800 bg-zinc-900 shadow-2xl transition-transform duration-200 ease-out ${
+        className={`fixed top-0 right-0 z-30 h-screen border-l border-ink-800 bg-ink-900 shadow-2xl transition-transform duration-200 ease-out ${
           open ? 'translate-x-0' : 'translate-x-full pointer-events-none'
         }`}
       >

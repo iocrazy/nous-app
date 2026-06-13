@@ -256,25 +256,25 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h2 className="text-lg font-semibold text-zinc-100">Files</h2>
-            <p className="text-xs text-zinc-500 mt-0.5">{filteredAndSorted.length} {t('projects.toolbar.items', 'items')}</p>
+            <h2 className="text-lg font-semibold text-ink-100">Files</h2>
+            <p className="text-xs text-ink-500 mt-0.5">{filteredAndSorted.length} {t('projects.toolbar.items', 'items')}</p>
           </div>
           <div className="flex items-center gap-3">
             {/* Search */}
             <div className="relative">
-              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-500" />
               <input
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 placeholder={t('projects.header.searchFiles', 'Search files...')}
-                className="w-40 pl-8 pr-3 py-1.5 text-xs bg-zinc-800/60 border border-zinc-700/50 rounded-lg text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:w-56 transition-all"
+                className="w-40 pl-8 pr-3 py-1.5 text-xs bg-ink-800/60 border border-ink-700/50 rounded-lg text-ink-200 placeholder-ink-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:w-56 transition-all"
               />
             </div>
 
             {/* Collect */}
             <button
               onClick={() => setIsCollectOpen(true)}
-              className="flex items-center gap-2 px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg font-medium transition-colors text-sm border border-zinc-700"
+              className="flex items-center gap-2 px-3 py-2 bg-ink-800 hover:bg-ink-700 text-ink-300 rounded-lg font-medium transition-colors text-sm border border-ink-700"
             >
               <Inbox size={14} />
               {t('projects.collect.title', 'Collect')}
@@ -299,7 +299,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
             <select
               value={sortBy}
               onChange={e => setSortBy(e.target.value as SortField)}
-              className="text-xs bg-zinc-800 border border-zinc-700/50 rounded-lg px-2 py-1.5 text-zinc-300 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="text-xs bg-ink-800 border border-ink-700/50 rounded-lg px-2 py-1.5 text-ink-300 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             >
               <option value="updated_at">{t('projects.toolbar.sortUpdated', 'Updated')}</option>
               <option value="filename">{t('projects.toolbar.sortName', 'Name')}</option>
@@ -310,7 +310,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
             <select
               value={filterType}
               onChange={e => setFilterType(e.target.value as FilterType)}
-              className="text-xs bg-zinc-800 border border-zinc-700/50 rounded-lg px-2 py-1.5 text-zinc-300 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="text-xs bg-ink-800 border border-ink-700/50 rounded-lg px-2 py-1.5 text-ink-300 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             >
               <option value="all">{t('projects.toolbar.filterAll', 'All Types')}</option>
               <option value="video">{t('projects.toolbar.filterVideo', 'Video')}</option>
@@ -323,7 +323,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
             <select
               value={statusFilter}
               onChange={e => setStatusFilter(e.target.value as StatusFilter)}
-              className="text-xs bg-zinc-800 border border-zinc-700/50 rounded-lg px-2 py-1.5 text-zinc-300 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="text-xs bg-ink-800 border border-ink-700/50 rounded-lg px-2 py-1.5 text-ink-300 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             >
               <option value="all">{t('projects.toolbar.statusAll', 'All Status')}</option>
               <option value="pending_review">{t('projects.toolbar.statusPending', 'Pending Review')}</option>
@@ -334,11 +334,11 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
             </select>
 
             {/* View toggle */}
-            <div className="flex bg-zinc-800 rounded-lg p-0.5">
+            <div className="flex bg-ink-800 rounded-lg p-0.5">
               <button
                 onClick={() => setViewMode('grid')}
                 className={`p-1.5 rounded-md transition-colors ${
-                  viewMode === 'grid' ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
+                  viewMode === 'grid' ? 'bg-ink-700 text-white' : 'text-ink-400 hover:text-ink-200'
                 }`}
               >
                 <LayoutGrid size={14} />
@@ -346,7 +346,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
               <button
                 onClick={() => setViewMode('list')}
                 className={`p-1.5 rounded-md transition-colors ${
-                  viewMode === 'list' ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
+                  viewMode === 'list' ? 'bg-ink-700 text-white' : 'text-ink-400 hover:text-ink-200'
                 }`}
               >
                 <LayoutList size={14} />
@@ -365,16 +365,16 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
                 <ChevronDown size={12} />
               </button>
               {uploadMenuOpen && (
-                <div className="absolute right-0 top-full mt-1 w-44 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl z-50 py-1">
+                <div className="absolute right-0 top-full mt-1 w-44 bg-ink-800 border border-ink-700 rounded-lg shadow-xl z-50 py-1">
                   <button
                     onClick={() => { fileInputRef.current?.click(); setUploadMenuOpen(false); }}
-                    className="w-full text-left px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-700 transition-colors"
+                    className="w-full text-left px-3 py-2 text-sm text-ink-200 hover:bg-ink-700 transition-colors"
                   >
                     {t('projects.toolbar.uploadFiles', 'Upload Files')}
                   </button>
                   <button
                     onClick={() => { folderInputRef.current?.click(); setUploadMenuOpen(false); }}
-                    className="w-full text-left px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-700 transition-colors"
+                    className="w-full text-left px-3 py-2 text-sm text-ink-200 hover:bg-ink-700 transition-colors"
                   >
                     {t('projects.toolbar.uploadFolder', 'Upload Folder')}
                   </button>
@@ -385,7 +385,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
             {/* New Folder */}
             <button
               onClick={handleCreateFolder}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg text-sm font-medium transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-ink-800 hover:bg-ink-700 text-ink-200 rounded-lg text-sm font-medium transition-colors"
             >
               <Plus size={14} />
               {t('projects.toolbar.newFolder', 'New Folder')}
@@ -402,17 +402,17 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
           <nav className="flex items-center gap-1 text-sm mb-3">
             <button
               onClick={() => navigateToFolder(null)}
-              className="text-zinc-400 hover:text-white transition-colors"
+              className="text-ink-400 hover:text-white transition-colors"
             >
               {project.name}
             </button>
             {folderChain.map((f) => (
               <React.Fragment key={f.id}>
-                <ChevronRight size={14} className="text-zinc-600" />
+                <ChevronRight size={14} className="text-ink-600" />
                 <button
                   onClick={() => navigateToFolder(f.id, f)}
                   className={`transition-colors ${
-                    f.id === currentFolderId ? 'text-white' : 'text-zinc-400 hover:text-white'
+                    f.id === currentFolderId ? 'text-white' : 'text-ink-400 hover:text-white'
                   }`}
                 >
                   {f.name}
@@ -432,15 +432,15 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
         {/* Empty state */}
         {!isLoading && folders.length === 0 && filteredAndSorted.length === 0 && (
           <div className="flex flex-col items-center justify-center py-20 text-center">
-            <div className="p-4 bg-zinc-800 rounded-2xl mb-4">
-              <FolderOpen size={40} className="text-zinc-500" />
+            <div className="p-4 bg-ink-800 rounded-2xl mb-4">
+              <FolderOpen size={40} className="text-ink-500" />
             </div>
-            <h3 className="text-lg font-medium text-zinc-300 mb-2">{t('mediatrack.noFiles')}</h3>
-            <p className="text-sm text-zinc-500 mb-4">{t('mediatrack.uploadOrLink')}</p>
+            <h3 className="text-lg font-medium text-ink-300 mb-2">{t('mediatrack.noFiles')}</h3>
+            <p className="text-sm text-ink-500 mb-4">{t('mediatrack.uploadOrLink')}</p>
             <div className="flex gap-3">
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-2 px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-xl font-medium transition-colors text-sm"
+                className="flex items-center gap-2 px-4 py-2.5 bg-ink-800 hover:bg-ink-700 text-ink-200 rounded-xl font-medium transition-colors text-sm"
               >
                 <Upload size={16} />
                 {t('mediatrack.upload')}
@@ -463,10 +463,10 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
               <div
                 key={folder.id}
                 onClick={() => navigateToFolder(folder.id, folder)}
-                className="group bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700/50 rounded-xl p-4 cursor-pointer transition-colors flex flex-col items-center gap-2"
+                className="group bg-ink-800/50 hover:bg-ink-800 border border-ink-700/50 rounded-xl p-4 cursor-pointer transition-colors flex flex-col items-center gap-2"
               >
                 <FolderIcon size={44} className="text-amber-400" />
-                <p className="text-sm text-zinc-200 truncate w-full text-center">{folder.name}</p>
+                <p className="text-sm text-ink-200 truncate w-full text-center">{folder.name}</p>
               </div>
             ))}
             {filteredAndSorted.map(file => (
@@ -490,10 +490,10 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
               <div
                 key={folder.id}
                 onClick={() => navigateToFolder(folder.id, folder)}
-                className="flex items-center gap-3 px-4 py-3 bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700/50 rounded-xl cursor-pointer transition-colors"
+                className="flex items-center gap-3 px-4 py-3 bg-ink-800/50 hover:bg-ink-800 border border-ink-700/50 rounded-xl cursor-pointer transition-colors"
               >
                 <FolderIcon size={20} className="text-amber-400 shrink-0" />
-                <span className="text-sm text-zinc-200 truncate">{folder.name}</span>
+                <span className="text-sm text-ink-200 truncate">{folder.name}</span>
               </div>
             ))}
             {filteredAndSorted.map(file => (
@@ -513,8 +513,8 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
 
       {/* Floating batch action bar */}
       {selectedIds.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-zinc-900 border border-zinc-700 rounded-xl px-5 py-3 flex items-center gap-4 shadow-2xl">
-          <span className="text-sm text-zinc-300">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-ink-900 border border-ink-700 rounded-xl px-5 py-3 flex items-center gap-4 shadow-2xl">
+          <span className="text-sm text-ink-300">
             {selectedIds.size} {t('projects.batch.selected', 'selected')}
           </span>
           <button
@@ -525,7 +525,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
           </button>
           <button
             onClick={() => setSelectedIds(new Set())}
-            className="text-sm text-zinc-500 hover:text-zinc-300 px-3 py-1.5 transition-colors"
+            className="text-sm text-ink-500 hover:text-ink-300 px-3 py-1.5 transition-colors"
           >
             {t('projects.batch.cancel', 'Cancel')}
           </button>
@@ -590,17 +590,17 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
       {/* Rename Dialog */}
       {renameFile && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setRenameFile(null)}>
-          <div className="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-sm mx-4 p-5" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-sm font-medium text-zinc-200 mb-3">{t('projects.fileMenu.rename', 'Rename')}</h3>
+          <div className="bg-ink-900 border border-ink-700 rounded-2xl w-full max-w-sm mx-4 p-5" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-medium text-ink-200 mb-3">{t('projects.fileMenu.rename', 'Rename')}</h3>
             <input
               autoFocus
               value={renameValue}
               onChange={(e) => setRenameValue(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleRenameSubmit(); if (e.key === 'Escape') setRenameFile(null); }}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500"
+              className="w-full bg-ink-800 border border-ink-700 rounded-lg px-3 py-2 text-sm text-ink-200 focus:outline-none focus:border-indigo-500"
             />
             <div className="flex justify-end gap-2 mt-4">
-              <button onClick={() => setRenameFile(null)} className="px-3 py-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors">
+              <button onClick={() => setRenameFile(null)} className="px-3 py-1.5 text-sm text-ink-400 hover:text-ink-200 transition-colors">
                 {t('common.cancel', 'Cancel')}
               </button>
               <button onClick={handleRenameSubmit} className="px-3 py-1.5 text-sm bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors">

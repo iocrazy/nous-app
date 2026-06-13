@@ -86,7 +86,7 @@ export const ChatAttachmentPicker: React.FC<ChatAttachmentPickerProps> = ({
         onClick={handlePick}
         disabled={isDisabled}
         title={t('chat.attachments.attachTooltip')}
-        className="flex-shrink-0 p-1.5 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        className="flex-shrink-0 p-1.5 rounded-md text-ink-500 hover:text-ink-300 hover:bg-ink-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
       >
         <Paperclip className="w-4 h-4" />
         <input
@@ -107,7 +107,7 @@ export const ChatAttachmentPicker: React.FC<ChatAttachmentPickerProps> = ({
       {attachments.map((a, idx) => (
         <div
           key={`${a.url}-${idx}`}
-          className="group flex items-center gap-1.5 px-2 py-0.5 bg-zinc-800 border border-zinc-700 rounded text-[11px] text-zinc-300"
+          className="group flex items-center gap-1.5 px-2 py-0.5 bg-ink-800 border border-ink-700 rounded text-[11px] text-ink-300"
           title={`${a.filename} · ${_formatBytes(a.size_bytes)}`}
         >
           {a.preview_data_url ? (
@@ -124,7 +124,7 @@ export const ChatAttachmentPicker: React.FC<ChatAttachmentPickerProps> = ({
             type="button"
             onClick={() => removeAt(idx)}
             disabled={isDisabled}
-            className="text-zinc-500 hover:text-red-400 transition-colors"
+            className="text-ink-500 hover:text-red-400 transition-colors"
             title={t('chat.attachments.remove')}
           >
             <X className="w-3 h-3" />
@@ -137,7 +137,7 @@ export const ChatAttachmentPicker: React.FC<ChatAttachmentPickerProps> = ({
         onClick={handlePick}
         disabled={isDisabled}
         title={t('chat.attachments.attachMore')}
-        className="flex-shrink-0 p-1 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        className="flex-shrink-0 p-1 rounded text-ink-500 hover:text-ink-300 hover:bg-ink-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
       >
         {uploading ? (
           <Loader2 className="w-3.5 h-3.5 animate-spin" />

@@ -162,7 +162,7 @@ export function FacetDropdown({
   return createPortal(
     <div className="md:hidden fixed inset-0 z-[65]" onClick={onClose}>
       <div
-        className="absolute rounded-2xl bg-zinc-800/95 backdrop-blur border border-zinc-700 shadow-2xl overflow-hidden py-1 animate-in fade-in slide-in-from-top-1 duration-150"
+        className="absolute rounded-2xl bg-ink-800/95 backdrop-blur border border-ink-700 shadow-2xl overflow-hidden py-1 animate-in fade-in slide-in-from-top-1 duration-150"
         style={{ left, top, width: WIDTH, maxHeight: '60vh', overflowY: 'auto' }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -172,8 +172,8 @@ export function FacetDropdown({
             type="button"
             onClick={r.onToggle}
             className={`w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors ${
-              r.selected ? 'text-white bg-indigo-500/10' : 'text-zinc-300'
-            } active:bg-zinc-700`}
+              r.selected ? 'text-white bg-indigo-500/10' : 'text-ink-300'
+            } active:bg-ink-700`}
           >
             <span className="w-4 shrink-0 text-indigo-400">
               {r.selected && (
@@ -183,14 +183,14 @@ export function FacetDropdown({
             <span className="flex-1 truncate">{r.label}</span>
           </button>
         ))}
-        <div className="border-t border-zinc-700/60 mt-1">
+        <div className="border-t border-ink-700/60 mt-1">
           <button
             type="button"
             onClick={() => {
               config.clearChip(facetId);
               onClose();
             }}
-            className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-zinc-400 active:bg-zinc-700"
+            className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-ink-400 active:bg-ink-700"
           >
             <XCircle size={15} />
             {t('resources.filter.clear', 'Clear')}

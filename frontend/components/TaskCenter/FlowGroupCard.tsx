@@ -121,34 +121,34 @@ export const FlowGroupCard: React.FC<FlowGroupCardProps> = ({ group, flowId, ren
       : 'bg-emerald-500';
 
   return (
-    <div className="border-b border-zinc-800/80 last:border-b-0">
+    <div className="border-b border-ink-800/80 last:border-b-0">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-start gap-2 px-4 py-2 text-left bg-zinc-900/40 hover:bg-zinc-800/40 sticky top-0"
+        className="w-full flex items-start gap-2 px-4 py-2 text-left bg-ink-900/40 hover:bg-ink-800/40 sticky top-0"
       >
         {open
-          ? <ChevronDown size={11} className="text-zinc-500 mt-1 shrink-0" />
-          : <ChevronRight size={11} className="text-zinc-500 mt-1 shrink-0" />}
+          ? <ChevronDown size={11} className="text-ink-500 mt-1 shrink-0" />
+          : <ChevronRight size={11} className="text-ink-500 mt-1 shrink-0" />}
         <Workflow size={11} className="text-emerald-400 mt-1 shrink-0" />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-[12px] font-medium text-zinc-200 truncate">{name}</span>
+            <span className="text-[12px] font-medium text-ink-200 truncate">{name}</span>
             <span
-              className="text-[10px] text-zinc-500 font-mono shrink-0"
+              className="text-[10px] text-ink-500 font-mono shrink-0"
               title={`flow_id ${flowId}`}
             >
               {flowId.slice(0, 8)}
             </span>
           </div>
-          <div className="mt-1 flex items-center gap-2 text-[10px] text-zinc-500">
+          <div className="mt-1 flex items-center gap-2 text-[10px] text-ink-500">
             <span>{done}/{total} done</span>
             {running > 0 && <span className="text-amber-400">• {running} running</span>}
             {failed > 0 && <span className="text-rose-400">• {failed} failed</span>}
-            {cancelled > 0 && <span className="text-zinc-500">• {cancelled} cancelled</span>}
+            {cancelled > 0 && <span className="text-ink-500">• {cancelled} cancelled</span>}
             <span>• {formatElapsed(elapsed)}</span>
           </div>
-          <div className="mt-1.5 h-1 rounded bg-zinc-800/80 overflow-hidden">
+          <div className="mt-1.5 h-1 rounded bg-ink-800/80 overflow-hidden">
             <div
               className={`h-full ${barColour} transition-all duration-300`}
               style={{ width: `${percent}%` }}
@@ -170,7 +170,7 @@ export const FlowGroupCard: React.FC<FlowGroupCardProps> = ({ group, flowId, ren
         )}
       </button>
       {open && (
-        <div className="bg-zinc-950/30">
+        <div className="bg-ink-950/30">
           {group.tasks.map((t) => renderTask(t))}
         </div>
       )}

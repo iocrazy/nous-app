@@ -117,12 +117,12 @@ export function SodaPlaylistPanel({ onSubmitted }: SodaPlaylistPanelProps) {
       {/* URL input + Load button */}
       <div className="relative group">
         <div className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl opacity-30 group-hover:opacity-60 transition duration-500 blur"></div>
-        <div className="relative bg-zinc-900 rounded-xl p-2 border border-zinc-800 shadow-xl flex items-center">
-          <ListMusic className="ml-3 text-zinc-500 w-5 h-5 flex-shrink-0" />
+        <div className="relative bg-ink-900 rounded-xl p-2 border border-ink-800 shadow-xl flex items-center">
+          <ListMusic className="ml-3 text-ink-500 w-5 h-5 flex-shrink-0" />
           <input
             type="text"
             placeholder="Paste a Soda Music playlist link"
-            className="flex-1 bg-transparent border-none outline-none text-zinc-200 placeholder-zinc-600 px-4 py-3"
+            className="flex-1 bg-transparent border-none outline-none text-ink-200 placeholder-ink-600 px-4 py-3"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleLoad()}
@@ -145,16 +145,16 @@ export function SodaPlaylistPanel({ onSubmitted }: SodaPlaylistPanelProps) {
 
       {/* Empty state — loaded but no tracks */}
       {loaded && tracks.length === 0 && !loading && (
-        <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6 text-center text-zinc-500 text-sm">
+        <div className="bg-ink-900/50 border border-ink-800 rounded-xl p-6 text-center text-ink-500 text-sm">
           No music tracks in this playlist
         </div>
       )}
 
       {/* Track checklist */}
       {tracks.length > 0 && (
-        <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+        <div className="bg-ink-900 border border-ink-800 rounded-xl overflow-hidden">
           {/* Header row */}
-          <div className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-800">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-ink-800">
             <button
               type="button"
               onClick={allSelected ? deselectAll : selectAll}
@@ -162,13 +162,13 @@ export function SodaPlaylistPanel({ onSubmitted }: SodaPlaylistPanelProps) {
             >
               {allSelected ? 'Deselect all' : 'Select all'}
             </button>
-            <span className="text-xs text-zinc-500">
+            <span className="text-xs text-ink-500">
               {newCount} new · {downloadedCount} downloaded
             </span>
           </div>
 
           {/* Rows */}
-          <div className="max-h-96 overflow-y-auto divide-y divide-zinc-800/50">
+          <div className="max-h-96 overflow-y-auto divide-y divide-ink-800/50">
             {tracks.map((track) => {
               const checked = selected.has(track.track_id);
               const duration = formatDuration(track.duration_ms);
@@ -177,7 +177,7 @@ export function SodaPlaylistPanel({ onSubmitted }: SodaPlaylistPanelProps) {
               return (
                 <label
                   key={track.track_id}
-                  className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-zinc-800/40 transition-colors ${
+                  className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-ink-800/40 transition-colors ${
                     isDownloaded ? 'opacity-50' : ''
                   }`}
                 >
@@ -187,7 +187,7 @@ export function SodaPlaylistPanel({ onSubmitted }: SodaPlaylistPanelProps) {
                     onChange={() => toggleTrack(track.track_id)}
                     className="w-4 h-4 rounded accent-indigo-600 flex-shrink-0"
                   />
-                  <div className="w-10 h-10 rounded bg-zinc-800 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                  <div className="w-10 h-10 rounded bg-ink-800 flex items-center justify-center flex-shrink-0 overflow-hidden">
                     {track.cover_url ? (
                       <img
                         src={track.cover_url}
@@ -198,14 +198,14 @@ export function SodaPlaylistPanel({ onSubmitted }: SodaPlaylistPanelProps) {
                         }}
                       />
                     ) : isVideo ? (
-                      <Film size={16} className="text-zinc-600" />
+                      <Film size={16} className="text-ink-600" />
                     ) : (
-                      <Music size={16} className="text-zinc-600" />
+                      <Music size={16} className="text-ink-600" />
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-sm text-zinc-200 truncate">
+                      <span className="text-sm text-ink-200 truncate">
                         {track.title || 'Untitled'}
                       </span>
                       {isVideo && (
@@ -222,11 +222,11 @@ export function SodaPlaylistPanel({ onSubmitted }: SodaPlaylistPanelProps) {
                       )}
                     </div>
                     {track.artist && (
-                      <div className="text-xs text-zinc-500 truncate">{track.artist}</div>
+                      <div className="text-xs text-ink-500 truncate">{track.artist}</div>
                     )}
                   </div>
                   {duration && (
-                    <span className="text-xs text-zinc-500 font-mono flex-shrink-0">
+                    <span className="text-xs text-ink-500 font-mono flex-shrink-0">
                       {duration}
                     </span>
                   )}
@@ -236,7 +236,7 @@ export function SodaPlaylistPanel({ onSubmitted }: SodaPlaylistPanelProps) {
           </div>
 
           {/* Download footer */}
-          <div className="flex justify-end px-4 py-3 border-t border-zinc-800">
+          <div className="flex justify-end px-4 py-3 border-t border-ink-800">
             <button
               onClick={handleDownload}
               disabled={selected.size === 0 || submitting}

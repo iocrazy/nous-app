@@ -80,10 +80,10 @@ export const UserDropdown: React.FC<UserDropdownProps> = ({
       {/* Dropdown Panel */}
       <div
         ref={dropdownRef}
-        className="fixed top-0 right-0 h-full w-72 bg-zinc-900 border-l border-zinc-800 shadow-2xl z-50 animate-in slide-in-from-right duration-300"
+        className="fixed top-0 right-0 h-full w-72 bg-ink-900 border-l border-ink-800 shadow-2xl z-50 animate-in slide-in-from-right duration-300"
       >
         {/* User Info */}
-        <div className="p-5 border-b border-zinc-800">
+        <div className="p-5 border-b border-ink-800">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center overflow-hidden">
               {user.avatarUrl ? (
@@ -94,21 +94,21 @@ export const UserDropdown: React.FC<UserDropdownProps> = ({
             </div>
             <div className="flex-1 min-w-0">
               <p className="font-semibold text-white truncate">{user.name}</p>
-              <p className="text-sm text-zinc-500 truncate">{user.email}</p>
+              <p className="text-sm text-ink-500 truncate">{user.email}</p>
             </div>
           </div>
         </div>
 
         {/* Teams Section */}
-        <div className="p-3 border-b border-zinc-800">
-          <p className="px-2 text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">
+        <div className="p-3 border-b border-ink-800">
+          <p className="px-2 text-xs font-semibold text-ink-500 uppercase tracking-wider mb-2">
             {t('user.joinedTeams')}
           </p>
           <div className="space-y-1">
             {sortedTeams.map(team => (
               <div
                 key={team.id}
-                className="flex items-center justify-between px-2 py-2 rounded-lg hover:bg-zinc-800/50 transition-colors group"
+                className="flex items-center justify-between px-2 py-2 rounded-lg hover:bg-ink-800/50 transition-colors group"
               >
                 <button
                   onClick={() => onTeamSelect(team.id)}
@@ -117,13 +117,13 @@ export const UserDropdown: React.FC<UserDropdownProps> = ({
                   <div className="w-7 h-7 rounded-lg bg-indigo-600/20 flex items-center justify-center text-indigo-400 text-sm font-bold">
                     {team.name.charAt(0).toUpperCase()}
                   </div>
-                  <span className="text-sm text-zinc-300 truncate">{team.name}</span>
+                  <span className="text-sm text-ink-300 truncate">{team.name}</span>
                 </button>
                 <div className="flex items-center gap-1">
                   {team.isOwner && (
                     <button
                       onClick={() => onTeamSettings(team.id)}
-                      className="p-1 rounded text-zinc-500 hover:text-white hover:bg-zinc-700 opacity-0 group-hover:opacity-100 transition-all"
+                      className="p-1 rounded text-ink-500 hover:text-white hover:bg-ink-700 opacity-0 group-hover:opacity-100 transition-all"
                     >
                       <Settings size={14} />
                     </button>
@@ -148,16 +148,16 @@ export const UserDropdown: React.FC<UserDropdownProps> = ({
         <div className="p-3 space-y-1">
           <button
             onClick={onProfile}
-            className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-zinc-300 hover:bg-zinc-800/50 transition-colors"
+            className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-ink-300 hover:bg-ink-800/50 transition-colors"
           >
-            <User size={18} className="text-zinc-500" />
+            <User size={18} className="text-ink-500" />
             <span className="text-sm">{t('user.profile')}</span>
           </button>
           <button
             onClick={onAccount}
-            className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-zinc-300 hover:bg-zinc-800/50 transition-colors"
+            className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-ink-300 hover:bg-ink-800/50 transition-colors"
           >
-            <Settings size={18} className="text-zinc-500" />
+            <Settings size={18} className="text-ink-500" />
             <span className="text-sm">{t('user.account')}</span>
           </button>
 
@@ -168,7 +168,7 @@ export const UserDropdown: React.FC<UserDropdownProps> = ({
         </div>
 
         {/* Logout */}
-        <div className="absolute bottom-0 left-0 right-0 p-3 border-t border-zinc-800">
+        <div className="absolute bottom-0 left-0 right-0 p-3 border-t border-ink-800">
           <button
             onClick={onLogout}
             className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-red-400 hover:bg-red-500/10 transition-colors"

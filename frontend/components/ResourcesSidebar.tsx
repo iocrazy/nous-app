@@ -37,12 +37,12 @@ export interface ResourcesSidebarProps {
 
 const sidebarItemClass = (active: boolean) =>
   `w-full flex items-center gap-3 px-3 py-2 text-[13px] rounded-lg transition-colors text-left cursor-pointer select-none ${
-    active ? 'bg-zinc-800/80 text-white font-medium' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
+    active ? 'bg-ink-800/80 text-white font-medium' : 'text-ink-400 hover:bg-ink-800/50 hover:text-ink-200'
   }`;
 
 // Section label (island redesign D3) — visual grouping only, no behavior.
 const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div className="px-3 pt-1.5 pb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-600 select-none">
+  <div className="px-3 pt-1.5 pb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-600 select-none">
     {children}
   </div>
 );
@@ -120,7 +120,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
         {onToggleCollapse && (
           <button
             onClick={onToggleCollapse}
-            className="absolute top-1/2 -translate-y-1/2 left-0 z-10 w-4 h-10 flex items-center justify-center rounded-r-md bg-zinc-800/80 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
+            className="absolute top-1/2 -translate-y-1/2 left-0 z-10 w-4 h-10 flex items-center justify-center rounded-r-md bg-ink-800/80 text-ink-500 hover:text-ink-200 hover:bg-ink-700 transition-colors"
             title="Expand sidebar"
           >
             <ChevronRight size={12} />
@@ -128,10 +128,10 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
         )}
       </div>
     ) : (
-    <div className="group hidden md:flex md:static w-52 shrink-0 border-r border-zinc-800/40 flex-col pt-16" style={{ position: 'relative' }}>
+    <div className="group hidden md:flex md:static w-52 shrink-0 border-r border-ink-800/40 flex-col pt-16" style={{ position: 'relative' }}>
       {/* Header */}
       <div className="px-4 pt-4 pb-3">
-        <span className="text-sm font-semibold text-zinc-200">{t('sidebar.resources', 'Resources')}</span>
+        <span className="text-sm font-semibold text-ink-200">{t('sidebar.resources', 'Resources')}</span>
       </div>
       {/* Navigation */}
       <div className="flex-1 overflow-y-auto px-2 pb-4 space-y-0.5">
@@ -150,16 +150,16 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
                 <BookOpen size={15} className="shrink-0 opacity-70" />
                 <span className="flex-1 truncate">{t('resources.library')}</span>
                 {libraries.length > 0 && (
-                  <span className="text-[10px] min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-zinc-800 text-zinc-500 font-medium">{libraries.length}</span>
+                  <span className="text-[10px] min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-ink-800 text-ink-500 font-medium">{libraries.length}</span>
                 )}
                 <ChevronDown
                   size={12}
-                  className={`shrink-0 text-zinc-500 transition-transform duration-200 ${librariesExpanded ? '' : '-rotate-90'}`}
+                  className={`shrink-0 text-ink-500 transition-transform duration-200 ${librariesExpanded ? '' : '-rotate-90'}`}
                 />
               </button>
               <button
                 onClick={(e) => { e.stopPropagation(); setCreatingLibrary(true); setLibrariesExpanded(true); }}
-                className="p-1 text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 rounded-md transition-colors shrink-0"
+                className="p-1 text-ink-600 hover:text-ink-300 hover:bg-ink-800 rounded-md transition-colors shrink-0"
                 title={t('resources.newLibrary')}
               >
                 <Plus size={14} />
@@ -168,7 +168,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
 
             {/* Library children (indented with left border) */}
             {librariesExpanded && (
-              <div className="ml-3 border-l border-zinc-700/40 pl-0.5">
+              <div className="ml-3 border-l border-ink-700/40 pl-0.5">
                 {libraries.map((lib) => (
                   <button
                     key={lib.id}
@@ -203,10 +203,10 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
                       }}
                       placeholder={t('resources.libraryName')}
                       disabled={savingLibrary}
-                      className="flex-1 min-w-0 bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                      className="flex-1 min-w-0 bg-ink-900 border border-ink-700 rounded px-2 py-1 text-xs text-ink-200 placeholder-ink-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
                     />
                     {savingLibrary && (
-                      <Loader2 size={12} className="animate-spin text-zinc-400" />
+                      <Loader2 size={12} className="animate-spin text-ink-400" />
                     )}
                   </div>
                 )}
@@ -215,7 +215,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
                 {!creatingLibrary && (
                   <button
                     onClick={() => setCreatingLibrary(true)}
-                    className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[13px] text-zinc-600 hover:text-zinc-400 rounded-lg transition-colors text-left"
+                    className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[13px] text-ink-600 hover:text-ink-400 rounded-lg transition-colors text-left"
                   >
                     <Plus size={14} className="shrink-0 opacity-70" />
                     <span>{t('resources.newLibrary')}</span>
@@ -234,7 +234,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
               <Download size={15} className="shrink-0 opacity-70" />
               <span className="flex-1 truncate">{t('resources.downloads')}</span>
               {downloadsCount !== null && downloadsCount > 0 && (
-                <span className="text-[11px] text-zinc-500 tabular-nums">{downloadsCount}</span>
+                <span className="text-[11px] text-ink-500 tabular-nums">{downloadsCount}</span>
               )}
             </button>
 
@@ -249,7 +249,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
                 <FolderOpen size={15} className="shrink-0 opacity-70" />
                 <span className="flex-1 truncate">{t('resources.myResources')}</span>
                 {myResourcesCount !== null && myResourcesCount > 0 && (
-                  <span className="text-[11px] text-zinc-500 tabular-nums">{myResourcesCount}</span>
+                  <span className="text-[11px] text-ink-500 tabular-nums">{myResourcesCount}</span>
                 )}
               </button>
               <button
@@ -257,7 +257,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
                   navigate(resPath('/resources'));
                   onNewFolder();
                 }}
-                className="p-1 text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 rounded-md transition-colors shrink-0"
+                className="p-1 text-ink-600 hover:text-ink-300 hover:bg-ink-800 rounded-md transition-colors shrink-0"
                 title={t('resources.newFolder')}
               >
                 <Plus size={14} />
@@ -277,7 +277,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
         )}
 
         {/* ── Divider ── */}
-        <div className="mx-1 my-2.5 border-t border-zinc-800/60" />
+        <div className="mx-1 my-2.5 border-t border-ink-800/60" />
 
         {/* ── Smart Folders — collapsible parent item ── */}
         <div className="flex items-center justify-between pr-1">
@@ -288,15 +288,15 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
             <Zap size={15} className="shrink-0 opacity-70" />
             <span className="flex-1 truncate">{t('resources.smartFolders')}</span>
             {smartFolders.length > 0 && (
-              <span className="text-[10px] min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-zinc-800 text-zinc-500 font-medium">{smartFolders.length}</span>
+              <span className="text-[10px] min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-ink-800 text-ink-500 font-medium">{smartFolders.length}</span>
             )}
             <ChevronDown
               size={12}
-              className={`shrink-0 text-zinc-500 transition-transform duration-200 ${smartFoldersExpanded ? '' : '-rotate-90'}`}
+              className={`shrink-0 text-ink-500 transition-transform duration-200 ${smartFoldersExpanded ? '' : '-rotate-90'}`}
             />
           </button>
           <button
-            className="p-1 text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 rounded-md transition-colors shrink-0"
+            className="p-1 text-ink-600 hover:text-ink-300 hover:bg-ink-800 rounded-md transition-colors shrink-0"
             title={t('smartFolder.createTitle')}
             onClick={(e) => { e.stopPropagation(); onCreateSmartFolder(); }}
           >
@@ -306,7 +306,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
 
         {/* Smart folder children (indented with left border) */}
         {smartFoldersExpanded && (
-          <div className="ml-3 border-l border-zinc-700/40 pl-0.5">
+          <div className="ml-3 border-l border-ink-700/40 pl-0.5">
             {smartFolders.map((sf) => (
               <button
                 key={sf.id}
@@ -321,7 +321,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
                 <Zap size={14} className="shrink-0 opacity-60" />
                 <span className="truncate flex-1">{sf.name}</span>
                 <span
-                  className="opacity-0 group-hover:opacity-100 ml-auto text-zinc-600 hover:text-zinc-300 transition-all"
+                  className="opacity-0 group-hover:opacity-100 ml-auto text-ink-600 hover:text-ink-300 transition-all"
                   onClick={(e) => {
                     e.stopPropagation();
                     onEditSmartFolder(sf);
@@ -336,7 +336,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
             {smartFolders.length === 0 && (
               <button
                 onClick={() => onCreateSmartFolder()}
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[13px] text-zinc-600 hover:text-zinc-400 rounded-lg transition-colors text-left"
+                className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[13px] text-ink-600 hover:text-ink-400 rounded-lg transition-colors text-left"
               >
                 <Plus size={14} className="shrink-0 opacity-70" />
                 <span>{t('smartFolder.createTitle')}</span>
@@ -348,7 +348,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
 
       {/* ── Manage section — pinned to the bottom (island redesign D3:
           low-frequency management items sink below the content groups) ── */}
-      <div className="px-2 pb-3 pt-2 border-t border-zinc-800/60 space-y-0.5">
+      <div className="px-2 pb-3 pt-2 border-t border-ink-800/60 space-y-0.5">
         <button
           onClick={() => navigate(resPath('/resources/shared'))}
           className={sidebarItemClass(isSharedView)}
@@ -370,7 +370,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
       {onToggleCollapse && (
         <button
           onClick={onToggleCollapse}
-          className="absolute top-1/2 -translate-y-1/2 right-0 z-10 w-4 h-10 flex items-center justify-center rounded-l-md bg-zinc-800/80 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 transition-colors opacity-0 group-hover:opacity-100"
+          className="absolute top-1/2 -translate-y-1/2 right-0 z-10 w-4 h-10 flex items-center justify-center rounded-l-md bg-ink-800/80 text-ink-500 hover:text-ink-200 hover:bg-ink-700 transition-colors opacity-0 group-hover:opacity-100"
           title="Collapse sidebar"
         >
           <ChevronLeft size={12} />

@@ -23,7 +23,7 @@ export const AIStatusBadge: React.FC<{ status?: string }> = ({ status }) => {
       );
     case 'pending':
       return (
-        <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-500/10 text-zinc-500">
+        <span className="text-[10px] px-1.5 py-0.5 rounded bg-ink-500/10 text-ink-500">
           Pending
         </span>
       );

@@ -77,7 +77,7 @@ export const IssueSortMenu: React.FC<IssueSortMenuProps> = ({ sort, onChange, on
   return (
     <div
       ref={ref}
-      className="absolute right-0 top-full mt-1 w-48 bg-zinc-950 border border-zinc-800 rounded-lg shadow-2xl z-30 py-1"
+      className="absolute right-0 top-full mt-1 w-48 bg-ink-950 border border-ink-800 rounded-lg shadow-2xl z-30 py-1"
     >
       {SORT_KEYS.map((k) => {
         const active = sort.key === k;
@@ -87,14 +87,14 @@ export const IssueSortMenu: React.FC<IssueSortMenuProps> = ({ sort, onChange, on
             type="button"
             onClick={() => pick(k)}
             className={`w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs transition ${
-              active ? 'bg-zinc-900 text-zinc-100' : 'text-zinc-300 hover:bg-zinc-900/60'
+              active ? 'bg-ink-900 text-ink-100' : 'text-ink-300 hover:bg-ink-900/60'
             }`}
           >
             <span className="flex-1">{SORT_LABEL[k]}</span>
             {active && (
               sort.dir === 'asc'
-                ? <ArrowUp size={11} className="text-zinc-400" />
-                : <ArrowDown size={11} className="text-zinc-400" />
+                ? <ArrowUp size={11} className="text-ink-400" />
+                : <ArrowDown size={11} className="text-ink-400" />
             )}
           </button>
         );

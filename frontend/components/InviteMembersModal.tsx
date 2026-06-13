@@ -115,16 +115,16 @@ export const InviteMembersModal: React.FC<InviteMembersModalProps> = ({
     <div className="fixed inset-0 z-[60] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
 
-      <div className="relative bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl w-full max-w-lg mx-4 animate-in fade-in zoom-in-95 duration-200">
+      <div className="relative bg-ink-900 border border-ink-800 rounded-2xl shadow-2xl w-full max-w-lg mx-4 animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-zinc-800">
+        <div className="flex items-center justify-between p-6 border-b border-ink-800">
           <div>
             <h2 className="text-lg font-semibold text-white">Invite Members</h2>
-            <p className="text-sm text-zinc-500">{teamName}</p>
+            <p className="text-sm text-ink-500">{teamName}</p>
           </div>
           <button
             onClick={onClose}
-            className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+            className="p-2 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
           >
             <X size={20} />
           </button>
@@ -135,7 +135,7 @@ export const InviteMembersModal: React.FC<InviteMembersModalProps> = ({
           {/* Create New Invite */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <p className="text-sm text-zinc-300">Create a new invite link:</p>
+              <p className="text-sm text-ink-300">Create a new invite link:</p>
               <button
                 onClick={() => setShowSettings(!showSettings)}
                 className="text-xs text-indigo-400 hover:text-indigo-300"
@@ -145,16 +145,16 @@ export const InviteMembersModal: React.FC<InviteMembersModalProps> = ({
             </div>
 
             {showSettings && (
-              <div className="p-4 bg-zinc-800/50 rounded-lg space-y-4 animate-in fade-in slide-in-from-top-2">
+              <div className="p-4 bg-ink-800/50 rounded-lg space-y-4 animate-in fade-in slide-in-from-top-2">
                 <div className="space-y-2">
-                  <label className="text-xs font-medium text-zinc-400 flex items-center gap-1">
+                  <label className="text-xs font-medium text-ink-400 flex items-center gap-1">
                     <Clock size={12} />
                     Expires after
                   </label>
                   <select
                     value={expiresIn}
                     onChange={(e) => setExpiresIn(e.target.value as ExpiryOption)}
-                    className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500"
+                    className="w-full bg-ink-900 border border-ink-700 rounded-lg px-3 py-2 text-sm text-ink-200 focus:outline-none focus:border-indigo-500"
                   >
                     {expiryOptions.map((opt) => (
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -163,14 +163,14 @@ export const InviteMembersModal: React.FC<InviteMembersModalProps> = ({
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-xs font-medium text-zinc-400 flex items-center gap-1">
+                  <label className="text-xs font-medium text-ink-400 flex items-center gap-1">
                     <Users size={12} />
                     Max uses
                   </label>
                   <select
                     value={maxUses === null ? 'null' : maxUses.toString()}
                     onChange={(e) => setMaxUses(e.target.value === 'null' ? null : parseInt(e.target.value) as MaxUsesOption)}
-                    className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500"
+                    className="w-full bg-ink-900 border border-ink-700 rounded-lg px-3 py-2 text-sm text-ink-200 focus:outline-none focus:border-indigo-500"
                   >
                     {maxUsesOptions.map((opt) => (
                       <option key={opt.value === null ? 'null' : opt.value} value={opt.value === null ? 'null' : opt.value}>
@@ -199,21 +199,21 @@ export const InviteMembersModal: React.FC<InviteMembersModalProps> = ({
           {/* Existing Invites */}
           {isLoading ? (
             <div className="flex items-center justify-center py-8">
-              <Loader2 className="animate-spin text-zinc-500" size={24} />
+              <Loader2 className="animate-spin text-ink-500" size={24} />
             </div>
           ) : invites.length > 0 ? (
             <div className="space-y-3">
-              <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Active Invites</p>
+              <p className="text-xs font-medium text-ink-500 uppercase tracking-wider">Active Invites</p>
               {invites.map((invite) => (
                 <div
                   key={invite.id}
-                  className="flex items-center gap-3 p-3 bg-zinc-800/50 rounded-lg"
+                  className="flex items-center gap-3 p-3 bg-ink-800/50 rounded-lg"
                 >
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-mono text-zinc-300 truncate">
+                    <p className="text-sm font-mono text-ink-300 truncate">
                       {getInviteLink(invite.code)}
                     </p>
-                    <div className="flex items-center gap-3 mt-1 text-xs text-zinc-500">
+                    <div className="flex items-center gap-3 mt-1 text-xs text-ink-500">
                       <span className="flex items-center gap-1">
                         <Clock size={10} />
                         {getExpiryLabel(invite.expires_at)}
@@ -229,14 +229,14 @@ export const InviteMembersModal: React.FC<InviteMembersModalProps> = ({
                     className={`p-2 rounded-lg transition-colors ${
                       copiedId === invite.id
                         ? 'bg-green-500/10 text-green-400'
-                        : 'hover:bg-zinc-700 text-zinc-400 hover:text-white'
+                        : 'hover:bg-ink-700 text-ink-400 hover:text-white'
                     }`}
                   >
                     {copiedId === invite.id ? <Check size={16} /> : <Copy size={16} />}
                   </button>
                   <button
                     onClick={() => handleDeleteInvite(invite.id)}
-                    className="p-2 hover:bg-red-500/10 text-zinc-400 hover:text-red-400 rounded-lg transition-colors"
+                    className="p-2 hover:bg-red-500/10 text-ink-400 hover:text-red-400 rounded-lg transition-colors"
                   >
                     <Trash2 size={16} />
                   </button>
@@ -244,7 +244,7 @@ export const InviteMembersModal: React.FC<InviteMembersModalProps> = ({
               ))}
             </div>
           ) : (
-            <p className="text-center text-sm text-zinc-500 py-4">
+            <p className="text-center text-sm text-ink-500 py-4">
               No active invite links
             </p>
           )}

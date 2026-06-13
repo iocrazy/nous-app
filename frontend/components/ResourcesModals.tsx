@@ -143,16 +143,16 @@ export const ResourcesModals: React.FC<ResourcesModalsProps> = ({
       {showDeleteConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onCancelPermanentDelete} />
-          <div className="relative bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl w-full max-w-sm mx-4">
+          <div className="relative bg-ink-900 border border-ink-800 rounded-2xl shadow-2xl w-full max-w-sm mx-4">
             <div className="p-6 text-center">
               <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-4">
                 <AlertTriangle className="text-red-500" size={24} />
               </div>
               <h3 className="text-lg font-semibold text-white mb-2">{t('resources.confirmPermanentDelete')}</h3>
-              <p className="text-sm text-zinc-400">{t('resources.permanentDeleteWarning')}</p>
+              <p className="text-sm text-ink-400">{t('resources.permanentDeleteWarning')}</p>
             </div>
-            <div className="flex gap-3 p-4 border-t border-zinc-800">
-              <button onClick={onCancelPermanentDelete} className="flex-1 px-4 py-2 text-sm font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors">
+            <div className="flex gap-3 p-4 border-t border-ink-800">
+              <button onClick={onCancelPermanentDelete} className="flex-1 px-4 py-2 text-sm font-medium text-ink-300 bg-ink-800 hover:bg-ink-700 rounded-lg transition-colors">
                 {t('common.cancel')}
               </button>
               <button onClick={onConfirmPermanentDelete} className="flex-1 px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-500 rounded-lg transition-colors">
@@ -166,11 +166,11 @@ export const ResourcesModals: React.FC<ResourcesModalsProps> = ({
       {/* Touch drag preview */}
       {touchDragState.isDragging && touchDragState.dragPosition && createPortal(
         <div
-          className="fixed z-[100] pointer-events-none flex items-center gap-2 bg-zinc-800/90 backdrop-blur-sm border border-zinc-600 rounded-lg px-3 py-2 shadow-2xl"
+          className="fixed z-[100] pointer-events-none flex items-center gap-2 bg-ink-800/90 backdrop-blur-sm border border-ink-600 rounded-lg px-3 py-2 shadow-2xl"
           style={{ left: touchDragState.dragPosition.x - 40, top: touchDragState.dragPosition.y - 20 }}
         >
           <Move size={14} className="text-indigo-400" />
-          <span className="text-sm text-zinc-200">
+          <span className="text-sm text-ink-200">
             {touchDragState.dragIds.length === 1 ? 'Moving item' : `${touchDragState.dragIds.length} items`}
           </span>
         </div>,

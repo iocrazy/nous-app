@@ -112,7 +112,7 @@ export const SocialFilterDropdown: React.FC<SocialFilterDropdownProps> = ({
     <div className="w-72 py-1.5" role="menu" aria-label="Social filter">
       {/* Combine mode radios */}
       <div
-        className="px-3 pt-1 pb-2 border-b border-zinc-700/60 space-y-1"
+        className="px-3 pt-1 pb-2 border-b border-ink-700/60 space-y-1"
         role="radiogroup"
         aria-label={t('resources.filter.social.combineLabel', 'Combine mode')}
       >
@@ -127,7 +127,7 @@ export const SocialFilterDropdown: React.FC<SocialFilterDropdownProps> = ({
             <label
               key={mode}
               className={`flex items-center gap-2 text-xs cursor-pointer px-1 py-1 rounded ${
-                checked ? 'text-indigo-300' : 'text-zinc-300 hover:text-zinc-100'
+                checked ? 'text-indigo-300' : 'text-ink-300 hover:text-ink-100'
               }`}
             >
               <input
@@ -156,7 +156,7 @@ export const SocialFilterDropdown: React.FC<SocialFilterDropdownProps> = ({
               className={`flex items-center gap-2 px-2 py-1 rounded-md ${
                 entry.enabled
                   ? 'bg-indigo-500/10'
-                  : 'hover:bg-zinc-800/60'
+                  : 'hover:bg-ink-800/60'
               }`}
             >
               <label
@@ -172,17 +172,17 @@ export const SocialFilterDropdown: React.FC<SocialFilterDropdownProps> = ({
                 />
                 <Icon
                   size={12}
-                  className={entry.enabled ? 'text-indigo-300' : 'text-zinc-500'}
+                  className={entry.enabled ? 'text-indigo-300' : 'text-ink-500'}
                   aria-hidden="true"
                 />
                 <span
-                  className={entry.enabled ? 'text-indigo-300' : 'text-zinc-300'}
+                  className={entry.enabled ? 'text-indigo-300' : 'text-ink-300'}
                 >
                   {labels[metric]}
                 </span>
               </label>
               <span
-                className="text-[10px] tracking-wider text-zinc-500"
+                className="text-[10px] tracking-wider text-ink-500"
                 aria-hidden="true"
               >
                 {t('resources.filter.social.threshold', '≥')}
@@ -197,10 +197,10 @@ export const SocialFilterDropdown: React.FC<SocialFilterDropdownProps> = ({
                 onChange={(e) =>
                   setMetricThreshold(metric, parseThreshold(e.target.value))
                 }
-                className={`w-20 bg-zinc-900/60 border rounded px-1.5 py-1 text-[11px] focus:outline-none focus:border-indigo-500 ${
+                className={`w-20 bg-ink-900/60 border rounded px-1.5 py-1 text-[11px] focus:outline-none focus:border-indigo-500 ${
                   entry.enabled
-                    ? 'border-zinc-600 text-zinc-200'
-                    : 'border-zinc-800 text-zinc-500'
+                    ? 'border-ink-600 text-ink-200'
+                    : 'border-ink-800 text-ink-500'
                 }`}
                 aria-label={`${labels[metric]} threshold`}
               />
@@ -210,8 +210,8 @@ export const SocialFilterDropdown: React.FC<SocialFilterDropdownProps> = ({
       </div>
 
       {/* Has-comments floor */}
-      <div className="px-3 py-2 border-t border-zinc-700/60">
-        <label className="flex items-center gap-2 text-xs cursor-pointer text-zinc-200">
+      <div className="px-3 py-2 border-t border-ink-700/60">
+        <label className="flex items-center gap-2 text-xs cursor-pointer text-ink-200">
           <input
             type="checkbox"
             checked={value.hasComments}
@@ -220,7 +220,7 @@ export const SocialFilterDropdown: React.FC<SocialFilterDropdownProps> = ({
           />
           <MessageCircle
             size={12}
-            className={value.hasComments ? 'text-indigo-300' : 'text-zinc-500'}
+            className={value.hasComments ? 'text-indigo-300' : 'text-ink-500'}
             aria-hidden="true"
           />
           <span>
@@ -231,11 +231,11 @@ export const SocialFilterDropdown: React.FC<SocialFilterDropdownProps> = ({
 
       {anyActive && (
         <>
-          <div className="mx-2.5 my-1 border-t border-zinc-700/60" />
+          <div className="mx-2.5 my-1 border-t border-ink-700/60" />
           <button
             type="button"
             onClick={onClearAll}
-            className="w-full text-left px-3 py-2 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+            className="w-full text-left px-3 py-2 text-xs text-ink-500 hover:text-ink-300 hover:bg-ink-800 transition-colors"
           >
             {t('resources.filter.clearSelection', 'Clear selection')}
           </button>

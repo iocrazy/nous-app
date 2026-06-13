@@ -97,16 +97,16 @@ export const IssueColumnPicker: React.FC<IssueColumnPickerProps> = ({ visible, o
   return (
     <div
       ref={ref}
-      className="absolute right-0 top-full mt-1 w-72 bg-zinc-950 border border-zinc-800 rounded-lg shadow-2xl z-30"
+      className="absolute right-0 top-full mt-1 w-72 bg-ink-950 border border-ink-800 rounded-lg shadow-2xl z-30"
     >
-      <header className="flex items-start justify-between px-3 py-2.5 border-b border-zinc-800">
+      <header className="flex items-start justify-between px-3 py-2.5 border-b border-ink-800">
         <div>
-          <div className="text-[10px] uppercase tracking-wider text-zinc-500">Desktop issue rows</div>
-          <h3 className="text-sm font-semibold text-zinc-200 mt-0.5">Choose which issue columns stay visible</h3>
+          <div className="text-[10px] uppercase tracking-wider text-ink-500">Desktop issue rows</div>
+          <h3 className="text-sm font-semibold text-ink-200 mt-0.5">Choose which issue columns stay visible</h3>
         </div>
         <button
           onClick={onClose}
-          className="p-1 text-zinc-500 hover:text-zinc-300 rounded hover:bg-zinc-800"
+          className="p-1 text-ink-500 hover:text-ink-300 rounded hover:bg-ink-800"
         >
           <X size={12} />
         </button>
@@ -119,16 +119,16 @@ export const IssueColumnPicker: React.FC<IssueColumnPickerProps> = ({ visible, o
               <button
                 type="button"
                 onClick={() => toggle(def.key)}
-                className="w-full flex items-start gap-2 px-3 py-2 text-left hover:bg-zinc-900/60 transition"
+                className="w-full flex items-start gap-2 px-3 py-2 text-left hover:bg-ink-900/60 transition"
               >
                 <span className="w-3.5 mt-0.5 inline-flex justify-center">
                   {checked && <Check size={12} className="text-emerald-400" />}
                 </span>
                 <span className="flex-1">
-                  <span className={`block text-xs font-medium ${checked ? 'text-zinc-100' : 'text-zinc-300'}`}>
+                  <span className={`block text-xs font-medium ${checked ? 'text-ink-100' : 'text-ink-300'}`}>
                     {def.label}
                   </span>
-                  <span className="block text-[11px] text-zinc-500 mt-0.5 leading-snug">
+                  <span className="block text-[11px] text-ink-500 mt-0.5 leading-snug">
                     {def.hint}
                   </span>
                 </span>
@@ -137,15 +137,15 @@ export const IssueColumnPicker: React.FC<IssueColumnPickerProps> = ({ visible, o
           );
         })}
       </ul>
-      <footer className="flex items-center justify-between px-3 py-2 border-t border-zinc-800 text-[11px]">
+      <footer className="flex items-center justify-between px-3 py-2 border-t border-ink-800 text-[11px]">
         <button
           type="button"
           onClick={reset}
-          className="text-zinc-300 hover:text-white"
+          className="text-ink-300 hover:text-white"
         >
           Reset defaults
         </button>
-        <span className="text-zinc-500 truncate ml-2 max-w-[55%] text-right" title={summaryText}>
+        <span className="text-ink-500 truncate ml-2 max-w-[55%] text-right" title={summaryText}>
           {summaryText}
         </span>
       </footer>

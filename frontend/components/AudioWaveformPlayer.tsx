@@ -467,10 +467,10 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="flex flex-col items-center gap-3">
               <div
-                className="w-8 h-8 border-2 border-zinc-300 border-t-transparent rounded-full animate-spin"
+                className="w-8 h-8 border-2 border-ink-300 border-t-transparent rounded-full animate-spin"
                 style={{ borderColor: tm.accent, borderTopColor: 'transparent' }}
               />
-              <span className="text-xs text-zinc-500">Decoding audio...</span>
+              <span className="text-xs text-ink-500">Decoding audio...</span>
             </div>
           </div>
         ) : (
@@ -503,7 +503,7 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
       </div>
 
       {/* Bottom control bar */}
-      <div className="flex items-center gap-4 px-6 py-3 border-t border-zinc-800/50 bg-zinc-900/50 shrink-0">
+      <div className="flex items-center gap-4 px-6 py-3 border-t border-ink-800/50 bg-ink-900/50 shrink-0">
         {/* Play/Pause */}
         <button
           onClick={togglePlay}
@@ -518,7 +518,7 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
         </button>
 
         {/* Time */}
-        <span className="text-sm text-zinc-300 tabular-nums font-medium min-w-[80px]">
+        <span className="text-sm text-ink-300 tabular-nums font-medium min-w-[80px]">
           {formatTime(currentTime)} / {formatTime(duration)}
         </span>
 
@@ -531,7 +531,7 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
             <button
               type="button"
               onClick={() => onChorusChange?.(currentTime)}
-              className="px-2 py-0.5 text-xs font-medium text-amber-300 hover:text-amber-200 bg-zinc-800 hover:bg-zinc-700 rounded transition-colors whitespace-nowrap"
+              className="px-2 py-0.5 text-xs font-medium text-amber-300 hover:text-amber-200 bg-ink-800 hover:bg-ink-700 rounded transition-colors whitespace-nowrap"
             >
               {setChorusLabel}
             </button>
@@ -539,7 +539,7 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
             <button
               type="button"
               onClick={() => onChorusChange?.(null)}
-              className="px-2 py-0.5 text-xs font-medium text-amber-300 hover:text-amber-200 bg-zinc-800 hover:bg-zinc-700 rounded transition-colors whitespace-nowrap"
+              className="px-2 py-0.5 text-xs font-medium text-amber-300 hover:text-amber-200 bg-ink-800 hover:bg-ink-700 rounded transition-colors whitespace-nowrap"
             >
               {clearChorusLabel}
             </button>
@@ -548,7 +548,7 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
         {/* Playback rate */}
         <button
           onClick={cycleRate}
-          className="px-2 py-0.5 text-xs font-medium text-zinc-400 hover:text-zinc-200 bg-zinc-800 hover:bg-zinc-700 rounded transition-colors tabular-nums min-w-[40px]"
+          className="px-2 py-0.5 text-xs font-medium text-ink-400 hover:text-ink-200 bg-ink-800 hover:bg-ink-700 rounded transition-colors tabular-nums min-w-[40px]"
         >
           {playbackRate === 1 ? '1x' : `${playbackRate}x`}
         </button>
@@ -557,7 +557,7 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
         <div className="flex items-center gap-2">
           <button
             onClick={toggleMute}
-            className="text-zinc-400 hover:text-zinc-200 transition-colors"
+            className="text-ink-400 hover:text-ink-200 transition-colors"
           >
             {isMuted || volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}
           </button>
@@ -572,7 +572,7 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
               accentColor: tm.accent,
               ['--sw' as string]: tm.accent,
             } as React.CSSProperties}
-            className="w-20 h-1 bg-zinc-700 rounded-full appearance-none cursor-pointer
+            className="w-20 h-1 bg-ink-700 rounded-full appearance-none cursor-pointer
               [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3
               [&::-webkit-slider-thumb]:bg-[var(--sw)] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
           />

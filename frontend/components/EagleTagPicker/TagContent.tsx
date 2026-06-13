@@ -108,7 +108,7 @@ export const TagContent: React.FC<TagContentProps> = ({
   const SectionHeader: React.FC<{ icon: React.ReactNode; label: string; count: number }> = ({ icon, label, count }) => (
     <div className="flex items-center gap-1.5 px-1 py-1.5">
       {icon}
-      <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">
+      <span className="text-[10px] font-semibold text-ink-500 uppercase tracking-wider">
         {label} ({count})
       </span>
     </div>
@@ -135,24 +135,24 @@ export const TagContent: React.FC<TagContentProps> = ({
       {/* Grouped tags */}
       {grouped.map(([groupName, groupTags]) => (
         <div key={groupName}>
-          <SectionHeader icon={<FolderOpen size={10} className="text-zinc-500" />} label={groupName} count={groupTags.length} />
+          <SectionHeader icon={<FolderOpen size={10} className="text-ink-500" />} label={groupName} count={groupTags.length} />
           <div className={gridClass}>{groupTags.map(renderTag)}</div>
         </div>
       ))}
 
       {groupFiltered.length === 0 && (
-        <p className="text-xs text-zinc-600 text-center py-6">No tags found</p>
+        <p className="text-xs text-ink-600 text-center py-6">No tags found</p>
       )}
 
       {/* Right-click context menu */}
       {contextMenu && (
         <div
-          className="fixed z-[80] bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-32"
+          className="fixed z-[80] bg-ink-900 border border-ink-700 rounded-lg shadow-xl py-1 w-32"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
           <button
             onClick={() => { onToggleStar(contextMenu.tagId); closeContextMenu(); }}
-            className="w-full px-3 py-1.5 text-xs text-left text-zinc-300 hover:bg-zinc-800 flex items-center gap-2"
+            className="w-full px-3 py-1.5 text-xs text-left text-ink-300 hover:bg-ink-800 flex items-center gap-2"
           >
             <Star size={10} className={starredSet.has(contextMenu.tagId) ? 'fill-yellow-500 text-yellow-500' : ''} />
             {starredSet.has(contextMenu.tagId) ? 'Unstar' : 'Star'}
@@ -160,7 +160,7 @@ export const TagContent: React.FC<TagContentProps> = ({
           {onRequestMerge && selectedUserTagCount >= 2 && (
             <button
               onClick={() => { onRequestMerge(); closeContextMenu(); }}
-              className="w-full px-3 py-1.5 text-xs text-left text-zinc-300 hover:bg-zinc-800 flex items-center gap-2"
+              className="w-full px-3 py-1.5 text-xs text-left text-ink-300 hover:bg-ink-800 flex items-center gap-2"
             >
               <span className="w-2.5 text-center">⛙</span>
               Merge {selectedUserTagCount} Tags

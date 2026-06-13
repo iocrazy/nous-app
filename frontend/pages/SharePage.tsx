@@ -180,7 +180,7 @@ export const SharePage: React.FC = () => {
       case 'review': return <Film size={48} className="text-indigo-400" />;
       case 'delivery': return <FileText size={48} className="text-emerald-400" />;
       case 'presentation': return <ImageIcon size={48} className="text-amber-400" />;
-      default: return <FileText size={48} className="text-zinc-400" />;
+      default: return <FileText size={48} className="text-ink-400" />;
     }
   };
 
@@ -189,10 +189,10 @@ export const SharePage: React.FC = () => {
   // Loading state
   if (phase === 'loading' || phase === 'initial') {
     return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
+      <div className="min-h-screen bg-ink-950 flex items-center justify-center">
         <div className="text-center">
           <Loader2 size={40} className="animate-spin text-indigo-500 mx-auto mb-4" />
-          <p className="text-zinc-400">{t('common.loading')}</p>
+          <p className="text-ink-400">{t('common.loading')}</p>
         </div>
       </div>
     );
@@ -201,14 +201,14 @@ export const SharePage: React.FC = () => {
   // Password required
   if (phase === 'password') {
     return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-ink-950 flex items-center justify-center p-4">
         <div className="w-full max-w-sm">
           <div className="text-center mb-8">
-            <div className="w-16 h-16 bg-zinc-800 rounded-2xl flex items-center justify-center mx-auto mb-4">
-              <Lock size={32} className="text-zinc-400" />
+            <div className="w-16 h-16 bg-ink-800 rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <Lock size={32} className="text-ink-400" />
             </div>
-            <h1 className="text-xl font-bold text-zinc-100 mb-2">{t('share.passwordRequired')}</h1>
-            <p className="text-sm text-zinc-500">{t('share.enterPassword')}</p>
+            <h1 className="text-xl font-bold text-ink-100 mb-2">{t('share.passwordRequired')}</h1>
+            <p className="text-sm text-ink-500">{t('share.enterPassword')}</p>
           </div>
 
           <form onSubmit={handlePasswordSubmit} className="space-y-4">
@@ -219,8 +219,8 @@ export const SharePage: React.FC = () => {
                 onChange={(e) => { setPassword(e.target.value); setPasswordError(false); }}
                 placeholder={t('share.enterPassword')}
                 autoFocus
-                className={`w-full px-4 py-3 bg-zinc-900 border rounded-xl text-zinc-200 placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                  passwordError ? 'border-red-500' : 'border-zinc-700'
+                className={`w-full px-4 py-3 bg-ink-900 border rounded-xl text-ink-200 placeholder-ink-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                  passwordError ? 'border-red-500' : 'border-ink-700'
                 }`}
               />
               {passwordError && (
@@ -230,7 +230,7 @@ export const SharePage: React.FC = () => {
             <button
               type="submit"
               disabled={!password}
-              className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white font-medium rounded-xl transition-colors"
+              className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-ink-800 disabled:text-ink-600 text-white font-medium rounded-xl transition-colors"
             >
               {t('share.submit')}
             </button>
@@ -243,12 +243,12 @@ export const SharePage: React.FC = () => {
   // Error state
   if (phase === 'error') {
     return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-ink-950 flex items-center justify-center p-4">
         <div className="text-center">
-          <div className="w-16 h-16 bg-zinc-800 rounded-2xl flex items-center justify-center mx-auto mb-4">
+          <div className="w-16 h-16 bg-ink-800 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <XCircle size={32} className="text-red-400" />
           </div>
-          <h1 className="text-xl font-bold text-zinc-100 mb-2">{error}</h1>
+          <h1 className="text-xl font-bold text-ink-100 mb-2">{error}</h1>
         </div>
       </div>
     );
@@ -275,14 +275,14 @@ export const SharePage: React.FC = () => {
   const isAudio = isAudioMime(mimeType);
 
   return (
-    <div className="min-h-screen bg-zinc-950 flex flex-col">
+    <div className="min-h-screen bg-ink-950 flex flex-col">
       {/* Header */}
-      <header className="border-b border-zinc-800 px-4 sm:px-6 py-4 flex items-center justify-between">
+      <header className="border-b border-ink-800 px-4 sm:px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3 min-w-0">
           <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center shrink-0">
             <Sparkles className="w-5 h-5 text-white" />
           </div>
-          <h1 className="text-lg font-semibold text-zinc-100 truncate">{share.share_name}</h1>
+          <h1 className="text-lg font-semibold text-ink-100 truncate">{share.share_name}</h1>
         </div>
         <div className="flex items-center gap-3 shrink-0">
           {share.allow_download && resourceUrl && (
@@ -304,7 +304,7 @@ export const SharePage: React.FC = () => {
         <div className={`${share.share_type === 'review' ? 'flex-1 min-w-0' : 'w-full max-w-4xl'}`}>
           {/* Album/carousel preview */}
           {isAlbum && mediaId ? (
-            <div className="bg-zinc-900 rounded-2xl overflow-hidden" style={{ maxHeight: 'calc(100vh - 200px)', aspectRatio: '9/16' }}>
+            <div className="bg-ink-900 rounded-2xl overflow-hidden" style={{ maxHeight: 'calc(100vh - 200px)', aspectRatio: '9/16' }}>
               <SlidePlayer
                 mediaId={mediaId}
                 mediaToken={shareCode}
@@ -325,7 +325,7 @@ export const SharePage: React.FC = () => {
             </div>
           ) : isImage && mediaUrl ? (
             /* Image preview */
-            <div className="bg-zinc-900 rounded-2xl border border-zinc-800 overflow-hidden flex items-center justify-center">
+            <div className="bg-ink-900 rounded-2xl border border-ink-800 overflow-hidden flex items-center justify-center">
               <img
                 src={mediaUrl}
                 alt={share.share_name}
@@ -334,18 +334,18 @@ export const SharePage: React.FC = () => {
             </div>
           ) : isAudio && mediaUrl ? (
             /* Audio preview */
-            <div className="bg-zinc-900 rounded-2xl border border-zinc-800 p-12 flex flex-col items-center justify-center gap-6">
+            <div className="bg-ink-900 rounded-2xl border border-ink-800 p-12 flex flex-col items-center justify-center gap-6">
               <Music size={64} className="text-indigo-400" />
-              <h2 className="text-lg font-medium text-zinc-200">{share.share_name}</h2>
+              <h2 className="text-lg font-medium text-ink-200">{share.share_name}</h2>
               <audio src={mediaUrl} controls className="w-full max-w-md" />
             </div>
           ) : resourceUrl ? (
             /* Generic file with download */
-            <div className="bg-zinc-900 rounded-2xl border border-zinc-800 overflow-hidden">
+            <div className="bg-ink-900 rounded-2xl border border-ink-800 overflow-hidden">
               <div className="flex flex-col items-center justify-center py-20">
                 {getFileTypeIcon(share.share_type)}
-                <h2 className="mt-4 text-lg font-medium text-zinc-200">{share.share_name}</h2>
-                <p className="mt-1 text-sm text-zinc-500">{shareAny.filename || 'Shared File'}</p>
+                <h2 className="mt-4 text-lg font-medium text-ink-200">{share.share_name}</h2>
+                <p className="mt-1 text-sm text-ink-500">{shareAny.filename || 'Shared File'}</p>
                 {share.allow_download && (
                   <a
                     href={resourceUrl}
@@ -361,41 +361,41 @@ export const SharePage: React.FC = () => {
           ) : (
             <div className="text-center py-20">
               {getFileTypeIcon(share.share_type)}
-              <h2 className="mt-4 text-lg font-medium text-zinc-200">{share.share_name}</h2>
-              <p className="mt-2 text-sm text-zinc-500">{t('share.noPreview')}</p>
+              <h2 className="mt-4 text-lg font-medium text-ink-200">{share.share_name}</h2>
+              <p className="mt-2 text-sm text-ink-500">{t('share.noPreview')}</p>
             </div>
           )}
         </div>
 
         {/* Review comments panel */}
         {share.share_type === 'review' && (
-          <div className="w-80 flex-shrink-0 bg-zinc-900 border border-zinc-800 rounded-2xl flex flex-col overflow-hidden">
+          <div className="w-80 flex-shrink-0 bg-ink-900 border border-ink-800 rounded-2xl flex flex-col overflow-hidden">
             {/* Panel header */}
-            <div className="px-4 py-3 border-b border-zinc-800 flex items-center gap-2">
-              <MessageSquare size={16} className="text-zinc-400" />
-              <span className="text-sm font-medium text-zinc-200">{t('review.comments')}</span>
-              <span className="text-xs text-zinc-500 ml-auto">{comments.length}</span>
+            <div className="px-4 py-3 border-b border-ink-800 flex items-center gap-2">
+              <MessageSquare size={16} className="text-ink-400" />
+              <span className="text-sm font-medium text-ink-200">{t('review.comments')}</span>
+              <span className="text-xs text-ink-500 ml-auto">{comments.length}</span>
             </div>
 
             {/* Comments list */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {commentsLoading ? (
                 <div className="flex items-center justify-center py-8">
-                  <Loader2 size={20} className="animate-spin text-zinc-500" />
+                  <Loader2 size={20} className="animate-spin text-ink-500" />
                 </div>
               ) : comments.length === 0 ? (
                 <div className="text-center py-8">
-                  <MessageSquare size={24} className="text-zinc-700 mx-auto mb-2" />
-                  <p className="text-sm text-zinc-500">{t('review.noComments')}</p>
+                  <MessageSquare size={24} className="text-ink-700 mx-auto mb-2" />
+                  <p className="text-sm text-ink-500">{t('review.noComments')}</p>
                 </div>
               ) : (
                 comments.map((comment) => (
                   <div key={comment.id} className="space-y-1">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-zinc-500">
+                      <span className="text-xs text-ink-500">
                         {comment.author_id ? comment.author_id.slice(0, 8) : t('review.anonymous')}
                       </span>
-                      <span className="text-xs text-zinc-600">
+                      <span className="text-xs text-ink-600">
                         {new Date(comment.created_at).toLocaleString()}
                       </span>
                     </div>
@@ -407,14 +407,14 @@ export const SharePage: React.FC = () => {
                         {formatTimecode(comment.timestamp_seconds)}
                       </button>
                     )}
-                    <p className="text-sm text-zinc-300">{comment.content}</p>
+                    <p className="text-sm text-ink-300">{comment.content}</p>
                   </div>
                 ))
               )}
             </div>
 
             {/* Comment input */}
-            <form onSubmit={handleSubmitComment} className="p-3 border-t border-zinc-800 space-y-2">
+            <form onSubmit={handleSubmitComment} className="p-3 border-t border-ink-800 space-y-2">
               {commentTimecode != null && (
                 <div className="flex items-center gap-1.5 text-xs text-indigo-400">
                   <Timer size={12} />
@@ -422,7 +422,7 @@ export const SharePage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setCommentTimecode(null)}
-                    className="text-zinc-500 hover:text-zinc-300 ml-auto"
+                    className="text-ink-500 hover:text-ink-300 ml-auto"
                   >
                     &times;
                   </button>
@@ -433,7 +433,7 @@ export const SharePage: React.FC = () => {
                   type="button"
                   onClick={captureTimecode}
                   title={t('review.timecode')}
-                  className="p-2 text-zinc-500 hover:text-indigo-400 hover:bg-zinc-800 rounded-lg transition-colors"
+                  className="p-2 text-ink-500 hover:text-indigo-400 hover:bg-ink-800 rounded-lg transition-colors"
                 >
                   <Timer size={16} />
                 </button>
@@ -442,12 +442,12 @@ export const SharePage: React.FC = () => {
                   value={commentText}
                   onChange={(e) => setCommentText(e.target.value)}
                   placeholder={t('review.placeholder')}
-                  className="flex-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  className="flex-1 px-3 py-2 bg-ink-800 border border-ink-700 rounded-lg text-sm text-ink-200 placeholder-ink-600 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 />
                 <button
                   type="submit"
                   disabled={!commentText.trim() || submittingComment}
-                  className="p-2 text-indigo-400 hover:text-indigo-300 disabled:text-zinc-600 transition-colors"
+                  className="p-2 text-indigo-400 hover:text-indigo-300 disabled:text-ink-600 transition-colors"
                 >
                   <Send size={16} />
                 </button>
@@ -458,7 +458,7 @@ export const SharePage: React.FC = () => {
       </main>
 
       {/* Footer metadata */}
-      <footer className="border-t border-zinc-800 px-6 py-3 flex items-center justify-center gap-6 text-xs text-zinc-500">
+      <footer className="border-t border-ink-800 px-6 py-3 flex items-center justify-center gap-6 text-xs text-ink-500">
         <span className="flex items-center gap-1">
           <Eye size={12} />
           {share.view_count} {t('share.views')}

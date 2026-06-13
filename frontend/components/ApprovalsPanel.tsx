@@ -120,8 +120,8 @@ export const ApprovalsPanel: React.FC<ApprovalsPanelProps> = ({
   return (
     <div className={`flex flex-col ${className}`}>
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
-        <div className="flex items-center gap-2 text-xs font-semibold text-zinc-300">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-ink-800">
+        <div className="flex items-center gap-2 text-xs font-semibold text-ink-300">
           <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
           {t('approvals.title')}
           {items.length > 0 && (
@@ -133,7 +133,7 @@ export const ApprovalsPanel: React.FC<ApprovalsPanelProps> = ({
         <button
           type="button"
           onClick={reload}
-          className="text-zinc-500 hover:text-zinc-300 p-1 rounded hover:bg-zinc-800 transition-colors"
+          className="text-ink-500 hover:text-ink-300 p-1 rounded hover:bg-ink-800 transition-colors"
           title={t('approvals.refresh')}
         >
           <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
@@ -143,28 +143,28 @@ export const ApprovalsPanel: React.FC<ApprovalsPanelProps> = ({
       {/* List */}
       <div className={`flex-1 overflow-y-auto ${compact ? 'max-h-96' : ''}`}>
         {loading && items.length === 0 ? (
-          <div className="px-3 py-4 text-xs text-zinc-500 text-center">
+          <div className="px-3 py-4 text-xs text-ink-500 text-center">
             {t('approvals.loading')}
           </div>
         ) : items.length === 0 ? (
-          <div className="px-3 py-6 text-xs text-zinc-500 text-center">
+          <div className="px-3 py-6 text-xs text-ink-500 text-center">
             <ShieldAlert className="w-6 h-6 mx-auto mb-2 opacity-30" />
             {t('approvals.empty')}
           </div>
         ) : (
-          <ul className="divide-y divide-zinc-800">
+          <ul className="divide-y divide-ink-800">
             {items.map((req) => (
               <li
                 key={req.id}
-                className="px-3 py-3 hover:bg-zinc-900/50 transition-colors"
+                className="px-3 py-3 hover:bg-ink-900/50 transition-colors"
               >
                 <div className="flex items-start gap-2 mb-2">
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs text-zinc-200 leading-relaxed font-medium">
+                    <div className="text-xs text-ink-200 leading-relaxed font-medium">
                       {req.reason}
                     </div>
-                    <div className="flex items-center gap-2 mt-1 text-[10px] text-zinc-500">
-                      <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 font-mono">
+                    <div className="flex items-center gap-2 mt-1 text-[10px] text-ink-500">
+                      <span className="px-1.5 py-0.5 rounded bg-ink-800 text-ink-400 font-mono">
                         {req.hook_name}
                       </span>
                       {req.expires_at && (
@@ -179,7 +179,7 @@ export const ApprovalsPanel: React.FC<ApprovalsPanelProps> = ({
 
                 {/* Payload preview (compact mode hides full dump) */}
                 {!compact && Object.keys(req.payload).length > 0 && (
-                  <pre className="text-[10px] text-zinc-500 bg-zinc-950/50 rounded p-2 overflow-x-auto mb-2 max-h-24">
+                  <pre className="text-[10px] text-ink-500 bg-ink-950/50 rounded p-2 overflow-x-auto mb-2 max-h-24">
                     {JSON.stringify(req.payload, null, 2)}
                   </pre>
                 )}
@@ -199,7 +199,7 @@ export const ApprovalsPanel: React.FC<ApprovalsPanelProps> = ({
                     type="button"
                     disabled={actingId === req.id}
                     onClick={() => handleReject(req.id)}
-                    className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-zinc-800 hover:bg-red-900/40 text-zinc-300 hover:text-red-300 transition-colors disabled:opacity-40"
+                    className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-ink-800 hover:bg-red-900/40 text-ink-300 hover:text-red-300 transition-colors disabled:opacity-40"
                   >
                     <X className="w-3 h-3" />
                     {t('approvals.reject')}

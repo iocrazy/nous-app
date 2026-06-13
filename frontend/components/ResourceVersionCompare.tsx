@@ -105,15 +105,15 @@ export const ResourceVersionCompare: React.FC<ResourceVersionCompareProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-zinc-950">
+    <div className="fixed inset-0 z-50 flex flex-col bg-ink-950">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-800 shrink-0">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-ink-800 shrink-0">
         <div className="flex items-center gap-3">
           <Layers size={18} className="text-indigo-400" />
           <h2 className="text-sm font-semibold text-white">
             {t('resources.compareVersions', 'Compare Versions')}
           </h2>
-          <span className="text-xs text-zinc-500">
+          <span className="text-xs text-ink-500">
             V{versionA.version_number} vs V{versionB.version_number}
           </span>
         </div>
@@ -122,19 +122,19 @@ export const ResourceVersionCompare: React.FC<ResourceVersionCompareProps> = ({
             <>
               <button
                 onClick={togglePlay}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-zinc-300 hover:text-white bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-ink-300 hover:text-white bg-ink-800 hover:bg-ink-700 rounded-lg transition-colors"
               >
                 {isPlaying ? <Pause size={14} /> : <Play size={14} />}
                 <span>{isPlaying ? 'Pause' : 'Play'}</span>
               </button>
               <button
                 onClick={resetBoth}
-                className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+                className="p-1.5 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
                 title="Reset"
               >
                 <RotateCcw size={14} />
               </button>
-              <label className="flex items-center gap-1.5 text-xs text-zinc-400 ml-2 cursor-pointer">
+              <label className="flex items-center gap-1.5 text-xs text-ink-400 ml-2 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={syncEnabled}
@@ -147,7 +147,7 @@ export const ResourceVersionCompare: React.FC<ResourceVersionCompareProps> = ({
           )}
           <button
             onClick={onClose}
-            className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors ml-2"
+            className="p-1.5 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors ml-2"
           >
             <X size={18} />
           </button>
@@ -157,14 +157,14 @@ export const ResourceVersionCompare: React.FC<ResourceVersionCompareProps> = ({
       {/* Side-by-side content */}
       <div className="flex-1 flex min-h-0">
         {/* Left: Version A */}
-        <div className="flex-1 flex flex-col border-r border-zinc-800">
-          <div className="flex items-center justify-center gap-2 px-3 py-1.5 bg-zinc-900 border-b border-zinc-800 shrink-0">
+        <div className="flex-1 flex flex-col border-r border-ink-800">
+          <div className="flex items-center justify-center gap-2 px-3 py-1.5 bg-ink-900 border-b border-ink-800 shrink-0">
             <span className="px-2 py-0.5 text-xs font-semibold bg-blue-500/20 text-blue-300 rounded-full">
               V{versionA.version_number}
             </span>
-            <span className="text-xs text-zinc-400 truncate">{versionA.filename}</span>
-            {versionA.resolution && <span className="text-[10px] text-zinc-600">{versionA.resolution.replace(/:/g, 'x')}</span>}
-            {versionA.file_size_bytes && <span className="text-[10px] text-zinc-600">{formatSize(versionA.file_size_bytes)}</span>}
+            <span className="text-xs text-ink-400 truncate">{versionA.filename}</span>
+            {versionA.resolution && <span className="text-[10px] text-ink-600">{versionA.resolution.replace(/:/g, 'x')}</span>}
+            {versionA.file_size_bytes && <span className="text-[10px] text-ink-600">{formatSize(versionA.file_size_bytes)}</span>}
           </div>
           <div className="flex-1 flex items-center justify-center bg-black overflow-hidden">
             {isVideoA && urlA ? (
@@ -179,20 +179,20 @@ export const ResourceVersionCompare: React.FC<ResourceVersionCompareProps> = ({
             ) : urlA ? (
               <img src={urlA} alt={`V${versionA.version_number}`} className="max-w-full max-h-full object-contain" loading="lazy" />
             ) : (
-              <p className="text-zinc-500 text-sm">{t('resources.noPreview', 'Preview not available')}</p>
+              <p className="text-ink-500 text-sm">{t('resources.noPreview', 'Preview not available')}</p>
             )}
           </div>
         </div>
 
         {/* Right: Version B */}
         <div className="flex-1 flex flex-col">
-          <div className="flex items-center justify-center gap-2 px-3 py-1.5 bg-zinc-900 border-b border-zinc-800 shrink-0">
+          <div className="flex items-center justify-center gap-2 px-3 py-1.5 bg-ink-900 border-b border-ink-800 shrink-0">
             <span className="px-2 py-0.5 text-xs font-semibold bg-emerald-500/20 text-emerald-300 rounded-full">
               V{versionB.version_number}
             </span>
-            <span className="text-xs text-zinc-400 truncate">{versionB.filename}</span>
-            {versionB.resolution && <span className="text-[10px] text-zinc-600">{versionB.resolution.replace(/:/g, 'x')}</span>}
-            {versionB.file_size_bytes && <span className="text-[10px] text-zinc-600">{formatSize(versionB.file_size_bytes)}</span>}
+            <span className="text-xs text-ink-400 truncate">{versionB.filename}</span>
+            {versionB.resolution && <span className="text-[10px] text-ink-600">{versionB.resolution.replace(/:/g, 'x')}</span>}
+            {versionB.file_size_bytes && <span className="text-[10px] text-ink-600">{formatSize(versionB.file_size_bytes)}</span>}
           </div>
           <div className="flex-1 flex items-center justify-center bg-black overflow-hidden">
             {isVideoB && urlB ? (
@@ -207,7 +207,7 @@ export const ResourceVersionCompare: React.FC<ResourceVersionCompareProps> = ({
             ) : urlB ? (
               <img src={urlB} alt={`V${versionB.version_number}`} className="max-w-full max-h-full object-contain" loading="lazy" />
             ) : (
-              <p className="text-zinc-500 text-sm">{t('resources.noPreview', 'Preview not available')}</p>
+              <p className="text-ink-500 text-sm">{t('resources.noPreview', 'Preview not available')}</p>
             )}
           </div>
         </div>

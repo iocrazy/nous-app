@@ -26,7 +26,7 @@ function ProjectCard({
 
   return (
     <div
-      className="group relative flex flex-col rounded-xl border border-zinc-800 bg-zinc-900 p-4 transition-colors hover:border-zinc-600 cursor-pointer"
+      className="group relative flex flex-col rounded-xl border border-ink-800 bg-ink-900 p-4 transition-colors hover:border-ink-600 cursor-pointer"
       onClick={() => selectMode ? setSelected(v => !v) : onClick(project.id)}
       role="button"
       tabIndex={0}
@@ -40,13 +40,13 @@ function ProjectCard({
           <Layers size={18} className="text-indigo-400" />
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className="truncate text-sm font-semibold text-zinc-100">{project.name}</h3>
+          <h3 className="truncate text-sm font-semibold text-ink-100">{project.name}</h3>
         </div>
         {/* Actions or checkbox */}
         {selectMode ? (
           <div
             className={`flex h-5 w-5 items-center justify-center rounded border transition-colors ${
-              selected ? 'border-indigo-500 bg-indigo-600' : 'border-zinc-600 bg-zinc-800'
+              selected ? 'border-indigo-500 bg-indigo-600' : 'border-ink-600 bg-ink-800'
             }`}
           >
             {selected && (
@@ -60,7 +60,7 @@ function ProjectCard({
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); onRename?.(project.id, project.name); }}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 transition-colors"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-ink-500 hover:bg-ink-800 hover:text-ink-300 transition-colors"
               title="Rename"
             >
               <Pencil size={14} />
@@ -68,7 +68,7 @@ function ProjectCard({
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); onDelete?.(project.id); }}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-red-950/50 hover:text-red-400 transition-colors"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-ink-500 hover:bg-red-950/50 hover:text-red-400 transition-colors"
               title="Delete"
             >
               <Trash2 size={14} />
@@ -85,9 +85,9 @@ function ProjectCard({
       </div>
 
       {/* Dates */}
-      <div className="mt-2 space-y-0.5 text-xs text-zinc-500">
-        <p>Modified: <span className="text-zinc-400">{formatDate(project.updated_at)}</span></p>
-        <p>Created: <span className="text-zinc-400">{formatDate(project.created_at)}</span></p>
+      <div className="mt-2 space-y-0.5 text-xs text-ink-500">
+        <p>Modified: <span className="text-ink-400">{formatDate(project.updated_at)}</span></p>
+        <p>Created: <span className="text-ink-400">{formatDate(project.created_at)}</span></p>
       </div>
     </div>
   );

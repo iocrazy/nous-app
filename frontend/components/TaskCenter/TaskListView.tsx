@@ -69,10 +69,10 @@ const TaskRow: React.FC<{
       <div
         ref={rowRef}
         onMouseDown={() => onFocus(task.id)}
-        className={`flex items-center border-b border-zinc-900/60 last:border-b-0 ${
+        className={`flex items-center border-b border-ink-900/60 last:border-b-0 ${
           focused ? 'ring-1 ring-inset ring-indigo-400/60 ' : ''
         }${
-          expanded ? 'bg-indigo-500/10' : selected ? 'bg-indigo-500/[0.06]' : 'hover:bg-zinc-800/40'
+          expanded ? 'bg-indigo-500/10' : selected ? 'bg-indigo-500/[0.06]' : 'hover:bg-ink-800/40'
         }`}
       >
         {selectable ? (
@@ -84,7 +84,7 @@ const TaskRow: React.FC<{
               type="checkbox"
               checked={selected}
               onChange={() => onToggleSelect(task.id)}
-              className="h-3 w-3 rounded border-zinc-600 bg-zinc-800 text-indigo-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+              className="h-3 w-3 rounded border-ink-600 bg-ink-800 text-indigo-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
             />
           </label>
         ) : (
@@ -96,19 +96,19 @@ const TaskRow: React.FC<{
         className={`flex-1 min-w-0 flex items-center gap-3 pl-1 pr-4 py-1.5 text-left text-xs transition outline-none focus:outline-none`}
       >
         {expanded
-          ? <ChevronDown size={11} className="text-zinc-400 shrink-0" />
-          : <ChevronRight size={11} className="text-zinc-600 shrink-0" />}
+          ? <ChevronDown size={11} className="text-ink-400 shrink-0" />
+          : <ChevronRight size={11} className="text-ink-600 shrink-0" />}
         <StatusIcon status={task.status} />
-        <span className="font-mono text-[10px] text-zinc-500 w-16 shrink-0 uppercase tracking-wider">
+        <span className="font-mono text-[10px] text-ink-500 w-16 shrink-0 uppercase tracking-wider">
           {taskIdLabel(task)}
         </span>
-        <span className="flex-1 truncate text-zinc-200">{task.title || '(no title)'}</span>
+        <span className="flex-1 truncate text-ink-200">{task.title || '(no title)'}</span>
         {task.error_msg && (
           <span className="text-rose-400 truncate max-w-[160px]" title={task.error_msg}>
             {task.error_msg}
           </span>
         )}
-        <span className="text-[10px] text-zinc-500 hidden md:inline-block">
+        <span className="text-[10px] text-ink-500 hidden md:inline-block">
           {taskTypeLabel(task.task_type)}
         </span>
         {agentId && (
@@ -121,7 +121,7 @@ const TaskRow: React.FC<{
             FL
           </span>
         )}
-        <span className="text-[10px] text-zinc-500 w-16 text-right shrink-0">
+        <span className="text-[10px] text-ink-500 w-16 text-right shrink-0">
           {relativeTime(task.updated_at ?? task.created_at)}
         </span>
       </button>
@@ -172,19 +172,19 @@ const GroupSection: React.FC<{
   }
 
   return (
-    <div className="border-b border-zinc-800/80 last:border-b-0">
+    <div className="border-b border-ink-800/80 last:border-b-0">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-2 px-4 py-1.5 text-left bg-zinc-900/40 hover:bg-zinc-800/40 sticky top-0"
+        className="w-full flex items-center gap-2 px-4 py-1.5 text-left bg-ink-900/40 hover:bg-ink-800/40 sticky top-0"
       >
-        {open ? <ChevronDown size={11} className="text-zinc-500" /> : <ChevronRight size={11} className="text-zinc-500" />}
-        <CircleDot size={10} className="text-zinc-500" />
-        <span className="text-[11px] font-medium text-zinc-300 uppercase tracking-wider">{group.label}</span>
-        <span className="text-[10px] text-zinc-500 ml-auto">{group.tasks.length}</span>
+        {open ? <ChevronDown size={11} className="text-ink-500" /> : <ChevronRight size={11} className="text-ink-500" />}
+        <CircleDot size={10} className="text-ink-500" />
+        <span className="text-[11px] font-medium text-ink-300 uppercase tracking-wider">{group.label}</span>
+        <span className="text-[10px] text-ink-500 ml-auto">{group.tasks.length}</span>
       </button>
       {open && (
-        <div className="bg-zinc-950/30">
+        <div className="bg-ink-950/30">
           {group.tasks.map(renderRow)}
         </div>
       )}
@@ -195,13 +195,13 @@ const GroupSection: React.FC<{
 export const TaskListView: React.FC<TaskListViewProps> = ({ groups, expandedIds, onToggle, selectedIds, onToggleSelect, focusedId, onFocusRow }) => {
   if (groups.length === 0) {
     return (
-      <div className="flex items-center justify-center py-24 text-sm text-zinc-500">
+      <div className="flex items-center justify-center py-24 text-sm text-ink-500">
         No tasks match the current filters.
       </div>
     );
   }
   return (
-    <div className="border-x border-b border-zinc-800/80">
+    <div className="border-x border-b border-ink-800/80">
       {groups.map((g) => (
         <GroupSection
           key={g.key}

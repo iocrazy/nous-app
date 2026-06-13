@@ -52,10 +52,10 @@ export function MessageBubble({
   if (role === 'user') {
     return (
       <div className="flex justify-end mb-3">
-        <div className="max-w-[75%] px-3 py-2 rounded-xl bg-indigo-600/20 text-zinc-200 text-sm leading-relaxed">
+        <div className="max-w-[75%] px-3 py-2 rounded-xl bg-indigo-600/20 text-ink-200 text-sm leading-relaxed">
           <p className="whitespace-pre-wrap break-words">{content}</p>
           {timestamp && (
-            <p className="mt-1 text-[10px] text-zinc-500 text-right">{timestamp}</p>
+            <p className="mt-1 text-[10px] text-ink-500 text-right">{timestamp}</p>
           )}
         </div>
       </div>
@@ -64,7 +64,7 @@ export function MessageBubble({
 
   return (
     <div className="flex justify-start mb-3">
-      <div className="max-w-[85%] rounded-xl bg-zinc-800 text-zinc-200 text-sm leading-relaxed overflow-hidden">
+      <div className="max-w-[85%] rounded-xl bg-ink-800 text-ink-200 text-sm leading-relaxed overflow-hidden">
         {agentName && (
           <div className="px-3 pt-2 pb-1">
             <span className="text-[10px] text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded font-medium">
@@ -92,9 +92,9 @@ export function MessageBubble({
           }}
         />
 
-        <div className="flex items-center gap-3 px-3 pb-2 pt-1 border-t border-zinc-700/50">
+        <div className="flex items-center gap-3 px-3 pb-2 pt-1 border-t border-ink-700/50">
           {tokens !== undefined && (
-            <span className="text-[10px] text-zinc-600">{tokens} tokens</span>
+            <span className="text-[10px] text-ink-600">{tokens} tokens</span>
           )}
           <div className="flex items-center gap-2 ml-auto">
             {onApply && (
@@ -109,7 +109,7 @@ export function MessageBubble({
             <button
               type="button"
               onClick={handleCopy}
-              className="flex items-center gap-0.5 text-[10px] text-zinc-500 hover:text-zinc-400 transition-colors"
+              className="flex items-center gap-0.5 text-[10px] text-ink-500 hover:text-ink-400 transition-colors"
             >
               {copied ? (
                 <Check size={10} className="text-green-400" />
@@ -122,7 +122,7 @@ export function MessageBubble({
         </div>
 
         {timestamp && (
-          <p className="px-3 pb-1 text-[10px] text-zinc-600">{timestamp}</p>
+          <p className="px-3 pb-1 text-[10px] text-ink-600">{timestamp}</p>
         )}
       </div>
     </div>

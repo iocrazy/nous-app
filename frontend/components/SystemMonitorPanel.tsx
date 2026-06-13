@@ -175,7 +175,7 @@ export const SystemMonitorPanel: React.FC = () => {
       case 'critical':
         return 'text-red-400';
       default:
-        return 'text-zinc-400';
+        return 'text-ink-400';
     }
   };
 
@@ -192,7 +192,7 @@ export const SystemMonitorPanel: React.FC = () => {
       case 'critical':
         return 'bg-red-500/10 border-red-500/20';
       default:
-        return 'bg-zinc-500/10 border-zinc-500/20';
+        return 'bg-ink-500/10 border-ink-500/20';
     }
   };
 
@@ -205,22 +205,22 @@ export const SystemMonitorPanel: React.FC = () => {
             <Activity size={20} />
           </div>
           <div>
-            <h2 className="font-semibold text-zinc-200">System Monitor</h2>
-            <p className="text-sm text-zinc-500">
+            <h2 className="font-semibold text-ink-200">System Monitor</h2>
+            <p className="text-sm text-ink-500">
               Celery workers, queue, and storage status
             </p>
           </div>
         </div>
         <div className="flex items-center gap-3">
           {lastUpdate && (
-            <span className="text-xs text-zinc-500">
+            <span className="text-xs text-ink-500">
               Updated: {lastUpdate.toLocaleTimeString()}
             </span>
           )}
           <button
             onClick={fetchData}
             disabled={isLoading}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors text-sm"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-ink-800 text-ink-400 hover:bg-ink-800 hover:text-ink-200 transition-colors text-sm"
           >
             <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
             Refresh
@@ -238,10 +238,10 @@ export const SystemMonitorPanel: React.FC = () => {
       {/* Status Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Queue Status */}
-        <div className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-xl">
+        <div className="p-4 bg-ink-900/50 border border-ink-800 rounded-xl">
           <div className="flex items-center gap-2 mb-3">
             <ListVideo size={18} className="text-indigo-400" />
-            <h3 className="font-medium text-zinc-200">Queue</h3>
+            <h3 className="font-medium text-ink-200">Queue</h3>
             {queue && (
               <span className={`ml-auto px-2 py-0.5 text-xs rounded border ${getStatusBg(queue.status)} ${getStatusColor(queue.status)}`}>
                 {queue.status}
@@ -251,30 +251,30 @@ export const SystemMonitorPanel: React.FC = () => {
           {queue ? (
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
-                <span className="text-zinc-500">Active Tasks</span>
-                <span className="text-zinc-200 font-mono">{queue.active}</span>
+                <span className="text-ink-500">Active Tasks</span>
+                <span className="text-ink-200 font-mono">{queue.active}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-zinc-500">Pending</span>
-                <span className="text-zinc-200 font-mono">{queue.pending}</span>
+                <span className="text-ink-500">Pending</span>
+                <span className="text-ink-200 font-mono">{queue.pending}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-zinc-500">Scheduled</span>
-                <span className="text-zinc-200 font-mono">{queue.scheduled}</span>
+                <span className="text-ink-500">Scheduled</span>
+                <span className="text-ink-200 font-mono">{queue.scheduled}</span>
               </div>
             </div>
           ) : (
             <div className="flex items-center justify-center py-4">
-              <Loader2 size={20} className="animate-spin text-zinc-500" />
+              <Loader2 size={20} className="animate-spin text-ink-500" />
             </div>
           )}
         </div>
 
         {/* Storage Status */}
-        <div className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-xl">
+        <div className="p-4 bg-ink-900/50 border border-ink-800 rounded-xl">
           <div className="flex items-center gap-2 mb-3">
             <HardDrive size={18} className="text-purple-400" />
-            <h3 className="font-medium text-zinc-200">Storage</h3>
+            <h3 className="font-medium text-ink-200">Storage</h3>
             {storage && (
               <span className={`ml-auto px-2 py-0.5 text-xs rounded border ${getStatusBg(storage.status)} ${getStatusColor(storage.status)}`}>
                 {storage.status}
@@ -284,20 +284,20 @@ export const SystemMonitorPanel: React.FC = () => {
           {storage ? (
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
-                <span className="text-zinc-500">Used</span>
-                <span className="text-zinc-200 font-mono">{formatBytes(storage.used_bytes)}</span>
+                <span className="text-ink-500">Used</span>
+                <span className="text-ink-200 font-mono">{formatBytes(storage.used_bytes)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-zinc-500">Free</span>
-                <span className="text-zinc-200 font-mono">{formatBytes(storage.free_bytes)}</span>
+                <span className="text-ink-500">Free</span>
+                <span className="text-ink-200 font-mono">{formatBytes(storage.free_bytes)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-zinc-500">Total</span>
-                <span className="text-zinc-200 font-mono">{formatBytes(storage.total_bytes)}</span>
+                <span className="text-ink-500">Total</span>
+                <span className="text-ink-200 font-mono">{formatBytes(storage.total_bytes)}</span>
               </div>
               {/* Progress bar */}
               <div className="mt-2">
-                <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
+                <div className="h-2 bg-ink-800 rounded-full overflow-hidden">
                   <div
                     className={`h-full transition-all ${
                       storage.percent_used > 90 ? 'bg-red-500' :
@@ -306,23 +306,23 @@ export const SystemMonitorPanel: React.FC = () => {
                     style={{ width: `${storage.percent_used}%` }}
                   />
                 </div>
-                <div className="text-xs text-zinc-500 mt-1 text-right">
+                <div className="text-xs text-ink-500 mt-1 text-right">
                   {storage.percent_used}% used
                 </div>
               </div>
             </div>
           ) : (
             <div className="flex items-center justify-center py-4">
-              <Loader2 size={20} className="animate-spin text-zinc-500" />
+              <Loader2 size={20} className="animate-spin text-ink-500" />
             </div>
           )}
         </div>
 
         {/* Network Status */}
-        <div className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-xl">
+        <div className="p-4 bg-ink-900/50 border border-ink-800 rounded-xl">
           <div className="flex items-center gap-2 mb-3">
             <Wifi size={18} className="text-emerald-400" />
-            <h3 className="font-medium text-zinc-200">Network</h3>
+            <h3 className="font-medium text-ink-200">Network</h3>
             {network && (
               <span className={`ml-auto px-2 py-0.5 text-xs rounded border ${getStatusBg(network.status)} ${getStatusColor(network.status)}`}>
                 {network.status}
@@ -332,11 +332,11 @@ export const SystemMonitorPanel: React.FC = () => {
           {network ? (
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
-                <span className="text-zinc-500">Download Speed</span>
-                <span className="text-zinc-200 font-mono">{network.speed}</span>
+                <span className="text-ink-500">Download Speed</span>
+                <span className="text-ink-200 font-mono">{network.speed}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-zinc-500">Status</span>
+                <span className="text-ink-500">Status</span>
                 <span className={`font-medium ${getStatusColor(network.status)}`}>
                   {network.status === 'active' ? 'Downloading' : 'Idle'}
                 </span>
@@ -344,7 +344,7 @@ export const SystemMonitorPanel: React.FC = () => {
             </div>
           ) : (
             <div className="flex items-center justify-center py-4">
-              <Loader2 size={20} className="animate-spin text-zinc-500" />
+              <Loader2 size={20} className="animate-spin text-ink-500" />
             </div>
           )}
         </div>
@@ -352,14 +352,14 @@ export const SystemMonitorPanel: React.FC = () => {
 
       {/* Queue breakdown by task type (ops visibility) */}
       {breakdown.length > 0 && (
-        <div className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-xl">
+        <div className="p-4 bg-ink-900/50 border border-ink-800 rounded-xl">
           <div className="flex items-center gap-2 mb-3">
             <ListVideo size={18} className="text-indigo-400" />
-            <h3 className="font-medium text-zinc-200">Queue by Type</h3>
+            <h3 className="font-medium text-ink-200">Queue by Type</h3>
           </div>
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-left text-xs text-zinc-500 border-b border-zinc-800">
+              <tr className="text-left text-xs text-ink-500 border-b border-ink-800">
                 <th className="py-1.5 font-medium">Type</th>
                 <th className="py-1.5 font-medium text-right">Running</th>
                 <th className="py-1.5 font-medium text-right">Queued</th>
@@ -368,11 +368,11 @@ export const SystemMonitorPanel: React.FC = () => {
             </thead>
             <tbody>
               {breakdown.map((r) => (
-                <tr key={r.task_type} className="border-b border-zinc-800/50 last:border-0">
-                  <td className="py-1.5 text-zinc-300">{r.task_type}</td>
+                <tr key={r.task_type} className="border-b border-ink-800/50 last:border-0">
+                  <td className="py-1.5 text-ink-300">{r.task_type}</td>
                   <td className="py-1.5 text-right font-mono text-emerald-400">{r.running}</td>
                   <td className="py-1.5 text-right font-mono text-amber-400">{r.pending}</td>
-                  <td className="py-1.5 text-right font-mono text-zinc-400">
+                  <td className="py-1.5 text-right font-mono text-ink-400">
                     {r.pending > 0 ? `${r.oldest_queued_age_sec}s` : '—'}
                   </td>
                 </tr>
@@ -383,11 +383,11 @@ export const SystemMonitorPanel: React.FC = () => {
       )}
 
       {/* Workers Section */}
-      <div className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-xl">
+      <div className="p-4 bg-ink-900/50 border border-ink-800 rounded-xl">
         <div className="flex items-center gap-2 mb-4">
           <Server size={18} className="text-blue-400" />
-          <h3 className="font-medium text-zinc-200">Celery Workers</h3>
-          <span className="ml-auto text-sm text-zinc-500">
+          <h3 className="font-medium text-ink-200">Celery Workers</h3>
+          <span className="ml-auto text-sm text-ink-500">
             {workers.length} worker(s)
           </span>
         </div>
@@ -395,11 +395,11 @@ export const SystemMonitorPanel: React.FC = () => {
         {workers.length > 0 ? (
           <div className="space-y-3">
             {workers.map((worker) => (
-              <div key={worker.name} className="flex items-center gap-3 p-3 bg-zinc-950 rounded-lg">
+              <div key={worker.name} className="flex items-center gap-3 p-3 bg-ink-950 rounded-lg">
                 <div className={`w-2 h-2 rounded-full ${worker.status === 'online' ? 'bg-green-500' : 'bg-red-500'}`} />
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm text-zinc-200 truncate font-mono">{worker.name}</div>
-                  <div className="text-xs text-zinc-500">
+                  <div className="text-sm text-ink-200 truncate font-mono">{worker.name}</div>
+                  <div className="text-xs text-ink-500">
                     Concurrency: {worker.concurrency} | Processes: {worker.processes?.length || 0}
                   </div>
                 </div>
@@ -410,7 +410,7 @@ export const SystemMonitorPanel: React.FC = () => {
             ))}
           </div>
         ) : (
-          <div className="text-center py-6 text-zinc-500">
+          <div className="text-center py-6 text-ink-500">
             {isLoading ? (
               <Loader2 size={20} className="animate-spin mx-auto" />
             ) : (
@@ -424,11 +424,11 @@ export const SystemMonitorPanel: React.FC = () => {
       </div>
 
       {/* Active Tasks Section */}
-      <div className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-xl">
+      <div className="p-4 bg-ink-900/50 border border-ink-800 rounded-xl">
         <div className="flex items-center gap-2 mb-4">
           <Clock size={18} className="text-amber-400" />
-          <h3 className="font-medium text-zinc-200">Active Tasks</h3>
-          <span className="ml-auto text-sm text-zinc-500">
+          <h3 className="font-medium text-ink-200">Active Tasks</h3>
+          <span className="ml-auto text-sm text-ink-500">
             {activeTasks.length} task(s)
           </span>
         </div>
@@ -436,13 +436,13 @@ export const SystemMonitorPanel: React.FC = () => {
         {activeTasks.length > 0 ? (
           <div className="space-y-2 max-h-64 overflow-y-auto">
             {activeTasks.map((task) => (
-              <div key={task.task_id} className="flex items-center gap-3 p-3 bg-zinc-950 rounded-lg">
+              <div key={task.task_id} className="flex items-center gap-3 p-3 bg-ink-950 rounded-lg">
                 <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm text-zinc-200 truncate">
+                  <div className="text-sm text-ink-200 truncate">
                     {task.name?.split('.').pop() || 'Unknown'}
                   </div>
-                  <div className="text-xs text-zinc-500 font-mono truncate">
+                  <div className="text-xs text-ink-500 font-mono truncate">
                     {task.task_id}
                   </div>
                 </div>
@@ -453,7 +453,7 @@ export const SystemMonitorPanel: React.FC = () => {
             ))}
           </div>
         ) : (
-          <div className="text-center py-6 text-zinc-500">
+          <div className="text-center py-6 text-ink-500">
             {isLoading ? (
               <Loader2 size={20} className="animate-spin mx-auto" />
             ) : (
@@ -468,7 +468,7 @@ export const SystemMonitorPanel: React.FC = () => {
 
       {/* Storage Path */}
       {storage?.path && (
-        <div className="text-xs text-zinc-600 text-right">
+        <div className="text-xs text-ink-600 text-right">
           Storage path: {storage.path}
         </div>
       )}

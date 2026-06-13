@@ -57,7 +57,7 @@ export const ClockDriftBanner: React.FC = () => {
     : t('clockDrift.ahead', 'ahead');
 
   return (
-    <div className="fixed top-0 inset-x-0 z-[70] flex items-center justify-center gap-2 px-4 py-2 bg-amber-500/95 text-zinc-950 text-xs font-medium shadow-lg">
+    <div className="fixed top-0 inset-x-0 z-[70] flex items-center justify-center gap-2 px-4 py-2 bg-amber-500/95 text-ink-950 text-xs font-medium shadow-lg">
       <AlertTriangle size={14} className="shrink-0" />
       <span>
         {t(

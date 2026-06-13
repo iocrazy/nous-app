@@ -69,7 +69,7 @@ const StepCircle: React.FC<{ step: UnifiedTask; active: boolean }> = ({ step, ac
     case 'failed':
       return <XCircle size={16} className="text-rose-400" />;
     case 'cancelled':
-      return <Ban size={16} className="text-zinc-500" />;
+      return <Ban size={16} className="text-ink-500" />;
     case 'processing':
       return <StepRing progress={step.progress || 0} />;
     case 'pending':
@@ -77,7 +77,7 @@ const StepCircle: React.FC<{ step: UnifiedTask; active: boolean }> = ({ step, ac
       return (
         <span
           className={`block w-[14px] h-[14px] rounded-full border-2 ${
-            active ? 'border-zinc-400' : 'border-zinc-600'
+            active ? 'border-ink-400' : 'border-ink-600'
           }`}
         />
       );
@@ -129,7 +129,7 @@ export const FlowStepCard: React.FC<FlowStepCardProps> = ({
         if (cur.speed && cur.speed > 0) bits.push(formatSpeed(cur.speed));
         return { text: bits.join(' · '), tone: 'text-amber-300' };
       }
-      return { text: `${label} · queued`, tone: 'text-zinc-500' };
+      return { text: `${label} · queued`, tone: 'text-ink-500' };
     }
     const failed = flow.steps.find((s) => s.status === 'failed');
     if (failed) {
@@ -139,7 +139,7 @@ export const FlowStepCard: React.FC<FlowStepCardProps> = ({
         tone: 'text-rose-400',
       };
     }
-    return { text: `${flow.doneCount}/${flow.steps.length} steps`, tone: 'text-zinc-500' };
+    return { text: `${flow.doneCount}/${flow.steps.length} steps`, tone: 'text-ink-500' };
   }, [flow]);
 
   const onCancelFlow = useCallback(
@@ -169,7 +169,7 @@ export const FlowStepCard: React.FC<FlowStepCardProps> = ({
   );
 
   return (
-    <div className="border-b border-zinc-800/50 last:border-b-0">
+    <div className="border-b border-ink-800/50 last:border-b-0">
       <div className="px-3 py-2.5">
         <div className="flex items-start gap-2.5">
           {/* Cover thumbnail (falls back to the root step's type icon) */}
@@ -178,7 +178,7 @@ export const FlowStepCard: React.FC<FlowStepCardProps> = ({
               src={getResourceCoverUrl(String(coverRid), mediaToken ?? undefined)}
               alt=""
               onError={() => setCoverFailed(true)}
-              className="w-9 h-9 rounded-lg object-cover shrink-0 bg-zinc-800"
+              className="w-9 h-9 rounded-lg object-cover shrink-0 bg-ink-800"
             />
           ) : (
             <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 text-sm bg-purple-500/15 text-purple-300">
@@ -188,12 +188,12 @@ export const FlowStepCard: React.FC<FlowStepCardProps> = ({
 
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-medium text-zinc-200 truncate">{title}</span>
+              <span className="text-xs font-medium text-ink-200 truncate">{title}</span>
               <div className="flex items-center gap-1.5 shrink-0">
                 {flow.hasActive && (
                   <button
                     onClick={onCancelFlow}
-                    className="p-0.5 rounded text-zinc-500 hover:text-rose-400 transition-colors"
+                    className="p-0.5 rounded text-ink-500 hover:text-rose-400 transition-colors"
                     title="Cancel all steps of this task"
                   >
                     {cancelling ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
@@ -211,8 +211,8 @@ export const FlowStepCard: React.FC<FlowStepCardProps> = ({
                     <span
                       className={`h-px w-3 ${
                         step.status === 'completed' || flow.steps[i - 1].status === 'completed'
-                          ? 'bg-zinc-600'
-                          : 'bg-zinc-800'
+                          ? 'bg-ink-600'
+                          : 'bg-ink-800'
                       }`}
                     />
                   )}
@@ -220,7 +220,7 @@ export const FlowStepCard: React.FC<FlowStepCardProps> = ({
                     onClick={() => toggleStep(step.id)}
                     title={`${taskTypeLabel(step.task_type)} · ${step.status}`}
                     className={`p-0.5 rounded-full transition-transform hover:scale-125 ${
-                      expandedId === step.id ? 'ring-1 ring-zinc-500/60' : ''
+                      expandedId === step.id ? 'ring-1 ring-ink-500/60' : ''
                     }`}
                   >
                     <StepCircle step={step} active={step.id === flow.current?.id} />
@@ -238,7 +238,7 @@ export const FlowStepCard: React.FC<FlowStepCardProps> = ({
           Indented behind a vertical guide line so the sub-step visually
           belongs to the flow card above it. */}
       {expandedStep && (
-        <div className="ml-7 mr-2 mb-2 border-l-2 border-zinc-700/70 bg-zinc-900/30 rounded-r-lg">
+        <div className="ml-7 mr-2 mb-2 border-l-2 border-ink-700/70 bg-ink-900/30 rounded-r-lg">
           {expandedStep.status === 'processing' ? (
             <ActiveTaskCard task={expandedStep} now={now} onCancel={onCancel} />
           ) : (

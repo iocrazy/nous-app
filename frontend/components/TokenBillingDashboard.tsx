@@ -62,16 +62,16 @@ export const TokenBillingDashboard: React.FC = () => {
   return (
     <div className="flex flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-ink-800">
         <div className="flex items-center gap-2">
           <Coins className="w-4 h-4 text-amber-400" />
-          <h2 className="text-sm font-semibold text-zinc-200">{t('tokenUsage.title')}</h2>
+          <h2 className="text-sm font-semibold text-ink-200">{t('tokenUsage.title')}</h2>
         </div>
         <div className="flex items-center gap-2">
           <select
             value={days}
             onChange={(e) => setDays(Number(e.target.value))}
-            className="px-2 py-1 text-xs rounded bg-zinc-900 border border-zinc-800 text-zinc-300"
+            className="px-2 py-1 text-xs rounded bg-ink-900 border border-ink-800 text-ink-300"
           >
             {WINDOW_OPTIONS.map((d) => (
               <option key={d} value={d}>
@@ -82,7 +82,7 @@ export const TokenBillingDashboard: React.FC = () => {
           <button
             type="button"
             onClick={reload}
-            className="p-1.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+            className="p-1.5 rounded text-ink-500 hover:text-ink-300 hover:bg-ink-800 transition-colors"
             title={t('tokenUsage.refresh')}
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
@@ -92,24 +92,24 @@ export const TokenBillingDashboard: React.FC = () => {
 
       {/* Stat tiles */}
       <div className="grid grid-cols-3 gap-3 px-4 py-4">
-        <div className="bg-zinc-900/40 border border-zinc-800 rounded-lg p-3">
-          <div className="text-[10px] uppercase tracking-wide text-zinc-500">
+        <div className="bg-ink-900/40 border border-ink-800 rounded-lg p-3">
+          <div className="text-[10px] uppercase tracking-wide text-ink-500">
             {t('tokenUsage.statTokens')}
           </div>
-          <div className="text-2xl font-bold mt-1 text-zinc-100">
+          <div className="text-2xl font-bold mt-1 text-ink-100">
             {overall ? _fmtNumber(overall.total_tokens) : '—'}
           </div>
         </div>
-        <div className="bg-zinc-900/40 border border-zinc-800 rounded-lg p-3">
-          <div className="text-[10px] uppercase tracking-wide text-zinc-500">
+        <div className="bg-ink-900/40 border border-ink-800 rounded-lg p-3">
+          <div className="text-[10px] uppercase tracking-wide text-ink-500">
             {t('tokenUsage.statPoints')}
           </div>
           <div className="text-2xl font-bold mt-1 text-amber-300">
             {overall ? _fmtPoints(overall.cost_points) : '—'}
           </div>
         </div>
-        <div className="bg-zinc-900/40 border border-zinc-800 rounded-lg p-3">
-          <div className="text-[10px] uppercase tracking-wide text-zinc-500">
+        <div className="bg-ink-900/40 border border-ink-800 rounded-lg p-3">
+          <div className="text-[10px] uppercase tracking-wide text-ink-500">
             {t('tokenUsage.statRuns')}
           </div>
           <div className="text-2xl font-bold mt-1 text-blue-300">
@@ -120,27 +120,27 @@ export const TokenBillingDashboard: React.FC = () => {
 
       {/* By-model table */}
       <div className="px-4 pb-4">
-        <div className="flex items-center gap-2 mb-2 text-xs text-zinc-400">
+        <div className="flex items-center gap-2 mb-2 text-xs text-ink-400">
           <BarChart3 className="w-3 h-3" />
           {t('tokenUsage.byModel')}
         </div>
         {byModel.length === 0 ? (
-          <div className="text-xs text-zinc-500 py-3 text-center bg-zinc-900/30 rounded">
+          <div className="text-xs text-ink-500 py-3 text-center bg-ink-900/30 rounded">
             {loading ? t('tokenUsage.loading') : t('tokenUsage.noUsage')}
           </div>
         ) : (
           <table className="w-full text-xs">
             <thead>
-              <tr className="text-zinc-500 text-left">
+              <tr className="text-ink-500 text-left">
                 <th className="font-medium pb-1">{t('tokenUsage.colModel')}</th>
                 <th className="font-medium pb-1 text-right">{t('tokenUsage.colRuns')}</th>
                 <th className="font-medium pb-1 text-right">{t('tokenUsage.colTokens')}</th>
                 <th className="font-medium pb-1 text-right">{t('tokenUsage.colCost')}</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-800">
+            <tbody className="divide-y divide-ink-800">
               {byModel.map((m) => (
-                <tr key={m.model} className="text-zinc-300">
+                <tr key={m.model} className="text-ink-300">
                   <td className="py-1.5 font-mono text-[11px]">{m.model}</td>
                   <td className="py-1.5 text-right">{m.run_count}</td>
                   <td className="py-1.5 text-right">{_fmtNumber(m.total_tokens)}</td>
@@ -157,11 +157,11 @@ export const TokenBillingDashboard: React.FC = () => {
       {/* By-day sparkline (text-based) */}
       {byDay.length > 0 && (
         <div className="px-4 pb-4">
-          <div className="flex items-center gap-2 mb-2 text-xs text-zinc-400">
+          <div className="flex items-center gap-2 mb-2 text-xs text-ink-400">
             <Calendar className="w-3 h-3" />
             {t('tokenUsage.byDay')}
           </div>
-          <div className="flex items-end gap-1 h-16 bg-zinc-900/30 rounded p-2">
+          <div className="flex items-end gap-1 h-16 bg-ink-900/30 rounded p-2">
             {byDay.map((d) => {
               const heightPct = maxDayCost > 0
                 ? Math.max(4, (d.cost_points / maxDayCost) * 100)
@@ -176,7 +176,7 @@ export const TokenBillingDashboard: React.FC = () => {
               );
             })}
           </div>
-          <div className="flex justify-between text-[10px] text-zinc-600 mt-1">
+          <div className="flex justify-between text-[10px] text-ink-600 mt-1">
             <span>{byDay[0]?.date}</span>
             <span>{byDay[byDay.length - 1]?.date}</span>
           </div>

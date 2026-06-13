@@ -94,7 +94,7 @@ function Toggle({ enabled, onToggle }: { enabled: boolean; onToggle: () => void 
       type="button"
       onClick={(e) => { e.stopPropagation(); onToggle(); }}
       className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer ${
-        enabled ? 'bg-indigo-600' : 'bg-zinc-700'
+        enabled ? 'bg-indigo-600' : 'bg-ink-700'
       }`}
     >
       <span
@@ -188,8 +188,8 @@ export function StoryboardApiSettings() {
         return (
           <div
             key={provider.id}
-            className={`bg-zinc-950 border rounded-xl overflow-hidden transition-all ${
-              enabled ? colors.border : 'border-zinc-800'
+            className={`bg-ink-950 border rounded-xl overflow-hidden transition-all ${
+              enabled ? colors.border : 'border-ink-800'
             }`}
           >
             {/* Provider Header — matches AI Providers style */}
@@ -199,24 +199,24 @@ export function StoryboardApiSettings() {
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <h4 className="font-semibold text-zinc-200">{provider.name}</h4>
+                  <h4 className="font-semibold text-ink-200">{provider.name}</h4>
                   {provider.selfHostable && (
-                    <span className="text-xs px-2 py-0.5 rounded-full border border-zinc-700 bg-zinc-800/50 text-zinc-500">
+                    <span className="text-xs px-2 py-0.5 rounded-full border border-ink-700 bg-ink-800/50 text-ink-500">
                       Self-host
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-zinc-500 mt-0.5">{provider.description}</p>
+                <p className="text-xs text-ink-500 mt-0.5">{provider.description}</p>
               </div>
               <Toggle enabled={enabled} onToggle={() => toggleProvider(provider.id)} />
             </div>
 
             {/* Provider Config (expanded when enabled) */}
             {enabled && (
-              <div className="px-6 pb-5 pt-2 border-t border-zinc-800/50 space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+              <div className="px-6 pb-5 pt-2 border-t border-ink-800/50 space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
                 {/* API Key */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
+                  <label className="text-xs font-medium text-ink-400 flex items-center gap-1.5">
                     <Key size={12} />
                     API Key
                   </label>
@@ -226,12 +226,12 @@ export function StoryboardApiSettings() {
                       value={key}
                       onChange={(e) => handleApiKeyChange(provider.id, e.target.value)}
                       placeholder={`Enter your ${provider.name} API key`}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2.5 pr-10 text-sm text-zinc-200 placeholder-zinc-600 font-mono focus:outline-none focus:border-indigo-500 transition-colors"
+                      className="w-full bg-ink-950 border border-ink-800 rounded-lg px-4 py-2.5 pr-10 text-sm text-ink-200 placeholder-ink-600 font-mono focus:outline-none focus:border-indigo-500 transition-colors"
                     />
                     <button
                       type="button"
                       onClick={() => toggleShowApiKey(provider.id)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-500 hover:text-ink-300 transition-colors"
                     >
                       {showApiKeys[provider.id] ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
@@ -241,7 +241,7 @@ export function StoryboardApiSettings() {
                 {/* Self-hosted Endpoint URL */}
                 {provider.selfHostable && (
                   <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
+                    <label className="text-xs font-medium text-ink-400 flex items-center gap-1.5">
                       <Server size={12} />
                       Endpoint URL
                     </label>
@@ -250,9 +250,9 @@ export function StoryboardApiSettings() {
                       value={endpoint}
                       onChange={(e) => handleEndpointChange(provider.id, e.target.value)}
                       placeholder={provider.defaultEndpoint || 'https://your-server.com'}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 font-mono focus:outline-none focus:border-indigo-500 transition-colors"
+                      className="w-full bg-ink-950 border border-ink-800 rounded-lg px-4 py-2.5 text-sm text-ink-200 placeholder-ink-600 font-mono focus:outline-none focus:border-indigo-500 transition-colors"
                     />
-                    <p className="text-[11px] text-zinc-600">
+                    <p className="text-[11px] text-ink-600">
                       Leave empty to use default: {provider.defaultEndpoint}
                     </p>
                   </div>
@@ -261,12 +261,12 @@ export function StoryboardApiSettings() {
                 {/* GRSAI Model Selector */}
                 {provider.id === 'grsai' && provider.models && (
                   <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-zinc-400">Model</label>
+                    <label className="text-xs font-medium text-ink-400">Model</label>
                     <div className="relative">
                       <select
                         value={grsaiNanoBananaProModel}
                         onChange={(e) => setGrsaiNanoBananaProModel(e.target.value)}
-                        className="w-full appearance-none bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2.5 pr-8 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer"
+                        className="w-full appearance-none bg-ink-950 border border-ink-800 rounded-lg px-4 py-2.5 pr-8 text-sm text-ink-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer"
                       >
                         {provider.models.map((m) => (
                           <option key={m} value={m}>{m}</option>
@@ -274,7 +274,7 @@ export function StoryboardApiSettings() {
                       </select>
                       <ChevronDown
                         size={14}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-500 pointer-events-none"
                       />
                     </div>
                   </div>
@@ -291,7 +291,7 @@ export function StoryboardApiSettings() {
                         ? 'bg-green-500/10 text-green-400 border-green-500/30'
                         : status === 'error'
                         ? 'bg-red-500/10 text-red-400 border-red-500/30'
-                        : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:bg-zinc-700'
+                        : 'bg-ink-800 text-ink-300 border-ink-700 hover:bg-ink-700'
                     }`}
                   >
                     {status === 'testing' && <Loader2 size={14} className="animate-spin" />}

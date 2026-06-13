@@ -91,7 +91,7 @@ export const MembersView: React.FC<MembersViewProps> = ({
       case 'admin':
         return <Shield size={14} className="text-indigo-400" />;
       default:
-        return <User size={14} className="text-zinc-500" />;
+        return <User size={14} className="text-ink-500" />;
     }
   };
 
@@ -111,7 +111,7 @@ export const MembersView: React.FC<MembersViewProps> = ({
         );
       default:
         return (
-          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-zinc-700/50 text-zinc-400 border border-zinc-600/30">
+          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-ink-700/50 text-ink-400 border border-ink-600/30">
             Member
           </span>
         );
@@ -126,7 +126,7 @@ export const MembersView: React.FC<MembersViewProps> = ({
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64 text-zinc-400">
+      <div className="flex items-center justify-center h-64 text-ink-400">
         <Loader2 className="animate-spin" size={24} />
       </div>
     );
@@ -137,8 +137,8 @@ export const MembersView: React.FC<MembersViewProps> = ({
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h2 className="text-2xl font-bold text-zinc-100">{t('members.title')}</h2>
-          <span className="bg-zinc-800 text-zinc-400 rounded-full px-2.5 py-0.5 text-sm">
+          <h2 className="text-2xl font-bold text-ink-100">{t('members.title')}</h2>
+          <span className="bg-ink-800 text-ink-400 rounded-full px-2.5 py-0.5 text-sm">
             {members.length}
           </span>
         </div>
@@ -155,39 +155,39 @@ export const MembersView: React.FC<MembersViewProps> = ({
 
       {/* Search */}
       <div className="relative">
-        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-500" />
         <input
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder={t('members.searchPlaceholder')}
-          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-10 pr-4 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500"
+          className="w-full bg-ink-900 border border-ink-800 rounded-lg pl-10 pr-4 py-2.5 text-sm text-ink-200 placeholder-ink-500 focus:outline-none focus:border-indigo-500"
         />
       </div>
 
       {/* Members Table */}
-      <div className="border border-zinc-800 rounded-lg overflow-hidden">
+      <div className="border border-ink-800 rounded-lg overflow-hidden">
         <table className="w-full">
-          <thead className="bg-zinc-900/50 border-b border-zinc-800">
+          <thead className="bg-ink-900/50 border-b border-ink-800">
             <tr>
-              <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 uppercase">Member</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 uppercase">Role</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-ink-500 uppercase">Member</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-ink-500 uppercase">Role</th>
               {canViewStats && (
-                <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 uppercase">Monthly Usage</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-ink-500 uppercase">Monthly Usage</th>
               )}
-              <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 uppercase">Joined</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-ink-500 uppercase">Joined</th>
               {isOwner && (
-                <th className="px-4 py-3 text-right text-xs font-medium text-zinc-500 uppercase">Actions</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-ink-500 uppercase">Actions</th>
               )}
             </tr>
           </thead>
-          <tbody className="divide-y divide-zinc-800/50">
+          <tbody className="divide-y divide-ink-800/50">
             {filteredMembers.map((member) => {
               const isCurrentUser = member.user_id === currentUserId;
               const displayName = member.name || member.email || 'Unknown';
               const usage = getMemberUsage(member.user_id);
               return (
-                <tr key={member.user_id} className="hover:bg-zinc-800/30">
+                <tr key={member.user_id} className="hover:bg-ink-800/30">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
                       <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
@@ -196,15 +196,15 @@ export const MembersView: React.FC<MembersViewProps> = ({
                         </span>
                       </div>
                       <div>
-                        <p className="text-sm font-medium text-zinc-200 flex items-center gap-2">
+                        <p className="text-sm font-medium text-ink-200 flex items-center gap-2">
                           <span>{displayName}</span>
                           {getRoleBadge(member.role)}
                           {isCurrentUser && (
-                            <span className="text-xs text-zinc-500">(You)</span>
+                            <span className="text-xs text-ink-500">(You)</span>
                           )}
                         </p>
                         {member.email && member.name && (
-                          <p className="text-xs text-zinc-500">{member.email}</p>
+                          <p className="text-xs text-ink-500">{member.email}</p>
                         )}
                       </div>
                     </div>
@@ -217,24 +217,24 @@ export const MembersView: React.FC<MembersViewProps> = ({
                           value={member.role}
                           onChange={(e) => handleRoleChange(member.user_id, e.target.value as 'admin' | 'member')}
                           disabled={updatingRoleFor === member.user_id}
-                          className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-300 focus:outline-none focus:border-indigo-500 cursor-pointer disabled:opacity-50"
+                          className="bg-ink-800 border border-ink-700 rounded px-2 py-1 text-sm text-ink-300 focus:outline-none focus:border-indigo-500 cursor-pointer disabled:opacity-50"
                         >
                           <option value="member">Member</option>
                           <option value="admin">Admin</option>
                         </select>
                         {updatingRoleFor === member.user_id && (
-                          <Loader2 size={12} className="animate-spin text-zinc-500" />
+                          <Loader2 size={12} className="animate-spin text-ink-500" />
                         )}
                       </div>
                     ) : (
-                      <span className="flex items-center gap-1.5 text-sm text-zinc-300">
+                      <span className="flex items-center gap-1.5 text-sm text-ink-300">
                         {getRoleIcon(member.role)}
                         {member.role.charAt(0).toUpperCase() + member.role.slice(1)}
                       </span>
                     )}
                   </td>
                   {canViewStats && (
-                    <td className="px-4 py-3 text-sm text-zinc-400">
+                    <td className="px-4 py-3 text-sm text-ink-400">
                       {usage ? (
                         usage.monthly_limit !== null ? (
                           <span>
@@ -243,15 +243,15 @@ export const MembersView: React.FC<MembersViewProps> = ({
                         ) : (
                           <span>
                             {usage.points_used.toLocaleString()} points used
-                            <span className="ml-1 text-zinc-600">(Unlimited)</span>
+                            <span className="ml-1 text-ink-600">(Unlimited)</span>
                           </span>
                         )
                       ) : (
-                        <span className="text-zinc-600">--</span>
+                        <span className="text-ink-600">--</span>
                       )}
                     </td>
                   )}
-                  <td className="px-4 py-3 text-sm text-zinc-500">
+                  <td className="px-4 py-3 text-sm text-ink-500">
                     {new Date(member.joined_at).toLocaleDateString()}
                   </td>
                   {isOwner && (
@@ -259,7 +259,7 @@ export const MembersView: React.FC<MembersViewProps> = ({
                       {member.role !== 'owner' && (
                         <button
                           onClick={() => handleRemoveMember(member.user_id)}
-                          className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
+                          className="p-1.5 text-ink-500 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
                         >
                           <Trash2 size={14} />
                         </button>
@@ -273,7 +273,7 @@ export const MembersView: React.FC<MembersViewProps> = ({
               <tr>
                 <td
                   colSpan={isOwner ? (canViewStats ? 5 : 4) : (canViewStats ? 4 : 3)}
-                  className="px-4 py-8 text-center text-zinc-500"
+                  className="px-4 py-8 text-center text-ink-500"
                 >
                   {searchQuery ? t('members.noResults') : t('members.noMembers')}
                 </td>

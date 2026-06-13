@@ -92,7 +92,7 @@ const ReviewCommentItem: React.FC<ReviewCommentItemProps> = ({
   const isOwn = comment.author_id === currentUserId;
 
   return (
-    <div className="group flex gap-3 px-3 py-2.5 hover:bg-zinc-800/50 rounded-lg transition-colors">
+    <div className="group flex gap-3 px-3 py-2.5 hover:bg-ink-800/50 rounded-lg transition-colors">
       <div
         className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium text-white ${getAvatarColor(comment.author_id)}`}
       >
@@ -101,7 +101,7 @@ const ReviewCommentItem: React.FC<ReviewCommentItemProps> = ({
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-0.5">
-          <span className="text-sm font-medium text-zinc-200 truncate">
+          <span className="text-sm font-medium text-ink-200 truncate">
             {getDisplayName(comment)}
           </span>
 
@@ -115,14 +115,14 @@ const ReviewCommentItem: React.FC<ReviewCommentItemProps> = ({
             </button>
           )}
 
-          <span className="text-xs text-zinc-500 flex-shrink-0">
+          <span className="text-xs text-ink-500 flex-shrink-0">
             {getRelativeTime(comment.created_at, t)}
           </span>
 
           {isOwn && (
             <button
               onClick={() => onDelete(comment.id)}
-              className="flex-shrink-0 ml-auto opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-zinc-700 text-zinc-500 hover:text-red-400 transition-all"
+              className="flex-shrink-0 ml-auto opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-ink-700 text-ink-500 hover:text-red-400 transition-all"
               title={t('mediatrack.review.deleteComment')}
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -130,7 +130,7 @@ const ReviewCommentItem: React.FC<ReviewCommentItemProps> = ({
           )}
         </div>
 
-        <p className="text-sm text-zinc-300 whitespace-pre-wrap break-words">
+        <p className="text-sm text-ink-300 whitespace-pre-wrap break-words">
           {comment.content}
         </p>
 

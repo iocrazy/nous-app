@@ -118,9 +118,9 @@ export type ScopedHeaderVariant = 'sidebar' | 'section';
 
 const HEADER_CLASSNAMES: Record<ScopedHeaderVariant, string> = {
   sidebar:
-    'sticky top-0 z-10 bg-zinc-950/95 px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 border-b border-zinc-800/60',
+    'sticky top-0 z-10 bg-ink-950/95 px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-500 border-b border-ink-800/60',
   section:
-    'sticky top-0 z-10 -mx-6 mb-3 border-b border-zinc-800/60 bg-zinc-950/95 px-6 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500',
+    'sticky top-0 z-10 -mx-6 mb-3 border-b border-ink-800/60 bg-ink-950/95 px-6 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-500',
 };
 
 export interface ScopedListProps<T extends Scoped> {

@@ -39,7 +39,7 @@ export function EditorLoadingScreen({ visible }: EditorLoadingScreenProps) {
       `}</style>
 
       <div
-        className={`fixed inset-0 z-50 bg-zinc-950 flex flex-col items-center justify-center gap-0 transition-opacity duration-500 ${
+        className={`fixed inset-0 z-50 bg-ink-950 flex flex-col items-center justify-center gap-0 transition-opacity duration-500 ${
           fading ? 'opacity-0 pointer-events-none' : 'opacity-100'
         }`}
       >
@@ -58,10 +58,10 @@ export function EditorLoadingScreen({ visible }: EditorLoadingScreenProps) {
         </svg>
 
         {/* Brand name */}
-        <span className="text-xs text-zinc-600 mb-6 tracking-widest uppercase">MediaHub</span>
+        <span className="text-xs text-ink-600 mb-6 tracking-widest uppercase">MediaHub</span>
 
         {/* Progress bar */}
-        <div className="w-64 h-1 bg-zinc-800 rounded-full overflow-hidden">
+        <div className="w-64 h-1 bg-ink-800 rounded-full overflow-hidden">
           <div className="editor-loading-bar-inner h-full bg-indigo-500 rounded-full" />
         </div>
       </div>

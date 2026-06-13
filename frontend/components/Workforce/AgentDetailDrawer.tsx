@@ -125,13 +125,13 @@ export const AgentDetailDrawer: React.FC<AgentDetailDrawerProps> = ({
         onClick={onClose}
       />
       {/* Panel */}
-      <aside className="fixed top-0 right-0 z-50 h-full w-full max-w-2xl bg-zinc-950 border-l border-zinc-800 flex flex-col shadow-2xl">
-        <header className="flex items-center justify-between px-5 pt-[max(env(safe-area-inset-top),16px)] pb-4 border-b border-zinc-800/60">
+      <aside className="fixed top-0 right-0 z-50 h-full w-full max-w-2xl bg-ink-950 border-l border-ink-800 flex flex-col shadow-2xl">
+        <header className="flex items-center justify-between px-5 pt-[max(env(safe-area-inset-top),16px)] pb-4 border-b border-ink-800/60">
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-zinc-100 truncate">
+            <div className="text-sm font-semibold text-ink-100 truncate">
               {detail?.agent.name ?? slug}
             </div>
-            <div className="text-[11px] text-zinc-500 truncate">
+            <div className="text-[11px] text-ink-500 truncate">
               {detail?.agent.slug ?? slug}
               {detail?.agent.model ? ` · ${detail.agent.model}` : ''}
               {detail?.agent.paused_reason
@@ -143,7 +143,7 @@ export const AgentDetailDrawer: React.FC<AgentDetailDrawerProps> = ({
             <button
               type="button"
               onClick={() => void refresh()}
-              className="flex h-7 w-7 items-center justify-center rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+              className="flex h-7 w-7 items-center justify-center rounded text-ink-500 hover:text-ink-200 hover:bg-ink-800 transition-colors"
               aria-label="Refresh"
               title="Refresh"
             >
@@ -152,7 +152,7 @@ export const AgentDetailDrawer: React.FC<AgentDetailDrawerProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="flex h-7 w-7 items-center justify-center rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+              className="flex h-7 w-7 items-center justify-center rounded text-ink-500 hover:text-ink-200 hover:bg-ink-800 transition-colors"
               aria-label="Close"
               title="Close (Esc)"
             >
@@ -162,7 +162,7 @@ export const AgentDetailDrawer: React.FC<AgentDetailDrawerProps> = ({
         </header>
 
         {/* Tabs */}
-        <nav className="flex items-center gap-1 px-3 pt-2 border-b border-zinc-800/40">
+        <nav className="flex items-center gap-1 px-3 pt-2 border-b border-ink-800/40">
           {(
             [
               ['runs', `Runs${detail ? ` (${detail.runs.length})` : ''}`],
@@ -178,8 +178,8 @@ export const AgentDetailDrawer: React.FC<AgentDetailDrawerProps> = ({
                 onClick={() => setTab(id)}
                 className={`px-3 py-2 text-[12px] border-b-2 transition-colors ${
                   active
-                    ? 'border-indigo-400 text-zinc-100'
-                    : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                    ? 'border-indigo-400 text-ink-100'
+                    : 'border-transparent text-ink-500 hover:text-ink-300'
                 }`}
               >
                 {label}
@@ -195,7 +195,7 @@ export const AgentDetailDrawer: React.FC<AgentDetailDrawerProps> = ({
             </div>
           )}
           {!detail ? (
-            <div className="p-6 text-sm text-zinc-500">Loading…</div>
+            <div className="p-6 text-sm text-ink-500">Loading…</div>
           ) : (
             <>
               {tab === 'runs' && <RunsList runs={detail.runs} />}
@@ -216,14 +216,14 @@ const RunsList: React.FC<{ runs: WorkforceDetailRun[] }> = ({ runs }) => {
     return <Empty label="No runs yet." />;
   }
   return (
-    <ul className="divide-y divide-zinc-800/40">
+    <ul className="divide-y divide-ink-800/40">
       {runs.map((run) => (
-        <li key={run.id} className="px-5 py-3 hover:bg-zinc-900/40">
+        <li key={run.id} className="px-5 py-3 hover:bg-ink-900/40">
           <div className="flex items-start gap-3">
             <RunStatusIcon status={run.status} />
             <div className="flex-1 min-w-0 space-y-1">
-              <div className="flex items-center gap-2 text-[11px] text-zinc-500">
-                <span className="text-zinc-300">{run.trigger}</span>
+              <div className="flex items-center gap-2 text-[11px] text-ink-500">
+                <span className="text-ink-300">{run.trigger}</span>
                 <span>·</span>
                 <span>{fmtTime(run.started_at)}</span>
                 <span>·</span>
@@ -246,20 +246,20 @@ const RunsList: React.FC<{ runs: WorkforceDetailRun[] }> = ({ runs }) => {
                 )}
               </div>
               {run.input_summary && (
-                <div className="text-[12px] text-zinc-300 line-clamp-2">
-                  <span className="text-zinc-500">in: </span>
+                <div className="text-[12px] text-ink-300 line-clamp-2">
+                  <span className="text-ink-500">in: </span>
                   {run.input_summary}
                 </div>
               )}
               {run.output_summary && (
-                <div className="text-[12px] text-zinc-400 line-clamp-3">
-                  <span className="text-zinc-500">out: </span>
+                <div className="text-[12px] text-ink-400 line-clamp-3">
+                  <span className="text-ink-500">out: </span>
                   {run.output_summary}
                 </div>
               )}
               {run.error_message && (
                 <div className="text-[12px] text-red-400">
-                  <span className="text-zinc-500">error: </span>
+                  <span className="text-ink-500">error: </span>
                   {run.error_code} — {run.error_message}
                 </div>
               )}
@@ -296,7 +296,7 @@ const MESSAGE_TYPE_META: Record<
   notification: {
     icon: <Bell className="w-3 h-3" />,
     label: 'Notification',
-    accent: 'bg-zinc-700/40 text-zinc-300 border-zinc-700',
+    accent: 'bg-ink-700/40 text-ink-300 border-ink-700',
   },
   cancel: {
     icon: <Slash className="w-3 h-3" />,
@@ -315,7 +315,7 @@ function _typeMeta(t: string) {
     MESSAGE_TYPE_META[t] || {
       icon: <InboxIcon className="w-3 h-3" />,
       label: t,
-      accent: 'bg-zinc-700/40 text-zinc-300 border-zinc-700',
+      accent: 'bg-ink-700/40 text-ink-300 border-ink-700',
     }
   );
 }
@@ -335,15 +335,15 @@ const InboxList: React.FC<{ rows: WorkforceInboxRow[] }> = ({ rows }) => {
   return (
     <div>
       {allTypes.length > 1 && (
-        <div className="flex items-center gap-1 flex-wrap px-5 py-2 border-b border-zinc-800/40 bg-zinc-900/30">
-          <span className="text-[10px] text-zinc-600 mr-1">Filter:</span>
+        <div className="flex items-center gap-1 flex-wrap px-5 py-2 border-b border-ink-800/40 bg-ink-900/30">
+          <span className="text-[10px] text-ink-600 mr-1">Filter:</span>
           <button
             type="button"
             onClick={() => setFilter(null)}
             className={`px-1.5 py-0.5 text-[10px] rounded transition-colors ${
               filter === null
-                ? 'bg-zinc-700 text-zinc-100'
-                : 'text-zinc-500 hover:bg-zinc-800'
+                ? 'bg-ink-700 text-ink-100'
+                : 'text-ink-500 hover:bg-ink-800'
             }`}
           >
             All ({rows.length})
@@ -357,7 +357,7 @@ const InboxList: React.FC<{ rows: WorkforceInboxRow[] }> = ({ rows }) => {
                 type="button"
                 onClick={() => setFilter(t)}
                 className={`px-1.5 py-0.5 text-[10px] rounded border flex items-center gap-1 transition-colors ${
-                  filter === t ? meta.accent : 'text-zinc-500 border-transparent hover:bg-zinc-800'
+                  filter === t ? meta.accent : 'text-ink-500 border-transparent hover:bg-ink-800'
                 }`}
               >
                 {meta.icon}
@@ -367,12 +367,12 @@ const InboxList: React.FC<{ rows: WorkforceInboxRow[] }> = ({ rows }) => {
           })}
         </div>
       )}
-      <ul className="divide-y divide-zinc-800/40">
+      <ul className="divide-y divide-ink-800/40">
         {filtered.map((row) => {
           const meta = _typeMeta(row.message_type);
           return (
-            <li key={row.id} className="px-5 py-3 hover:bg-zinc-900/40">
-              <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+            <li key={row.id} className="px-5 py-3 hover:bg-ink-900/40">
+              <div className="flex items-center gap-2 text-[11px] text-ink-500">
                 <StatusBadge value={row.status} />
                 <span
                   className={`flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] ${meta.accent}`}
@@ -408,11 +408,11 @@ const OutboxList: React.FC<{ rows: WorkforceOutboxRow[] }> = ({ rows }) => {
     return <Empty label="No outbox messages." />;
   }
   return (
-    <ul className="divide-y divide-zinc-800/40">
+    <ul className="divide-y divide-ink-800/40">
       {rows.map((row) => (
-        <li key={row.id} className="px-5 py-3 hover:bg-zinc-900/40">
+        <li key={row.id} className="px-5 py-3 hover:bg-ink-900/40">
           {(() => { const meta = _typeMeta(row.message_type); return (
-          <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+          <div className="flex items-center gap-2 text-[11px] text-ink-500">
             <StatusBadge value={row.delivered ? 'delivered' : 'pending'} />
             <span
               className={`flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] ${meta.accent}`}
@@ -445,7 +445,7 @@ const OutboxList: React.FC<{ rows: WorkforceOutboxRow[] }> = ({ rows }) => {
 // ─── tiny helpers ───────────────────────────────────────────────────
 
 const Empty: React.FC<{ label: string }> = ({ label }) => (
-  <div className="p-6 text-sm text-zinc-500 text-center">{label}</div>
+  <div className="p-6 text-sm text-ink-500 text-center">{label}</div>
 );
 
 const RunStatusIcon: React.FC<{ status: string }> = ({ status }) => {
@@ -457,9 +457,9 @@ const RunStatusIcon: React.FC<{ status: string }> = ({ status }) => {
     case 'failed':
       return <XCircle size={14} className="text-red-400 shrink-0 mt-0.5" />;
     case 'cancelled':
-      return <CircleDashed size={14} className="text-zinc-500 shrink-0 mt-0.5" />;
+      return <CircleDashed size={14} className="text-ink-500 shrink-0 mt-0.5" />;
     default:
-      return <CircleDashed size={14} className="text-zinc-500 shrink-0 mt-0.5" />;
+      return <CircleDashed size={14} className="text-ink-500 shrink-0 mt-0.5" />;
   }
 };
 
@@ -475,11 +475,11 @@ const StatusBadge: React.FC<{ value: string }> = ({ value }) => {
         return 'bg-emerald-500/15 text-emerald-300';
       case 'dismissed':
       case 'expired':
-        return 'bg-zinc-800/60 text-zinc-400';
+        return 'bg-ink-800/60 text-ink-400';
       case 'pending':
         return 'bg-amber-500/15 text-amber-300';
       default:
-        return 'bg-zinc-800/60 text-zinc-400';
+        return 'bg-ink-800/60 text-ink-400';
     }
   })();
   return (
@@ -507,7 +507,7 @@ const PayloadPreview: React.FC<{
   }, [payload]);
   const trimmed = text.length > max ? text.slice(0, max) + '…' : text;
   return (
-    <div className="text-[12px] text-zinc-400 mt-1 line-clamp-3 break-words">
+    <div className="text-[12px] text-ink-400 mt-1 line-clamp-3 break-words">
       {trimmed}
     </div>
   );

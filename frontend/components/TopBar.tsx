@@ -91,8 +91,8 @@ const IconButton: React.FC<{
     onClick={onClick}
     className={`relative p-2 rounded-lg transition-colors ${
       active
-        ? 'bg-zinc-800 text-zinc-100'
-        : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+        ? 'bg-ink-800 text-ink-100'
+        : 'text-ink-400 hover:bg-ink-800 hover:text-ink-200'
     }`}
   >
     {children}
@@ -113,7 +113,7 @@ const PanelShell: React.FC<{
   className?: string;
 }> = ({ children, className = '' }) => (
   <div
-    className={`fixed sm:absolute right-2 sm:right-0 top-14 sm:top-full sm:mt-2 bg-zinc-900 border border-zinc-700/50 rounded-xl shadow-2xl z-50 ${className}`}
+    className={`fixed sm:absolute right-2 sm:right-0 top-14 sm:top-full sm:mt-2 bg-ink-900 border border-ink-700/50 rounded-xl shadow-2xl z-50 ${className}`}
   >
     {children}
   </div>
@@ -183,12 +183,12 @@ const TaskCenterPanel: React.FC<{
   return (
     <PanelShell className="w-[calc(100vw-2rem)] sm:w-96 right-0 sm:right-0">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
-        <span className="text-sm font-semibold text-zinc-200">{t('topbar.taskCenter')}</span>
+      <div className="flex items-center justify-between px-4 py-3 border-b border-ink-800">
+        <span className="text-sm font-semibold text-ink-200">{t('topbar.taskCenter')}</span>
         {completedCount > 0 && (
           <button
             onClick={() => clearCompleted()}
-            className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+            className="text-[10px] text-ink-500 hover:text-ink-300 transition-colors"
           >
             {t('topbar.clearCompleted')}
           </button>
@@ -196,8 +196,8 @@ const TaskCenterPanel: React.FC<{
       </div>
 
       {isLoading ? (
-        <div className="flex flex-col items-center justify-center py-10 text-zinc-500">
-          <div className="w-5 h-5 border-2 border-zinc-600 border-t-indigo-400 rounded-full animate-spin mb-2" />
+        <div className="flex flex-col items-center justify-center py-10 text-ink-500">
+          <div className="w-5 h-5 border-2 border-ink-600 border-t-indigo-400 rounded-full animate-spin mb-2" />
           <span className="text-sm">{t('common.loading')}</span>
         </div>
       ) : hasTasks ? (
@@ -216,30 +216,30 @@ const TaskCenterPanel: React.FC<{
               <>
                 {/* Active uploads from UploadContext (client-side progress) */}
                 {uploadingItems.map((item) => (
-                  <div key={item.id} className="px-3 py-2.5 border-b border-zinc-800/50">
+                  <div key={item.id} className="px-3 py-2.5 border-b border-ink-800/50">
                     <div className="flex items-center gap-2.5">
                       <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-sm bg-blue-500/20 text-blue-400">
                         <UploadIcon size={14} />
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between">
-                          <span className="text-xs text-zinc-300 truncate max-w-[180px]">{item.filename}</span>
+                          <span className="text-xs text-ink-300 truncate max-w-[180px]">{item.filename}</span>
                           <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                            <span className="text-[10px] text-zinc-500">{item.percent}%</span>
+                            <span className="text-[10px] text-ink-500">{item.percent}%</span>
                             {item.speed > 0 && (
-                              <span className="text-[10px] text-zinc-600">{uploadFormatSpeed(item.speed)}</span>
+                              <span className="text-[10px] text-ink-600">{uploadFormatSpeed(item.speed)}</span>
                             )}
                           </div>
                         </div>
                         <div className="flex items-center gap-2 mt-0.5">
-                          <span className="text-[10px] text-zinc-600">Upload</span>
+                          <span className="text-[10px] text-ink-600">Upload</span>
                           {item.fileSize > 0 && (
-                            <span className="text-[10px] text-zinc-600">{uploadFormatFileSize(item.fileSize)}</span>
+                            <span className="text-[10px] text-ink-600">{uploadFormatFileSize(item.fileSize)}</span>
                           )}
                         </div>
                       </div>
                     </div>
-                    <div className="mt-1.5 h-1 bg-zinc-800 rounded-full overflow-hidden">
+                    <div className="mt-1.5 h-1 bg-ink-800 rounded-full overflow-hidden">
                       <div
                         className="h-full rounded-full transition-all duration-300 bg-indigo-500"
                         style={{ width: `${Math.max(item.percent, 2)}%` }}
@@ -259,8 +259,8 @@ const TaskCenterPanel: React.FC<{
                 />
 
                 {uploadingItems.length === 0 && activeItems.length === 0 && (
-                  <div className="flex flex-col items-center justify-center py-8 text-zinc-500">
-                    <CheckCircle2 size={24} className="mb-2 text-zinc-600" />
+                  <div className="flex flex-col items-center justify-center py-8 text-ink-500">
+                    <CheckCircle2 size={24} className="mb-2 text-ink-600" />
                     <span className="text-xs">{t('topbar.noActiveTasks')}</span>
                   </div>
                 )}
@@ -276,8 +276,8 @@ const TaskCenterPanel: React.FC<{
                   onOpenDetail={onOpenDetail}
                 />
                 {historyItems.length === 0 && (
-                  <div className="flex flex-col items-center justify-center py-8 text-zinc-500">
-                    <Inbox size={24} className="mb-2 text-zinc-600" />
+                  <div className="flex flex-col items-center justify-center py-8 text-ink-500">
+                    <Inbox size={24} className="mb-2 text-ink-600" />
                     <span className="text-xs">{t('topbar.noItems')}</span>
                   </div>
                 )}
@@ -286,8 +286,8 @@ const TaskCenterPanel: React.FC<{
           </div>
         </>
       ) : (
-        <div className="flex flex-col items-center justify-center py-10 text-zinc-500">
-          <Inbox size={28} className="mb-2 text-zinc-600" />
+        <div className="flex flex-col items-center justify-center py-10 text-ink-500">
+          <Inbox size={28} className="mb-2 text-ink-600" />
           <span className="text-sm">{t('topbar.noItems')}</span>
         </div>
       )}
@@ -303,11 +303,11 @@ const NotificationsPanel: React.FC = () => {
   const { t } = useTranslation();
   return (
     <PanelShell className="w-[calc(100vw-2rem)] sm:w-80">
-      <div className="px-4 py-3 border-b border-zinc-800">
-        <span className="text-sm font-semibold text-zinc-200">{t('topbar.notifications')}</span>
+      <div className="px-4 py-3 border-b border-ink-800">
+        <span className="text-sm font-semibold text-ink-200">{t('topbar.notifications')}</span>
       </div>
-      <div className="flex flex-col items-center justify-center py-10 text-zinc-500">
-        <Bell size={28} className="mb-2 text-zinc-600" />
+      <div className="flex flex-col items-center justify-center py-10 text-ink-500">
+        <Bell size={28} className="mb-2 text-ink-600" />
         <span className="text-sm">{t('topbar.noNotifications')}</span>
       </div>
     </PanelShell>
@@ -327,9 +327,9 @@ const AvatarMenu: React.FC<{
   return (
     <PanelShell className="w-56">
       {/* User info header */}
-      <div className="px-4 py-3 border-b border-zinc-800">
-        <p className="text-sm font-semibold text-zinc-200 truncate">{user.name}</p>
-        <p className="text-xs text-zinc-500 truncate">{user.email}</p>
+      <div className="px-4 py-3 border-b border-ink-800">
+        <p className="text-sm font-semibold text-ink-200 truncate">{user.name}</p>
+        <p className="text-xs text-ink-500 truncate">{user.email}</p>
       </div>
 
       {/* Menu items */}
@@ -346,7 +346,7 @@ const AvatarMenu: React.FC<{
         />
       </div>
 
-      <div className="border-t border-zinc-800" />
+      <div className="border-t border-ink-800" />
 
       <div className="py-1">
         <MenuButton
@@ -358,7 +358,7 @@ const AvatarMenu: React.FC<{
         />
       </div>
 
-      <div className="border-t border-zinc-800" />
+      <div className="border-t border-ink-800" />
 
       <div className="py-1">
         <MenuButton icon={LogOut} label={t('user.signOut')} onClick={onSignOut} danger />
@@ -378,7 +378,7 @@ const MenuButton: React.FC<{
     className={`w-full flex items-center gap-3 px-4 py-2 text-sm transition-colors ${
       danger
         ? 'text-red-400 hover:bg-red-500/10'
-        : 'text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100'
+        : 'text-ink-300 hover:bg-ink-800 hover:text-ink-100'
     }`}
   >
     <Icon size={16} />
@@ -482,7 +482,7 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
   useCloseOnOutsideOrEscape(avatarRef, openPanel === 'avatar', closeAll);
 
   return (
-    <header className={`fixed top-0 right-0 left-0 ${sidebarCollapsed ? 'sm:left-20' : 'sm:left-64'} h-14 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-sm z-50 hidden sm:flex items-center justify-end px-3 sm:px-6 gap-1.5 sm:gap-2 transition-[left] duration-300`}>
+    <header className={`fixed top-0 right-0 left-0 ${sidebarCollapsed ? 'sm:left-20' : 'sm:left-64'} h-14 border-b border-ink-800 bg-ink-950/80 backdrop-blur-sm z-50 hidden sm:flex items-center justify-end px-3 sm:px-6 gap-1.5 sm:gap-2 transition-[left] duration-300`}>
       {/* Language Switcher — desktop only (mobile: accessible via Settings) */}
       <div className="hidden sm:block">
         <LanguageSwitcher />
@@ -558,7 +558,7 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
         <button
           title={t('topbar.account')}
           onClick={() => togglePanel('avatar')}
-          className="p-1 rounded-lg transition-colors hover:bg-zinc-800"
+          className="p-1 rounded-lg transition-colors hover:bg-ink-800"
         >
           <UserAvatar
             name={user?.name || '?'}

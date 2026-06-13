@@ -95,7 +95,7 @@ const getAIStatusClass = (status?: string): string => {
     case 'failed':
       return 'text-red-400';
     default:
-      return 'text-zinc-600';
+      return 'text-ink-600';
   }
 };
 
@@ -585,7 +585,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             </div>
           ) : isVideo ? (
             <div
-              className="w-full h-full flex items-center justify-center bg-zinc-900 text-zinc-500 cursor-pointer relative overflow-hidden"
+              className="w-full h-full flex items-center justify-center bg-ink-900 text-ink-500 cursor-pointer relative overflow-hidden"
               onClick={() => setIsPlaying(true)}
             >
                {isPlaying ? (
@@ -608,7 +608,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                        referrerPolicy="no-referrer"
                      />
                    ) : (
-                     <div className="w-full h-full bg-zinc-800" />
+                     <div className="w-full h-full bg-ink-800" />
                    )}
                    <div className="absolute z-20 w-16 h-16 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center group-hover:scale-110 transition-transform border border-white/20 shadow-xl">
                       <Play className="w-8 h-8 text-white fill-white ml-1" />
@@ -629,7 +629,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                      referrerPolicy="no-referrer"
                    />
                  ) : (
-                   <div className="w-full h-full bg-zinc-800" />
+                   <div className="w-full h-full bg-ink-800" />
                  );
                })()}
 
@@ -675,7 +675,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           <div className="flex justify-between items-start gap-2 mb-2 min-w-0">
             {/* Desktop: type badge + resolution */}
             <div className="hidden sm:flex gap-2 shrink-0">
-                <span className="px-2 py-1 text-xs font-semibold bg-zinc-800 text-zinc-300 rounded-md border border-zinc-700 uppercase tracking-wider">
+                <span className="px-2 py-1 text-xs font-semibold bg-ink-800 text-ink-300 rounded-md border border-ink-700 uppercase tracking-wider">
                 {isAudio ? 'Audio' : getAwemeTypeLabel(data.media_type)}
                 </span>
                 {data.resolution ? (
@@ -689,10 +689,10 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                 ) : null}
             </div>
             {/* Mobile: ID on the left */}
-            <span className="sm:hidden text-xs text-zinc-500 font-mono truncate min-w-0">ID: {data.id}</span>
+            <span className="sm:hidden text-xs text-ink-500 font-mono truncate min-w-0">ID: {data.id}</span>
             <div className="flex items-center gap-2 min-w-0 shrink-0">
               {/* Desktop: ID */}
-              <span className="hidden sm:inline text-xs text-zinc-500 font-mono truncate min-w-0">ID: {data.id}</span>
+              <span className="hidden sm:inline text-xs text-ink-500 font-mono truncate min-w-0">ID: {data.id}</span>
               {/* Mobile: injected action buttons (Share + More) */}
               {mobileActions && <div className="sm:hidden flex items-center gap-1">{mobileActions}</div>}
               {/* More actions (three-dots) — hidden when inside PlayerPage */}
@@ -703,10 +703,10 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                   disabled={isRetrying}
                   className={`w-7 h-7 flex items-center justify-center rounded-md transition-colors ${
                     isRetrying
-                      ? 'text-zinc-500'
+                      ? 'text-ink-500'
                       : retrySuccess
                         ? 'text-emerald-400'
-                        : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
+                        : 'text-ink-500 hover:text-ink-300 hover:bg-ink-800'
                   } disabled:opacity-70`}
                   title="More Actions"
                 >
@@ -725,19 +725,19 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                       className="fixed inset-0 z-40"
                       onClick={() => setShowMoreMenu(false)}
                     />
-                    <div className="absolute top-full right-0 mt-1 w-48 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 overflow-hidden">
+                    <div className="absolute top-full right-0 mt-1 w-48 bg-ink-900 border border-ink-700 rounded-lg shadow-xl z-50 overflow-hidden">
                       <div className="py-1">
                         {/* Download section */}
                         <button
                           onClick={() => { setShowMoreMenu(false); onDownloadVideo(); }}
-                          className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
+                          className="w-full px-4 py-2.5 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-white flex items-center gap-3 transition-colors"
                         >
                           <VideoIcon size={16} className="text-amber-400" />
                           Video
                         </button>
                         <button
                           onClick={() => { setShowMoreMenu(false); onDownloadCoverFile(); }}
-                          className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
+                          className="w-full px-4 py-2.5 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-white flex items-center gap-3 transition-colors"
                         >
                           <ImageIcon size={16} className="text-emerald-400" />
                           Cover
@@ -745,7 +745,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                         {data.music_download_path && (
                           <button
                             onClick={() => { setShowMoreMenu(false); onDownloadAudio(); }}
-                            className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
+                            className="w-full px-4 py-2.5 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-white flex items-center gap-3 transition-colors"
                           >
                             <Music size={16} className="text-indigo-400" />
                             Audio
@@ -753,15 +753,15 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                         )}
 
                         {/* ID row */}
-                        <div className="border-t border-zinc-700 my-1" />
-                        <div className="px-4 py-2 text-xs text-zinc-500 font-mono truncate">
+                        <div className="border-t border-ink-700 my-1" />
+                        <div className="px-4 py-2 text-xs text-ink-500 font-mono truncate">
                           ID: {data.id}
                         </div>
 
                         {/* Delete section */}
                         {onDelete && (
                           <>
-                            <div className="border-t border-zinc-700 my-1" />
+                            <div className="border-t border-ink-700 my-1" />
                             <button
                               onClick={() => { setShowMoreMenu(false); setShowDeleteDialog(true); }}
                               className="w-full px-4 py-2.5 text-left text-sm text-red-400 hover:bg-red-950/50 hover:text-red-300 flex items-center gap-3 transition-colors"
@@ -783,7 +783,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           {/* Mobile action buttons — injected into header row on mobile, shown separately on sm+ if needed */}
 
           {/* Title */}
-          <h2 className="text-2xl font-bold text-zinc-100 mb-3 leading-tight">
+          <h2 className="text-2xl font-bold text-ink-100 mb-3 leading-tight">
             {data.title || 'No Title'}
           </h2>
 
@@ -845,7 +845,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           {/* Rating & Notes (from resources table) */}
           {onRatingChange && (
             <div className="mb-4 flex items-center gap-4">
-              <span className="text-xs text-zinc-500 uppercase tracking-wider">Rating</span>
+              <span className="text-xs text-ink-500 uppercase tracking-wider">Rating</span>
               <RatingStars value={resourceRating || 0} onChange={onRatingChange} />
             </div>
           )}
@@ -857,7 +857,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                 onBlur={onNotesBlur}
                 placeholder="Add notes..."
                 rows={2}
-                className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-3 py-2 text-sm text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 resize-none"
+                className="w-full bg-ink-800/50 border border-ink-700/50 rounded-lg px-3 py-2 text-sm text-ink-300 placeholder-ink-600 focus:outline-none focus:border-indigo-500/50 resize-none"
               />
             </div>
           )}
@@ -878,12 +878,12 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           {/* Platform hashtags (read-only, for analytics) */}
           {data.hashtags && (
             <div className="mb-4">
-              <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
+              <h4 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-2">
                 Platform Tags
               </h4>
               <div className="flex flex-wrap gap-2">
                 {data.hashtags.split(/\s+/).filter(h => h.startsWith('#') && h.length > 1).map((ht, i) => (
-                  <span key={i} className="px-2.5 py-1 rounded-full border text-xs font-medium bg-zinc-800/30 text-zinc-500 border-zinc-700/50">
+                  <span key={i} className="px-2.5 py-1 rounded-full border text-xs font-medium bg-ink-800/30 text-ink-500 border-ink-700/50">
                     {ht}
                   </span>
                 ))}
@@ -911,7 +911,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           <div className="grid grid-cols-4 gap-1.5 sm:gap-2 mb-5">
              <button
                onClick={(e) => handleAction(e, 'copy')}
-               className="flex items-center justify-center gap-1 sm:gap-2 p-2 sm:p-2.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white transition-colors border border-zinc-700 hover:border-zinc-600"
+               className="flex items-center justify-center gap-1 sm:gap-2 p-2 sm:p-2.5 rounded-lg bg-ink-800 hover:bg-ink-700 text-ink-400 hover:text-white transition-colors border border-ink-700 hover:border-ink-600"
              >
                {copied ? <Check size={16} className="text-green-500 shrink-0" /> : <Copy size={16} className="shrink-0" />}
                <span className="text-[10px] sm:text-xs font-medium truncate">{copied ? 'Copied' : 'Copy'}</span>
@@ -956,8 +956,8 @@ export const MediaCard: React.FC<MediaCardProps> = ({
               Hidden in compact mode (mobile audio player). */}
           {!compact && (
           <div className="mb-4">
-             <p className="text-zinc-300 text-sm whitespace-pre-wrap leading-relaxed">
-               {data.description || <span className="text-zinc-500 italic">No description available.</span>}
+             <p className="text-ink-300 text-sm whitespace-pre-wrap leading-relaxed">
+               {data.description || <span className="text-ink-500 italic">No description available.</span>}
              </p>
           </div>
           )}
@@ -974,7 +974,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                         </div>
                         <span className="text-xs font-semibold text-teal-200">Extracted Data</span>
                     </div>
-                    <div className="p-3 rounded-lg border border-teal-500/20 bg-teal-500/5 text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap">
+                    <div className="p-3 rounded-lg border border-teal-500/20 bg-teal-500/5 text-sm text-ink-300 leading-relaxed whitespace-pre-wrap">
                         {extractText}
                     </div>
                 </div>
@@ -989,7 +989,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                         </div>
                         <span className="text-xs font-semibold text-indigo-200">AI Rewrite</span>
                     </div>
-                    <div className="p-3 rounded-lg border border-indigo-500/20 bg-indigo-500/5 text-sm text-zinc-300 leading-relaxed">
+                    <div className="p-3 rounded-lg border border-indigo-500/20 bg-indigo-500/5 text-sm text-ink-300 leading-relaxed">
                         {rewrittenText}
                     </div>
                 </div>
@@ -1004,7 +1004,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                         </div>
                         <span className="text-xs font-semibold text-purple-200">Content Analysis</span>
                     </div>
-                    <div className="p-3 rounded-lg border border-purple-500/20 bg-purple-500/5 text-sm text-zinc-300 leading-relaxed">
+                    <div className="p-3 rounded-lg border border-purple-500/20 bg-purple-500/5 text-sm text-ink-300 leading-relaxed">
                         {analysisText}
                     </div>
                 </div>
@@ -1013,12 +1013,12 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
           {/* Actions Footer — only show when action handlers are provided */}
           {(onSave || onToggleCollection) && (
-          <div className="space-y-3 pt-4 border-t border-zinc-800/50 mt-auto">
+          <div className="space-y-3 pt-4 border-t border-ink-800/50 mt-auto">
              <div className="flex gap-2">
                 {onSave && (
                    <button
                     onClick={() => onSave(data)}
-                    className="w-11 h-11 flex items-center justify-center bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg transition-colors border border-zinc-700"
+                    className="w-11 h-11 flex items-center justify-center bg-ink-800 hover:bg-ink-700 text-ink-200 rounded-lg transition-colors border border-ink-700"
                     title="Save to Library"
                    >
                      <Bookmark className="w-5 h-5" />
@@ -1032,7 +1032,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                       className={`w-11 h-11 flex items-center justify-center rounded-lg transition-colors border ${
                         videoCollectionIds.length > 0
                           ? 'bg-indigo-600/20 text-indigo-400 border-indigo-600/50 hover:bg-indigo-600/30'
-                          : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:bg-zinc-700 hover:text-white'
+                          : 'bg-ink-800 text-ink-300 border-ink-700 hover:bg-ink-700 hover:text-white'
                       }`}
                       title="Add to Collection"
                     >
@@ -1075,11 +1075,11 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           onClick={() => setShowDeleteDialog(false)}
         >
           <div
-            className="bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden animate-in zoom-in-95 duration-200"
+            className="bg-ink-900 border border-ink-700 rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden animate-in zoom-in-95 duration-200"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-ink-800">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-amber-500/10 rounded-lg">
                   <Trash2 className="w-5 h-5 text-amber-500" />
@@ -1088,7 +1088,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
               </div>
               <button
                 onClick={() => setShowDeleteDialog(false)}
-                className="p-1.5 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+                className="p-1.5 text-ink-500 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
               >
                 <X size={18} />
               </button>
@@ -1096,13 +1096,13 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
             {/* Content */}
             <div className="px-5 py-4 space-y-4">
-              <p className="text-sm text-zinc-400">
+              <p className="text-sm text-ink-400">
                 This item will be moved to the Recycle Bin. You can restore it later.
               </p>
 
               {/* Media Preview */}
-              <div className="flex items-center gap-3 p-3 bg-zinc-800/50 rounded-lg border border-zinc-700/50">
-                <div className="w-12 h-12 rounded-lg bg-zinc-700 flex items-center justify-center flex-shrink-0 overflow-hidden">
+              <div className="flex items-center gap-3 p-3 bg-ink-800/50 rounded-lg border border-ink-700/50">
+                <div className="w-12 h-12 rounded-lg bg-ink-700 flex items-center justify-center flex-shrink-0 overflow-hidden">
                   {coverUrl && !coverLoadError ? (
                     <img
                       src={coverUrl}
@@ -1112,23 +1112,23 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                       onError={() => setCoverLoadError(true)}
                     />
                   ) : (
-                    <VideoIcon size={20} className="text-zinc-500" />
+                    <VideoIcon size={20} className="text-ink-500" />
                   )}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-white font-medium truncate">
                     {data.title || 'Untitled'}
                   </p>
-                  <p className="text-xs text-zinc-500">@{data.author}</p>
+                  <p className="text-xs text-ink-500">@{data.author}</p>
                 </div>
               </div>
             </div>
 
             {/* Footer */}
-            <div className="flex gap-3 px-5 py-4 bg-zinc-800/30 border-t border-zinc-800">
+            <div className="flex gap-3 px-5 py-4 bg-ink-800/30 border-t border-ink-800">
               <button
                 onClick={() => setShowDeleteDialog(false)}
-                className="flex-1 px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg font-medium transition-colors border border-zinc-700"
+                className="flex-1 px-4 py-2.5 bg-ink-800 hover:bg-ink-700 text-ink-300 rounded-lg font-medium transition-colors border border-ink-700"
               >
                 Cancel
               </button>

@@ -57,14 +57,14 @@ export default function ErrorPage({ code, onAction, onSecondaryAction, className
     <div className={`flex items-center justify-center min-h-[400px] ${className}`}>
       <div className="text-center max-w-md px-6">
         <div className="flex justify-center mb-6">
-          <div className="w-16 h-16 rounded-full bg-zinc-800/50 flex items-center justify-center">
-            <Icon className="w-8 h-8 text-zinc-400" />
+          <div className="w-16 h-16 rounded-full bg-ink-800/50 flex items-center justify-center">
+            <Icon className="w-8 h-8 text-ink-400" />
           </div>
         </div>
-        <h2 className="text-xl font-semibold text-zinc-100 mb-2">
+        <h2 className="text-xl font-semibold text-ink-100 mb-2">
           {config.title}
         </h2>
-        <p className="text-zinc-400 text-sm mb-6">
+        <p className="text-ink-400 text-sm mb-6">
           {config.description}
         </p>
         <div className="flex items-center justify-center gap-3">
@@ -77,7 +77,7 @@ export default function ErrorPage({ code, onAction, onSecondaryAction, className
           {effectiveCode === 500 && onSecondaryAction && (
             <button
               onClick={onSecondaryAction}
-              className="px-5 py-2 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 text-sm font-medium rounded-lg transition-colors"
+              className="px-5 py-2 bg-ink-700 hover:bg-ink-600 text-ink-200 text-sm font-medium rounded-lg transition-colors"
             >
               Go Home
             </button>

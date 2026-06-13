@@ -124,11 +124,11 @@ export const BatchSelectionToolbar: React.FC<BatchSelectionToolbarProps> = ({
   };
 
   return (
-    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-zinc-900 border border-zinc-700 rounded-xl px-5 py-3 shadow-2xl">
-      <span className="text-sm text-zinc-300 font-medium">
+    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-ink-900 border border-ink-700 rounded-xl px-5 py-3 shadow-2xl">
+      <span className="text-sm text-ink-300 font-medium">
         {t('resources.selected', { count: selectedIds.size })}
       </span>
-      <div className="w-px h-5 bg-zinc-700" />
+      <div className="w-px h-5 bg-ink-700" />
       {isRecycleView ? (
         <>
           <button
@@ -176,7 +176,7 @@ export const BatchSelectionToolbar: React.FC<BatchSelectionToolbarProps> = ({
               setOperationTargetFolders(flds);
               setFolderPickerMode('move');
             }}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-ink-300 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
           >
             <Move size={14} />
             {t('resources.batchMove')}
@@ -188,7 +188,7 @@ export const BatchSelectionToolbar: React.FC<BatchSelectionToolbarProps> = ({
               setOperationTargetFolders([]);
               setFolderPickerMode('copy');
             }}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-ink-300 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
           >
             <Copy size={14} />
             {t('resources.batchCopy')}
@@ -199,7 +199,7 @@ export const BatchSelectionToolbar: React.FC<BatchSelectionToolbarProps> = ({
                 onClick={() => runBatchAi('caption')}
                 disabled={aiBusy !== null}
                 title={t('resources.batchGeneratePromptHint', 'Reverse-engineer prompts for the selected images')}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-50"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-ink-300 hover:text-white hover:bg-ink-800 rounded-lg transition-colors disabled:opacity-50"
               >
                 {aiBusy === 'caption' ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
                 {t('resources.batchGeneratePrompt', 'Prompts')}
@@ -208,7 +208,7 @@ export const BatchSelectionToolbar: React.FC<BatchSelectionToolbarProps> = ({
                 onClick={() => runBatchAi('classify')}
                 disabled={aiBusy !== null}
                 title={t('resources.batchAutoTagHint', 'Auto-tag the selected images across 12 dimensions')}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-50"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-ink-300 hover:text-white hover:bg-ink-800 rounded-lg transition-colors disabled:opacity-50"
               >
                 {aiBusy === 'classify' ? <Loader2 size={14} className="animate-spin" /> : <Tag size={14} />}
                 {t('resources.batchAutoTag', 'Auto Tag')}
@@ -237,7 +237,7 @@ export const BatchSelectionToolbar: React.FC<BatchSelectionToolbarProps> = ({
                 }}
                 disabled={aiBusy !== null}
                 title={t('resources.trainingSetHint', 'Download images + .txt prompt captions (LoRA training format)')}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-50"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-ink-300 hover:text-white hover:bg-ink-800 rounded-lg transition-colors disabled:opacity-50"
               >
                 {aiBusy === 'export' ? <Loader2 size={14} className="animate-spin" /> : <Package size={14} />}
                 {t('resources.trainingSet', 'Training Set')}
@@ -276,10 +276,10 @@ export const BatchSelectionToolbar: React.FC<BatchSelectionToolbarProps> = ({
           </button>
         </>
       )}
-      <div className="w-px h-5 bg-zinc-700" />
+      <div className="w-px h-5 bg-ink-700" />
       <button
         onClick={() => setSelectedIds(new Set())}
-        className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+        className="p-1.5 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
       >
         <X size={14} />
       </button>

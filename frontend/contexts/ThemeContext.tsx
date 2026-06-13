@@ -1,0 +1,74 @@
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+
+// Island redesign D11 — three-state theme. 'system' follows
+// prefers-color-scheme; resolved value is written to <html data-theme>.
+export type ThemePreference = 'system' | 'light' | 'dark';
+
+const STORAGE_KEY = 'mediahub.theme';
+
+// Default preference. 'dark' until the light-theme contrast polish lands
+// (~817 hardcoded text-white/bg-black sites + scrollbars are not yet
+// theme-aware) — switch to 'system' (spec D11) in the light-polish PR so
+// light-OS users aren't dropped into a half-polished theme.
+const DEFAULT_PREFERENCE: ThemePreference = 'dark';
+
+interface ThemeContextValue {
+  preference: ThemePreference;
+  resolved: 'light' | 'dark';
+  setPreference: (p: ThemePreference) => void;
+}
+
+const ThemeContext = createContext<ThemeContextValue | null>(null);
+
+function systemTheme(): 'light' | 'dark' {
+  return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+}
+
+export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [preference, setPreferenceState] = useState<ThemePreference>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved === 'light' || saved === 'dark' || saved === 'system') return saved;
+    } catch {
+      // Safari private mode can throw — fall through to the default.
+    }
+    return DEFAULT_PREFERENCE;
+  });
+  const [resolved, setResolved] = useState<'light' | 'dark'>(() =>
+    preference === 'system' ? systemTheme() : preference,
+  );
+
+  const setPreference = useCallback((p: ThemePreference) => {
+    setPreferenceState(p);
+    try {
+      localStorage.setItem(STORAGE_KEY, p);
+    } catch {
+      // Best-effort persistence — the in-memory preference still applies.
+    }
+  }, []);
+
+  useEffect(() => {
+    const apply = () => {
+      const next = preference === 'system' ? systemTheme() : preference;
+      setResolved(next);
+      document.documentElement.dataset.theme = next;
+    };
+    apply();
+    if (preference !== 'system') return;
+    const mq = window.matchMedia('(prefers-color-scheme: light)');
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, [preference]);
+
+  return (
+    <ThemeContext.Provider value={{ preference, resolved, setPreference }}>
+      {children}
+    </ThemeContext.Provider>
+  );
+};
+
+export function useTheme(): ThemeContextValue {
+  const ctx = useContext(ThemeContext);
+  if (!ctx) throw new Error('useTheme must be used within ThemeProvider');
+  return ctx;
+}

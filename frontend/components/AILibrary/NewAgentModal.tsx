@@ -113,11 +113,11 @@ export const NewAgentModal: React.FC<NewAgentModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="w-full max-w-md rounded-lg border border-zinc-800 bg-zinc-900 p-6 shadow-xl">
-        <h2 className="text-lg font-semibold text-zinc-100">
+      <div className="w-full max-w-md rounded-lg border border-ink-800 bg-ink-900 p-6 shadow-xl">
+        <h2 className="text-lg font-semibold text-ink-100">
           {t('aiLibrary.agents.newAgentTitle', 'New Agent')}
         </h2>
-        <p className="mt-1 text-xs text-zinc-500">
+        <p className="mt-1 text-xs text-ink-500">
           {t(
             'aiLibrary.agents.newAgentHint',
             'Create a custom agent. You can start from scratch or fork an existing agent as a starting point.',
@@ -126,7 +126,7 @@ export const NewAgentModal: React.FC<NewAgentModalProps> = ({
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-4">
           <div>
-            <label className="block text-xs font-medium text-zinc-400">
+            <label className="block text-xs font-medium text-ink-400">
               {t('aiLibrary.agents.slugLabel', 'Slug')}
             </label>
             <input
@@ -134,7 +134,7 @@ export const NewAgentModal: React.FC<NewAgentModalProps> = ({
               value={slug}
               onChange={(e) => setSlug(e.target.value)}
               placeholder="my-custom-agent"
-              className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+              className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
               disabled={submitting}
               required
             />
@@ -149,7 +149,7 @@ export const NewAgentModal: React.FC<NewAgentModalProps> = ({
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-zinc-400">
+            <label className="block text-xs font-medium text-ink-400">
               {t('aiLibrary.agents.nameLabel', 'Name')}
             </label>
             <input
@@ -157,16 +157,16 @@ export const NewAgentModal: React.FC<NewAgentModalProps> = ({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="My Custom Agent"
-              className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+              className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
               disabled={submitting}
               required
             />
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-zinc-400">
+            <label className="block text-xs font-medium text-ink-400">
               {t('aiLibrary.agents.descriptionLabel', 'Description')}
-              <span className="ml-1 text-zinc-600">
+              <span className="ml-1 text-ink-600">
                 ({t('common.optional', 'optional')})
               </span>
             </label>
@@ -174,13 +174,13 @@ export const NewAgentModal: React.FC<NewAgentModalProps> = ({
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+              className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
               disabled={submitting}
             />
           </div>
 
           <fieldset className="space-y-2">
-            <legend className="block text-xs font-medium text-zinc-400">
+            <legend className="block text-xs font-medium text-ink-400">
               {t('aiLibrary.agents.scopeLabel', 'Scope')}
             </legend>
             <div className="flex gap-2">
@@ -207,7 +207,7 @@ export const NewAgentModal: React.FC<NewAgentModalProps> = ({
               <select
                 value={teamId}
                 onChange={(e) => setTeamId(e.target.value)}
-                className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+                className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
                 disabled={submitting || scopeLoading}
                 required
               >
@@ -227,7 +227,7 @@ export const NewAgentModal: React.FC<NewAgentModalProps> = ({
               <select
                 value={projectId}
                 onChange={(e) => setProjectId(e.target.value)}
-                className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+                className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
                 disabled={submitting || scopeLoading}
                 required
               >
@@ -243,7 +243,7 @@ export const NewAgentModal: React.FC<NewAgentModalProps> = ({
                 ))}
               </select>
             )}
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-ink-500">
               {t(
                 'aiLibrary.agents.scopeHint',
                 'Private = only you. Team / Project = everyone in that scope.',
@@ -252,16 +252,16 @@ export const NewAgentModal: React.FC<NewAgentModalProps> = ({
           </fieldset>
 
           <div>
-            <label className="block text-xs font-medium text-zinc-400">
+            <label className="block text-xs font-medium text-ink-400">
               {t('aiLibrary.agents.forkFromLabel', 'Fork from')}
-              <span className="ml-1 text-zinc-600">
+              <span className="ml-1 text-ink-600">
                 ({t('common.optional', 'optional')})
               </span>
             </label>
             <select
               value={forkFrom}
               onChange={(e) => setForkFrom(e.target.value)}
-              className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+              className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
               disabled={submitting}
             >
               <option value="">
@@ -273,7 +273,7 @@ export const NewAgentModal: React.FC<NewAgentModalProps> = ({
                 </option>
               ))}
             </select>
-            <p className="mt-1 text-xs text-zinc-500">
+            <p className="mt-1 text-xs text-ink-500">
               {t(
                 'aiLibrary.agents.forkFromHint',
                 'Copies the identity / soul / instructions + model settings. Skill bindings are NOT copied.',
@@ -292,7 +292,7 @@ export const NewAgentModal: React.FC<NewAgentModalProps> = ({
               type="button"
               onClick={onClose}
               disabled={submitting}
-              className="rounded-md border border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800"
+              className="rounded-md border border-ink-700 px-4 py-2 text-sm text-ink-300 hover:bg-ink-800"
             >
               {t('common.cancel', 'Cancel')}
             </button>
@@ -333,7 +333,7 @@ const ScopeRadio: React.FC<ScopeRadioProps> = ({
     className={`inline-flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors ${
       checked
         ? 'border-indigo-500 bg-indigo-500/10 text-indigo-200'
-        : 'border-zinc-700 bg-zinc-800 text-zinc-300 hover:bg-zinc-750'
+        : 'border-ink-700 bg-ink-800 text-ink-300 hover:bg-ink-750'
     } ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
   >
     <input

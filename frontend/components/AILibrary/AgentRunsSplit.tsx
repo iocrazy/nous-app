@@ -100,7 +100,7 @@ function triggerBadge(trigger: string): { label: string; cls: string } {
   if (trigger.startsWith('script')) {
     return { label: 'Script', cls: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' };
   }
-  return { label: trigger, cls: 'border-zinc-700 bg-zinc-800 text-zinc-300' };
+  return { label: trigger, cls: 'border-ink-700 bg-ink-800 text-ink-300' };
 }
 
 const StatusIcon: React.FC<{ status: AgentRunStatus; size?: number }> = ({ status, size = 14 }) => {
@@ -122,7 +122,7 @@ export const RunStatusBadge: React.FC<{ status: AgentRunStatus }> = ({ status })
   const { t } = useTranslation();
   const styles: Record<AgentRunStatus, string> = {
     running: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
-    completed: 'border-zinc-700 bg-zinc-800 text-zinc-200',
+    completed: 'border-ink-700 bg-ink-800 text-ink-200',
     failed: 'border-red-500/40 bg-red-500/10 text-red-300',
     cancelled: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
     heartbeat_lost: 'border-orange-500/40 bg-orange-500/10 text-orange-300',
@@ -153,24 +153,24 @@ const RunListCard: React.FC<{
     <button
       type="button"
       onClick={onSelect}
-      className={`w-full border-b border-zinc-800/70 px-3 py-2.5 text-left transition-colors ${
-        selected ? 'bg-zinc-800/80' : 'hover:bg-zinc-900/70'
+      className={`w-full border-b border-ink-800/70 px-3 py-2.5 text-left transition-colors ${
+        selected ? 'bg-ink-800/80' : 'hover:bg-ink-900/70'
       }`}
     >
       <div className="flex items-center gap-2">
         <StatusIcon status={run.status} />
-        <span className="font-mono text-xs text-zinc-400">{run.id.slice(0, 8)}</span>
+        <span className="font-mono text-xs text-ink-400">{run.id.slice(0, 8)}</span>
         <span className={`rounded border px-1.5 py-px text-[10px] font-medium ${badge.cls}`}>
           {badge.label}
         </span>
-        <span className="ml-auto text-[10px] text-zinc-500 whitespace-nowrap">
+        <span className="ml-auto text-[10px] text-ink-500 whitespace-nowrap">
           {relativeAge(run.started_at)}
         </span>
       </div>
       {snippet && (
-        <p className="mt-1 line-clamp-2 text-xs leading-snug text-zinc-400">{snippet}</p>
+        <p className="mt-1 line-clamp-2 text-xs leading-snug text-ink-400">{snippet}</p>
       )}
-      <div className="mt-1 text-[10px] tabular-nums text-zinc-500">
+      <div className="mt-1 text-[10px] tabular-nums text-ink-500">
         {formatTokens(run.total_tokens)} tok
         {run.cost_cents != null && <> · {formatCost(run.cost_cents)}</>}
       </div>
@@ -187,7 +187,7 @@ const TaskPhaseBadge: React.FC<{ phase?: string | null }> = ({ phase }) => {
       ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
       : p === 'failed'
         ? 'border-red-500/40 bg-red-500/10 text-red-300'
-        : 'border-zinc-700 bg-zinc-800 text-zinc-300';
+        : 'border-ink-700 bg-ink-800 text-ink-300';
   return (
     <span className={`rounded border px-1.5 py-px text-[10px] font-medium ${cls}`}>{p}</span>
   );
@@ -195,8 +195,8 @@ const TaskPhaseBadge: React.FC<{ phase?: string | null }> = ({ phase }) => {
 
 const Stat: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
   <div className="flex flex-col gap-0.5">
-    <span className="text-[10px] uppercase tracking-wide text-zinc-500">{label}</span>
-    <span className="text-sm font-semibold tabular-nums text-zinc-100">{value}</span>
+    <span className="text-[10px] uppercase tracking-wide text-ink-500">{label}</span>
+    <span className="text-sm font-semibold tabular-nums text-ink-100">{value}</span>
   </div>
 );
 
@@ -242,7 +242,7 @@ const RunDetailPane: React.FC<{
   }
   if (!detail) {
     return (
-      <p className="p-4 text-sm text-zinc-500">
+      <p className="p-4 text-sm text-ink-500">
         {t('aiLibrary.agents.runs.loading', 'Loading runs...')}
       </p>
     );
@@ -254,13 +254,13 @@ const RunDetailPane: React.FC<{
   return (
     <div className="space-y-4">
       {/* Header: status + chips + cancel */}
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-4">
+      <div className="rounded-lg border border-ink-800 bg-ink-900/60 p-4">
         <div className="flex flex-wrap items-center gap-2">
           {onBack && (
             <button
               type="button"
               onClick={onBack}
-              className="md:hidden rounded-md border border-zinc-700 bg-zinc-800 p-1.5 text-zinc-300"
+              className="md:hidden rounded-md border border-ink-700 bg-ink-800 p-1.5 text-ink-300"
               aria-label={t('common.back', 'Back')}
             >
               <ArrowLeft size={14} />
@@ -270,9 +270,9 @@ const RunDetailPane: React.FC<{
           <span className={`rounded border px-1.5 py-px text-[10px] font-medium ${badge.cls}`}>
             {badge.label}
           </span>
-          <span className="font-mono text-xs text-zinc-500">{detail.trigger}</span>
+          <span className="font-mono text-xs text-ink-500">{detail.trigger}</span>
           {detail.model && (
-            <span className="rounded border border-zinc-700 bg-zinc-800 px-1.5 py-px font-mono text-[10px] text-zinc-300">
+            <span className="rounded border border-ink-700 bg-ink-800 px-1.5 py-px font-mono text-[10px] text-ink-300">
               {detail.provider ? `${detail.provider}/` : ''}{detail.model}
             </span>
           )}
@@ -288,13 +288,13 @@ const RunDetailPane: React.FC<{
           )}
         </div>
         <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <span className="font-mono text-sm text-zinc-200">
+          <span className="font-mono text-sm text-ink-200">
             {formatClock(detail.started_at)} → {formatClock(detail.ended_at)}
           </span>
-          <span className="text-xs text-zinc-500">
+          <span className="text-xs text-ink-500">
             {formatTimestamp(detail.started_at)}
           </span>
-          <span className="text-xs font-medium text-zinc-300">
+          <span className="text-xs font-medium text-ink-300">
             {t('aiLibrary.agents.runs.colDuration', 'Duration')}:{' '}
             {formatDuration(detail.started_at, detail.ended_at)}
           </span>
@@ -318,16 +318,16 @@ const RunDetailPane: React.FC<{
 
       {/* Tasks Touched — mig 282 task ↔ run linkage */}
       {detail.task && (
-        <section className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-4">
-          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+        <section className="rounded-lg border border-ink-800 bg-ink-900/60 p-4">
+          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-500">
             {t('aiLibrary.agents.runs.tasksTouched', 'Tasks Touched')} (1)
           </h4>
-          <div className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950/60 px-3 py-2">
+          <div className="flex items-center gap-2 rounded-md border border-ink-800 bg-ink-950/60 px-3 py-2">
             <TaskPhaseBadge phase={detail.task.phase} />
-            <span className="truncate text-sm text-zinc-200">
+            <span className="truncate text-sm text-ink-200">
               {detail.task.title || detail.task.id}
             </span>
-            <span className="ml-auto font-mono text-[10px] text-zinc-500">
+            <span className="ml-auto font-mono text-[10px] text-ink-500">
               {detail.task.task_type || detail.task.id.slice(0, 8)}
             </span>
           </div>
@@ -339,31 +339,31 @@ const RunDetailPane: React.FC<{
 
       {/* Session */}
       {detail.session_id && (
-        <section className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-4">
-          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+        <section className="rounded-lg border border-ink-800 bg-ink-900/60 p-4">
+          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-500">
             {t('aiLibrary.agents.runs.session', 'Session')}
           </h4>
-          <span className="font-mono text-xs text-zinc-300 break-all">{detail.session_id}</span>
+          <span className="font-mono text-xs text-ink-300 break-all">{detail.session_id}</span>
         </section>
       )}
 
       {/* Summaries / error / metadata */}
       {detail.input_summary && (
         <section>
-          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-500">
             {t('aiLibrary.agents.runs.fieldInputSummary', 'Input summary')}
           </h4>
-          <pre className="whitespace-pre-wrap break-words rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-200">
+          <pre className="whitespace-pre-wrap break-words rounded-lg border border-ink-800 bg-ink-950 p-3 text-xs text-ink-200">
             {detail.input_summary}
           </pre>
         </section>
       )}
       {detail.output_summary && (
         <section>
-          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-500">
             {t('aiLibrary.agents.runs.fieldOutputSummary', 'Output summary')}
           </h4>
-          <pre className="whitespace-pre-wrap break-words rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-200">
+          <pre className="whitespace-pre-wrap break-words rounded-lg border border-ink-800 bg-ink-950 p-3 text-xs text-ink-200">
             {detail.output_summary}
           </pre>
         </section>
@@ -381,12 +381,12 @@ const RunDetailPane: React.FC<{
       )}
       {detail.skill_slugs_used.length > 0 && (
         <section>
-          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-500">
             {t('aiLibrary.agents.runs.fieldSkills', 'Skills used')}
           </h4>
           <div className="flex flex-wrap gap-1.5">
             {detail.skill_slugs_used.map((s) => (
-              <span key={s} className="rounded-full border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[10px] text-zinc-300">
+              <span key={s} className="rounded-full border border-ink-700 bg-ink-800 px-2 py-0.5 text-[10px] text-ink-300">
                 {s}
               </span>
             ))}
@@ -395,10 +395,10 @@ const RunDetailPane: React.FC<{
       )}
       {Object.keys(meta).length > 0 && (
         <section>
-          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-500">
             {t('aiLibrary.agents.runs.fieldMetadata', 'Metadata')}
           </h4>
-          <pre className="whitespace-pre-wrap break-words rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-mono text-xs text-zinc-300">
+          <pre className="whitespace-pre-wrap break-words rounded-lg border border-ink-800 bg-ink-950 p-3 font-mono text-xs text-ink-300">
             {JSON.stringify(meta, null, 2)}
           </pre>
         </section>
@@ -481,7 +481,7 @@ export const AgentRunsSplit: React.FC<{ slug: string }> = ({ slug }) => {
 
   if (loading && page === null) {
     return (
-      <p className="text-sm text-zinc-500">
+      <p className="text-sm text-ink-500">
         {t('aiLibrary.agents.runs.loading', 'Loading runs...')}
       </p>
     );
@@ -495,7 +495,7 @@ export const AgentRunsSplit: React.FC<{ slug: string }> = ({ slug }) => {
   }
   if (items.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-zinc-800 bg-zinc-900/40 px-3 py-8 text-center text-sm text-zinc-500">
+      <div className="rounded-lg border border-dashed border-ink-800 bg-ink-900/40 px-3 py-8 text-center text-sm text-ink-500">
         {t(
           'aiLibrary.agents.runs.emptyBody',
           'This agent has not been invoked yet. Start a chat or task to see activity here.',
@@ -511,7 +511,7 @@ export const AgentRunsSplit: React.FC<{ slug: string }> = ({ slug }) => {
         className={`w-full shrink-0 md:w-72 lg:w-80 ${mobileShowDetail ? 'hidden md:block' : ''}`}
       >
         <div className="mb-2 flex items-center justify-between gap-2">
-          <span className="text-xs text-zinc-500">
+          <span className="text-xs text-ink-500">
             {t('aiLibrary.agents.runs.paginationLabel', {
               defaultValue: 'Showing {{start}}–{{end}} of {{total}}',
               start: total === 0 ? 0 : offset + 1,
@@ -523,13 +523,13 @@ export const AgentRunsSplit: React.FC<{ slug: string }> = ({ slug }) => {
             type="button"
             onClick={() => void fetchPage(offset, 'initial')}
             disabled={loading || refreshing}
-            className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-[10px] font-medium text-zinc-300 hover:bg-zinc-700 disabled:opacity-50"
+            className="inline-flex items-center gap-1 rounded-md border border-ink-700 bg-ink-800 px-2 py-1 text-[10px] font-medium text-ink-300 hover:bg-ink-700 disabled:opacity-50"
           >
             <RefreshCw size={11} className={refreshing ? 'animate-spin' : ''} />
             {t('aiLibrary.agents.runs.refresh', 'Refresh')}
           </button>
         </div>
-        <div className="max-h-[70vh] overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-900/40 custom-scrollbar">
+        <div className="max-h-[70vh] overflow-y-auto rounded-lg border border-ink-800 bg-ink-900/40 custom-scrollbar">
           {items.map((run) => (
             <RunListCard
               key={run.id}
@@ -548,7 +548,7 @@ export const AgentRunsSplit: React.FC<{ slug: string }> = ({ slug }) => {
               type="button"
               onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
               disabled={!hasPrev || loading}
-              className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-[10px] font-medium text-zinc-300 hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex items-center gap-1 rounded-md border border-ink-700 bg-ink-800 px-2 py-1 text-[10px] font-medium text-ink-300 hover:bg-ink-700 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <ChevronLeft size={12} />
               {t('common.previous', 'Previous')}
@@ -557,7 +557,7 @@ export const AgentRunsSplit: React.FC<{ slug: string }> = ({ slug }) => {
               type="button"
               onClick={() => setOffset(offset + PAGE_SIZE)}
               disabled={!hasNext || loading}
-              className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-[10px] font-medium text-zinc-300 hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex items-center gap-1 rounded-md border border-ink-700 bg-ink-800 px-2 py-1 text-[10px] font-medium text-ink-300 hover:bg-ink-700 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {t('common.next', 'Next')}
               <ChevronRight size={12} />
@@ -575,7 +575,7 @@ export const AgentRunsSplit: React.FC<{ slug: string }> = ({ slug }) => {
             onBack={() => setMobileShowDetail(false)}
           />
         ) : (
-          <div className="flex h-40 items-center justify-center rounded-lg border border-dashed border-zinc-800 text-sm text-zinc-500">
+          <div className="flex h-40 items-center justify-center rounded-lg border border-dashed border-ink-800 text-sm text-ink-500">
             <X size={14} className="mr-1.5" />
             {t('aiLibrary.agents.runs.selectPrompt', 'Select a run to view details')}
           </div>

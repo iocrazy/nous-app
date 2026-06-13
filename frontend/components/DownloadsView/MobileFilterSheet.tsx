@@ -218,16 +218,16 @@ export function MobileFilterSheet({
       />
 
       <div
-        className="absolute inset-x-0 bottom-0 bg-zinc-900 border-t border-zinc-700/80 rounded-t-2xl shadow-2xl max-h-[82vh] flex flex-col animate-in slide-in-from-bottom duration-200"
+        className="absolute inset-x-0 bottom-0 bg-ink-900 border-t border-ink-700/80 rounded-t-2xl shadow-2xl max-h-[82vh] flex flex-col animate-in slide-in-from-bottom duration-200"
         style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
       >
         {/* Grab handle */}
         <div className="pt-2 flex justify-center shrink-0">
-          <div className="h-1 w-10 rounded-full bg-zinc-600" />
+          <div className="h-1 w-10 rounded-full bg-ink-600" />
         </div>
 
         {/* Header */}
-        <div className="px-4 py-3 flex items-center justify-between border-b border-zinc-800 shrink-0">
+        <div className="px-4 py-3 flex items-center justify-between border-b border-ink-800 shrink-0">
           <div className="flex items-center gap-2">
             <Filter size={16} className="text-indigo-400" />
             <span className="text-sm font-semibold text-white">
@@ -244,7 +244,7 @@ export function MobileFilterSheet({
               type="button"
               onClick={clearAll}
               disabled={!hasActiveFilters}
-              className="text-xs font-medium text-zinc-400 disabled:opacity-40 active:text-white"
+              className="text-xs font-medium text-ink-400 disabled:opacity-40 active:text-white"
             >
               {t('resources.filter.reset', 'Reset')}
             </button>
@@ -252,7 +252,7 @@ export function MobileFilterSheet({
               type="button"
               onClick={onClose}
               aria-label={t('common.close', 'Close')}
-              className="text-zinc-400 active:text-white"
+              className="text-ink-400 active:text-white"
             >
               <X size={18} />
             </button>
@@ -413,12 +413,12 @@ export function MobileFilterSheet({
                       className={`w-24 px-3 py-1.5 rounded-lg text-xs font-medium border text-left transition-colors ${
                         entry.enabled
                           ? 'bg-indigo-500 border-indigo-400 text-white'
-                          : 'bg-zinc-800 border-zinc-700 text-zinc-300'
+                          : 'bg-ink-800 border-ink-700 text-ink-300'
                       }`}
                     >
                       {SOCIAL_LABELS[m]}
                     </button>
-                    <span className="text-xs text-zinc-500">≥</span>
+                    <span className="text-xs text-ink-500">≥</span>
                     <input
                       type="number"
                       inputMode="numeric"
@@ -429,7 +429,7 @@ export function MobileFilterSheet({
                         const n = Math.max(0, Math.floor(Number(e.target.value) || 0));
                         setSocialMetric(m, { threshold: n });
                       }}
-                      className="flex-1 min-w-0 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-400 disabled:opacity-40"
+                      className="flex-1 min-w-0 bg-ink-800 border border-ink-700 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-400 disabled:opacity-40"
                     />
                   </div>
                 );
@@ -508,7 +508,7 @@ export function MobileFilterSheet({
         </div>
 
         {/* Done */}
-        <div className="px-4 py-3 border-t border-zinc-800 shrink-0">
+        <div className="px-4 py-3 border-t border-ink-800 shrink-0">
           <button
             type="button"
             onClick={onClose}

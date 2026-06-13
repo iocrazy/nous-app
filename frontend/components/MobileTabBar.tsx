@@ -98,7 +98,7 @@ export function MobileTabBar({ tabs, collapsed, onExpand, hidden }: MobileTabBar
       >
         <div
           ref={containerRef}
-          className="relative bg-zinc-900/95 backdrop-blur-xl border border-zinc-800/60 rounded-full flex items-center px-2 py-1.5 gap-0.5 shadow-2xl"
+          className="relative bg-ink-900/95 backdrop-blur-xl border border-ink-800/60 rounded-full flex items-center px-2 py-1.5 gap-0.5 shadow-2xl"
         >
           {/* Sliding active indicator — iOS-26 "liquid glass": translucent fill
               + top highlight + soft shadow, with a springy (overshoot) ease so
@@ -125,7 +125,7 @@ export function MobileTabBar({ tabs, collapsed, onExpand, hidden }: MobileTabBar
                 <button
                   onClick={collapsed ? onExpand : tab.onClick}
                   className={`relative z-10 flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-full transition-colors ${
-                    tab.active ? 'text-indigo-400' : 'text-zinc-500'
+                    tab.active ? 'text-indigo-400' : 'text-ink-500'
                   }`}
                 >
                   {tab.icon}
