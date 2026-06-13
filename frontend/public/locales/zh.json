@@ -1935,5 +1935,13 @@
     "forgetAll": "清除全部记忆",
     "forgetConfirm": "删除所有已学记忆?你的聊天记录会保留。",
     "forgetYes": "确认清除"
+  },
+  "aiHealth": {
+    "title": "功能健康检查",
+    "subtitle": "每个 AI 功能实际使用的模型和密钥。",
+    "warningsBadge": "{{count}} 项需处理",
+    "refresh": "刷新",
+    "unset": "未配置",
+    "default": "默认"
   }
 }

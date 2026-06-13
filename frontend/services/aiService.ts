@@ -312,6 +312,33 @@ export const getVisualAnalysisByResource = async (
   };
 };
 
+// --- Capability health ---
+
+export interface CapabilityHealth {
+  capability: string;
+  label: string;
+  agent_slug: string;
+  assigned: boolean;
+  model: string;
+  provider: string;
+  needs_vision: boolean;
+  status: 'ok' | 'no_key' | 'no_model' | 'not_vision' | 'unknown_provider' | 'error';
+  hint: string;
+}
+
+export const getAIHealth = async (): Promise<CapabilityHealth[]> => {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/ai/health`, {
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(err.detail || `HTTP ${response.status}`);
+  }
+  const data = await response.json();
+  return data.capabilities || [];
+};
+
 // --- Settings ---
 
 export const getAISettings = async (): Promise<AISettings> => {
