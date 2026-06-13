@@ -17,9 +17,7 @@ from app.services.canvas.asset_refs import extract_asset_refs
 
 
 async def main() -> None:
-    rows = await db_engine.fetch_all(
-        "SELECT id::text AS id, nodes_json FROM canvases"
-    )
+    rows = await db_engine.fetch_all("SELECT id::text AS id, nodes_json FROM canvases")
     refs_repo = CanvasRefsRepository()
     total_canvases = 0
     total_refs = 0
@@ -28,9 +26,7 @@ async def main() -> None:
         await refs_repo.replace_for_canvas(row["id"], refs)
         total_canvases += 1
         total_refs += len(refs)
-    logger.info(
-        "backfill done: {} canvases, {} refs", total_canvases, total_refs
-    )
+    logger.info("backfill done: {} canvases, {} refs", total_canvases, total_refs)
 
 
 if __name__ == "__main__":

@@ -76,9 +76,7 @@ class CanvasRefsRepository:
         )
         return rows or []
 
-    async def tree_for_projects(
-        self, project_ids: List[str]
-    ) -> List[Dict[str, Any]]:
+    async def tree_for_projects(self, project_ids: List[str]) -> List[Dict[str, Any]]:
         """Per-canvas asset counts for the given projects (tree payload)."""
         if not project_ids:
             return []
