@@ -734,6 +734,7 @@
     "trashFolderFailed": "Failed to move folder to trash",
     "trashFolderConfirm": "This folder contains {{contents}}. All contents will be moved to the recycle bin. Continue?",
     "temp": "Temp",
+    "projectAssets": "Project Assets",
     "tempEmpty": "No chat uploads yet — files you paste or drop into the chat composer land here for 24h before being moved or expired.",
     "sectionLocations": "Locations"
   },
@@ -1916,5 +1917,15 @@
     "warning": "Your device clock is {{amount}} {{direction}} server time — this breaks sign-in. Enable automatic date & time in system settings.",
     "behind": "behind",
     "ahead": "ahead"
+  },
+  "projectAssets": {
+    "chatUploads": "Chat Uploads",
+    "noCanvases": "No canvases yet",
+    "appearsInCanvases_one": "Appears in {{count}} canvas",
+    "appearsInCanvases_other": "Appears in {{count}} canvases",
+    "role": {
+      "reference": "Reference",
+      "output": "Output"
+    }
   }
 }
