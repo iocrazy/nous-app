@@ -147,6 +147,28 @@
   box-shadow: var(--shadow-island, 0 10px 40px rgba(0, 0, 0, .45));
 }
 
+/* Collapsed-info reopen tab — a fixed right-edge vertical handle styled like an
+   island card. Semantic tokens flip per theme; indigo accent (#6366f1) on hover
+   (the `--indigo` var does NOT exist — use the literal). */
+.island-reopen {
+  position: fixed;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 40;
+  writing-mode: vertical-rl;
+  padding: 14px 6px;
+  background: var(--island);
+  border: 1px solid var(--line);
+  border-right: none;
+  border-radius: 10px 0 0 10px;
+  color: var(--color-ink-300, #a1a1aa);
+  font-size: 12px;
+  box-shadow: -4px 0 16px rgba(0, 0, 0, .25);
+  transition: color .15s ease;
+}
+.island-reopen:hover { color: #6366f1; }
+
 /* Global styles */
 html, body {
   overflow-x: hidden;
