@@ -170,12 +170,63 @@ class GraphFact:
     valid_at: Optional[datetime] = None
 
 
+def _build_llm_and_embedder(config: "GraphMemoryConfig") -> tuple[Any, Any]:
+    """Build explicit Graphiti OpenAI-compatible LLM + embedder from the
+    admin-set config, or ``(None, None)`` to let Graphiti keep its own
+    ``OPENAI_*`` env defaults (when no extractor key is configured).
+
+    Uses ``OpenAIGenericClient`` (not the strict ``OpenAIClient``) because the
+    extractor is typically a non-OpenAI compatible endpoint (ModelScope/Qwen)
+    where the generic structured-output path is the safer fit. Construction is
+    network-free; the AsyncOpenAI client is created lazily-ish but needs a
+    non-empty api_key, which is why we only build when one is set."""
+    if not config.extractor_api_key:
+        return None, None
+    from graphiti_core.embedder.openai import OpenAIEmbedder, OpenAIEmbedderConfig
+    from graphiti_core.llm_client.config import LLMConfig
+    from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
+
+    llm = OpenAIGenericClient(
+        config=LLMConfig(
+            base_url=config.extractor_base_url or None,
+            api_key=config.extractor_api_key,
+            model=config.extractor_model or None,
+        )
+    )
+    embedder = None
+    if config.embedder_api_key:
+        ecfg = {
+            "api_key": config.embedder_api_key,
+            "base_url": config.embedder_base_url or None,
+        }
+        if config.embedder_model:
+            ecfg["embedding_model"] = config.embedder_model
+        embedder = OpenAIEmbedder(config=OpenAIEmbedderConfig(**ecfg))
+    return llm, embedder
+
+
 @dataclass
 class GraphMemoryService:
     """Lazy-connecting wrapper; inject ``graphiti`` in tests."""
 
     config: GraphMemoryConfig = field(default_factory=GraphMemoryConfig.from_env)
     graphiti: Optional[Any] = None
+    # Whether config has been (re)loaded from system_settings. The env-sourced
+    # default_factory keeps construction cheap; the DB load happens once on
+    # first real async use via _ensure_config.
+    _config_loaded: bool = False
+
+    async def _ensure_config(self) -> None:
+        """Swap the env-default config for the DB-sourced one on first use.
+        Tests inject ``graphiti`` + their own config, so those are left alone.
+        Never raises — a failed settings load keeps the env config."""
+        if self.graphiti is not None or self._config_loaded:
+            return
+        self._config_loaded = True  # set first: no retry-storm, no double-load
+        try:
+            self.config = await GraphMemoryConfig.from_settings()
+        except Exception:  # noqa: BLE001
+            logger.warning("[graph_memory] from_settings failed; keeping env config")
 
     def _client(self) -> Optional[Any]:
         if self.graphiti is not None:
@@ -193,7 +244,13 @@ class GraphMemoryService:
                 port=self.config.falkordb_port,
                 database=self.config.falkordb_database,
             )
-            self.graphiti = Graphiti(graph_driver=driver)
+            llm_client, embedder = _build_llm_and_embedder(self.config)
+            kwargs: dict[str, Any] = {"graph_driver": driver}
+            if llm_client is not None:
+                kwargs["llm_client"] = llm_client
+            if embedder is not None:
+                kwargs["embedder"] = embedder
+            self.graphiti = Graphiti(**kwargs)
             return self.graphiti
         except Exception:  # noqa: BLE001
             logger.exception(
@@ -212,6 +269,7 @@ class GraphMemoryService:
     ) -> bool:
         """Ingest one episode. Returns True on success, False on any
         failure or when the service is disabled/inoperative."""
+        await self._ensure_config()
         client = self._client()
         if client is None or not body.strip():
             return False
@@ -241,6 +299,7 @@ class GraphMemoryService:
         """Hybrid fact retrieval scoped to ``group_ids`` (e.g. the
         user's personal group plus the session's project group).
         Empty list on any failure or when disabled."""
+        await self._ensure_config()
         client = self._client()
         if client is None or not query.strip() or not group_ids:
             return []
