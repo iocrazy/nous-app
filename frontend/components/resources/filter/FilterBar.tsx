@@ -32,7 +32,9 @@ import type { ChipId, DatePresetId, DurationPresetId, SocialMetric } from './typ
 import { SOCIAL_METRICS } from './types';
 import { filterVisibleChips } from './chipVisibility';
 import { FilterChip } from './FilterChip';
+import { SegmentedTypeFilter } from './SegmentedTypeFilter';
 import { FilterConfigPanel } from './FilterConfigPanel';
+import { islandUI } from '../../../utils/featureFlags';
 import { RatingFilterDropdown } from './RatingFilterDropdown';
 import { TagsFilterDropdown } from './TagsFilterDropdown';
 import { TypeFilterDropdown } from './TypeFilterDropdown';
@@ -153,11 +155,20 @@ export const FilterBar: React.FC<FilterBarProps> = ({
     [setChipValue, refreshTags],
   );
 
+  // Island shell surfaces the media-type filter as an always-visible segmented
+  // control (spec §5.1) instead of the `type` dropdown chip, so drop `type` from
+  // the pinned chips here to avoid a duplicate control. Same multi-select state
+  // drives both, so nothing is lost (D12). Build-time constant → stable.
+  const island = islandUI();
+
   // Subset of pinnedChips that's actually rendered in the toolbar.
   // Disallowed chips stay pinned in localStorage but don't show here.
   const visiblePinnedChips = useMemo(
-    () => filterVisibleChips(pinnedChips, allowedChips),
-    [pinnedChips, allowedChips],
+    () =>
+      filterVisibleChips(pinnedChips, allowedChips).filter(
+        (id) => !(island && id === 'type'),
+      ),
+    [pinnedChips, allowedChips, island],
   );
 
   // Static icon registry — each chip carries a distinct lucide icon so the
@@ -358,6 +369,12 @@ export const FilterBar: React.FC<FilterBarProps> = ({
 
   return (
     <div className="flex items-center gap-1.5 flex-wrap" data-testid="resources-filter-bar">
+      {island && (
+        <SegmentedTypeFilter
+          selected={chipValues.type.types}
+          onChange={(next) => setChipValue('type', { types: next })}
+        />
+      )}
       {visiblePinnedChips.map((id) => (
         <FilterChip
           key={id}
