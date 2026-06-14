@@ -136,8 +136,11 @@ async def liveness_scan_step() -> dict[str, Any]:
                 await _mark_dead(run_id, "stuck", reason="liveness_dead")
                 counts["stuck_to_dead"] += 1
             elif useful_age <= T1_SECONDS:
-                # Continuation worked — recovered
-                await _transition(run_id, "stuck", "running")
+                # Continuation worked — recovered. Count it: a run that keeps
+                # flapping stuck→running burns through MAX_CONTINUATIONS and is
+                # then killed by the cap above (closes the "flap forever, never
+                # judged dead because each recovery resets state_age" hole).
+                await _recover_from_stuck(run_id)
             else:
                 counts["noop"] += 1
         else:  # dead / cancelled — scanner doesn't touch
@@ -175,6 +178,25 @@ async def _transition(run_id: Any, expected: str, target: str) -> None:
         logger.warning(
             f"[liveness-scanner] transition {run_id} {expected}->{target} failed: {exc}"
         )
+
+
+async def _recover_from_stuck(run_id: Any) -> None:
+    """CAS stuck→running AND increment continuation_attempt in one write — each
+    recovery from stuck counts toward MAX_CONTINUATIONS so a chronically-flapping
+    run is eventually judged dead. Idempotent under concurrent scanners (CAS on
+    liveness_state='stuck')."""
+    from app.db import engine as db_engine
+
+    try:
+        await db_engine.execute(
+            "UPDATE public.agent_runs "
+            "SET liveness_state = 'running', "
+            "continuation_attempt = continuation_attempt + 1 "
+            "WHERE id = :id AND liveness_state = 'stuck'",
+            {"id": run_id},
+        )
+    except Exception as exc:
+        logger.warning(f"[liveness-scanner] recover-from-stuck {run_id} failed: {exc}")
 
 
 async def _mark_dead(run_id: Any, expected_state: str, *, reason: str) -> None:
