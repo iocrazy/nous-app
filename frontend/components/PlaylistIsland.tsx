@@ -32,11 +32,11 @@ export const PlaylistIsland: React.FC<PlaylistIslandProps> = ({ title, author, c
       {/* ── Header ─────────────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-2 px-4 pt-4 pb-3 shrink-0">
         <div className="flex items-center gap-2">
-          <ListMusic size={16} className="text-ink-400 shrink-0" />
-          <span className="text-sm font-semibold text-ink-200 tracking-wide">Playlist</span>
+          <ListMusic size={16} className="text-content-2 shrink-0" />
+          <span className="text-sm font-semibold text-content tracking-wide">Playlist</span>
         </div>
         {/* COMING SOON badge */}
-        <span className="text-[10px] font-semibold uppercase tracking-widest text-ink-500 border border-line rounded-full px-2 py-0.5 leading-none">
+        <span className="text-[10px] font-semibold uppercase tracking-widest text-content-3 border border-line rounded-full px-2 py-0.5 leading-none">
           COMING SOON
         </span>
       </div>
@@ -69,9 +69,9 @@ export const PlaylistIsland: React.FC<PlaylistIslandProps> = ({ title, author, c
 
         {/* Title + author */}
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-ink-100 truncate">{title}</p>
+          <p className="text-sm font-medium text-content truncate">{title}</p>
           {author && (
-            <p className="text-xs text-ink-400 truncate mt-0.5">{author}</p>
+            <p className="text-xs text-content-2 truncate mt-0.5">{author}</p>
           )}
         </div>
 
@@ -96,7 +96,7 @@ export const PlaylistIsland: React.FC<PlaylistIslandProps> = ({ title, author, c
               <div className="h-2 rounded bg-line w-1/2" />
             </div>
             {/* Duration */}
-            <span className="text-xs text-ink-500 shrink-0 tabular-nums">{row.duration}</span>
+            <span className="text-xs text-content-3 shrink-0 tabular-nums">{row.duration}</span>
           </div>
         ))}
       </div>

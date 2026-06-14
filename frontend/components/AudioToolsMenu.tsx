@@ -22,14 +22,14 @@ export const AudioToolsMenuItems: React.FC<AudioToolsMenuItemsProps> = ({
   if (!onNotesChange) return null;
   return (
     <div className="px-3 pt-1.5 pb-2">
-      <label className="block text-[10px] font-semibold text-ink-500 uppercase tracking-wider mb-1">Notes</label>
+      <label className="block text-[10px] font-semibold text-content-3 uppercase tracking-wider mb-1">Notes</label>
       <textarea
         value={resourceNotes || ''}
         onChange={(e) => onNotesChange(e.target.value)}
         onBlur={onNotesBlur}
         placeholder="Add notes..."
         rows={2}
-        className="w-full bg-ink-800/50 border border-ink-700/50 rounded-lg px-2 py-1.5 text-xs text-ink-300 placeholder-ink-600 focus:outline-none focus:border-indigo-500/50 resize-none"
+        className="w-full bg-ink-800/50 border border-ink-700/50 rounded-lg px-2 py-1.5 text-xs text-content-2 placeholder-content-4 focus:outline-none focus:border-indigo-500/50 resize-none"
       />
     </div>
   );

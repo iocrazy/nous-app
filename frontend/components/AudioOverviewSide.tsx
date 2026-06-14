@@ -118,7 +118,7 @@ export const AudioOverviewSide: React.FC<AudioOverviewSideProps> = ({
     <div className="audio-side">
       {/* Cover — Music glyph behind the image so a 404 reveals the icon. */}
       <div className="audio-cover">
-        <Music size={44} className="text-ink-500 col-start-1 row-start-1" />
+        <Music size={44} className="text-content-3 col-start-1 row-start-1" />
         {coverUrl && (
           <img
             src={coverUrl}
@@ -147,7 +147,7 @@ export const AudioOverviewSide: React.FC<AudioOverviewSideProps> = ({
         ) : (
           <div className="flex items-center gap-0.5" aria-hidden="true">
             {[1, 2, 3, 4, 5].map((star) => (
-              <Star key={star} size={14} className="text-ink-600" />
+              <Star key={star} size={14} className="text-content-4" />
             ))}
           </div>
         )}
