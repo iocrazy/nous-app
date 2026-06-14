@@ -244,8 +244,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // Nav-island width follows spec §2: list pages = 200px, detail rail = 54px.
   const railW = iconRail ? 'w-[54px]' : collapsed ? 'w-20' : 'w-[200px]';
   const railPad = iconRail ? 'px-1.5 py-3' : collapsed ? 'p-3' : 'p-4';
+  // `island-nav` opts the full-width island nav (200px, list pages) into the
+  // tighter mock row density (index.css). Not added for the 54px icon rail
+  // (collapsed) or classic mode → those keep their own spacing (D12 no-op).
   const asideClass = island
-    ? `group hidden sm:flex flex-col ${railW} ${railPad} relative h-full transition-all duration-300`
+    ? `group hidden sm:flex flex-col ${railW} ${railPad} relative h-full transition-all duration-300${!collapsed ? ' island-nav' : ''}`
     : `group hidden sm:flex flex-col ${collapsed ? 'w-20' : 'w-64'} border-r border-ink-800 bg-ink-950 ${collapsed ? 'p-3' : 'p-6'} fixed top-0 left-0 h-full z-10 transition-all duration-300`;
 
   // Navigate via URL and notify parent for side effects
@@ -337,20 +340,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
   if (mode === 'team') {
     return (
       <aside className={asideClass}>
-        <Logo collapsed={collapsed} />
+        {/* In the island shell the brand wordmark lives in the global topbar
+            (spec §2), so the nav island never repeats it — list nav starts with
+            the account switcher, detail rail is icons only (matches the mockups).
+            Classic (flag-OFF) keeps the in-sidebar logo → D12 no-op. */}
+        {!island && <Logo collapsed={collapsed} />}
 
-        <div className="mb-2">
-          <WorkspaceSwitcher
-            teams={teams}
-            activeTeamId={activeTeamId}
-            personalTeamId={personalTeamId}
-            currentTeam={currentTeam}
-            userName={userName}
-            onTeamChange={onTeamChange}
-            onCreateTeam={onCreateTeam}
-            collapsed={collapsed}
-          />
-        </div>
+        {!iconRail && (
+          <div className="mb-2">
+            <WorkspaceSwitcher
+              teams={teams}
+              activeTeamId={activeTeamId}
+              personalTeamId={personalTeamId}
+              currentTeam={currentTeam}
+              userName={userName}
+              onTeamChange={onTeamChange}
+              onCreateTeam={onCreateTeam}
+              collapsed={collapsed}
+            />
+          </div>
+        )}
 
         <nav className="flex-1 flex flex-col gap-4">
           <SidebarSection label="" hideLabel>
@@ -402,20 +411,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // ===================================================================
   return (
     <aside className={asideClass}>
-      <Logo collapsed={collapsed} />
+      {/* Island shell: brand wordmark lives in the global topbar (spec §2), so the
+          nav island never repeats it. Classic (flag-OFF) keeps it → D12 no-op. */}
+      {!island && <Logo collapsed={collapsed} />}
 
-      <div className="mb-2">
-        <WorkspaceSwitcher
-          teams={teams}
-          activeTeamId={activeTeamId}
-          personalTeamId={personalTeamId}
-          currentTeam={currentTeam}
-          userName={userName}
-          onTeamChange={onTeamChange}
-          onCreateTeam={onCreateTeam}
-          collapsed={collapsed}
-        />
-      </div>
+      {!iconRail && (
+        <div className="mb-2">
+          <WorkspaceSwitcher
+            teams={teams}
+            activeTeamId={activeTeamId}
+            personalTeamId={personalTeamId}
+            currentTeam={currentTeam}
+            userName={userName}
+            onTeamChange={onTeamChange}
+            onCreateTeam={onCreateTeam}
+            collapsed={collapsed}
+          />
+        </div>
+      )}
 
       <nav className="flex-1 flex flex-col gap-4">
         <SidebarSection label="" hideLabel>
@@ -441,7 +454,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </SidebarSection>
       </nav>
 
-      <FloatingCollapseTab collapsed={collapsed} onToggleCollapse={onToggleCollapse} />
+      {!iconRail && <FloatingCollapseTab collapsed={collapsed} onToggleCollapse={onToggleCollapse} island={island} />}
     </aside>
   );
 };
