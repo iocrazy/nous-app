@@ -46,6 +46,7 @@ export interface GraphMemorySettings {
   falkordb_database: string
   extractor_base_url: string
   extractor_model: string
+  extractor_structured_output_mode: string
   extractor_api_key_set: boolean
   embedder_base_url: string
   embedder_model: string
@@ -60,6 +61,7 @@ export interface GraphMemorySettingsUpdate {
   extractor_base_url?: string
   extractor_api_key?: string
   extractor_model?: string
+  extractor_structured_output_mode?: string
   embedder_base_url?: string
   embedder_api_key?: string
   embedder_model?: string

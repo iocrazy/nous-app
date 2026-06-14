@@ -8,6 +8,7 @@ import {
   Spin,
   Divider,
   Tag,
+  Select,
 } from '@arco-design/web-react'
 import {
   useGraphMemorySettings,
@@ -45,6 +46,7 @@ export function MemorySettings() {
   const [database, setDatabase] = useState('mediahub_memory')
   const [exBaseUrl, setExBaseUrl] = useState('')
   const [exModel, setExModel] = useState('')
+  const [exMode, setExMode] = useState('json_object')
   const [exKey, setExKey] = useState('')
   const [emBaseUrl, setEmBaseUrl] = useState('')
   const [emModel, setEmModel] = useState('')
@@ -59,6 +61,7 @@ export function MemorySettings() {
     setDatabase(data.falkordb_database)
     setExBaseUrl(data.extractor_base_url)
     setExModel(data.extractor_model)
+    setExMode(data.extractor_structured_output_mode || 'json_object')
     setEmBaseUrl(data.embedder_base_url)
     setEmModel(data.embedder_model)
     setExKey('')
@@ -73,6 +76,7 @@ export function MemorySettings() {
       falkordb_database: database,
       extractor_base_url: exBaseUrl,
       extractor_model: exModel,
+      extractor_structured_output_mode: exMode,
       embedder_base_url: emBaseUrl,
       embedder_model: emModel,
     }
@@ -128,10 +132,20 @@ export function MemorySettings() {
       </Row>
       <Divider style={{ margin: 0 }} />
       <Row label="Model">
-        <Input value={exModel} onChange={setExModel} placeholder="e.g. Qwen/Qwen2.5-72B-Instruct" style={{ width: 260 }} />
+        <Input value={exModel} onChange={setExModel} placeholder="e.g. Qwen/Qwen3-235B-A22B-Instruct-2507" style={{ width: 260 }} />
       </Row>
       <Divider style={{ margin: 0 }} />
-      <Row label="API key" hint="Must support structured output (json_schema).">
+      <Row
+        label="Structured output"
+        hint="json_object works on ModelScope/Qwen/DeepSeek; json_schema needs native constrained-decoding support (e.g. OpenAI)."
+      >
+        <Select value={exMode} onChange={setExMode} style={{ width: 200 }}>
+          <Select.Option value="json_object">json_object (default)</Select.Option>
+          <Select.Option value="json_schema">json_schema</Select.Option>
+        </Select>
+      </Row>
+      <Divider style={{ margin: 0 }} />
+      <Row label="API key" hint="Must support structured output (chat completions).">
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end' }}>
           {keyTag(data?.extractor_api_key_set ?? false)}
           <Input.Password

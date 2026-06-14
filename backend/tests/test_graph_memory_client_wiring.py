@@ -28,13 +28,13 @@ def _cfg(**kw) -> GraphMemoryConfig:
 # ----- _build_llm_and_embedder -----------------------------------------
 
 
-def test_build_returns_none_pair_when_no_extractor_key():
-    llm, embedder = _build_llm_and_embedder(_cfg(extractor_api_key=""))
-    assert llm is None and embedder is None
+def test_build_returns_none_triple_when_no_extractor_key():
+    llm, embedder, reranker = _build_llm_and_embedder(_cfg(extractor_api_key=""))
+    assert llm is None and embedder is None and reranker is None
 
 
 def test_build_llm_carries_explicit_config():
-    llm, embedder = _build_llm_and_embedder(
+    llm, embedder, reranker = _build_llm_and_embedder(
         _cfg(
             extractor_api_key="ms-key",
             extractor_base_url="https://ms.example/v1",
@@ -47,10 +47,32 @@ def test_build_llm_carries_explicit_config():
     assert llm.config.model == "Qwen/Qwen2.5-72B-Instruct"
     # no embedder key => embedder stays None (Graphiti env default)
     assert embedder is None
+    # cross_encoder is ALWAYS built from the extractor config when a key exists —
+    # otherwise Graphiti's __init__ falls back to OpenAIRerankerClient() which
+    # reads OPENAI_API_KEY and crashes the whole client build (the #709 bug this
+    # validation surfaced against dev FalkorDB).
+    assert reranker is not None
+    assert reranker.config.api_key == "ms-key"
+    assert reranker.config.base_url == "https://ms.example/v1"
+
+
+def test_build_llm_defaults_to_json_object_mode():
+    # ModelScope/Qwen (and DeepSeek-class providers) reject Graphiti's complex
+    # json_schema constrained-decoding payload (returns choices=None); json_object
+    # — schema injected into the prompt — is the working path, so it is the default.
+    llm, _, _ = _build_llm_and_embedder(_cfg(extractor_api_key="ms-key"))
+    assert llm.structured_output_mode == "json_object"
+
+
+def test_build_llm_honours_explicit_structured_output_mode():
+    llm, _, _ = _build_llm_and_embedder(
+        _cfg(extractor_api_key="ms-key", extractor_structured_output_mode="json_schema")
+    )
+    assert llm.structured_output_mode == "json_schema"
 
 
 def test_build_embedder_when_embedder_key_set():
-    llm, embedder = _build_llm_and_embedder(
+    llm, embedder, _ = _build_llm_and_embedder(
         _cfg(
             extractor_api_key="ms-key",
             embedder_api_key="ms-key",
