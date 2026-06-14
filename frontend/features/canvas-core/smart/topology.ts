@@ -121,16 +121,35 @@ export function topoSortPrompts(
     }
   }
 
-  // Kahn's algorithm on the prompt-only graph.
+  // Kahn on the collapsed prompt-only graph — shared core (DRY with the
+  // generic ClassicMode topoSort).
+  return kahnSort(promptIds, promptAdj);
+}
+
+/**
+ * Kahn's algorithm over a prebuilt adjacency map. Shared core behind both
+ * {@link topoSortPrompts} (SmartMode, prompt-only collapsed graph) and
+ * {@link topoSort} (ClassicMode, all node ids).
+ *
+ * Tie-break is alphabetical — the initial `queue.sort()` plus sorted-position
+ * insertion on each indegree-zero release — so the output order is
+ * deterministic across runs. Any node that never reaches indegree zero (i.e.
+ * sits in a cycle) lands in `cyclic` instead of `order`.
+ *
+ * NOTE: this is a byte-for-byte extraction of SmartMode's original loop. Do
+ * not "tidy" the tie-break — SmartMode run order depends on it exactly.
+ */
+function kahnSort(ids: Iterable<string>, adj: Map<string, Set<string>>): TopoResult {
+  const idList = [...ids];
   const indegree = new Map<string, number>();
-  for (const p of promptIds) indegree.set(p, 0);
-  for (const [, outs] of promptAdj) {
+  for (const id of idList) indegree.set(id, 0);
+  for (const [, outs] of adj) {
     for (const t of outs) indegree.set(t, (indegree.get(t) ?? 0) + 1);
   }
 
   const queue: string[] = [];
-  for (const [p, deg] of indegree) {
-    if (deg === 0) queue.push(p);
+  for (const [id, deg] of indegree) {
+    if (deg === 0) queue.push(id);
   }
   // Stable ordering for deterministic output across runs.
   queue.sort();
@@ -139,7 +158,7 @@ export function topoSortPrompts(
   while (queue.length > 0) {
     const next = queue.shift()!;
     order.push(next);
-    for (const downstream of promptAdj.get(next) ?? []) {
+    for (const downstream of adj.get(next) ?? []) {
       const d = (indegree.get(downstream) ?? 0) - 1;
       indegree.set(downstream, d);
       if (d === 0) {
@@ -152,11 +171,37 @@ export function topoSortPrompts(
   }
 
   const cyclic: string[] = [];
-  for (const p of promptIds) {
-    if (!order.includes(p)) cyclic.push(p);
+  for (const id of idList) {
+    if (!order.includes(id)) cyclic.push(id);
   }
 
   return { order, cyclic };
+}
+
+/**
+ * Generic topological sort over ALL node ids (ClassicMode). Unlike
+ * {@link topoSortPrompts} there is no prompt-only collapse — every node id
+ * participates, so a ComfyUI-style heterogeneous DAG (image → llm → comfy →
+ * output) sorts directly.
+ *
+ *   - Edges whose source or target is not in `nodeIds` are ignored.
+ *   - Self-edges (source === target) are skipped — ClassicMode rejects them
+ *     at connect time (`canConnectClassic`), so they never reach here.
+ *   - Nodes in a cycle land in `cyclic`, not `order`.
+ */
+export function topoSort(
+  nodeIds: string[],
+  edges: { source: string; target: string }[],
+): TopoResult {
+  const idSet = new Set(nodeIds);
+  const adj = new Map<string, Set<string>>();
+  for (const id of nodeIds) adj.set(id, new Set());
+  for (const edge of edges) {
+    if (edge.source === edge.target) continue;
+    if (!idSet.has(edge.source) || !idSet.has(edge.target)) continue;
+    adj.get(edge.source)!.add(edge.target);
+  }
+  return kahnSort(idSet, adj);
 }
 
 /**

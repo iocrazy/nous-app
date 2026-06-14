@@ -114,17 +114,26 @@ async def run_nous_workflow(
     agent_id: Optional[str] = None,
     client: Optional[NousCenterClient] = None,
     sleep: SleepFn = asyncio.sleep,
+    max_wait_s_override: Optional[float] = None,
 ) -> CanvasPromptRunResult:
     """Start a nous-center run and poll until terminal.
 
     Returns a ``CanvasPromptRunResult`` — failures are in-band; only
     misconfiguration (``NousCenterNotConfigured``) escapes.
+
+    ``max_wait_s_override`` lets a caller raise the poll ceiling for a slow
+    workflow type (image/video comfy nodes routinely exceed the default
+    ``NOUS_CENTER_MAX_WAIT_S``). When ``None`` the global setting applies.
     """
     nous_client = client or _build_client(settings)
     initial_poll_ms = _read_int(
         settings, "NOUS_CENTER_POLL_MS", DEFAULT_INITIAL_POLL_MS
     )
-    max_wait_s = _read_float(settings, "NOUS_CENTER_MAX_WAIT_S", DEFAULT_MAX_WAIT_S)
+    max_wait_s = (
+        max_wait_s_override
+        if max_wait_s_override is not None
+        else _read_float(settings, "NOUS_CENTER_MAX_WAIT_S", DEFAULT_MAX_WAIT_S)
+    )
 
     metadata = {"agent_id": agent_id} if agent_id else None
     try:

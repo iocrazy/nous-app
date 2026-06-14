@@ -306,6 +306,54 @@ async def test_timeout_returns_in_band_failure():
 
 
 # ============================================================
+# Per-call deadline override (Phase 5a Lane C — long image/video workflows)
+# ============================================================
+
+
+@pytest.mark.asyncio
+async def test_max_wait_override_extends_deadline():
+    # Setting deadline is tiny (would time out after the first poll), but a
+    # per-call override lets a slow image/video workflow run to completion.
+    client = FakeNousClient(
+        status_sequence=[
+            _status("queued"),
+            _status("queued"),
+            _status("completed", text="img"),
+        ],
+    )
+    settings = _settings(NOUS_CENTER_MAX_WAIT_S=0.001, NOUS_CENTER_POLL_MS=1)
+    result = await run_nous_workflow(
+        settings=settings,
+        workflow_slug="comfy-render",
+        prompt="y",
+        client=client,
+        sleep=AsyncMock(),
+        max_wait_s_override=10.0,
+    )
+    assert result.ok is True
+    assert result.text == "img"
+
+
+@pytest.mark.asyncio
+async def test_override_none_falls_back_to_setting():
+    # Without an override the global setting still bounds the wait.
+    client = FakeNousClient(
+        status_sequence=[_status("queued"), _status("queued")],
+    )
+    settings = _settings(NOUS_CENTER_MAX_WAIT_S=0.001, NOUS_CENTER_POLL_MS=1)
+    result = await run_nous_workflow(
+        settings=settings,
+        workflow_slug="x",
+        prompt="y",
+        client=client,
+        sleep=AsyncMock(),
+        max_wait_s_override=None,
+    )
+    assert result.ok is False
+    assert "timed out" in (result.error or "")
+
+
+# ============================================================
 # Misconfiguration
 # ============================================================
 

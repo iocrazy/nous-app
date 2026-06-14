@@ -34,6 +34,10 @@ from app.schemas.canvas_run import CanvasPromptRunResult
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "qwen-plus"
+# nous-routed runs are always workflow nodes (comfy/image/video) that can run
+# minutes — well past the default chat-style NOUS_CENTER_MAX_WAIT_S. Lift the
+# poll ceiling for this path; override via NOUS_CENTER_MAX_WAIT_S_WORKFLOW.
+DEFAULT_WORKFLOW_MAX_WAIT_S = 600.0
 SYSTEM_MESSAGE = (
     "You are a smart-canvas prompt runner. The user gave you a single "
     "creative prompt; reply with the rendered content directly, no "
@@ -160,11 +164,21 @@ class CanvasRunService:
 
         try:
             settings = await self._get_settings()
+            raw_ceiling = getattr(settings, "NOUS_CENTER_MAX_WAIT_S_WORKFLOW", None)
+            try:
+                workflow_ceiling = (
+                    float(raw_ceiling)
+                    if raw_ceiling is not None
+                    else DEFAULT_WORKFLOW_MAX_WAIT_S
+                )
+            except (TypeError, ValueError):
+                workflow_ceiling = DEFAULT_WORKFLOW_MAX_WAIT_S
             return await run_nous_workflow(
                 settings=settings,
                 workflow_slug=workflow_slug,
                 prompt=body,
                 agent_id=agent_id,
+                max_wait_s_override=workflow_ceiling,
             )
         except NousCenterNotConfigured as exc:
             return CanvasPromptRunResult(ok=False, text="", error=str(exc))
