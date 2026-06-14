@@ -19,6 +19,7 @@ import { ClassicRunBar } from '../classic/ui/ClassicRunBar';
 import { CommandPalette } from '../palette/CommandPalette';
 import { CanvasComposer } from '../smart/CanvasComposer';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
+import { useCanvasRealtime } from '../realtime/useCanvasRealtime';
 import { CanvasConflictDialog } from './CanvasConflictDialog';
 import { CanvasSurface } from './CanvasSurface';
 import { useCanvasShortcuts } from './useCanvasShortcuts';
@@ -42,6 +43,12 @@ export default function CanvasPage() {
     enabled: loadStatus === 'ready',
     onOpenPalette: () => setPaletteOpen(true),
   });
+
+  // Phase 6a — cross-tab / cross-user realtime invalidation.
+  // When another session saves a newer revision, applyRemoteUpdate in the
+  // store either rebases (clean local state) or surfaces a conflict (dirty
+  // edits) without clobbering. canvasId is null before params resolve.
+  useCanvasRealtime(canvasId);
 
   useEffect(() => {
     if (!canvasId) return;
