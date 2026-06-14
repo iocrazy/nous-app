@@ -29,6 +29,8 @@ from app.schemas.canvas import (
 from app.schemas.canvas_run import (
     CanvasPromptRunRequest,
     CanvasPromptRunResponse,
+    ClassicNodeRunRequest,
+    ClassicNodeRunResponse,
 )
 from app.services.canvas import CanvasConflict, CanvasService
 from app.services.canvas.canvas_run_service import CanvasRunService
@@ -182,6 +184,39 @@ async def run_canvas_prompt(
         agent_id=payload.agent_id,
     )
     body = CanvasPromptRunResponse(ok=result.ok, text=result.text, error=result.error)
+    return {"success": True, "data": body.model_dump(mode="json")}
+
+
+@router.post("/canvases/runs/classic-node")
+async def run_classic_node(
+    auth: AuthDep,
+    payload: ClassicNodeRunRequest,
+) -> dict:
+    """Execute one ClassicMode node run (server-resolved route).
+
+    The cascade hands the node here instead of guessing a provider_slug
+    client-side. The run service resolves the route (llm/comfy provider,
+    image_gen op, or in-band reject) and runs it synchronously. Failure
+    modes are returned in-band via {ok: false, error}; HTTP stays 200 unless
+    gating fails. ``result`` carries structured op output (image_url for
+    image_gen).
+    """
+    project_id = await _gate_canvas_write(payload.canvas_id, auth)
+    svc = CanvasRunService()
+    result = await svc.run_classic_node(
+        node_type=payload.node.type,
+        node={"data": payload.node.data},
+        body=payload.body,
+        agent_id=payload.agent_id,
+        node_id=payload.node.id,
+        project_id=project_id,
+    )
+    body = ClassicNodeRunResponse(
+        ok=result.ok,
+        text=result.text,
+        error=result.error,
+        result=result.result,
+    )
     return {"success": True, "data": body.model_dump(mode="json")}
 
 

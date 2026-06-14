@@ -316,3 +316,121 @@ class TestRunClassicNode:
         assert "frobnicate" in (result.error or "")
         # No silent route to a wrong provider.
         assert adapter.calls == []
+
+
+class TestRunClassicImageGen:
+    """image_gen op (Phase 5a path B): a classic image_gen node calls
+    StoryboardAIService.generate_image directly (NOT a provider_slug) and
+    normalises the dataclass-dict result into ok/text/result.image_url."""
+
+    @staticmethod
+    def _service_with_image(image_service):
+        svc = make_service(FakeAdapter())
+        svc._storyboard_ai_service = lambda: image_service  # type: ignore[assignment]
+        return svc
+
+    @pytest.mark.asyncio
+    async def test_image_gen_calls_generate_image_with_node_data_params(self):
+        gen = AsyncMock(
+            return_value={
+                "image_url": "https://cdn/out.png",
+                "width": 1024,
+                "height": 576,
+                "provider": "doubao",
+                "model": "seedream",
+            }
+        )
+        image_service = SimpleNamespace(generate_image=gen)
+        svc = self._service_with_image(image_service)
+
+        result = await svc.run_classic_node(
+            node_type="image_gen",
+            node={
+                "data": {
+                    "prompt": "a neon city",
+                    "model": "seedream",
+                    "provider_name": "doubao",
+                    "aspect_ratio": "16:9",
+                    "reference_image_url": "https://cdn/ref.png",
+                    "character_ids": ["c1", "c2"],
+                }
+            },
+            body="ignored upstream body",
+            node_id="node-42",
+            project_id="proj-7",
+        )
+
+        assert result.ok is True
+        assert result.result is not None
+        assert result.result["image_url"] == "https://cdn/out.png"
+        # text mirrors the url so plain-text cascade consumers still get content.
+        assert result.text == "https://cdn/out.png"
+        assert result.error is None
+
+        gen.assert_awaited_once()
+        kwargs = gen.await_args.kwargs
+        assert kwargs["prompt"] == "a neon city"  # from node data, not body
+        assert kwargs["model"] == "seedream"
+        assert kwargs["provider_name"] == "doubao"
+        assert kwargs["aspect_ratio"] == "16:9"
+        assert kwargs["reference_image_url"] == "https://cdn/ref.png"
+        assert kwargs["character_ids"] == ["c1", "c2"]
+        assert kwargs["node_id"] == "node-42"
+        assert kwargs["project_id"] == "proj-7"
+
+    @pytest.mark.asyncio
+    async def test_image_gen_prompt_falls_back_to_body(self):
+        gen = AsyncMock(return_value={"image_url": "https://cdn/x.png"})
+        svc = self._service_with_image(SimpleNamespace(generate_image=gen))
+
+        result = await svc.run_classic_node(
+            node_type="image_gen",
+            node={"data": {"provider_name": "doubao", "model": "m"}},
+            body="prompt from upstream",
+        )
+        assert result.ok is True
+        assert gen.await_args.kwargs["prompt"] == "prompt from upstream"
+        # default aspect ratio applied when node data omits it
+        assert gen.await_args.kwargs["aspect_ratio"] == "16:9"
+
+    @pytest.mark.asyncio
+    async def test_image_gen_missing_prompt_fails_without_calling_service(self):
+        gen = AsyncMock()
+        svc = self._service_with_image(SimpleNamespace(generate_image=gen))
+
+        result = await svc.run_classic_node(
+            node_type="image_gen",
+            node={"data": {"provider_name": "doubao", "model": "m"}},
+            body="   ",
+        )
+        assert result.ok is False
+        assert "prompt" in (result.error or "").lower()
+        gen.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_image_gen_provider_raises_returns_in_band_error(self):
+        gen = AsyncMock(side_effect=RuntimeError("provider exploded"))
+        svc = self._service_with_image(SimpleNamespace(generate_image=gen))
+
+        result = await svc.run_classic_node(
+            node_type="image_gen",
+            node={"data": {"prompt": "x", "provider_name": "doubao", "model": "m"}},
+            body="x",
+        )
+        assert result.ok is False
+        assert result.text == ""
+        assert "provider exploded" in (result.error or "")
+        assert result.result is None
+
+    @pytest.mark.asyncio
+    async def test_image_gen_empty_url_result_fails_in_band(self):
+        gen = AsyncMock(return_value={"image_url": "", "width": 10})
+        svc = self._service_with_image(SimpleNamespace(generate_image=gen))
+
+        result = await svc.run_classic_node(
+            node_type="image_gen",
+            node={"data": {"prompt": "x", "provider_name": "doubao", "model": "m"}},
+            body="x",
+        )
+        assert result.ok is False
+        assert "image_url" in (result.error or "")

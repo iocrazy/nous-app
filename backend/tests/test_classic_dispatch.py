@@ -6,7 +6,9 @@ from __future__ import annotations
 import pytest
 
 from app.services.canvas.classic_dispatch import (
+    OP_IMAGE_GEN,
     ClassicDispatchError,
+    resolve_classic_dispatch,
     resolve_provider_slug,
 )
 
@@ -75,3 +77,54 @@ class TestNoMapping:
     def test_missing_type_raises(self):
         with pytest.raises(ClassicDispatchError):
             resolve_provider_slug(None, {})
+
+
+class TestResolveClassicDispatch:
+    """The server-side route resolver (Phase 5a path B). image_gen → op kind;
+    llm/comfy → provider kind delegating to resolve_provider_slug; unknown /
+    literal-sink / missing → raise (never a silent route)."""
+
+    def test_image_gen_returns_op_kind(self):
+        dispatch = resolve_classic_dispatch("image_gen", {"data": {"prompt": "x"}})
+        assert dispatch.kind == "op"
+        assert dispatch.op == OP_IMAGE_GEN
+        # An op is NOT a provider_slug.
+        assert dispatch.provider_slug is None
+
+    def test_image_gen_needs_no_data_to_resolve(self):
+        # Param validation is the run handler's job, not the resolver's.
+        dispatch = resolve_classic_dispatch("image_gen", None)
+        assert dispatch.kind == "op"
+        assert dispatch.op == OP_IMAGE_GEN
+
+    def test_comfy_returns_provider_kind_with_nous_slug(self):
+        dispatch = resolve_classic_dispatch(
+            "comfy", {"data": {"workflow_slug": "render-xl"}}
+        )
+        assert dispatch.kind == "provider"
+        assert dispatch.provider_slug == "nous/render-xl"
+        assert dispatch.op is None
+
+    def test_llm_returns_provider_kind_with_model(self):
+        dispatch = resolve_classic_dispatch("llm", {"model": "qwen-plus"})
+        assert dispatch.kind == "provider"
+        assert dispatch.provider_slug == "qwen-plus"
+
+    def test_llm_without_override_returns_provider_kind_none_slug(self):
+        dispatch = resolve_classic_dispatch("llm", {"data": {}})
+        assert dispatch.kind == "provider"
+        assert dispatch.provider_slug is None
+
+    def test_unknown_type_raises(self):
+        with pytest.raises(ClassicDispatchError) as exc:
+            resolve_classic_dispatch("frobnicate", {})
+        assert "frobnicate" in str(exc.value)
+
+    @pytest.mark.parametrize("literal_type", ["image", "prompt", "output"])
+    def test_literal_sink_types_raise(self, literal_type):
+        with pytest.raises(ClassicDispatchError):
+            resolve_classic_dispatch(literal_type, {})
+
+    def test_missing_type_raises(self):
+        with pytest.raises(ClassicDispatchError):
+            resolve_classic_dispatch(None, {})

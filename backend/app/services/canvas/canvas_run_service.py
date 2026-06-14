@@ -31,8 +31,9 @@ from uuid import UUID
 
 from app.schemas.canvas_run import CanvasPromptRunResult
 from app.services.canvas.classic_dispatch import (
+    OP_IMAGE_GEN,
     ClassicDispatchError,
-    resolve_provider_slug,
+    resolve_classic_dispatch,
 )
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,64 @@ def _compose_system_message(agent_id: Optional[str]) -> str:
     if agent_id:
         return f"{SYSTEM_MESSAGE}\n\n[Acting under agent {agent_id}]"
     return SYSTEM_MESSAGE
+
+
+# Data-payload keys (snake + camel) for image_gen params. The node's domain
+# payload nests under ``data`` in a React Flow node; we also accept a flat dict.
+_IMAGE_GEN_PROMPT_KEYS = ("prompt",)
+_IMAGE_GEN_MODEL_KEYS = ("model",)
+_IMAGE_GEN_PROVIDER_KEYS = ("provider_name", "providerName", "provider")
+_IMAGE_GEN_ASPECT_KEYS = ("aspect_ratio", "aspectRatio")
+_IMAGE_GEN_REFERENCE_KEYS = ("reference_image_url", "referenceImageUrl")
+_IMAGE_GEN_CHARACTER_KEYS = ("character_ids", "characterIds")
+_DEFAULT_ASPECT_RATIO = "16:9"
+
+
+def _image_gen_data(node: Optional[Mapping[str, Any]]) -> Mapping[str, Any]:
+    """Pull the domain payload off a node — nested ``data`` or flat dict."""
+    if not isinstance(node, Mapping):
+        return {}
+    data = node.get("data")
+    if isinstance(data, Mapping):
+        return data
+    return node
+
+
+def _first_str(data: Mapping[str, Any], keys: tuple[str, ...]) -> Optional[str]:
+    for key in keys:
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _extract_image_gen_params(node: Optional[Mapping[str, Any]]) -> dict:
+    """Normalise image_gen params out of a node payload.
+
+    Returns a dict with: prompt (str), model (str), provider_name (str),
+    aspect_ratio (str), reference_image_url (Optional[str]),
+    character_ids (Optional[list[str]]). Missing string params come back as
+    "" so the caller's clear-error checks (and generate_image's own provider
+    lookup) fire predictably.
+    """
+    data = _image_gen_data(node)
+
+    character_ids: Optional[List[str]] = None
+    for key in _IMAGE_GEN_CHARACTER_KEYS:
+        value = data.get(key)
+        if isinstance(value, (list, tuple)):
+            character_ids = [str(c) for c in value if c]
+            break
+
+    return {
+        "prompt": _first_str(data, _IMAGE_GEN_PROMPT_KEYS) or "",
+        "model": _first_str(data, _IMAGE_GEN_MODEL_KEYS) or "",
+        "provider_name": _first_str(data, _IMAGE_GEN_PROVIDER_KEYS) or "",
+        "aspect_ratio": _first_str(data, _IMAGE_GEN_ASPECT_KEYS)
+        or _DEFAULT_ASPECT_RATIO,
+        "reference_image_url": _first_str(data, _IMAGE_GEN_REFERENCE_KEYS),
+        "character_ids": character_ids,
+    }
 
 
 class CanvasRunService:
@@ -143,27 +202,130 @@ class CanvasRunService:
         node: Optional[Mapping[str, Any]] = None,
         body: str,
         agent_id: Optional[str] = None,
+        node_id: Optional[str] = None,
+        project_id: Optional[str] = None,
     ) -> CanvasPromptRunResult:
-        """Resolve a classic node's provider_slug from its type + data, then
-        dispatch through the existing synchronous run path.
+        """Resolve a classic node to its route (provider vs op) and run it
+        synchronously, returning the in-band ok/text/result/error envelope.
 
-        A ``comfy`` node resolves to ``nous/<workflow_slug>`` and reuses the
-        ``nous/`` route (which block-polls ``run_nous_workflow`` to a terminal
-        state) — single-synchronous, no DBOS workflow. An ``llm`` node resolves
-        to its model slug and reuses the bare-model adapter path. Unknown /
-        non-runnable node types fail in-band (ok=False) without dispatching, so
-        we never silently route to the wrong provider.
+        Routes:
+          - ``llm``       → bare-model adapter path (``run_prompt``), unchanged.
+          - ``comfy``     → ``nous/<workflow_slug>`` route (block-polls
+            ``run_nous_workflow`` to terminal), unchanged.
+          - ``image_gen`` → direct ``StoryboardAIService.generate_image`` call
+            (Phase 5a path B). ``result.image_url`` carries the output.
+          - unknown / literal-sink / missing → ok=False in-band, no dispatch
+            (never a silent wrong route).
+
+        ``node_id`` / ``project_id`` are only consumed by op handlers
+        (image_gen passes them to ``generate_image`` for logging + style
+        lookup); the provider paths ignore them. Single-synchronous throughout
+        — no DBOS workflow is created here.
+
+        NEXT TASK: split / video_gen add one ``op`` branch apiece below.
         """
         try:
-            provider_slug = resolve_provider_slug(node_type, node)
+            dispatch = resolve_classic_dispatch(node_type, node)
         except ClassicDispatchError as exc:
             logger.info("canvas classic dispatch rejected: %s", exc)
             return CanvasPromptRunResult(ok=False, text="", error=str(exc))
 
+        if dispatch.kind == "op":
+            if dispatch.op == OP_IMAGE_GEN:
+                return await self._run_image_gen(
+                    node=node,
+                    body=body,
+                    node_id=node_id,
+                    project_id=project_id,
+                )
+            # split / video_gen ops slot in here (next task).
+            return CanvasPromptRunResult(
+                ok=False,
+                text="",
+                error=f"classic op '{dispatch.op}' is not implemented yet",
+            )
+
         return await self.run_prompt(
             body=body,
-            provider_slug=provider_slug,
+            provider_slug=dispatch.provider_slug,
             agent_id=agent_id,
+        )
+
+    # ------------------------------------------------------------------
+    # image_gen op (Phase 5a path B)
+    # ------------------------------------------------------------------
+
+    def _storyboard_ai_service(self):
+        """Construct the storyboard AI service (seam for tests to patch).
+
+        Lazy import keeps unit tests that never touch image_gen cheap and
+        avoids dragging the storyboard repo/provider stack into module load.
+        """
+        from app.services.storyboard.storyboard_ai_service import StoryboardAIService
+
+        return StoryboardAIService()
+
+    async def _run_image_gen(
+        self,
+        *,
+        node: Optional[Mapping[str, Any]],
+        body: str,
+        node_id: Optional[str],
+        project_id: Optional[str],
+    ) -> CanvasPromptRunResult:
+        """Run an image_gen node: prompt → image via ``generate_image``.
+
+        Params come from the node's ``data`` (prompt falls back to the run
+        ``body`` since in a real graph the prompt arrives from an upstream
+        node). Reuses the run service's context — there is no DB session to
+        thread; ``generate_image`` looks up its own project style fragment by
+        ``project_id`` (best-effort, returns empty when absent). The dataclass
+        result is normalised into the shared envelope with ``result.image_url``.
+
+        Any failure (missing prompt, unregistered provider, provider raises) is
+        returned in-band as ok=False with a clear ``error`` — never silent.
+        """
+        params = _extract_image_gen_params(node)
+        prompt = params["prompt"] or (body or "").strip()
+        if not prompt:
+            return CanvasPromptRunResult(
+                ok=False,
+                text="",
+                error="image_gen node is missing a prompt",
+            )
+
+        try:
+            service = self._storyboard_ai_service()
+            raw = await service.generate_image(
+                project_id=str(project_id) if project_id is not None else "",
+                node_id=str(node_id) if node_id is not None else "",
+                prompt=prompt,
+                model=params["model"],
+                provider_name=params["provider_name"],
+                character_ids=params["character_ids"],
+                reference_image_url=params["reference_image_url"],
+                aspect_ratio=params["aspect_ratio"],
+            )
+        except Exception as exc:
+            logger.exception("canvas image_gen failed for node %s", node_id)
+            return CanvasPromptRunResult(
+                ok=False, text="", error=f"image generation failed: {exc}"
+            )
+
+        result = dict(raw) if isinstance(raw, Mapping) else {}
+        image_url = result.get("image_url")
+        if not image_url:
+            return CanvasPromptRunResult(
+                ok=False,
+                text="",
+                error="image generation returned no image_url",
+            )
+
+        return CanvasPromptRunResult(
+            ok=True,
+            text=str(image_url),
+            error=None,
+            result=result,
         )
 
     @staticmethod
