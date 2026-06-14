@@ -23,6 +23,11 @@ import { topoSort } from '../smart/topology';
 import type { CanvasConnection, CanvasNode } from '../types';
 import { beginAbortable, clearAbortController } from './abortRegistry';
 import { dispatchClassicNode } from './classicDispatch';
+import {
+  buildEffectiveData,
+  type IncomingWire,
+  type RecordedOutput,
+} from './dataPiping';
 import { getClassicNodeDefinition } from './registry';
 import type { ClassicRunStatus } from './nodes/ClassicNodeShell';
 import type { ClassicRunner } from './classicRunner';
@@ -84,6 +89,42 @@ function readEdge(conn: CanvasConnection): { source: string; target: string } | 
   const obj = conn as Record<string, unknown>;
   if (typeof obj.source !== 'string' || typeof obj.target !== 'string') return null;
   return { source: obj.source, target: obj.target };
+}
+
+/** A directed edge enriched with the typed-port handle ids the wire connects.
+ *  Handles are `null` when absent (e.g. legacy single-handle wires) — piping
+ *  then resolves to no value for that wire. */
+interface FullEdge {
+  source: string;
+  target: string;
+  sourceHandle: string | null;
+  targetHandle: string | null;
+}
+
+function readEdgeFull(conn: CanvasConnection): FullEdge | null {
+  const obj = conn as Record<string, unknown>;
+  if (typeof obj.source !== 'string' || typeof obj.target !== 'string') return null;
+  return {
+    source: obj.source,
+    target: obj.target,
+    sourceHandle: typeof obj.sourceHandle === 'string' ? obj.sourceHandle : null,
+    targetHandle: typeof obj.targetHandle === 'string' ? obj.targetHandle : null,
+  };
+}
+
+/** Build the incoming wires per target node (target id → wires), preserving
+ *  edge order so multi-edge-into-one-input is deterministic (last wins). */
+function buildIncomingWires(edges: FullEdge[]): Map<string, IncomingWire[]> {
+  const incoming = new Map<string, IncomingWire[]>();
+  for (const e of edges) {
+    if (!incoming.has(e.target)) incoming.set(e.target, []);
+    incoming.get(e.target)!.push({
+      sourceId: e.source,
+      sourceHandle: e.sourceHandle,
+      targetHandle: e.targetHandle,
+    });
+  }
+  return incoming;
 }
 
 /** Build the forward adjacency (source → targets) over node ids. */
@@ -163,6 +204,18 @@ export async function runClassicCascade(
     .filter((e): e is { source: string; target: string } => e !== null);
   const forward = buildForwardAdjacency(edges);
 
+  // Handle-aware edges drive DATA PIPING: an upstream output flows into the
+  // wired downstream input. `incoming` maps each target to its incoming wires.
+  const fullEdges = connections
+    .map(readEdgeFull)
+    .filter((e): e is FullEdge => e !== null);
+  const incomingWires = buildIncomingWires(fullEdges);
+
+  // Recorded node outputs, populated AS WE GO in topo order so a downstream
+  // node can read what its upstreams emitted. Sources record their `data`;
+  // runnables record their `run_result` after they finish.
+  const outputs = new Map<string, RecordedOutput>();
+
   const { order } = topoSort(nodeIds, edges);
 
   const report: CascadeReport = {
@@ -206,7 +259,15 @@ export async function runClassicCascade(
     const dispatch = dispatchClassicNode(nodeType);
 
     if (dispatch.kind === 'passive') {
-      // Literal/sink node — not an execution step. Pass through silently.
+      // Literal/sink node — not an execution step. Pass through silently, but
+      // RECORD its data so a downstream node can read a passive SOURCE node's
+      // output (prompt/text/image). Sinks (output/preview/note/group) record
+      // too but emit nothing — `nodeOutputValue` returns undefined for them.
+      outputs.set(nodeId, {
+        nodeType,
+        data: readData(node),
+        runResult: null,
+      });
       report.skipped.push(nodeId);
       continue;
     }
@@ -238,6 +299,19 @@ export async function runClassicCascade(
       run_error: null,
     });
 
+    // DATA PIPING: fold each incoming wire's upstream output into a per-run
+    // copy of this node's data. A connected input OVERRIDES the node's own
+    // widget value (ComfyUI semantics). The persisted node `data` is NOT
+    // mutated — only this effective copy is handed to the runner. `body` and
+    // `agent_id` derive from the effective data so a piped `prompt` reaches
+    // the llm/comfy body seam.
+    const effectiveData = buildEffectiveData(
+      nodeType,
+      readData(node),
+      incomingWires.get(nodeId) ?? [],
+      outputs,
+    );
+
     const controller = beginAbortable(nodeId);
     let result: Awaited<ReturnType<ClassicRunner>>;
     try {
@@ -245,9 +319,9 @@ export async function runClassicCascade(
         {
           nodeId,
           nodeType,
-          data: readData(node),
-          body: readBody(node),
-          agentId: readAgentId(node),
+          data: effectiveData,
+          body: readBodyFromData(effectiveData),
+          agentId: readAgentIdFromData(effectiveData),
         },
         controller.signal,
       );
@@ -264,10 +338,25 @@ export async function runClassicCascade(
 
     if (result.ok) {
       report.succeeded.push(nodeId);
+      // Normalize the structured output. A runnable with a structured result
+      // (image_gen → {image_url}, video_gen → {video_url}) uses it directly;
+      // a plain-text runnable (llm) returns its text at the TOP level with
+      // `result === null`, so fold that text into `{ text }` — otherwise the
+      // llm output is lost to both downstream piping (nodeOutputValue reads
+      // run_result.text) and the inline result display.
+      const runResult: Record<string, unknown> | null =
+        result.result ?? (result.text ? { text: result.text } : null);
+      // Record the run_result so downstream nodes can pipe from this node's
+      // output (e.g. image_gen.image_url → video_gen.source_image_url).
+      outputs.set(nodeId, {
+        nodeType,
+        data: effectiveData,
+        runResult,
+      });
       handlers.onNodePatch(nodeId, {
         run_status: 'succeeded',
         run_error: null,
-        run_result: result.result ?? null,
+        run_result: runResult,
       });
     } else {
       containFailure(nodeId, node, nodeType, result.error ?? 'run failed');
@@ -277,8 +366,10 @@ export async function runClassicCascade(
   return report;
 }
 
-function readBody(node: CanvasNode): string {
-  const data = readData(node);
+/** Derive the run body from a node's EFFECTIVE data: `body || prompt || text`.
+ *  A piped `prompt` (folded in by `buildEffectiveData`) reaches the llm/comfy
+ *  body seam through this. */
+function readBodyFromData(data: Record<string, unknown>): string {
   for (const key of ['body', 'prompt', 'text']) {
     const v = data[key];
     if (typeof v === 'string') return v;
@@ -286,8 +377,7 @@ function readBody(node: CanvasNode): string {
   return '';
 }
 
-function readAgentId(node: CanvasNode): string | null {
-  const data = readData(node);
+function readAgentIdFromData(data: Record<string, unknown>): string | null {
   const v = data.agent_id ?? data.agentId;
   return typeof v === 'string' ? v : null;
 }

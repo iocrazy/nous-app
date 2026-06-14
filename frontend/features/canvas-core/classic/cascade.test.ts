@@ -29,6 +29,16 @@ function edge(source: string, target: string): CanvasConnection {
   return { id: `${source}->${target}`, source, target };
 }
 
+/** A handle-aware wire — drives DATA PIPING (source output → target input). */
+function wire(
+  source: string,
+  sourceHandle: string,
+  target: string,
+  targetHandle: string,
+): CanvasConnection {
+  return { id: `${source}.${sourceHandle}->${target}.${targetHandle}`, source, target, sourceHandle, targetHandle };
+}
+
 // ---- recording handlers ---------------------------------------------------
 
 interface Patch {
@@ -380,6 +390,161 @@ describe('runClassicCascade — readBody derives the run body from data.prompt',
     await runClassicCascade(nodes, [], runner, r.handlers);
 
     expect(seenBody).toBe('from-body');
+  });
+});
+
+describe('runClassicCascade — DATA PIPING (upstream output → downstream input)', () => {
+  it('pipes a prompt source value into a downstream image_gen prompt param', async () => {
+    // image_gen has NO own prompt; the connected prompt node supplies it.
+    const nodes = [node('P', 'prompt', { prompt: 'hi' }), node('G', 'image_gen')];
+    const conns = [wire('P', 'prompt-out', 'G', 'prompt-in')];
+    let seenData: Record<string, unknown> | undefined;
+    const runner: ClassicRunner = async (ctx) => {
+      seenData = ctx.data;
+      return { ok: true, text: '', error: null, result: { image_url: 'x.png' } };
+    };
+    const r = recorder();
+    await runClassicCascade(nodes, conns, runner, r.handlers);
+
+    expect(seenData!.prompt).toBe('hi');
+  });
+
+  it('a connected input OVERRIDES the node own widget value (ComfyUI precedence)', async () => {
+    const nodes = [
+      node('P', 'prompt', { prompt: 'piped' }),
+      node('G', 'image_gen', { prompt: 'own' }),
+    ];
+    const conns = [wire('P', 'prompt-out', 'G', 'prompt-in')];
+    let seenData: Record<string, unknown> | undefined;
+    const runner: ClassicRunner = async (ctx) => {
+      seenData = ctx.data;
+      return { ok: true, text: '', error: null };
+    };
+    const r = recorder();
+    await runClassicCascade(nodes, conns, runner, r.handlers);
+
+    expect(seenData!.prompt).toBe('piped');
+  });
+
+  it('does NOT mutate the persisted node data in place', async () => {
+    const gNode = node('G', 'image_gen', { prompt: 'own' });
+    const nodes = [node('P', 'prompt', { prompt: 'piped' }), gNode];
+    const conns = [wire('P', 'prompt-out', 'G', 'prompt-in')];
+    const runner: ClassicRunner = async () => ({ ok: true, text: '', error: null });
+    const r = recorder();
+    await runClassicCascade(nodes, conns, runner, r.handlers);
+
+    // The store node's own data is untouched — piping built a per-run copy.
+    expect((gNode.data as Record<string, unknown>).prompt).toBe('own');
+  });
+
+  it('pipes an image_gen run_result image_url into video_gen source_image_url', async () => {
+    const nodes = [node('G', 'image_gen', { prompt: 'a cat' }), node('V', 'video_gen')];
+    const conns = [wire('G', 'image-out', 'V', 'image-in')];
+    const seen: Record<string, Record<string, unknown>> = {};
+    const runner: ClassicRunner = async (ctx) => {
+      seen[ctx.nodeId] = ctx.data;
+      return ctx.nodeId === 'G'
+        ? { ok: true, text: '', error: null, result: { image_url: 'gen.png' } }
+        : { ok: true, text: '', error: null, result: { video_url: 'v.mp4' } };
+    };
+    const r = recorder();
+    const report = await runClassicCascade(nodes, conns, runner, r.handlers);
+
+    expect(report.succeeded).toEqual(['G', 'V']); // topo order: producer first
+    expect(seen.V.source_image_url).toBe('gen.png');
+  });
+
+  it('folds an llm top-level text result into run_result so it pipes downstream', async () => {
+    // llm returns its text at the TOP level with result===null; it must still
+    // surface as run_result.text so a downstream node (and the inline display)
+    // can read it.
+    const nodes = [node('L', 'llm', { prompt: 'expand: dragon' }), node('G', 'image_gen')];
+    const conns = [wire('L', 'text-out', 'G', 'prompt-in')];
+    const seen: Record<string, Record<string, unknown>> = {};
+    const runner: ClassicRunner = async (ctx) => {
+      seen[ctx.nodeId] = ctx.data;
+      return ctx.nodeId === 'L'
+        ? { ok: true, text: 'a fierce red dragon', error: null, result: null }
+        : { ok: true, text: '', error: null, result: { image_url: 'gen.png' } };
+    };
+    const r = recorder();
+    const report = await runClassicCascade(nodes, conns, runner, r.handlers);
+
+    expect(report.succeeded).toEqual(['L', 'G']);
+    expect(seen.G.prompt).toBe('a fierce red dragon'); // null result → {text} → piped
+  });
+
+  it('image_gen → preview (passive sink) does not crash and skips the sink', async () => {
+    const nodes = [node('G', 'image_gen', { prompt: 'a cat' }), node('V', 'preview')];
+    const conns = [wire('G', 'image-out', 'V', 'image-in')];
+    const ran: string[] = [];
+    const runner: ClassicRunner = async (ctx) => {
+      ran.push(ctx.nodeId);
+      return { ok: true, text: '', error: null, result: { image_url: 'gen.png' } };
+    };
+    const r = recorder();
+    const report = await runClassicCascade(nodes, conns, runner, r.handlers);
+
+    expect(ran).toEqual(['G']); // preview never dispatched
+    expect(report.succeeded).toEqual(['G']);
+    expect(report.skipped).toContain('V');
+    expect(report.failed).toEqual([]);
+  });
+
+  it('a piped prompt reaches the llm body derivation (data.prompt → ctx.body)', async () => {
+    // The llm has no own prompt/body; a connected prompt node supplies it, and
+    // readBody derivation (body||prompt||text) must pick the piped prompt up.
+    const nodes = [node('P', 'prompt', { prompt: 'write a poem' }), node('L', 'llm')];
+    const conns = [wire('P', 'prompt-out', 'L', 'prompt-in')];
+    let seenBody: string | undefined;
+    const runner: ClassicRunner = async (ctx) => {
+      seenBody = ctx.body;
+      return { ok: true, text: 'ok', error: null, result: { text: 'a poem' } };
+    };
+    const r = recorder();
+    await runClassicCascade(nodes, conns, runner, r.handlers);
+
+    expect(seenBody).toBe('write a poem');
+  });
+
+  it('a piped prompt reaches the comfy body derivation as well', async () => {
+    const nodes = [node('P', 'prompt', { prompt: 'render this' }), node('C', 'comfy')];
+    const conns = [wire('P', 'prompt-out', 'C', 'prompt-in')];
+    let seenBody: string | undefined;
+    const runner: ClassicRunner = async (ctx) => {
+      seenBody = ctx.body;
+      return { ok: true, text: '', error: null, result: { image_url: 'c.png' } };
+    };
+    const r = recorder();
+    await runClassicCascade(nodes, conns, runner, r.handlers);
+
+    expect(seenBody).toBe('render this');
+  });
+
+  it('chains a text source → llm → image_gen, piping llm text into the image prompt', async () => {
+    const nodes = [
+      node('T', 'text', { text: 'a dragon' }),
+      node('L', 'llm'),
+      node('G', 'image_gen'),
+    ];
+    const conns = [
+      wire('T', 'text-out', 'L', 'text-in'),
+      wire('L', 'text-out', 'G', 'prompt-in'),
+    ];
+    const seen: Record<string, Record<string, unknown>> = {};
+    const runner: ClassicRunner = async (ctx) => {
+      seen[ctx.nodeId] = ctx.data;
+      return ctx.nodeId === 'L'
+        ? { ok: true, text: 'expanded dragon', error: null, result: { text: 'expanded dragon' } }
+        : { ok: true, text: '', error: null, result: { image_url: 'd.png' } };
+    };
+    const r = recorder();
+    const report = await runClassicCascade(nodes, conns, runner, r.handlers);
+
+    expect(report.succeeded).toEqual(['L', 'G']);
+    expect(seen.L.prompt).toBe('a dragon'); // text-in folded into llm prompt
+    expect(seen.G.prompt).toBe('expanded dragon'); // llm output → image prompt
   });
 });
 

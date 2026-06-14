@@ -216,14 +216,19 @@ class CanvasRunService:
         agent_id: Optional[str] = None,
     ) -> CanvasPromptRunResult:
         body = (body or "").strip()
+
+        # Route to nous-center for workflow-style providers FIRST. Many
+        # ComfyUI/nous workflows (comfy/image/video nodes) need no text prompt,
+        # so the empty-body guard must NOT apply to this path — a node with a
+        # valid workflow_slug but empty prompt is legitimate.
+        if provider_slug and provider_slug.startswith("nous/"):
+            return await self._run_via_nous(provider_slug, body, agent_id)
+
+        # Non-nous (text-adapter / llm) path requires a prompt body.
         if not body:
             return CanvasPromptRunResult(
                 ok=False, text="", error="prompt body is empty"
             )
-
-        # Route to nous-center for workflow-style providers.
-        if provider_slug and provider_slug.startswith("nous/"):
-            return await self._run_via_nous(provider_slug, body, agent_id)
 
         model = _resolve_model(provider_slug)
         system_message = _compose_system_message(agent_id)
