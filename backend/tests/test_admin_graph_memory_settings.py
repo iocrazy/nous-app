@@ -53,6 +53,7 @@ def _seed_rows(**over) -> dict[str, str]:
         "graph_extractor_base_url": "",
         "graph_extractor_api_key": "",
         "graph_extractor_model": "",
+        "graph_extractor_structured_output_mode": "json_object",
         "graph_embedder_base_url": "",
         "graph_embedder_api_key": "",
         "graph_embedder_model": "",
@@ -106,6 +107,7 @@ async def test_get_masks_api_keys(monkeypatch, client):
     assert body["enabled"] is True
     assert body["falkordb_host"] == "db-host"
     assert body["extractor_model"] == "Qwen/Qwen2.5"
+    assert body["extractor_structured_output_mode"] == "json_object"
     assert body["extractor_api_key_set"] is True
     assert body["embedder_api_key_set"] is False
     # the raw key must never appear anywhere in the response
@@ -143,6 +145,26 @@ async def test_put_writes_api_key_only_when_provided(monkeypatch, client):
     assert r.status_code == 200
     by_key = dict(repo.updates)
     assert by_key.get("graph_extractor_api_key") == "sk-new"
+
+
+@pytest.mark.asyncio
+async def test_put_writes_structured_output_mode(monkeypatch, client):
+    repo = _FakeRepo(_seed_rows())
+    _install_repo(monkeypatch, repo)
+    r = await client.put(URL, json={"extractor_structured_output_mode": "json_schema"})
+    assert r.status_code == 200
+    by_key = dict(repo.updates)
+    assert by_key.get("graph_extractor_structured_output_mode") == "json_schema"
+
+
+@pytest.mark.asyncio
+async def test_put_rejects_invalid_structured_output_mode(monkeypatch, client):
+    repo = _FakeRepo(_seed_rows())
+    _install_repo(monkeypatch, repo)
+    r = await client.put(URL, json={"extractor_structured_output_mode": "garbage"})
+    assert r.status_code == 422
+    # nothing written on a rejected payload
+    assert repo.updates == []
 
 
 @pytest.mark.asyncio

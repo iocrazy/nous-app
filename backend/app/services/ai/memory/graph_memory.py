@@ -45,6 +45,15 @@ _TRUTHY = {"1", "true", "yes", "on"}
 DEFAULT_FALKORDB_PORT = 6379
 DEFAULT_DATABASE = "mediahub_memory"
 
+# Graphiti's OpenAIGenericClient can drive structured output two ways. json_object
+# (the default here) is provider-robust: the schema is injected into the prompt
+# and the response_format is the simple {"type":"json_object"} that every
+# OpenAI-compatible endpoint accepts. json_schema uses native constrained
+# decoding — better when the provider supports it (real OpenAI), but ModelScope/
+# Qwen returns choices=None for Graphiti's complex nested schema, so it is opt-in.
+STRUCTURED_OUTPUT_MODES = ("json_object", "json_schema")
+DEFAULT_STRUCTURED_OUTPUT_MODE = "json_object"
+
 
 # system_settings key (admin-set, DB) → env-var fallback. Lets the Graphiti
 # gate + extractor/embedder provider be configured from an admin UI instead of
@@ -57,6 +66,10 @@ _SETTINGS_MAP: dict[str, tuple[str, str]] = {
     "extractor_base_url": ("graph_extractor_base_url", "OPENAI_BASE_URL"),
     "extractor_api_key": ("graph_extractor_api_key", "OPENAI_API_KEY"),
     "extractor_model": ("graph_extractor_model", "GRAPH_EXTRACTOR_MODEL"),
+    "extractor_structured_output_mode": (
+        "graph_extractor_structured_output_mode",
+        "GRAPH_EXTRACTOR_STRUCTURED_OUTPUT_MODE",
+    ),
     "embedder_base_url": ("graph_embedder_base_url", "OPENAI_BASE_URL"),
     "embedder_api_key": ("graph_embedder_api_key", "OPENAI_API_KEY"),
     "embedder_model": ("graph_embedder_model", "GRAPH_EMBEDDER_MODEL"),
@@ -95,6 +108,9 @@ class GraphMemoryConfig:
     extractor_base_url: str = ""
     extractor_api_key: str = ""
     extractor_model: str = ""
+    # How the extractor LLM client requests structured output (see
+    # STRUCTURED_OUTPUT_MODES). Defaults to the provider-robust json_object.
+    extractor_structured_output_mode: str = DEFAULT_STRUCTURED_OUTPUT_MODE
     embedder_base_url: str = ""
     embedder_api_key: str = ""
     embedder_model: str = ""
@@ -144,6 +160,13 @@ class GraphMemoryConfig:
         except ValueError:
             port = DEFAULT_FALKORDB_PORT
         database = (await resolve("database")) or DEFAULT_DATABASE
+        mode = (
+            await resolve(
+                "extractor_structured_output_mode", DEFAULT_STRUCTURED_OUTPUT_MODE
+            )
+        ).lower()
+        if mode not in STRUCTURED_OUTPUT_MODES:
+            mode = DEFAULT_STRUCTURED_OUTPUT_MODE
         return cls(
             enabled=enabled,
             falkordb_host=host,
@@ -152,6 +175,7 @@ class GraphMemoryConfig:
             extractor_base_url=await resolve("extractor_base_url"),
             extractor_api_key=await resolve("extractor_api_key"),
             extractor_model=await resolve("extractor_model"),
+            extractor_structured_output_mode=mode,
             embedder_base_url=await resolve("embedder_base_url"),
             embedder_api_key=await resolve("embedder_api_key"),
             embedder_model=await resolve("embedder_model"),
@@ -170,29 +194,43 @@ class GraphFact:
     valid_at: Optional[datetime] = None
 
 
-def _build_llm_and_embedder(config: "GraphMemoryConfig") -> tuple[Any, Any]:
-    """Build explicit Graphiti OpenAI-compatible LLM + embedder from the
-    admin-set config, or ``(None, None)`` to let Graphiti keep its own
-    ``OPENAI_*`` env defaults (when no extractor key is configured).
+def _build_llm_and_embedder(config: "GraphMemoryConfig") -> tuple[Any, Any, Any]:
+    """Build explicit Graphiti OpenAI-compatible ``(llm, embedder, cross_encoder)``
+    from the admin-set config, or ``(None, None, None)`` to let Graphiti keep its
+    own ``OPENAI_*`` env defaults (when no extractor key is configured).
 
     Uses ``OpenAIGenericClient`` (not the strict ``OpenAIClient``) because the
     extractor is typically a non-OpenAI compatible endpoint (ModelScope/Qwen)
-    where the generic structured-output path is the safer fit. Construction is
-    network-free; the AsyncOpenAI client is created lazily-ish but needs a
-    non-empty api_key, which is why we only build when one is set."""
+    where the generic structured-output path is the safer fit; ``json_object`` is
+    the default mode for the same reason (json_schema constrained decoding is
+    rejected by such providers).
+
+    The cross_encoder MUST be built explicitly too: Graphiti's ``__init__``
+    otherwise constructs a default ``OpenAIRerankerClient()`` that reads
+    ``OPENAI_API_KEY`` from the environment — which is absent in prod when the
+    extractor is admin-configured, crashing the whole client build and silently
+    disabling graph memory. Construction is network-free but needs a non-empty
+    api_key, which is why we only build when one is set."""
     if not config.extractor_api_key:
-        return None, None
+        return None, None, None
+    from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
     from graphiti_core.embedder.openai import OpenAIEmbedder, OpenAIEmbedderConfig
     from graphiti_core.llm_client.config import LLMConfig
     from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
 
-    llm = OpenAIGenericClient(
-        config=LLMConfig(
-            base_url=config.extractor_base_url or None,
-            api_key=config.extractor_api_key,
-            model=config.extractor_model or None,
-        )
+    llm_config = LLMConfig(
+        base_url=config.extractor_base_url or None,
+        api_key=config.extractor_api_key,
+        model=config.extractor_model or None,
     )
+    llm = OpenAIGenericClient(
+        config=llm_config,
+        structured_output_mode=config.extractor_structured_output_mode,
+    )
+    # Reranker shares the extractor endpoint/key. It uses logprobs; a provider
+    # without logprobs only degrades search reranking (caught by the safety
+    # contract), it does not break ingestion.
+    cross_encoder = OpenAIRerankerClient(config=llm_config)
     embedder = None
     if config.embedder_api_key:
         ecfg = {
@@ -202,7 +240,7 @@ def _build_llm_and_embedder(config: "GraphMemoryConfig") -> tuple[Any, Any]:
         if config.embedder_model:
             ecfg["embedding_model"] = config.embedder_model
         embedder = OpenAIEmbedder(config=OpenAIEmbedderConfig(**ecfg))
-    return llm, embedder
+    return llm, embedder, cross_encoder
 
 
 @dataclass
@@ -244,12 +282,16 @@ class GraphMemoryService:
                 port=self.config.falkordb_port,
                 database=self.config.falkordb_database,
             )
-            llm_client, embedder = _build_llm_and_embedder(self.config)
+            llm_client, embedder, cross_encoder = _build_llm_and_embedder(self.config)
             kwargs: dict[str, Any] = {"graph_driver": driver}
             if llm_client is not None:
                 kwargs["llm_client"] = llm_client
             if embedder is not None:
                 kwargs["embedder"] = embedder
+            # Pass the cross_encoder whenever we built an explicit llm — keeps
+            # Graphiti from defaulting to the OPENAI_API_KEY-reading reranker.
+            if cross_encoder is not None:
+                kwargs["cross_encoder"] = cross_encoder
             self.graphiti = Graphiti(**kwargs)
             return self.graphiti
         except Exception:  # noqa: BLE001

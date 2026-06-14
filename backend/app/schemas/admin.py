@@ -236,6 +236,7 @@ class GraphMemorySettingsResponse(BaseModel):
     falkordb_database: str = "mediahub_memory"
     extractor_base_url: str = ""
     extractor_model: str = ""
+    extractor_structured_output_mode: str = "json_object"
     extractor_api_key_set: bool = False
     embedder_base_url: str = ""
     embedder_model: str = ""
@@ -254,6 +255,7 @@ class GraphMemorySettingsUpdate(BaseModel):
     extractor_base_url: Optional[str] = None
     extractor_api_key: Optional[str] = None
     extractor_model: Optional[str] = None
+    extractor_structured_output_mode: Optional[str] = None
     embedder_base_url: Optional[str] = None
     embedder_api_key: Optional[str] = None
     embedder_model: Optional[str] = None

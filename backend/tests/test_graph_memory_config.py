@@ -52,6 +52,32 @@ async def test_db_values_take_precedence_over_env():
 
 
 @pytest.mark.asyncio
+async def test_structured_output_mode_defaults_json_object():
+    # Default is the provider-robust json_object; json_schema is opt-in.
+    cfg = await GraphMemoryConfig.from_settings(reader=_reader({}), env={})
+    assert cfg.extractor_structured_output_mode == "json_object"
+
+
+@pytest.mark.asyncio
+async def test_structured_output_mode_db_override():
+    cfg = await GraphMemoryConfig.from_settings(
+        reader=_reader({"graph_extractor_structured_output_mode": "json_schema"}),
+        env={},
+    )
+    assert cfg.extractor_structured_output_mode == "json_schema"
+
+
+@pytest.mark.asyncio
+async def test_structured_output_mode_invalid_falls_back_json_object():
+    # A typo / unknown value must not break the LLM client; coerce to json_object.
+    cfg = await GraphMemoryConfig.from_settings(
+        reader=_reader({"graph_extractor_structured_output_mode": "garbage"}),
+        env={},
+    )
+    assert cfg.extractor_structured_output_mode == "json_object"
+
+
+@pytest.mark.asyncio
 async def test_env_fallback_when_db_absent():
     cfg = await GraphMemoryConfig.from_settings(
         reader=_reader({}),

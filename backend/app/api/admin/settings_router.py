@@ -13,6 +13,7 @@ from app.schemas.admin import (
     SystemSettingResponse,
     SystemSettingUpdate,
 )
+from app.services.ai.memory.graph_memory import STRUCTURED_OUTPUT_MODES
 from app.utils.admin_helpers import create_audit_log
 
 router = APIRouter()
@@ -29,6 +30,7 @@ _GRAPH_FIELD_TO_KEY = {
     "extractor_base_url": "graph_extractor_base_url",
     "extractor_api_key": "graph_extractor_api_key",
     "extractor_model": "graph_extractor_model",
+    "extractor_structured_output_mode": "graph_extractor_structured_output_mode",
     "embedder_base_url": "graph_embedder_base_url",
     "embedder_api_key": "graph_embedder_api_key",
     "embedder_model": "graph_embedder_model",
@@ -72,6 +74,9 @@ async def _read_graph_settings() -> GraphMemorySettingsResponse:
         falkordb_database=s("falkordb_database") or "mediahub_memory",
         extractor_base_url=s("extractor_base_url"),
         extractor_model=s("extractor_model"),
+        extractor_structured_output_mode=(
+            s("extractor_structured_output_mode") or "json_object"
+        ),
         extractor_api_key_set=bool(s("extractor_api_key").strip()),
         embedder_base_url=s("embedder_base_url"),
         embedder_model=s("embedder_model"),
@@ -96,6 +101,19 @@ async def update_graph_memory_settings(
     bundle — the raw keys never leave the server."""
     repo = get_system_settings_repository()
     data = update.model_dump(exclude_unset=True)
+
+    # Reject an unknown structured-output mode up front (422) — a bad value would
+    # otherwise persist and silently break the extractor LLM client at run time.
+    mode = data.get("extractor_structured_output_mode")
+    if mode is not None and mode not in STRUCTURED_OUTPUT_MODES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "extractor_structured_output_mode must be one of "
+                f"{list(STRUCTURED_OUTPUT_MODES)}"
+            ),
+        )
+
     written: list[str] = []
     for field, key in _GRAPH_FIELD_TO_KEY.items():
         if field not in data or data[field] is None:
