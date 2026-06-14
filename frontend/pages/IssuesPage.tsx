@@ -29,21 +29,25 @@ import {
 } from '../services/issuesService';
 import { useDbosWorkflowStatus } from '../hooks/useDbosWorkflowStatus';
 
+// Tinted status chips — low-alpha semantic hues that read on both themes.
+// Hue meaning matches the canonical text-only scheme in
+// components/Todolist/IssueStatusIcon.tsx (todo=blue, in_progress=amber,
+// in_review=purple, blocked=rose, done=emerald, backlog/cancelled=neutral).
 const STATUS_COLOR: Record<IssueStatus, string> = {
-  backlog: 'bg-gray-200 text-gray-800',
-  todo: 'bg-blue-100 text-blue-800',
-  in_progress: 'bg-amber-100 text-amber-800',
-  in_review: 'bg-purple-100 text-purple-800',
-  blocked: 'bg-red-100 text-red-800',
-  done: 'bg-green-100 text-green-800',
-  cancelled: 'bg-gray-100 text-gray-500',
+  backlog: 'bg-ink-700/60 text-ink-300',
+  todo: 'bg-blue-500/15 text-blue-300 border border-blue-500/30',
+  in_progress: 'bg-amber-500/15 text-amber-300 border border-amber-500/30',
+  in_review: 'bg-purple-500/15 text-purple-300 border border-purple-500/30',
+  blocked: 'bg-rose-500/15 text-rose-300 border border-rose-500/30',
+  done: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30',
+  cancelled: 'bg-ink-700/60 text-ink-400',
 };
 
 const PRIORITY_COLOR = {
-  critical: 'text-red-600',
-  high: 'text-orange-600',
-  medium: 'text-blue-600',
-  low: 'text-gray-500',
+  critical: 'text-rose-400',
+  high: 'text-orange-400',
+  medium: 'text-blue-400',
+  low: 'text-ink-500',
 };
 
 export const IssuesPage: React.FC = () => {
@@ -150,17 +154,17 @@ export const IssuesPage: React.FC = () => {
   return (
     <div className="flex-1 h-full min-h-0 overflow-hidden flex">
       {/* List pane */}
-      <div className="w-96 flex-shrink-0 border-r border-gray-200 flex flex-col">
-        <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+      <div className="w-96 flex-shrink-0 border-r border-line flex flex-col">
+        <div className="px-4 py-3 border-b border-line flex items-center justify-between">
           <h2 className="text-lg font-semibold">Issues</h2>
           <button
-            className="text-sm px-3 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700"
+            className="text-sm px-3 py-1 rounded btn-tint-indigo"
             onClick={() => setShowNewModal(true)}
           >
             + New
           </button>
         </div>
-        <div className="px-4 py-2 border-b border-gray-100 flex flex-wrap gap-1 text-xs">
+        <div className="px-4 py-2 border-b border-line flex flex-wrap gap-1 text-xs">
           <FilterPill
             label="All"
             active={statusFilter === 'all'}
@@ -176,9 +180,9 @@ export const IssuesPage: React.FC = () => {
           ))}
         </div>
         <div className="flex-1 overflow-y-auto">
-          {loading && <div className="p-4 text-sm text-gray-500">Loading…</div>}
+          {loading && <div className="p-4 text-sm text-ink-500">Loading…</div>}
           {!loading && items.length === 0 && (
-            <div className="p-6 text-sm text-gray-500 text-center">
+            <div className="p-6 text-sm text-ink-500 text-center">
               No issues. Click <em>+ New</em> to create one.
             </div>
           )}
@@ -192,7 +196,7 @@ export const IssuesPage: React.FC = () => {
           ))}
         </div>
         {total > items.length && (
-          <div className="p-2 text-xs text-gray-400 text-center border-t">
+          <div className="p-2 text-xs text-ink-500 text-center border-t border-line">
             Showing {items.length} of {total}
           </div>
         )}
@@ -201,17 +205,17 @@ export const IssuesPage: React.FC = () => {
       {/* Detail pane */}
       <div className="flex-1 min-w-0 overflow-y-auto">
         {error && (
-          <div className="m-4 p-3 rounded bg-red-50 text-red-800 text-sm">
+          <div className="m-4 p-3 rounded bg-rose-500/15 text-rose-300 text-sm">
             {error}
           </div>
         )}
         {!selected && !detailLoading && (
-          <div className="h-full flex items-center justify-center text-gray-400 text-sm">
+          <div className="h-full flex items-center justify-center text-ink-500 text-sm">
             Select an issue from the list, or click <em>+ New</em>.
           </div>
         )}
         {detailLoading && (
-          <div className="p-6 text-sm text-gray-500">Loading…</div>
+          <div className="p-6 text-sm text-ink-500">Loading…</div>
         )}
         {selected && (
           <IssueDetail
@@ -243,8 +247,8 @@ const FilterPill: React.FC<{
   <button
     className={`px-2 py-1 rounded ${
       active
-        ? 'bg-indigo-600 text-white'
-        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+        ? 'btn-tint-indigo'
+        : 'bg-ink-800 text-ink-200 hover:bg-ink-700'
     }`}
     onClick={onClick}
   >
@@ -258,12 +262,12 @@ const IssueListRow: React.FC<{
   onClick: () => void;
 }> = ({ issue, selected, onClick }) => (
   <button
-    className={`w-full text-left px-4 py-3 border-b border-gray-100 hover:bg-gray-50 ${
-      selected ? 'bg-indigo-50' : ''
+    className={`w-full text-left px-4 py-3 border-b border-line hover:bg-ink-800/60 ${
+      selected ? 'bg-indigo-500/10' : ''
     }`}
     onClick={onClick}
   >
-    <div className="flex items-center justify-between text-xs text-gray-500">
+    <div className="flex items-center justify-between text-xs text-ink-500">
       <span className="font-mono">{issue.identifier}</span>
       <span
         className={`px-1.5 py-0.5 rounded ${STATUS_COLOR[issue.status]}`}
@@ -276,8 +280,8 @@ const IssueListRow: React.FC<{
       <span className={PRIORITY_COLOR[issue.priority]}>
         {PRIORITY_LABEL[issue.priority]}
       </span>
-      <span className="text-gray-400">·</span>
-      <span className="text-gray-500">
+      <span className="text-ink-500">·</span>
+      <span className="text-ink-500">
         {new Date(issue.created_at).toLocaleDateString()}
       </span>
     </div>
@@ -299,7 +303,7 @@ const IssueDetail: React.FC<{
 
   return (
     <div className="p-6 max-w-3xl">
-      <div className="flex items-center gap-3 text-sm text-gray-500">
+      <div className="flex items-center gap-3 text-sm text-ink-500">
         <span className="font-mono">{issue.identifier}</span>
         <span
           className={`px-2 py-0.5 rounded ${STATUS_COLOR[issue.status]}`}
@@ -312,16 +316,16 @@ const IssueDetail: React.FC<{
       </div>
       <h1 className="mt-2 text-2xl font-semibold">{issue.title}</h1>
       {issue.description && (
-        <p className="mt-3 text-sm text-gray-700 whitespace-pre-wrap">
+        <p className="mt-3 text-sm text-ink-200 whitespace-pre-wrap">
           {issue.description}
         </p>
       )}
 
       {/* Status transition */}
       <div className="mt-6 flex items-center gap-2">
-        <label className="text-xs text-gray-500">Status:</label>
+        <label className="text-xs text-ink-500">Status:</label>
         <select
-          className="text-sm border border-gray-300 rounded px-2 py-1"
+          className="text-sm border border-line bg-ink-900 text-ink-100 rounded px-2 py-1"
           value={issue.status}
           onChange={(e) => onTransition(e.target.value as IssueStatus)}
         >
@@ -334,14 +338,14 @@ const IssueDetail: React.FC<{
       </div>
 
       {/* DBOS dispatch + live status */}
-      <div className="mt-6 border-t border-gray-200 pt-4">
+      <div className="mt-6 border-t border-line pt-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-gray-700">
+          <h3 className="text-sm font-semibold text-ink-200">
             DBOS Workflow
           </h3>
           {!issue.dbos_workflow_id && (
             <button
-              className="text-sm px-3 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700"
+              className="text-sm px-3 py-1 rounded btn-tint-green"
               onClick={onDispatch}
             >
               Dispatch
@@ -350,46 +354,46 @@ const IssueDetail: React.FC<{
         </div>
         {issue.dbos_workflow_id ? (
           <div className="mt-3 text-sm">
-            <div className="text-xs text-gray-500 font-mono break-all">
+            <div className="text-xs text-ink-500 font-mono break-all">
               {issue.dbos_workflow_id}
             </div>
             {isLoading && (
-              <div className="mt-2 text-gray-500">Connecting…</div>
+              <div className="mt-2 text-ink-500">Connecting…</div>
             )}
             {error && (
-              <div className="mt-2 text-red-600">
+              <div className="mt-2 text-rose-400">
                 Stream error: {error.kind}
               </div>
             )}
             {snapshot && (
               <div className="mt-2 space-y-1">
                 <div>
-                  <span className="text-gray-500">Status:</span>{' '}
+                  <span className="text-ink-500">Status:</span>{' '}
                   <span className="font-medium">
                     {snapshot.status ?? '(unknown)'}
                   </span>
                   {isTerminal && (
-                    <span className="ml-2 text-xs text-gray-400">
+                    <span className="ml-2 text-xs text-ink-500">
                       (final)
                     </span>
                   )}
                 </div>
                 {snapshot.error && (
-                  <div className="text-red-600 text-xs whitespace-pre-wrap">
+                  <div className="text-rose-400 text-xs whitespace-pre-wrap">
                     {snapshot.error}
                   </div>
                 )}
                 {steps.length > 0 && (
                   <details className="mt-2">
-                    <summary className="text-xs text-gray-500 cursor-pointer">
+                    <summary className="text-xs text-ink-500 cursor-pointer">
                       {steps.length} step{steps.length > 1 ? 's' : ''}
                     </summary>
-                    <ol className="mt-2 ml-4 text-xs text-gray-600 list-decimal">
+                    <ol className="mt-2 ml-4 text-xs text-ink-300 list-decimal">
                       {steps.map((s, i) => (
                         <li key={`${s.function_id}-${i}`}>
                           <span className="font-mono">{s.function_name}</span>
                           {s.error && (
-                            <span className="text-red-600"> — {s.error}</span>
+                            <span className="text-rose-400"> — {s.error}</span>
                           )}
                         </li>
                       ))}
@@ -400,9 +404,9 @@ const IssueDetail: React.FC<{
             )}
           </div>
         ) : (
-          <p className="mt-2 text-sm text-gray-500">
+          <p className="mt-2 text-sm text-ink-500">
             Not dispatched. Click <em>Dispatch</em> to start the
-            <code className="ml-1 px-1 py-0.5 bg-gray-100 rounded text-xs">
+            <code className="ml-1 px-1 py-0.5 bg-ink-800 rounded text-xs">
               execute_issue
             </code>{' '}
             DBOS workflow.
@@ -411,7 +415,7 @@ const IssueDetail: React.FC<{
       </div>
 
       {/* Meta */}
-      <div className="mt-6 border-t border-gray-200 pt-4 text-xs text-gray-500 space-y-1">
+      <div className="mt-6 border-t border-line pt-4 text-xs text-ink-500 space-y-1">
         <div>
           Created: {new Date(issue.created_at).toLocaleString()}
         </div>
@@ -428,9 +432,9 @@ const IssueDetail: React.FC<{
         )}
       </div>
 
-      <div className="mt-8 border-t border-gray-200 pt-4 flex justify-end">
+      <div className="mt-8 border-t border-line pt-4 flex justify-end">
         <button
-          className="text-sm text-red-600 hover:underline"
+          className="text-sm text-rose-400 hover:underline"
           onClick={onDelete}
         >
           Delete
@@ -447,31 +451,31 @@ const NewIssueModal: React.FC<{
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-lg w-96 p-6">
-        <h3 className="text-lg font-semibold mb-3">New issue</h3>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-island border border-line rounded-lg shadow-lg w-96 p-6">
+        <h3 className="text-lg font-semibold mb-3 text-ink-100">New issue</h3>
         <input
-          className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+          className="w-full border border-line bg-ink-900 text-ink-100 rounded px-3 py-2 text-sm"
           placeholder="Title"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           autoFocus
         />
         <textarea
-          className="mt-2 w-full border border-gray-300 rounded px-3 py-2 text-sm h-32"
+          className="mt-2 w-full border border-line bg-ink-900 text-ink-100 rounded px-3 py-2 text-sm h-32"
           placeholder="Description (optional)"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
         />
         <div className="mt-4 flex justify-end gap-2">
           <button
-            className="text-sm px-3 py-1 rounded text-gray-600 hover:bg-gray-100"
+            className="text-sm px-3 py-1 rounded text-ink-300 hover:bg-ink-800"
             onClick={onClose}
           >
             Cancel
           </button>
           <button
-            className="text-sm px-3 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-gray-300"
+            className="text-sm px-3 py-1 rounded btn-tint-indigo disabled:opacity-50"
             disabled={!title.trim()}
             onClick={() => onCreate(title.trim(), description.trim())}
           >
