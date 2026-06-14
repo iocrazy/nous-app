@@ -24,12 +24,14 @@ describe('classicNodeDefinitions', () => {
         'comfy',
         'group',
         'image',
+        'image_gen',
         'llm',
         'note',
         'output',
         'preview',
         'prompt',
         'text',
+        'video_gen',
       ].sort(),
     );
   });
@@ -100,6 +102,26 @@ describe('classicNodeDefinitions', () => {
     const group = classicNodeDefinitions.group;
     expect(group.inputs).toEqual([]);
     expect(group.outputs).toEqual([]);
+  });
+
+  it('exposes `video` as a known port type', () => {
+    expect(CLASSIC_PORT_TYPES).toContain('video');
+  });
+
+  it('image_gen takes prompt + optional image, outputs an image', () => {
+    const def = classicNodeDefinitions.image_gen;
+    expect(def.label).toBe('Image Gen');
+    expect(def.inputs.some((p) => p.id === 'prompt-in' && p.type === 'prompt')).toBe(true);
+    expect(def.inputs.some((p) => p.id === 'image-in' && p.type === 'image')).toBe(true);
+    expect(def.outputs).toEqual([{ id: 'image-out', type: 'image' }]);
+  });
+
+  it('video_gen takes image (source) + optional prompt, outputs a VIDEO port', () => {
+    const def = classicNodeDefinitions.video_gen;
+    expect(def.label).toBe('Video Gen');
+    expect(def.inputs.some((p) => p.id === 'image-in' && p.type === 'image')).toBe(true);
+    expect(def.inputs.some((p) => p.id === 'prompt-in' && p.type === 'prompt')).toBe(true);
+    expect(def.outputs).toEqual([{ id: 'video-out', type: 'video' }]);
   });
 });
 
@@ -221,5 +243,38 @@ describe('canConnectClassic', () => {
   it('a portless group can never be a connection source (no output handle found)', () => {
     expect(canConnectClassic('group', 'llm', 'group-out', llmTextIn)).toBe(false);
     expect(canConnectClassic('group', 'output', imgOut, outImgIn)).toBe(false);
+  });
+
+  // ---- image_gen / video_gen runnable AI-op nodes -------------------------
+
+  const imageGenImgOut = classicNodeDefinitions.image_gen.outputs.find(
+    (p) => p.type === 'image',
+  )!.id;
+  const imageGenPromptIn = classicNodeDefinitions.image_gen.inputs.find(
+    (p) => p.type === 'prompt',
+  )!.id;
+  const videoGenImgIn = classicNodeDefinitions.video_gen.inputs.find(
+    (p) => p.type === 'image',
+  )!.id;
+  const videoGenVideoOut = classicNodeDefinitions.video_gen.outputs.find(
+    (p) => p.type === 'video',
+  )!.id;
+
+  it('image_gen image-out → output image-in ✓ (matching image port types)', () => {
+    expect(canConnectClassic('image_gen', 'output', imageGenImgOut, outImgIn)).toBe(true);
+  });
+
+  it('image_gen image-out → video_gen image-in ✓ (image feeds the video source)', () => {
+    expect(canConnectClassic('image_gen', 'video_gen', imageGenImgOut, videoGenImgIn)).toBe(
+      true,
+    );
+  });
+
+  it('video_gen video-out → output image-in ✗ (video vs image mismatch)', () => {
+    expect(canConnectClassic('video_gen', 'output', videoGenVideoOut, outImgIn)).toBe(false);
+  });
+
+  it('prompt-output → image_gen prompt-in ✓ (matching prompt port types)', () => {
+    expect(canConnectClassic('prompt', 'image_gen', promptOut, imageGenPromptIn)).toBe(true);
   });
 });

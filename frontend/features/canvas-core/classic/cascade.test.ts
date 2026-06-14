@@ -298,6 +298,60 @@ describe('runClassicCascade — portless group container', () => {
   });
 });
 
+describe('runClassicCascade — image_gen / video_gen runnable AI-op nodes', () => {
+  it('dispatches an image_gen node (not skipped) and marks it succeeded with its result', async () => {
+    const nodes = [node('P', 'prompt'), node('G', 'image_gen', { prompt: 'a castle' })];
+    const conns = [edge('P', 'G')];
+    const ran: string[] = [];
+    const runner: ClassicRunner = async (ctx) => {
+      ran.push(ctx.nodeId);
+      return { ok: true, text: '', error: null, result: { image_url: 'https://x/i.png' } };
+    };
+    const r = recorder();
+    const report = await runClassicCascade(nodes, conns, runner, r.handlers);
+
+    expect(ran).toEqual(['G']); // prompt source passive; image_gen dispatched
+    expect(report.succeeded).toEqual(['G']);
+    expect(report.skipped).toContain('P');
+    expect(r.statusOf('G')).toBe('succeeded');
+  });
+
+  it('threads the node id + opaque data into the runner ctx', async () => {
+    const nodes = [node('V', 'video_gen', { motion: 'pan-left' })];
+    let seenCtx: { nodeId: string; nodeType?: string; data?: Record<string, unknown> } | null =
+      null;
+    const runner: ClassicRunner = async (ctx) => {
+      seenCtx = ctx;
+      return { ok: true, text: '', error: null };
+    };
+    const r = recorder();
+    await runClassicCascade(nodes, [], runner, r.handlers);
+
+    expect(seenCtx!.nodeId).toBe('V');
+    expect(seenCtx!.nodeType).toBe('video_gen');
+    expect(seenCtx!.data).toMatchObject({ motion: 'pan-left' });
+  });
+
+  it('a failing video_gen blocks its downstream output node', async () => {
+    const nodes = [node('V', 'video_gen', { label: 'Animate' }), node('O', 'output')];
+    const conns = [edge('V', 'O')];
+    const ran: string[] = [];
+    const runner: ClassicRunner = async (ctx) => {
+      ran.push(ctx.nodeId);
+      return ctx.nodeId === 'V'
+        ? { ok: false, text: '', error: 'render farm down' }
+        : { ok: true, text: 'ok', error: null };
+    };
+    const r = recorder();
+    const report = await runClassicCascade(nodes, conns, runner, r.handlers);
+
+    expect(report.failed).toEqual(['V']);
+    expect(report.blocked).toEqual(['O']); // output is passive but downstream → blocked
+    expect(ran).toEqual(['V']); // output never dispatched
+    expect(r.toasts).toContain('Cascade stopped at Animate');
+  });
+});
+
 describe('runClassicCascade — abort wiring', () => {
   it('passes the beginAbortable signal for the node into the run call', async () => {
     const nodes = [node('N', 'comfy')];

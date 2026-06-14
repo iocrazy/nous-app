@@ -145,3 +145,108 @@ describe('ComfyNodeView — cancel', () => {
     expect(screen.queryByTestId('comfy-cancel')).not.toBeInTheDocument();
   });
 });
+
+// ---- image_gen / video_gen share the same runnable-op view --------------
+
+const ImageGenNodeView = CLASSIC_NODE_TYPES.image_gen;
+const VideoGenNodeView = CLASSIC_NODE_TYPES.video_gen;
+
+function seedRunnable(id: string, type: string, data: Record<string, unknown>) {
+  const fullData = {
+    run_status: 'idle',
+    run_started_at: null,
+    run_error: null,
+    ...data,
+  };
+  useCanvasCoreStore.setState({
+    nodes: [{ id, type, data: fullData, position: { x: 0, y: 0 } }],
+  });
+  return fullData;
+}
+
+describe('image_gen / video_gen — runnable-op elapsed + cancel', () => {
+  const cases = [
+    { View: ImageGenNodeView, type: 'image_gen', prefix: 'image-gen' },
+    { View: VideoGenNodeView, type: 'video_gen', prefix: 'video-gen' },
+  ] as const;
+
+  for (const { View, type, prefix } of cases) {
+    it(`${type}: shows live elapsed + Cancel while running`, () => {
+      const data = seedRunnable('r1', type, {
+        run_status: 'running',
+        run_started_at: '2026-06-14T00:00:00.000Z',
+      });
+      render(
+        <Wrap>
+          <View {...baseProps} id="r1" type={type} data={data} />
+        </Wrap>,
+      );
+      expect(screen.getByTestId(`${prefix}-elapsed`)).toBeInTheDocument();
+      expect(screen.getByTestId(`${prefix}-cancel`)).toBeInTheDocument();
+    });
+
+    it(`${type}: Cancel aborts the in-flight request and flips to idle`, () => {
+      const data = seedRunnable('r1', type, {
+        run_status: 'running',
+        run_started_at: '2026-06-14T00:00:00.000Z',
+      });
+      const controller = beginAbortable('r1');
+      render(
+        <Wrap>
+          <View {...baseProps} id="r1" type={type} data={data} />
+        </Wrap>,
+      );
+      fireEvent.click(screen.getByTestId(`${prefix}-cancel`));
+      expect(controller.signal.aborted).toBe(true);
+      expect(hasAbortController('r1')).toBe(false);
+      const node = useCanvasCoreStore.getState().nodes[0] as Record<
+        string,
+        Record<string, unknown>
+      >;
+      expect(node.data.run_status).toBe('idle');
+    });
+  }
+
+  it('image_gen renders an inline result thumbnail on success', () => {
+    const data = seedRunnable('r1', 'image_gen', {
+      run_status: 'succeeded',
+      run_result: { image_url: 'https://x/out.png' },
+    });
+    render(
+      <Wrap>
+        <ImageGenNodeView {...baseProps} id="r1" type="image_gen" data={data} />
+      </Wrap>,
+    );
+    const frame = screen.getByTestId('image-gen-result');
+    expect(frame).toBeInTheDocument();
+    expect(frame.querySelector('img')?.getAttribute('src')).toBe('https://x/out.png');
+  });
+
+  it('video_gen prefers thumbnail_url for its result preview', () => {
+    const data = seedRunnable('r1', 'video_gen', {
+      run_status: 'succeeded',
+      run_result: { video_url: 'https://x/clip.mp4', thumbnail_url: 'https://x/thumb.jpg' },
+    });
+    render(
+      <Wrap>
+        <VideoGenNodeView {...baseProps} id="r1" type="video_gen" data={data} />
+      </Wrap>,
+    );
+    expect(screen.getByTestId('video-gen-result').querySelector('img')?.getAttribute('src')).toBe(
+      'https://x/thumb.jpg',
+    );
+  });
+
+  it('no result frame before success (idle)', () => {
+    const data = seedRunnable('r1', 'image_gen', {
+      run_status: 'idle',
+      run_result: { image_url: 'https://x/out.png' },
+    });
+    render(
+      <Wrap>
+        <ImageGenNodeView {...baseProps} id="r1" type="image_gen" data={data} />
+      </Wrap>,
+    );
+    expect(screen.queryByTestId('image-gen-result')).not.toBeInTheDocument();
+  });
+});

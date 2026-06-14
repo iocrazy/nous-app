@@ -13,6 +13,9 @@ export const CLASSIC_PORT_TONE: Record<ClassicPortType, string> = {
   image: '!bg-ink-200',
   text: '!bg-ink-500',
   prompt: '!bg-ink-700',
+  // `video` is the brightest/most-saturated accent so an animated artifact
+  // reads as the "richest" wire at a glance — distinct from the other three.
+  video: '!bg-ink-50',
 };
 
 /** Vertical layout constants shared by the handle dots + their labels. */

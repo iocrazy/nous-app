@@ -14,6 +14,7 @@
 import { useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 
+import { ClassicRunBar } from '../classic/ui/ClassicRunBar';
 import { CanvasComposer } from '../smart/CanvasComposer';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { CanvasConflictDialog } from './CanvasConflictDialog';
@@ -71,7 +72,7 @@ export default function CanvasPage() {
     <div ref={surfaceRef} className="relative h-full w-full">
       <CanvasSurface />
       {kind === 'smart' && <CanvasComposer surfaceRef={surfaceRef} />}
-      {kind === 'classic' && null /* ClassicMode overlay (palette) — later slice */}
+      {kind === 'classic' && <ClassicRunBar />}
       <CanvasConflictDialog />
       <SaveBadge status={saveStatus} error={saveError} />
     </div>

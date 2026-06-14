@@ -33,6 +33,9 @@ export interface CascadeNodeStatusPatch {
   run_status: ClassicRunStatus;
   run_started_at?: string | null;
   run_error?: string | null;
+  /** Structured op output on success (image_url / video_url / ...), or null.
+   *  The node view renders an inline thumbnail off this. */
+  run_result?: Record<string, unknown> | null;
 }
 
 export interface CascadeHandlers {
@@ -200,7 +203,7 @@ export async function runClassicCascade(
     const node = nodeById.get(nodeId);
     if (!node) continue;
     const nodeType = readType(node);
-    const dispatch = dispatchClassicNode(nodeType, readData(node));
+    const dispatch = dispatchClassicNode(nodeType);
 
     if (dispatch.kind === 'passive') {
       // Literal/sink node — not an execution step. Pass through silently.
@@ -225,13 +228,10 @@ export async function runClassicCascade(
       continue;
     }
 
-    if (dispatch.kind === 'invalid') {
-      // Runnable TYPE, unrunnable config (e.g. comfy w/o workflow_slug).
-      containFailure(nodeId, node, nodeType, dispatch.reason);
-      continue;
-    }
-
-    // dispatch.kind === 'run' — dispatch through the synchronous runner.
+    // dispatch.kind === 'run' — dispatch through the synchronous runner. A
+    // runnable node that is mis-configured (e.g. comfy with no workflow_slug)
+    // is no longer pre-rejected client-side: the backend resolves it and
+    // reports any config error in-band as `ok: false`, handled below.
     handlers.onNodePatch(nodeId, {
       run_status: 'running',
       run_started_at: now(),
@@ -239,14 +239,14 @@ export async function runClassicCascade(
     });
 
     const controller = beginAbortable(nodeId);
-    let result;
+    let result: Awaited<ReturnType<ClassicRunner>>;
     try {
       result = await runner(
         {
           nodeId,
           nodeType,
+          data: readData(node),
           body: readBody(node),
-          providerSlug: dispatch.providerSlug,
           agentId: readAgentId(node),
         },
         controller.signal,
@@ -256,6 +256,7 @@ export async function runClassicCascade(
         ok: false,
         text: '',
         error: err instanceof Error ? err.message : String(err),
+        result: null,
       };
     } finally {
       clearAbortController(nodeId);
@@ -263,7 +264,11 @@ export async function runClassicCascade(
 
     if (result.ok) {
       report.succeeded.push(nodeId);
-      handlers.onNodePatch(nodeId, { run_status: 'succeeded', run_error: null });
+      handlers.onNodePatch(nodeId, {
+        run_status: 'succeeded',
+        run_error: null,
+        run_result: result.result ?? null,
+      });
     } else {
       containFailure(nodeId, node, nodeType, result.error ?? 'run failed');
     }

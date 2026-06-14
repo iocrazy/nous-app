@@ -16,7 +16,7 @@
  */
 
 /** The closed set of ClassicMode port types. */
-export const CLASSIC_PORT_TYPES = ['image', 'text', 'prompt'] as const;
+export const CLASSIC_PORT_TYPES = ['image', 'text', 'prompt', 'video'] as const;
 
 export type ClassicPortType = (typeof CLASSIC_PORT_TYPES)[number];
 
@@ -131,6 +131,33 @@ const comfyNode: ClassicNodeDefinition = {
   ],
 };
 
+const imageGenNode: ClassicNodeDefinition = {
+  type: 'image_gen',
+  label: 'Image Gen',
+  // A RUNNABLE AI op: turns a prompt (+ optional reference image) into a
+  // freshly generated image. The backend resolves it to `generate_image`.
+  inputs: [
+    { id: 'prompt-in', type: 'prompt' },
+    // optional reference / conditioning image
+    { id: 'image-in', type: 'image' },
+  ],
+  outputs: [{ id: 'image-out', type: 'image' }],
+};
+
+const videoGenNode: ClassicNodeDefinition = {
+  type: 'video_gen',
+  label: 'Video Gen',
+  // A RUNNABLE AI op: animates a source image (+ optional prompt) into a
+  // video. The backend resolves it to `generate_video`. Its output is the
+  // new `video` port type.
+  inputs: [
+    { id: 'image-in', type: 'image' },
+    // optional motion / style prompt
+    { id: 'prompt-in', type: 'prompt' },
+  ],
+  outputs: [{ id: 'video-out', type: 'video' }],
+};
+
 export const classicNodeDefinitions: Record<string, ClassicNodeDefinition> = {
   image: imageNode,
   prompt: promptNode,
@@ -141,6 +168,8 @@ export const classicNodeDefinitions: Record<string, ClassicNodeDefinition> = {
   note: noteNode,
   preview: previewNode,
   group: groupNode,
+  image_gen: imageGenNode,
+  video_gen: videoGenNode,
 };
 
 export function getClassicNodeDefinition(
