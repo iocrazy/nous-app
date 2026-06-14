@@ -18,9 +18,9 @@ import {
 } from './registry';
 
 describe('classicNodeDefinitions', () => {
-  it('defines the MVP node types', () => {
+  it('defines the registered node types', () => {
     expect(Object.keys(classicNodeDefinitions).sort()).toEqual(
-      ['comfy', 'image', 'llm', 'output', 'prompt'].sort(),
+      ['comfy', 'image', 'llm', 'note', 'output', 'prompt', 'text'].sort(),
     );
   });
 
@@ -63,6 +63,19 @@ describe('classicNodeDefinitions', () => {
   it('getClassicNodeDefinition resolves a known type and returns undefined otherwise', () => {
     expect(getClassicNodeDefinition('image')).toBe(classicNodeDefinitions.image);
     expect(getClassicNodeDefinition('nope')).toBeUndefined();
+  });
+
+  it('text is a static source: one text output, zero inputs', () => {
+    const text = classicNodeDefinitions.text;
+    expect(text.inputs).toEqual([]);
+    expect(text.outputs).toHaveLength(1);
+    expect(text.outputs[0].type).toBe('text');
+  });
+
+  it('note is a portless annotation: zero inputs AND zero outputs', () => {
+    const note = classicNodeDefinitions.note;
+    expect(note.inputs).toEqual([]);
+    expect(note.outputs).toEqual([]);
   });
 });
 
@@ -118,5 +131,31 @@ describe('canConnectClassic', () => {
   it('null/undefined handles rejected', () => {
     expect(canConnectClassic('image', 'output', null, outImgIn)).toBe(false);
     expect(canConnectClassic('image', 'output', imgOut, undefined)).toBe(false);
+  });
+
+  // ---- text source node ---------------------------------------------------
+
+  const textOut = classicNodeDefinitions.text.outputs.find((p) => p.type === 'text')!.id;
+  const llmTextIn = classicNodeDefinitions.llm.inputs.find((p) => p.type === 'text')!.id;
+
+  it('text-output → llm text-input ✓ (matching text port types)', () => {
+    expect(canConnectClassic('text', 'llm', textOut, llmTextIn)).toBe(true);
+  });
+
+  it('text-output → output image-input ✗ (text vs image mismatch)', () => {
+    expect(canConnectClassic('text', 'output', textOut, outImgIn)).toBe(false);
+  });
+
+  // ---- portless note node -------------------------------------------------
+
+  it('a portless note can never be a connection target (no input handle found)', () => {
+    // Any handle id on a note is "not found" → rejected.
+    expect(canConnectClassic('text', 'note', textOut, 'note-in')).toBe(false);
+    expect(canConnectClassic('text', 'note', textOut, textOut)).toBe(false);
+  });
+
+  it('a portless note can never be a connection source (no output handle found)', () => {
+    expect(canConnectClassic('note', 'llm', 'note-out', llmTextIn)).toBe(false);
+    expect(canConnectClassic('note', 'output', textOut, outImgIn)).toBe(false);
   });
 });

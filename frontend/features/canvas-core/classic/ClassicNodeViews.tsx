@@ -13,11 +13,15 @@
 import { classicNodeDefinitions } from './registry';
 import { makeClassicSimpleNodeView } from './nodes/ClassicSimpleNodeView';
 import { ComfyNodeView } from './nodes/ComfyNodeView';
+import { NoteNodeView } from './nodes/NoteNodeView';
 
 export const CLASSIC_NODE_TYPES = {
   image: makeClassicSimpleNodeView(classicNodeDefinitions.image),
   prompt: makeClassicSimpleNodeView(classicNodeDefinitions.prompt),
+  text: makeClassicSimpleNodeView(classicNodeDefinitions.text),
   llm: makeClassicSimpleNodeView(classicNodeDefinitions.llm),
   output: makeClassicSimpleNodeView(classicNodeDefinitions.output),
   comfy: ComfyNodeView,
+  // `note` is a portless sticky — its own minimal view, NOT the port shell.
+  note: NoteNodeView,
 } as const;

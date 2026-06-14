@@ -22,12 +22,16 @@
 const NODE_TYPE_LLM = 'llm';
 const NODE_TYPE_COMFY = 'comfy';
 
-/** Literal/sink node types: they hold data or collect results, never
- *  dispatch to a provider. In a cascade they are pass-through. */
+/** Literal/sink/annotation node types: they hold data, collect results, or
+ *  are pure-UI stickies — they never dispatch to a provider. In a cascade
+ *  they are pass-through (skipped, stay idle). `text` is a static text
+ *  literal (like `prompt`); `note` is a portless annotation. */
 const PASSIVE_NODE_TYPES: ReadonlySet<string> = new Set([
   'image',
   'prompt',
+  'text',
   'output',
+  'note',
 ]);
 
 /** Data keys accepted for an llm node's model / provider override

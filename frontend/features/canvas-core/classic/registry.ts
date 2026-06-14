@@ -63,8 +63,28 @@ const llmNode: ClassicNodeDefinition = {
     { id: 'prompt-in', type: 'prompt' },
     // optional image conditioning
     { id: 'image-in', type: 'image' },
+    // optional static-text conditioning (fed by a `text` source node)
+    { id: 'text-in', type: 'text' },
   ],
   outputs: [{ id: 'text-out', type: 'text' }],
+};
+
+const textNode: ClassicNodeDefinition = {
+  type: 'text',
+  label: 'Text',
+  // A static text literal — like `prompt`/`image`, it is a passive data
+  // source with no inputs and a single typed output.
+  inputs: [],
+  outputs: [{ id: 'text-out', type: 'text' }],
+};
+
+const noteNode: ClassicNodeDefinition = {
+  type: 'note',
+  label: 'Note',
+  // A pure-UI sticky annotation (standard ComfyUI "Note"): zero ports, so
+  // it can never participate in a wire.
+  inputs: [],
+  outputs: [],
 };
 
 const outputNode: ClassicNodeDefinition = {
@@ -92,9 +112,11 @@ const comfyNode: ClassicNodeDefinition = {
 export const classicNodeDefinitions: Record<string, ClassicNodeDefinition> = {
   image: imageNode,
   prompt: promptNode,
+  text: textNode,
   llm: llmNode,
   output: outputNode,
   comfy: comfyNode,
+  note: noteNode,
 };
 
 export function getClassicNodeDefinition(

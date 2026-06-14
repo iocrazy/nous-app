@@ -60,7 +60,7 @@ function handleIds(container: HTMLElement): string[] {
 }
 
 describe('CLASSIC_NODE_TYPES — labels + typed ports', () => {
-  const types = ['image', 'prompt', 'llm', 'output', 'comfy'] as const;
+  const types = ['image', 'prompt', 'llm', 'output', 'comfy', 'text'] as const;
 
   for (const type of types) {
     const def = classicNodeDefinitions[type];
@@ -78,6 +78,29 @@ describe('CLASSIC_NODE_TYPES — labels + typed ports', () => {
       expect(handleIds(container)).toEqual(expectedIds);
     });
   }
+});
+
+describe('CLASSIC_NODE_TYPES — text source node', () => {
+  it('renders one source handle for its single text output', () => {
+    const { container } = renderNode('text', { text: 'hello' });
+    expect(handleIds(container)).toEqual(['text-out']);
+    const handle = container.querySelector('.react-flow__handle');
+    expect(handle?.classList.contains('react-flow__handle-right')).toBe(true);
+  });
+});
+
+describe('CLASSIC_NODE_TYPES — portless note node', () => {
+  it('renders the note text with NO handles', () => {
+    const { container } = renderNode('note', { text: 'set the seed to 42' });
+    expect(screen.getByTestId('classic-node-note')).toHaveTextContent('set the seed to 42');
+    expect(handleIds(container)).toEqual([]);
+    expect(container.querySelectorAll('.react-flow__handle').length).toBe(0);
+  });
+
+  it('falls back to data.label when no text is given', () => {
+    renderNode('note', { label: 'Annotation here' });
+    expect(screen.getByTestId('classic-node-note')).toHaveTextContent('Annotation here');
+  });
 });
 
 describe('CLASSIC_NODE_TYPES — run-state halo', () => {

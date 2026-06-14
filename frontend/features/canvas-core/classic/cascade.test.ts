@@ -205,6 +205,37 @@ describe('runClassicCascade — passive nodes', () => {
   });
 });
 
+describe('runClassicCascade — portless note node', () => {
+  it('a portless note alongside a runnable chain is skipped, chain runs, no throw, no toast', async () => {
+    // P(prompt, passive) → L(llm, runnable); N(note, portless) is isolated.
+    const nodes = [
+      node('P', 'prompt'),
+      node('L', 'llm', { model: 'qwen' }),
+      node('N', 'note', { text: 'remember to set seed' }),
+    ];
+    const conns = [edge('P', 'L')]; // note has NO edges
+    const ran: string[] = [];
+    const runner: ClassicRunner = async (ctx) => {
+      ran.push(ctx.nodeId);
+      return { ok: true, text: 'ok', error: null };
+    };
+    const r = recorder();
+    const report = await runClassicCascade(nodes, conns, runner, r.handlers);
+
+    // The runnable chain runs normally.
+    expect(ran).toEqual(['L']);
+    expect(report.succeeded).toContain('L');
+    // The portless note is skipped (passive), never dispatched, stays idle.
+    expect(report.skipped).toContain('N');
+    expect(ran).not.toContain('N');
+    expect(r.statusOf('N')).toBeUndefined(); // no patch emitted → still idle
+    // Nothing failed/blocked and no toast fired.
+    expect(report.failed).toEqual([]);
+    expect(report.blocked).toEqual([]);
+    expect(r.toasts).toEqual([]);
+  });
+});
+
 describe('runClassicCascade — abort wiring', () => {
   it('passes the beginAbortable signal for the node into the run call', async () => {
     const nodes = [node('N', 'comfy')];
