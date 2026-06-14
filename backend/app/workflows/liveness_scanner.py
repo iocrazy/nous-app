@@ -1,12 +1,14 @@
 """Liveness scanner for agent_runs (paperclip-inspired, A8.5).
 
 Runs every 30s via @DBOS.scheduled. For each agent_runs row with
-status='running', re-evaluates the liveness_state field based on three
+status='running', re-evaluates the liveness_state field based on two
 signals:
 
   1. heartbeat_at age           — process alive at all?
   2. last_useful_action_at age  — making real progress?
-  3. output_silence_bytes       — output growing or frozen?
+
+(``output_silence_bytes`` is a reserved column, not currently fed into any
+transition — see app/models/agents.py.)
 
 State machine (transitions are one-way except cancelled / dead):
 
@@ -92,8 +94,8 @@ async def liveness_scan_step() -> dict[str, Any]:
     # mediahub doesn't have hundreds of running agent_runs at once).
     rows = await db_engine.fetch_all(
         "SELECT id, status, liveness_state, heartbeat_at, "
-        "last_useful_action_at, liveness_changed_at, continuation_attempt, "
-        "output_silence_bytes FROM public.agent_runs "
+        "last_useful_action_at, liveness_changed_at, continuation_attempt "
+        "FROM public.agent_runs "
         "WHERE status = 'running' LIMIT 200"
     )
     counts["scanned"] = len(rows)

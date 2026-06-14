@@ -263,7 +263,7 @@ class AgentRuns(Base):
             "paperclip-style 5-state liveness orthogonal to status.\n"
             "   running→silent→stuck→dead transitions are driven by the scanner\n"
             "   in app/workflows/liveness_scanner.py based on heartbeat_at +\n"
-            "   last_useful_action_at + output_silence_bytes thresholds."
+            "   last_useful_action_at thresholds."
         ),
     )
     continuation_attempt: Mapped[int] = mapped_column(
@@ -280,9 +280,10 @@ class AgentRuns(Base):
         nullable=False,
         server_default=text("0"),
         comment=(
-            "Snapshot of how much output the run had at the last scanner pass\n"
-            "   it was found stuck. If the next pass finds the same byte count,\n"
-            "   stuck → dead."
+            "RESERVED — not currently used. Was intended as an output-frozen\n"
+            "   signal but the scanner never wrote or read it; liveness keys off\n"
+            "   heartbeat_at + last_useful_action_at only. Kept (always 0) to\n"
+            "   avoid a column-drop migration; safe to drop in a later cleanup."
         ),
     )
     id: Mapped[int] = mapped_column(
