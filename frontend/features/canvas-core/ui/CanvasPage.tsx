@@ -11,11 +11,12 @@
  * edits.
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
 import { ClassicPalette } from '../classic/ui/ClassicPalette';
 import { ClassicRunBar } from '../classic/ui/ClassicRunBar';
+import { CommandPalette } from '../palette/CommandPalette';
 import { CanvasComposer } from '../smart/CanvasComposer';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { CanvasConflictDialog } from './CanvasConflictDialog';
@@ -34,7 +35,13 @@ export default function CanvasPage() {
   const flushSave = useCanvasCoreStore((s) => s.flushSave);
   const reset = useCanvasCoreStore((s) => s.reset);
 
-  useCanvasShortcuts({ enabled: loadStatus === 'ready' });
+  // Cmd+K palette — canvas-only scope, active only when canvas is ready.
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  useCanvasShortcuts({
+    enabled: loadStatus === 'ready',
+    onOpenPalette: () => setPaletteOpen(true),
+  });
 
   useEffect(() => {
     if (!canvasId) return;
@@ -81,6 +88,10 @@ export default function CanvasPage() {
       )}
       <CanvasConflictDialog />
       <SaveBadge status={saveStatus} error={saveError} />
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+      />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 /**
  * Canvas keyboard shortcuts (Phase 1 Week 3).
  *
+ *   Cmd/Ctrl + K              → open command palette (Phase 6c)
  *   Cmd/Ctrl + Z              → undo
  *   Cmd/Ctrl + Shift + Z      → redo
  *   Cmd/Ctrl + Y              → redo (Windows convention)
@@ -13,9 +14,13 @@
  * Bound at window scope while the hook is mounted. Skipped when the
  * keystroke originates inside an editable text field so node-rename
  * inputs (and any future inline editors) keep working.
+ *
+ * Note: when the command palette is open its search <input> holds focus, so
+ * `isInsideEditable` returns true for all palette keystrokes — the palette
+ * handles its own Esc / Enter / arrow navigation independently.
  */
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 import {
   copyNodesToClipboard,
@@ -28,10 +33,23 @@ import type { CanvasNode } from '../types';
 interface UseCanvasShortcutsOptions {
   /** Disable the bindings without unmounting the host component. */
   enabled?: boolean;
+  /**
+   * Called when the user presses Cmd/Ctrl+K outside an editable element.
+   * Provided by CanvasPage to open the command palette. Uses a ref internally
+   * so stale-closure re-registration is never needed.
+   */
+  onOpenPalette?: () => void;
 }
 
 export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
   const enabled = options.enabled ?? true;
+
+  // Keep a stable ref so the window listener never goes stale without
+  // re-subscribing (avoids adding onOpenPalette to the effect dep array).
+  const onOpenPaletteRef = useRef(options.onOpenPalette);
+  useEffect(() => {
+    onOpenPaletteRef.current = options.onOpenPalette;
+  });
 
   useEffect(() => {
     if (!enabled) return;
@@ -41,6 +59,14 @@ export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
       const key = event.key;
 
       const store = useCanvasCoreStore.getState();
+
+      // Cmd+K — open command palette (before all other meta+key branches so
+      // it takes priority and its callback is clearly separated from store ops).
+      if (meta && (key === 'k' || key === 'K')) {
+        event.preventDefault();
+        onOpenPaletteRef.current?.();
+        return;
+      }
 
       if (meta && (key === 'z' || key === 'Z')) {
         event.preventDefault();
