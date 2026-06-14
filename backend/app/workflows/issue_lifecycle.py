@@ -107,6 +107,24 @@ async def set_status(
 
 
 @DBOS.step()
+async def load_auto_close_flag() -> bool:
+    """Spec-2 slice 2a: read the platform ``issue_agent_auto_close`` toggle.
+    Checkpointed as a step so a workflow replay uses the value seen at dispatch.
+    Defaults to False (never auto-close) on any read failure / unset key."""
+    from app.db import engine as db_engine
+
+    try:
+        val = await db_engine.fetch_val(
+            "SELECT value FROM public.system_settings "
+            "WHERE key = 'issue_agent_auto_close'"
+        )
+    except Exception:  # noqa: BLE001 — a settings read must never break dispatch
+        logger.warning("[execute_issue] auto_close flag read failed; defaulting off")
+        return False
+    return str(val).strip().lower() in {"1", "true", "yes", "on"} if val else False
+
+
+@DBOS.step()
 async def clear_lock(issue_id: int) -> None:
     """Release the execution lock so the issue can be retried later."""
     from app.db import engine as db_engine
@@ -328,6 +346,7 @@ async def _run_dispatch_with_continuation(
     run_turn: Callable[..., Awaitable[dict[str, Any]]],
     set_status: Callable[..., Awaitable[None]],
     max_continuations: int = ISSUE_MAX_CONTINUATIONS,
+    auto_close: bool = False,
 ) -> dict[str, Any]:
     """Spec-2 core: run the agent, then route the issue by the agent's declared
     FinishIssue outcome. ``continue`` auto-runs another bounded turn; everything
@@ -335,9 +354,11 @@ async def _run_dispatch_with_continuation(
     without DBOS/DB (mirrors _run_reply_turns).
 
     Routing:
-      completed       → in_review (human confirms; agents don't hard-close yet)
+      completed       → done if ``auto_close`` (slice 2a platform toggle) else
+                        in_review (human confirms)
       needs_input     → blocked   (with the agent's reason)
-      continue (capped)→ in_review (handed to a human after the cap)
+      continue (capped)→ in_review (handed to a human after the cap; never
+                        auto-closes — the agent never said it finished)
       none declared   → in_review (default — unchanged legacy behavior)
     """
     attempt = 0
@@ -363,8 +384,12 @@ async def _run_dispatch_with_continuation(
             agent_outcome="needs_input",
         )
     elif outcome == "completed":
+        # slice 2a: self-close only when the platform toggle trusts agents to.
         await set_status(
-            issue_id, "in_review", agent_outcome="completed", outcome_reason=reason
+            issue_id,
+            "done" if auto_close else "in_review",
+            agent_outcome="completed",
+            outcome_reason=reason,
         )
     elif outcome == "continue":
         # Asked for more turns past the cap — stop and hand to a human.
@@ -402,6 +427,7 @@ async def execute_issue(issue_id: int) -> dict[str, Any]:
         if agent_id and user_id:
             # Spec-2: route status + bounded continuation by the agent's
             # FinishIssue declaration (agent output already bridged to chat).
+            auto_close = await load_auto_close_flag()
             routed = await _run_dispatch_with_continuation(
                 issue_id,
                 issue_row,
@@ -409,6 +435,7 @@ async def execute_issue(issue_id: int) -> dict[str, Any]:
                 user_id,
                 run_turn=run_issue_agent_step,
                 set_status=set_status,
+                auto_close=auto_close,
             )
             return {"issue_id": issue_id, "executed": True, **routed}
         # No agent assigned → nothing to run; close it out.
