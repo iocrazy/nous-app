@@ -61,10 +61,17 @@ export default function CanvasPage() {
     );
   }
 
+  // Both modes render the same React Flow surface — CanvasSurface picks
+  // the nodeTypes map (smart vs classic) off the store `kind`. The
+  // per-mode overlays differ: SmartMode adds the node composer palette;
+  // ClassicMode's MVP mounts the surface alone (its node views carry
+  // their own typed-port + run UI, and a classic palette is a later
+  // slice). Branch explicitly so adding a classic overlay is a one-liner.
   return (
     <div ref={surfaceRef} className="relative h-full w-full">
       <CanvasSurface />
       {kind === 'smart' && <CanvasComposer surfaceRef={surfaceRef} />}
+      {kind === 'classic' && null /* ClassicMode overlay (palette) — later slice */}
       <CanvasConflictDialog />
       <SaveBadge status={saveStatus} error={saveError} />
     </div>
