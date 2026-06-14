@@ -158,6 +158,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
           {/* New Project button */}
           <button
             onClick={onCreateProject}
+            data-testid="new-project-btn"
             className="flex items-center gap-2 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors text-sm"
           >
             <Plus size={14} />
@@ -252,7 +253,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
       {filteredProjects.length > 0 && viewMode === 'grid' && (
         <div className="flex flex-wrap gap-4">
           {filteredProjects.map(project => (
-            <div key={project.id} className="w-[260px]">
+            <div key={project.id} className="w-[260px]" data-testid="project-card">
               <ProjectCard
                 project={project}
                 onClick={() => onProjectSelect(project)}

@@ -192,6 +192,7 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
       >
         {data.imageUrl ? (
           <CanvasNodeImage
+            data-testid={isExportResultNode ? 'sb-result-image' : undefined}
             src={imageSource ?? ''}
             alt={isExportResultNode ? t('node.imageNode.resultAlt', 'Result') : t('node.imageNode.generatedAlt', 'Generated')}
             viewerSourceUrl={originalImageUrl}
