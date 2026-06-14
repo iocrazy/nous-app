@@ -703,12 +703,20 @@ class AILibraryChatService:
         # tool_calls trace; chat turns never see this tool.
         if trigger in ("issue_dispatch", "issue_reply"):
             from app.services.ai.tools.finish_issue_tool import (
+                FINISH_ISSUE_INSTRUCTION,
                 finish_issue_handler,
                 finish_issue_spec,
             )
 
             composed = composed.model_copy(
-                update={"tools": list(composed.tools or []) + [finish_issue_spec()]}
+                update={
+                    "tools": list(composed.tools or []) + [finish_issue_spec()],
+                    # Directive so the agent reliably DECLARES — without it the
+                    # tool is latent and the workflow falls back to in_review.
+                    "system_message": (
+                        composed.system_message + "\n\n" + FINISH_ISSUE_INSTRUCTION
+                    ),
+                }
             )
             runner.finish_issue_handler = finish_issue_handler
             logger.info("[chat] FinishIssue tool registered for issue turn")

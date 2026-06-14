@@ -28,6 +28,20 @@ FINISH_ISSUE_OUTCOMES: tuple[str, ...] = ("completed", "needs_input", "continue"
 # The tool name as the model sees it / the runner dispatches on.
 FINISH_ISSUE_TOOL_NAME = "FinishIssue"
 
+# System-prompt directive appended to issue-context turns so the agent reliably
+# DECLARES an outcome. Without this the tool is latent — agents rarely self-close
+# from the spec description alone, and the workflow falls back to in_review.
+FINISH_ISSUE_INSTRUCTION = (
+    "You are working an assigned issue. Before you end this turn you MUST call "
+    "the FinishIssue tool exactly once to declare the outcome:\n"
+    "- 'completed' — the task is done and ready for a human to review.\n"
+    "- 'needs_input' — you are blocked and need a human decision or information; "
+    "state precisely what you need in 'reason'.\n"
+    "- 'continue' — you made real progress but need another turn to finish.\n"
+    "Always include a one-sentence 'reason'. Do not end the turn without calling "
+    "FinishIssue."
+)
+
 
 def finish_issue_spec() -> dict[str, Any]:
     """OpenAI function-calling spec for FinishIssue (model-facing)."""
@@ -114,6 +128,7 @@ def extract_issue_outcome(
 __all__ = [
     "FINISH_ISSUE_OUTCOMES",
     "FINISH_ISSUE_TOOL_NAME",
+    "FINISH_ISSUE_INSTRUCTION",
     "finish_issue_spec",
     "finish_issue_handler",
     "extract_issue_outcome",
