@@ -24,6 +24,7 @@ import type { ClassicNodeDefinition } from '../registry';
 import { abortNode } from '../abortRegistry';
 import { useNodeDataPatch } from '../../smart/nodes/useNodeDataPatch';
 import { ClassicNodeShell } from './ClassicNodeShell';
+import { NodeConfigFields } from './NodeConfigFields';
 import { readRunData } from './classicNodeData';
 import { formatElapsed, useElapsedSeconds } from './elapsed';
 
@@ -69,6 +70,10 @@ export function makeRunnableOpNodeView(
         runError={run_error}
         selected={Boolean(selected)}
       >
+        {/* Inline config editors — write run params straight to node.data
+            (the keys the backend _extract_*_params read). Disabled mid-run so
+            edits can't race the in-flight request. */}
+        <NodeConfigFields id={id} type={def.type} data={data} disabled={running} />
         {running && (
           <div className="flex items-center justify-between gap-2">
             <span

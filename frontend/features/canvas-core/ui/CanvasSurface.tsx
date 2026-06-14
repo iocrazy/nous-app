@@ -16,6 +16,7 @@ import {
   BackgroundVariant,
   Controls,
   SelectionMode,
+  type Connection,
   type EdgeChange,
   type IsValidConnection,
   type Node,
@@ -106,14 +107,40 @@ export function CanvasSurface() {
     [setSelection],
   );
 
+  // Shared node-type lookup — the single source the validator reads, used by
+  // BOTH the live drag-validity hint (`isConnectionValid`) and the commit
+  // (`onConnect`), so the dropped-wire rule and the appended-edge rule can
+  // never diverge.
+  const nodeTypeById = useCallback(
+    (id: string) => rfNodes.find((n) => n.id === id)?.type,
+    [rfNodes],
+  );
+
   const isConnectionValid = useCallback<IsValidConnection>(
-    (connection) =>
-      validateCanvasConnection(
-        connection,
-        kind,
-        (id) => rfNodes.find((n) => n.id === id)?.type,
-      ),
-    [kind, rfNodes],
+    (connection) => validateCanvasConnection(connection, kind, nodeTypeById),
+    [kind, nodeTypeById],
+  );
+
+  // Commit a dragged wire. React Flow hands us {source, target, sourceHandle,
+  // targetHandle}; we re-run the SAME validator as the live hint (smart →
+  // canConnectSmart, classic → typed-port canConnectClassic). Valid wires are
+  // appended to the store as a new `CanvasConnection` carrying a generated id
+  // and the handle ids (critical: the cascade + multi-port validation address
+  // ports by handle, and `toReactFlowEdges` round-trips them). Invalid wires
+  // are dropped silently — there was no edge before, so dropping is a no-op.
+  const onConnect = useCallback(
+    (connection: Connection) => {
+      if (!validateCanvasConnection(connection, kind, nodeTypeById)) return;
+      const newEdge: CanvasConnection = {
+        id: `edge-${crypto.randomUUID()}`,
+        source: connection.source,
+        target: connection.target,
+        sourceHandle: connection.sourceHandle ?? null,
+        targetHandle: connection.targetHandle ?? null,
+      };
+      setConnections([...connections, newEdge]);
+    },
+    [kind, nodeTypeById, connections, setConnections],
   );
 
   const nodeTypes =
@@ -130,6 +157,7 @@ export function CanvasSurface() {
       nodeTypes={nodeTypes}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
+      onConnect={onConnect}
       onMove={onMove}
       onSelectionChange={onSelectionChange}
       isValidConnection={isConnectionValid}

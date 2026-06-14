@@ -352,6 +352,37 @@ describe('runClassicCascade — image_gen / video_gen runnable AI-op nodes', () 
   });
 });
 
+describe('runClassicCascade — readBody derives the run body from data.prompt', () => {
+  it('feeds a runnable node its data.prompt as ctx.body (the llm/comfy prompt seam)', async () => {
+    // A runnable llm node whose prompt lives under data.prompt (no data.body):
+    // the cascade must derive ctx.body from it so the backend adapter receives
+    // the prompt. This pins the data.body || data.prompt || data.text seam.
+    const nodes = [node('L', 'llm', { model: 'qwen', prompt: 'hello' })];
+    let seenBody: string | undefined;
+    const runner: ClassicRunner = async (ctx) => {
+      seenBody = ctx.body;
+      return { ok: true, text: 'ok', error: null };
+    };
+    const r = recorder();
+    await runClassicCascade(nodes, [], runner, r.handlers);
+
+    expect(seenBody).toBe('hello');
+  });
+
+  it('prefers data.body over data.prompt when both are present', async () => {
+    const nodes = [node('L', 'llm', { model: 'qwen', body: 'from-body', prompt: 'from-prompt' })];
+    let seenBody: string | undefined;
+    const runner: ClassicRunner = async (ctx) => {
+      seenBody = ctx.body;
+      return { ok: true, text: 'ok', error: null };
+    };
+    const r = recorder();
+    await runClassicCascade(nodes, [], runner, r.handlers);
+
+    expect(seenBody).toBe('from-body');
+  });
+});
+
 describe('runClassicCascade — abort wiring', () => {
   it('passes the beginAbortable signal for the node into the run call', async () => {
     const nodes = [node('N', 'comfy')];

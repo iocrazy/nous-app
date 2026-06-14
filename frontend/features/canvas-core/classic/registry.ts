@@ -98,11 +98,14 @@ const previewNode: ClassicNodeDefinition = {
   type: 'preview',
   label: 'Preview',
   // A display sink (like `output`, but multi-modal): it DISPLAYS whatever is
-  // wired in. Two typed inputs — an image and a text port — and ZERO outputs,
-  // so nothing flows out of it. Passive (see `classicDispatch.ts`).
+  // wired in. THREE typed inputs — image, text, and video — and ZERO outputs,
+  // so nothing flows out of it. The `video` input is the consumer for a
+  // `video_gen` node's `video-out`, so an animated result is no longer a
+  // dead-end. Passive (see `classicDispatch.ts`).
   inputs: [
     { id: 'image-in', type: 'image' },
     { id: 'text-in', type: 'text' },
+    { id: 'video-in', type: 'video' },
   ],
   outputs: [],
 };
