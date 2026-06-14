@@ -26,10 +26,14 @@ distinguishes ok vs failed by the body).
 from __future__ import annotations
 
 import logging
-from typing import Any, List, Optional
+from typing import Any, List, Mapping, Optional
 from uuid import UUID
 
 from app.schemas.canvas_run import CanvasPromptRunResult
+from app.services.canvas.classic_dispatch import (
+    ClassicDispatchError,
+    resolve_provider_slug,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +131,40 @@ class CanvasRunService:
 
         text = self._extract_text(response)
         return CanvasPromptRunResult(ok=True, text=text, error=None)
+
+    # ------------------------------------------------------------------
+    # ClassicMode node dispatch (Phase 5a C2)
+    # ------------------------------------------------------------------
+
+    async def run_classic_node(
+        self,
+        *,
+        node_type: Optional[str],
+        node: Optional[Mapping[str, Any]] = None,
+        body: str,
+        agent_id: Optional[str] = None,
+    ) -> CanvasPromptRunResult:
+        """Resolve a classic node's provider_slug from its type + data, then
+        dispatch through the existing synchronous run path.
+
+        A ``comfy`` node resolves to ``nous/<workflow_slug>`` and reuses the
+        ``nous/`` route (which block-polls ``run_nous_workflow`` to a terminal
+        state) — single-synchronous, no DBOS workflow. An ``llm`` node resolves
+        to its model slug and reuses the bare-model adapter path. Unknown /
+        non-runnable node types fail in-band (ok=False) without dispatching, so
+        we never silently route to the wrong provider.
+        """
+        try:
+            provider_slug = resolve_provider_slug(node_type, node)
+        except ClassicDispatchError as exc:
+            logger.info("canvas classic dispatch rejected: %s", exc)
+            return CanvasPromptRunResult(ok=False, text="", error=str(exc))
+
+        return await self.run_prompt(
+            body=body,
+            provider_slug=provider_slug,
+            agent_id=agent_id,
+        )
 
     @staticmethod
     def _extract_text(response: dict) -> str:

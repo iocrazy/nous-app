@@ -252,3 +252,67 @@ class TestNousProviderRouting:
         result = await svc.run_prompt(body="x", provider_slug="nous/anything")
         assert result.ok is False
         assert "not configured" in (result.error or "")
+
+
+class TestRunClassicNode:
+    """ClassicMode node → provider_slug dispatch (Phase 5a C2). A comfy node
+    resolves to ``nous/<workflow_slug>`` from its data and reuses the existing
+    nous/ route; an llm node resolves to its model and reuses the adapter
+    path; an unknown type fails in-band without dispatching."""
+
+    @pytest.mark.asyncio
+    async def test_comfy_node_routes_via_nous_with_data_workflow(self, monkeypatch):
+        captured = {}
+
+        async def fake_run_nous_workflow(
+            *, settings, workflow_slug, prompt, agent_id=None, **_
+        ):
+            captured["workflow_slug"] = workflow_slug
+            captured["prompt"] = prompt
+            from app.schemas.canvas_run import CanvasPromptRunResult
+
+            return CanvasPromptRunResult(ok=True, text="rendered", error=None)
+
+        monkeypatch.setattr(
+            "app.services.canvas.nous_center_runner.run_nous_workflow",
+            fake_run_nous_workflow,
+        )
+
+        adapter = FakeAdapter()
+        svc = make_service(adapter)
+        result = await svc.run_classic_node(
+            node_type="comfy",
+            node={"data": {"workflow_slug": "render-xl"}},
+            body="a robot",
+        )
+        assert result.ok is True
+        assert result.text == "rendered"
+        # The workflow slug came from the node data, not a hardcode.
+        assert captured["workflow_slug"] == "render-xl"
+        assert captured["prompt"] == "a robot"
+        # And the bare LLM adapter was NOT used.
+        assert adapter.calls == []
+
+    @pytest.mark.asyncio
+    async def test_llm_node_routes_via_adapter_with_resolved_model(self):
+        adapter = FakeAdapter(reply="hi there")
+        svc = make_service(adapter)
+        svc._get_adapter = AsyncMock(return_value=adapter)  # type: ignore[assignment]
+        result = await svc.run_classic_node(
+            node_type="llm",
+            node={"data": {"provider_slug": "anthropic/claude-sonnet-4-6"}},
+            body="say hi",
+        )
+        assert result.ok is True
+        assert result.text == "hi there"
+        svc._get_adapter.assert_called_once_with("claude-sonnet-4-6")
+
+    @pytest.mark.asyncio
+    async def test_unknown_node_type_fails_in_band_without_dispatch(self):
+        adapter = FakeAdapter()
+        svc = make_service(adapter)
+        result = await svc.run_classic_node(node_type="frobnicate", node={}, body="x")
+        assert result.ok is False
+        assert "frobnicate" in (result.error or "")
+        # No silent route to a wrong provider.
+        assert adapter.calls == []
