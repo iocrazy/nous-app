@@ -21,8 +21,13 @@ interface AudioWaveformPlayerProps {
    *   chip (relocated to the stats row) and NO volume (phones use physical
    *   volume keys). Playback rate is controlled externally via the
    *   `playbackRate` + `onPlaybackRateChange` props.
+   * - `'capsule'`: island audio-stage pill (mock `.player`) — a single ~36px
+   *   row of a tint-green play button + a thin cover-tint waveform (played bars
+   *   = `rgb(var(--tint))`, unplayed = faint white) + time + speed + a compact
+   *   volume toggle. Reads `--tint` off the stage root. Used by the island
+   *   desktop audio capsule only.
    */
-  layout?: 'full' | 'compact';
+  layout?: 'full' | 'compact' | 'capsule';
   /**
    * Compact-only: externally-controlled playback rate. When provided, the
    * player applies it to the audio element so a sibling (the stats-row speed
@@ -61,10 +66,13 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
   clearChorusLabel = 'Clear',
 }) => {
   const isCompact = layout === 'compact';
+  const isCapsule = layout === 'capsule';
   // Compact lives in a narrow row, so 200 hair-thin bars compress into an
   // unreadable blur. Fewer, wider bars (and a proportional vertical margin
-  // below) make the waveform legible even for short tracks.
-  const barCount = isCompact ? 56 : BAR_COUNT;
+  // below) make the waveform legible even for short tracks. The capsule row is
+  // wider than mobile-compact but still short, so ~90 thin bars (per the mock's
+  // 90-bar wave) read cleanly.
+  const barCount = isCompact ? 56 : isCapsule ? 90 : BAR_COUNT;
   // Use the track's Soda palette when given; otherwise derive a stable vivid
   // color from the src so every audio player is colorful + consistent (no flat
   // gray) regardless of source (downloads / uploads / share).
@@ -159,16 +167,30 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
     const centerY = H / 2;
     // A fixed 32px margin crushes amplitude on the short compact height (~56px
     // → only 12px per half). Use a proportional margin so bars fill the space.
-    const verticalMargin = isCompact ? H * 0.16 : 32;
+    const verticalMargin = isCompact ? H * 0.16 : isCapsule ? H * 0.12 : 32;
     const maxBarH = (H - verticalMargin) / 2;
     const barW = W / barCount;
     const gap = Math.max(0.5, barW * 0.18); // gap between bars
 
-    // Colors — driven by the track's palette (or a stable per-track color).
-    const playedColor = tm.accent;
-    const playedDimColor = tm.accentSoft;
-    const unplayedColor = tm.waveUnplayed;
-    const unplayedDimColor = tm.waveUnplayed; // slightly dim mirror (globalAlpha below)
+    // Colors. Capsule (mock `.wave`): played bars = cover-tint `rgb(var(--tint))`
+    // read live off the stage root, unplayed = faint white rgba(255,255,255,.16).
+    // Other layouts keep the track palette.
+    let playedColor: string;
+    let playedDimColor: string;
+    let unplayedColor: string;
+    let unplayedDimColor: string;
+    if (isCapsule) {
+      const tintRaw = getComputedStyle(container).getPropertyValue('--tint').trim() || '99,102,241';
+      playedColor = `rgb(${tintRaw})`;
+      playedDimColor = `rgb(${tintRaw})`;
+      unplayedColor = 'rgba(255,255,255,0.16)';
+      unplayedDimColor = 'rgba(255,255,255,0.16)';
+    } else {
+      playedColor = tm.accent;
+      playedDimColor = tm.accentSoft;
+      unplayedColor = tm.waveUnplayed;
+      unplayedDimColor = tm.waveUnplayed; // slightly dim mirror (globalAlpha below)
+    }
 
     for (let i = 0; i < waveform.length; i++) {
       const amp = waveform[i];
@@ -184,33 +206,36 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
       ctx.fillStyle = mainColor;
       ctx.fillRect(x + gap / 2, centerY - barH, barW - gap, barH);
 
-      // Draw lower half (slightly dimmer mirror)
+      // Draw lower half (slightly dimmer mirror). Capsule bars are uniform
+      // (no dim mirror) to match the mock's flat `.wave i` color blocks.
       ctx.save();
-      ctx.globalAlpha = isPlayed ? 1 : 0.7;
+      ctx.globalAlpha = isCapsule ? 1 : (isPlayed ? 1 : 0.7);
       ctx.fillStyle = dimColor;
       ctx.fillRect(x + gap / 2, centerY, barW - gap, barH * 0.8);
       ctx.restore();
     }
 
-    // Center line
-    ctx.strokeStyle = 'rgba(63, 63, 70, 0.5)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0, centerY);
-    ctx.lineTo(W, centerY);
-    ctx.stroke();
-
-    // Playback cursor
-    if (duration > 0) {
-      const cursorX = progress * W;
-      ctx.strokeStyle = tm.lyricActive;
-      ctx.lineWidth = 1.5;
+    // Center line + playback cursor — omitted for the capsule (the mock wave is
+    // a clean bar row whose progress is shown purely by the tint/faint split).
+    if (!isCapsule) {
+      ctx.strokeStyle = 'rgba(63, 63, 70, 0.5)';
+      ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(cursorX, 8);
-      ctx.lineTo(cursorX, H - 8);
+      ctx.moveTo(0, centerY);
+      ctx.lineTo(W, centerY);
       ctx.stroke();
+
+      if (duration > 0) {
+        const cursorX = progress * W;
+        ctx.strokeStyle = tm.lyricActive;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(cursorX, 8);
+        ctx.lineTo(cursorX, H - 8);
+        ctx.stroke();
+      }
     }
-  }, [waveform, currentTime, duration, tm, barCount, isCompact]);
+  }, [waveform, currentTime, duration, tm, barCount, isCompact, isCapsule]);
 
   // Keep the latest onTimeUpdate in a ref so the rAF loop never re-subscribes.
   const onTimeUpdateRef = useRef(onTimeUpdate);
@@ -447,6 +472,104 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
         <span className="text-[12px] text-white/80 tabular-nums whitespace-nowrap shrink-0">
           {formatTime(currentTime)} / {formatTime(duration)}
         </span>
+      </div>
+    );
+  }
+
+  // Capsule (island audio stage, mock `.player`): one ~36px row of
+  // tint play button + thin cover-tint waveform + time + speed + volume.
+  if (isCapsule) {
+    return (
+      <div className="flex items-center gap-3 w-full">
+        {audioEl}
+        {/* Play / Pause — mock `.play`: 38px tint circle, dark glyph, tint glow. */}
+        <button
+          onClick={togglePlay}
+          disabled={isDecoding}
+          aria-label={isPlaying ? 'Pause' : 'Play'}
+          className="audio-play-btn"
+        >
+          {isPlaying ? <Pause size={14} fill="currentColor" /> : <Play size={14} className="ml-0.5" fill="currentColor" />}
+        </button>
+
+        {/* Waveform — mock `.wave`: flex:1, 36px, doubles as the seek bar. */}
+        <div
+          ref={containerRef}
+          className="relative flex-1 min-w-0 h-9 cursor-pointer select-none"
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+        >
+          {isDecoding ? (
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full h-1 rounded-full bg-white/15 overflow-hidden">
+                <div
+                  className="h-full w-1/3 animate-pulse rounded-full"
+                  style={{ backgroundColor: 'rgb(var(--tint,99,102,241))' }}
+                />
+              </div>
+            </div>
+          ) : (
+            <canvas
+              ref={canvasRef}
+              className="absolute inset-0 w-full h-full"
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+            />
+          )}
+          {/* Chorus badge — mock `.chorus`: amber pill poking above the wave,
+              positioned at the real chorus time; click seeks there. */}
+          {!isDecoding && chorusStartSec !== undefined && duration > 0 && chorusStartSec <= duration && (
+            <button
+              type="button"
+              title="Chorus"
+              onClick={() => {
+                const audio = audioRef.current;
+                if (!audio) return;
+                audio.currentTime = chorusStartSec;
+                setCurrentTime(chorusStartSec);
+                onTimeUpdate?.(chorusStartSec);
+              }}
+              className="audio-chorus-badge"
+              style={{ left: `${(chorusStartSec / duration) * 100}%` }}
+            >
+              CHORUS
+            </button>
+          )}
+        </div>
+
+        {/* Time — mock `.ptime`. */}
+        <span className="audio-ptime">
+          {formatTime(currentTime)} / {formatTime(duration)}
+        </span>
+
+        {/* Side controls — mock `.pside`: speed "1×" + a compact volume toggle
+            (kept for parity with the full player; mock omits it). */}
+        <div className="audio-pside">
+          <button
+            onClick={cycleRate}
+            className="hover:text-[color:var(--content,#e7e7ea)] transition-colors tabular-nums"
+          >
+            {playbackRate === 1 ? '1×' : `${playbackRate}×`}
+          </button>
+          <button
+            onClick={toggleMute}
+            aria-label={isMuted || volume === 0 ? 'Unmute' : 'Mute'}
+            className="hover:text-[color:var(--content,#e7e7ea)] transition-colors"
+          >
+            {isMuted || volume === 0 ? <VolumeX size={14} /> : <Volume2 size={14} />}
+          </button>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+            value={isMuted ? 0 : volume}
+            onChange={handleVolumeChange}
+            aria-label="Volume"
+            style={{ accentColor: 'rgb(var(--tint,99,102,241))' }}
+            className="w-12 h-1 bg-white/15 rounded-full appearance-none cursor-pointer"
+          />
+        </div>
       </div>
     );
   }

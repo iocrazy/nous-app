@@ -492,11 +492,15 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
     />
   );
 
-  // SAME AudioWaveformPlayer AudioHero builds (same src / filename / duration /
-  // chorus / onTimeUpdate / theme). Falls back to the not-available notice when
-  // the audio file isn't downloaded.
+  // Island audio capsule player — same AudioWaveformPlayer (src / filename /
+  // duration / chorus / onTimeUpdate / theme) but the `capsule` layout (mock
+  // `.player`): compact tint waveform row. island-only (this const is only fed
+  // to AudioStageIsland's player slot, rendered when islandDesktop && isAudio),
+  // so the classic AudioHero player is untouched. Falls back to the
+  // not-available notice when the audio file isn't downloaded.
   const audioPlayer = (video.music_download_path || video.extract_audio_path) ? (
     <AudioWaveformPlayer
+      layout="capsule"
       src={`${getApiUrl()}/api/v1/media/${video.id}/audio${mediaToken ? `?token=${encodeURIComponent(mediaToken)}` : ''}`}
       filename={video.music_name || video.title || 'Audio'}
       duration={Number(video.duration) || undefined}
