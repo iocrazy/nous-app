@@ -20,7 +20,17 @@ import {
 describe('classicNodeDefinitions', () => {
   it('defines the registered node types', () => {
     expect(Object.keys(classicNodeDefinitions).sort()).toEqual(
-      ['comfy', 'image', 'llm', 'note', 'output', 'prompt', 'text'].sort(),
+      [
+        'comfy',
+        'group',
+        'image',
+        'llm',
+        'note',
+        'output',
+        'preview',
+        'prompt',
+        'text',
+      ].sort(),
     );
   });
 
@@ -76,6 +86,20 @@ describe('classicNodeDefinitions', () => {
     const note = classicNodeDefinitions.note;
     expect(note.inputs).toEqual([]);
     expect(note.outputs).toEqual([]);
+  });
+
+  it('preview is a display sink: two typed inputs (image + text), zero outputs', () => {
+    const preview = classicNodeDefinitions.preview;
+    expect(preview.inputs).toHaveLength(2);
+    expect(preview.inputs.some((p) => p.type === 'image')).toBe(true);
+    expect(preview.inputs.some((p) => p.type === 'text')).toBe(true);
+    expect(preview.outputs).toEqual([]);
+  });
+
+  it('group is a portless container: zero inputs AND zero outputs', () => {
+    const group = classicNodeDefinitions.group;
+    expect(group.inputs).toEqual([]);
+    expect(group.outputs).toEqual([]);
   });
 });
 
@@ -157,5 +181,45 @@ describe('canConnectClassic', () => {
   it('a portless note can never be a connection source (no output handle found)', () => {
     expect(canConnectClassic('note', 'llm', 'note-out', llmTextIn)).toBe(false);
     expect(canConnectClassic('note', 'output', textOut, outImgIn)).toBe(false);
+  });
+
+  // ---- preview display sink (typed image + text inputs) -------------------
+
+  const previewImgIn = classicNodeDefinitions.preview.inputs.find(
+    (p) => p.type === 'image',
+  )!.id;
+  const previewTextIn = classicNodeDefinitions.preview.inputs.find(
+    (p) => p.type === 'text',
+  )!.id;
+  const promptOut = classicNodeDefinitions.prompt.outputs.find(
+    (p) => p.type === 'prompt',
+  )!.id;
+
+  it('image-output → preview image-input ✓ (matching image port types)', () => {
+    expect(canConnectClassic('image', 'preview', imgOut, previewImgIn)).toBe(true);
+  });
+
+  it('text-output → preview text-input ✓ (matching text port types)', () => {
+    expect(canConnectClassic('text', 'preview', textOut, previewTextIn)).toBe(true);
+  });
+
+  it('prompt-output → preview image-input ✗ (prompt vs image mismatch)', () => {
+    expect(canConnectClassic('prompt', 'preview', promptOut, previewImgIn)).toBe(false);
+  });
+
+  it('preview has no output handle → can never be a connection source', () => {
+    expect(canConnectClassic('preview', 'output', previewImgIn, outImgIn)).toBe(false);
+  });
+
+  // ---- portless group container -------------------------------------------
+
+  it('a portless group can never be a connection target (no input handle found)', () => {
+    expect(canConnectClassic('text', 'group', textOut, 'group-in')).toBe(false);
+    expect(canConnectClassic('image', 'group', imgOut, imgOut)).toBe(false);
+  });
+
+  it('a portless group can never be a connection source (no output handle found)', () => {
+    expect(canConnectClassic('group', 'llm', 'group-out', llmTextIn)).toBe(false);
+    expect(canConnectClassic('group', 'output', imgOut, outImgIn)).toBe(false);
   });
 });

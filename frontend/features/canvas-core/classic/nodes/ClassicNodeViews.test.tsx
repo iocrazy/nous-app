@@ -103,6 +103,43 @@ describe('CLASSIC_NODE_TYPES — portless note node', () => {
   });
 });
 
+describe('CLASSIC_NODE_TYPES — preview display sink', () => {
+  it('renders its label and inline display frame', () => {
+    renderNode('preview');
+    const node = screen.getByTestId('classic-node-preview');
+    // Label appears in the shell header (and again in the placeholder frame).
+    expect(
+      within(node).getAllByText(classicNodeDefinitions.preview.label).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByTestId('classic-node-preview-display')).toBeInTheDocument();
+  });
+
+  it('renders both typed input handles (image + text), zero outputs', () => {
+    const { container } = renderNode('preview');
+    const def = classicNodeDefinitions.preview;
+    const expectedIds = [...def.inputs, ...def.outputs].map((p) => p.id).sort();
+    expect(handleIds(container)).toEqual(expectedIds);
+    // Both are TARGET (input) handles on the left edge; none on the right.
+    const handles = Array.from(container.querySelectorAll('.react-flow__handle'));
+    expect(handles).toHaveLength(2);
+    expect(handles.every((h) => h.classList.contains('react-flow__handle-left'))).toBe(true);
+  });
+});
+
+describe('CLASSIC_NODE_TYPES — portless group container', () => {
+  it('renders its label with NO handles', () => {
+    const { container } = renderNode('group', { label: 'Scene group' });
+    expect(screen.getByTestId('classic-node-group')).toHaveTextContent('Scene group');
+    expect(handleIds(container)).toEqual([]);
+    expect(container.querySelectorAll('.react-flow__handle').length).toBe(0);
+  });
+
+  it('falls back to a default label when none is given', () => {
+    renderNode('group');
+    expect(screen.getByTestId('classic-node-group')).toHaveTextContent('Group');
+  });
+});
+
 describe('CLASSIC_NODE_TYPES — run-state halo', () => {
   it('failed shows the failed tone + inline run_error text', () => {
     renderNode('llm', { run_status: 'failed', run_error: 'boom: provider 500' });

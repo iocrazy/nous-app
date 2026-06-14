@@ -94,6 +94,28 @@ const outputNode: ClassicNodeDefinition = {
   outputs: [],
 };
 
+const previewNode: ClassicNodeDefinition = {
+  type: 'preview',
+  label: 'Preview',
+  // A display sink (like `output`, but multi-modal): it DISPLAYS whatever is
+  // wired in. Two typed inputs — an image and a text port — and ZERO outputs,
+  // so nothing flows out of it. Passive (see `classicDispatch.ts`).
+  inputs: [
+    { id: 'image-in', type: 'image' },
+    { id: 'text-in', type: 'text' },
+  ],
+  outputs: [],
+};
+
+const groupNode: ClassicNodeDefinition = {
+  type: 'group',
+  label: 'Group',
+  // A pure-UI visual container/frame (standard ComfyUI "Group"): zero ports,
+  // like `note`, so it can never participate in a wire.
+  inputs: [],
+  outputs: [],
+};
+
 const comfyNode: ClassicNodeDefinition = {
   type: 'comfy',
   label: 'ComfyUI',
@@ -117,6 +139,8 @@ export const classicNodeDefinitions: Record<string, ClassicNodeDefinition> = {
   output: outputNode,
   comfy: comfyNode,
   note: noteNode,
+  preview: previewNode,
+  group: groupNode,
 };
 
 export function getClassicNodeDefinition(

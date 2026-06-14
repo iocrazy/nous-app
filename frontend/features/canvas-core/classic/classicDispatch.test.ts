@@ -70,7 +70,7 @@ describe('dispatchClassicNode — comfy', () => {
 });
 
 describe('dispatchClassicNode — passive literal/sink types', () => {
-  for (const type of ['image', 'prompt', 'output', 'text', 'note']) {
+  for (const type of ['image', 'prompt', 'output', 'text', 'note', 'preview', 'group']) {
     it(`treats '${type}' as passive (no dispatch)`, () => {
       expect(dispatchClassicNode(type, {}).kind).toBe('passive');
     });

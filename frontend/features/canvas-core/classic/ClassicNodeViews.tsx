@@ -14,6 +14,8 @@ import { classicNodeDefinitions } from './registry';
 import { makeClassicSimpleNodeView } from './nodes/ClassicSimpleNodeView';
 import { ComfyNodeView } from './nodes/ComfyNodeView';
 import { NoteNodeView } from './nodes/NoteNodeView';
+import { PreviewNodeView } from './nodes/PreviewNodeView';
+import { GroupNodeView } from './nodes/GroupNodeView';
 
 export const CLASSIC_NODE_TYPES = {
   image: makeClassicSimpleNodeView(classicNodeDefinitions.image),
@@ -24,4 +26,8 @@ export const CLASSIC_NODE_TYPES = {
   comfy: ComfyNodeView,
   // `note` is a portless sticky — its own minimal view, NOT the port shell.
   note: NoteNodeView,
+  // `preview` is a multi-modal display sink — port shell + inline frame.
+  preview: PreviewNodeView,
+  // `group` is a portless visual container — its own minimal frame view.
+  group: GroupNodeView,
 } as const;

@@ -236,6 +236,68 @@ describe('runClassicCascade — portless note node', () => {
   });
 });
 
+describe('runClassicCascade — passive preview sink downstream', () => {
+  it('prompt→llm→preview: preview (passive sink) is skipped, the chain runs, no throw', async () => {
+    // P(prompt, passive) → L(llm, runnable) → V(preview, passive display sink).
+    const nodes = [
+      node('P', 'prompt'),
+      node('L', 'llm', { model: 'qwen' }),
+      node('V', 'preview'),
+    ];
+    const conns = [edge('P', 'L'), edge('L', 'V')];
+    const ran: string[] = [];
+    const runner: ClassicRunner = async (ctx) => {
+      ran.push(ctx.nodeId);
+      return { ok: true, text: 'ok', error: null };
+    };
+    const r = recorder();
+    const report = await runClassicCascade(nodes, conns, runner, r.handlers);
+
+    // Only the runnable llm dispatches; both passive ends are skipped.
+    expect(ran).toEqual(['L']);
+    expect(report.succeeded).toContain('L');
+    expect(report.skipped).toContain('P');
+    expect(report.skipped).toContain('V');
+    expect(ran).not.toContain('V');
+    // preview stays idle (no patch), nothing failed/blocked, no toast.
+    expect(r.statusOf('V')).toBeUndefined();
+    expect(report.failed).toEqual([]);
+    expect(report.blocked).toEqual([]);
+    expect(r.toasts).toEqual([]);
+  });
+});
+
+describe('runClassicCascade — portless group container', () => {
+  it('a portless group alongside a runnable chain is skipped, chain runs, no throw, no toast', async () => {
+    // P(prompt, passive) → L(llm, runnable); G(group, portless) is isolated.
+    const nodes = [
+      node('P', 'prompt'),
+      node('L', 'llm', { model: 'qwen' }),
+      node('G', 'group', { label: 'Render group' }),
+    ];
+    const conns = [edge('P', 'L')]; // group has NO edges
+    const ran: string[] = [];
+    const runner: ClassicRunner = async (ctx) => {
+      ran.push(ctx.nodeId);
+      return { ok: true, text: 'ok', error: null };
+    };
+    const r = recorder();
+    const report = await runClassicCascade(nodes, conns, runner, r.handlers);
+
+    // The runnable chain runs normally.
+    expect(ran).toEqual(['L']);
+    expect(report.succeeded).toContain('L');
+    // The portless group is skipped (passive), never dispatched, stays idle.
+    expect(report.skipped).toContain('G');
+    expect(ran).not.toContain('G');
+    expect(r.statusOf('G')).toBeUndefined();
+    // Nothing failed/blocked and no toast fired.
+    expect(report.failed).toEqual([]);
+    expect(report.blocked).toEqual([]);
+    expect(r.toasts).toEqual([]);
+  });
+});
+
 describe('runClassicCascade — abort wiring', () => {
   it('passes the beginAbortable signal for the node into the run call', async () => {
     const nodes = [node('N', 'comfy')];
