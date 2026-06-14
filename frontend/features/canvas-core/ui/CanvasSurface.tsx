@@ -15,6 +15,7 @@ import {
   Background,
   BackgroundVariant,
   Controls,
+  MiniMap,
   SelectionMode,
   type Connection,
   type EdgeChange,
@@ -36,6 +37,14 @@ import { CLASSIC_NODE_TYPES } from '../classic/ClassicNodeViews';
 import { toReactFlowEdges, validateCanvasConnection } from './connectionMapping';
 
 type AnyNode = Node;
+
+// MiniMap renders via SVG; CSS custom-properties are not available in that
+// context, so we carry the hex values directly.  Both literals are derived
+// from the ink palette dark-mode defaults (index.css § ink ladder):
+//   INK_ACCENT → --color-accent  (#6366f1, indigo-500)   — selected nodes
+//   INK_MUTED  → dark-mode --ink-600  (#52525b, zinc-600) — unselected nodes
+const INK_ACCENT = '#6366f1';
+const INK_MUTED = '#52525b';
 
 function toReactFlowNodes(nodes: CanvasNode[]): AnyNode[] {
   return nodes.map((node, idx) => {
@@ -66,6 +75,13 @@ export function CanvasSurface() {
   const setSelection = useCanvasCoreStore((s) => s.setSelection);
 
   const selectionSet = useMemo(() => new Set(selection), [selection]);
+
+  // nodeColor for MiniMap — selected nodes get the app accent, others get muted.
+  const nodeColor = useCallback(
+    (n: AnyNode) => (selectionSet.has(n.id) ? INK_ACCENT : INK_MUTED),
+    [selectionSet],
+  );
+
   const rfNodes = useMemo(
     () =>
       toReactFlowNodes(nodes).map((n) => ({
@@ -164,6 +180,10 @@ export function CanvasSurface() {
       viewport={viewport}
       fitView={false}
       proOptions={{ hideAttribution: true }}
+      // 6b.1 — skip rendering nodes/edges whose bounding box lies outside
+      // the current viewport.  React Flow re-checks on every pan/zoom so
+      // the visible set stays correct without any extra work from us.
+      onlyRenderVisibleElements
       // Shift-drag for box select; click-drag is for panning the
       // viewport, matching Figma / Miro / Excalidraw.
       selectionMode={SelectionMode.Partial}
@@ -173,6 +193,14 @@ export function CanvasSurface() {
     >
       <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
       <Controls position="bottom-right" />
+      {/* 6b.2 — minimap: pannable + zoomable, selected nodes highlighted */}
+      <MiniMap
+        position="bottom-left"
+        pannable
+        zoomable
+        nodeColor={nodeColor}
+        nodeStrokeWidth={3}
+      />
     </ReactFlow>
   );
 }
