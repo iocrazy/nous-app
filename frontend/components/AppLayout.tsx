@@ -25,6 +25,7 @@ import { MobileProfilePage } from './MobileProfilePage';
 import { MobileTasksPage } from './MobileTasksPage';
 import { MobileTabBar, type MobileTab } from './MobileTabBar';
 import { useTabBarCollapse } from '../hooks/useTabBarCollapse';
+import { useIsDesktop } from '../hooks/useIsDesktop';
 import { CreateTeamModal } from './CreateTeamModal';
 import { SettingsModal } from './SettingsModal';
 import { CreateCollectionModal } from './CreateCollectionModal';
@@ -360,6 +361,9 @@ function AppLayoutInner() {
   // Island shell (spec D1–D12) — flag-gated. Hoist the Sidebar/TopBar props so
   // the classic frame and the IslandShell frame share IDENTICAL wiring (D12).
   const island = islandUI();
+  // Island UI is desktop-only by design — on mobile (<640px) fall through to the
+  // classic <main> so the routed page renders (IslandShell is `hidden sm:flex`).
+  const isDesktop = useIsDesktop();
 
   // Typed via ComponentProps so the arrow params get the SAME contextual types
   // the original inline JSX inferred (e.g. SmartCollection.id) — D12 no-op.
@@ -548,7 +552,7 @@ function AppLayoutInner() {
 
       {/* Main Content — island shell (flag ON) draws the full desktop frame
           (topbar + nav island + workspace island); otherwise the classic main. */}
-      {island ? (
+      {island && isDesktop ? (
         <IslandShell isDetailPage={isDetailPage} topBarProps={topBarProps} sidebarProps={sidebarProps}>
           <Outlet />
         </IslandShell>
