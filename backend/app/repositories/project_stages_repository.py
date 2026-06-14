@@ -19,7 +19,9 @@ from loguru import logger
 
 # ── SQL constants ────────────────────────────────────────────────────────────
 
-_CATALOG_COLUMNS = "id, slug, name, sort_order, tools_recommended, created_at, updated_at"
+_CATALOG_COLUMNS = (
+    "id, slug, name, sort_order, tools_recommended, created_at, updated_at"
+)
 
 _LIST_CATALOG_SQL = (
     f"SELECT {_CATALOG_COLUMNS} FROM public.project_stages ORDER BY sort_order ASC"
@@ -166,9 +168,7 @@ class ProjectStagesRepository:
 
         async with eng.begin() as conn:
             # Step 1 — lock the projects row and read current stage
-            result = await conn.execute(
-                text(_SELECT_FOR_UPDATE_SQL), {"pid": pid}
-            )
+            result = await conn.execute(text(_SELECT_FOR_UPDATE_SQL), {"pid": pid})
             lock_row = result.mappings().first()
             if lock_row is None:
                 raise ValueError(f"Project {pid} not found")
@@ -183,14 +183,10 @@ class ProjectStagesRepository:
                 return None
 
             # Step 3 — close the currently open history row (if any)
-            await conn.execute(
-                text(_CLOSE_OPEN_HISTORY_SQL), {"pid": pid}
-            )
+            await conn.execute(text(_CLOSE_OPEN_HISTORY_SQL), {"pid": pid})
 
             # Step 4 — insert new open history row
-            await conn.execute(
-                text(_INSERT_HISTORY_SQL), params_base
-            )
+            await conn.execute(text(_INSERT_HISTORY_SQL), params_base)
 
             # Step 5 — update projects.current_stage_id
             await conn.execute(
@@ -198,9 +194,7 @@ class ProjectStagesRepository:
             )
 
             # Step 6 — fetch the stage row to return
-            stage_result = await conn.execute(
-                text(_GET_STAGE_BY_ID_SQL), {"sid": sid}
-            )
+            stage_result = await conn.execute(text(_GET_STAGE_BY_ID_SQL), {"sid": sid})
             stage_row = stage_result.mappings().first()
 
         if stage_row is None:

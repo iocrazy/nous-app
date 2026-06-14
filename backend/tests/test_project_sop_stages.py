@@ -319,8 +319,7 @@ class FakeStagePub:
 def fake_stage_repo(monkeypatch: pytest.MonkeyPatch) -> FakeStagePub:
     repo = FakeStagePub()
     monkeypatch.setattr(
-        "app.repositories.project_stages_repository."
-        "get_project_stages_repository",
+        "app.repositories.project_stages_repository." "get_project_stages_repository",
         lambda: repo,
     )
     return repo
@@ -343,9 +342,7 @@ def test_get_current_stage_null_when_unset(
     assert response.json() == {"success": True, "data": None}
 
 
-def test_put_current_stage_calls_repo(
-    client, fake_stage_repo: FakeStagePub
-) -> None:
+def test_put_current_stage_calls_repo(client, fake_stage_repo: FakeStagePub) -> None:
     response = client.put(
         "/api/v1/projects/777/current_stage",
         json={"stage_id": 111},

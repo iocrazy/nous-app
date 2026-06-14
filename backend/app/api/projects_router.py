@@ -214,7 +214,10 @@ async def list_stage_catalog(auth: AuthDep):
         get_project_stages_repository,
     )
 
-    return {"success": True, "data": await get_project_stages_repository().list_catalog()}
+    return {
+        "success": True,
+        "data": await get_project_stages_repository().list_catalog(),
+    }
 
 
 @router.get("/{project_id}/current_stage")
