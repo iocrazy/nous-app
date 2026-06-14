@@ -46,7 +46,7 @@ class _Recorder:
         )
 
 
-async def _run(rec: _Recorder, max_continuations=2):
+async def _run(rec: _Recorder, max_continuations=2, auto_close=False):
     return await _run_dispatch_with_continuation(
         1,
         {"id": 1},
@@ -55,6 +55,7 @@ async def _run(rec: _Recorder, max_continuations=2):
         run_turn=rec.run_turn,
         set_status=rec.set_status,
         max_continuations=max_continuations,
+        auto_close=auto_close,
     )
 
 
@@ -72,6 +73,34 @@ async def test_completed_goes_in_review_with_outcome():
             "outcome_reason": "all done",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_completed_auto_closes_to_done_when_enabled():
+    # slice 2a: with the platform toggle on, completed → done (self-close).
+    rec = _Recorder([("completed", "all done")])
+    await _run(rec, auto_close=True)
+    call = rec.status_calls[-1]
+    assert call["status"] == "done"
+    assert call["agent_outcome"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_completed_stays_in_review_when_auto_close_off():
+    # Default: even a completed declaration parks at in_review for a human.
+    rec = _Recorder([("completed", "all done")])
+    await _run(rec, auto_close=False)
+    assert rec.status_calls[-1]["status"] == "in_review"
+
+
+@pytest.mark.asyncio
+async def test_auto_close_only_applies_to_completed_not_continue_cap():
+    # continue-capped must NOT auto-close even when the toggle is on — the agent
+    # never said it finished.
+    rec = _Recorder([("continue", "a"), ("continue", "b"), ("continue", "c")])
+    await _run(rec, max_continuations=2, auto_close=True)
+    assert rec.status_calls[-1]["status"] == "in_review"
+    assert rec.status_calls[-1]["agent_outcome"] == "continue_capped"
 
 
 @pytest.mark.asyncio
