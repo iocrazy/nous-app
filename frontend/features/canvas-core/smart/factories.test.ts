@@ -69,6 +69,24 @@ describe('createPromptNode', () => {
     expect(node.data.agent_id).toBe('99999');
     expect(node.data.run_status).toBe('succeeded');
   });
+
+  it('round-trips a persisted "blocked" run_status (cascade downstream)', () => {
+    const node = createPromptNode(
+      { run_status: 'blocked' },
+      { randomSuffix: fixedSuffix },
+    );
+    expect(node.data.run_status).toBe('blocked');
+  });
+
+  it('still accepts legacy run_status values (backward compatible)', () => {
+    for (const legacy of ['idle', 'queued', 'running', 'succeeded', 'failed'] as const) {
+      const node = createPromptNode(
+        { run_status: legacy },
+        { randomSuffix: fixedSuffix },
+      );
+      expect(node.data.run_status).toBe(legacy);
+    }
+  });
 });
 
 describe('createOutputNode', () => {
