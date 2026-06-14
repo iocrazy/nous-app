@@ -5,8 +5,14 @@ import { clearClipboard } from '../store/clipboard';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { useCanvasShortcuts } from './useCanvasShortcuts';
 
-function Host({ enabled }: { enabled?: boolean }) {
-  useCanvasShortcuts({ enabled });
+function Host({
+  enabled,
+  onOpenPalette,
+}: {
+  enabled?: boolean;
+  onOpenPalette?: () => void;
+}) {
+  useCanvasShortcuts({ enabled, onOpenPalette });
   return null;
 }
 
@@ -177,5 +183,37 @@ describe('useCanvasShortcuts — enabled flag', () => {
     render(<Host enabled={false} />);
     fireKey({ key: 'a', meta: true });
     expect(useCanvasCoreStore.getState().selection).toEqual([]);
+  });
+});
+
+describe('useCanvasShortcuts — Cmd+K palette (Phase 6c)', () => {
+  it('Cmd+K calls the onOpenPalette callback', () => {
+    const onOpenPalette = vi.fn();
+    render(<Host onOpenPalette={onOpenPalette} />);
+    fireKey({ key: 'k', meta: true });
+    expect(onOpenPalette).toHaveBeenCalledTimes(1);
+  });
+
+  it('Ctrl+K also calls the callback (Windows/Linux)', () => {
+    const onOpenPalette = vi.fn();
+    render(<Host onOpenPalette={onOpenPalette} />);
+    fireKey({ key: 'K', meta: true }); // upper-case variant from shift state
+    expect(onOpenPalette).toHaveBeenCalledTimes(1);
+  });
+
+  it('Cmd+K is ignored when focus is inside an editable element', () => {
+    const onOpenPalette = vi.fn();
+    render(<Host onOpenPalette={onOpenPalette} />);
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    fireKey({ key: 'k', meta: true, target: input });
+    expect(onOpenPalette).not.toHaveBeenCalled();
+    document.body.removeChild(input);
+  });
+
+  it('Cmd+K is a no-op when no onOpenPalette callback is provided', () => {
+    render(<Host />);
+    // Should not throw even without a callback
+    expect(() => fireKey({ key: 'k', meta: true })).not.toThrow();
   });
 });
