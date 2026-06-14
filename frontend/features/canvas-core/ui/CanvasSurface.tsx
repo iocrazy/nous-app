@@ -16,8 +16,8 @@ import {
   BackgroundVariant,
   Controls,
   SelectionMode,
-  type Edge,
   type EdgeChange,
+  type IsValidConnection,
   type Node,
   type NodeChange,
   type OnSelectionChangeParams,
@@ -31,10 +31,9 @@ import { useCallback, useMemo } from 'react';
 import type { CanvasConnection, CanvasNode } from '../types';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { SMART_NODE_TYPES } from '../smart/nodes/registry';
-import { canConnectSmart } from '../smart/types';
+import { toReactFlowEdges, validateCanvasConnection } from './connectionMapping';
 
 type AnyNode = Node;
-type AnyEdge = Edge;
 
 function toReactFlowNodes(nodes: CanvasNode[]): AnyNode[] {
   return nodes.map((node, idx) => {
@@ -50,16 +49,6 @@ function toReactFlowNodes(nodes: CanvasNode[]): AnyNode[] {
         ? (obj.data as Record<string, unknown>)
         : { label: typeof obj.label === 'string' ? obj.label : id };
     return { id, position, type, data } as AnyNode;
-  });
-}
-
-function toReactFlowEdges(connections: CanvasConnection[]): AnyEdge[] {
-  return connections.map((conn, idx) => {
-    const obj = conn as Record<string, unknown>;
-    const id = typeof obj.id === 'string' ? obj.id : `edge-${idx}`;
-    const source = typeof obj.source === 'string' ? obj.source : '';
-    const target = typeof obj.target === 'string' ? obj.target : '';
-    return { id, source, target } as AnyEdge;
   });
 }
 
@@ -116,15 +105,13 @@ export function CanvasSurface() {
     [setSelection],
   );
 
-  const isConnectionValid = useCallback(
-    (connection: { source: string; target: string }) => {
-      if (kind !== 'smart') return true;
-      const findType = (id: string) => {
-        const found = rfNodes.find((n) => n.id === id);
-        return found?.type;
-      };
-      return canConnectSmart(findType(connection.source), findType(connection.target));
-    },
+  const isConnectionValid = useCallback<IsValidConnection>(
+    (connection) =>
+      validateCanvasConnection(
+        connection,
+        kind,
+        (id) => rfNodes.find((n) => n.id === id)?.type,
+      ),
     [kind, rfNodes],
   );
 
