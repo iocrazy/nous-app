@@ -10,6 +10,7 @@ import {
 } from '@arco-design/web-react'
 import { useSystemSettings, useUpdateSetting } from '../../api/endpoints/settings'
 import type { SystemSetting } from '../../api/endpoints/settings'
+import { MemorySettings } from './MemorySettings'
 
 const { Title } = Typography
 
@@ -101,10 +102,13 @@ export function Settings() {
     )
   }
 
+  // graph_* keys are managed by the dedicated Memory panel below (masked api
+  // keys) — keep them out of the generic rows so they don't show raw + cluttered.
+  const generic = (settings || []).filter((s) => !s.key.startsWith('graph_'))
   // Group settings: booleans first, then numbers, then strings
-  const boolSettings = (settings || []).filter((s) => typeof s.value === 'boolean')
-  const numberSettings = (settings || []).filter((s) => typeof s.value === 'number')
-  const stringSettings = (settings || []).filter(
+  const boolSettings = generic.filter((s) => typeof s.value === 'boolean')
+  const numberSettings = generic.filter((s) => typeof s.value === 'number')
+  const stringSettings = generic.filter(
     (s) => typeof s.value !== 'boolean' && typeof s.value !== 'number',
   )
 
@@ -135,7 +139,7 @@ export function Settings() {
         ))}
       </Card>
 
-      <Card title="Limits & Quotas">
+      <Card title="Limits & Quotas" style={{ marginBottom: 20 }}>
         {numberSettings.map((s, i) => (
           <div key={s.key}>
             {i > 0 && <Divider style={{ margin: 0 }} />}
@@ -143,6 +147,8 @@ export function Settings() {
           </div>
         ))}
       </Card>
+
+      <MemorySettings />
     </div>
   )
 }
