@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Outlet, useParams } from 'react-router-dom';
 import { AILibrarySidebar } from './AILibrarySidebar';
+import { islandUI } from '../../utils/featureFlags';
 
 /**
  * Layout for all /ai-library/* routes.
@@ -15,11 +16,12 @@ export const AILibraryLayout: React.FC = () => {
   const { teamId } = useParams();
   const urlPrefix = teamId ? `/team/${teamId}` : '';
   const [collapsed, setCollapsed] = useState(false);
+  const island = islandUI();
 
   return (
     <div
-      className="flex -mx-4 -mt-14 -mb-20 sm:-mx-8 sm:-mt-20 sm:-mb-8"
-      style={{ height: '100vh' }}
+      className={island ? 'flex h-full min-h-0' : 'flex -mx-4 -mt-14 -mb-20 sm:-mx-8 sm:-mt-20 sm:-mb-8'}
+      style={island ? undefined : { height: '100vh' }}
     >
       <AILibrarySidebar
         urlPrefix={urlPrefix}
@@ -27,7 +29,7 @@ export const AILibraryLayout: React.FC = () => {
         onToggleCollapse={() => setCollapsed((v) => !v)}
       />
       <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
-        <div className="flex-1 overflow-y-auto px-8 pt-20 pb-8">
+        <div className={island ? 'flex-1 overflow-y-auto px-8 pb-8' : 'flex-1 overflow-y-auto px-8 pt-20 pb-8'}>
           <Outlet />
         </div>
       </div>
