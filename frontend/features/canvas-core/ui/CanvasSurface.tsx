@@ -31,6 +31,7 @@ import { useCallback, useMemo } from 'react';
 import type { CanvasConnection, CanvasNode } from '../types';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { SMART_NODE_TYPES } from '../smart/nodes/registry';
+import { CLASSIC_NODE_TYPES } from '../classic/ClassicNodeViews';
 import { toReactFlowEdges, validateCanvasConnection } from './connectionMapping';
 
 type AnyNode = Node;
@@ -115,7 +116,12 @@ export function CanvasSurface() {
     [kind, rfNodes],
   );
 
-  const nodeTypes = kind === 'smart' ? SMART_NODE_TYPES : undefined;
+  const nodeTypes =
+    kind === 'smart'
+      ? SMART_NODE_TYPES
+      : kind === 'classic'
+        ? CLASSIC_NODE_TYPES
+        : undefined;
 
   return (
     <ReactFlow

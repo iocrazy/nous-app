@@ -14,6 +14,7 @@ import type { Connection, Edge } from '@xyflow/react';
 
 import type { CanvasConnection, CanvasKind } from '../types';
 import { canConnectSmart } from '../smart/types';
+import { canConnectClassic } from '../classic/registry';
 
 /**
  * Map stored `CanvasConnection`s into React Flow edges, preserving the
@@ -41,17 +42,32 @@ export function toReactFlowEdges(connections: CanvasConnection[]): Edge[] {
  * `connection.sourceHandle` / `connection.targetHandle`.
  *
  * For SmartMode the rule is purely node-type based (handles ignored,
- * which is harmless). For every other kind we currently allow any
- * connection.
+ * which is harmless). For ClassicMode the rule is typed-port based: the
+ * source node's OUTPUT port (`sourceHandle`) must share a port type with
+ * the target node's INPUT port (`targetHandle`), and a node may not wire
+ * to itself. For any other kind we allow any connection.
  */
 export function validateCanvasConnection(
   connection: Connection | Edge,
   kind: CanvasKind | null,
   nodeTypeById: (id: string) => string | undefined,
 ): boolean {
-  if (kind !== 'smart') return true;
-  return canConnectSmart(
-    nodeTypeById(connection.source),
-    nodeTypeById(connection.target),
-  );
+  if (kind === 'smart') {
+    return canConnectSmart(
+      nodeTypeById(connection.source),
+      nodeTypeById(connection.target),
+    );
+  }
+  if (kind === 'classic') {
+    // Reject self-loops here — this is the only layer that sees node IDS;
+    // `canConnectClassic` only sees node types + handle ids.
+    if (connection.source === connection.target) return false;
+    return canConnectClassic(
+      nodeTypeById(connection.source),
+      nodeTypeById(connection.target),
+      connection.sourceHandle,
+      connection.targetHandle,
+    );
+  }
+  return true;
 }
