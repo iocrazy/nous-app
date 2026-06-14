@@ -7,6 +7,7 @@ import {
   FileVersion,
   ReviewComment,
   ReviewStatus,
+  ProjectStage,
 } from '../types';
 import { apiClient, apiFetch } from './apiClient';
 
@@ -424,4 +425,41 @@ export const deleteProjectCollection = async (
   await apiClient.delete(
     `/api/v1/projects/${projectId}/collections/${collectionId}`,
   );
+};
+
+// ============================================
+// SOP Stage endpoints (Phase 5b)
+// ============================================
+
+/** Fetch the global SOP stage catalog (ordered by sort_order). */
+export const fetchStageCatalog = async (): Promise<ProjectStage[]> => {
+  const response = await apiClient.get<Envelope<ProjectStage[]>>(
+    '/api/v1/projects/stages/catalog',
+  );
+  return response.data ?? [];
+};
+
+/** Fetch the current SOP stage for a project, or null when unset. */
+export const fetchCurrentStage = async (
+  projectId: string,
+): Promise<ProjectStage | null> => {
+  const response = await apiClient.get<Envelope<ProjectStage | null>>(
+    `/api/v1/projects/${projectId}/current_stage`,
+  );
+  return response.data ?? null;
+};
+
+/**
+ * Set the project's current SOP stage. Returns the new stage row, or null
+ * when the project was already on the requested stage (server-side no-op).
+ */
+export const setCurrentStage = async (
+  projectId: string,
+  stageId: string,
+): Promise<ProjectStage | null> => {
+  const response = await apiClient.put<Envelope<ProjectStage | null>>(
+    `/api/v1/projects/${projectId}/current_stage`,
+    { stage_id: Number(stageId) },
+  );
+  return response.data ?? null;
 };

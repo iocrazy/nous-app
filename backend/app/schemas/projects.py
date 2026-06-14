@@ -262,3 +262,9 @@ class StyleProfileUpdate(BaseModel):
     style_md: Optional[str] = Field(None, max_length=20000)
     visual_style: Optional[dict] = None
     reference_links: Optional[list] = Field(None, max_length=100)
+
+
+class CurrentStageUpdate(BaseModel):
+    """Request body for PUT /projects/{id}/current_stage."""
+
+    stage_id: int = Field(..., description="Target project_stages.id")
