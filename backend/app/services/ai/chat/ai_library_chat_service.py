@@ -697,6 +697,22 @@ class AILibraryChatService:
                 f"ResourceFetch tool registered"
             )
 
+        # Spec-2: issue-context turns expose FinishIssue so the agent can
+        # declare its outcome (completed | needs_input | continue). The
+        # execute_issue workflow reads the declaration from the returned
+        # tool_calls trace; chat turns never see this tool.
+        if trigger in ("issue_dispatch", "issue_reply"):
+            from app.services.ai.tools.finish_issue_tool import (
+                finish_issue_handler,
+                finish_issue_spec,
+            )
+
+            composed = composed.model_copy(
+                update={"tools": list(composed.tools or []) + [finish_issue_spec()]}
+            )
+            runner.finish_issue_handler = finish_issue_handler
+            logger.info("[chat] FinishIssue tool registered for issue turn")
+
         # Prepend ref warnings to the user content so the agent sees them.
         effective_content = content
         if ref_warnings:
@@ -839,6 +855,9 @@ class AILibraryChatService:
                     if resource_refs:
                         runner.resource_fetch_handler = None
                         _request_cache.clear()
+                    # Spec-2: drop the per-turn FinishIssue handler so a later
+                    # non-issue turn on the same runner can't accept it.
+                    runner.finish_issue_handler = None
 
                 run_id = recorder.run_id
                 # Pull usage off the recorder — that's the single source

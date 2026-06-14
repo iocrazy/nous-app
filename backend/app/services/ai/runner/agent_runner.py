@@ -59,7 +59,13 @@ _DEFAULT_COMPACTOR = ContextCompactor()
 # don't need to be listed here.
 # S4-T6: ResourceFetch is a per-request caller-provided tool; its handler
 # is injected onto runner.resource_fetch_handler before each turn.
-SUPPORTED_TOOLS: frozenset[str] = frozenset({"Skill", "Delegate", "ResourceFetch"})
+# FinishIssue (Spec-2) is, like ResourceFetch, a per-request caller-provided
+# tool: its handler is injected onto runner.finish_issue_handler only for
+# issue-context turns, and its spec is only added to composed.tools there, so
+# regular chat turns never see or accept it.
+SUPPORTED_TOOLS: frozenset[str] = frozenset(
+    {"Skill", "Delegate", "ResourceFetch", "FinishIssue"}
+)
 
 
 def _last_user_text(user_messages: list[dict]) -> str:
@@ -173,6 +179,10 @@ class AgentRunner:
         # attachments. None means no @-referenced resources for this turn —
         # calls to ResourceFetch return a clear error instead of crashing.
         self.resource_fetch_handler: Optional[Any] = None
+        # Spec-2: per-request FinishIssue handler. Injected by the chat service
+        # only for issue-context turns; None on regular chat turns so a stray
+        # FinishIssue call returns a clear "not available" result.
+        self.finish_issue_handler: Optional[Any] = None
 
     async def stream_turn(
         self,
@@ -461,6 +471,8 @@ class AgentRunner:
                             result = {
                                 "error": f"ResourceFetch failed: {rf_exc.__class__.__name__}"
                             }
+                elif tool_name == "FinishIssue":
+                    result = await self._dispatch_finish_issue(args)
                 elif is_mcp:
                     # G3: route to outbound MCP server. Mirrors run_turn
                     # error handling — transport errors → tool result
@@ -518,6 +530,23 @@ class AgentRunner:
             finish_reason="length",
             usage={"warning": "max_stream_iterations_exceeded"},
         )
+
+    async def _dispatch_finish_issue(self, args: dict) -> dict:
+        """Spec-2: route a FinishIssue call to the per-request handler injected
+        by the chat service. None means this is not an issue turn — return a
+        clear result instead of crashing. Mirrors the ResourceFetch contract."""
+        if self.finish_issue_handler is None:
+            return {
+                "error": (
+                    "FinishIssue is not available on this turn — it only "
+                    "applies when working an assigned issue."
+                )
+            }
+        try:
+            return await self.finish_issue_handler(args)
+        except Exception as fi_exc:  # noqa: BLE001
+            logger.warning(f"[AgentRunner] FinishIssue handler raised: {fi_exc!r}")
+            return {"error": f"FinishIssue failed: {fi_exc.__class__.__name__}"}
 
     async def run_turn(
         self,
@@ -870,6 +899,8 @@ class AgentRunner:
                             result = {
                                 "error": f"ResourceFetch failed: {rf_exc.__class__.__name__}"
                             }
+                elif tool_name == "FinishIssue":
+                    result = await self._dispatch_finish_issue(args)
                 elif is_mcp:
                     # Q5: route to outbound MCP server. Tool errors
                     # (server returned isError=true) come back as a

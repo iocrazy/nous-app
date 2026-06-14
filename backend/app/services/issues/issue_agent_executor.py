@@ -9,11 +9,12 @@ by the turn flow; the issue chat surface reads ai_messages (Task 5).
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from loguru import logger
 
 from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
+from app.services.ai.tools.finish_issue_tool import extract_issue_outcome
 from app.services.issues.issue_chat_stream import (  # noqa: F401
     publish_chunk,
     publish_message,
@@ -32,16 +33,33 @@ def _build_user_message(issue: dict[str, Any]) -> str:
     return "\n".join(parts) or "Complete the assigned task."
 
 
+# Synthetic nudge for a continuation turn (Spec-2). The session already carries
+# the full task history via memory, so we only need to prompt another turn.
+CONTINUATION_NUDGE = (
+    "Continue working on this issue. When you are finished, blocked, or need "
+    "another turn, call the FinishIssue tool to declare the outcome."
+)
+
+
 async def run_issue_agent(
-    *, issue: dict[str, Any], agent_id: str, user_id: str
-) -> Optional[str]:
+    *,
+    issue: dict[str, Any],
+    agent_id: str,
+    user_id: str,
+    is_continuation: bool = False,
+) -> dict[str, Any]:
     """Run the assigned agent on the issue via the chat runtime.
 
     Streams token deltas + publishes the final message to Redis channel
     ``issue:{id}`` while the turn is in flight.
 
-    Returns the agent's text output (also persisted as an ai_message by
-    run_session_turn).
+    Returns ``{"content": str, "outcome": Optional[str], "reason": Optional[str]}``
+    where ``outcome`` is the agent's FinishIssue declaration (completed |
+    needs_input | continue) or None if it never declared. The assistant text is
+    also persisted as an ai_message by run_session_turn.
+
+    ``is_continuation`` sends a short "keep going" nudge instead of the full
+    task text (Spec-2 bounded continuation); the agent already has the history.
 
     Raises RuntimeError when the issue has no assignable agent session.
 
@@ -59,22 +77,25 @@ async def run_issue_agent(
     async def _cb(delta: str) -> None:
         await publish_chunk(iid, delta)
 
+    content_in = CONTINUATION_NUDGE if is_continuation else _build_user_message(issue)
+
     await publish_status(iid, "running")
     try:
         result = await AILibraryChatService().run_session_turn(
             session_id,
             user_id=user_id,
-            content=_build_user_message(issue),
+            content=content_in,
             trigger="issue_dispatch",
             chunk_callback=_cb,
         )
         assistant = result.get("assistant_message") or {}
         await publish_message(iid, assistant, session_user_id=None)
         content = assistant.get("content") or ""
+        outcome, reason = extract_issue_outcome(result.get("tool_calls"))
         logger.info(
             f"[issue_agent] issue={iid} session={session_id} "
-            f"produced {len(content)} chars"
+            f"produced {len(content)} chars; outcome={outcome}"
         )
-        return content
+        return {"content": content, "outcome": outcome, "reason": reason}
     finally:
         await publish_status(iid, "done")

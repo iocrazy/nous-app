@@ -54,7 +54,8 @@ async def test_run_issue_agent_passes_chunk_callback_and_publishes(monkeypatch):
         agent_id="a",
         user_id="u",
     )
-    assert out == "result"
+    assert out["content"] == "result"
+    assert out["outcome"] is None  # no FinishIssue declared in this turn
     assert captured["has_cb"] is True
     assert chunks == ["tok"]
     assert messages and messages[0]["content"] == "result"
@@ -83,7 +84,66 @@ async def test_run_issue_agent_runs_session_turn(monkeypatch):
     aa = chat_svc.run_session_turn.await_args
     assert aa.kwargs["trigger"] == "issue_dispatch"
     assert "写一篇短文" in str(aa)  # issue task is in the content arg
-    assert out == "essay"
+    assert out["content"] == "essay"
+
+
+async def test_run_issue_agent_extracts_finish_outcome(monkeypatch):
+    from app.services.issues import issue_agent_executor as m
+
+    monkeypatch.setattr(
+        m, "get_or_create_issue_session", AsyncMock(return_value="sess-2")
+    )
+    chat_svc = AsyncMock()
+    chat_svc.run_session_turn = AsyncMock(
+        return_value={
+            "assistant_message": {"content": "did it"},
+            "tool_calls": [
+                {
+                    "name": "FinishIssue",
+                    "args": {"outcome": "completed"},
+                    "result": {
+                        "acknowledged": True,
+                        "outcome": "completed",
+                        "reason": "shipped",
+                    },
+                }
+            ],
+        }
+    )
+    monkeypatch.setattr(m, "AILibraryChatService", lambda: chat_svc)
+    monkeypatch.setattr(m, "publish_chunk", AsyncMock())
+    monkeypatch.setattr(m, "publish_message", AsyncMock())
+    monkeypatch.setattr(m, "publish_status", AsyncMock())
+    out = await m.run_issue_agent(
+        issue={"id": 7, "title": "t"}, agent_id="a", user_id="u"
+    )
+    assert out["outcome"] == "completed"
+    assert out["reason"] == "shipped"
+
+
+async def test_run_issue_agent_continuation_sends_nudge(monkeypatch):
+    from app.services.issues import issue_agent_executor as m
+
+    monkeypatch.setattr(
+        m, "get_or_create_issue_session", AsyncMock(return_value="sess-3")
+    )
+    chat_svc = AsyncMock()
+    chat_svc.run_session_turn = AsyncMock(
+        return_value={"assistant_message": {"content": "more"}}
+    )
+    monkeypatch.setattr(m, "AILibraryChatService", lambda: chat_svc)
+    monkeypatch.setattr(m, "publish_chunk", AsyncMock())
+    monkeypatch.setattr(m, "publish_message", AsyncMock())
+    monkeypatch.setattr(m, "publish_status", AsyncMock())
+    await m.run_issue_agent(
+        issue={"id": 8, "title": "big task", "description": "lots"},
+        agent_id="a",
+        user_id="u",
+        is_continuation=True,
+    )
+    sent = chat_svc.run_session_turn.await_args.kwargs["content"]
+    assert sent == m.CONTINUATION_NUDGE
+    assert "big task" not in sent  # continuation does NOT resend the full task
 
 
 async def test_run_issue_agent_raises_when_no_session(monkeypatch):

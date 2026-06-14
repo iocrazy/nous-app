@@ -12,8 +12,17 @@ Steps + workflow are async because the engine helpers are async.
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Awaitable, Callable, Optional
+
+# Spec-2: how many bounded continuation turns an agent may auto-run on one issue
+# before it is handed to a human (in_review). Mirrors the liveness MAX, but is a
+# distinct issue-level axis (process-liveness lives on agent_runs).
+try:
+    ISSUE_MAX_CONTINUATIONS = max(0, int(os.getenv("ISSUE_MAX_CONTINUATIONS", "2")))
+except ValueError:
+    ISSUE_MAX_CONTINUATIONS = 2
 
 from dbos import DBOS
 from loguru import logger
@@ -57,8 +66,14 @@ async def set_status(
     *,
     error_code: Optional[str] = None,
     error_message: Optional[str] = None,
+    agent_outcome: Optional[str] = None,
+    outcome_reason: Optional[str] = None,
 ) -> None:
-    """Transition issue.status with side-effect timestamps (design Protocol 5)."""
+    """Transition issue.status with side-effect timestamps (design Protocol 5).
+
+    Spec-2: ``agent_outcome`` / ``outcome_reason`` record the agent's FinishIssue
+    self-report into execution_state so the UI can distinguish "agent reports
+    done" from "agent merely stopped"."""
     from app.db import engine as db_engine
 
     now_dt = datetime.now(timezone.utc)
@@ -73,11 +88,17 @@ async def set_status(
     elif status == "cancelled":
         cols.append("cancelled_at = :ts")
         params["ts"] = now_dt
+    state: dict[str, Any] = {}
     if error_code or error_message:
+        state["error_code"] = error_code
+        state["error_message"] = error_message
+    if agent_outcome:
+        state["agent_outcome"] = agent_outcome
+    if outcome_reason:
+        state["outcome_reason"] = outcome_reason
+    if state:
         cols.append("execution_state = CAST(:state AS jsonb)")
-        params["state"] = json.dumps(
-            {"error_code": error_code, "error_message": error_message}
-        )
+        params["state"] = json.dumps(state)
     params["id"] = issue_id
     # may write execution_state (service_role-only via issues_update_allowlist)
     await db_engine.execute_as_service_role(
@@ -276,16 +297,87 @@ async def load_issue(issue_id: int) -> dict[str, Any]:
 
 @DBOS.step()
 async def run_issue_agent_step(
-    issue: dict[str, Any], agent_id: str, user_id: str
-) -> Optional[str]:
+    issue: dict[str, Any],
+    agent_id: str,
+    user_id: str,
+    is_continuation: bool = False,
+) -> dict[str, Any]:
     """Run the assigned agent on the issue. The RunRecorder (issue_id-linked)
-    + mig-208 triggers write the result into the issue chat; we just return the
-    text. No retry: run_issue_agent calls run_session_turn which is non-idempotent
-    (appends user msg + charges) and streams per-token chunks — a retry would
-    re-emit the whole stream (double bubble) and re-charge the user."""
+    + mig-208 triggers write the result into the issue chat; we return the
+    agent's FinishIssue declaration ``{content, outcome, reason}`` so the
+    workflow can route status + continuation. No retry: run_issue_agent calls
+    run_session_turn which is non-idempotent (appends user msg + charges) and
+    streams per-token chunks — a retry would re-emit the whole stream (double
+    bubble) and re-charge the user."""
     from app.services.issues.issue_agent_executor import run_issue_agent
 
-    return await run_issue_agent(issue=issue, agent_id=agent_id, user_id=user_id)
+    return await run_issue_agent(
+        issue=issue,
+        agent_id=agent_id,
+        user_id=user_id,
+        is_continuation=is_continuation,
+    )
+
+
+async def _run_dispatch_with_continuation(
+    issue_id: int,
+    issue_row: dict[str, Any],
+    agent_id: str,
+    user_id: str,
+    *,
+    run_turn: Callable[..., Awaitable[dict[str, Any]]],
+    set_status: Callable[..., Awaitable[None]],
+    max_continuations: int = ISSUE_MAX_CONTINUATIONS,
+) -> dict[str, Any]:
+    """Spec-2 core: run the agent, then route the issue by the agent's declared
+    FinishIssue outcome. ``continue`` auto-runs another bounded turn; everything
+    else terminates the dispatch. Deps are injected so this is unit-testable
+    without DBOS/DB (mirrors _run_reply_turns).
+
+    Routing:
+      completed       → in_review (human confirms; agents don't hard-close yet)
+      needs_input     → blocked   (with the agent's reason)
+      continue (capped)→ in_review (handed to a human after the cap)
+      none declared   → in_review (default — unchanged legacy behavior)
+    """
+    attempt = 0
+    outcome: Optional[str] = None
+    reason: Optional[str] = None
+    while True:
+        res = await run_turn(
+            issue_row, agent_id, user_id, is_continuation=(attempt > 0)
+        )
+        outcome = (res or {}).get("outcome")
+        reason = (res or {}).get("reason")
+        if outcome == "continue" and attempt < max_continuations:
+            attempt += 1
+            continue
+        break
+
+    if outcome == "needs_input":
+        await set_status(
+            issue_id,
+            "blocked",
+            error_code="agent_needs_input",
+            error_message=reason,
+            agent_outcome="needs_input",
+        )
+    elif outcome == "completed":
+        await set_status(
+            issue_id, "in_review", agent_outcome="completed", outcome_reason=reason
+        )
+    elif outcome == "continue":
+        # Asked for more turns past the cap — stop and hand to a human.
+        await set_status(
+            issue_id,
+            "in_review",
+            agent_outcome="continue_capped",
+            outcome_reason=reason,
+        )
+    else:
+        # No declaration → preserve legacy behavior (park for human review).
+        await set_status(issue_id, "in_review")
+    return {"outcome": outcome, "attempts": attempt}
 
 
 @DBOS.workflow()
@@ -308,11 +400,17 @@ async def execute_issue(issue_id: int) -> dict[str, Any]:
             "assignee_user_id"
         )
         if agent_id and user_id:
-            await run_issue_agent_step(issue_row, agent_id, user_id)
-            # Agent output is already in the chat (mig-208 bridge). Move to
-            # in_review so a human confirms — agents don't self-close yet.
-            await set_status(issue_id, "in_review")
-            return {"issue_id": issue_id, "executed": True}
+            # Spec-2: route status + bounded continuation by the agent's
+            # FinishIssue declaration (agent output already bridged to chat).
+            routed = await _run_dispatch_with_continuation(
+                issue_id,
+                issue_row,
+                agent_id,
+                user_id,
+                run_turn=run_issue_agent_step,
+                set_status=set_status,
+            )
+            return {"issue_id": issue_id, "executed": True, **routed}
         # No agent assigned → nothing to run; close it out.
         await set_status(issue_id, "done")
         return {"issue_id": issue_id, "executed": False}
