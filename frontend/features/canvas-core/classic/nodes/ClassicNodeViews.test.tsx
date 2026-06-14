@@ -69,6 +69,8 @@ describe('CLASSIC_NODE_TYPES — labels + typed ports', () => {
     'text',
     'image_gen',
     'video_gen',
+    'video',
+    'text_join',
   ] as const;
 
   for (const type of types) {
@@ -213,5 +215,51 @@ describe('CLASSIC_NODE_TYPES — run-state halo', () => {
     const node = screen.getByTestId('classic-node-image');
     expect(node.className).toContain('border-indigo-500');
     expect(node.className).not.toContain('border-rose-500');
+  });
+});
+
+// W3: video source node
+describe('CLASSIC_NODE_TYPES — W3 video source node', () => {
+  it('renders the Video label and the single video-out handle', () => {
+    const { container } = renderNode('video', { video_url: 'https://cdn/v.mp4' });
+    expect(screen.getByTestId('classic-node-video')).toBeInTheDocument();
+    expect(handleIds(container)).toEqual(['video-out']);
+    // The single handle is a source on the right.
+    const handles = container.querySelectorAll('.react-flow__handle');
+    expect(handles).toHaveLength(1);
+    expect(handles[0].classList.contains('react-flow__handle-right')).toBe(true);
+  });
+});
+
+// W3: text_join transform node
+describe('CLASSIC_NODE_TYPES — W3 text_join transform node', () => {
+  it('renders the Text Join label with two target handles (left) and one source handle (right)', () => {
+    const { container } = renderNode('text_join', { text_a: 'A', text_b: 'B' });
+    expect(screen.getByTestId('classic-node-text_join')).toBeInTheDocument();
+    const ids = handleIds(container);
+    expect(ids).toContain('text-a-in');
+    expect(ids).toContain('text-b-in');
+    expect(ids).toContain('text-out');
+    const leftHandles = container.querySelectorAll('.react-flow__handle-left');
+    expect(leftHandles).toHaveLength(2);
+    const rightHandles = container.querySelectorAll('.react-flow__handle-right');
+    expect(rightHandles).toHaveLength(1);
+  });
+
+  it('shows an inline join preview when text_a and text_b are present', () => {
+    renderNode('text_join', { text_a: 'Hello', text_b: 'World' });
+    const preview = screen.getByTestId('classic-node-text_join-preview');
+    expect(preview).toHaveTextContent('Hello World');
+  });
+
+  it('uses data.separator in the inline preview', () => {
+    renderNode('text_join', { text_a: 'A', text_b: 'B', separator: ' | ' });
+    const preview = screen.getByTestId('classic-node-text_join-preview');
+    expect(preview).toHaveTextContent('A | B');
+  });
+
+  it('renders no preview box when neither text_a nor text_b are set', () => {
+    renderNode('text_join');
+    expect(screen.queryByTestId('classic-node-text_join-preview')).toBeNull();
   });
 });
