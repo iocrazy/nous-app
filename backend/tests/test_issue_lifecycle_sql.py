@@ -140,11 +140,12 @@ async def test_run_issue_agent_step_invokes_executor(monkeypatch):
 
     ran = {}
 
-    async def fake_run_issue_agent(*, issue, agent_id, user_id):
+    async def fake_run_issue_agent(*, issue, agent_id, user_id, is_continuation=False):
         ran["issue_id"] = issue["id"]
         ran["agent_id"] = agent_id
         ran["user_id"] = user_id
-        return "essay output"
+        ran["is_continuation"] = is_continuation
+        return {"content": "essay output", "outcome": "completed", "reason": "done"}
 
     monkeypatch.setattr(
         "app.services.issues.issue_agent_executor.run_issue_agent",
@@ -153,8 +154,14 @@ async def test_run_issue_agent_step_invokes_executor(monkeypatch):
     out = await il.run_issue_agent_step(
         {"id": 409, "title": "t", "description": "d"}, "agent-uuid", "user-uuid"
     )
-    assert ran == {"issue_id": 409, "agent_id": "agent-uuid", "user_id": "user-uuid"}
-    assert out == "essay output"
+    assert ran == {
+        "issue_id": 409,
+        "agent_id": "agent-uuid",
+        "user_id": "user-uuid",
+        "is_continuation": False,
+    }
+    assert out["content"] == "essay output"
+    assert out["outcome"] == "completed"
 
 
 async def test_load_issue_normalizes_datetime_and_uuid():
