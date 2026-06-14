@@ -28,11 +28,13 @@ const RUNNABLE_NODE_TYPES: ReadonlySet<string> = new Set([
  *  display results, or are pure-UI chrome — they never dispatch to a provider.
  *  In a cascade they are pass-through (skipped, stay idle). `text` is a static
  *  text literal (like `prompt`); `note` is a portless annotation; `preview` is
- *  a multi-modal display sink; `group` is a portless visual container. */
+ *  a multi-modal display sink; `group` is a portless visual container.
+ *  `video` (W3) is the video URL source counterpart of `image`. */
 const PASSIVE_NODE_TYPES: ReadonlySet<string> = new Set([
   'image',
   'prompt',
   'text',
+  'video',   // W3: static video URL source — passive, like `image`
   'output',
   'note',
   'preview',
@@ -40,19 +42,40 @@ const PASSIVE_NODE_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * W3 transform node types — client-side data transformations that do NOT
+ * dispatch to the backend. The cascade computes their EFFECTIVE data (applying
+ * any piped input values) and records it so downstream nodes can read the
+ * result via `nodeOutputValue`. They are counted as `skipped` in the cascade
+ * report and do NOT trigger `onNodePatch`.
+ *
+ * Current member: `text_join` (concatenates two text inputs into one text
+ * output). Why NOT loop/iterate or generator/batch: those require either a
+ * `list` port type (not in the closed `CLASSIC_PORT_TYPES` set) or
+ * re-executing downstream subgraphs per item — which would break the single
+ * topo-sort-pass cascade model. They are deferred to Phase 6.
+ */
+const TRANSFORM_NODE_TYPES: ReadonlySet<string> = new Set([
+  'text_join',
+]);
+
+/**
  * The dispatch decision for one classic node:
- *   - run     — a runnable AI-op node (llm / comfy / image_gen / video_gen).
- *               The cascade hands it to the runner, which POSTs the node to
- *               the backend; the backend resolves the route (and reports any
- *               config error — e.g. comfy with no workflow_slug — in-band).
- *   - passive — a literal/sink node: no provider dispatch; the cascade treats
- *               it as a no-op pass-through.
- *   - unknown — an unmapped node type. The cascade decides skip-vs-fail based
- *               on whether the node has downstream dependents.
+ *   - run       — a runnable AI-op node (llm / comfy / image_gen / video_gen).
+ *                 The cascade hands it to the runner, which POSTs the node to
+ *                 the backend; the backend resolves the route (and reports any
+ *                 config error — e.g. comfy with no workflow_slug — in-band).
+ *   - passive   — a literal/sink node: no provider dispatch; the cascade treats
+ *                 it as a no-op pass-through (records original data).
+ *   - transform — a client-side data transformation node (W3: `text_join`).
+ *                 The cascade computes effective data (applying piped inputs)
+ *                 and records it for downstream piping. No backend call.
+ *   - unknown   — an unmapped node type. The cascade decides skip-vs-fail
+ *                 based on whether the node has downstream dependents.
  */
 export type ClassicDispatch =
   | { kind: 'run' }
   | { kind: 'passive' }
+  | { kind: 'transform' }
   | { kind: 'unknown'; reason: string };
 
 /**
@@ -64,6 +87,10 @@ export function dispatchClassicNode(
 ): ClassicDispatch {
   if (nodeType && RUNNABLE_NODE_TYPES.has(nodeType)) {
     return { kind: 'run' };
+  }
+
+  if (nodeType && TRANSFORM_NODE_TYPES.has(nodeType)) {
+    return { kind: 'transform' };
   }
 
   if (nodeType && PASSIVE_NODE_TYPES.has(nodeType)) {
