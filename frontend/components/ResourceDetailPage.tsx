@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -18,6 +19,7 @@ import {
   Layers,
   FileQuestion,
   PanelLeft,
+  PanelRightClose,
   RefreshCw,
   Search,
   Share2,
@@ -71,6 +73,9 @@ import { formatDateLocalized } from '../utils/formatDate';
 import { downloadFile } from '../utils/download';
 import { useToast } from './Toast';
 import { useAuth } from '../contexts/AuthContext';
+import { useIslandWork } from '../contexts/IslandWorkContext';
+import { islandUI } from '../utils/featureFlags';
+import { CometBack } from './CometBack';
 import { ShareModal } from './ShareModal';
 import { VersionManagerModal } from './VersionManagerModal';
 import VideoPlayer from './VideoPlayer';
@@ -367,6 +372,25 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
   }, []);
+
+  // Island app-shell integration (no-op in classic — useIslandWork returns an
+  // inert shape outside a shell, and `island` gates every island-only branch).
+  const island = islandUI();
+  const { infoIslandEl, setInfoVisible, setInfoAvailable } = useIslandWork();
+  // Island desktop = flag on AND the md+ split-pane layout is active (same
+  // breakpoint the rest of this page uses), so the inspector is never both
+  // mounted in the work island and portaled into the info island.
+  const islandDesktop = island && isDesktop;
+
+  // Island mode: this page owns an info island (the inspector). Mark it
+  // available + visible on mount so the shell mounts the info aside (our portal
+  // target), and tear it down on unmount. No-op in classic.
+  useEffect(() => {
+    if (!island) return;
+    setInfoAvailable(true);
+    setInfoVisible(true);
+    return () => { setInfoAvailable(false); setInfoVisible(false); };
+  }, [island, setInfoAvailable, setInfoVisible]);
 
   // File list panel state
   const [showFileList, setShowFileList] = useState(false);
@@ -1072,6 +1096,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   return (
     <div className="flex flex-col h-full animate-in fade-in duration-300">
       {/* Top bar — [PanelLeft | ← Back] | [◀ prev | filename (2/5) | next ▶] | [Download | ⋯] */}
+      {/* Classic top bar — island desktop renders the stage-head below instead. */}
+      {!island && (
       <div className="detail-header-glow hidden md:flex items-center justify-between px-4 py-2.5 mb-2 shrink-0">
         {/* Glowing accent line that dips to cradle the round Back button */}
         <svg
@@ -1324,6 +1350,225 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
           </div>
         </div>
       </div>
+      )}
+
+      {/* Island stage-head — comet back · file nav/title/version · actions.
+          Mirrors the download detail stage-head and carries the same controls
+          (prev/next, version, transcode, share/download/more) so island loses
+          no functionality (D12). */}
+      {islandDesktop && (
+        <div className="stage-head hidden md:flex items-center gap-3 px-4 py-3 border-b border-line relative">
+          <CometBack onClick={handleBack} title={t('common.back')} />
+          <button
+            onClick={() => setShowFileList(!showFileList)}
+            className={`p-1.5 rounded-lg transition-colors ${
+              showFileList ? 'bg-ink-800 text-indigo-400' : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800'
+            }`}
+            title={t('resources.fileListPanel')}
+          >
+            <PanelLeft size={16} />
+          </button>
+          {/* Center: prev/next + filename + version + transcode badges */}
+          <div className="min-w-0 flex-1 flex items-center justify-center gap-2">
+            <button
+              onClick={() => navigateToSibling('prev')}
+              disabled={!hasPrev}
+              className={`p-1 rounded transition-colors ${
+                hasPrev ? 'text-ink-400 hover:text-ink-200 hover:bg-ink-800' : 'text-ink-700 cursor-not-allowed'
+              }`}
+              title={t('resources.prevFile')}
+            >
+              <ChevronLeft size={18} />
+            </button>
+            <div className="flex items-center gap-2 px-2 min-w-0">
+              <FileIcon size={14} className={iconColor} />
+              <span className="text-sm text-ink-200 font-medium max-w-[140px] md:max-w-[300px] truncate">
+                {resource.filename}
+              </span>
+              {versions.length > 0 && (
+                <div className="relative" ref={versionDropdownRef}>
+                  <button
+                    onClick={() => setShowVersionDropdown(!showVersionDropdown)}
+                    className={`flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-md transition-colors ${
+                      selectedVersionId
+                        ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
+                        : 'bg-ink-800 text-ink-400 hover:text-ink-200 hover:bg-ink-700'
+                    }`}
+                  >
+                    <Layers size={12} />
+                    <span>
+                      {selectedVersionId
+                        ? `v${versions.find(v => v.id === selectedVersionId)?.version_number ?? '?'}`
+                        : `v${resource.current_version}`}
+                    </span>
+                    <ChevronDown size={12} />
+                  </button>
+                  {showVersionDropdown && (
+                    <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1 z-30 bg-ink-900 border border-ink-700 rounded-lg shadow-xl w-56 py-1">
+                      <div className="px-3 py-1.5 border-b border-ink-800">
+                        <p className="text-[10px] font-semibold text-ink-500 uppercase tracking-widest">
+                          {t('resources.versions', 'Versions')}
+                        </p>
+                      </div>
+                      <div className="max-h-48 overflow-y-auto py-1">
+                        {versions
+                          .sort((a, b) => b.version_number - a.version_number)
+                          .map((ver) => {
+                            const isCurrentVer = ver.version_number === resource.current_version;
+                            const isSelected = selectedVersionId ? ver.id === selectedVersionId : isCurrentVer;
+                            return (
+                              <button
+                                key={ver.id}
+                                onClick={() => handleSelectVersion(ver)}
+                                className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors ${
+                                  isSelected
+                                    ? 'bg-indigo-500/10 text-indigo-300'
+                                    : 'text-ink-400 hover:bg-ink-800 hover:text-ink-200'
+                                }`}
+                              >
+                                <span className={`font-semibold ${isCurrentVer ? 'text-indigo-400' : ''}`}>
+                                  v{ver.version_number}
+                                </span>
+                                <span className="truncate flex-1 text-left">{ver.filename}</span>
+                                {ver.transcode_status === 'completed' && (
+                                  <span className="text-[9px] px-1 py-0.5 bg-emerald-500/20 text-emerald-400 rounded">
+                                    HLS
+                                  </span>
+                                )}
+                                {(ver.transcode_status === 'pending' || ver.transcode_status === 'processing') && (
+                                  <Loader2 size={10} className="animate-spin text-amber-400 shrink-0" />
+                                )}
+                                {isCurrentVer && (
+                                  <span className="text-[9px] px-1 py-0.5 bg-emerald-500/20 text-emerald-400 rounded">
+                                    current
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                      </div>
+                      <div className="border-t border-ink-800 px-2 py-1.5">
+                        <button
+                          onClick={() => { setShowVersionDropdown(false); setShowVersionManager(true); }}
+                          className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-indigo-400 hover:bg-indigo-500/10 rounded-md transition-colors"
+                        >
+                          <Layers size={12} />
+                          {t('resources.manageVersions', 'Manage Versions')}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              {isVideo && transcodeStatus === 'pending' && (
+                <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/15 text-amber-400 rounded-md">
+                  <Loader2 size={10} className="animate-spin" />
+                  {t('resources.transcoding', 'Transcoding...')}
+                </span>
+              )}
+              {isVideo && transcodeStatus === 'processing' && (
+                <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/15 text-amber-400 rounded-md">
+                  <Loader2 size={10} className="animate-spin" />
+                  {t('resources.transcoding', 'Transcoding...')}
+                </span>
+              )}
+              {isVideo && transcodeStatus === 'failed' && viewingVersion && (
+                <button
+                  onClick={async () => {
+                    try {
+                      await retryTranscode(resourceId, viewingVersion.id);
+                      setVersions((prev) =>
+                        prev.map((v) =>
+                          v.id === viewingVersion.id
+                            ? { ...v, transcode_status: 'pending' }
+                            : v,
+                        ),
+                      );
+                    } catch (err) {
+                      console.error('Retry transcode failed:', err);
+                    }
+                  }}
+                  className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-red-500/15 text-red-400 hover:bg-red-500/25 hover:text-red-300 rounded-md transition-colors cursor-pointer"
+                  title={t('resources.retryTranscode', 'Retry')}
+                >
+                  <RefreshCw size={10} />
+                  {t('resources.transcodeFailed', 'Transcode Failed')}
+                </button>
+              )}
+              {isVideo && transcodeStatus === 'completed' && (
+                <span className="px-1.5 py-0.5 text-[10px] font-medium bg-emerald-500/15 text-emerald-400 rounded-md">
+                  HLS
+                </span>
+              )}
+              {currentIndex >= 0 && siblingFiles.length > 0 && (
+                <span className="text-xs text-ink-500">
+                  ({currentIndex + 1}/{siblingFiles.length})
+                </span>
+              )}
+            </div>
+            <button
+              onClick={() => navigateToSibling('next')}
+              disabled={!hasNext}
+              className={`p-1 rounded transition-colors ${
+                hasNext ? 'text-ink-400 hover:text-ink-200 hover:bg-ink-800' : 'text-ink-700 cursor-not-allowed'
+              }`}
+              title={t('resources.nextFile')}
+            >
+              <ChevronRight size={18} />
+            </button>
+          </div>
+          <span className="comet-trail" />
+          {/* Right: share + download + more */}
+          <div className="ml-auto flex items-center gap-1.5">
+            <button
+              onClick={() => setShowShareModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg btn-tint-indigo transition-colors"
+            >
+              <Share2 size={14} />
+              <span>{t('resources.share')}</span>
+            </button>
+            {fileUrl && (
+              <a
+                href={fileUrl}
+                download
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-ink-400 hover:text-ink-200 hover:bg-ink-800 rounded-lg transition-colors"
+              >
+                <Download size={14} />
+                <span>{t('resources.download')}</span>
+              </a>
+            )}
+            <div className="relative">
+              <button
+                onClick={() => setShowMoreMenu(!showMoreMenu)}
+                className="p-1.5 text-ink-400 hover:text-ink-200 hover:bg-ink-800 rounded-lg transition-colors"
+              >
+                <MoreHorizontal size={16} />
+              </button>
+              {showMoreMenu && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setShowMoreMenu(false)} />
+                  <div className="absolute right-0 top-full mt-1 z-20 bg-ink-900 border border-ink-700 rounded-lg shadow-xl py-1 w-44">
+                    {fileUrl && (
+                      <button
+                        className="block w-full text-left px-3 py-1.5 text-xs text-ink-400 hover:bg-ink-800 hover:text-ink-200 transition-colors"
+                        onClick={() => {
+                          setShowMoreMenu(false);
+                          downloadFile(fileUrl, resource.filename || 'download', {
+                            onSuccess: (f) => addToast(`Downloaded: ${f}`, 'success'),
+                            onError: (msg) => addToast(`Download failed (${msg})`, 'error'),
+                          });
+                        }}
+                      >
+                        {t('resources.downloadOriginal')}
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main content */}
       <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-y-auto md:overflow-hidden">
@@ -1445,12 +1690,16 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
         </div>
 
         {/* Resize handle — desktop only, invisible until hover (no persistent divider) */}
-        <ResizeHandle onMouseDown={handleResizeStart} />
+        {!islandDesktop && <ResizeHandle onMouseDown={handleResizeStart} />}
 
-        {/* Right: Inspector panel — full-width on mobile, resizable on desktop (no border-l divider) */}
+        {/* Right: Inspector panel — classic renders it as the split-pane column;
+            island desktop portals it (bare, no card chrome) into the shell's
+            info island. Same JSX, single source. */}
+        {(() => {
+        const inspectorPanel = (
         <div
-          className="w-full md:w-auto border-t md:border-t-0 border-ink-800 flex flex-col shrink-0"
-          style={isDesktop ? { width: panelWidth } : undefined}
+          className={islandDesktop ? 'h-full flex flex-col min-h-0' : 'w-full md:w-auto border-t md:border-t-0 border-ink-800 flex flex-col shrink-0'}
+          style={islandDesktop ? undefined : (isDesktop ? { width: panelWidth } : undefined)}
         >
           {/* Tab bar */}
           <div className="flex border-b border-ink-800 shrink-0">
@@ -1517,11 +1766,21 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 </button>
               </>
             )}
+            {islandDesktop && (
+              <button
+                onClick={() => setInfoVisible(false)}
+                aria-label="Collapse panel"
+                title="Collapse panel"
+                className="ml-auto px-3 py-3 text-ink-400 hover:text-ink-200 transition-colors"
+              >
+                <PanelRightClose size={16} />
+              </button>
+            )}
           </div>
 
           {rightTab === 'info' ? (
-          <div className="overflow-y-auto flex-1 bg-ink-950 md:bg-transparent p-3">
-          <div className={detailCardClass}>
+          <div className={islandDesktop ? 'overflow-y-auto flex-1 p-3' : 'overflow-y-auto flex-1 bg-ink-950 md:bg-transparent p-3'}>
+          <div className={islandDesktop ? 'flex flex-col max-w-full' : detailCardClass}>
           {/* Mobile: ID row with share + more (like Downloads) */}
           <div className="flex md:hidden items-center justify-between px-4 pt-3 pb-1">
             <span className="text-xs text-ink-600 font-mono">ID: {String(resource.id)}</span>
@@ -2288,6 +2547,14 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             </div>
           ) : null}
         </div>
+        );
+        // Classic: render inline in the split-pane row. Island desktop: portal
+        // into the shell's info island (the players/preview stay in the work
+        // island; only the inspector relocates).
+        return islandDesktop
+          ? (infoIslandEl ? createPortal(inspectorPanel, infoIslandEl) : null)
+          : inspectorPanel;
+        })()}
       </div>
 
       {/* Share Modal */}
