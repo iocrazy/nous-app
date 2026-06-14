@@ -455,6 +455,26 @@ describe('runClassicCascade — DATA PIPING (upstream output → downstream inpu
     expect(seen.V.source_image_url).toBe('gen.png');
   });
 
+  it('folds an llm top-level text result into run_result so it pipes downstream', async () => {
+    // llm returns its text at the TOP level with result===null; it must still
+    // surface as run_result.text so a downstream node (and the inline display)
+    // can read it.
+    const nodes = [node('L', 'llm', { prompt: 'expand: dragon' }), node('G', 'image_gen')];
+    const conns = [wire('L', 'text-out', 'G', 'prompt-in')];
+    const seen: Record<string, Record<string, unknown>> = {};
+    const runner: ClassicRunner = async (ctx) => {
+      seen[ctx.nodeId] = ctx.data;
+      return ctx.nodeId === 'L'
+        ? { ok: true, text: 'a fierce red dragon', error: null, result: null }
+        : { ok: true, text: '', error: null, result: { image_url: 'gen.png' } };
+    };
+    const r = recorder();
+    const report = await runClassicCascade(nodes, conns, runner, r.handlers);
+
+    expect(report.succeeded).toEqual(['L', 'G']);
+    expect(seen.G.prompt).toBe('a fierce red dragon'); // null result → {text} → piped
+  });
+
   it('image_gen → preview (passive sink) does not crash and skips the sink', async () => {
     const nodes = [node('G', 'image_gen', { prompt: 'a cat' }), node('V', 'preview')];
     const conns = [wire('G', 'image-out', 'V', 'image-in')];

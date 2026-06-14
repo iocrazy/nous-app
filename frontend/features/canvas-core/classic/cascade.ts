@@ -338,17 +338,25 @@ export async function runClassicCascade(
 
     if (result.ok) {
       report.succeeded.push(nodeId);
+      // Normalize the structured output. A runnable with a structured result
+      // (image_gen → {image_url}, video_gen → {video_url}) uses it directly;
+      // a plain-text runnable (llm) returns its text at the TOP level with
+      // `result === null`, so fold that text into `{ text }` — otherwise the
+      // llm output is lost to both downstream piping (nodeOutputValue reads
+      // run_result.text) and the inline result display.
+      const runResult: Record<string, unknown> | null =
+        result.result ?? (result.text ? { text: result.text } : null);
       // Record the run_result so downstream nodes can pipe from this node's
       // output (e.g. image_gen.image_url → video_gen.source_image_url).
       outputs.set(nodeId, {
         nodeType,
         data: effectiveData,
-        runResult: result.result ?? null,
+        runResult,
       });
       handlers.onNodePatch(nodeId, {
         run_status: 'succeeded',
         run_error: null,
-        run_result: result.result ?? null,
+        run_result: runResult,
       });
     } else {
       containFailure(nodeId, node, nodeType, result.error ?? 'run failed');
