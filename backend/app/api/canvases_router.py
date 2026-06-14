@@ -6,6 +6,7 @@ Surface area:
   DELETE /api/v1/canvases/{canvas_id}                    — remove
   GET    /api/v1/projects/{project_id}/canvases          — list within project
   POST   /api/v1/projects/{project_id}/canvases          — create within project
+  POST   /api/v1/canvases/{canvas_id}/graph-runs         — enqueue full-graph run (Phase 6d)
 
 Project-membership gating piggy-backs on the existing
 ``verify_project_*_access`` guards from ``app.core.scope_guards`` for the
@@ -14,6 +15,8 @@ project via the repo and then call the same guard.
 """
 
 from __future__ import annotations
+
+import uuid
 
 from fastapi import APIRouter, HTTPException, Path
 from loguru import logger
@@ -27,6 +30,8 @@ from app.schemas.canvas import (
     CanvasUpdate,
 )
 from app.schemas.canvas_run import (
+    CanvasGraphRunRequest,
+    CanvasGraphRunResponse,
     CanvasPromptRunRequest,
     CanvasPromptRunResponse,
     ClassicNodeRunRequest,
@@ -217,6 +222,77 @@ async def run_classic_node(
         error=result.error,
         result=result.result,
     )
+    return {"success": True, "data": body.model_dump(mode="json")}
+
+
+# ============================================================
+# Full-graph canvas run (Phase 6d M1)
+# ============================================================
+
+
+@router.post("/canvases/{canvas_id}/graph-runs")
+async def enqueue_canvas_graph_run(
+    auth: AuthDep,
+    payload: CanvasGraphRunRequest,
+    canvas_id: str = Path(..., description="Snowflake canvas ID"),
+) -> dict:
+    """Enqueue a full-graph canvas run as a DBOS workflow.
+
+    Returns immediately with the ``task_id`` / ``dbos_workflow_id`` — the
+    workflow executes asynchronously. Poll ``GET /api/v1/workflows/{id}`` or
+    listen to the TaskManagerContext Realtime channel for status updates.
+
+    路线 C id-match contract: ``manager.create(dbos_workflow_id=wf_id)`` and
+    ``start_workflow_routed(workflow_id=wf_id)`` receive the SAME ``wf_id``
+    so the task_tracking row and the DBOS workflow are always linked.
+    """
+    from app.services.infra.dbos_orchestrator import start_workflow_routed
+    from app.services.infra.unified_task_manager import get_task_manager
+    from app.workflows.canvas_graph import canvas_graph_workflow
+
+    await _gate_canvas_write(canvas_id, auth)
+
+    wf_id = str(uuid.uuid4())
+
+    # Create task_tracking row first (id-match: same wf_id passed below).
+    try:
+        await get_task_manager().create(
+            user_id=auth.user_id,
+            task_type="canvas_graph_run",
+            title=f"Graph Run {canvas_id[:16]}",
+            dbos_workflow_id=wf_id,
+            metadata={
+                "canvas_id": canvas_id,
+                "node_count": len(payload.node_order),
+                "continue_on_failure": payload.continue_on_failure,
+            },
+        )
+    except Exception as exc:
+        logger.warning(
+            f"[canvases.graph_run] pre-create task_tracking row failed: {exc!r}"
+        )
+
+    # Enqueue DBOS workflow (id-match: workflow_id=wf_id, same as above).
+    try:
+        await start_workflow_routed(
+            "canvas_graph_run",
+            dbos_workflow_callable=canvas_graph_workflow,
+            dbos_workflow_kwargs={
+                "canvas_id": canvas_id,
+                "node_order": payload.node_order,
+                "user_id": auth.user_id,
+                "continue_on_failure": payload.continue_on_failure,
+            },
+            workflow_id=wf_id,
+        )
+    except Exception as exc:
+        logger.exception(f"[canvases.graph_run] enqueue failed: {exc!r}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"canvas graph run enqueue failed: {exc}",
+        )
+
+    body = CanvasGraphRunResponse(task_id=wf_id, dbos_workflow_id=wf_id)
     return {"success": True, "data": body.model_dump(mode="json")}
 
 
