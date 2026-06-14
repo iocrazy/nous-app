@@ -1,0 +1,153 @@
+"""Tests for the ClassicMode node-type → provider_slug dispatch map
+(Phase 5a C2)."""
+
+from __future__ import annotations
+
+import pytest
+
+from app.services.canvas.classic_dispatch import (
+    OP_IMAGE_GEN,
+    OP_VIDEO_GEN,
+    ClassicDispatchError,
+    resolve_classic_dispatch,
+    resolve_provider_slug,
+)
+
+
+class TestComfyMapping:
+    def test_comfy_resolves_nous_workflow_from_data(self):
+        slug = resolve_provider_slug("comfy", {"data": {"workflow_slug": "render-xl"}})
+        assert slug == "nous/render-xl"
+
+    def test_comfy_reads_flat_data_payload(self):
+        # Caller may pass the data dict directly (data merged at top level).
+        slug = resolve_provider_slug("comfy", {"workflow_slug": "upscale"})
+        assert slug == "nous/upscale"
+
+    def test_comfy_accepts_camel_case_key(self):
+        slug = resolve_provider_slug("comfy", {"workflowSlug": "inpaint"})
+        assert slug == "nous/inpaint"
+
+    def test_distinct_workflows_route_distinctly(self):
+        a = resolve_provider_slug("comfy", {"workflow_slug": "a"})
+        b = resolve_provider_slug("comfy", {"workflow_slug": "b"})
+        assert a == "nous/a"
+        assert b == "nous/b"
+
+    def test_comfy_missing_workflow_slug_raises(self):
+        with pytest.raises(ClassicDispatchError) as exc:
+            resolve_provider_slug("comfy", {"data": {}})
+        assert "workflow_slug" in str(exc.value)
+
+    def test_comfy_blank_workflow_slug_raises(self):
+        with pytest.raises(ClassicDispatchError):
+            resolve_provider_slug("comfy", {"workflow_slug": "   "})
+
+
+class TestLlmMapping:
+    def test_llm_uses_provider_slug_from_data(self):
+        slug = resolve_provider_slug(
+            "llm", {"data": {"provider_slug": "anthropic/claude-sonnet-4-6"}}
+        )
+        assert slug == "anthropic/claude-sonnet-4-6"
+
+    def test_llm_falls_back_to_model_key(self):
+        slug = resolve_provider_slug("llm", {"model": "qwen-plus"})
+        assert slug == "qwen-plus"
+
+    def test_llm_without_override_returns_none_for_default_model(self):
+        # None is meaningful: run_prompt falls back to DEFAULT_MODEL. It is
+        # NOT the "no mapping" signal (that path raises).
+        assert resolve_provider_slug("llm", {"data": {}}) is None
+        assert resolve_provider_slug("llm", None) is None
+
+
+class TestNoMapping:
+    def test_unknown_node_type_raises(self):
+        with pytest.raises(ClassicDispatchError) as exc:
+            resolve_provider_slug("frobnicate", {})
+        assert "frobnicate" in str(exc.value)
+
+    @pytest.mark.parametrize("literal_type", ["image", "prompt", "output"])
+    def test_literal_and_sink_types_have_no_provider_mapping(self, literal_type):
+        # These hold data / collect results — they never dispatch. Raising
+        # (not None) keeps us from silently routing to a wrong provider.
+        with pytest.raises(ClassicDispatchError):
+            resolve_provider_slug(literal_type, {})
+
+    def test_missing_type_raises(self):
+        with pytest.raises(ClassicDispatchError):
+            resolve_provider_slug(None, {})
+
+
+class TestResolveClassicDispatch:
+    """The server-side route resolver (Phase 5a path B). image_gen → op kind;
+    llm/comfy → provider kind delegating to resolve_provider_slug; unknown /
+    literal-sink / missing → raise (never a silent route)."""
+
+    def test_image_gen_returns_op_kind(self):
+        dispatch = resolve_classic_dispatch("image_gen", {"data": {"prompt": "x"}})
+        assert dispatch.kind == "op"
+        assert dispatch.op == OP_IMAGE_GEN
+        # An op is NOT a provider_slug.
+        assert dispatch.provider_slug is None
+
+    def test_image_gen_needs_no_data_to_resolve(self):
+        # Param validation is the run handler's job, not the resolver's.
+        dispatch = resolve_classic_dispatch("image_gen", None)
+        assert dispatch.kind == "op"
+        assert dispatch.op == OP_IMAGE_GEN
+
+    def test_video_gen_returns_op_kind(self):
+        dispatch = resolve_classic_dispatch(
+            "video_gen", {"data": {"source_image_url": "https://cdn/x.png"}}
+        )
+        assert dispatch.kind == "op"
+        assert dispatch.op == OP_VIDEO_GEN
+        # An op is NOT a provider_slug.
+        assert dispatch.provider_slug is None
+
+    def test_video_gen_needs_no_data_to_resolve(self):
+        # Param validation is the run handler's job, not the resolver's.
+        dispatch = resolve_classic_dispatch("video_gen", None)
+        assert dispatch.kind == "op"
+        assert dispatch.op == OP_VIDEO_GEN
+
+    def test_image_and_video_ops_are_distinct(self):
+        assert OP_IMAGE_GEN != OP_VIDEO_GEN
+        img = resolve_classic_dispatch("image_gen", None)
+        vid = resolve_classic_dispatch("video_gen", None)
+        assert img.op == OP_IMAGE_GEN
+        assert vid.op == OP_VIDEO_GEN
+
+    def test_comfy_returns_provider_kind_with_nous_slug(self):
+        dispatch = resolve_classic_dispatch(
+            "comfy", {"data": {"workflow_slug": "render-xl"}}
+        )
+        assert dispatch.kind == "provider"
+        assert dispatch.provider_slug == "nous/render-xl"
+        assert dispatch.op is None
+
+    def test_llm_returns_provider_kind_with_model(self):
+        dispatch = resolve_classic_dispatch("llm", {"model": "qwen-plus"})
+        assert dispatch.kind == "provider"
+        assert dispatch.provider_slug == "qwen-plus"
+
+    def test_llm_without_override_returns_provider_kind_none_slug(self):
+        dispatch = resolve_classic_dispatch("llm", {"data": {}})
+        assert dispatch.kind == "provider"
+        assert dispatch.provider_slug is None
+
+    def test_unknown_type_raises(self):
+        with pytest.raises(ClassicDispatchError) as exc:
+            resolve_classic_dispatch("frobnicate", {})
+        assert "frobnicate" in str(exc.value)
+
+    @pytest.mark.parametrize("literal_type", ["image", "prompt", "output"])
+    def test_literal_sink_types_raise(self, literal_type):
+        with pytest.raises(ClassicDispatchError):
+            resolve_classic_dispatch(literal_type, {})
+
+    def test_missing_type_raises(self):
+        with pytest.raises(ClassicDispatchError):
+            resolve_classic_dispatch(None, {})

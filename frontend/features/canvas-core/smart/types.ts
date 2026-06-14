@@ -31,10 +31,17 @@ export interface PromptNodeData {
   provider_slug: string;
   /** Snowflake AI library agent ID to ask, or null = use provider default. */
   agent_id: string | null;
-  /** "idle" | "queued" | "running" | "succeeded" | "failed" — driven by
-   *  the run protocol when it lands. Persisted so a reload shows the
-   *  last-known state. */
-  run_status: 'idle' | 'queued' | 'running' | 'succeeded' | 'failed';
+  /** "idle" | "queued" | "running" | "succeeded" | "failed" | "blocked" —
+   *  driven by the run protocol. "blocked" marks a downstream node that was
+   *  not run because an upstream node failed (set by the ClassicMode cascade).
+   *  Persisted so a reload shows the last-known state. */
+  run_status:
+    | 'idle'
+    | 'queued'
+    | 'running'
+    | 'succeeded'
+    | 'failed'
+    | 'blocked';
   run_started_at: string | null;
   run_finished_at: string | null;
   run_error: string | null;
@@ -132,6 +139,9 @@ export const RUN_STATUS_TONE: Record<PromptNodeData['run_status'], string> = {
   running: 'border-indigo-500 animate-pulse',
   succeeded: 'border-emerald-500',
   failed: 'border-rose-500',
+  // Dimmed neutral ink tone — "blocked" = skipped because an upstream node
+  // failed, so it reads as inert/greyed-out, not as its own error.
+  blocked: 'border-ink-400 opacity-60',
 };
 
 export function isSmartNode(node: CanvasNode): node is AnySmartNode {
