@@ -14,6 +14,7 @@
 import { useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 
+import { ClassicPalette } from '../classic/ui/ClassicPalette';
 import { ClassicRunBar } from '../classic/ui/ClassicRunBar';
 import { CanvasComposer } from '../smart/CanvasComposer';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
@@ -65,14 +66,19 @@ export default function CanvasPage() {
   // Both modes render the same React Flow surface — CanvasSurface picks
   // the nodeTypes map (smart vs classic) off the store `kind`. The
   // per-mode overlays differ: SmartMode adds the node composer palette;
-  // ClassicMode's MVP mounts the surface alone (its node views carry
-  // their own typed-port + run UI, and a classic palette is a later
-  // slice). Branch explicitly so adding a classic overlay is a one-liner.
+  // ClassicMode adds its own palette (top-left, to ADD nodes) plus the run
+  // bar (bottom-center, to RUN the cascade) — the two overlays are placed
+  // so they never overlap. Branch explicitly per mode.
   return (
     <div ref={surfaceRef} className="relative h-full w-full">
       <CanvasSurface />
       {kind === 'smart' && <CanvasComposer surfaceRef={surfaceRef} />}
-      {kind === 'classic' && <ClassicRunBar />}
+      {kind === 'classic' && (
+        <>
+          <ClassicPalette surfaceRef={surfaceRef} />
+          <ClassicRunBar />
+        </>
+      )}
       <CanvasConflictDialog />
       <SaveBadge status={saveStatus} error={saveError} />
     </div>

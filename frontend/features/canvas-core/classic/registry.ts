@@ -172,6 +172,29 @@ export const classicNodeDefinitions: Record<string, ClassicNodeDefinition> = {
   video_gen: videoGenNode,
 };
 
+/**
+ * Every classic node definition as an ORDERED, iterable list — so menus /
+ * palettes can enumerate the full node set without depending on JS object
+ * key order. Grouped by role: passive SOURCES first, then RUNNABLE ops,
+ * then SINKS / structural nodes.
+ */
+export const CLASSIC_NODE_DEFINITIONS: readonly ClassicNodeDefinition[] = [
+  // sources
+  imageNode,
+  promptNode,
+  textNode,
+  // runnable
+  llmNode,
+  comfyNode,
+  imageGenNode,
+  videoGenNode,
+  // sinks / structural
+  outputNode,
+  previewNode,
+  noteNode,
+  groupNode,
+];
+
 export function getClassicNodeDefinition(
   type: string | undefined,
 ): ClassicNodeDefinition | undefined {
