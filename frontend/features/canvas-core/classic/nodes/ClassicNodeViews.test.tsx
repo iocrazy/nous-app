@@ -123,14 +123,14 @@ describe('CLASSIC_NODE_TYPES — preview display sink', () => {
     expect(screen.getByTestId('classic-node-preview-display')).toBeInTheDocument();
   });
 
-  it('renders both typed input handles (image + text), zero outputs', () => {
+  it('renders all typed input handles (image + text + video), zero outputs', () => {
     const { container } = renderNode('preview');
     const def = classicNodeDefinitions.preview;
     const expectedIds = [...def.inputs, ...def.outputs].map((p) => p.id).sort();
     expect(handleIds(container)).toEqual(expectedIds);
-    // Both are TARGET (input) handles on the left edge; none on the right.
+    // All three are TARGET (input) handles on the left edge; none on the right.
     const handles = Array.from(container.querySelectorAll('.react-flow__handle'));
-    expect(handles).toHaveLength(2);
+    expect(handles).toHaveLength(3);
     expect(handles.every((h) => h.classList.contains('react-flow__handle-left'))).toBe(true);
   });
 });

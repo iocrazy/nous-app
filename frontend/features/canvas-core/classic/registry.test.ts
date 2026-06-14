@@ -90,11 +90,13 @@ describe('classicNodeDefinitions', () => {
     expect(note.outputs).toEqual([]);
   });
 
-  it('preview is a display sink: two typed inputs (image + text), zero outputs', () => {
+  it('preview is a display sink: three typed inputs (image + text + video), zero outputs', () => {
     const preview = classicNodeDefinitions.preview;
-    expect(preview.inputs).toHaveLength(2);
+    expect(preview.inputs).toHaveLength(3);
     expect(preview.inputs.some((p) => p.type === 'image')).toBe(true);
     expect(preview.inputs.some((p) => p.type === 'text')).toBe(true);
+    // `video` consumer so a video_gen result is no longer a dead-end.
+    expect(preview.inputs.some((p) => p.id === 'video-in' && p.type === 'video')).toBe(true);
     expect(preview.outputs).toEqual([]);
   });
 
@@ -276,5 +278,23 @@ describe('canConnectClassic', () => {
 
   it('prompt-output → image_gen prompt-in ✓ (matching prompt port types)', () => {
     expect(canConnectClassic('prompt', 'image_gen', promptOut, imageGenPromptIn)).toBe(true);
+  });
+
+  // ---- video consumer: video_gen video-out → preview video-in --------------
+
+  const previewVideoIn = classicNodeDefinitions.preview.inputs.find(
+    (p) => p.type === 'video',
+  )!.id;
+
+  it('video_gen video-out → preview video-in ✓ (video result has a consumer)', () => {
+    expect(canConnectClassic('video_gen', 'preview', videoGenVideoOut, previewVideoIn)).toBe(
+      true,
+    );
+  });
+
+  it('image_gen image-out → preview video-in ✗ (image vs video mismatch)', () => {
+    expect(canConnectClassic('image_gen', 'preview', imageGenImgOut, previewVideoIn)).toBe(
+      false,
+    );
   });
 });
