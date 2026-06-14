@@ -1,15 +1,17 @@
-"""Tests for the outpaint derive service (Phase 3 Day 13)."""
+"""Tests for the outpaint derive service (Phase 3 Day 13 + 6f AI path)."""
 
 from __future__ import annotations
 
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from PIL import Image
 
 from app.services.canvas.image_outpaint import Padding
+from app.services.canvas.nous_center_runner import NousCenterNotConfigured
 from app.services.canvas.outpaint_derive_service import (
     OutpaintDeriveError,
     derive_outpaint_resource,
@@ -149,3 +151,96 @@ async def test_filename_override(tmp_download_root: Path) -> None:
         repo=repo,
     )
     assert result.resource["filename"] == "wide.png"
+
+
+# ---------------------------------------------------------------------------
+# 6f — AI generative path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_ai_mode_calls_nous_and_persists_bytes(
+    tmp_download_root: Path,
+) -> None:
+    """AI mode with a configured nous slug → run_outpaint_via_nous is called
+    and its bytes (not the deterministic blur fill) are persisted."""
+    repo = _source_repo(tmp_download_root)
+    # Distinct size so we can tell AI bytes from deterministic fill (200x50).
+    nous_bytes = _png_bytes(300, 150)
+
+    with patch(
+        "app.services.canvas.outpaint_derive_service.run_outpaint_via_nous",
+        new_callable=AsyncMock,
+        return_value=nous_bytes,
+    ) as mock_nous:
+        result = await derive_outpaint_resource(
+            source_resource_id="111",
+            user_id="user-A",
+            padding=Padding(left=0.5, top=0, right=0.5, bottom=0),
+            prompt="extend the meadow scenery",
+            mode="ai",
+            repo=repo,
+        )
+
+    mock_nous.assert_called_once()
+    target = tmp_download_root / result.resource["file_path"]
+    decoded = Image.open(target)
+    # Must be the nous bytes (300x150), not the deterministic fill (200x50).
+    assert decoded.size == (300, 150)
+    assert len(repo.versions) == 1
+    assert repo.items[0]["scope_id"] == "scope-1"
+
+
+@pytest.mark.asyncio
+async def test_ai_mode_falls_back_when_nous_not_configured(
+    tmp_download_root: Path,
+) -> None:
+    """AI mode + NousCenterNotConfigured → silent deterministic fallback, never raises."""
+    repo = _source_repo(tmp_download_root)
+
+    with patch(
+        "app.services.canvas.outpaint_derive_service.run_outpaint_via_nous",
+        new_callable=AsyncMock,
+        side_effect=NousCenterNotConfigured("NOUS_CENTER_OUTPAINT_SLUG not configured"),
+    ):
+        result = await derive_outpaint_resource(
+            source_resource_id="111",
+            user_id="user-A",
+            padding=Padding(left=0.5, top=0, right=0.5, bottom=0),
+            prompt="extend the meadow",
+            mode="ai",
+            repo=repo,
+        )
+
+    # Deterministic blur fill: 100px wide + 50 % each side → 200px.
+    target = tmp_download_root / result.resource["file_path"]
+    decoded = Image.open(target)
+    assert decoded.size == (200, 50)
+    assert len(repo.versions) == 1  # resource still persisted
+
+
+@pytest.mark.asyncio
+async def test_deterministic_mode_never_calls_nous(
+    tmp_download_root: Path,
+) -> None:
+    """Explicit deterministic mode → run_outpaint_via_nous is not invoked,
+    even when a prompt is present."""
+    repo = _source_repo(tmp_download_root)
+
+    with patch(
+        "app.services.canvas.outpaint_derive_service.run_outpaint_via_nous",
+        new_callable=AsyncMock,
+    ) as mock_nous:
+        result = await derive_outpaint_resource(
+            source_resource_id="111",
+            user_id="user-A",
+            padding=Padding(left=0.5, top=0, right=0.5, bottom=0),
+            prompt="extend the meadow",
+            mode="deterministic",
+            repo=repo,
+        )
+
+    mock_nous.assert_not_called()
+    target = tmp_download_root / result.resource["file_path"]
+    decoded = Image.open(target)
+    assert decoded.size == (200, 50)

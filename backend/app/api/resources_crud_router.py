@@ -1307,6 +1307,7 @@ async def derive_outpaint_endpoint(
                 bottom=body.bottom,
             ),
             prompt=body.prompt,
+            mode=body.mode,
             filename_override=body.filename,
         )
         return {"success": True, "data": result.resource}
