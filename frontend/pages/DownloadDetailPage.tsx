@@ -12,7 +12,8 @@ import { MobileAudioScreen } from '../components/MobileAudioScreen';
 import { ShareModal } from '../components/ShareModal';
 import { AudioStageIsland } from '../components/AudioStageIsland';
 import { PlaylistIsland } from '../components/PlaylistIsland';
-import { MediaCard } from '../components/MediaCard';
+import { AudioOverviewSide } from '../components/AudioOverviewSide';
+import { AudioToolsMenu } from '../components/AudioToolsMenu';
 import SodaLyricsTab from '../components/SodaLyricsTab';
 import { AudioWaveformPlayer } from '../components/AudioWaveformPlayer';
 import { extractCoverTint, tintFromTheme, type CoverTint } from '../utils/coverTint';
@@ -444,40 +445,36 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
   // Island-audio stage slots (cover-side Overview | lyrics | capsule player),
   // extracted as consts like actionButtons/detailPanel so the audio branch is a
   // flat <AudioStageIsland .../> call. Only rendered when islandDesktop && isAudio.
+  // Cover-side Overview — faithful port of the audio mock `.side` stack
+  // (cover → song → artist → stats → stars → tags). Replaces the bare MediaCard
+  // the stage used to host so the cover-side matches the mock exactly; the AI
+  // actions + notes MediaCard carried move into the stage-head AudioToolsMenu so
+  // nothing is lost (D12). The SAME audioCoverUrl drives both the tint sample and
+  // this cover image.
   const audioCoverSide = (
-    /* Album cover (classic shows it via AudioHero; the island stage has no hero,
-       so render it here — spec §5.3 cover-first). The SAME audioCoverUrl drives
-       both the tint sample and this image. MediaCard keeps hidePreview so there's
-       no double preview. */
-    <div className="flex flex-col items-center gap-4">
-      <div className="audio-cover">
-        {/* Music icon sits behind the image (grid stack); onError hides the img
-            so the icon shows on a 404 instead of an empty box. */}
-        <Music size={44} className="text-ink-500 col-start-1 row-start-1" />
-        {audioCoverUrl && (
-          <img
-            src={audioCoverUrl}
-            alt=""
-            className="col-start-1 row-start-1 w-full h-full object-cover"
-            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-          />
-        )}
-      </div>
-      {/* SAME MediaCard the audio Overview renders today (VideoDetailPanel →
-         MediaCard). mobileActions omitted — island is desktop-only. */}
-      <MediaCard
-        data={video}
-        onUpdate={handleUpdate}
-        onDelete={handleDelete}
-        hidePreview
-        bare
-        resourceRating={resourceRating}
-        resourceNotes={resourceNotes}
-        onRatingChange={resourceId ? handleRatingChange : undefined}
-        onNotesChange={resourceId ? handleNotesChange : undefined}
-        onNotesBlur={resourceId ? handleNotesBlur : undefined}
-      />
-    </div>
+    <AudioOverviewSide
+      video={video}
+      coverUrl={audioCoverUrl}
+      title={video.music_name || video.title || 'Audio'}
+      author={video.author || undefined}
+      rating={resourceRating}
+      onRatingChange={resourceId ? handleRatingChange : undefined}
+    />
+  );
+
+  // AI actions (Copy / Transcript / Summary / Analyze) + Notes — relocated from
+  // the cover-side MediaCard into a stage-head dropdown for the island audio
+  // stage only, so classic / video stage-heads stay byte-identical (they keep
+  // the shared `actionButtons` exactly).
+  const audioToolsMenu = (
+    <AudioToolsMenu
+      video={video}
+      onUpdate={handleUpdate}
+      resourceNotes={resourceNotes}
+      onNotesChange={resourceId ? handleNotesChange : undefined}
+      onNotesBlur={resourceId ? handleNotesBlur : undefined}
+      addToast={addToast}
+    />
   );
 
   // SAME synced-lyrics component the Lyrics tab uses (fetch / sync / Fetch Lyrics
@@ -700,7 +697,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
               title={titleText}
               author={video.author || undefined}
               onBack={handleBack}
-              actions={actionButtons}
+              actions={<>{audioToolsMenu}{actionButtons}</>}
               coverSide={audioCoverSide}
               lyrics={audioLyrics}
               player={audioPlayer}
@@ -811,8 +808,9 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
       {islandDesktop && infoIslandEl && createPortal(
         isAudio ? (
           /* Audio: the info island hosts the Playlist (COMING SOON) — NOT
-             VideoDetailPanel (its MediaCard already lives in the cover-side
-             column, so portaling it here would render MediaCard twice). */
+             VideoDetailPanel (the cover-side AudioOverviewSide + stage-head
+             AudioToolsMenu already carry the audio Overview, so portaling the
+             panel here would duplicate it). */
           <PlaylistIsland title={titleText} author={video.author || undefined} coverUrl={audioCoverUrl} />
         ) : (
           React.cloneElement(detailPanel, { island: true, onCollapse: () => setInfoVisible(false) })
