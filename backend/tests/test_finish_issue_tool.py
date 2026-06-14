@@ -9,12 +9,21 @@ from __future__ import annotations
 import pytest
 
 from app.services.ai.tools.finish_issue_tool import (
+    FINISH_ISSUE_INSTRUCTION,
     FINISH_ISSUE_OUTCOMES,
     FINISH_ISSUE_TOOL_NAME,
     extract_issue_outcome,
     finish_issue_handler,
     finish_issue_spec,
 )
+
+
+def test_instruction_names_tool_and_every_outcome():
+    # The system directive must mention the tool + every outcome — otherwise the
+    # agent can't reliably declare and slice 1 silently degrades to in_review.
+    assert FINISH_ISSUE_TOOL_NAME in FINISH_ISSUE_INSTRUCTION
+    for outcome in FINISH_ISSUE_OUTCOMES:
+        assert outcome in FINISH_ISSUE_INSTRUCTION
 
 
 def test_spec_advertises_enum_and_name():
