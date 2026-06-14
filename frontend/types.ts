@@ -861,6 +861,19 @@ export interface ScriptProjectSummary {
 
 export type ProjectTab = 'files' | 'scripts' | 'storyboard' | 'output' | 'tasks' | 'shares' | 'trash';
 
+/** A single row from the global ``project_stages`` catalog (Phase 5b SOP). */
+export interface ProjectStage {
+  /** Snowflake BIGINT serialised as string for JS-safe transport. */
+  id: string;
+  slug: string;
+  name: string;
+  sort_order: number;
+  /** Tool slugs recommended for this stage (maps to TOOL_CATALOG in stageTools.ts). */
+  tools_recommended: string[];
+  created_at?: string;
+  updated_at?: string;
+}
+
 export type ScriptAssetType = 'worldview' | 'character' | 'location' | 'prop' | 'plot_point';
 
 export interface ScriptAsset {
