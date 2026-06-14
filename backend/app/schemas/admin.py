@@ -226,6 +226,39 @@ class SystemSettingUpdate(BaseModel):
     value: Any
 
 
+class GraphMemorySettingsResponse(BaseModel):
+    """Graphiti graph-memory config for the admin Memory panel. API keys are
+    MASKED — only a ``*_set`` boolean is returned, never the raw key."""
+
+    enabled: bool = False
+    falkordb_host: str = ""
+    falkordb_port: str = "6379"
+    falkordb_database: str = "mediahub_memory"
+    extractor_base_url: str = ""
+    extractor_model: str = ""
+    extractor_api_key_set: bool = False
+    embedder_base_url: str = ""
+    embedder_model: str = ""
+    embedder_api_key_set: bool = False
+
+
+class GraphMemorySettingsUpdate(BaseModel):
+    """Partial update — only the fields the admin sends are written. API key
+    fields are written only when a (new) value is provided; omit to keep the
+    stored key unchanged."""
+
+    enabled: Optional[bool] = None
+    falkordb_host: Optional[str] = None
+    falkordb_port: Optional[str] = None
+    falkordb_database: Optional[str] = None
+    extractor_base_url: Optional[str] = None
+    extractor_api_key: Optional[str] = None
+    extractor_model: Optional[str] = None
+    embedder_base_url: Optional[str] = None
+    embedder_api_key: Optional[str] = None
+    embedder_model: Optional[str] = None
+
+
 # ============================================
 # Video Management Schemas
 # ============================================
