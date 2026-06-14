@@ -1,32 +1,35 @@
 /**
- * ClassicMode run-service seam (Phase 5a B5).
+ * ClassicMode run-service seam (Phase 5a path B).
  *
  * The cascade orchestrator dispatches each runnable classic node through a
- * `ClassicRunner` — the SAME synchronous run path SmartMode's `runPrompts`
- * uses, just reshaped for classic node data. Tests inject a deterministic
- * runner; runtime uses `createClassicBackendRunner`, which reuses the
- * existing canvas run transport (POST /api/v1/canvases/runs/prompts) so we
- * do NOT invent a new endpoint.
+ * `ClassicRunner`. Tests inject a deterministic runner; runtime uses
+ * `createClassicBackendRunner`, which POSTs the WHOLE node to the new
+ * server-resolving route `POST /api/v1/canvases/runs/classic-node`. The
+ * backend (`resolve_classic_dispatch`) decides how every runnable type runs
+ * — image_gen → generate_image, video_gen → generate_video, comfy →
+ * nous/<slug>, llm → text adapter. The frontend no longer guesses a
+ * provider_slug (the old mirror is dead).
  *
  * The abort signal threads through here: the cascade calls
  * `beginAbortable(nodeId)` and hands the runner `.signal`, which the
- * backend runner forwards into the fetch — so the comfy node view's Cancel
- * (which calls `abortNode(nodeId)`) aborts the in-flight cascade request.
+ * backend runner forwards into the fetch — so a node view's Cancel (which
+ * calls `abortNode(nodeId)`) aborts the in-flight cascade request.
  */
 
 import { apiFetch, ApiError } from '../../../services/apiClient';
 
 export interface ClassicRunContext {
   nodeId: string;
-  /** Classic node type (llm / comfy / ...). Forwarded for forward-compat
-   *  with a backend `run_classic_node` route; the current transport routes
-   *  by the client-resolved `providerSlug`. */
+  /** Classic node type (llm / comfy / image_gen / video_gen / ...). Sent to
+   *  the backend, which resolves the dispatch route from it + `data`. */
   nodeType: string | undefined;
-  /** The prompt/body text the node runs with. */
+  /** The node's opaque `data` blob — POSTed verbatim as `node.data`; the
+   *  backend reads provider/workflow/op params (e.g. data.prompt,
+   *  data.workflow_slug) out of it. */
+  data: Record<string, unknown>;
+  /** Upstream/aggregated text fed into the node (e.g. the prompt for an llm
+   *  node). image_gen prefers its own data.prompt but falls back to this. */
   body: string;
-  /** Resolved by the dispatch table (`dispatchClassicNode`). null = the
-   *  provider's default model. */
-  providerSlug: string | null;
   /** AI-library agent id override, or null for the provider default. */
   agentId: string | null;
 }
@@ -37,6 +40,10 @@ export interface ClassicRunResult {
   text: string;
   /** Populated on failure. */
   error: string | null;
+  /** Structured op output on success — e.g. `{ image_url }` for image_gen or
+   *  `{ video_url, thumbnail_url, ... }` for video_gen. null for plain text /
+   *  on failure. */
+  result?: Record<string, unknown> | null;
 }
 
 /**
@@ -60,32 +67,34 @@ interface BackendEnvelope {
     ok: boolean;
     text: string;
     error: string | null;
+    result?: Record<string, unknown> | null;
     response_kind?: string;
   };
 }
 
 /**
- * Build a ClassicRunner bound to a specific canvas. Reuses the same
- * in-band `/canvases/runs/prompts` route SmartMode uses — the route always
- * 200s normal runs and reports ok/failed in the body. We additionally send
- * `node_type` so a future backend upgrade can route through
- * `run_classic_node`; today the route consumes the client-resolved
- * `provider_slug`.
+ * Build a ClassicRunner bound to a specific canvas. POSTs the node to the
+ * server-resolving `/canvases/runs/classic-node` route: the route always
+ * 200s normal runs and reports ok/failed in the body. `canvas_id` is bound
+ * at construction (the cascade reads it from the canvas-core store when it
+ * builds the runner) so the runner never has to reach into the store itself.
  */
 export function createClassicBackendRunner({
   canvasId,
 }: BackendRunnerOptions): ClassicRunner {
   return async (ctx, signal) => {
     try {
-      const response = await apiFetch('/api/v1/canvases/runs/prompts', {
+      const response = await apiFetch('/api/v1/canvases/runs/classic-node', {
         method: 'POST',
         signal,
         json: {
           canvas_id: canvasId,
-          prompt_node_id: ctx.nodeId,
-          node_type: ctx.nodeType,
+          node: {
+            id: ctx.nodeId,
+            type: ctx.nodeType,
+            data: ctx.data,
+          },
           body: ctx.body,
-          provider_slug: ctx.providerSlug,
           agent_id: ctx.agentId,
         },
       });
@@ -98,6 +107,7 @@ export function createClassicBackendRunner({
         ok: data.ok,
         text: data.ok ? data.text : '',
         error: data.ok ? null : (data.error ?? 'unknown backend error'),
+        result: data.ok ? (data.result ?? null) : null,
       };
     } catch (err) {
       if (err instanceof ApiError) {
@@ -110,5 +120,5 @@ export function createClassicBackendRunner({
 }
 
 function failed(error: string): ClassicRunResult {
-  return { ok: false, text: '', error };
+  return { ok: false, text: '', error, result: null };
 }

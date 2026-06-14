@@ -60,7 +60,16 @@ function handleIds(container: HTMLElement): string[] {
 }
 
 describe('CLASSIC_NODE_TYPES — labels + typed ports', () => {
-  const types = ['image', 'prompt', 'llm', 'output', 'comfy', 'text'] as const;
+  const types = [
+    'image',
+    'prompt',
+    'llm',
+    'output',
+    'comfy',
+    'text',
+    'image_gen',
+    'video_gen',
+  ] as const;
 
   for (const type of types) {
     const def = classicNodeDefinitions[type];

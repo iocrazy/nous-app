@@ -1,26 +1,28 @@
 /**
- * ClassicMode executor dispatch table (Phase 5a B5).
+ * ClassicMode executor dispatch predicate (Phase 5a path B).
  *
- * Decides, for a single classic node, HOW it runs — purely from its
- * `type` + opaque `data` payload, with NO knowledge of the surrounding
- * graph. The cascade orchestrator (`cascade.ts`) layers the graph-aware
- * failure/blocked propagation on top.
+ * Decides, for a single classic node, ONLY whether it RUNS or is PASSIVE —
+ * purely from its `type`. It no longer resolves a provider_slug: the backend
+ * `/api/v1/canvases/runs/classic-node` route is now the SINGLE SOURCE OF
+ * DISPATCH TRUTH (`resolve_classic_dispatch` maps image_gen → generate_image,
+ * video_gen → generate_video, comfy → nous/<slug>, llm → text adapter,
+ * passive types → skipped, server-side). The old client-side provider_slug
+ * MIRROR is gone — keeping it would mean two divergent dispatch tables.
  *
- * This is the FRONTEND mirror of the backend C2 resolver
- * (`backend/app/services/canvas/classic_dispatch.py::resolve_provider_slug`).
- * We resolve the provider_slug client-side so the cascade can reuse the
- * EXISTING synchronous canvas run transport (POST /canvases/runs/prompts —
- * see `classicRunner.ts`) without inventing a new endpoint: comfy nodes
- * resolve to `nous/<workflow_slug>`, which the existing nous/ route
- * block-polls to a terminal state (single-synchronous, no DBOS).
- *
- * Keep the key lists + precedence byte-aligned with the backend so a node
- * routes identically whichever side resolves it.
+ * The cascade orchestrator (`cascade.ts`) layers graph-aware failure/blocked
+ * propagation on top of this predicate; it only needs to know passive (skip,
+ * never touch the network) vs runnable (hand the node to the runner) vs an
+ * unmapped type (skip-vs-fail based on whether it has downstream dependents).
  */
 
-/** Classic node type keys — mirror `classic/registry.ts`. */
-const NODE_TYPE_LLM = 'llm';
-const NODE_TYPE_COMFY = 'comfy';
+/** Runnable AI-op node types — they POST to the classic-node run route and
+ *  the BACKEND resolves how each one runs. */
+const RUNNABLE_NODE_TYPES: ReadonlySet<string> = new Set([
+  'llm',
+  'comfy',
+  'image_gen',
+  'video_gen',
+]);
 
 /** Literal/sink/annotation/container node types: they hold data, collect or
  *  display results, or are pure-UI chrome — they never dispatch to a provider.
@@ -37,66 +39,31 @@ const PASSIVE_NODE_TYPES: ReadonlySet<string> = new Set([
   'group',
 ]);
 
-/** Data keys accepted for an llm node's model / provider override
- *  (snake + camel + bare model), in precedence order — mirror of the
- *  backend `_LLM_PROVIDER_KEYS`. */
-const LLM_PROVIDER_KEYS = ['provider_slug', 'providerSlug', 'model'] as const;
-/** Data keys accepted for a comfy node's workflow slug — mirror of the
- *  backend `_COMFY_WORKFLOW_KEYS`. */
-const COMFY_WORKFLOW_KEYS = ['workflow_slug', 'workflowSlug'] as const;
-
 /**
  * The dispatch decision for one classic node:
- *   - run     — a runnable node (llm / comfy-with-slug). `providerSlug` is
- *               the slug the run transport expects (null = default model).
- *   - passive — a literal/sink node (image / prompt / output): no provider
- *               dispatch; the cascade treats it as a no-op pass-through.
- *   - invalid — a runnable TYPE that cannot run as configured (comfy with
- *               no workflow_slug). A CONTAINED failure, never silent.
- *   - unknown — an unmapped node type. The cascade decides skip-vs-fail
- *               based on whether the node has downstream dependents.
+ *   - run     — a runnable AI-op node (llm / comfy / image_gen / video_gen).
+ *               The cascade hands it to the runner, which POSTs the node to
+ *               the backend; the backend resolves the route (and reports any
+ *               config error — e.g. comfy with no workflow_slug — in-band).
+ *   - passive — a literal/sink node: no provider dispatch; the cascade treats
+ *               it as a no-op pass-through.
+ *   - unknown — an unmapped node type. The cascade decides skip-vs-fail based
+ *               on whether the node has downstream dependents.
  */
 export type ClassicDispatch =
-  | { kind: 'run'; providerSlug: string | null }
+  | { kind: 'run' }
   | { kind: 'passive' }
-  | { kind: 'invalid'; reason: string }
   | { kind: 'unknown'; reason: string };
-
-function firstNonBlankString(
-  data: Record<string, unknown>,
-  keys: ReadonlyArray<string>,
-): string | null {
-  for (const key of keys) {
-    const value = data[key];
-    if (typeof value === 'string' && value.trim()) return value.trim();
-  }
-  return null;
-}
 
 /**
  * Resolve how a classic node should run. Pure + deterministic — no graph,
- * no network, no React.
+ * no network, no React, no provider resolution (that's the backend's job now).
  */
 export function dispatchClassicNode(
   nodeType: string | undefined,
-  data: Record<string, unknown> | undefined,
 ): ClassicDispatch {
-  const payload = data ?? {};
-
-  if (nodeType === NODE_TYPE_LLM) {
-    return { kind: 'run', providerSlug: firstNonBlankString(payload, LLM_PROVIDER_KEYS) };
-  }
-
-  if (nodeType === NODE_TYPE_COMFY) {
-    const workflowSlug = firstNonBlankString(payload, COMFY_WORKFLOW_KEYS);
-    if (!workflowSlug) {
-      return {
-        kind: 'invalid',
-        reason:
-          'comfy node is missing a workflow_slug in its data; cannot route to nous-center',
-      };
-    }
-    return { kind: 'run', providerSlug: `nous/${workflowSlug}` };
+  if (nodeType && RUNNABLE_NODE_TYPES.has(nodeType)) {
+    return { kind: 'run' };
   }
 
   if (nodeType && PASSIVE_NODE_TYPES.has(nodeType)) {
