@@ -46,12 +46,58 @@ DEFAULT_FALKORDB_PORT = 6379
 DEFAULT_DATABASE = "mediahub_memory"
 
 
+# system_settings key (admin-set, DB) → env-var fallback. Lets the Graphiti
+# gate + extractor/embedder provider be configured from an admin UI instead of
+# editing prod compose env (which Watchtower does not reload).
+_SETTINGS_MAP: dict[str, tuple[str, str]] = {
+    "enabled": ("graph_memory_enabled", "FEATURE_GRAPH_MEMORY"),
+    "host": ("graph_falkordb_host", "FALKORDB_HOST"),
+    "port": ("graph_falkordb_port", "FALKORDB_PORT"),
+    "database": ("graph_falkordb_database", "FALKORDB_DATABASE"),
+    "extractor_base_url": ("graph_extractor_base_url", "OPENAI_BASE_URL"),
+    "extractor_api_key": ("graph_extractor_api_key", "OPENAI_API_KEY"),
+    "extractor_model": ("graph_extractor_model", "GRAPH_EXTRACTOR_MODEL"),
+    "embedder_base_url": ("graph_embedder_base_url", "OPENAI_BASE_URL"),
+    "embedder_api_key": ("graph_embedder_api_key", "OPENAI_API_KEY"),
+    "embedder_model": ("graph_embedder_model", "GRAPH_EMBEDDER_MODEL"),
+}
+
+
+async def _default_settings_reader(key: str) -> Optional[str]:
+    """Read one system_settings value via the SQLAlchemy engine (service-role,
+    bypasses RLS). Returns None when unset / DB unavailable. Note: the extractor
+    api_key lives here, so system_settings must stay admin/service-role-only —
+    never exposed to the anon PostgREST surface."""
+    try:
+        from app.db import engine as db_engine
+
+        if not db_engine.is_configured():
+            return None
+        value = await db_engine.fetch_val(
+            "SELECT value FROM public.system_settings WHERE key = :k", {"k": key}
+        )
+        return None if value is None else str(value)
+    except Exception:  # noqa: BLE001 — settings read must never raise
+        logger.warning("[graph_memory] system_settings read failed: %s", key)
+        return None
+
+
 @dataclass(frozen=True)
 class GraphMemoryConfig:
     enabled: bool = False
     falkordb_host: str = ""
     falkordb_port: int = DEFAULT_FALKORDB_PORT
     falkordb_database: str = DEFAULT_DATABASE
+    # Extractor + embedder LLM (OpenAI-compatible). Empty => fall back to
+    # Graphiti's own OPENAI_* env defaults (current behavior). When set
+    # (admin-configured via system_settings), the client is built explicitly
+    # so the extractor provider/key/model is frontend-settable, not env-locked.
+    extractor_base_url: str = ""
+    extractor_api_key: str = ""
+    extractor_model: str = ""
+    embedder_base_url: str = ""
+    embedder_api_key: str = ""
+    embedder_model: str = ""
 
     @classmethod
     def from_env(cls) -> "GraphMemoryConfig":
@@ -67,6 +113,48 @@ class GraphMemoryConfig:
             falkordb_host=host,
             falkordb_port=port,
             falkordb_database=database,
+        )
+
+    @classmethod
+    async def from_settings(cls, *, reader=None, env=None) -> "GraphMemoryConfig":
+        """Resolve config from system_settings (DB, admin-set) with env
+        fallback — DB value > env > default, per field. ``reader(key)`` is an
+        async callable returning ``Optional[str]`` (defaults to the
+        system_settings reader); ``env`` defaults to ``os.environ``. Never
+        raises — a broken settings table degrades to env/defaults."""
+        read = reader if reader is not None else _default_settings_reader
+        environ = env if env is not None else os.environ
+
+        async def resolve(field_key: str, default: str = "") -> str:
+            db_key, env_key = _SETTINGS_MAP[field_key]
+            try:
+                db_val = await read(db_key)
+            except Exception:  # noqa: BLE001
+                logger.warning("[graph_memory] settings read failed: %s", db_key)
+                db_val = None
+            if db_val is not None and str(db_val).strip():
+                return str(db_val).strip()
+            env_val = environ.get(env_key)
+            return env_val.strip() if isinstance(env_val, str) else default
+
+        enabled = (await resolve("enabled")).lower() in _TRUTHY
+        host = await resolve("host")
+        try:
+            port = int(await resolve("port", str(DEFAULT_FALKORDB_PORT)))
+        except ValueError:
+            port = DEFAULT_FALKORDB_PORT
+        database = (await resolve("database")) or DEFAULT_DATABASE
+        return cls(
+            enabled=enabled,
+            falkordb_host=host,
+            falkordb_port=port,
+            falkordb_database=database,
+            extractor_base_url=await resolve("extractor_base_url"),
+            extractor_api_key=await resolve("extractor_api_key"),
+            extractor_model=await resolve("extractor_model"),
+            embedder_base_url=await resolve("embedder_base_url"),
+            embedder_api_key=await resolve("embedder_api_key"),
+            embedder_model=await resolve("embedder_model"),
         )
 
     def operative(self) -> bool:
