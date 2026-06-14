@@ -152,11 +152,24 @@
 .island-card {
   background: var(--island);
   /* line-strong (12% white dark / 16% black light) gives each island a crisp,
-     visible edge so the panels read as distinct floating cards in both themes. */
+     visible edge so the panels read as distinct blocks in both themes. */
   border: 1px solid var(--line-strong);
   border-radius: var(--r-lg, 18px);
-  box-shadow: var(--shadow-island, 0 12px 40px rgba(0, 0, 0, .55));
+  /* No drop-shadow: islands are flat blocks separated by gap + border, not
+     raised/floating cards (per user direction — keep the blocking, drop the lift). */
+  box-shadow: none;
 }
+
+/* Island nav density — match the mock (mockups/mediahub-resources-redesign-v2.html
+   `.nav a`: 7px 10px / 13px). The classic sidebar items are looser (py-2.5 / 14px);
+   here we tighten ONLY the full island nav (the `.island-nav` marker is absent on
+   the 54px icon rail and in classic mode → D12 no-op). The child-combinator path
+   `nav > div(section) > div(list) > button` hits only top-level items, leaving
+   submenu sub-items (one level deeper) and the account switcher (outside `nav`)
+   untouched. Specificity (0,1,4) beats the Tailwind utilities it overrides. */
+.island-nav nav > div > div > button { padding: 6px 10px; border-radius: 9px; font-size: 13px; }
+.island-nav nav > div > div > button > div { gap: 9px; }
+.island-nav nav > div > div > button svg { width: 17px; height: 17px; }
 
 /* Collapsed-info reopen tab — a fixed right-edge vertical handle styled like an
    island card. Semantic tokens flip per theme; indigo accent (#6366f1) on hover
