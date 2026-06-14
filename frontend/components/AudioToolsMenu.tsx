@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { Sparkles, Copy, FileText, PenTool, Wand2, Check, Loader2 } from 'lucide-react';
+import { Copy, FileText, PenTool, Wand2, Check, Loader2 } from 'lucide-react';
 import type { Video } from '../types';
 import {
   triggerTranscription, getTranscript,
@@ -7,7 +7,7 @@ import {
   triggerVisualAnalysis,
 } from '../services/aiService';
 
-interface AudioToolsMenuProps {
+interface AudioToolsMenuItemsProps {
   video: Video;
   /** Persist AI status / generated text back to the media row (handleUpdate). */
   onUpdate?: (id: string, updates: Partial<Video>) => void;
@@ -19,14 +19,16 @@ interface AudioToolsMenuProps {
 }
 
 /**
- * Audio stage-head "tools" dropdown — the home for the AI actions
- * (Copy / Transcript / Summary / Analyze) and Notes editing that the cover-side
- * MediaCard used to host. The island audio Overview (AudioOverviewSide) mirrors
- * the clean mock `.side` stack, so these capabilities move here to stay reachable
- * without crowding the cover (D12: no capability removed). The action keys +
- * service calls + toasts are kept identical to MediaCard's handleAction.
+ * Audio AI actions (Copy / Transcript / Summary / Analyze) + Notes editing,
+ * rendered as bare menu items so they can be FOLDED into the shared stage-head
+ * More ("…") menu for the island audio stage only (the mock stage-head is just
+ * back · title · Share / Download / … — no extra icon). These capabilities used
+ * to live in the cover-side MediaCard, which AudioOverviewSide replaced with the
+ * clean mock `.side` stack, so they move here to stay reachable (D12: nothing
+ * removed). The action keys + service calls + toasts are identical to MediaCard's
+ * handleAction. Item styling matches the surrounding More-menu items.
  */
-export const AudioToolsMenu: React.FC<AudioToolsMenuProps> = ({
+export const AudioToolsMenuItems: React.FC<AudioToolsMenuItemsProps> = ({
   video,
   onUpdate,
   resourceNotes,
@@ -34,7 +36,6 @@ export const AudioToolsMenu: React.FC<AudioToolsMenuProps> = ({
   onNotesBlur,
   addToast,
 }) => {
-  const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
 
@@ -116,54 +117,41 @@ export const AudioToolsMenu: React.FC<AudioToolsMenuProps> = ({
     }
   }, [video, onUpdate, saveAIContent, addToast]);
 
-  const itemClass = 'flex items-center gap-2 w-full text-left px-3 py-2 text-xs text-ink-300 hover:bg-ink-800 hover:text-ink-50 transition-colors disabled:opacity-60';
+  // Matches the surrounding shared More-menu item styling so the folded section
+  // is visually seamless.
+  const itemClass = 'flex items-center gap-2 w-full text-left px-3 py-1.5 text-xs text-ink-400 hover:bg-ink-800 hover:text-ink-200 transition-colors disabled:opacity-60';
 
   return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen(!open)}
-        title="Track tools"
-        aria-label="Track tools"
-        className="p-1.5 text-ink-400 hover:text-ink-200 hover:bg-ink-800 rounded-lg transition-colors"
-      >
-        <Sparkles size={16} />
+    <>
+      <button className={itemClass} onClick={() => handleAction('copy')}>
+        {copied ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+        {copied ? 'Copied' : 'Copy text'}
       </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full mt-1 z-20 w-56 bg-ink-900 border border-ink-700 rounded-lg shadow-xl py-1">
-            <button className={itemClass} onClick={() => handleAction('copy')}>
-              {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-              {copied ? 'Copied' : 'Copy text'}
-            </button>
-            <button className={itemClass} disabled={loadingAction === 'extract'} onClick={() => handleAction('extract')}>
-              {loadingAction === 'extract' ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} className="text-teal-300" />}
-              Transcript
-            </button>
-            <button className={itemClass} disabled={loadingAction === 'rewrite'} onClick={() => handleAction('rewrite')}>
-              {loadingAction === 'rewrite' ? <Loader2 size={14} className="animate-spin" /> : <PenTool size={14} className="text-violet-300" />}
-              Summary
-            </button>
-            <button className={itemClass} disabled={loadingAction === 'analyze'} onClick={() => handleAction('analyze')}>
-              {loadingAction === 'analyze' ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} className="text-indigo-300" />}
-              Analyze
-            </button>
-            {onNotesChange && (
-              <div className="border-t border-ink-700 mt-1 pt-2 px-3 pb-2">
-                <label className="block text-[10px] font-semibold text-ink-500 uppercase tracking-wider mb-1">Notes</label>
-                <textarea
-                  value={resourceNotes || ''}
-                  onChange={(e) => onNotesChange(e.target.value)}
-                  onBlur={onNotesBlur}
-                  placeholder="Add notes..."
-                  rows={2}
-                  className="w-full bg-ink-800/50 border border-ink-700/50 rounded-lg px-2 py-1.5 text-xs text-ink-300 placeholder-ink-600 focus:outline-none focus:border-indigo-500/50 resize-none"
-                />
-              </div>
-            )}
-          </div>
-        </>
+      <button className={itemClass} disabled={loadingAction === 'extract'} onClick={() => handleAction('extract')}>
+        {loadingAction === 'extract' ? <Loader2 size={13} className="animate-spin" /> : <FileText size={13} className="text-teal-300" />}
+        Transcript
+      </button>
+      <button className={itemClass} disabled={loadingAction === 'rewrite'} onClick={() => handleAction('rewrite')}>
+        {loadingAction === 'rewrite' ? <Loader2 size={13} className="animate-spin" /> : <PenTool size={13} className="text-violet-300" />}
+        Summary
+      </button>
+      <button className={itemClass} disabled={loadingAction === 'analyze'} onClick={() => handleAction('analyze')}>
+        {loadingAction === 'analyze' ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} className="text-indigo-300" />}
+        Analyze
+      </button>
+      {onNotesChange && (
+        <div className="px-3 pt-1.5 pb-2">
+          <label className="block text-[10px] font-semibold text-ink-500 uppercase tracking-wider mb-1">Notes</label>
+          <textarea
+            value={resourceNotes || ''}
+            onChange={(e) => onNotesChange(e.target.value)}
+            onBlur={onNotesBlur}
+            placeholder="Add notes..."
+            rows={2}
+            className="w-full bg-ink-800/50 border border-ink-700/50 rounded-lg px-2 py-1.5 text-xs text-ink-300 placeholder-ink-600 focus:outline-none focus:border-indigo-500/50 resize-none"
+          />
+        </div>
       )}
-    </div>
+    </>
   );
 };

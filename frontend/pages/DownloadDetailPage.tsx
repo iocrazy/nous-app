@@ -13,7 +13,7 @@ import { ShareModal } from '../components/ShareModal';
 import { AudioStageIsland } from '../components/AudioStageIsland';
 import { PlaylistIsland } from '../components/PlaylistIsland';
 import { AudioOverviewSide } from '../components/AudioOverviewSide';
-import { AudioToolsMenu } from '../components/AudioToolsMenu';
+import { AudioToolsMenuItems } from '../components/AudioToolsMenu';
 import SodaLyricsTab from '../components/SodaLyricsTab';
 import { AudioWaveformPlayer } from '../components/AudioWaveformPlayer';
 import { extractCoverTint, tintFromTheme, type CoverTint } from '../utils/coverTint';
@@ -269,7 +269,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
       {resourceId && (
         <button
           onClick={() => setIsShareModalOpen(true)}
-          className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-medium rounded-lg btn-tint-indigo transition-colors"
+          className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${islandDesktop && isAudio ? 'btn-tint-cover' : 'btn-tint-indigo'}`}
         >
           <Share2 size={14} />
           <span className="hidden sm:inline">Share</span>
@@ -312,6 +312,24 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
           <>
             <div className="fixed inset-0 z-10" onClick={() => setShowMoreMenu(false)} />
             <div className="absolute right-0 top-full mt-1 z-20 bg-ink-900 border border-ink-700 rounded-lg shadow-xl py-1 w-44">
+              {/* Island audio only: fold the AI actions + Notes (formerly on the
+                  cover-side MediaCard) into this shared More menu so the audio
+                  stage-head matches the mock (back · title · Share/Download/…)
+                  with no extra icon. Gated on islandDesktop && isAudio so the
+                  classic + video stage-heads stay byte-identical (D12). */}
+              {islandDesktop && isAudio && (
+                <>
+                  <AudioToolsMenuItems
+                    video={video}
+                    onUpdate={handleUpdate}
+                    resourceNotes={resourceNotes}
+                    onNotesChange={resourceId ? handleNotesChange : undefined}
+                    onNotesBlur={resourceId ? handleNotesBlur : undefined}
+                    addToast={addToast}
+                  />
+                  <div className="border-t border-ink-700 my-1" />
+                </>
+              )}
               {video.original_url && (
                 <a
                   href={video.original_url}
@@ -448,9 +466,9 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
   // Cover-side Overview — faithful port of the audio mock `.side` stack
   // (cover → song → artist → stats → stars → tags). Replaces the bare MediaCard
   // the stage used to host so the cover-side matches the mock exactly; the AI
-  // actions + notes MediaCard carried move into the stage-head AudioToolsMenu so
-  // nothing is lost (D12). The SAME audioCoverUrl drives both the tint sample and
-  // this cover image.
+  // actions + notes MediaCard carried fold into the shared stage-head More ("…")
+  // menu (AudioToolsMenuItems, audio-only) so nothing is lost (D12). The SAME
+  // audioCoverUrl drives both the tint sample and this cover image.
   const audioCoverSide = (
     <AudioOverviewSide
       video={video}
@@ -459,21 +477,6 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
       author={video.author || undefined}
       rating={resourceRating}
       onRatingChange={resourceId ? handleRatingChange : undefined}
-    />
-  );
-
-  // AI actions (Copy / Transcript / Summary / Analyze) + Notes — relocated from
-  // the cover-side MediaCard into a stage-head dropdown for the island audio
-  // stage only, so classic / video stage-heads stay byte-identical (they keep
-  // the shared `actionButtons` exactly).
-  const audioToolsMenu = (
-    <AudioToolsMenu
-      video={video}
-      onUpdate={handleUpdate}
-      resourceNotes={resourceNotes}
-      onNotesChange={resourceId ? handleNotesChange : undefined}
-      onNotesBlur={resourceId ? handleNotesBlur : undefined}
-      addToast={addToast}
     />
   );
 
@@ -697,7 +700,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
               title={titleText}
               author={video.author || undefined}
               onBack={handleBack}
-              actions={<>{audioToolsMenu}{actionButtons}</>}
+              actions={actionButtons}
               coverSide={audioCoverSide}
               lyrics={audioLyrics}
               player={audioPlayer}
