@@ -107,6 +107,7 @@ export const ResourcesInfoPanelWrapper: React.FC<ResourcesInfoPanelWrapperProps>
           {selectedFolder ? (
             <FolderInfoPanel
               folder={selectedFolder}
+              island
               previewItems={
                 isRecycleView
                   ? trashedFolderPreviews[String(selectedFolder.id)]
@@ -121,6 +122,7 @@ export const ResourcesInfoPanelWrapper: React.FC<ResourcesInfoPanelWrapperProps>
           ) : selectedResource?.resource ? (
             <ResourceInfoPanel
               resource={selectedResource.resource}
+              island
               allTags={allTags}
               assignedTags={selectedResourceTags.map(item => item.tag).filter((t): t is Tag => !!t)}
               folderName={selectedResource.folder_id ? folders.find(f => f.id === selectedResource.folder_id)?.name : null}

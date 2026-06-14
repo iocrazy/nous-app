@@ -497,6 +497,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
             onNotesBlur={onNotesBlur}
             mobileActions={mobileActions}
             compact={compact}
+            bare={island}
           />
         )}
 

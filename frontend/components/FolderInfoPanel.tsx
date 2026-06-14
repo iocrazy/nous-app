@@ -17,6 +17,9 @@ interface FolderInfoPanelProps {
   readOnly?: boolean;
   onClose: () => void;
   onRename: (name: string) => void;
+  /** Island shell: render transparently — the info island already paints the
+   *  card surface, so a bg here would be a box inside a box. */
+  island?: boolean;
 }
 
 function formatDate(dateStr: string | null | undefined): string {
@@ -46,6 +49,7 @@ export const FolderInfoPanel: React.FC<FolderInfoPanelProps> = ({
   readOnly = false,
   onClose,
   onRename,
+  island = false,
 }) => {
   const { t } = useTranslation();
 
@@ -78,9 +82,9 @@ export const FolderInfoPanel: React.FC<FolderInfoPanelProps> = ({
   const previewSlots = previewItems ? previewItems.slice(0, 4) : [];
 
   return (
-    <div className="flex-1 min-w-0 h-full bg-ink-900 overflow-y-auto">
+    <div className={`flex-1 min-w-0 h-full overflow-y-auto ${island ? '' : 'bg-ink-900'}`}>
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-ink-800 sticky top-0 bg-ink-900 z-10">
+      <div className={`flex items-center justify-between p-4 border-b border-ink-800 sticky top-0 z-10 ${island ? 'bg-island' : 'bg-ink-900'}`}>
         <h3 className="text-sm font-semibold text-ink-50">{t('resources.folderInfoPanel.title')}</h3>
         <button
           onClick={onClose}

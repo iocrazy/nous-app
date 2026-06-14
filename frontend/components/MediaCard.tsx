@@ -57,6 +57,14 @@ interface MediaCardProps {
    * false so every other caller renders identically.
    */
   compact?: boolean;
+  /**
+   * Bare mode — drop the card's own chrome (bg / border / rounded / shadow) so
+   * the content flows directly inside a parent island card. Without this the
+   * island shell's card + MediaCard's card render as a frame-inside-a-frame
+   * (island redesign v2; matches the detail mockups where the info content is
+   * not double-boxed). Defaults false so every classic caller is unchanged.
+   */
+  bare?: boolean;
 }
 
 // Helper to generate consistent colors from strings (Shared logic)
@@ -139,6 +147,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   onNotesBlur,
   mobileActions,
   compact = false,
+  bare = false,
 }) => {
   const { mediaToken } = useAuth();
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
@@ -568,7 +577,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   })();
 
   return (
-    <div className={detailCardClass}>
+    <div className={bare ? 'flex flex-col max-w-full min-w-0' : detailCardClass}>
       <div className={`flex ${hidePreview ? 'flex-col' : 'flex-col md:flex-row'} min-w-0`}>
         {/* Media Preview Section - Left Side */}
         {!hidePreview && <div className="md:w-2/5 bg-black relative h-64 md:h-auto md:max-h-[70vh] md:min-h-[400px] group flex-shrink-0 flex items-center justify-center">

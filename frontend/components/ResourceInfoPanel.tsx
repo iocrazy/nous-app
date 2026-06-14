@@ -16,6 +16,9 @@ interface ResourceInfoPanelProps {
   onRemoveTag: (tagId: string) => void;
   onCreate?: (name: string, color: string) => Promise<Tag | null>;
   onUpdate: (data: Partial<Resource>) => void;
+  /** Island shell: the surrounding info island already paints the card surface,
+   *  so render transparently to avoid a second box inside the island. */
+  island?: boolean;
 }
 
 function formatFileSize(bytes: number | null | undefined): string {
@@ -140,6 +143,7 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
   onRemoveTag,
   onCreate,
   onUpdate,
+  island = false,
 }) => {
   const { t } = useTranslation();
   const { icon: IconComponent, color, bg } = getFileIcon(resource.mime_type);
@@ -234,9 +238,9 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
   ]);
 
   return (
-    <div className="flex-1 min-w-0 h-full bg-ink-900 overflow-y-auto">
+    <div className={`flex-1 min-w-0 h-full overflow-y-auto ${island ? '' : 'bg-ink-900'}`}>
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-ink-800 sticky top-0 bg-ink-900 z-10">
+      <div className={`flex items-center justify-between p-4 border-b border-ink-800 sticky top-0 z-10 ${island ? 'bg-island' : 'bg-ink-900'}`}>
         <h3 className="text-sm font-semibold text-ink-50 select-none">{t('resources.infoPanel.title')}</h3>
         <button
           onClick={onClose}

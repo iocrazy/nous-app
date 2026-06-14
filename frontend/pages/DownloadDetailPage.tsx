@@ -470,6 +470,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
         onUpdate={handleUpdate}
         onDelete={handleDelete}
         hidePreview
+        bare
         resourceRating={resourceRating}
         resourceNotes={resourceNotes}
         onRatingChange={resourceId ? handleRatingChange : undefined}
