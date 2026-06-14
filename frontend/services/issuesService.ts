@@ -17,6 +17,7 @@ export type IssueStatus =
   | 'in_progress'
   | 'in_review'
   | 'blocked'
+  | 'needs_followup'
   | 'done'
   | 'cancelled';
 

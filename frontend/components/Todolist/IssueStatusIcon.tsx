@@ -7,11 +7,11 @@
  */
 
 import React from 'react';
-import { Circle, CircleDashed, AlertCircle, CircleDot, CheckCircle2, MinusCircle, XCircle } from 'lucide-react';
+import { Circle, CircleDashed, AlertCircle, CircleDot, CheckCircle2, MinusCircle, XCircle, HelpCircle } from 'lucide-react';
 import type { IssueStatus, IssuePriority } from '../../services/issuesService';
 
 export const STATUS_ORDER: IssueStatus[] = [
-  'backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled',
+  'backlog', 'todo', 'in_progress', 'in_review', 'needs_followup', 'blocked', 'done', 'cancelled',
 ];
 
 export const STATUS_LABEL: Record<IssueStatus, string> = {
@@ -19,6 +19,7 @@ export const STATUS_LABEL: Record<IssueStatus, string> = {
   todo: 'Todo',
   in_progress: 'In Progress',
   in_review: 'In Review',
+  needs_followup: 'Needs Follow-up',
   blocked: 'Blocked',
   done: 'Done',
   cancelled: 'Cancelled',
@@ -29,6 +30,7 @@ export const STATUS_COLOR: Record<IssueStatus, string> = {
   todo: 'text-blue-400',
   in_progress: 'text-amber-400',
   in_review: 'text-purple-400',
+  needs_followup: 'text-orange-400',
   blocked: 'text-rose-400',
   done: 'text-emerald-500',
   cancelled: 'text-ink-500',
@@ -37,14 +39,15 @@ export const STATUS_COLOR: Record<IssueStatus, string> = {
 export const IssueStatusIcon: React.FC<{ status: IssueStatus; size?: number }> = ({ status, size = 14 }) => {
   const cls = STATUS_COLOR[status];
   switch (status) {
-    case 'backlog':     return <CircleDashed size={size} className={cls} />;
-    case 'todo':        return <Circle size={size} className={cls} />;
-    case 'in_progress': return <CircleDot size={size} className={cls} />;
-    case 'in_review':   return <CircleDot size={size} className={cls} />;
-    case 'blocked':     return <AlertCircle size={size} className={cls} />;
-    case 'done':        return <CheckCircle2 size={size} className={cls} />;
-    case 'cancelled':   return <MinusCircle size={size} className={cls} />;
-    default:            return <XCircle size={size} className="text-ink-500" />;
+    case 'backlog':        return <CircleDashed size={size} className={cls} />;
+    case 'todo':           return <Circle size={size} className={cls} />;
+    case 'in_progress':    return <CircleDot size={size} className={cls} />;
+    case 'in_review':      return <CircleDot size={size} className={cls} />;
+    case 'needs_followup': return <HelpCircle size={size} className={cls} />;
+    case 'blocked':        return <AlertCircle size={size} className={cls} />;
+    case 'done':           return <CheckCircle2 size={size} className={cls} />;
+    case 'cancelled':      return <MinusCircle size={size} className={cls} />;
+    default:               return <XCircle size={size} className="text-ink-500" />;
   }
 };
 
