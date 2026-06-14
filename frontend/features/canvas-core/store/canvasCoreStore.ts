@@ -124,6 +124,16 @@ interface CanvasState {
   flushSave(): Promise<void>;
   resolveConflictWithServer(): void;
   dismissConflict(): void;
+
+  // ---- Realtime sync (Phase 6a) ----
+  /**
+   * Called by useCanvasRealtime when Supabase Realtime broadcasts an UPDATE
+   * on the canvases row. Three cases:
+   *   - Self-echo / stale: row.base_updated_at <= current → no-op
+   *   - Newer + no unsaved edits → rebase to remote row
+   *   - Newer + unsaved local edits → surface as conflict (reuse 409 path)
+   */
+  applyRemoteUpdate(row: Canvas): void;
 }
 
 interface CanvasStoreFactoryOptions {
@@ -473,6 +483,26 @@ export function createCanvasCoreStore(
 
       dismissConflict() {
         set({ conflict: null, saveStatus: 'idle', saveError: null });
+      },
+
+      // ---- Realtime sync (Phase 6a) ----
+      applyRemoteUpdate(row: Canvas) {
+        const s = get();
+
+        // Guard 1: store not loaded yet — ignore.
+        if (!s.baseUpdatedAt) return;
+
+        // Guard 2: self-echo / stale broadcast — ignore.
+        if (row.base_updated_at <= s.baseUpdatedAt) return;
+
+        // Guard 3: local dirty edits exist — surface as conflict, never clobber.
+        if (s.revision > s.persistedRevision) {
+          set({ conflict: row });
+          return;
+        }
+
+        // Happy path: newer row, clean local state — rebase.
+        applyServerRow(row);
       },
     };
   });
