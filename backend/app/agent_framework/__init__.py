@@ -161,7 +161,6 @@ from app.agent_framework.multimodal import flatten_to_text as flatten_multimodal
 from app.agent_framework.output_budget import (
     OutputBudget,
     derive_output_budget,
-    should_auto_continue,
 )
 from app.agent_framework.plan_mode import (
     ApprovalDecision,
@@ -316,7 +315,6 @@ __all__ = [
     "prune_tool_results",
     "render_session_memory",
     "role_from_env",
-    "should_auto_continue",
     "wrap_legacy_post",
     "wrap_legacy_pre",
     "serve_mcp_stdio",
