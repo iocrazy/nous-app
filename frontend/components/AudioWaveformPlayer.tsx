@@ -516,8 +516,9 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
               onMouseMove={handleMouseMove}
             />
           )}
-          {/* Chorus badge — mock `.chorus`: amber pill poking above the wave,
-              positioned at the real chorus time; click seeks there. */}
+          {/* Chorus marker — thin yellow vertical line drawn on the waveform at
+              the chorus time (same overlay the full/compact layouts use), no
+              text. Click seeks there. */}
           {!isDecoding && chorusStartSec !== undefined && duration > 0 && chorusStartSec <= duration && (
             <button
               type="button"
@@ -529,11 +530,9 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
                 setCurrentTime(chorusStartSec);
                 onTimeUpdate?.(chorusStartSec);
               }}
-              className="audio-chorus-badge"
+              className="absolute top-0 bottom-0 z-10 w-0.5 bg-amber-400/80 hover:bg-amber-300 cursor-pointer"
               style={{ left: `${(chorusStartSec / duration) * 100}%` }}
-            >
-              CHORUS
-            </button>
+            />
           )}
         </div>
 
@@ -542,8 +541,9 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
           {formatTime(currentTime)} / {formatTime(duration)}
         </span>
 
-        {/* Side controls — mock `.pside`: speed "1×" + a compact volume toggle
-            (kept for parity with the full player; mock omits it). */}
+        {/* Side controls — mock `.pside`: speed "1×" + an icon-only volume
+            control whose slider reveals on hover (kept for parity with the full
+            player; mock omits it). */}
         <div className="audio-pside">
           <button
             onClick={cycleRate}
@@ -551,24 +551,34 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
           >
             {playbackRate === 1 ? '1×' : `${playbackRate}×`}
           </button>
-          <button
-            onClick={toggleMute}
-            aria-label={isMuted || volume === 0 ? 'Unmute' : 'Mute'}
-            className="hover:text-[color:var(--content,#e7e7ea)] transition-colors"
-          >
-            {isMuted || volume === 0 ? <VolumeX size={14} /> : <Volume2 size={14} />}
-          </button>
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.05"
-            value={isMuted ? 0 : volume}
-            onChange={handleVolumeChange}
-            aria-label="Volume"
-            style={{ accentColor: 'rgb(var(--tint,99,102,241))' }}
-            className="w-12 h-1 bg-white/15 rounded-full appearance-none cursor-pointer"
-          />
+          {/* Volume: icon only; on hover the slider pops up in a small floating
+              panel above the icon. The panel is a DOM child of the group so
+              hover persists while the cursor is over it (pb-2 bridges the gap),
+              and click still toggles mute. */}
+          <div className="relative group/vol flex items-center">
+            <button
+              onClick={toggleMute}
+              aria-label={isMuted || volume === 0 ? 'Unmute' : 'Mute'}
+              className="flex items-center hover:text-[color:var(--content,#e7e7ea)] transition-colors"
+            >
+              {isMuted || volume === 0 ? <VolumeX size={14} /> : <Volume2 size={14} />}
+            </button>
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 pb-2 z-20 hidden group-hover/vol:block">
+              <div className="bg-ink-900 border border-ink-700 rounded-lg shadow-xl px-2.5 py-2">
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={isMuted ? 0 : volume}
+                  onChange={handleVolumeChange}
+                  aria-label="Volume"
+                  style={{ accentColor: 'rgb(var(--tint,99,102,241))' }}
+                  className="block w-20 h-1 bg-white/15 rounded-full appearance-none cursor-pointer"
+                />
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     );

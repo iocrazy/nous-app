@@ -312,20 +312,16 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
           <>
             <div className="fixed inset-0 z-10" onClick={() => setShowMoreMenu(false)} />
             <div className="absolute right-0 top-full mt-1 z-20 bg-ink-900 border border-ink-700 rounded-lg shadow-xl py-1 w-44">
-              {/* Island audio only: fold the AI actions + Notes (formerly on the
-                  cover-side MediaCard) into this shared More menu so the audio
-                  stage-head matches the mock (back · title · Share/Download/…)
-                  with no extra icon. Gated on islandDesktop && isAudio so the
-                  classic + video stage-heads stay byte-identical (D12). */}
-              {islandDesktop && isAudio && (
+              {/* Island audio only: fold inline Notes into this shared More menu
+                  (audio doesn't surface the AI actions, per design). Gated on
+                  islandDesktop && isAudio && resourceId so classic + video
+                  stage-heads stay byte-identical (D12). */}
+              {islandDesktop && isAudio && resourceId && (
                 <>
                   <AudioToolsMenuItems
-                    video={video}
-                    onUpdate={handleUpdate}
                     resourceNotes={resourceNotes}
-                    onNotesChange={resourceId ? handleNotesChange : undefined}
-                    onNotesBlur={resourceId ? handleNotesBlur : undefined}
-                    addToast={addToast}
+                    onNotesChange={handleNotesChange}
+                    onNotesBlur={handleNotesBlur}
                   />
                   <div className="border-t border-ink-700 my-1" />
                 </>
