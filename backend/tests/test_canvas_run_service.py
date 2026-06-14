@@ -229,6 +229,37 @@ class TestNousProviderRouting:
         assert captured["override"] == 900.0
 
     @pytest.mark.asyncio
+    async def test_nous_empty_body_still_runs_workflow(self, monkeypatch):
+        # Some ComfyUI/nous workflows need no text prompt — a nous/ dispatch
+        # with an empty body must still reach run_nous_workflow (the empty-body
+        # guard applies only to the non-nous text-adapter path).
+        captured = {}
+
+        async def fake_run_nous_workflow(
+            *, settings, workflow_slug, prompt, agent_id=None, **_
+        ):
+            captured["workflow_slug"] = workflow_slug
+            captured["prompt"] = prompt
+            from app.schemas.canvas_run import CanvasPromptRunResult
+
+            return CanvasPromptRunResult(ok=True, text="rendered", error=None)
+
+        monkeypatch.setattr(
+            "app.services.canvas.nous_center_runner.run_nous_workflow",
+            fake_run_nous_workflow,
+        )
+
+        adapter = FakeAdapter()
+        svc = make_service(adapter)
+        result = await svc.run_prompt(body="   ", provider_slug="nous/comfy-render")
+        assert result.ok is True
+        assert result.text == "rendered"
+        assert captured["workflow_slug"] == "comfy-render"
+        assert captured["prompt"] == ""
+        # The bare LLM adapter was NOT used.
+        assert adapter.calls == []
+
+    @pytest.mark.asyncio
     async def test_nous_slash_missing_workflow_returns_error(self):
         adapter = FakeAdapter()
         svc = make_service(adapter)
@@ -291,6 +322,51 @@ class TestRunClassicNode:
         assert captured["workflow_slug"] == "render-xl"
         assert captured["prompt"] == "a robot"
         # And the bare LLM adapter was NOT used.
+        assert adapter.calls == []
+
+    @pytest.mark.asyncio
+    async def test_comfy_node_with_empty_prompt_still_runs_workflow(self, monkeypatch):
+        # A comfy node with a valid workflow_slug but no text prompt is valid —
+        # it must reach run_nous_workflow, not be rejected as "empty".
+        captured = {}
+
+        async def fake_run_nous_workflow(
+            *, settings, workflow_slug, prompt, agent_id=None, **_
+        ):
+            captured["workflow_slug"] = workflow_slug
+            from app.schemas.canvas_run import CanvasPromptRunResult
+
+            return CanvasPromptRunResult(ok=True, text="rendered", error=None)
+
+        monkeypatch.setattr(
+            "app.services.canvas.nous_center_runner.run_nous_workflow",
+            fake_run_nous_workflow,
+        )
+
+        adapter = FakeAdapter()
+        svc = make_service(adapter)
+        result = await svc.run_classic_node(
+            node_type="comfy",
+            node={"data": {"workflow_slug": "render-xl"}},
+            body="   ",
+        )
+        assert result.ok is True
+        assert result.text == "rendered"
+        assert captured["workflow_slug"] == "render-xl"
+        assert adapter.calls == []
+
+    @pytest.mark.asyncio
+    async def test_llm_node_empty_body_still_rejected_as_empty(self):
+        # The non-nous (llm/adapter) path keeps enforcing the empty-body guard.
+        adapter = FakeAdapter()
+        svc = make_service(adapter)
+        result = await svc.run_classic_node(
+            node_type="llm",
+            node={"data": {"provider_slug": "anthropic/claude-sonnet-4-6"}},
+            body="   ",
+        )
+        assert result.ok is False
+        assert "empty" in (result.error or "").lower()
         assert adapter.calls == []
 
     @pytest.mark.asyncio

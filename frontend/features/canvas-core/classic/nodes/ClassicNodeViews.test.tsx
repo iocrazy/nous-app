@@ -149,6 +149,38 @@ describe('CLASSIC_NODE_TYPES — portless group container', () => {
   });
 });
 
+describe('CLASSIC_NODE_TYPES — llm inline text result', () => {
+  it('renders the run_result text inline when the llm node succeeded', () => {
+    renderNode('llm', {
+      run_status: 'succeeded',
+      run_result: { text: 'hello world' },
+    });
+    const box = screen.getByTestId('classic-node-llm-result');
+    expect(box).toHaveTextContent('hello world');
+  });
+
+  it('renders no result box when the llm node has no run_result', () => {
+    renderNode('llm', { run_status: 'succeeded' });
+    expect(screen.queryByTestId('classic-node-llm-result')).toBeNull();
+  });
+
+  it('renders no result box when run_result carries no text', () => {
+    renderNode('llm', {
+      run_status: 'succeeded',
+      run_result: { image_url: 'https://cdn/x.png' },
+    });
+    expect(screen.queryByTestId('classic-node-llm-result')).toBeNull();
+  });
+
+  it('does not show a result box on non-llm simple nodes', () => {
+    renderNode('text', {
+      run_status: 'succeeded',
+      run_result: { text: 'hello world' },
+    });
+    expect(screen.queryByTestId('classic-node-text-result')).toBeNull();
+  });
+});
+
 describe('CLASSIC_NODE_TYPES — run-state halo', () => {
   it('failed shows the failed tone + inline run_error text', () => {
     renderNode('llm', { run_status: 'failed', run_error: 'boom: provider 500' });
