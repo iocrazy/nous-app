@@ -15,6 +15,27 @@ import { LoopNodeView } from './LoopNodeView';
 import { PromptNodeView } from './PromptNodeView';
 import { ShotNodeView } from './ShotNodeView';
 
+// PromptNodeView now imports useResourceSearch for the @-mention picker.
+// Return empty data so the debounced fetch never fires and existing tests
+// are unaffected.
+vi.mock('../../../../hooks/useResourceSearch', () => ({
+  useResourceSearch: vi.fn().mockReturnValue({
+    data: {
+      results: [],
+      counts: { all: 0, video: 0, image: 0, doc: 0, audio: 0, pdf: 0 },
+      next_cursor: null,
+    },
+    loading: false,
+    error: null,
+  }),
+}));
+
+// ResourcePickerSuggestion (rendered by CanvasMentionPicker) uses useTranslation.
+// Passthrough so existing tests that don't open the picker are unaffected.
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({ t: (k: string) => k }),
+}));
+
 beforeEach(() => {
   useCanvasCoreStore.getState().reset();
   useCanvasCoreStore.setState({
