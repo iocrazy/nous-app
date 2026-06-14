@@ -45,11 +45,14 @@ class _FakeNodeStep:
 
     ``raise_on`` maps node_id → exception message; absent ids succeed.
     ``calls`` records (node_id, node_type) tuples in invocation order.
+    ``records`` captures the full kwargs (node_type/node_data/body) so tests
+    can assert the REAL node data was threaded through.
     """
 
     def __init__(self, raise_on: dict[str, str] | None = None) -> None:
         self.raise_on = raise_on or {}
         self.calls: list[tuple[str, str]] = []
+        self.records: list[dict[str, Any]] = []
 
     async def __call__(
         self,
@@ -62,26 +65,85 @@ class _FakeNodeStep:
         project_id: Any,
     ) -> dict:
         self.calls.append((node_id, node_type))
+        self.records.append(
+            {
+                "node_id": node_id,
+                "node_type": node_type,
+                "node_data": node_data,
+                "body": body,
+            }
+        )
         if node_id in self.raise_on:
             raise RuntimeError(self.raise_on[node_id])
         return {"ok": True, "text": f"ok-{node_id}", "error": None, "result": None}
 
 
-def _patch_steps(monkeypatch, *, node_step: _FakeNodeStep | None = None):
-    """Patch all step functions on canvas_graph_module; return (mark_proc, create_sub,
-    mark_complete, mark_failed, node_runner)."""
+class _DefaultCanvas:
+    """id -> node lookup that synthesizes a default 'llm' node for ANY id.
+
+    Used by legacy behavioral tests that don't care about a node's real
+    type/data — they only exercise run order / failure handling. ``.get``
+    therefore never returns None, so every id in node_order resolves.
+    """
+
+    def get(self, node_id: str) -> dict:
+        return {"id": node_id, "type": "llm", "data": {}}
+
+
+def _fake_canvas(
+    node_order: list[str], types: dict[str, str] | None = None
+) -> dict[str, dict]:
+    """Build an explicit id -> node lookup from a node_order.
+
+    Unlike _DefaultCanvas, a missing id resolves to None (real dict.get),
+    which is what the node-not-found tests rely on.
+    """
+    types = types or {}
+    return {
+        nid: {
+            "id": nid,
+            "type": types.get(nid, "llm"),
+            "data": {"prompt": f"prompt-{nid}"},
+        }
+        for nid in node_order
+    }
+
+
+def _patch_steps(
+    monkeypatch,
+    *,
+    node_step: _FakeNodeStep | None = None,
+    gen_step: _FakeNodeStep | None = None,
+    canvas: Any | None = None,
+):
+    """Patch all step functions + canvas loader on canvas_graph_module.
+
+    Returns (mark_proc, create_sub, mark_complete, mark_failed, node_runner).
+
+    ``canvas`` is the id -> node lookup returned by the patched
+    ``_load_canvas_nodes``; defaults to ``_DefaultCanvas()`` so legacy tests
+    that don't set up a canvas still resolve every node as a plain 'llm'.
+    When ``gen_step`` is omitted, the same runner backs both the plain and
+    the gen step (sufficient for tests that don't distinguish routing).
+    """
     mark_proc = AsyncMock()
     create_sub = AsyncMock()
     mark_complete = AsyncMock()
     mark_failed = AsyncMock()
     runner = node_step or _FakeNodeStep()
+    gen_runner = gen_step or runner
+
+    load_canvas = AsyncMock(
+        return_value=canvas if canvas is not None else _DefaultCanvas()
+    )
 
     monkeypatch.setattr(canvas_graph_module, "mark_graph_processing_step", mark_proc)
     monkeypatch.setattr(canvas_graph_module, "create_node_subtask_step", create_sub)
     monkeypatch.setattr(canvas_graph_module, "mark_node_complete_step", mark_complete)
     monkeypatch.setattr(canvas_graph_module, "mark_node_failed_step", mark_failed)
     monkeypatch.setattr(canvas_graph_module, "run_canvas_node_step", runner)
-    monkeypatch.setattr(canvas_graph_module, "run_gen_canvas_node_step", runner)
+    monkeypatch.setattr(canvas_graph_module, "run_gen_canvas_node_step", gen_runner)
+    monkeypatch.setattr(canvas_graph_module, "_load_canvas_nodes", load_canvas)
 
     return mark_proc, create_sub, mark_complete, mark_failed, runner
 
@@ -422,6 +484,101 @@ class TestPerNodeSubtasks:
         )
 
         assert create_sub.call_args.kwargs.get("parent_wf_id") == _WF_ID
+
+
+# ============================================================
+# Real node-data resolution + gen/non-gen routing (Phase 6d fix)
+# ============================================================
+
+
+@pytest.mark.asyncio
+class TestNodeDataResolution:
+    async def test_image_gen_node_routes_through_gen_step(self, monkeypatch):
+        """A node typed image_gen runs via run_gen_canvas_node_step (NOT the
+        plain step), and receives the REAL node_type + node data."""
+        plain = _FakeNodeStep()
+        gen = _FakeNodeStep()
+        canvas = _fake_canvas(["n1", "n2"], types={"n2": "image_gen"})
+
+        _patch_steps(monkeypatch, node_step=plain, gen_step=gen, canvas=canvas)
+
+        result = await _run_graph(
+            workflow_id=_WF_ID,
+            canvas_id=_CANVAS,
+            node_order=["n1", "n2"],
+            user_id=_USER,
+            continue_on_failure=False,
+        )
+
+        assert result["status"] == "success"
+
+        # n2 went through the gen step with its real type + data.
+        gen_ids = [nid for nid, _ in gen.calls]
+        assert gen_ids == ["n2"], f"expected gen step to run n2 only, got {gen_ids}"
+        gen_rec = gen.records[0]
+        assert gen_rec["node_type"] == "image_gen"
+        assert gen_rec["node_data"] == {"prompt": "prompt-n2"}
+        assert gen_rec["body"] == "prompt-n2"
+
+        # The plain step ran n1 but never n2.
+        plain_ids = [nid for nid, _ in plain.calls]
+        assert plain_ids == ["n1"], f"plain step should run n1 only, got {plain_ids}"
+
+    async def test_llm_node_routes_through_plain_step(self, monkeypatch):
+        """An llm node routes through run_canvas_node_step, never the gen step."""
+        plain = _FakeNodeStep()
+        gen = _FakeNodeStep()
+        canvas = _fake_canvas(["n1"], types={"n1": "llm"})
+
+        _patch_steps(monkeypatch, node_step=plain, gen_step=gen, canvas=canvas)
+
+        await _run_graph(
+            workflow_id=_WF_ID,
+            canvas_id=_CANVAS,
+            node_order=["n1"],
+            user_id=_USER,
+            continue_on_failure=False,
+        )
+
+        assert [nid for nid, _ in plain.calls] == ["n1"]
+        assert gen.calls == [], "llm node must NOT route through the gen step"
+        assert plain.records[0]["node_type"] == "llm"
+
+    async def test_node_id_absent_from_canvas_raises(self, monkeypatch):
+        """A node id in node_order but missing from the loaded canvas is a real
+        error: raises with continue_on_failure=False, and still raises at the
+        end with continue_on_failure=True (after attempting the other nodes)."""
+        # Canvas only contains n1 + n3; "missing" is absent.
+        canvas = _fake_canvas(["n1", "n3"])
+
+        # continue_on_failure=False → raises immediately at the missing node.
+        _, _, _, mark_failed, runner = _patch_steps(monkeypatch, canvas=canvas)
+        with pytest.raises(RuntimeError):
+            await _run_graph(
+                workflow_id=_WF_ID,
+                canvas_id=_CANVAS,
+                node_order=["n1", "missing", "n3"],
+                user_id=_USER,
+                continue_on_failure=False,
+            )
+        ran = [nid for nid, _ in runner.calls]
+        assert ran == ["n1"], f"n3 must not run after missing node, got {ran}"
+        assert mark_failed.call_count == 1  # the missing node's subtask
+
+        # continue_on_failure=True → attempts n1 + n3, raises at the end.
+        _, _, _, mark_failed2, runner2 = _patch_steps(monkeypatch, canvas=canvas)
+        with pytest.raises(RuntimeError) as exc_info:
+            await _run_graph(
+                workflow_id=_WF_ID,
+                canvas_id=_CANVAS,
+                node_order=["n1", "missing", "n3"],
+                user_id=_USER,
+                continue_on_failure=True,
+            )
+        ran2 = [nid for nid, _ in runner2.calls]
+        assert ran2 == ["n1", "n3"], f"both real nodes should run, got {ran2}"
+        assert "missing" in str(exc_info.value)
+        assert mark_failed2.call_count == 1
 
 
 # ============================================================

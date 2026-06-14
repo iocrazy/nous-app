@@ -34,6 +34,50 @@ from loguru import logger
 # avoid charging users twice for the same generation.
 _GEN_NODE_TYPES = frozenset({"image_gen", "video_gen"})
 
+# Key fallback order used to resolve a node's run "body" from its own data.
+# Mirrors the upstream-aggregated text the synchronous /runs/classic-node
+# route receives — except the graph run has no upstream aggregation, so we
+# read the body straight off the node's persisted data.
+_NODE_BODY_KEYS = ("body", "prompt", "text", "content")
+
+
+def _node_body(data: dict) -> str:
+    """Resolve a node's run body from its own data (first present key).
+
+    Local fallback resolver mirroring ``_first_str`` in canvas_run_service —
+    extracts the first non-empty string under _NODE_BODY_KEYS, defaulting to
+    "" when none are present. Kept local to avoid importing a leading-
+    underscore helper across module boundaries.
+    """
+    for key in _NODE_BODY_KEYS:
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+async def _load_canvas_nodes(canvas_id: str) -> dict[str, dict]:
+    """Load the canvas once and return an id -> node lookup.
+
+    Deliberately a plain async function (NOT a @DBOS.step): it is a pure read
+    used to drive the orchestration loop, so keeping it off the DBOS step
+    ledger avoids recording a redundant step result, and keeps it trivially
+    monkeypatchable in tests. Raises if the canvas row is missing — a canvas
+    that cannot be found is a real error, not a silent empty run.
+    """
+    from app.services.canvas.canvas_service import CanvasService
+
+    row = await CanvasService().get(canvas_id)
+    if row is None:
+        raise RuntimeError(f"canvas {canvas_id!r} not found")
+
+    nodes_by_id: dict[str, dict] = {}
+    for node in row.get("nodes_json") or []:
+        node_id = node.get("id") if isinstance(node, dict) else None
+        if isinstance(node_id, str):
+            nodes_by_id[node_id] = node
+    return nodes_by_id
+
 
 # ---------------------------------------------------------------------------
 # Manager-lifecycle steps (async — called with await from workflow / _run_graph)
@@ -212,6 +256,10 @@ async def _run_graph(
     # shows the run as active rather than stuck at queued.
     await mark_graph_processing_step(workflow_id)
 
+    # Load the persisted canvas ONCE to drive the loop. node_order only
+    # carries ids; the real type/data/body live on the canvas nodes.
+    nodes_by_id = await _load_canvas_nodes(canvas_id)
+
     failed_nodes: list[str] = []
 
     for i, node_id in enumerate(node_order):
@@ -229,14 +277,29 @@ async def _run_graph(
             position=i,
         )
 
-        # v1: all nodes default to "llm" type — the route doesn't carry
-        # per-node type yet. CanvasRunService.run_classic_node resolves
-        # the actual provider internally. Gen node types (image_gen /
-        # video_gen) will use run_gen_canvas_node_step in v2 when the
-        # request carries a nodes dict with type info.
-        node_type = "llm"
-        node_data: dict = {}
-        body = ""
+        # Resolve REAL node data from the persisted canvas. A node id in
+        # node_order that is absent from the canvas is a real error — treat
+        # it the same as a node run failure (mark subtask failed, then
+        # continue or raise per continue_on_failure).
+        node = nodes_by_id.get(node_id)
+        if node is None:
+            exc_msg = f"node {node_id!r} not found in canvas {canvas_id!r}"
+            logger.warning(f"[canvas_graph] {exc_msg} (position={i})")
+            await mark_node_failed_step(node_wf_id, exc_msg)
+            if continue_on_failure:
+                failed_nodes.append(node_id)
+                continue
+            raise RuntimeError(exc_msg)
+
+        # Mirror the synchronous /runs/classic-node route exactly:
+        #   node_type=<node's type>, node={"data": <node's data>}, node_id=...
+        # body is resolved from THIS node's own data (no upstream aggregation
+        # in the graph run). agent_id/project_id stay None — the persisted
+        # node does not carry an agent_id in this path (real limitation, not
+        # a regression vs the previous empty-call version).
+        node_type = node.get("type")
+        node_data: dict = node.get("data") or {}
+        body = _node_body(node_data)
         agent_id: Optional[str] = None
         project_id: Optional[str] = None
 
