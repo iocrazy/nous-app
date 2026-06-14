@@ -102,6 +102,53 @@ async def test_image_gen_node_returns_image_url_envelope(client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_video_gen_node_returns_video_url_envelope(client, monkeypatch):
+    gen = AsyncMock(
+        return_value={
+            "video_url": "https://cdn/result.mp4",
+            "thumbnail_url": "https://cdn/thumb.png",
+            "duration_seconds": 5.0,
+            "width": 1024,
+            "height": 576,
+        }
+    )
+    monkeypatch.setattr(
+        CanvasRunService,
+        "_storyboard_ai_service",
+        lambda self: SimpleNamespace(generate_video=gen),
+    )
+
+    resp = await client.post(
+        URL,
+        json={
+            "canvas_id": "123",
+            "node": {
+                "id": "n1",
+                "type": "video_gen",
+                "data": {
+                    "source_image_url": "https://cdn/src.png",
+                    "prompt": "slow pan",
+                    "model": "seedance",
+                    "provider_name": "doubao",
+                },
+            },
+        },
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["ok"] is True
+    assert data["result"]["video_url"] == "https://cdn/result.mp4"
+    assert data["result"]["thumbnail_url"] == "https://cdn/thumb.png"
+    assert data["text"] == "https://cdn/result.mp4"
+    assert data["response_kind"] == "classic_node_run"
+    # project_id from gating flowed into generate_video.
+    assert gen.await_args.kwargs["project_id"] == FAKE_PROJECT_ID
+    assert gen.await_args.kwargs["node_id"] == "n1"
+    assert gen.await_args.kwargs["source_image_url"] == "https://cdn/src.png"
+
+
+@pytest.mark.asyncio
 async def test_unknown_node_type_returns_in_band_error_200(client):
     resp = await client.post(
         URL,

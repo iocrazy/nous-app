@@ -434,3 +434,173 @@ class TestRunClassicImageGen:
         )
         assert result.ok is False
         assert "image_url" in (result.error or "")
+
+
+class TestRunClassicVideoGen:
+    """video_gen op (Phase 5a path B): a classic video_gen node calls
+    StoryboardAIService.generate_video directly (NOT a provider_slug, uses the
+    distinct video provider registry) and normalises the dataclass-dict result
+    into ok/text/result.video_url. The source image comes from the node data
+    (in a real graph it arrives from an upstream image node)."""
+
+    @staticmethod
+    def _service_with_video(video_service):
+        svc = make_service(FakeAdapter())
+        svc._storyboard_ai_service = lambda: video_service  # type: ignore[assignment]
+        return svc
+
+    @pytest.mark.asyncio
+    async def test_video_gen_calls_generate_video_with_node_data_params(self):
+        gen = AsyncMock(
+            return_value={
+                "video_url": "https://cdn/out.mp4",
+                "video_path": "/tmp/out.mp4",
+                "duration_seconds": 5.0,
+                "width": 1024,
+                "height": 576,
+                "thumbnail_url": "https://cdn/thumb.png",
+                "provider": "doubao",
+                "model": "seedance",
+            }
+        )
+        video_service = SimpleNamespace(generate_video=gen)
+        svc = self._service_with_video(video_service)
+
+        result = await svc.run_classic_node(
+            node_type="video_gen",
+            node={
+                "data": {
+                    "source_image_url": "https://cdn/src.png",
+                    "prompt": "slow pan over the city",
+                    "model": "seedance",
+                    "provider_name": "doubao",
+                    "duration_seconds": 8.0,
+                    "motion_intensity": "high",
+                }
+            },
+            body="ignored upstream body",
+            node_id="node-42",
+            project_id="proj-7",
+        )
+
+        assert result.ok is True
+        assert result.result is not None
+        assert result.result["video_url"] == "https://cdn/out.mp4"
+        assert result.result["thumbnail_url"] == "https://cdn/thumb.png"
+        # text mirrors the url so plain-text cascade consumers still get content.
+        assert result.text == "https://cdn/out.mp4"
+        assert result.error is None
+
+        gen.assert_awaited_once()
+        kwargs = gen.await_args.kwargs
+        assert kwargs["source_image_url"] == "https://cdn/src.png"
+        assert kwargs["prompt"] == "slow pan over the city"
+        assert kwargs["model"] == "seedance"
+        assert kwargs["provider_name"] == "doubao"
+        assert kwargs["duration_seconds"] == 8.0
+        assert kwargs["motion_intensity"] == "high"
+        assert kwargs["node_id"] == "node-42"
+        assert kwargs["project_id"] == "proj-7"
+
+    @pytest.mark.asyncio
+    async def test_video_gen_applies_param_defaults(self):
+        gen = AsyncMock(return_value={"video_url": "https://cdn/x.mp4"})
+        svc = self._service_with_video(SimpleNamespace(generate_video=gen))
+
+        result = await svc.run_classic_node(
+            node_type="video_gen",
+            node={
+                "data": {
+                    "source_image_url": "https://cdn/src.png",
+                    "provider_name": "doubao",
+                    "model": "m",
+                }
+            },
+            body="",
+        )
+        assert result.ok is True
+        kwargs = gen.await_args.kwargs
+        assert kwargs["duration_seconds"] == 5.0
+        assert kwargs["motion_intensity"] == "medium"
+        assert kwargs["prompt"] == ""
+
+    @pytest.mark.asyncio
+    async def test_video_gen_reads_camel_case_source_image(self):
+        gen = AsyncMock(return_value={"video_url": "https://cdn/x.mp4"})
+        svc = self._service_with_video(SimpleNamespace(generate_video=gen))
+
+        result = await svc.run_classic_node(
+            node_type="video_gen",
+            node={
+                "data": {
+                    "sourceImageUrl": "https://cdn/camel.png",
+                    "providerName": "doubao",
+                    "durationSeconds": 6.0,
+                    "motionIntensity": "low",
+                    "prompt": "motion prompt",
+                }
+            },
+            body="ignored upstream body",
+        )
+        assert result.ok is True
+        kwargs = gen.await_args.kwargs
+        assert kwargs["source_image_url"] == "https://cdn/camel.png"
+        assert kwargs["provider_name"] == "doubao"
+        assert kwargs["duration_seconds"] == 6.0
+        assert kwargs["motion_intensity"] == "low"
+        assert kwargs["prompt"] == "motion prompt"
+
+    @pytest.mark.asyncio
+    async def test_video_gen_missing_source_image_fails_without_calling_service(self):
+        gen = AsyncMock()
+        svc = self._service_with_video(SimpleNamespace(generate_video=gen))
+
+        result = await svc.run_classic_node(
+            node_type="video_gen",
+            node={"data": {"prompt": "x", "provider_name": "doubao", "model": "m"}},
+            body="x",
+        )
+        assert result.ok is False
+        assert "source image" in (result.error or "").lower()
+        gen.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_video_gen_provider_raises_returns_in_band_error(self):
+        gen = AsyncMock(side_effect=RuntimeError("provider exploded"))
+        svc = self._service_with_video(SimpleNamespace(generate_video=gen))
+
+        result = await svc.run_classic_node(
+            node_type="video_gen",
+            node={
+                "data": {
+                    "source_image_url": "https://cdn/src.png",
+                    "provider_name": "doubao",
+                    "model": "m",
+                }
+            },
+            body="x",
+        )
+        assert result.ok is False
+        assert result.text == ""
+        assert "provider exploded" in (result.error or "")
+        assert "video generation failed" in (result.error or "").lower()
+        assert result.result is None
+
+    @pytest.mark.asyncio
+    async def test_video_gen_empty_url_result_fails_in_band(self):
+        gen = AsyncMock(return_value={"video_url": "", "width": 10})
+        svc = self._service_with_video(SimpleNamespace(generate_video=gen))
+
+        result = await svc.run_classic_node(
+            node_type="video_gen",
+            node={
+                "data": {
+                    "source_image_url": "https://cdn/src.png",
+                    "provider_name": "doubao",
+                    "model": "m",
+                }
+            },
+            body="x",
+        )
+        assert result.ok is False
+        assert "video_url" in (result.error or "")

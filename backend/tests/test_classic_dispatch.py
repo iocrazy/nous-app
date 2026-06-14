@@ -7,6 +7,7 @@ import pytest
 
 from app.services.canvas.classic_dispatch import (
     OP_IMAGE_GEN,
+    OP_VIDEO_GEN,
     ClassicDispatchError,
     resolve_classic_dispatch,
     resolve_provider_slug,
@@ -96,6 +97,28 @@ class TestResolveClassicDispatch:
         dispatch = resolve_classic_dispatch("image_gen", None)
         assert dispatch.kind == "op"
         assert dispatch.op == OP_IMAGE_GEN
+
+    def test_video_gen_returns_op_kind(self):
+        dispatch = resolve_classic_dispatch(
+            "video_gen", {"data": {"source_image_url": "https://cdn/x.png"}}
+        )
+        assert dispatch.kind == "op"
+        assert dispatch.op == OP_VIDEO_GEN
+        # An op is NOT a provider_slug.
+        assert dispatch.provider_slug is None
+
+    def test_video_gen_needs_no_data_to_resolve(self):
+        # Param validation is the run handler's job, not the resolver's.
+        dispatch = resolve_classic_dispatch("video_gen", None)
+        assert dispatch.kind == "op"
+        assert dispatch.op == OP_VIDEO_GEN
+
+    def test_image_and_video_ops_are_distinct(self):
+        assert OP_IMAGE_GEN != OP_VIDEO_GEN
+        img = resolve_classic_dispatch("image_gen", None)
+        vid = resolve_classic_dispatch("video_gen", None)
+        assert img.op == OP_IMAGE_GEN
+        assert vid.op == OP_VIDEO_GEN
 
     def test_comfy_returns_provider_kind_with_nous_slug(self):
         dispatch = resolve_classic_dispatch(

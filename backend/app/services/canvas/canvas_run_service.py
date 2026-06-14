@@ -32,6 +32,7 @@ from uuid import UUID
 from app.schemas.canvas_run import CanvasPromptRunResult
 from app.services.canvas.classic_dispatch import (
     OP_IMAGE_GEN,
+    OP_VIDEO_GEN,
     ClassicDispatchError,
     resolve_classic_dispatch,
 )
@@ -126,6 +127,66 @@ def _extract_image_gen_params(node: Optional[Mapping[str, Any]]) -> dict:
     }
 
 
+# Data-payload keys (snake + camel) for video_gen params. In a real graph the
+# source image arrives from an upstream image node; for now it is read from the
+# node's own ``data``. The video provider registry is distinct from image.
+_VIDEO_GEN_SOURCE_KEYS = ("source_image_url", "sourceImageUrl")
+_VIDEO_GEN_PROMPT_KEYS = ("prompt",)
+_VIDEO_GEN_MODEL_KEYS = ("model",)
+_VIDEO_GEN_PROVIDER_KEYS = ("provider_name", "providerName", "provider")
+_VIDEO_GEN_DURATION_KEYS = ("duration_seconds", "durationSeconds")
+_VIDEO_GEN_MOTION_KEYS = ("motion_intensity", "motionIntensity")
+_DEFAULT_DURATION_SECONDS = 5.0
+_DEFAULT_MOTION_INTENSITY = "medium"
+
+
+def _first_float(
+    data: Mapping[str, Any], keys: tuple[str, ...], default: float
+) -> float:
+    """Pull the first numeric value for ``keys``, coercing str/int → float.
+
+    Falls back to ``default`` when no key holds a parseable number, so a
+    malformed payload never blows up the run (it just uses the default clip
+    length).
+    """
+    for key in keys:
+        value = data.get(key)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str) and value.strip():
+            try:
+                return float(value.strip())
+            except ValueError:
+                continue
+    return default
+
+
+def _extract_video_gen_params(node: Optional[Mapping[str, Any]]) -> dict:
+    """Normalise video_gen params out of a node payload.
+
+    Returns a dict with: source_image_url (Optional[str] — None when absent so
+    the caller's clear-error check fires), prompt (str), model (str),
+    provider_name (str), duration_seconds (float, default 5.0),
+    motion_intensity (str, default "medium"). Reuses the image_gen node-data
+    accessor (nested ``data`` or flat dict).
+    """
+    data = _image_gen_data(node)
+
+    return {
+        "source_image_url": _first_str(data, _VIDEO_GEN_SOURCE_KEYS),
+        "prompt": _first_str(data, _VIDEO_GEN_PROMPT_KEYS) or "",
+        "model": _first_str(data, _VIDEO_GEN_MODEL_KEYS) or "",
+        "provider_name": _first_str(data, _VIDEO_GEN_PROVIDER_KEYS) or "",
+        "duration_seconds": _first_float(
+            data, _VIDEO_GEN_DURATION_KEYS, _DEFAULT_DURATION_SECONDS
+        ),
+        "motion_intensity": _first_str(data, _VIDEO_GEN_MOTION_KEYS)
+        or _DEFAULT_MOTION_INTENSITY,
+    }
+
+
 class CanvasRunService:
     """Single entrypoint: ``await svc.run_prompt(...)`` returns a result."""
 
@@ -214,15 +275,17 @@ class CanvasRunService:
             ``run_nous_workflow`` to terminal), unchanged.
           - ``image_gen`` → direct ``StoryboardAIService.generate_image`` call
             (Phase 5a path B). ``result.image_url`` carries the output.
+          - ``video_gen`` → direct ``StoryboardAIService.generate_video`` call
+            (Phase 5a path B). ``result.video_url`` carries the output.
           - unknown / literal-sink / missing → ok=False in-band, no dispatch
             (never a silent wrong route).
 
         ``node_id`` / ``project_id`` are only consumed by op handlers
-        (image_gen passes them to ``generate_image`` for logging + style
+        (image_gen / video_gen pass them to the gen service for logging + style
         lookup); the provider paths ignore them. Single-synchronous throughout
         — no DBOS workflow is created here.
 
-        NEXT TASK: split / video_gen add one ``op`` branch apiece below.
+        NEXT TASK: split adds one more ``op`` branch below.
         """
         try:
             dispatch = resolve_classic_dispatch(node_type, node)
@@ -238,7 +301,13 @@ class CanvasRunService:
                     node_id=node_id,
                     project_id=project_id,
                 )
-            # split / video_gen ops slot in here (next task).
+            if dispatch.op == OP_VIDEO_GEN:
+                return await self._run_video_gen(
+                    node=node,
+                    node_id=node_id,
+                    project_id=project_id,
+                )
+            # split op slots in here (next task).
             return CanvasPromptRunResult(
                 ok=False,
                 text="",
@@ -324,6 +393,76 @@ class CanvasRunService:
         return CanvasPromptRunResult(
             ok=True,
             text=str(image_url),
+            error=None,
+            result=result,
+        )
+
+    # ------------------------------------------------------------------
+    # video_gen op (Phase 5a path B)
+    # ------------------------------------------------------------------
+
+    async def _run_video_gen(
+        self,
+        *,
+        node: Optional[Mapping[str, Any]],
+        node_id: Optional[str],
+        project_id: Optional[str],
+    ) -> CanvasPromptRunResult:
+        """Run a video_gen node: source image + motion prompt → video via
+        ``generate_video`` (the distinct video provider registry).
+
+        Params come from the node's ``data``. ``source_image_url`` is required —
+        in a real graph it arrives from an upstream image node, but for now it
+        is read straight from the node data, so a missing one is a hard,
+        in-band failure (the service is NOT called). Reuses the run service's
+        context exactly like ``_run_image_gen`` (project_id from the gate,
+        node_id from the node; no DB session to thread). The dataclass result
+        is normalised into the shared envelope with ``result.video_url`` (and
+        ``thumbnail_url``).
+
+        Any failure (missing source image, unregistered video provider,
+        provider raises, empty video_url) is returned in-band as ok=False with
+        a clear ``error`` — never silent.
+        """
+        params = _extract_video_gen_params(node)
+        source_image_url = params["source_image_url"]
+        if not source_image_url:
+            return CanvasPromptRunResult(
+                ok=False,
+                text="",
+                error="video_gen node is missing a source image",
+            )
+
+        try:
+            service = self._storyboard_ai_service()
+            raw = await service.generate_video(
+                project_id=str(project_id) if project_id is not None else "",
+                node_id=str(node_id) if node_id is not None else "",
+                source_image_url=source_image_url,
+                prompt=params["prompt"],
+                provider_name=params["provider_name"],
+                model=params["model"],
+                duration_seconds=params["duration_seconds"],
+                motion_intensity=params["motion_intensity"],
+            )
+        except Exception as exc:
+            logger.exception("canvas video_gen failed for node %s", node_id)
+            return CanvasPromptRunResult(
+                ok=False, text="", error=f"video generation failed: {exc}"
+            )
+
+        result = dict(raw) if isinstance(raw, Mapping) else {}
+        video_url = result.get("video_url")
+        if not video_url:
+            return CanvasPromptRunResult(
+                ok=False,
+                text="",
+                error="video generation returned no video_url",
+            )
+
+        return CanvasPromptRunResult(
+            ok=True,
+            text=str(video_url),
             error=None,
             result=result,
         )
