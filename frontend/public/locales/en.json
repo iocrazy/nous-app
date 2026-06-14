@@ -1130,6 +1130,25 @@
       "share": "Share",
       "delete": "Delete"
     },
+    "stages": {
+      "title": "Stage",
+      "selectStage": "Select Stage",
+      "currentStage": "Current Stage",
+      "recommendedTools": "Suggested",
+      "planning": "Planning",
+      "script": "Script",
+      "storyboard": "Storyboard",
+      "generation": "Generation",
+      "review": "Review",
+      "delivery": "Delivery"
+    },
+    "tools": {
+      "files": "Files",
+      "scripts": "Scripts",
+      "storyboard": "Storyboard",
+      "output": "Output",
+      "tasks": "Tasks"
+    },
     "collect": {
       "title": "File Collection",
       "empty": "No collection links yet",
