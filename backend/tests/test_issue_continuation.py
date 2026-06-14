@@ -104,14 +104,14 @@ async def test_auto_close_only_applies_to_completed_not_continue_cap():
 
 
 @pytest.mark.asyncio
-async def test_needs_input_goes_blocked():
+async def test_needs_input_goes_needs_followup():
+    # slice 2b: needs_input → needs_followup (deliberate hand-off), NOT blocked.
     rec = _Recorder([("needs_input", "need the API key")])
     await _run(rec)
     call = rec.status_calls[-1]
-    assert call["status"] == "blocked"
-    assert call["error_code"] == "agent_needs_input"
-    assert call["error_message"] == "need the API key"
+    assert call["status"] == "needs_followup"
     assert call["agent_outcome"] == "needs_input"
+    assert call["outcome_reason"] == "need the API key"
 
 
 @pytest.mark.asyncio
