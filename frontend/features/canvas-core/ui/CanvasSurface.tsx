@@ -28,7 +28,7 @@ import {
   applyNodeChanges,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 
 import type { CanvasConnection, CanvasNode } from '../types';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
@@ -73,6 +73,13 @@ export function CanvasSurface() {
   const setConnections = useCanvasCoreStore((s) => s.setConnections);
   const setViewport = useCanvasCoreStore((s) => s.setViewport);
   const setSelection = useCanvasCoreStore((s) => s.setSelection);
+  const noteDragStart = useCanvasCoreStore((s) => s.noteDragStart);
+  const setNodesDragTick = useCanvasCoreStore((s) => s.setNodesDragTick);
+  const setViewportOnMove = useCanvasCoreStore((s) => s.setViewportOnMove);
+  const flushViewportDirty = useCanvasCoreStore((s) => s.flushViewportDirty);
+
+  // RAF handle for coalescing per-tick onMove dirty signals (Fix 2).
+  const viewportRafRef = useRef<number | null>(null);
 
   const selectionSet = useMemo(() => new Set(selection), [selection]);
 
@@ -95,10 +102,25 @@ export function CanvasSurface() {
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
       const next = applyNodeChanges(changes, rfNodes);
-      setNodes(next as unknown as CanvasNode[]);
+      // Fix 1 — mid-drag ticks: ALL changes are position-type with dragging:true.
+      // Route these through setNodesDragTick which skips the historyTimer reset,
+      // cutting timer-reset churn from O(drag_ticks) to O(1) per drag gesture.
+      const isMidDragOnly = changes.every(
+        (c) => c.type === 'position' && (c as { dragging?: boolean }).dragging === true,
+      );
+      if (isMidDragOnly) {
+        setNodesDragTick(next as unknown as CanvasNode[]);
+      } else {
+        setNodes(next as unknown as CanvasNode[]);
+      }
     },
-    [rfNodes, setNodes],
+    [rfNodes, setNodes, setNodesDragTick],
   );
+
+  // Fix 1 — capture pre-drag snapshot exactly once, before the first tick.
+  const onNodeDragStart = useCallback(() => {
+    noteDragStart();
+  }, [noteDragStart]);
 
   const onEdgesChange = useCallback(
     (changes: EdgeChange[]) => {
@@ -110,9 +132,18 @@ export function CanvasSurface() {
 
   const onMove = useCallback(
     (_event: unknown, nextViewport: Viewport) => {
-      setViewport(nextViewport);
+      // Fix 2 — update viewport state immediately for React Flow controlled-mode
+      // rendering (so panning feels instant), but coalesce the markDirty() +
+      // revision-bump to at most once per animation frame via RAF.
+      setViewportOnMove(nextViewport);
+      if (viewportRafRef.current === null) {
+        viewportRafRef.current = requestAnimationFrame(() => {
+          viewportRafRef.current = null;
+          flushViewportDirty();
+        });
+      }
     },
-    [setViewport],
+    [setViewportOnMove, flushViewportDirty],
   );
 
   const onSelectionChange = useCallback(
@@ -172,6 +203,7 @@ export function CanvasSurface() {
       edges={rfEdges}
       nodeTypes={nodeTypes}
       onNodesChange={onNodesChange}
+      onNodeDragStart={onNodeDragStart}
       onEdgesChange={onEdgesChange}
       onConnect={onConnect}
       onMove={onMove}
