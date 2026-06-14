@@ -155,6 +155,96 @@ def test_extract_spade_key_rejects_too_short():
 # ---------------------------------------------------------------------------
 
 
+def _stsc_one_run(samples_per_chunk: int) -> bytes:
+    # one run: from chunk 1, every chunk holds `samples_per_chunk` samples
+    payload = (
+        b"\x00\x00\x00\x00"
+        + struct.pack(">I", 1)  # entry_count
+        + struct.pack(">III", 1, samples_per_chunk, 1)
+    )
+    return _box(b"stsc", payload)
+
+
+def _stco(offsets: list[int]) -> bytes:
+    payload = b"\x00\x00\x00\x00" + struct.pack(">I", len(offsets))
+    for o in offsets:
+        payload += struct.pack(">I", o)
+    return _box(b"stco", payload)
+
+
+def _build_chunked_mp4(
+    key: bytes,
+    samples_plain: list[bytes],
+    ivs8: list[bytes],
+    *,
+    data_blob: bytes,
+) -> bytes:
+    """Two audio chunks (2 samples each) with a foreign ``data_blob`` BETWEEN
+    them inside mdat — mimics the real 2-track/chunked layout. Sequential reads
+    from mdat start would run into data_blob; only stco/stsc offsets are right.
+
+    mdat is placed FIRST so the absolute stco chunk offsets are computable.
+    """
+    assert len(samples_plain) == 4
+    enc = [_ctr(key, ivs8[i] + b"\x00" * 8, samples_plain[i]) for i in range(4)]
+    chunk1 = enc[0] + enc[1]
+    chunk2 = enc[2] + enc[3]
+    mdat_payload = chunk1 + data_blob + chunk2
+    mdat = _box(b"mdat", mdat_payload)
+    # mdat at file offset 0 → data_start = 8
+    chunk1_off = 8
+    chunk2_off = 8 + len(chunk1) + len(data_blob)
+    stbl = _box(
+        b"stbl",
+        _stsd()
+        + _stsz([len(s) for s in samples_plain])
+        + _senc(ivs8)
+        + _stco([chunk1_off, chunk2_off])
+        + _stsc_one_run(2),
+    )
+    moov = _box(b"moov", _box(b"trak", _box(b"mdia", _box(b"minf", stbl))))
+    return mdat + moov
+
+
+def test_decrypt_audio_chunked_multitrack_decrypts_at_real_offsets():
+    # The regression for '永不栖落的鸟': chunked audio + a foreign data track in
+    # mdat. The decrypt must use stco/stsc offsets (not sequential), recover all
+    # samples, AND leave the data blob byte-for-byte intact.
+    hex_key = "00112233445566778899aabbccddeeff"
+    key = bytes.fromhex(hex_key)
+    play_auth = make_play_auth(hex_key)
+    samples = [b"A" * 16, b"B" * 16, b"C" * 16, b"D" * 16]
+    ivs = [bytes([i]) + b"\x00" * 7 for i in range(4)]
+    data_blob = b"\xde\xad\xbe\xef" * 5  # the 2nd track's bytes — must survive
+
+    mp4 = _build_chunked_mp4(key, samples, ivs, data_blob=data_blob)
+    out = decrypt_audio(mp4, play_auth)
+
+    # every audio sample recovered…
+    for s in samples:
+        assert s in out
+    # …and the foreign data track is untouched (would be corrupted by a
+    # sequential-from-mdat decrypt).
+    assert data_blob in out
+    # size preserved (in-place, no rebuild)
+    assert len(out) == len(mp4)
+
+
+def test_decrypt_audio_chunked_truncated_raises():
+    # If a chunk offset + sample size runs past the buffer, fail loudly rather
+    # than write a half-decrypted file.
+    hex_key = "00112233445566778899aabbccddeeff"
+    key = bytes.fromhex(hex_key)
+    play_auth = make_play_auth(hex_key)
+    samples = [b"A" * 16, b"B" * 16, b"C" * 16, b"D" * 16]
+    ivs = [bytes([i]) + b"\x00" * 7 for i in range(4)]
+    mp4 = bytearray(_build_chunked_mp4(key, samples, ivs, data_blob=b""))
+    # chop the tail so the last chunk's samples no longer fit
+    truncated = bytes(mp4[: len(mp4) - 20])
+    with pytest.raises(SodaDecryptError):
+        decrypt_audio(truncated, play_auth)
+
+
 def test_decrypt_audio_no_subsamples_recovers_plaintext():
     hex_key = "00112233445566778899aabbccddeeff"
     key = bytes.fromhex(hex_key)
