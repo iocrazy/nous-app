@@ -161,6 +161,51 @@ const videoGenNode: ClassicNodeDefinition = {
   outputs: [{ id: 'video-out', type: 'video' }],
 };
 
+/**
+ * W3: Video source node.
+ *
+ * A static video URL literal — the `video` counterpart of `image`. It is a
+ * PASSIVE source (no backend call): the user pastes a URL into `data.video_url`
+ * and it flows downstream on the `video-out` handle to a consumer such as
+ * `preview`. Zero inputs, one video output.
+ */
+const videoNode: ClassicNodeDefinition = {
+  type: 'video',
+  label: 'Video',
+  inputs: [],
+  outputs: [{ id: 'video-out', type: 'video' }],
+};
+
+/**
+ * W3: Text Join transform node.
+ *
+ * Concatenates two text inputs into a single text output client-side —
+ * no backend call required. This fills a real graph-composition gap: without
+ * it there is no way to merge two text streams before feeding an LLM or
+ * image-gen prompt.
+ *
+ * Dispatch kind: `transform` (see `classicDispatch.ts`) — the cascade
+ * computes the effective data (applying piped values from `text-a-in` and
+ * `text-b-in`), then records the joined text for downstream piping. The
+ * separator defaults to a single space; set `data.separator` to override.
+ *
+ * Why NOT loop/iterate or batch?
+ *   - No `list` port type exists in the closed `CLASSIC_PORT_TYPES` set.
+ *   - The cascade processes a DAG in a single topo-sort pass (each node once).
+ *   - Fan-out execution (running downstream branches N times per list item)
+ *     would require rearchitecting the cascade loop — not just extending it.
+ *   - Those patterns are deferred to Phase 6 (async/DBOS execution model).
+ */
+const textJoinNode: ClassicNodeDefinition = {
+  type: 'text_join',
+  label: 'Text Join',
+  inputs: [
+    { id: 'text-a-in', type: 'text' },
+    { id: 'text-b-in', type: 'text' },
+  ],
+  outputs: [{ id: 'text-out', type: 'text' }],
+};
+
 export const classicNodeDefinitions: Record<string, ClassicNodeDefinition> = {
   image: imageNode,
   prompt: promptNode,
@@ -173,6 +218,9 @@ export const classicNodeDefinitions: Record<string, ClassicNodeDefinition> = {
   group: groupNode,
   image_gen: imageGenNode,
   video_gen: videoGenNode,
+  // W3 additions
+  video: videoNode,
+  text_join: textJoinNode,
 };
 
 /**
@@ -182,11 +230,14 @@ export const classicNodeDefinitions: Record<string, ClassicNodeDefinition> = {
  * then SINKS / structural nodes.
  */
 export const CLASSIC_NODE_DEFINITIONS: readonly ClassicNodeDefinition[] = [
-  // sources
+  // passive sources
   imageNode,
   promptNode,
   textNode,
-  // runnable
+  videoNode,         // W3: video URL source (feeds preview.video-in)
+  // data transforms (client-side, no backend call)
+  textJoinNode,      // W3: concatenate two text inputs
+  // runnable AI-ops
   llmNode,
   comfyNode,
   imageGenNode,

@@ -261,13 +261,31 @@ export async function runClassicCascade(
     if (dispatch.kind === 'passive') {
       // Literal/sink node — not an execution step. Pass through silently, but
       // RECORD its data so a downstream node can read a passive SOURCE node's
-      // output (prompt/text/image). Sinks (output/preview/note/group) record
-      // too but emit nothing — `nodeOutputValue` returns undefined for them.
+      // output (prompt/text/image/video). Sinks (output/preview/note/group)
+      // record too but emit nothing — `nodeOutputValue` returns undefined for
+      // them.
       outputs.set(nodeId, {
         nodeType,
         data: readData(node),
         runResult: null,
       });
+      report.skipped.push(nodeId);
+      continue;
+    }
+
+    if (dispatch.kind === 'transform') {
+      // Client-side data transformation (W3: text_join). Unlike passive nodes
+      // (which record their stored data as-is), a transform node MUST record
+      // its EFFECTIVE data so piped input values (from wired upstream nodes)
+      // are available when downstream nodes call `nodeOutputValue` on it.
+      // No backend call, no `onNodePatch` — counted as skipped.
+      const effectiveData = buildEffectiveData(
+        nodeType,
+        readData(node),
+        incomingWires.get(nodeId) ?? [],
+        outputs,
+      );
+      outputs.set(nodeId, { nodeType, data: effectiveData, runResult: null });
       report.skipped.push(nodeId);
       continue;
     }

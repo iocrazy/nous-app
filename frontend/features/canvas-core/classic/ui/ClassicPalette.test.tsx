@@ -82,8 +82,9 @@ describe('ClassicPalette — add node', () => {
 
   it('cascades the drop position so repeated adds do not stack exactly', () => {
     render(<ClassicPalette />);
-    fireEvent.click(screen.getByRole('button', { name: /add text/i }));
-    fireEvent.click(screen.getByRole('button', { name: /add text/i }));
+    // Use anchored regex so "Add Text Join" is not also matched.
+    fireEvent.click(screen.getByRole('button', { name: /^add text$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^add text$/i }));
 
     const nodes = useCanvasCoreStore.getState().nodes as Record<
       string,

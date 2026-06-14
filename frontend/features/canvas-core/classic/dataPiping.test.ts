@@ -63,6 +63,46 @@ describe('nodeOutputValue — runnables read from run_result', () => {
     expect(nodeOutputValue(undefined, 'image-out', {}, { image_url: 'x' })).toBeUndefined();
     expect(nodeOutputValue('image_gen', null, {}, { image_url: 'x' })).toBeUndefined();
   });
+
+  // W3: video source node
+  it('video/video-out → data.video_url', () => {
+    expect(nodeOutputValue('video', 'video-out', { video_url: 'v.mp4' }, null)).toBe('v.mp4');
+  });
+
+  it('video/video-out → undefined when data.video_url absent', () => {
+    expect(nodeOutputValue('video', 'video-out', {}, null)).toBeUndefined();
+  });
+
+  it('video with wrong handle → undefined', () => {
+    expect(nodeOutputValue('video', 'image-out', { video_url: 'v.mp4' }, null)).toBeUndefined();
+  });
+
+  // W3: text_join transform node
+  it('text_join/text-out → concatenation of data.text_a + sep + data.text_b (default sep = space)', () => {
+    expect(nodeOutputValue('text_join', 'text-out', { text_a: 'Hello', text_b: 'World' }, null)).toBe(
+      'Hello World',
+    );
+  });
+
+  it('text_join uses data.separator when provided', () => {
+    expect(
+      nodeOutputValue('text_join', 'text-out', { text_a: 'A', text_b: 'B', separator: ' | ' }, null),
+    ).toBe('A | B');
+  });
+
+  it('text_join with only text_a (text_b absent) returns text_a alone', () => {
+    expect(nodeOutputValue('text_join', 'text-out', { text_a: 'only A' }, null)).toBe('only A');
+  });
+
+  it('text_join with neither field → empty string (returns undefined since empty not piped)', () => {
+    expect(nodeOutputValue('text_join', 'text-out', {}, null)).toBeUndefined();
+  });
+
+  it('text_join with wrong handle → undefined', () => {
+    expect(
+      nodeOutputValue('text_join', 'image-out', { text_a: 'hi', text_b: 'bye' }, null),
+    ).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -97,6 +137,22 @@ describe('inputParamKey — backend-matching param keys', () => {
     expect(inputParamKey('prompt', 'prompt-out')).toBeNull();
     expect(inputParamKey('image_gen', undefined)).toBeNull();
     expect(inputParamKey(undefined, 'prompt-in')).toBeNull();
+  });
+
+  // W3: text_join transform node param keys
+  it('text_join maps text-a-in→text_a, text-b-in→text_b', () => {
+    expect(inputParamKey('text_join', 'text-a-in')).toBe('text_a');
+    expect(inputParamKey('text_join', 'text-b-in')).toBe('text_b');
+  });
+
+  it('text_join unknown handle → null', () => {
+    expect(inputParamKey('text_join', 'text-out')).toBeNull();
+    expect(inputParamKey('text_join', 'nonexistent')).toBeNull();
+  });
+
+  // W3: video source takes no run param (passive source)
+  it('video source takes no run param (null)', () => {
+    expect(inputParamKey('video', 'video-out')).toBeNull();
   });
 });
 

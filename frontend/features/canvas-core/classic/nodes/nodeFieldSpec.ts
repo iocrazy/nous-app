@@ -76,6 +76,36 @@ export const CLASSIC_NODE_FIELD_SPECS: Record<string, readonly NodeFieldSpec[]> 
   text: [
     { key: 'text', label: 'Text Content', kind: 'textarea', placeholder: 'Static text…' },
   ],
+  // W3: video source — lets the user paste a video URL directly
+  video: [
+    {
+      key: 'video_url',
+      label: 'Video URL',
+      kind: 'text',
+      placeholder: 'https://… (video URL)',
+    },
+  ],
+  // W3: text_join transform — two static text fallbacks + optional separator
+  text_join: [
+    {
+      key: 'text_a',
+      label: 'Text A',
+      kind: 'textarea',
+      placeholder: 'First part (or wire a text input)…',
+    },
+    {
+      key: 'text_b',
+      label: 'Text B',
+      kind: 'textarea',
+      placeholder: 'Second part (or wire a text input)…',
+    },
+    {
+      key: 'separator',
+      label: 'Separator',
+      kind: 'text',
+      placeholder: 'space (default)',
+    },
+  ],
 };
 
 /** The editable field set for a node type, or [] when it has no editor. */
