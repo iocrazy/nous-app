@@ -21,6 +21,7 @@ from app.schemas.projects import (
     CreateCommentRequest,
     CreateFolderRequest,
     CreateShareRequest,
+    CurrentStageUpdate,
     LinkMediaRequest,
     MoveFileRequest,
     ProjectCreate,
@@ -199,6 +200,92 @@ async def put_style_profile(
     except Exception as e:
         logger.error(f"Failed to save style profile for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to save style profile")
+
+
+# ============================================
+# SOP stage endpoints (Phase 5b)
+# ============================================
+
+
+@router.get("/stages/catalog")
+async def list_stage_catalog(auth: AuthDep):
+    """Global catalog of all SOP stages, ordered by sort_order."""
+    from app.repositories.project_stages_repository import (
+        get_project_stages_repository,
+    )
+
+    return {"success": True, "data": await get_project_stages_repository().list_catalog()}
+
+
+@router.get("/{project_id}/current_stage")
+async def get_current_stage(
+    project_id: str,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
+    """The project's current SOP stage, or null when none has been set."""
+    from app.repositories.project_stages_repository import (
+        get_project_stages_repository,
+    )
+
+    try:
+        return {
+            "success": True,
+            "data": await get_project_stages_repository().get_current(int(project_id)),
+        }
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid project id")
+    except Exception as e:
+        logger.error(f"Failed to get current stage for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get current stage")
+
+
+@router.put("/{project_id}/current_stage")
+async def put_current_stage(
+    project_id: str,
+    data: CurrentStageUpdate,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
+    """Set (or advance) the project's SOP stage. Same stage → 200 no-op (data: null).
+    Closes the previous open history row and inserts a new one atomically."""
+    from app.repositories.project_stages_repository import (
+        get_project_stages_repository,
+    )
+
+    try:
+        stage = await get_project_stages_repository().set_current_stage(
+            int(project_id), data.stage_id, auth.user_id
+        )
+        return {"success": True, "data": stage}
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to set stage for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to set current stage")
+
+
+@router.get("/{project_id}/stage_history")
+async def get_stage_history(
+    project_id: str,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
+    """Append-only SOP stage transition history for a project."""
+    from app.repositories.project_stages_repository import (
+        get_project_stages_repository,
+    )
+
+    try:
+        return {
+            "success": True,
+            "data": await get_project_stages_repository().history(int(project_id)),
+        }
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid project id")
+    except Exception as e:
+        logger.error(f"Failed to get stage history for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get stage history")
 
 
 # ============================================
