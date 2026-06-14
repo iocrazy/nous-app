@@ -91,6 +91,7 @@ export function AIChatDrawer({
           onClick={toggle}
           title="AI Chat (⌘I)"
           aria-label="Open AI Chat"
+          data-testid="sb-toggle-chat"
           className="fixed bottom-4 right-4 z-30 flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600 text-white shadow-lg transition-all hover:bg-indigo-500 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-indigo-400"
         >
           <MessageSquare size={20} />
@@ -108,13 +109,15 @@ export function AIChatDrawer({
         }`}
       >
         {open && (
-          <AIChatPanel
-            projectId={projectId}
-            contextType={contextType}
-            contextId={contextId}
-            onApplyContent={onApplyContent}
-            onClose={close}
-          />
+          <div data-testid="sb-panel-chat" className="h-full">
+            <AIChatPanel
+              projectId={projectId}
+              contextType={contextType}
+              contextId={contextId}
+              onApplyContent={onApplyContent}
+              onClose={close}
+            />
+          </div>
         )}
       </aside>
     </>

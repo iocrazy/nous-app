@@ -195,17 +195,20 @@ export function CanvasEditorPage() {
                 <FloatingIconButton
                   icon={<FileText size={16} />}
                   tooltip="Script Import"
+                  testId="sb-toggle-script"
                   onClick={() => setShowScriptImport(true)}
                 />
                 <FloatingIconButton
                   icon={<Users size={16} />}
                   tooltip="Characters"
+                  testId="sb-toggle-characters"
                   active={sidePanel === 'characters'}
                   onClick={() => toggleSidePanel('characters')}
                 />
                 <FloatingIconButton
                   icon={<Film size={16} />}
                   tooltip="Timeline"
+                  testId="sb-toggle-timeline"
                   active={showTimeline}
                   onClick={() => setShowTimeline((v) => !v)}
                 />
@@ -218,6 +221,7 @@ export function CanvasEditorPage() {
                 <FloatingIconButton
                   icon={<Download size={16} />}
                   tooltip="Export"
+                  testId="sb-toggle-export"
                   onClick={() => setShowExport(true)}
                 />
               </div>
@@ -225,7 +229,10 @@ export function CanvasEditorPage() {
 
             {/* Right side panel */}
             {sidePanel === 'characters' && projectId && (
-              <div className="w-80 flex-shrink-0 border-l border-ink-800/50 overflow-y-auto">
+              <div
+                data-testid="sb-panel-characters"
+                className="w-80 flex-shrink-0 border-l border-ink-800/50 overflow-y-auto"
+              >
                 <CharacterPanel projectId={projectId} onClose={() => setSidePanel(null)} />
               </div>
             )}
@@ -273,17 +280,20 @@ function FloatingIconButton({
   tooltip,
   active,
   onClick,
+  testId,
 }: {
   icon: React.ReactNode;
   tooltip: string;
   active?: boolean;
   onClick: () => void;
+  testId?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       title={tooltip}
+      data-testid={testId}
       className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${
         active
           ? 'bg-ink-700 text-ink-100'

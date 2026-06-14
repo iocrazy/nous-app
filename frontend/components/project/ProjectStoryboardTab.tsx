@@ -62,6 +62,7 @@ export function ProjectStoryboardTab({ projectId }: Props) {
         </div>
         <button
           onClick={() => setShowCreateModal(true)}
+          data-testid="new-storyboard-btn"
           className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
         >
           <Plus size={15} />
@@ -182,6 +183,7 @@ function CreateStoryboardModal({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      data-testid="create-storyboard-modal"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div className="w-full max-w-sm rounded-xl bg-ink-900 border border-ink-700 shadow-2xl p-5">
@@ -196,6 +198,7 @@ function CreateStoryboardModal({
         <input
           ref={inputRef}
           type="text"
+          data-testid="storyboard-name-input"
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={handleKeyDown}

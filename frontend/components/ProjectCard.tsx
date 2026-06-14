@@ -75,6 +75,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project, onClick, onTo
           {onContextMenu && (
             <button
               onClick={(e) => { e.stopPropagation(); onContextMenu(e); }}
+              data-testid="project-menu-btn"
               className="p-1.5 rounded-lg hover:bg-ink-700 text-ink-500 hover:text-ink-200
                          transition-colors opacity-0 group-hover:opacity-100"
             >

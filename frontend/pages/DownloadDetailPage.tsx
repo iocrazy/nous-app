@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft, Loader2, FileQuestion, UserRound,
   Share2, Download, MoreHorizontal, ExternalLink, Copy, Trash2,
@@ -10,6 +10,12 @@ import { AudioHero } from '../components/AudioHero';
 import { VideoDetailPanel } from '../components/VideoDetailPanel';
 import { MobileAudioScreen } from '../components/MobileAudioScreen';
 import { ShareModal } from '../components/ShareModal';
+import { AudioStageIsland } from '../components/AudioStageIsland';
+import { PlaylistIsland } from '../components/PlaylistIsland';
+import { MediaCard } from '../components/MediaCard';
+import SodaLyricsTab from '../components/SodaLyricsTab';
+import { AudioWaveformPlayer } from '../components/AudioWaveformPlayer';
+import { extractCoverTint, tintFromTheme, type CoverTint } from '../utils/coverTint';
 import { getDownloadUrl, getCoverDownloadUrl, getMusicDownloadUrl, getGalleryZipUrl } from '../services/dataService';
 import { getVideoUrl, getCoverUrl, isAlbumType, isAudioType } from '../utils/awemeType';
 import { buildSodaTheme } from '../utils/sodaTheme';
@@ -100,6 +106,32 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
     setInfoVisible(true);
     return () => { setInfoAvailable(false); setInfoVisible(false); };
   }, [island, setInfoAvailable, setInfoVisible]);
+
+  // Audio palette + cover-tint. Computed before the early returns (video-null
+  // safe) so the tint hooks below obey the rules of hooks. Soda tracks carry
+  // their own palette; non-Soda audio (extracted) seeds a stable per-track
+  // color from the id instead of flat gray.
+  const isAudio = !!video && isAudioType(video.media_type);
+  const sodaTheme = isAudio && video
+    ? buildSodaTheme(video.metadata?.colors, String(video.id))
+    : undefined;
+  const audioCoverUrl = isAudio && video ? getCoverUrl(video, mediaToken ?? undefined) : undefined;
+
+  // Cover-tint for the island audio stage (--tint / --tint-deep). Seeded from
+  // the sodaTheme accent, then canvas-sampled from the real cover. Gated to
+  // island desktop audio — no-op in classic / video / mobile.
+  const [tint, setTint] = useState<CoverTint>(() => tintFromTheme(sodaTheme));
+  useEffect(() => {
+    if (!islandDesktop || !isAudio || !audioCoverUrl) return;
+    let cancelled = false;
+    extractCoverTint(audioCoverUrl, tintFromTheme(sodaTheme)).then((t) => {
+      if (!cancelled) setTint(t);
+    });
+    return () => { cancelled = true; };
+    // sodaTheme is rebuilt each render (new object); the effect only reads its
+    // stable `accent` string via tintFromTheme, so key on that to avoid a
+    // sample-every-render loop (worse during playback as currentTime ticks).
+  }, [islandDesktop, isAudio, audioCoverUrl, sodaTheme?.accent]);
 
   // Toolbar download handler — only downloads from backend server (no CDN fallback)
   const handleToolbarDownload = async (type: 'video' | 'cover' | 'audio' | 'images') => {
@@ -227,15 +259,6 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
       </div>
     );
   }
-
-  // Build the track's Soda palette once (audio only). Soda tracks use their own
-  // colors; non-Soda audio (e.g. extracted audio) has no palette, so seed a
-  // stable per-track color from the id instead of flat gray.
-  const isAudio = isAudioType(video.media_type);
-  const sodaTheme = isAudio
-    ? buildSodaTheme(video.metadata?.colors, String(video.id))
-    : undefined;
-  const audioCoverUrl = isAudio ? getCoverUrl(video, mediaToken ?? undefined) : undefined;
 
   // Desktop action buttons (Share / Download / More) — extracted verbatim so the
   // classic header and the island stage-head render the EXACT same buttons,
@@ -418,6 +441,82 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
   // island stage-head. Island adds an author sub-line with the platform icon.
   const titleText = video.title || video.description || 'Media Player';
 
+  // Island-audio stage slots (cover-side Overview | lyrics | capsule player),
+  // extracted as consts like actionButtons/detailPanel so the audio branch is a
+  // flat <AudioStageIsland .../> call. Only rendered when islandDesktop && isAudio.
+  const audioCoverSide = (
+    /* Album cover (classic shows it via AudioHero; the island stage has no hero,
+       so render it here — spec §5.3 cover-first). The SAME audioCoverUrl drives
+       both the tint sample and this image. MediaCard keeps hidePreview so there's
+       no double preview. */
+    <div className="flex flex-col items-center gap-4">
+      <div className="audio-cover">
+        {/* Music icon sits behind the image (grid stack); onError hides the img
+            so the icon shows on a 404 instead of an empty box. */}
+        <Music size={44} className="text-ink-500 col-start-1 row-start-1" />
+        {audioCoverUrl && (
+          <img
+            src={audioCoverUrl}
+            alt=""
+            className="col-start-1 row-start-1 w-full h-full object-cover"
+            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+          />
+        )}
+      </div>
+      {/* SAME MediaCard the audio Overview renders today (VideoDetailPanel →
+         MediaCard). mobileActions omitted — island is desktop-only. */}
+      <MediaCard
+        data={video}
+        onUpdate={handleUpdate}
+        onDelete={handleDelete}
+        hidePreview
+        resourceRating={resourceRating}
+        resourceNotes={resourceNotes}
+        onRatingChange={resourceId ? handleRatingChange : undefined}
+        onNotesChange={resourceId ? handleNotesChange : undefined}
+        onNotesBlur={resourceId ? handleNotesBlur : undefined}
+      />
+    </div>
+  );
+
+  // SAME synced-lyrics component the Lyrics tab uses (fetch / sync / Fetch Lyrics
+  // behavior identical), bare variant for the column.
+  const audioLyrics = (
+    <SodaLyricsTab
+      variant="bare"
+      mediaId={String(video.id)}
+      currentTime={currentTime}
+      theme={sodaTheme}
+      sourcePlatform={video.source_platform}
+    />
+  );
+
+  // SAME AudioWaveformPlayer AudioHero builds (same src / filename / duration /
+  // chorus / onTimeUpdate / theme). Falls back to the not-available notice when
+  // the audio file isn't downloaded.
+  const audioPlayer = (video.music_download_path || video.extract_audio_path) ? (
+    <AudioWaveformPlayer
+      src={`${getApiUrl()}/api/v1/media/${video.id}/audio${mediaToken ? `?token=${encodeURIComponent(mediaToken)}` : ''}`}
+      filename={video.music_name || video.title || 'Audio'}
+      duration={Number(video.duration) || undefined}
+      chorusStartSec={
+        typeof video.metadata?.chorus?.start === 'number'
+          ? video.metadata.chorus.start / 1000
+          : undefined
+      }
+      onTimeUpdate={handleTimeUpdate}
+      theme={sodaTheme}
+    />
+  ) : (
+    <div className="flex flex-col items-center justify-center gap-1.5 py-3 text-center">
+      <Music size={24} className="text-ink-500" />
+      <p className="text-ink-300 text-sm font-medium">Audio not available</p>
+      <p className="text-ink-500 text-xs max-w-[320px]">
+        This audio hasn't been downloaded yet. Use the Download button to fetch the audio file.
+      </p>
+    </div>
+  );
+
   // VideoDetailPanel props — shared verbatim between the classic split-pane
   // column and the island portal so the panel behaves identically in both.
   const detailPanel = (
@@ -586,7 +685,27 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
         {/* Island desktop: the stage fills the work island; the detail panel is
             portaled to the shell's info island (rendered below). Mobile + classic
             share the split-pane content row in the else branch (unchanged). */}
-        {islandDesktop ? (
+        {islandDesktop ? (isAudio ? (
+          /* Island desktop AUDIO: cover-tinted two-column stage (cover-side
+             Overview | synced lyrics) + bottom play capsule. The Playlist island
+             is portaled into infoIslandEl below (instead of VideoDetailPanel).
+             --tint / --tint-deep are set on a display:contents wrapper so the
+             .audio-stage root inherits them (AudioStageIsland is pure layout). */
+          <div
+            className="contents"
+            style={{ ['--tint']: tint.tint, ['--tint-deep']: tint.tintDeep } as React.CSSProperties}
+          >
+            <AudioStageIsland
+              title={titleText}
+              author={video.author || undefined}
+              onBack={handleBack}
+              actions={actionButtons}
+              coverSide={audioCoverSide}
+              lyrics={audioLyrics}
+              player={audioPlayer}
+            />
+          </div>
+        ) : (
           <div className="hidden sm:flex flex-col h-full min-h-0">
             <div className="stage-head flex items-center gap-3 px-4 py-3 border-b border-line relative">
               <CometBack onClick={handleBack} title="Back" />
@@ -612,7 +731,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
               {playerSwitch}
             </div>
           </div>
-        ) : (
+        )) : (
         <div ref={scrollRef} className="flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-y-hidden">
           {isMobile && isAudio ? (
             /* LOCKED mobile-audio layout — ONE continuous gradient surface.
@@ -689,7 +808,14 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
           the SAME element as the classic column (detailPanel), cloned with the
           island flag + an in-island collapse handler. */}
       {islandDesktop && infoIslandEl && createPortal(
-        React.cloneElement(detailPanel, { island: true, onCollapse: () => setInfoVisible(false) }),
+        isAudio ? (
+          /* Audio: the info island hosts the Playlist (COMING SOON) — NOT
+             VideoDetailPanel (its MediaCard already lives in the cover-side
+             column, so portaling it here would render MediaCard twice). */
+          <PlaylistIsland title={titleText} author={video.author || undefined} coverUrl={audioCoverUrl} />
+        ) : (
+          React.cloneElement(detailPanel, { island: true, onCollapse: () => setInfoVisible(false) })
+        ),
         infoIslandEl,
       )}
 
