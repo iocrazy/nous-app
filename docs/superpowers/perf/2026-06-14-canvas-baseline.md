@@ -101,45 +101,91 @@ is 0 change in visible behaviour but up to 60× fewer Zustand state writes.
 
 ---
 
-## 2. Candidates deferred (not implemented)
+## 2. Phase 6e candidates — microbench results + decisions (2026-06-15)
+
+Measured via `frontend/features/canvas-core/__bench__/canvasSurfacePerf.bench.ts`
+using `vitest bench --run`.  All numbers are `mean` latency per bench iteration
+on an Apple M-series laptop (arm64, Node 25, vitest 4.1.7).
 
 ### 2a. `toReactFlowNodes` full-array rebuild on every `nodes` change
 
-**File**: `CanvasSurface.tsx`, `rfNodes` memo (line 85–100 pre-fix).
+**File**: `CanvasSurface.tsx`, `rfNodes` memo.
 
-Every change to `nodes` (including position updates from drag ticks) rebuilds the
-entire `rfNodes` array via `toReactFlowNodes(nodes).map(...)`.  For a 1000-node canvas
-this is 1000 object allocations per tick.
+**Candidate fix**: a `Map<id, RFNode>` cache populated once, updated only for
+changed nodes on each subsequent render — unchanged nodes keep object identity.
 
-**Why deferred**: Fix 1 already reduces the frequency of `nodes` changes during drag
-from O(drag_ticks) to… still O(drag_ticks) because `setNodesDragTick` still calls
-`set({ nodes })`, which still triggers `rfNodes` recomputation.
+**Microbench — BEFORE (full rebuild) vs AFTER (Map cache), mean ms per call:**
 
-A proper fix would memoize individual node objects (e.g. via a `Map<id, RFNode>` that
-is only updated for changed nodes).  This is more invasive and would require changing
-the `useMemo` to a `useRef`-based manual cache.  Safe to implement but needs its own
-test surface (position-only change does not reallocate unaffected node objects).
+| N nodes | BEFORE (full map) | AFTER (Map cache) | Result |
+|---------|-------------------|-------------------|--------|
+| 100     | 0.004 ms          | 0.010 ms          | BEFORE 2.43× faster |
+| 500     | 0.018 ms          | 0.064 ms          | BEFORE 3.60× faster |
+| 1000    | 0.036 ms          | 0.131 ms          | BEFORE 3.67× faster |
 
-**Recommendation**: Profile live first — React Flow's own rendering may batch
-internally.  Add to follow-up once live FPS baselines are captured.
+**Verdict: NOT IMPLEMENTED.**
+
+The proposed cache is structurally slower than the naive full rebuild.  Reason:
+there is no change-delta available at the `rfNodes` memo boundary — React only
+gives us the full new `nodes` array, not a list of which nodes changed.  The
+cache must therefore iterate all N nodes anyway (to compare with cached values),
+plus it adds Map.get + positional comparison overhead per node, plus a Map.set
+for changed nodes.  Net: O(N) iteration + O(N) Map overhead vs O(N) iteration
+alone.  The full rebuild at N=1000 costs 0.036 ms — not a bottleneck.
+
+React Flow's `onlyRenderVisibleElements` flag (already set) means unchanged
+off-screen nodes never hit the DOM reconciler regardless, further reducing any
+practical benefit of per-node identity preservation.
 
 ### 2b. `selectionSet` `useMemo` dependency on full `selection` array
 
-**File**: `CanvasSurface.tsx`, line 77.
+**File**: `CanvasSurface.tsx`, line 84.
 
-`new Set(selection)` rebuilds every time `selection` array reference changes.  Since
-`setSelection` always calls `set({ selection: ids })` with a new array (even if
-content is identical), this fires on every `onSelectionChange` call.  Minor; profile
-before fixing.
+**Candidate fix**: a `useRef`-based equality guard — skip `new Set(selection)` when
+the selection content is unchanged (length + membership identical).
+
+**Microbench — BEFORE vs AFTER, mean ms per rebuild (50-element selection):**
+
+| N canvas nodes | BEFORE (new Set) | AFTER (guard no-op) | Result |
+|----------------|------------------|---------------------|--------|
+| 100            | 0.0016 ms        | 0.0004 ms           | 4× faster |
+| 500            | 0.0017 ms        | 0.0004 ms           | 4× faster |
+| 1000           | 0.0016 ms        | 0.0004 ms           | 4× faster |
+
+**Verdict: NOT IMPLEMENTED.**
+
+The absolute cost is 0.0016 ms per selectionSet rebuild — microsecond noise.
+Even at 60 fps selection-change events (far higher than real-world frequency),
+that is 0.096 ms/s of CPU time.  The equality guard itself incurs an O(M) scan
+(where M = selection size) before deciding to skip, so for large selections the
+guard cost approaches the rebuild cost.  Complexity not justified.
 
 ### 2c. `nodeTypeById` linear scan on every connection attempt
 
 **File**: `CanvasSurface.tsx`, `nodeTypeById` callback.
 
-`rfNodes.find(n => n.id === id)` is O(N).  For connection validation during drag it
-fires twice per connection event (once for source, once for target).  At 100+ nodes a
-`Map<id, type>` memoized alongside `rfNodes` would be O(1).  Low priority given
-connection events are rare vs drag/pan.
+**Fix**: a `nodeTypeMap = useMemo(() => Map<id, type>, [rfNodes])` built alongside
+`rfNodes`, replacing `rfNodes.find(n => n.id === id)` with `nodeTypeMap.get(id)`.
+
+**Microbench — BEFORE (find) vs AFTER (Map.get), mean ms for 1000 lookups:**
+
+| N nodes | BEFORE (rfNodes.find) | AFTER (Map.get) | Speedup |
+|---------|-----------------------|-----------------|---------|
+| 100     | 0.439 ms              | 0.0012 ms       | 371×    |
+| 500     | 1.067 ms              | 0.0021 ms       | 517×    |
+| 1000    | 2.166 ms              | 0.0012 ms       | 1802×   |
+
+**IMPLEMENTED** (`CanvasSurface.tsx`, commit "perf(canvas): fix 3 — O(1) nodeTypeById via Map").
+
+The structural O(N)→O(1) win is unambiguous. Connection validation fires twice
+per wire-drag event (source + target lookup); `isValidConnection` also fires on
+every handle-hover during a connection drag.  At N=1000 nodes, each `find` costs
+~2.2 μs; the Map lookup costs ~0.0012 μs — a 1802× improvement.
+
+**Correctness**: existing `CanvasSurface.test.tsx` tests (5 tests across classic
+typed-port validation and smart-mode validation) exercise `nodeTypeById` end-to-end
+via the `onConnect` and `isValidConnection` paths.  All 670 canvas-core tests pass
+after the change.  The `nodeTypeMap` memo has `[rfNodes]` as its only dependency,
+so it is always in sync with the rendered node list.
 
 ---
 
@@ -213,5 +259,6 @@ Fix 2, `revision` bumps are throttled and `viewport` is the only changed slice).
 |---|---|
 | `frontend/features/canvas-core/store/canvasCoreStore.ts` | +4 actions: `noteDragStart`, `setNodesDragTick`, `setViewportOnMove`, `flushViewportDirty` |
 | `frontend/features/canvas-core/store/canvasCoreStore.perf.test.ts` | New file — 12 behavioral tests (2 describe blocks) |
-| `frontend/features/canvas-core/ui/CanvasSurface.tsx` | Wire new actions; add `onNodeDragStart` prop; RAF-throttle `onMove` |
-| `docs/superpowers/perf/2026-06-14-canvas-baseline.md` | This document |
+| `frontend/features/canvas-core/ui/CanvasSurface.tsx` | Wire new actions; add `onNodeDragStart` prop; RAF-throttle `onMove`; **Fix 3 (6e-2c)** — `nodeTypeMap = useMemo(Map<id,type>, [rfNodes])` + `nodeTypeById` uses `nodeTypeMap.get(id)` instead of `rfNodes.find(...)` |
+| `frontend/features/canvas-core/__bench__/canvasSurfacePerf.bench.ts` | New file — microbenchmarks for 6e candidates 2a/2b/2c (vitest bench) |
+| `docs/superpowers/perf/2026-06-14-canvas-baseline.md` | This document; §2 updated with real microbench numbers + implemented/skipped decisions |
