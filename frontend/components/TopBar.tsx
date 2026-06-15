@@ -88,14 +88,15 @@ const IconButton: React.FC<{
   active?: boolean;
   children: React.ReactNode;
   badge?: number;
-}> = ({ title, onClick, active, children, badge }) => (
+  island?: boolean;
+}> = ({ title, onClick, active, children, badge, island = false }) => (
   <button
     title={title}
     onClick={onClick}
     className={`relative p-2 rounded-lg transition-colors ${
       active
-        ? 'bg-ink-800 text-ink-100'
-        : 'text-ink-400 hover:bg-ink-800 hover:text-ink-200'
+        ? (island ? 'bg-island-2 text-content' : 'bg-ink-800 text-ink-100')
+        : (island ? 'text-content-2 hover:bg-island-2 hover:text-content-2' : 'text-ink-400 hover:bg-ink-800 hover:text-ink-200')
     }`}
   >
     {children}
@@ -114,9 +115,10 @@ const IconButton: React.FC<{
 const PanelShell: React.FC<{
   children: React.ReactNode;
   className?: string;
-}> = ({ children, className = '' }) => (
+  island?: boolean;
+}> = ({ children, className = '', island = false }) => (
   <div
-    className={`fixed sm:absolute right-2 sm:right-0 top-14 sm:top-full sm:mt-2 bg-ink-900 border border-ink-700/50 rounded-xl shadow-2xl z-50 ${className}`}
+    className={`fixed sm:absolute right-2 sm:right-0 top-14 sm:top-full sm:mt-2 ${island ? 'bg-card border border-line' : 'bg-ink-900 border border-ink-700/50'} rounded-xl shadow-2xl z-50 ${className}`}
   >
     {children}
   </div>
@@ -129,7 +131,8 @@ const PanelShell: React.FC<{
 const TaskCenterPanel: React.FC<{
   onClose: () => void;
   onOpenDetail: (task: UnifiedTask) => void;
-}> = ({ onClose, onOpenDetail }) => {
+  island?: boolean;
+}> = ({ onClose, onOpenDetail, island = false }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { tasks, cancelTask, retryTask, clearCompleted, isLoading } = useTaskManager();
@@ -184,14 +187,14 @@ const TaskCenterPanel: React.FC<{
   }, [counts.running]);
 
   return (
-    <PanelShell className="w-[calc(100vw-2rem)] sm:w-96 right-0 sm:right-0">
+    <PanelShell island={island} className="w-[calc(100vw-2rem)] sm:w-96 right-0 sm:right-0">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-ink-800">
-        <span className="text-sm font-semibold text-ink-200">{t('topbar.taskCenter')}</span>
+      <div className={`flex items-center justify-between px-4 py-3 border-b ${island ? 'border-line' : 'border-ink-800'}`}>
+        <span className={`text-sm font-semibold ${island ? 'text-content-2' : 'text-ink-200'}`}>{t('topbar.taskCenter')}</span>
         {completedCount > 0 && (
           <button
             onClick={() => clearCompleted()}
-            className="text-[10px] text-ink-500 hover:text-ink-300 transition-colors"
+            className={`text-[10px] ${island ? 'text-content-3 hover:text-content-2' : 'text-ink-500 hover:text-ink-300'} transition-colors`}
           >
             {t('topbar.clearCompleted')}
           </button>
@@ -199,8 +202,8 @@ const TaskCenterPanel: React.FC<{
       </div>
 
       {isLoading ? (
-        <div className="flex flex-col items-center justify-center py-10 text-ink-500">
-          <div className="w-5 h-5 border-2 border-ink-600 border-t-indigo-400 rounded-full animate-spin mb-2" />
+        <div className={`flex flex-col items-center justify-center py-10 ${island ? 'text-content-3' : 'text-ink-500'}`}>
+          <div className={`w-5 h-5 border-2 ${island ? 'border-line-strong' : 'border-ink-600'} border-t-indigo-400 rounded-full animate-spin mb-2`} />
           <span className="text-sm">{t('common.loading')}</span>
         </div>
       ) : hasTasks ? (
@@ -219,30 +222,30 @@ const TaskCenterPanel: React.FC<{
               <>
                 {/* Active uploads from UploadContext (client-side progress) */}
                 {uploadingItems.map((item) => (
-                  <div key={item.id} className="px-3 py-2.5 border-b border-ink-800/50">
+                  <div key={item.id} className={`px-3 py-2.5 border-b ${island ? 'border-line' : 'border-ink-800/50'}`}>
                     <div className="flex items-center gap-2.5">
                       <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-sm bg-blue-500/20 text-blue-400">
                         <UploadIcon size={14} />
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between">
-                          <span className="text-xs text-ink-300 truncate max-w-[180px]">{item.filename}</span>
+                          <span className={`text-xs ${island ? 'text-content-2' : 'text-ink-300'} truncate max-w-[180px]`}>{item.filename}</span>
                           <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                            <span className="text-[10px] text-ink-500">{item.percent}%</span>
+                            <span className={`text-[10px] ${island ? 'text-content-3' : 'text-ink-500'}`}>{item.percent}%</span>
                             {item.speed > 0 && (
-                              <span className="text-[10px] text-ink-600">{uploadFormatSpeed(item.speed)}</span>
+                              <span className={`text-[10px] ${island ? 'text-content-4' : 'text-ink-600'}`}>{uploadFormatSpeed(item.speed)}</span>
                             )}
                           </div>
                         </div>
                         <div className="flex items-center gap-2 mt-0.5">
-                          <span className="text-[10px] text-ink-600">Upload</span>
+                          <span className={`text-[10px] ${island ? 'text-content-4' : 'text-ink-600'}`}>Upload</span>
                           {item.fileSize > 0 && (
-                            <span className="text-[10px] text-ink-600">{uploadFormatFileSize(item.fileSize)}</span>
+                            <span className={`text-[10px] ${island ? 'text-content-4' : 'text-ink-600'}`}>{uploadFormatFileSize(item.fileSize)}</span>
                           )}
                         </div>
                       </div>
                     </div>
-                    <div className="mt-1.5 h-1 bg-ink-800 rounded-full overflow-hidden">
+                    <div className={`mt-1.5 h-1 ${island ? 'bg-island-2' : 'bg-ink-800'} rounded-full overflow-hidden`}>
                       <div
                         className="h-full rounded-full transition-all duration-300 bg-indigo-500"
                         style={{ width: `${Math.max(item.percent, 2)}%` }}
@@ -262,8 +265,8 @@ const TaskCenterPanel: React.FC<{
                 />
 
                 {uploadingItems.length === 0 && activeItems.length === 0 && (
-                  <div className="flex flex-col items-center justify-center py-8 text-ink-500">
-                    <CheckCircle2 size={24} className="mb-2 text-ink-600" />
+                  <div className={`flex flex-col items-center justify-center py-8 ${island ? 'text-content-3' : 'text-ink-500'}`}>
+                    <CheckCircle2 size={24} className={`mb-2 ${island ? 'text-content-4' : 'text-ink-600'}`} />
                     <span className="text-xs">{t('topbar.noActiveTasks')}</span>
                   </div>
                 )}
@@ -279,8 +282,8 @@ const TaskCenterPanel: React.FC<{
                   onOpenDetail={onOpenDetail}
                 />
                 {historyItems.length === 0 && (
-                  <div className="flex flex-col items-center justify-center py-8 text-ink-500">
-                    <Inbox size={24} className="mb-2 text-ink-600" />
+                  <div className={`flex flex-col items-center justify-center py-8 ${island ? 'text-content-3' : 'text-ink-500'}`}>
+                    <Inbox size={24} className={`mb-2 ${island ? 'text-content-4' : 'text-ink-600'}`} />
                     <span className="text-xs">{t('topbar.noItems')}</span>
                   </div>
                 )}
@@ -289,8 +292,8 @@ const TaskCenterPanel: React.FC<{
           </div>
         </>
       ) : (
-        <div className="flex flex-col items-center justify-center py-10 text-ink-500">
-          <Inbox size={28} className="mb-2 text-ink-600" />
+        <div className={`flex flex-col items-center justify-center py-10 ${island ? 'text-content-3' : 'text-ink-500'}`}>
+          <Inbox size={28} className={`mb-2 ${island ? 'text-content-4' : 'text-ink-600'}`} />
           <span className="text-sm">{t('topbar.noItems')}</span>
         </div>
       )}
@@ -302,15 +305,15 @@ const TaskCenterPanel: React.FC<{
 // Notifications panel
 // ---------------------------------------------------------------------------
 
-const NotificationsPanel: React.FC = () => {
+const NotificationsPanel: React.FC<{ island?: boolean }> = ({ island = false }) => {
   const { t } = useTranslation();
   return (
-    <PanelShell className="w-[calc(100vw-2rem)] sm:w-80">
-      <div className="px-4 py-3 border-b border-ink-800">
-        <span className="text-sm font-semibold text-ink-200">{t('topbar.notifications')}</span>
+    <PanelShell island={island} className="w-[calc(100vw-2rem)] sm:w-80">
+      <div className={`px-4 py-3 border-b ${island ? 'border-line' : 'border-ink-800'}`}>
+        <span className={`text-sm font-semibold ${island ? 'text-content-2' : 'text-ink-200'}`}>{t('topbar.notifications')}</span>
       </div>
-      <div className="flex flex-col items-center justify-center py-10 text-ink-500">
-        <Bell size={28} className="mb-2 text-ink-600" />
+      <div className={`flex flex-col items-center justify-center py-10 ${island ? 'text-content-3' : 'text-ink-500'}`}>
+        <Bell size={28} className={`mb-2 ${island ? 'text-content-4' : 'text-ink-600'}`} />
         <span className="text-sm">{t('topbar.noNotifications')}</span>
       </div>
     </PanelShell>
@@ -325,14 +328,15 @@ const AvatarMenu: React.FC<{
   user: { name: string; email: string };
   onSignOut: () => void;
   onOpenSettings?: (tab?: string) => void;
-}> = ({ user, onSignOut, onOpenSettings }) => {
+  island?: boolean;
+}> = ({ user, onSignOut, onOpenSettings, island = false }) => {
   const { t } = useTranslation();
   return (
-    <PanelShell className="w-56">
+    <PanelShell island={island} className="w-56">
       {/* User info header */}
-      <div className="px-4 py-3 border-b border-ink-800">
-        <p className="text-sm font-semibold text-ink-200 truncate">{user.name}</p>
-        <p className="text-xs text-ink-500 truncate">{user.email}</p>
+      <div className={`px-4 py-3 border-b ${island ? 'border-line' : 'border-ink-800'}`}>
+        <p className={`text-sm font-semibold ${island ? 'text-content-2' : 'text-ink-200'} truncate`}>{user.name}</p>
+        <p className={`text-xs ${island ? 'text-content-3' : 'text-ink-500'} truncate`}>{user.email}</p>
       </div>
 
       {/* Menu items */}
@@ -341,15 +345,17 @@ const AvatarMenu: React.FC<{
           icon={User}
           label={t('user.profile')}
           onClick={() => onOpenSettings?.('personal')}
+          island={island}
         />
         <MenuButton
           icon={Settings}
           label={t('nav.settings')}
           onClick={() => onOpenSettings?.('general')}
+          island={island}
         />
       </div>
 
-      <div className="border-t border-ink-800" />
+      <div className={`border-t ${island ? 'border-line' : 'border-ink-800'}`} />
 
       <div className="py-1">
         <MenuButton
@@ -358,13 +364,14 @@ const AvatarMenu: React.FC<{
           onClick={() => {
             /* placeholder */
           }}
+          island={island}
         />
       </div>
 
-      <div className="border-t border-ink-800" />
+      <div className={`border-t ${island ? 'border-line' : 'border-ink-800'}`} />
 
       <div className="py-1">
-        <MenuButton icon={LogOut} label={t('user.signOut')} onClick={onSignOut} danger />
+        <MenuButton icon={LogOut} label={t('user.signOut')} onClick={onSignOut} danger island={island} />
       </div>
     </PanelShell>
   );
@@ -375,13 +382,14 @@ const MenuButton: React.FC<{
   label: string;
   onClick: () => void;
   danger?: boolean;
-}> = ({ icon: Icon, label, onClick, danger }) => (
+  island?: boolean;
+}> = ({ icon: Icon, label, onClick, danger, island = false }) => (
   <button
     onClick={onClick}
     className={`w-full flex items-center gap-3 px-4 py-2 text-sm transition-colors ${
       danger
         ? 'text-red-400 hover:bg-red-500/10'
-        : 'text-ink-300 hover:bg-ink-800 hover:text-ink-100'
+        : (island ? 'text-content-2 hover:bg-island-2 hover:text-content' : 'text-ink-300 hover:bg-ink-800 hover:text-ink-100')
     }`}
   >
     <Icon size={16} />
@@ -484,6 +492,11 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
   useCloseOnOutsideOrEscape(approvalsRef, openPanel === 'approvals', closeAll);
   useCloseOnOutsideOrEscape(avatarRef, openPanel === 'avatar', closeAll);
 
+  // Island-aware ink → surface-token overrides. Each classic (island=false) arm
+  // is the verbatim original so D12 keeps the classic render byte-identical.
+  const brandTextCls = island ? 'text-content' : 'text-ink-100';
+  const avatarHoverBg = island ? 'hover:bg-island-2' : 'hover:bg-ink-800';
+
   return (
     <header
       className={
@@ -496,7 +509,7 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
           controls to the right. Classic mode keeps justify-end with no brand. */}
       {island && (
         <>
-          <div className="flex items-center gap-2 font-bold text-sm text-ink-100 pl-1 pr-2 select-none">
+          <div className={`flex items-center gap-2 font-bold text-sm ${brandTextCls} pl-1 pr-2 select-none`}>
             <span className="w-6 h-6 rounded-[7px] grid place-items-center bg-gradient-to-br from-indigo-400 to-indigo-500 shadow-[0_0_16px_rgba(99,102,241,0.4)]">
               <Sparkles size={13} className="text-white" />
             </span>
@@ -515,6 +528,7 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
         <IconButton
           title={t('topbar.search')}
           onClick={() => { /* Cmd+K search — Phase 2+ */ }}
+          island={island}
         >
           <Search size={18} />
         </IconButton>
@@ -527,11 +541,12 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
           onClick={() => togglePanel('taskCenter')}
           active={openPanel === 'taskCenter'}
           badge={badgeCount > 0 ? badgeCount : undefined}
+          island={island}
         >
           <ListTodo size={18} />
         </IconButton>
         {openPanel === 'taskCenter' && (
-          <TaskCenterPanel onClose={closeAll} onOpenDetail={setDetailTask} />
+          <TaskCenterPanel onClose={closeAll} onOpenDetail={setDetailTask} island={island} />
         )}
       </div>
 
@@ -549,10 +564,11 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
           onClick={() => togglePanel('notifications')}
           active={openPanel === 'notifications'}
           badge={unreadCount}
+          island={island}
         >
           <Bell size={18} />
         </IconButton>
-        {openPanel === 'notifications' && <NotificationsPanel />}
+        {openPanel === 'notifications' && <NotificationsPanel island={island} />}
       </div>
 
       {/* G1-UI: Approvals (agent hook gates pending user decision) */}
@@ -562,11 +578,12 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
           onClick={() => togglePanel('approvals')}
           active={openPanel === 'approvals'}
           badge={approvalsCount > 0 ? approvalsCount : undefined}
+          island={island}
         >
           <ShieldAlert size={18} />
         </IconButton>
         {openPanel === 'approvals' && (
-          <PanelShell className="w-[calc(100vw-2rem)] sm:w-96 right-0 sm:right-0">
+          <PanelShell island={island} className="w-[calc(100vw-2rem)] sm:w-96 right-0 sm:right-0">
             <ApprovalsPanel
               compact
               onCountChange={setApprovalsCount}
@@ -580,7 +597,7 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
         <button
           title={t('topbar.account')}
           onClick={() => togglePanel('avatar')}
-          className="p-1 rounded-lg transition-colors hover:bg-ink-800"
+          className={`p-1 rounded-lg transition-colors ${avatarHoverBg}`}
         >
           <UserAvatar
             name={user?.name || '?'}
@@ -588,7 +605,7 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
           />
         </button>
         {openPanel === 'avatar' && user && (
-          <AvatarMenu user={user} onSignOut={onSignOut} onOpenSettings={onOpenSettings} />
+          <AvatarMenu user={user} onSignOut={onSignOut} onOpenSettings={onOpenSettings} island={island} />
         )}
       </div>
     </header>
