@@ -9,7 +9,7 @@ Library chat path and is overkill here.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -126,3 +126,46 @@ class ClassicNodeRunResponse(BaseModel):
     error: Optional[str] = None
     result: Optional[Dict[str, Any]] = None
     response_kind: Literal["classic_node_run"] = "classic_node_run"
+
+
+# ---------------------------------------------------------------------------
+# Full-graph canvas run (Phase 6d / M1)
+# ---------------------------------------------------------------------------
+
+
+class CanvasGraphRunRequest(BaseModel):
+    """Enqueue a full-graph canvas run (Phase 6d M1).
+
+    The frontend computes topo-sort order (reusing ``topology.ts:topoSortPrompts``)
+    and sends the node IDs in execution order. The backend DBOS workflow runs
+    each node sequentially via the existing CanvasRunService.
+    """
+
+    canvas_id: str = Field(..., description="Snowflake canvas id (string)")
+    node_order: List[str] = Field(
+        ...,
+        description=(
+            "Node IDs in topo-sorted execution order "
+            "(frontend supplies via topoSortPrompts)"
+        ),
+    )
+    continue_on_failure: bool = Field(
+        default=False,
+        description=(
+            "When True the workflow continues running remaining nodes even when "
+            "an earlier node fails. The parent workflow still raises at the end "
+            "when any node failed so task_tracking reflects the partial failure."
+        ),
+    )
+
+
+class CanvasGraphRunResponse(BaseModel):
+    """Immediate response: the workflow is enqueued, not yet complete.
+
+    ``task_id`` == ``dbos_workflow_id`` — both are the same UUID, exposed
+    as two fields so the frontend can treat ``task_id`` as an opaque handle
+    and also poll ``/api/v1/workflows/{dbos_workflow_id}`` for status.
+    """
+
+    task_id: str = Field(..., description="task_tracking row key (== dbos_workflow_id)")
+    dbos_workflow_id: str = Field(..., description="DBOS workflow id (== task_id)")
