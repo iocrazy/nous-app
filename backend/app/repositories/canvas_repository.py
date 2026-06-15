@@ -165,6 +165,98 @@ class CanvasRepository:
             logger.error(f"canvas update_with_lock({canvas_id}) failed: {e}")
             return None
 
+    async def patch_node_run_results(
+        self,
+        canvas_id: str,
+        results_by_node_id: Dict[str, Dict[str, Any]],
+    ) -> bool:
+        """Merge run_result/run_status into nodes_json for the given nodes.
+
+        Read-modify-write WITHOUT an optimistic lock. Uses the service-role
+        client so the DBOS graph workflow can persist per-node outputs without
+        holding the user's lock token across steps.
+
+        Only the keys supplied in ``results_by_node_id`` (e.g. ``run_result``,
+        ``run_status``) are written into ``node.data``; all other node fields
+        (position, type, other data keys, connections) are left intact.
+
+        base_updated_at advance (Phase 6a realtime closure):
+          ``base_updated_at`` is the optimistic-lock token AND the staleness
+          guard the frontend's ``applyRemoteUpdate`` uses to drop self-echo /
+          stale realtime events (``if row.base_updated_at <= s.baseUpdatedAt
+          return``).  A nodes_json write that does NOT advance the token would
+          be seen as STALE by every open tab → the persisted run_result would
+          never surface via realtime, defeating the purpose of persisting it.
+          So, mirroring ``update_with_lock``, we stamp base_updated_at to the
+          freshly-bumped updated_at: the UPDATE writing nodes_json fires the
+          ``trg_canvases_touch_updated_at`` trigger (bumps updated_at SQL-side
+          via now()), then a second UPDATE echoes that new updated_at into
+          base_updated_at.  The timestamp source is the DB trigger's now() — it
+          is never computed in Python.
+
+        Clobber-safety note (M4a documented limitation):
+          The concurrent user PUT path (``update_with_lock``) replaces
+          ``nodes_json`` wholesale.  If a user saves the canvas while the
+          workflow is mid-run, the user save and the workflow write race.
+          Whichever write lands second wins at the row level, so ``run_result``
+          fields written by the workflow may be overwritten by a concurrent user
+          save, or vice-versa.  For the M4a scope this is acceptable: the
+          frontend relies on Phase 6a realtime broadcasts which will deliver the
+          most-recently persisted row.  A user with unsaved local edits gets the
+          existing 409 conflict path on their next PUT (their base_updated_at no
+          longer matches) — correct last-writer-wins behaviour for v1.  M4b may
+          address with a PostgreSQL jsonb path-update to make the write truly
+          non-destructive.
+        """
+        row = await self.get_by_id(canvas_id)
+        if row is None:
+            logger.warning(
+                f"canvas patch_node_run_results: canvas {canvas_id!r} not found"
+            )
+            return False
+
+        nodes_raw = row.get("nodes_json")
+        nodes_list: List[Any] = list(nodes_raw) if isinstance(nodes_raw, list) else []
+
+        patched: List[Any] = []
+        for node in nodes_list:
+            if not isinstance(node, dict):
+                patched.append(node)
+                continue
+            node_id = node.get("id")
+            if node_id in results_by_node_id:
+                node_data = dict(node.get("data") or {})
+                node_data.update(results_by_node_id[node_id])
+                patched.append({**node, "data": node_data})
+            else:
+                patched.append(node)
+
+        try:
+            client = await self._client()
+            # Step 1: write nodes_json.  This fires trg_canvases_touch_updated_at
+            # which bumps updated_at to now() at the SQL layer.
+            result = (
+                await client.table(self.TABLE)
+                .update({"nodes_json": patched})
+                .eq("id", _bigint(canvas_id))
+                .execute()
+            )
+            if not result.data:
+                return False
+            # Step 2: advance base_updated_at to the freshly-bumped updated_at so
+            # the realtime event is recognised as NEWER by open tabs (Phase 6a
+            # applyRemoteUpdate staleness guard).  Same SQL-side timestamp the
+            # user save path echoes — never a Python-computed value.
+            new_token = result.data[0].get("updated_at")
+            if new_token:
+                await client.table(self.TABLE).update(
+                    {"base_updated_at": new_token}
+                ).eq("id", _bigint(canvas_id)).execute()
+            return True
+        except Exception as e:
+            logger.error(f"canvas patch_node_run_results({canvas_id}) failed: {e}")
+            return False
+
     async def delete(self, canvas_id: str) -> bool:
         try:
             client = await self._client()
