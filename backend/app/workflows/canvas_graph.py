@@ -439,6 +439,23 @@ async def mark_node_complete_step(node_wf_id: str) -> None:
 
 
 @DBOS.step()
+async def mark_node_processing_step(node_wf_id: str) -> None:
+    """Mark a per-node subtask row as processing (best-effort).
+
+    Called just before a runnable node is dispatched so the canvas shows a
+    live per-node "running" state (M4b maps phase=processing -> run_status
+    running). Passive/transform nodes are instant and skip this. The subtask
+    is not a real DBOS workflow, so its phase is managed via the manager API.
+    """
+    from app.services.infra.unified_task_manager import get_task_manager
+
+    try:
+        await get_task_manager().start(node_wf_id)
+    except Exception as exc:
+        logger.warning(f"[canvas_graph.mark_node_processing] {node_wf_id}: {exc!r}")
+
+
+@DBOS.step()
 async def mark_node_failed_step(node_wf_id: str, error_msg: str) -> None:
     """Mark a per-node subtask row as failed (best-effort)."""
     from app.services.infra.unified_task_manager import get_task_manager
@@ -691,6 +708,10 @@ async def _run_graph(
         body = _node_body(effective_data)
         agent_id: Optional[str] = None
         project_id: Optional[str] = None
+
+        # Light up a live per-node "running" state before dispatch (M4b maps
+        # phase=processing -> run_status running). Best-effort; never fatal.
+        await mark_node_processing_step(node_wf_id)
 
         try:
             if node_type in _GEN_NODE_TYPES:
