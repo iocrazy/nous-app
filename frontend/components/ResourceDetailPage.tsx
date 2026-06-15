@@ -784,7 +784,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const handleIslandCoverFile = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     e.target.value = ''; // allow re-selecting the same file
-    if (!f) return;
+    if (!f || !resource) return;
     try {
       const updated = await uploadResourceCover(resource.id, f);
       setResource(updated);
@@ -793,7 +793,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
       console.error('Failed to upload cover:', err);
       addToast('Failed to upload cover', 'error');
     }
-  }, [resource.id, addToast, t]);
+  }, [resource?.id, addToast, t]);
 
   // Close version dropdown on outside click
   useEffect(() => {
