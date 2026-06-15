@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Play, Pause, Volume2, VolumeX } from 'lucide-react';
 import { buildSodaTheme, type SodaTheme } from '../utils/sodaTheme';
+import { islandUI } from '../utils/featureFlags';
 
 interface AudioWaveformPlayerProps {
   src: string;
@@ -67,6 +68,20 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
 }) => {
   const isCompact = layout === 'compact';
   const isCapsule = layout === 'capsule';
+  // Island redesign: route the full/compact player's neutral ink surfaces to the
+  // mock --content/--island-2/--line ladder when the island UI is on. The flag
+  // is global+build-time, so flag-OFF (classic) every gate resolves to the exact
+  // original ink class → D12 byte-identical.
+  const island = islandUI();
+  const cInkText300 = island ? 'text-content-2' : 'text-ink-300';
+  const cInkText400 = island ? 'text-content-2' : 'text-ink-400';
+  const cInkText500 = island ? 'text-content-3' : 'text-ink-500';
+  const cInkHover200 = island ? 'hover:text-content' : 'hover:text-ink-200';
+  const cInkCtrlBg = island ? 'bg-island-2' : 'bg-ink-800';
+  const cInkCtrlHover = island ? 'hover:bg-island-2' : 'hover:bg-ink-700';
+  const cInkTrack = island ? 'bg-island-2' : 'bg-ink-700';
+  const cInkBarBg = island ? 'bg-island-2/60' : 'bg-ink-900/50';
+  const cInkBarBorder = island ? 'border-line' : 'border-ink-800/50';
   // Compact lives in a narrow row, so 200 hair-thin bars compress into an
   // unreadable blur. Fewer, wider bars (and a proportional vertical margin
   // below) make the waveform legible even for short tracks. The capsule row is
@@ -564,7 +579,7 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
               {isMuted || volume === 0 ? <VolumeX size={14} /> : <Volume2 size={14} />}
             </button>
             <div className="absolute bottom-full left-1/2 -translate-x-1/2 pb-2 z-20 hidden group-hover/vol:block">
-              <div className="bg-ink-900 border border-ink-700 rounded-lg shadow-xl px-2.5 py-2">
+              <div className="bg-card border border-line rounded-lg shadow-xl px-2.5 py-2">
                 <input
                   type="range"
                   min="0"
@@ -603,7 +618,7 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
                 className="w-8 h-8 border-2 border-ink-300 border-t-transparent rounded-full animate-spin"
                 style={{ borderColor: tm.accent, borderTopColor: 'transparent' }}
               />
-              <span className="text-xs text-ink-500">Decoding audio...</span>
+              <span className={`text-xs ${cInkText500}`}>Decoding audio...</span>
             </div>
           </div>
         ) : (
@@ -636,7 +651,7 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
       </div>
 
       {/* Bottom control bar */}
-      <div className="flex items-center gap-4 px-6 py-3 border-t border-ink-800/50 bg-ink-900/50 shrink-0">
+      <div className={`flex items-center gap-4 px-6 py-3 border-t ${cInkBarBorder} ${cInkBarBg} shrink-0`}>
         {/* Play/Pause */}
         <button
           onClick={togglePlay}
@@ -651,7 +666,7 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
         </button>
 
         {/* Time */}
-        <span className="text-sm text-ink-300 tabular-nums font-medium min-w-[80px]">
+        <span className={`text-sm ${cInkText300} tabular-nums font-medium min-w-[80px]`}>
           {formatTime(currentTime)} / {formatTime(duration)}
         </span>
 
@@ -664,7 +679,7 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
             <button
               type="button"
               onClick={() => onChorusChange?.(currentTime)}
-              className="px-2 py-0.5 text-xs font-medium text-amber-300 hover:text-amber-200 bg-ink-800 hover:bg-ink-700 rounded transition-colors whitespace-nowrap"
+              className={`px-2 py-0.5 text-xs font-medium text-amber-300 hover:text-amber-200 ${cInkCtrlBg} ${cInkCtrlHover} rounded transition-colors whitespace-nowrap`}
             >
               {setChorusLabel}
             </button>
@@ -672,7 +687,7 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
             <button
               type="button"
               onClick={() => onChorusChange?.(null)}
-              className="px-2 py-0.5 text-xs font-medium text-amber-300 hover:text-amber-200 bg-ink-800 hover:bg-ink-700 rounded transition-colors whitespace-nowrap"
+              className={`px-2 py-0.5 text-xs font-medium text-amber-300 hover:text-amber-200 ${cInkCtrlBg} ${cInkCtrlHover} rounded transition-colors whitespace-nowrap`}
             >
               {clearChorusLabel}
             </button>
@@ -681,7 +696,7 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
         {/* Playback rate */}
         <button
           onClick={cycleRate}
-          className="px-2 py-0.5 text-xs font-medium text-ink-400 hover:text-ink-200 bg-ink-800 hover:bg-ink-700 rounded transition-colors tabular-nums min-w-[40px]"
+          className={`px-2 py-0.5 text-xs font-medium ${cInkText400} ${cInkHover200} ${cInkCtrlBg} ${cInkCtrlHover} rounded transition-colors tabular-nums min-w-[40px]`}
         >
           {playbackRate === 1 ? '1x' : `${playbackRate}x`}
         </button>
@@ -690,7 +705,7 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
         <div className="flex items-center gap-2">
           <button
             onClick={toggleMute}
-            className="text-ink-400 hover:text-ink-200 transition-colors"
+            className={`${cInkText400} ${cInkHover200} transition-colors`}
           >
             {isMuted || volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}
           </button>
@@ -705,9 +720,9 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
               accentColor: tm.accent,
               ['--sw' as string]: tm.accent,
             } as React.CSSProperties}
-            className="w-20 h-1 bg-ink-700 rounded-full appearance-none cursor-pointer
+            className={`w-20 h-1 ${cInkTrack} rounded-full appearance-none cursor-pointer
               [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3
-              [&::-webkit-slider-thumb]:bg-[var(--sw)] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
+              [&::-webkit-slider-thumb]:bg-[var(--sw)] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer`}
           />
         </div>
       </div>

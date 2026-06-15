@@ -29,7 +29,7 @@ export const AudioToolsMenuItems: React.FC<AudioToolsMenuItemsProps> = ({
         onBlur={onNotesBlur}
         placeholder="Add notes..."
         rows={2}
-        className="w-full bg-ink-800/50 border border-ink-700/50 rounded-lg px-2 py-1.5 text-xs text-content-2 placeholder-content-4 focus:outline-none focus:border-indigo-500/50 resize-none"
+        className="w-full bg-island-2 border border-line rounded-lg px-2 py-1.5 text-xs text-content-2 placeholder-content-4 focus:outline-none focus:border-indigo-500/50 resize-none"
       />
     </div>
   );
