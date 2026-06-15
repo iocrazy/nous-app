@@ -9,6 +9,7 @@
 import React, { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check } from 'lucide-react';
+import { islandUI } from '../../../utils/featureFlags';
 
 /** Canonical ordered list of known source platforms. */
 const KNOWN_PLATFORMS: string[] = [
@@ -56,6 +57,7 @@ export const SourceFilterDropdown: React.FC<SourceFilterDropdownProps> = ({
   availablePlatforms = [],
 }) => {
   const { t } = useTranslation();
+  const island = islandUI();
   const selectedSet = useMemo(
     () => new Set(selectedPlatforms),
     [selectedPlatforms],
@@ -89,7 +91,7 @@ export const SourceFilterDropdown: React.FC<SourceFilterDropdownProps> = ({
       aria-label="Source filter"
     >
       {options.length === 0 && (
-        <div className="px-3 py-4 text-xs text-ink-500">
+        <div className={`px-3 py-4 text-xs ${island ? 'text-content-3' : 'text-ink-500'}`}>
           {t('resources.filter.noSources', 'No sources yet')}
         </div>
       )}
@@ -111,6 +113,8 @@ export const SourceFilterDropdown: React.FC<SourceFilterDropdownProps> = ({
             className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between transition-colors ${
               active
                 ? 'bg-indigo-500/10 text-indigo-300'
+                : island
+                ? 'text-content-2 hover:bg-island-2'
                 : 'text-ink-300 hover:bg-ink-800'
             }`}
           >
@@ -132,11 +136,11 @@ export const SourceFilterDropdown: React.FC<SourceFilterDropdownProps> = ({
       })}
       {selectedPlatforms.length > 0 && (
         <>
-          <div className="mx-2.5 my-1 border-t border-ink-700/60" />
+          <div className={`mx-2.5 my-1 border-t ${island ? 'border-line' : 'border-ink-700/60'}`} />
           <button
             type="button"
             onClick={onClearAll}
-            className="w-full text-left px-3 py-2 text-xs text-ink-500 hover:text-ink-300 hover:bg-ink-800 transition-colors"
+            className={`w-full text-left px-3 py-2 text-xs ${island ? 'text-content-3 hover:text-content-2 hover:bg-island-2' : 'text-ink-500 hover:text-ink-300 hover:bg-ink-800'} transition-colors`}
           >
             {t('resources.filter.clearSelection', 'Clear selection')}
           </button>

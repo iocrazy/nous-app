@@ -11,6 +11,7 @@ import { ArrowDown, ArrowUp, Minus, Plus } from 'lucide-react';
 
 import type { ChipId } from './types';
 import { filterVisibleChips } from './chipVisibility';
+import { islandUI } from '../../../utils/featureFlags';
 
 export interface FilterConfigPanelProps {
   pinnedChips: ChipId[];
@@ -40,6 +41,11 @@ export const FilterConfigPanel: React.FC<FilterConfigPanelProps> = ({
 }) => {
   const { t } = useTranslation();
   const panelRef = useRef<HTMLDivElement>(null);
+  const island = islandUI();
+  // Local gate consts (DRY — these neutral ink classes repeat below).
+  const cLabel = island ? 'text-content-3' : 'text-ink-500';
+  const cArrowBtn = island ? 'text-content-2 hover:text-content' : 'text-ink-400 hover:text-ink-100';
+  const cActionBtn = island ? 'text-content-2' : 'text-ink-400';
 
   // Apply scope allowlist. When provided, hide any chip outside the set
   // from both Pinned (a chip the user pinned in another scope is still
@@ -68,15 +74,15 @@ export const FilterConfigPanel: React.FC<FilterConfigPanelProps> = ({
   return (
     <div
       ref={panelRef}
-      className="absolute right-0 top-full mt-1.5 z-40 w-64 bg-ink-900/95 backdrop-blur-sm border border-ink-700/80 rounded-xl shadow-2xl py-2 animate-dropdown"
+      className={`absolute right-0 top-full mt-1.5 z-40 w-64 ${island ? 'bg-card' : 'bg-ink-900/95'} backdrop-blur-sm border ${island ? 'border-line' : 'border-ink-700/80'} rounded-xl shadow-2xl py-2 animate-dropdown`}
       role="dialog"
       aria-label={t('resources.filter.filterConfig', 'Filter Settings')}
     >
-      <div className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-widest text-ink-500">
+      <div className={`px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-widest ${cLabel}`}>
         {t('resources.filter.pinned', 'Pinned')}
       </div>
       {visiblePinned.length === 0 && (
-        <div className="px-3 py-2 text-xs text-ink-500">
+        <div className={`px-3 py-2 text-xs ${cLabel}`}>
           {t('resources.filter.noneYet', 'None yet')}
         </div>
       )}
@@ -86,7 +92,7 @@ export const FilterConfigPanel: React.FC<FilterConfigPanelProps> = ({
         return (
           <div
             key={id}
-            className="flex items-center gap-1 px-2 py-1 text-xs text-ink-200 hover:bg-ink-800/60 rounded-md mx-1"
+            className={`flex items-center gap-1 px-2 py-1 text-xs ${island ? 'text-content-2 hover:bg-island-2' : 'text-ink-200 hover:bg-ink-800/60'} rounded-md mx-1`}
           >
             <span className="flex-1 truncate px-1">{chipLabel(id)}</span>
             <button
@@ -94,7 +100,7 @@ export const FilterConfigPanel: React.FC<FilterConfigPanelProps> = ({
               onClick={() => onReorder(id, 'up')}
               disabled={!canMoveUp}
               aria-label={t('resources.filter.moveUp', 'Move up')}
-              className="p-1 text-ink-400 hover:text-ink-100 disabled:opacity-30 disabled:cursor-not-allowed"
+              className={`p-1 ${cArrowBtn} disabled:opacity-30 disabled:cursor-not-allowed`}
             >
               <ArrowUp size={12} />
             </button>
@@ -103,7 +109,7 @@ export const FilterConfigPanel: React.FC<FilterConfigPanelProps> = ({
               onClick={() => onReorder(id, 'down')}
               disabled={!canMoveDown}
               aria-label={t('resources.filter.moveDown', 'Move down')}
-              className="p-1 text-ink-400 hover:text-ink-100 disabled:opacity-30 disabled:cursor-not-allowed"
+              className={`p-1 ${cArrowBtn} disabled:opacity-30 disabled:cursor-not-allowed`}
             >
               <ArrowDown size={12} />
             </button>
@@ -111,7 +117,7 @@ export const FilterConfigPanel: React.FC<FilterConfigPanelProps> = ({
               type="button"
               onClick={() => onUnpin(id)}
               aria-label={t('resources.filter.unpin', 'Unpin')}
-              className="ml-1 p-1 text-ink-400 hover:text-rose-300"
+              className={`ml-1 p-1 ${cActionBtn} hover:text-rose-300`}
               title={t('resources.filter.unpin', 'Unpin')}
             >
               <Minus size={12} />
@@ -120,27 +126,27 @@ export const FilterConfigPanel: React.FC<FilterConfigPanelProps> = ({
         );
       })}
 
-      <div className="mx-2.5 my-2 border-t border-ink-700/60" />
+      <div className={`mx-2.5 my-2 border-t ${island ? 'border-line' : 'border-ink-700/60'}`} />
 
-      <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-ink-500">
+      <div className={`px-3 pb-1 text-[10px] font-semibold uppercase tracking-widest ${cLabel}`}>
         {t('resources.filter.available', 'Available')}
       </div>
       {visibleAvailable.length === 0 && (
-        <div className="px-3 py-2 text-xs text-ink-500">
+        <div className={`px-3 py-2 text-xs ${cLabel}`}>
           {t('resources.filter.allPinned', 'All filters pinned')}
         </div>
       )}
       {visibleAvailable.map((id) => (
         <div
           key={id}
-          className="flex items-center gap-1 px-2 py-1 text-xs text-ink-300 hover:bg-ink-800/60 rounded-md mx-1"
+          className={`flex items-center gap-1 px-2 py-1 text-xs ${island ? 'text-content-2 hover:bg-island-2' : 'text-ink-300 hover:bg-ink-800/60'} rounded-md mx-1`}
         >
           <span className="flex-1 truncate px-1">{chipLabel(id)}</span>
           <button
             type="button"
             onClick={() => onPin(id)}
             aria-label={t('resources.filter.pin', 'Pin')}
-            className="p-1 text-ink-400 hover:text-indigo-300"
+            className={`p-1 ${cActionBtn} hover:text-indigo-300`}
             title={t('resources.filter.pin', 'Pin')}
           >
             <Plus size={12} />

@@ -47,6 +47,7 @@ import { useResourcesContext } from '../../../contexts/ResourcesContext';
 import { datePresetSummary } from './dateUtils';
 import { durationPresetSummary } from './durationUtils';
 import { aspectSummary } from './aspectUtils';
+import { islandUI } from '../../../utils/featureFlags';
 
 export interface FilterBarProps {
   /** Config hook instance — FilterBar is controlled via this. */
@@ -127,6 +128,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   allowedChips,
 }) => {
   const { t } = useTranslation();
+  const island = islandUI();
   const [openTarget, setOpenTarget] = useState<OpenTarget>(null);
   const { refreshTags } = useResourcesContext();
 
@@ -387,7 +389,9 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border transition-colors text-xs ${
             isConfigOpen
               ? 'border-indigo-500/60 bg-indigo-500/10 text-indigo-300'
-              : 'border-ink-700/80 bg-ink-900/40 text-ink-400 hover:text-ink-200 hover:border-ink-600'
+              : island
+                ? 'border-line bg-island-2 text-content-2 hover:text-content-2 hover:border-line-strong'
+                : 'border-ink-700/80 bg-ink-900/40 text-ink-400 hover:text-ink-200 hover:border-ink-600'
           }`}
           title={t('resources.filter.filterConfig', 'Filter Settings')}
           aria-label={t('resources.filter.filterConfig', 'Filter Settings')}
@@ -414,7 +418,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
         <button
           type="button"
           onClick={clearAll}
-          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-ink-400 hover:text-ink-100 hover:bg-ink-800/60"
+          className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs ${island ? 'text-content-2 hover:text-content hover:bg-island-2' : 'text-ink-400 hover:text-ink-100 hover:bg-ink-800/60'}`}
           title={t('resources.filter.clearAll', 'Clear all filters')}
         >
           <X size={12} />
