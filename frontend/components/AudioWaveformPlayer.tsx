@@ -556,10 +556,21 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
           {formatTime(currentTime)} / {formatTime(duration)}
         </span>
 
-        {/* Side controls — mock `.pside`: speed "1×" + an icon-only volume
-            control whose slider reveals on hover (kept for parity with the full
-            player; mock omits it). */}
+        {/* Side controls — mock `.pside`: optional chorus Set/Clear (uploaded
+            audio — preserves the full player's chorus-edit feature in the island
+            capsule, D12), speed "1×" + an icon-only volume control whose slider
+            reveals on hover (kept for parity with the full player; mock omits it). */}
         <div className="audio-pside">
+          {chorusEditable && onChorusChange && (
+            <button
+              type="button"
+              onClick={() => onChorusChange(chorusStartSec === undefined ? currentTime : null)}
+              className="text-amber-300 hover:text-amber-200 transition-colors whitespace-nowrap"
+              title={chorusStartSec === undefined ? setChorusLabel : clearChorusLabel}
+            >
+              {chorusStartSec === undefined ? setChorusLabel : clearChorusLabel}
+            </button>
+          )}
           <button
             onClick={cycleRate}
             className="hover:text-[color:var(--content,#e7e7ea)] transition-colors tabular-nums"

@@ -8,8 +8,13 @@ import { fetchAllTags, createTag } from '../services/unifiedTagService';
 import { getSupabaseClient } from '../supabaseClient';
 
 interface AudioOverviewSideProps {
-  /** The parsed_media row — drives stats + resolves the owning resource for tags. */
-  video: Video;
+  /** The parsed_media row (download audio) — drives the social stats row and
+   *  resolves the owning resource for tags. Omit for uploaded audio, which has
+   *  no parsed_media / social stats; pass `resourceId` directly instead. */
+  video?: Video;
+  /** Uploaded-audio path: the resource id to bind tags to directly (skips the
+   *  media_id → resource lookup). When set, the social stats row is hidden. */
+  resourceId?: string;
   /** Album/track cover URL; falls back to a Music glyph on missing/404. */
   coverUrl?: string;
   title: string;
@@ -17,6 +22,9 @@ interface AudioOverviewSideProps {
   /** Resource-level rating (0–5) + setter; stars are read-only when no setter. */
   rating?: number;
   onRatingChange?: (rating: number) => void;
+  /** When provided (uploaded audio), the cover becomes click-to-replace — mirrors
+   *  the AudioHero cover affordance so island audio keeps cover upload (D12). */
+  onCoverClick?: () => void;
 }
 
 // Same compact number format MediaCard uses (1.2K / 338.0K / 1.2M) so the stat
@@ -39,16 +47,19 @@ const formatNumber = (num?: number): string => {
  */
 export const AudioOverviewSide: React.FC<AudioOverviewSideProps> = ({
   video,
+  resourceId: explicitResourceId,
   coverUrl,
   title,
   author,
   rating,
   onRatingChange,
+  onCoverClick,
 }) => {
-  // Resource tags — resolved self-contained from media_id exactly like MediaCard,
+  // Resource tags — resolved self-contained from media_id exactly like MediaCard
+  // (download path), or bound directly to an explicit resourceId (upload path),
   // so the picker behaves the same regardless of where it's mounted.
   const [resourceTags, setResourceTags] = useState<Array<{ tag: { id: string; name: string; color?: string } }>>([]);
-  const [resourceId, setResourceId] = useState<string | null>(null);
+  const [resourceId, setResourceId] = useState<string | null>(explicitResourceId ?? null);
   const [allTags, setAllTags] = useState<Tag[]>([]);
 
   useEffect(() => {
@@ -56,7 +67,23 @@ export const AudioOverviewSide: React.FC<AudioOverviewSideProps> = ({
   }, []);
 
   useEffect(() => {
-    if (!video.id) return;
+    // Upload path: resourceId is known up front — bind tags to it directly.
+    if (explicitResourceId) {
+      setResourceId(explicitResourceId);
+      setResourceTags([]);
+      let cancelled = false;
+      (async () => {
+        try {
+          const tags = await fetchResourceTags(explicitResourceId);
+          if (!cancelled) setResourceTags(tags);
+        } catch (err) {
+          console.error('Failed to load resource tags:', err);
+        }
+      })();
+      return () => { cancelled = true; };
+    }
+    // Download path: resolve the owning resource from the parsed_media id.
+    if (!video?.id) return;
     setResourceTags([]);
     setResourceId(null);
     let cancelled = false;
@@ -80,7 +107,7 @@ export const AudioOverviewSide: React.FC<AudioOverviewSideProps> = ({
       }
     })();
     return () => { cancelled = true; };
-  }, [video.id]);
+  }, [video?.id, explicitResourceId]);
 
   const handleAddTag = useCallback(async (tagId: string) => {
     if (!resourceId) return;
@@ -116,8 +143,14 @@ export const AudioOverviewSide: React.FC<AudioOverviewSideProps> = ({
 
   return (
     <div className="audio-side">
-      {/* Cover — Music glyph behind the image so a 404 reveals the icon. */}
-      <div className="audio-cover">
+      {/* Cover — Music glyph behind the image so a 404 reveals the icon. When
+          onCoverClick is set (uploaded audio) the cover is click-to-replace. */}
+      <div
+        className={`audio-cover${onCoverClick ? ' cursor-pointer' : ''}`}
+        onClick={onCoverClick}
+        title={onCoverClick ? 'Change cover' : undefined}
+        role={onCoverClick ? 'button' : undefined}
+      >
         <Music size={44} className="text-content-3 col-start-1 row-start-1" />
         {coverUrl && (
           <img
@@ -132,12 +165,16 @@ export const AudioOverviewSide: React.FC<AudioOverviewSideProps> = ({
       <div className="audio-song">{title}</div>
       {author && <div className="audio-artist">@{author}</div>}
 
-      {/* Stats — comment / share / collect, colored per the mock. */}
-      <div className="audio-ovr">
-        <span className="c-comment"><MessageCircle size={13} /> {formatNumber(video.comment_count)}</span>
-        <span className="c-share"><Share2 size={13} /> {formatNumber(video.share_count)}</span>
-        <span className="c-collect"><Bookmark size={13} /> {formatNumber(video.favorite_count)}</span>
-      </div>
+      {/* Stats — comment / share / collect, colored per the mock. Download audio
+          only; uploaded audio has no parsed_media social stats so the row is
+          omitted (the stack still reads correctly without it). */}
+      {video && (
+        <div className="audio-ovr">
+          <span className="c-comment"><MessageCircle size={13} /> {formatNumber(video.comment_count)}</span>
+          <span className="c-share"><Share2 size={13} /> {formatNumber(video.share_count)}</span>
+          <span className="c-collect"><Bookmark size={13} /> {formatNumber(video.favorite_count)}</span>
+        </div>
+      )}
 
       {/* Rating — interactive when a setter is provided (resource-backed), else a
           read-only dim row so the stack still matches the mock visually. */}

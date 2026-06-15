@@ -84,8 +84,12 @@ import { ResourceReviewPanel } from './ResourceReviewPanel';
 import { useResizablePanel, ResizeHandle, detailCardClass, DetailBadge, RatingStars, AiIntentBadges } from './detail/DetailCardKit';
 import { ResourceAnnotationOverlay, NormalizedAnnotation } from './ResourceAnnotationOverlay';
 import { AudioHero } from './AudioHero';
+import { AudioWaveformPlayer } from './AudioWaveformPlayer';
+import { AudioOverviewSide } from './AudioOverviewSide';
 import { MobileAudioUpload } from './MobileAudioUpload';
 import { LyricsView } from './LyricsView';
+import { buildSodaTheme } from '../utils/sodaTheme';
+import { extractCoverTint, tintFromTheme, type CoverTint } from '../utils/coverTint';
 import { fetchComments } from '../services/reviewService';
 import {
   triggerTranscriptionByResource,
@@ -453,6 +457,15 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const [rightTab, setRightTab] = useState<'info' | 'review' | 'transcript' | 'analysis' | 'lyrics'>('info');
   const [lyrics, setLyrics] = useState<{ lrc: string; lines: Array<{ text: string; line_start_ms: number | null }> } | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string>('');
+  // Island audio capsule stage: playback position drives the synced lyrics
+  // column; tint is the cover-sampled backdrop (matches the download detail
+  // audio stage). island-desktop audio only — no-op elsewhere.
+  const [audioCurrentTime, setAudioCurrentTime] = useState(0);
+  const [tint, setTint] = useState<CoverTint>(() => tintFromTheme(null));
+  // Cover upload for the island audio capsule stage (the AudioHero cover-click
+  // affordance lives inside FilePreview, which the stage replaces — so re-wire
+  // it here to preserve cover replace in island, D12).
+  const islandCoverInputRef = useRef<HTMLInputElement>(null);
 
   // AI / Transcript / Analysis state
   const [transcript, setTranscript] = useState<TranscriptData | null>(null);
@@ -767,6 +780,21 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
     handleResourceUpdate({ rating: v });
   }, [handleResourceUpdate]);
 
+  // Island audio capsule stage cover upload (mirrors FilePreview.handleCoverFile).
+  const handleIslandCoverFile = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file
+    if (!f) return;
+    try {
+      const updated = await uploadResourceCover(resource.id, f);
+      setResource(updated);
+      addToast(t('resources.detail.coverUpdated', 'Cover updated'), 'success');
+    } catch (err) {
+      console.error('Failed to upload cover:', err);
+      addToast('Failed to upload cover', 'error');
+    }
+  }, [resource.id, addToast, t]);
+
   // Close version dropdown on outside click
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -953,12 +981,32 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
     }
   }, [rightTab]);
 
-  // ─── Load lyrics for uploaded audio on tab switch ───
+  // ─── Load lyrics for uploaded audio — on tab switch (classic) OR up front
+  //     when the island audio capsule stage shows its synced lyrics column. ───
   useEffect(() => {
-    if (rightTab === 'lyrics' && !lyrics) {
+    const islandAudioStage =
+      islandDesktop &&
+      resource.mime_type?.startsWith('audio/') &&
+      resource.source_type === 'upload';
+    if ((rightTab === 'lyrics' || islandAudioStage) && !lyrics) {
       getResourceLyrics(resourceId).then((d) => { if (d) setLyrics(d); }).catch(() => {});
     }
-  }, [rightTab, lyrics, resourceId]);
+  }, [rightTab, lyrics, resourceId, islandDesktop, resource.mime_type, resource.source_type]);
+
+  // ─── Cover-tint for the island audio capsule stage (--tint / --tint-deep) ───
+  useEffect(() => {
+    const isAud = resource.mime_type?.startsWith('audio/');
+    const coverUrl =
+      resource.cover_image_path && resource.id
+        ? getResourceCoverUrl(String(resource.id), undefined, resource.updated_at)
+        : resource.thumbnail_path || undefined;
+    if (!islandDesktop || !isAud || !coverUrl) return;
+    let cancelled = false;
+    extractCoverTint(coverUrl, tintFromTheme(null)).then((tnt) => {
+      if (!cancelled) setTint(tnt);
+    });
+    return () => { cancelled = true; };
+  }, [islandDesktop, resource.mime_type, resource.cover_image_path, resource.id, resource.thumbnail_path, resource.updated_at]);
 
   const loadTranscript = useCallback(async () => {
     try {
@@ -1107,6 +1155,15 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const isVideo = resource.mime_type?.startsWith('video/');
   const isAudio = resource.mime_type?.startsWith('audio/');
   const isUploadedAudio = isAudio && resource.source_type === 'upload';
+  // Island audio capsule stage (unifies uploaded audio with the download-detail
+  // audio layout): cover-tinted cover-side + synced lyrics column + bottom
+  // capsule player. Gated to island desktop audio; classic / mobile keep AudioHero.
+  const audioCoverUrl =
+    resource.cover_image_path && resource.id
+      ? getResourceCoverUrl(String(resource.id), undefined, resource.updated_at)
+      : resource.thumbnail_path || undefined;
+  const audioSodaTheme = buildSodaTheme(null, String(resource.id));
+  const islandAudioStage = islandDesktop && isAudio && !!fileUrl;
   const viewingVersion = selectedVersionId
     ? versions.find((v) => v.id === selectedVersionId)
     : versions.find((v) => v.version_number === resource.current_version);
@@ -1671,7 +1728,10 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
 
         {/* Preview area — audio gets a tall hero (matches the download detail
             view); other media keep the compact mobile preview. */}
-        <div className={`w-full ${isAudio ? 'min-h-[78vh] sm:h-[50vh]' : 'h-64 sm:h-80'} md:h-auto md:flex-1 flex flex-col bg-ink-950 min-w-0 overflow-hidden shrink-0 md:shrink`}>
+        <div
+          className={`w-full ${isAudio ? 'min-h-[78vh] sm:h-[50vh]' : 'h-64 sm:h-80'} md:h-auto md:flex-1 flex flex-col min-w-0 overflow-hidden shrink-0 md:shrink ${islandAudioStage ? 'audio-stage' : 'bg-ink-950'}`}
+          style={islandAudioStage ? ({ ['--tint']: tint.tint, ['--tint-deep']: tint.tintDeep } as React.CSSProperties) : undefined}
+        >
           {/* Version preview banner */}
           {selectedVersionId && (
             <div className="flex items-center justify-center gap-2 px-3 py-1.5 bg-amber-500/10 border-b border-amber-500/20 text-xs text-amber-300 shrink-0">
@@ -1687,6 +1747,82 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               </button>
             </div>
           )}
+          {islandAudioStage ? (
+            <>
+              {/* Cover-tinted two-column stage (cover-side Overview | synced
+                  lyrics) + bottom play capsule — unifies uploaded audio with the
+                  download detail audio layout. The existing stage-head, inspector,
+                  file list, prev/next, versions and chorus all stay intact. */}
+              <div className="flex-1 min-h-0 flex items-center justify-center gap-[60px] pt-2.5 px-12 overflow-auto relative z-[2]">
+                <div className="max-w-[340px] shrink-0">
+                  <AudioOverviewSide
+                    resourceId={resourceId || undefined}
+                    coverUrl={audioCoverUrl}
+                    title={resource.filename}
+                    rating={resource.rating ?? 0}
+                    onRatingChange={handleRating}
+                    onCoverClick={isUploadedAudio ? () => islandCoverInputRef.current?.click() : undefined}
+                  />
+                  {isUploadedAudio && (
+                    <input
+                      ref={islandCoverInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleIslandCoverFile}
+                    />
+                  )}
+                </div>
+                <div className="lyrics-col flex-1 max-w-[440px] h-[min(420px,52vh)] overflow-hidden">
+                  {lyrics?.lines?.length ? (
+                    <LyricsView lines={lyrics.lines} currentTime={audioCurrentTime} variant="bare" />
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-center gap-1.5">
+                      <Music size={24} className={cFaint} />
+                      <p className={`text-sm ${cLabel}`}>{t('resources.detail.noLyrics', 'No lyrics yet')}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="audio-capsule shrink-0 relative z-[2]">
+                <AudioWaveformPlayer
+                  layout="capsule"
+                  src={fileUrl}
+                  filename={resource.filename}
+                  duration={resource.duration_seconds ?? undefined}
+                  chorusStartSec={resource.chorus_start_ms != null ? resource.chorus_start_ms / 1000 : undefined}
+                  chorusEditable={isUploadedAudio}
+                  setChorusLabel={t('resources.detail.setChorus', 'Set chorus')}
+                  clearChorusLabel={t('resources.detail.clearChorus', 'Clear')}
+                  onChorusChange={
+                    isUploadedAudio
+                      ? async (sec) => {
+                          try {
+                            const ms = sec == null ? null : Math.round(sec * 1000);
+                            const updated = await setResourceChorus(resource.id, ms);
+                            setResource(updated);
+                            addToast(
+                              t(
+                                ms == null
+                                  ? 'resources.detail.chorusCleared'
+                                  : 'resources.detail.chorusSet',
+                                ms == null ? 'Chorus removed' : 'Chorus marked',
+                              ),
+                              'success',
+                            );
+                          } catch (err) {
+                            console.error('Failed to set chorus:', err);
+                            addToast('Failed to set chorus', 'error');
+                          }
+                        }
+                      : undefined
+                  }
+                  onTimeUpdate={setAudioCurrentTime}
+                  theme={audioSodaTheme}
+                />
+              </div>
+            </>
+          ) : (
           <div className="flex-1 flex items-center justify-center min-h-0 min-w-0 overflow-hidden">
           {isVideo && fileUrl ? (
             <div className="w-full h-full relative">
@@ -1721,6 +1857,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             </div>
           )}
           </div>
+          )}
         </div>
 
         {/* Resize handle — desktop only, invisible until hover (no persistent divider) */}
