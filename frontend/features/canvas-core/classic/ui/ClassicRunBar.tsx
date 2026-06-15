@@ -1,37 +1,103 @@
 /**
- * ClassicMode run bar (Phase 5a — the "Run trigger" last mile).
+ * ClassicMode run bar — Phase 5a (synchronous cascade) + Phase 6d-M4b (async DBOS).
  *
- * ClassicMode ships a fully-built, tested cascade engine
- * (`runClassicCascade`) but nothing in the UI invokes it. This overlay is
- * that last mile: a single Run control mounted on the classic canvas
- * surface that runs the cascade against the LIVE store graph and wires its
- * two side-channels back into the app:
+ * TWO run paths, selected by which prop is provided:
  *
- *   - `onNodePatch(id, patch)` → `store.patchNode(id, { data: patch })` so
- *     each node's run_status/run_error/run_result render inline, and
- *   - `onToast(message)` → app `useToast().addToast(message, 'error')` so a
- *     contained cascade failure ("Cascade stopped at …") is surfaced.
+ * ── Synchronous cascade (legacy / test injection) ──────────────────────────
+ * When a `cascade` prop is supplied the bar behaves exactly as it did before
+ * Phase 6d: it calls `runClassicCascade` in-browser, receives `onNodePatch`
+ * callbacks, and surfaces toasts for failures. All existing ClassicRunBar
+ * tests exercise this path.
  *
- * MVP scope: just Run + a running affordance. A node-palette to ADD classic
- * nodes is an explicit LATER slice and is intentionally NOT built here.
+ * ── Async DBOS graph-run (production default) ──────────────────────────────
+ * When NO `cascade` prop is supplied (production), the button triggers:
+ *   1. `topoSort` over the live store graph → deterministic `node_order`.
+ *   2. Pre-paint every ordered node as `queued` for instant visual feedback.
+ *   3. `POST /api/v1/canvases/{id}/graph-runs` (returns task_id immediately).
+ *   4. Store `parentTaskId`; a `useEffect` watches `tasks` from
+ *      `TaskManagerContext` and maps per-node subtask rows
+ *      (`{task_id}-node-{pos}`, `metadata.node_id`) to node `run_status`.
+ *
+ * Node OUTPUT updates arrive via the Phase-6a Supabase Realtime channel
+ * (`useCanvasRealtime` → `applyRemoteUpdate`) — this bar does NOT re-fetch.
+ *
+ * ── Single-node Run (SmartMode) ────────────────────────────────────────────
+ * The SmartMode single-node `runSinglePrompt` path is UNAFFECTED — it lives
+ * in `smart/runner.ts` and is invoked from SmartMode prompt node controls,
+ * not from this component.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Loader2, Play } from 'lucide-react';
 
 import { useToast } from '../../../../components/Toast';
+import {
+  useTaskManager,
+  type UnifiedTask,
+} from '../../../../contexts/TaskManagerContext';
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
+import { enqueueGraphRun } from '../../services/canvasService';
+import { topoSort } from '../../smart/topology';
 import { runClassicCascade } from '../cascade';
 import { createClassicBackendRunner } from '../classicRunner';
 
+// ── Types ──────────────────────────────────────────────────────────────────
+
+/** Valid `run_status` values (mirrors `ClassicRunStatus` / `PromptNodeData`). */
+type RunStatus = 'idle' | 'queued' | 'running' | 'succeeded' | 'failed' | 'blocked';
+
 export interface ClassicRunBarProps {
-  /** Injected by tests with a deterministic spy. Defaults to the real
-   *  cascade orchestrator at runtime. */
+  /**
+   * Injected by existing tests with a deterministic spy (synchronous cascade
+   * path). When present the async DBOS path is bypassed entirely so the full
+   * legacy test suite continues to pass without any changes.
+   *
+   * Production callers MUST NOT supply this prop — leave it undefined so the
+   * DBOS graph-run path is used.
+   */
   cascade?: typeof runClassicCascade;
+
+  /**
+   * Injectable override for the graph-run enqueue call. Defaults to the real
+   * `enqueueGraphRun` from canvasService. Provided by new DBOS-path tests.
+   */
+  enqueue?: typeof enqueueGraphRun;
 }
 
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+/** Map a `task_tracking.phase` value to the canvas node `run_status` union. */
+function phaseToRunStatus(phase: string | undefined): RunStatus {
+  switch (phase) {
+    case 'queued':
+    case 'dedup_check':
+      return 'queued';
+    case 'processing':
+      return 'running';
+    case 'completed':
+      return 'succeeded';
+    case 'failed':
+    case 'cancelled':
+      return 'failed';
+    default:
+      // Unknown / undefined phase while the workflow is live → treat as running.
+      return 'running';
+  }
+}
+
+/** True when every subtask has reached a terminal phase. */
+function allTerminal(subtasks: UnifiedTask[]): boolean {
+  if (subtasks.length === 0) return false;
+  return subtasks.every(
+    (t) => t.phase === 'completed' || t.phase === 'failed' || t.phase === 'cancelled',
+  );
+}
+
+// ── Component ──────────────────────────────────────────────────────────────
+
 export function ClassicRunBar({
-  cascade = runClassicCascade,
+  cascade,
+  enqueue = enqueueGraphRun,
 }: ClassicRunBarProps = {}) {
   const nodes = useCanvasCoreStore((s) => s.nodes);
   const connections = useCanvasCoreStore((s) => s.connections);
@@ -39,32 +105,90 @@ export function ClassicRunBar({
   const patchNode = useCanvasCoreStore((s) => s.patchNode);
   const { addToast } = useToast();
 
+  // TaskManagerContext — needed for the async DBOS path.
+  // Tests mock this module (see ClassicRunBar.test.tsx / ClassicRunBar.graphRun.test.tsx).
+  const { tasks } = useTaskManager();
+
   const [running, setRunning] = useState(false);
+  /** DBOS parent workflow id after a successful graph-run enqueue. */
+  const [parentTaskId, setParentTaskId] = useState<string | null>(null);
 
   const nodeCount = nodes.length;
 
+  // ── Per-node status sync (DBOS path only) ────────────────────────────────
+  // Subtasks are task_tracking rows with ids `{parentTaskId}-node-{position}`
+  // and `metadata.node_id` = the canvas node's id. When their `phase` changes
+  // (via Supabase Realtime → TaskManagerContext), we paint the matching node.
+  useEffect(() => {
+    if (!parentTaskId) return;
+    const prefix = `${parentTaskId}-node-`;
+    const subtasks = tasks.filter((t: UnifiedTask) => t.id.startsWith(prefix));
+    for (const subtask of subtasks) {
+      const nodeId = subtask.metadata.node_id as string | undefined;
+      if (!nodeId) continue;
+      const runStatus = phaseToRunStatus(subtask.phase);
+      patchNode(nodeId, {
+        data: { run_status: runStatus } as Record<string, unknown>,
+      });
+    }
+    if (allTerminal(subtasks)) {
+      setRunning(false);
+      setParentTaskId(null);
+    }
+  }, [tasks, parentTaskId, patchNode]);
+
+  // ── Run handler ──────────────────────────────────────────────────────────
   const onRun = useCallback(async () => {
-    // Guard against double-invocation: a click while a cascade is in flight
-    // (the button is also disabled, but belt-and-suspenders) and a run with
-    // no canvas bound (the backend runner needs a canvas id).
     if (running || !canvasId) return;
     setRunning(true);
-    try {
-      const runner = createClassicBackendRunner({ canvasId });
-      await cascade(nodes, connections, runner, {
-        onNodePatch: (id, patch) =>
-          patchNode(id, { data: { ...patch } as Record<string, unknown> }),
-        onToast: (message) => addToast(message, 'error'),
-      });
-    } catch (err) {
-      // The cascade is contained and should never throw, but be safe: a
-      // surprise rejection must not leave the UI stuck or silent.
-      const message = err instanceof Error ? err.message : String(err);
-      addToast(`Cascade failed: ${message}`, 'error');
-    } finally {
-      setRunning(false);
+
+    // ── Legacy synchronous cascade (injected by tests) ──────────────────
+    if (cascade) {
+      try {
+        const runner = createClassicBackendRunner({ canvasId });
+        await cascade(nodes, connections, runner, {
+          onNodePatch: (id, patch) =>
+            patchNode(id, { data: { ...patch } as Record<string, unknown> }),
+          onToast: (message) => addToast(message, 'error'),
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        addToast(`Cascade failed: ${message}`, 'error');
+      } finally {
+        setRunning(false);
+      }
+      return;
     }
-  }, [running, canvasId, nodes, connections, cascade, patchNode, addToast]);
+
+    // ── Async DBOS graph-run (production default) ────────────────────────
+    try {
+      const nodeIds = nodes
+        .map((n) => (n as Record<string, unknown>).id as string)
+        .filter(Boolean);
+      const edges = connections.map((c) => {
+        const conn = c as Record<string, unknown>;
+        return {
+          source: conn.source as string,
+          target: conn.target as string,
+        };
+      });
+      const { order } = topoSort(nodeIds, edges);
+
+      // Optimistic pre-paint: mark each node queued before the round-trip.
+      for (const id of order) {
+        patchNode(id, { data: { run_status: 'queued' } as Record<string, unknown> });
+      }
+
+      const result = await enqueue(canvasId, order, /* continueOnFailure */ true);
+      setParentTaskId(result.task_id);
+      // `running` stays true — cleared by the useEffect when subtasks finish.
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      addToast(`Graph run failed: ${message}`, 'error');
+      setRunning(false);
+      setParentTaskId(null);
+    }
+  }, [running, canvasId, cascade, enqueue, nodes, connections, patchNode, addToast]);
 
   const disabled = running || !canvasId || nodeCount === 0;
 

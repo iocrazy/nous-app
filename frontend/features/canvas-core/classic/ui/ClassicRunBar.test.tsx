@@ -18,6 +18,14 @@ vi.mock('../../../../components/Toast', () => ({
   useToast: () => ({ addToast }),
 }));
 
+// The async DBOS path (Phase 6d-M4b) reads from TaskManagerContext. Stub it
+// so the bar renders without a TaskManagerProvider in these synchronous-cascade
+// tests. All existing tests pass `cascade` prop → the DBOS branch is never
+// reached — an empty tasks array is the correct stub value here.
+vi.mock('../../../../contexts/TaskManagerContext', () => ({
+  useTaskManager: () => ({ tasks: [] }),
+}));
+
 const EMPTY_REPORT: CascadeReport = {
   succeeded: [],
   failed: [],
