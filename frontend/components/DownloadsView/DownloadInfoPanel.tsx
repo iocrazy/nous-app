@@ -128,7 +128,7 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
         <div className="flex-1 overflow-y-auto">
           {/* Header */}
           <div className={`sticky top-0 z-10 flex items-center justify-between px-4 py-2 border-b ${cBorderHeader} ${cSurface}`}>
-            <h3 className={`text-sm font-semibold ${cPrimary} truncate`}>{t('resources.details', 'Details')}</h3>
+            <h3 className={`text-sm font-semibold ${cPrimary} truncate`}>{t('resources.infoPanel.title')}</h3>
             <button
               onClick={onClose}
               className={`p-1.5 ${cText400} ${cHoverPrimary} ${cHoverSurface} rounded-lg transition-colors`}
@@ -171,7 +171,7 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
           {island && selectedResourceData && (
             <div className="px-4 mt-3">
               <h4 className="text-[11px] font-semibold text-content-3 uppercase tracking-widest mb-1.5">
-                Notes
+                {t('resources.infoPanel.notes')}
               </h4>
               {panelNotes || editingNotes ? (
                 <textarea
@@ -182,7 +182,7 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
                     if (!panelNotes.trim()) setEditingNotes(false);
                   }}
                   autoFocus={editingNotes && !panelNotes}
-                  placeholder="Add notes..."
+                  placeholder={t('resources.infoPanel.notesPlaceholder')}
                   rows={3}
                   className="w-full bg-island-2 border border-line rounded-lg px-2.5 py-2 text-xs text-content-2 placeholder-content-4 focus:outline-none focus:border-indigo-500/50 resize-none"
                 />
@@ -192,7 +192,7 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
                   className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-content-4 hover:text-content-2 border border-dashed border-line-strong hover:border-line-strong rounded-lg transition-colors text-left"
                 >
                   <Plus size={12} className="shrink-0" />
-                  Add note
+                  {t('resources.infoPanel.addNote')}
                 </button>
               )}
             </div>
@@ -213,7 +213,7 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
           {selectedVideo?.hashtags && (
             <div className="px-4 mt-3">
               <h4 className={`text-[11px] font-semibold ${cLabel} uppercase tracking-widest mb-2`}>
-                Platform Tags
+                {t('resources.infoPanel.platformTags')}
               </h4>
               <div className="flex flex-wrap gap-1.5">
                 {selectedVideo.hashtags.split(/\s+/).filter(h => h.startsWith('#') && h.length > 1).map((ht, i) => (
@@ -230,7 +230,7 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
           {!island && (
             <div className="px-4 mt-4">
               <h4 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-2">
-                Rating
+                {t('resources.infoPanel.rating')}
               </h4>
               <div className="flex items-center gap-0.5">
                 {[1, 2, 3, 4, 5].map(star => (
@@ -258,13 +258,13 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
           {!island && selectedResourceData && (
             <div className="px-4 mt-4">
               <h4 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-1.5">
-                Notes
+                {t('resources.infoPanel.notes')}
               </h4>
               <textarea
                 value={panelNotes}
                 onChange={e => onNotesChange(e.target.value)}
                 onBlur={onNotesBlur}
-                placeholder="Add notes..."
+                placeholder={t('resources.infoPanel.notesPlaceholder')}
                 className="w-full bg-ink-900 border border-ink-800 rounded-lg px-3 py-2 text-xs text-ink-300 placeholder-ink-600 resize-none min-h-[60px] focus:outline-none focus:border-ink-600 transition-colors"
                 rows={3}
               />
@@ -275,7 +275,7 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
           {(selectedVideo.transcript_status || selectedVideo.summary_status || selectedVideo.visual_analysis_status) && (
             <div className={`px-4 mt-4 border-t ${cBorderSection} pt-3`}>
               <h4 className={`text-[11px] font-semibold ${cLabel} uppercase tracking-widest mb-2`}>
-                AI
+                {t('resources.infoPanel.aiStatus')}
               </h4>
               <div className="space-y-1.5">
                 {selectedVideo.transcript_status && selectedVideo.transcript_status !== 'none' && (
@@ -312,14 +312,14 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
           {/* Properties */}
           <div className={`px-4 mt-4 border-t ${cBorderSection} pt-3`}>
             <h4 className={`text-[11px] font-semibold ${cLabel} uppercase tracking-widest mb-2`}>
-              Properties
+              {t('resources.infoPanel.properties')}
             </h4>
             <div className="space-y-0">
               {/* Rating — island merges it into the properties list (first row) to
                   mirror the uploads panel. Classic shows the standalone section above. */}
               {island && (
                 <div className="flex justify-between items-center py-1.5 pr-0.5">
-                  <span className="text-xs text-content-3">Rating</span>
+                  <span className="text-xs text-content-3">{t('resources.infoPanel.rating')}</span>
                   <div className="flex items-center gap-0.5" onMouseLeave={() => onHoverRating(0)}>
                     {[1, 2, 3, 4, 5].map(star => (
                       <button
@@ -341,37 +341,37 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
               )}
               {selectedVideo.author && (
                 <div className="flex justify-between items-center py-1.5">
-                  <span className={`text-xs ${cLabel}`}>Author</span>
+                  <span className={`text-xs ${cLabel}`}>{t('resources.infoPanel.author')}</span>
                   <span className={`text-xs ${cText300}`}>@{selectedVideo.author}</span>
                 </div>
               )}
               {selectedVideo.duration && (
                 <div className="flex justify-between items-center py-1.5">
-                  <span className={`text-xs ${cLabel}`}>Duration</span>
+                  <span className={`text-xs ${cLabel}`}>{t('resources.infoPanel.duration')}</span>
                   <span className={`text-xs ${cText300}`}>{selectedVideo.duration}s</span>
                 </div>
               )}
               {selectedVideo.resolution && (
                 <div className="flex justify-between items-center py-1.5">
-                  <span className={`text-xs ${cLabel}`}>Resolution</span>
+                  <span className={`text-xs ${cLabel}`}>{t('resources.infoPanel.resolution')}</span>
                   <span className={`text-xs ${cText300}`}>{formatResolution(selectedVideo.resolution)}</span>
                 </div>
               )}
               {selectedVideo.datasize && (
                 <div className="flex justify-between items-center py-1.5">
-                  <span className={`text-xs ${cLabel}`}>Size</span>
+                  <span className={`text-xs ${cLabel}`}>{t('resources.infoPanel.size')}</span>
                   <span className={`text-xs ${cText300}`}>{selectedVideo.datasize}</span>
                 </div>
               )}
               {selectedVideo.source_platform && (
                 <div className="flex justify-between items-center py-1.5">
-                  <span className={`text-xs ${cLabel}`}>Platform</span>
+                  <span className={`text-xs ${cLabel}`}>{t('resources.infoPanel.platform')}</span>
                   <span className={`text-xs ${cText300} capitalize`}>{selectedVideo.source_platform}</span>
                 </div>
               )}
               {selectedVideo.published_at && (
                 <div className="flex justify-between items-center py-1.5">
-                  <span className={`text-xs ${cLabel}`}>Published</span>
+                  <span className={`text-xs ${cLabel}`}>{t('resources.infoPanel.published')}</span>
                   <span className={`text-xs ${cText300}`}>{formatDate(selectedVideo.published_at)}</span>
                 </div>
               )}

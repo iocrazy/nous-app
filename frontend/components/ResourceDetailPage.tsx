@@ -984,29 +984,32 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   // ─── Load lyrics for uploaded audio — on tab switch (classic) OR up front
   //     when the island audio capsule stage shows its synced lyrics column. ───
   useEffect(() => {
+    // resource is null until loaded; this effect is defined before the
+    // !resource render guard, so every access (incl. the dep array) must be
+    // null-safe or the first render throws.
     const islandAudioStage =
       islandDesktop &&
-      resource.mime_type?.startsWith('audio/') &&
-      resource.source_type === 'upload';
+      resource?.mime_type?.startsWith('audio/') &&
+      resource?.source_type === 'upload';
     if ((rightTab === 'lyrics' || islandAudioStage) && !lyrics) {
       getResourceLyrics(resourceId).then((d) => { if (d) setLyrics(d); }).catch(() => {});
     }
-  }, [rightTab, lyrics, resourceId, islandDesktop, resource.mime_type, resource.source_type]);
+  }, [rightTab, lyrics, resourceId, islandDesktop, resource?.mime_type, resource?.source_type]);
 
   // ─── Cover-tint for the island audio capsule stage (--tint / --tint-deep) ───
   useEffect(() => {
-    const isAud = resource.mime_type?.startsWith('audio/');
+    const isAud = resource?.mime_type?.startsWith('audio/');
     const coverUrl =
-      resource.cover_image_path && resource.id
+      resource?.cover_image_path && resource?.id
         ? getResourceCoverUrl(String(resource.id), undefined, resource.updated_at)
-        : resource.thumbnail_path || undefined;
+        : resource?.thumbnail_path || undefined;
     if (!islandDesktop || !isAud || !coverUrl) return;
     let cancelled = false;
     extractCoverTint(coverUrl, tintFromTheme(null)).then((tnt) => {
       if (!cancelled) setTint(tnt);
     });
     return () => { cancelled = true; };
-  }, [islandDesktop, resource.mime_type, resource.cover_image_path, resource.id, resource.thumbnail_path, resource.updated_at]);
+  }, [islandDesktop, resource?.mime_type, resource?.cover_image_path, resource?.id, resource?.thumbnail_path, resource?.updated_at]);
 
   const loadTranscript = useCallback(async () => {
     try {

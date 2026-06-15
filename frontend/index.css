@@ -233,11 +233,13 @@
 
 /* Audio detail island — cover-tinted immersive stage (spec §5.3 / D8). --tint and
    --tint-deep are set per-track by DownloadDetailPage (coverTint util); fallbacks here. */
+/* Flat immersive backdrop — per user direction the music detail drops the
+   cover-tint gradient. Fixed dark in both themes (a media stage, like a video
+   player, stays dark); --tint still drives the small accents (play button,
+   waveform, share). */
 .audio-stage {
   position: relative;
-  background:
-    radial-gradient(900px 600px at 38% 30%, rgba(var(--tint, 99,102,241), .16), transparent 65%),
-    linear-gradient(165deg, rgb(var(--tint-deep, 24,28,46)), #0d1210 55%, #0a0d0c);
+  background: #0a0a0d;
 }
 .lyrics-col {
   -webkit-mask-image: linear-gradient(transparent, #000 18%, #000 82%, transparent);

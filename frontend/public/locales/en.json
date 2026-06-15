@@ -723,7 +723,11 @@
       "autoTagSlow": "Still tagging — check Task Center",
       "autoTagFailed": "Auto-tagging failed",
       "addNote": "Add note",
-      "addUrl": "Add source link"
+      "addUrl": "Add source link",
+      "author": "Author",
+      "platform": "Platform",
+      "published": "Published",
+      "platformTags": "Platform Tags"
     },
     "folderInfoPanel": {
       "title": "Folder Info",
