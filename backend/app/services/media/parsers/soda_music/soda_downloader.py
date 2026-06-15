@@ -21,7 +21,7 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 import aiofiles
 from loguru import logger
@@ -43,8 +43,15 @@ async def download_and_decrypt(
     dest_path: str,
     cookie: str = "",
     client_factory: Callable[[], Any] | None = None,
+    progress_cb: Callable[[int], Awaitable[None]] | None = None,
 ) -> int:
     """Fetch the encrypted stream, decrypt, write to dest_path. Returns bytes written.
+
+    ``progress_cb(pct)`` (optional) is awaited with the download percentage
+    (0-99), throttled to ~5% steps, while the encrypted stream is being pulled —
+    so the UI doesn't sit frozen during the slow byte fetch. Best-effort: a
+    callback error never aborts the download. Needs a Content-Length to report;
+    without one the callback is simply not called.
 
     Raises:
         ValueError: if url is empty.
@@ -66,10 +73,25 @@ async def download_and_decrypt(
     async with factory() as client:
         async with client.stream("GET", url, headers=headers, timeout=120.0) as resp:
             resp.raise_for_status()
+            try:
+                total = int(
+                    (getattr(resp, "headers", None) or {}).get("content-length") or 0
+                )
+            except (TypeError, ValueError):
+                total = 0
+            last_pct = -1
             async for chunk in cap_aiter(
                 resp.aiter_bytes(), max_bytes=MAX_SODA_AUDIO_BYTES
             ):
                 buf.extend(chunk)
+                if progress_cb is not None and total > 0:
+                    pct = min(99, len(buf) * 100 // total)
+                    if pct >= last_pct + 5:
+                        last_pct = pct
+                        try:
+                            await progress_cb(pct)
+                        except Exception:  # noqa: BLE001 — progress is best-effort
+                            pass
     encrypted = bytes(buf)
 
     # decrypt_audio is heavy synchronous CPU work (per-sample AES-CTR over the
