@@ -165,6 +165,13 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
   const cDashed = island ? 'border-line-strong' : 'border-ink-700/60';
   const cDashedHover = island ? 'hover:border-line-strong' : 'hover:border-ink-600';
   const cPlaceholder = island ? 'placeholder-content-4' : 'placeholder-ink-600';
+  // Surface tokens: the mock paints inputs/secondary surfaces with --island-2
+  // and hovers with --island-2; classic keeps the exact original ink surfaces
+  // so D12 stays byte-identical when island=false.
+  const cInputBg = island ? 'bg-island-2' : 'bg-ink-800/50';
+  const cInputBorder = island ? 'border-line' : 'border-ink-700/50';
+  const cFieldBg = island ? 'bg-island-2' : 'bg-ink-800';
+  const cHoverSurface = island ? 'hover:bg-island-2' : 'hover:bg-ink-800';
 
   // ─── Editable filename ──────────────────────────────
   const [editingName, setEditingName] = useState(false);
@@ -260,7 +267,7 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
         <h3 className={`text-sm font-semibold ${cPrimary} select-none`}>{t('resources.infoPanel.title')}</h3>
         <button
           onClick={onClose}
-          className={`p-1.5 ${cText400} ${cHoverPrimary} hover:bg-ink-800 rounded-lg transition-colors`}
+          className={`p-1.5 ${cText400} ${cHoverPrimary} ${cHoverSurface} rounded-lg transition-colors`}
         >
           <X size={16} />
         </button>
@@ -293,7 +300,7 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
               if (e.key === 'Enter') commitName();
               if (e.key === 'Escape') { setNameValue(resource.filename); setEditingName(false); }
             }}
-            className={`w-full bg-ink-800 border border-indigo-500/50 rounded px-2 py-1 text-sm ${cPrimary} focus:outline-none`}
+            className={`w-full ${cFieldBg} border border-indigo-500/50 rounded px-2 py-1 text-sm ${cPrimary} focus:outline-none`}
             autoFocus
           />
         ) : readOnly ? (
@@ -326,7 +333,7 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
               autoFocus={editingNotes && !notesValue}
               placeholder={t('resources.infoPanel.notesPlaceholder')}
               rows={3}
-              className={`w-full bg-ink-800/50 border border-ink-700/50 rounded-lg px-2.5 py-2 text-xs ${cText300} ${cPlaceholder} focus:outline-none focus:border-indigo-500/50 resize-none`}
+              className={`w-full ${cInputBg} border ${cInputBorder} rounded-lg px-2.5 py-2 text-xs ${cText300} ${cPlaceholder} focus:outline-none focus:border-indigo-500/50 resize-none`}
             />
           ) : (
             <button
@@ -362,7 +369,7 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
               onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
               autoFocus={editingUrl && !urlValue}
               placeholder={t('resources.infoPanel.urlPlaceholder')}
-              className={`w-full bg-ink-800/50 border border-ink-700/50 rounded-lg px-2.5 py-1.5 text-xs ${cText300} ${cPlaceholder} focus:outline-none focus:border-indigo-500/50`}
+              className={`w-full ${cInputBg} border ${cInputBorder} rounded-lg px-2.5 py-1.5 text-xs ${cText300} ${cPlaceholder} focus:outline-none focus:border-indigo-500/50`}
             />
           ) : (
             <button

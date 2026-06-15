@@ -91,6 +91,13 @@ export const FolderInfoPanel: React.FC<FolderInfoPanelProps> = ({
   const cGroupHover400 = island ? 'group-hover:text-content-2' : 'group-hover:text-ink-400';
   const cBorderHeader = island ? 'border-line' : 'border-ink-800';
   const cBorderSection = island ? 'border-line' : 'border-ink-800/60';
+  // Surface tokens — mirror the resource/download panels: island paints the
+  // preview/placeholder/input/hover surfaces with --island-2; classic keeps the
+  // exact original ink surfaces so D12 stays byte-identical when island=false.
+  const cHoverSurface = island ? 'hover:bg-island-2' : 'hover:bg-ink-800';
+  const cPreviewBg = island ? 'bg-island-2' : 'bg-ink-800/50';
+  const cTileBg = island ? 'bg-island-2' : 'bg-ink-800';
+  const cFieldBg = island ? 'bg-island-2' : 'bg-ink-800';
 
   return (
     <div className={`flex-1 min-w-0 h-full overflow-y-auto ${island ? '' : 'bg-ink-900'}`}>
@@ -99,19 +106,19 @@ export const FolderInfoPanel: React.FC<FolderInfoPanelProps> = ({
         <h3 className={`text-sm font-semibold ${cPrimary}`}>{t('resources.folderInfoPanel.title')}</h3>
         <button
           onClick={onClose}
-          className={`p-1.5 ${cText400} ${cHoverPrimary} hover:bg-ink-800 rounded-lg transition-colors`}
+          className={`p-1.5 ${cText400} ${cHoverPrimary} ${cHoverSurface} rounded-lg transition-colors`}
         >
           <X size={16} />
         </button>
       </div>
 
       {/* Preview — 4-grid thumbnails or folder icon fallback */}
-      <div className={`mx-4 mt-4 h-44 rounded-xl overflow-hidden bg-ink-800/50 ${hasPreview ? '' : 'flex items-center justify-center'}`}>
+      <div className={`mx-4 mt-4 h-44 rounded-xl overflow-hidden ${cPreviewBg} ${hasPreview ? '' : 'flex items-center justify-center'}`}>
         {hasPreview ? (
           <div className="w-full h-full grid grid-cols-2 grid-rows-2 gap-px">
             {[0, 1, 2, 3].map((idx) => {
               const item = previewSlots[idx];
-              if (!item) return <div key={idx} className="bg-ink-800" />;
+              if (!item) return <div key={idx} className={cTileBg} />;
               const src = (item.thumbnail_path || item.cover_image_path) && item.resource_id
                 ? getResourceCoverUrl(String(item.resource_id))
                 : null;
@@ -125,7 +132,7 @@ export const FolderInfoPanel: React.FC<FolderInfoPanelProps> = ({
                   onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                 />
               ) : (
-                <div key={idx} className="bg-ink-800 flex items-center justify-center">
+                <div key={idx} className={`${cTileBg} flex items-center justify-center`}>
                   <FolderOpen size={16} className={cFaint} />
                 </div>
               );
@@ -153,7 +160,7 @@ export const FolderInfoPanel: React.FC<FolderInfoPanelProps> = ({
               if (e.key === 'Enter') commitName();
               if (e.key === 'Escape') { setNameValue(folder.name); setEditingName(false); }
             }}
-            className={`w-full bg-ink-800 border border-indigo-500/50 rounded px-2 py-1 text-sm ${cPrimary} focus:outline-none`}
+            className={`w-full ${cFieldBg} border border-indigo-500/50 rounded px-2 py-1 text-sm ${cPrimary} focus:outline-none`}
             autoFocus
           />
         ) : readOnly ? (

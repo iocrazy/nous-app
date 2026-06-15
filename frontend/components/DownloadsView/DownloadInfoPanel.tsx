@@ -95,6 +95,14 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
   const cBorderWrap = island ? 'border-line' : 'border-ink-800';
   const cBorderHeader = island ? 'border-line' : 'border-ink-800/80';
   const cBorderSection = island ? 'border-line' : 'border-ink-800/60';
+  // Surface tokens — mirror ResourceInfoPanel: island paints inputs/hovers/chips
+  // with --island-2/--line; classic keeps the exact original ink surfaces.
+  const cInputBg = island ? 'bg-island-2' : 'bg-ink-800/50';
+  const cInputBorder = island ? 'border-line' : 'border-ink-700/50';
+  const cHoverSurface = island ? 'hover:bg-island-2' : 'hover:bg-ink-800';
+  const cChipBg = island ? 'bg-island-2' : 'bg-ink-800/50';
+  const cChipText = island ? 'text-content-3' : 'text-ink-500';
+  const cChipBorder = island ? 'border-line' : 'border-ink-700/50';
 
   return (
     <>
@@ -107,7 +115,7 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
       >
         <button
           onClick={() => onTogglePanel(false)}
-          className={`absolute -left-10 bottom-8 w-10 h-12 ${cSurface} border-l border-y ${cBorderWrap} rounded-l-xl flex items-center justify-center ${cText400} ${cHoverPrimary} cursor-pointer hover:bg-ink-800 transition-colors z-10`}
+          className={`absolute -left-10 bottom-8 w-10 h-12 ${cSurface} border-l border-y ${cBorderWrap} rounded-l-xl flex items-center justify-center ${cText400} ${cHoverPrimary} cursor-pointer ${cHoverSurface} transition-colors z-10`}
         >
           <ChevronRight size={20} />
         </button>
@@ -123,7 +131,7 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
             <h3 className={`text-sm font-semibold ${cPrimary} truncate`}>{t('resources.details', 'Details')}</h3>
             <button
               onClick={onClose}
-              className={`p-1.5 ${cText400} ${cHoverPrimary} hover:bg-ink-800 rounded-lg transition-colors`}
+              className={`p-1.5 ${cText400} ${cHoverPrimary} ${cHoverSurface} rounded-lg transition-colors`}
             >
               <X size={16} />
             </button>
@@ -176,7 +184,7 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
                   autoFocus={editingNotes && !panelNotes}
                   placeholder="Add notes..."
                   rows={3}
-                  className="w-full bg-ink-800/50 border border-ink-700/50 rounded-lg px-2.5 py-2 text-xs text-content-2 placeholder-content-4 focus:outline-none focus:border-indigo-500/50 resize-none"
+                  className="w-full bg-island-2 border border-line rounded-lg px-2.5 py-2 text-xs text-content-2 placeholder-content-4 focus:outline-none focus:border-indigo-500/50 resize-none"
                 />
               ) : (
                 <button
@@ -209,7 +217,7 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
               </h4>
               <div className="flex flex-wrap gap-1.5">
                 {selectedVideo.hashtags.split(/\s+/).filter(h => h.startsWith('#') && h.length > 1).map((ht, i) => (
-                  <span key={i} className="text-[10px] px-2 py-0.5 rounded bg-ink-800/50 text-ink-500 border border-ink-700/50">
+                  <span key={i} className={`text-[10px] px-2 py-0.5 rounded ${cChipBg} ${cChipText} border ${cChipBorder}`}>
                     {ht}
                   </span>
                 ))}
@@ -379,7 +387,7 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
       {!showInfoPanel && (
         <button
           onClick={() => onTogglePanel(true)}
-          className={`hidden md:flex fixed bottom-8 right-0 w-10 h-12 ${cSurface} border-l border-y ${cBorderWrap} rounded-l-xl items-center justify-center ${cText400} ${cHoverPrimary} cursor-pointer hover:bg-ink-800 transition-all z-50`}
+          className={`hidden md:flex fixed bottom-8 right-0 w-10 h-12 ${cSurface} border-l border-y ${cBorderWrap} rounded-l-xl items-center justify-center ${cText400} ${cHoverPrimary} cursor-pointer ${cHoverSurface} transition-all z-50`}
         >
           <ChevronLeft size={20} />
         </button>
