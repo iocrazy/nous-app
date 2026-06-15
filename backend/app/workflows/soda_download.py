@@ -281,7 +281,14 @@ async def soda_download_workflow(
 
     await manager.update_progress(wf_id, 20, subtitle=f"Downloading {title}")
 
-    # 4. Download + decrypt to disk.
+    # 4. Download + decrypt to disk. Stream-progress so the UI doesn't freeze at
+    #    20% during the byte fetch: map the download's 0-100% into the 20-75 band
+    #    (75-80 covers decrypt+save). Best-effort — progress never blocks DL.
+    async def _on_download_progress(pct: int) -> None:
+        await manager.update_progress(
+            wf_id, 20 + (pct * 55) // 100, subtitle=f"Downloading {title}"
+        )
+
     full, rel = build_audio_dest(
         media_id=str(media_id),
         ext=plan.ext,
@@ -292,6 +299,7 @@ async def soda_download_workflow(
         play_auth=plan.play_auth,
         dest_path=str(full),
         cookie=cookie,
+        progress_cb=_on_download_progress,
     )
 
     await manager.update_progress(wf_id, 80, subtitle="Saving to library")
