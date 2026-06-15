@@ -99,6 +99,20 @@ export function CanvasSurface() {
   );
   const rfEdges = useMemo(() => toReactFlowEdges(connections), [connections]);
 
+  // Fix 3 (6e-2c) — O(1) node-type lookup for connection validation.
+  // `nodeTypeById` is called twice per connection event (source + target).
+  // Previously: rfNodes.find(n => n.id === id) = O(N) per call.
+  // Now: Map<id, type> built once alongside rfNodes, O(1) per call.
+  // The Map rebuilds only when rfNodes rebuilds (same [rfNodes] dep),
+  // so it is always consistent with the rendered node list.
+  const nodeTypeMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const n of rfNodes) {
+      if (n.type) m.set(n.id, n.type);
+    }
+    return m;
+  }, [rfNodes]);
+
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
       const next = applyNodeChanges(changes, rfNodes);
@@ -158,9 +172,10 @@ export function CanvasSurface() {
   // BOTH the live drag-validity hint (`isConnectionValid`) and the commit
   // (`onConnect`), so the dropped-wire rule and the appended-edge rule can
   // never diverge.
+  // Fix 3 (6e-2c): use O(1) Map instead of O(N) rfNodes.find(…).
   const nodeTypeById = useCallback(
-    (id: string) => rfNodes.find((n) => n.id === id)?.type,
-    [rfNodes],
+    (id: string) => nodeTypeMap.get(id),
+    [nodeTypeMap],
   );
 
   const isConnectionValid = useCallback<IsValidConnection>(
