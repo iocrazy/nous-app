@@ -147,6 +147,10 @@ def _patch_steps(
     monkeypatch.setattr(canvas_graph_module, "mark_graph_processing_step", mark_proc)
     monkeypatch.setattr(canvas_graph_module, "create_node_subtask_step", create_sub)
     monkeypatch.setattr(canvas_graph_module, "mark_node_complete_step", mark_complete)
+    # Per-node "running" step (best-effort); patched so the real @DBOS.step
+    # does not run in the DBOS-less unit-test process. Tests that assert on it
+    # re-patch with their own mock after calling _patch_steps.
+    monkeypatch.setattr(canvas_graph_module, "mark_node_processing_step", AsyncMock())
     monkeypatch.setattr(canvas_graph_module, "mark_node_failed_step", mark_failed)
     monkeypatch.setattr(canvas_graph_module, "run_canvas_node_step", runner)
     monkeypatch.setattr(canvas_graph_module, "run_gen_canvas_node_step", gen_runner)
@@ -552,6 +556,29 @@ class TestNodeDataResolution:
         assert [nid for nid, _ in plain.calls] == ["n1"]
         assert gen.calls == [], "llm node must NOT route through the gen step"
         assert plain.records[0]["node_type"] == "llm"
+
+    async def test_runnable_marked_processing_passive_not(self, monkeypatch):
+        """mark_node_processing_step fires for a runnable node (live 'running'
+        state) but NOT for a passive node, which resolves instantly."""
+        import app.workflows.canvas_graph as cg
+
+        # n0 = passive (image), n1 = runnable (llm).
+        canvas = _fake_canvas(["n0", "n1"], types={"n0": "image", "n1": "llm"})
+        _patch_steps(monkeypatch, canvas=canvas)
+        mark_proc_node = AsyncMock()
+        monkeypatch.setattr(cg, "mark_node_processing_step", mark_proc_node)
+
+        await _run_graph(
+            workflow_id=_WF_ID,
+            canvas_id=_CANVAS,
+            node_order=["n0", "n1"],
+            user_id=_USER,
+            continue_on_failure=False,
+        )
+
+        # Only the runnable node (n1, position 1) is marked processing.
+        called_ids = [c.args[0] for c in mark_proc_node.await_args_list]
+        assert called_ids == [f"{_WF_ID}-node-1"], called_ids
 
     async def test_node_id_absent_from_canvas_raises(self, monkeypatch):
         """A node id in node_order but missing from the loaded canvas is a real
