@@ -136,6 +136,13 @@ def _patch_steps(
     load_canvas = AsyncMock(
         return_value=canvas if canvas is not None else _DefaultCanvas()
     )
+    # M4a: patch new helpers so existing tests don't hit a live DB or DBOS.
+    # _load_canvas_connections returns {} → no piping in legacy tests (node data
+    # flows through unchanged, so all node_data / body assertions still hold).
+    # persist_node_result_step is a DBOS step; without patching, its decorator
+    # would raise because DBOS is not initialised in the unit-test process.
+    load_conns = AsyncMock(return_value={})
+    persist_step = AsyncMock()
 
     monkeypatch.setattr(canvas_graph_module, "mark_graph_processing_step", mark_proc)
     monkeypatch.setattr(canvas_graph_module, "create_node_subtask_step", create_sub)
@@ -144,6 +151,8 @@ def _patch_steps(
     monkeypatch.setattr(canvas_graph_module, "run_canvas_node_step", runner)
     monkeypatch.setattr(canvas_graph_module, "run_gen_canvas_node_step", gen_runner)
     monkeypatch.setattr(canvas_graph_module, "_load_canvas_nodes", load_canvas)
+    monkeypatch.setattr(canvas_graph_module, "_load_canvas_connections", load_conns)
+    monkeypatch.setattr(canvas_graph_module, "persist_node_result_step", persist_step)
 
     return mark_proc, create_sub, mark_complete, mark_failed, runner
 
