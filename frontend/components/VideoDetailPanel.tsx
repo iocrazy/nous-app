@@ -132,6 +132,10 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   const cHoverText200 = island ? 'hover:text-content' : 'hover:text-ink-200';
   const cHoverBorder700 = island ? 'hover:border-line' : 'hover:border-ink-700';
   const cDivide80050 = island ? 'divide-line/50' : 'divide-ink-800/50';
+  // Surface backgrounds — map raw ink fills to the mock's semantic tokens.
+  const cCardBg = island ? 'bg-card' : 'bg-ink-900';
+  const cCtrlBg = island ? 'bg-island-2' : 'bg-ink-800';
+  const cHoverSurf7 = island ? 'hover:bg-island-2' : 'hover:bg-ink-700';
 
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
   const [transcript, setTranscript] = useState<TranscriptData | null>(null);
@@ -555,7 +559,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
             {/* Not started — no transcript and not loading/processing */}
             {!transcript && !transcriptLoading && transcribeStatus !== 'processing' && (
               <div className="flex flex-col items-center justify-center py-16 text-center">
-                <div className="p-4 bg-ink-800/50 rounded-full mb-4">
+                <div className={`p-4 ${island ? 'bg-island-2' : 'bg-ink-800/50'} rounded-full mb-4`}>
                   <FileText size={32} className={cText500} />
                 </div>
                 <h3 className={`text-lg font-medium ${cText200}`}>No Transcript Available</h3>
@@ -596,14 +600,14 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                 </div>
 
                 {/* Content area */}
-                <div className={`bg-ink-900 border ${cBorder800} rounded-xl overflow-hidden`}>
+                <div className={`${cCardBg} border ${cBorder800} rounded-xl overflow-hidden`}>
                   <div className="max-h-[50vh] overflow-y-auto custom-scrollbar">
                     {transcriptView === 'segments' ? (
                       <div className={`divide-y ${cDivide80050}`}>
                         {transcript.segments.map((seg, i) => (
                           <div
                             key={i}
-                            className="flex gap-3 px-4 py-3 hover:bg-ink-800/30 transition-colors group"
+                            className={`flex gap-3 px-4 py-3 ${island ? 'hover:bg-island-2' : 'hover:bg-ink-800/30'} transition-colors group`}
                           >
                             <button
                               className="text-xs font-mono text-indigo-400/70 group-hover:text-indigo-400 shrink-0 pt-0.5 transition-colors"
@@ -628,7 +632,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                 {/* Toolbar */}
                 <div className="flex items-center gap-2">
                   {/* View toggle */}
-                  <div className={`flex bg-ink-800 border ${cBorder700} rounded-lg overflow-hidden`}>
+                  <div className={`flex ${cCtrlBg} border ${cBorder700} rounded-lg overflow-hidden`}>
                     <button
                       onClick={() => setTranscriptView('segments')}
                       className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${
@@ -656,7 +660,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                   {/* Copy */}
                   <button
                     onClick={handleCopyTranscript}
-                    className={`px-3 py-1.5 text-xs bg-ink-800 hover:bg-ink-700 ${cText300} rounded-lg transition-colors flex items-center gap-1.5 border ${cBorder700}`}
+                    className={`px-3 py-1.5 text-xs ${cCtrlBg} ${cHoverSurf7} ${cText300} rounded-lg transition-colors flex items-center gap-1.5 border ${cBorder700}`}
                   >
                     {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
                     {copied ? 'Copied!' : 'Copy'}
@@ -666,23 +670,23 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                   <div className="relative">
                     <button
                       onClick={() => setExportOpen(!exportOpen)}
-                      className={`px-3 py-1.5 text-xs bg-ink-800 hover:bg-ink-700 ${cText300} rounded-lg transition-colors flex items-center gap-1.5 border ${cBorder700}`}
+                      className={`px-3 py-1.5 text-xs ${cCtrlBg} ${cHoverSurf7} ${cText300} rounded-lg transition-colors flex items-center gap-1.5 border ${cBorder700}`}
                     >
                       <Download size={12} />
                       Export
                       <ChevronDown size={10} />
                     </button>
                     {exportOpen && (
-                      <div className={`absolute bottom-full mb-1 left-0 bg-ink-800 border ${cBorder700} rounded-lg shadow-xl overflow-hidden z-10 min-w-[120px]`}>
+                      <div className={`absolute bottom-full mb-1 left-0 ${cCtrlBg} border ${cBorder700} rounded-lg shadow-xl overflow-hidden z-10 min-w-[120px]`}>
                         <button
                           onClick={() => { handleExportSRT(); setExportOpen(false); }}
-                          className={`w-full px-3 py-2 text-xs ${cText300} hover:bg-ink-700 text-left transition-colors`}
+                          className={`w-full px-3 py-2 text-xs ${cText300} ${cHoverSurf7} text-left transition-colors`}
                         >
                           Export SRT
                         </button>
                         <button
                           onClick={() => { handleExportTXT(); setExportOpen(false); }}
-                          className={`w-full px-3 py-2 text-xs ${cText300} hover:bg-ink-700 text-left transition-colors`}
+                          className={`w-full px-3 py-2 text-xs ${cText300} ${cHoverSurf7} text-left transition-colors`}
                         >
                           Export TXT
                         </button>
@@ -710,7 +714,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
 
               {/* Summary processing */}
               {video.summary_status === 'processing' && (
-                <div className={`flex items-center gap-3 p-4 bg-ink-900 border ${cBorder800} rounded-lg`}>
+                <div className={`flex items-center gap-3 p-4 ${cCardBg} border ${cBorder800} rounded-lg`}>
                   <Loader2 size={18} className="animate-spin text-indigo-400" />
                   <span className={`text-sm ${cText400}`}>Generating summary...</span>
                 </div>
@@ -718,7 +722,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
 
               {/* Summary not started */}
               {(!video.summary_status || video.summary_status === 'pending') && !summary && (
-                <div className={`p-4 bg-ink-900 border ${cBorder800} rounded-lg`}>
+                <div className={`p-4 ${cCardBg} border ${cBorder800} rounded-lg`}>
                   <p className={`text-sm ${cText500} mb-3`}>
                     Generate an AI summary with key points and topics.
                   </p>
@@ -773,7 +777,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
               {summary && (
                 <div className="space-y-4">
                   {/* Summary text */}
-                  <div className={`p-4 bg-ink-900 border ${cBorder800} rounded-lg`}>
+                  <div className={`p-4 ${cCardBg} border ${cBorder800} rounded-lg`}>
                     <p className={`text-sm ${cText300} leading-relaxed`}>{summary.summary}</p>
                   </div>
 
@@ -840,7 +844,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                   analyze_l1 workflow actually writes. Takes priority over the
                   status branches: fetched data is ground truth. */}
               {visualAnalysis && (
-                <div className={`p-4 bg-ink-900 border ${cBorder800} rounded-lg space-y-3`}>
+                <div className={`p-4 ${cCardBg} border ${cBorder800} rounded-lg space-y-3`}>
                   {visualAnalysis.description && (
                     <p className={`text-sm ${cText300} leading-relaxed whitespace-pre-wrap`}>
                       {visualAnalysis.description}
@@ -857,7 +861,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                         {chips.map((c, i) => (
                           <span
                             key={i}
-                            className={`px-2 py-0.5 rounded-full text-[10px] bg-ink-800 ${cText300}`}
+                            className={`px-2 py-0.5 rounded-full text-[10px] ${cCtrlBg} ${cText300}`}
                           >
                             {String(c)}
                           </span>
@@ -880,7 +884,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                 && (analysisTaskPhase === 'processing'
                   || (analysisTaskPhase === null
                     && video.visual_analysis_status === 'processing')) && (
-                <div className={`flex items-center gap-3 p-4 bg-ink-900 border ${cBorder800} rounded-lg`}>
+                <div className={`flex items-center gap-3 p-4 ${cCardBg} border ${cBorder800} rounded-lg`}>
                   <Loader2 size={18} className="animate-spin text-purple-400" />
                   <span className={`text-sm ${cText400}`}>Analyzing visual content...</span>
                 </div>
@@ -900,7 +904,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                 && !(analysisTaskPhase === null
                   && (video.visual_analysis_status === 'processing'
                     || video.visual_analysis_status === 'failed')) && (
-                <div className={`p-4 bg-ink-900 border ${cBorder800} rounded-lg`}>
+                <div className={`p-4 ${cCardBg} border ${cBorder800} rounded-lg`}>
                   {visualAnalysisFetching ? (
                     <div className="flex items-center gap-3">
                       <Loader2 size={18} className="animate-spin text-purple-400" />

@@ -406,6 +406,15 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const cBorder800_80 = island ? 'border-line' : 'border-ink-800/80';
   const cHoverBorder700 = island ? 'hover:border-line' : 'hover:border-ink-700';
   const cPlaceholder = island ? 'placeholder-content-4' : 'placeholder-ink-600';
+  // Surface backgrounds — map raw ink to the mock's semantic surface tokens in
+  // island; classic (island=false) keeps the EXACT original ink class so the
+  // D12 classic render stays byte-identical.
+  const cCardBg = island ? 'bg-card' : 'bg-ink-900';
+  const cCtrlBg = island ? 'bg-island-2' : 'bg-ink-800';
+  const cActiveBg = island ? 'bg-card' : 'bg-ink-800';
+  const cHoverSurf = island ? 'hover:bg-island-2' : 'hover:bg-ink-800';
+  const cHoverSurf7 = island ? 'hover:bg-island-2' : 'hover:bg-ink-700';
+  const cInputBg = island ? 'bg-island-2' : 'bg-ink-800/50';
 
   // Island mode: this page owns an info island (the inspector). Mark it
   // available + visible on mount so the shell mounts the info aside (our portal
@@ -1085,7 +1094,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
         <p className={`${cText400} text-lg font-medium mb-2`}>{error || 'Resource not found'}</p>
         <button
           onClick={handleBack}
-          className={`flex items-center gap-2 px-4 py-2 bg-ink-800 hover:bg-ink-700 ${cText300} rounded-lg transition-colors mt-4`}
+          className={`flex items-center gap-2 px-4 py-2 ${cCtrlBg} ${cHoverSurf7} ${cText300} rounded-lg transition-colors mt-4`}
         >
           <ArrowLeft size={16} />
           {t('common.back')}
@@ -1387,7 +1396,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
           <button
             onClick={() => setShowFileList(!showFileList)}
             className={`p-1.5 rounded-lg transition-colors ${
-              showFileList ? 'bg-ink-800 text-indigo-400' : 'text-content-2 hover:text-content hover:bg-ink-800'
+              showFileList ? `${cActiveBg} text-indigo-400` : `text-content-2 hover:text-content ${cHoverSurf}`
             }`}
             title={t('resources.fileListPanel')}
           >
@@ -1399,7 +1408,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               onClick={() => navigateToSibling('prev')}
               disabled={!hasPrev}
               className={`p-1 rounded transition-colors ${
-                hasPrev ? 'text-content-2 hover:text-content hover:bg-ink-800' : 'text-ink-700 cursor-not-allowed'
+                hasPrev ? `text-content-2 hover:text-content ${cHoverSurf}` : 'text-ink-700 cursor-not-allowed'
               }`}
               title={t('resources.prevFile')}
             >
@@ -1417,7 +1426,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                     className={`flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-md transition-colors ${
                       selectedVersionId
                         ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
-                        : 'bg-ink-800 text-content-2 hover:text-content hover:bg-ink-700'
+                        : `${cCtrlBg} text-content-2 hover:text-content ${cHoverSurf7}`
                     }`}
                   >
                     <Layers size={12} />
@@ -1429,7 +1438,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                     <ChevronDown size={12} />
                   </button>
                   {showVersionDropdown && (
-                    <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1 z-30 bg-ink-900 border border-line rounded-lg shadow-xl w-56 py-1">
+                    <div className={`absolute left-1/2 -translate-x-1/2 top-full mt-1 z-30 ${cCardBg} border border-line rounded-lg shadow-xl w-56 py-1`}>
                       <div className="px-3 py-1.5 border-b border-line">
                         <p className="text-[10px] font-semibold text-content-3 uppercase tracking-widest">
                           {t('resources.versions', 'Versions')}
@@ -1448,7 +1457,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                                 className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors ${
                                   isSelected
                                     ? 'bg-indigo-500/10 text-indigo-300'
-                                    : 'text-content-2 hover:bg-ink-800 hover:text-content'
+                                    : `text-content-2 ${cHoverSurf} hover:text-content`
                                 }`}
                               >
                                 <span className={`font-semibold ${isCurrentVer ? 'text-indigo-400' : ''}`}>
@@ -1535,7 +1544,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               onClick={() => navigateToSibling('next')}
               disabled={!hasNext}
               className={`p-1 rounded transition-colors ${
-                hasNext ? 'text-content-2 hover:text-content hover:bg-ink-800' : 'text-ink-700 cursor-not-allowed'
+                hasNext ? `text-content-2 hover:text-content ${cHoverSurf}` : 'text-ink-700 cursor-not-allowed'
               }`}
               title={t('resources.nextFile')}
             >
@@ -1556,7 +1565,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               <a
                 href={fileUrl}
                 download
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-content-2 hover:text-content hover:bg-ink-800 rounded-lg transition-colors"
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-content-2 hover:text-content ${cHoverSurf} rounded-lg transition-colors`}
               >
                 <Download size={14} />
                 <span>{t('resources.download')}</span>
@@ -1565,17 +1574,17 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             <div className="relative">
               <button
                 onClick={() => setShowMoreMenu(!showMoreMenu)}
-                className="p-1.5 text-content-2 hover:text-content hover:bg-ink-800 rounded-lg transition-colors"
+                className={`p-1.5 text-content-2 hover:text-content ${cHoverSurf} rounded-lg transition-colors`}
               >
                 <MoreHorizontal size={16} />
               </button>
               {showMoreMenu && (
                 <>
                   <div className="fixed inset-0 z-10" onClick={() => setShowMoreMenu(false)} />
-                  <div className="absolute right-0 top-full mt-1 z-20 bg-ink-900 border border-line rounded-lg shadow-xl py-1 w-44">
+                  <div className={`absolute right-0 top-full mt-1 z-20 ${cCardBg} border border-line rounded-lg shadow-xl py-1 w-44`}>
                     {fileUrl && (
                       <button
-                        className="block w-full text-left px-3 py-1.5 text-xs text-content-2 hover:bg-ink-800 hover:text-content transition-colors"
+                        className={`block w-full text-left px-3 py-1.5 text-xs text-content-2 ${cHoverSurf} hover:text-content transition-colors`}
                         onClick={() => {
                           setShowMoreMenu(false);
                           downloadFile(fileUrl, resource.filename || 'download', {
@@ -1610,7 +1619,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   value={fileListSearch}
                   onChange={(e) => setFileListSearch(e.target.value)}
                   placeholder={t('resources.searchFiles')}
-                  className={`w-full bg-ink-800/60 border ${cBorder700_30} rounded-lg pl-8 pr-3 py-1.5 text-xs ${cText200} ${cPlaceholder} focus:outline-none focus:border-indigo-500/50 transition-colors`}
+                  className={`w-full ${island ? 'bg-island-2' : 'bg-ink-800/60'} border ${cBorder700_30} rounded-lg pl-8 pr-3 py-1.5 text-xs ${cText200} ${cPlaceholder} focus:outline-none focus:border-indigo-500/50 transition-colors`}
                 />
               </div>
             </div>
@@ -1632,7 +1641,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                     className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-all ${
                       isActive
                         ? 'bg-indigo-500/10 border-l-2 border-indigo-400'
-                        : 'hover:bg-ink-800/60 border-l-2 border-transparent'
+                        : `${island ? 'hover:bg-island-2' : 'hover:bg-ink-800/60'} border-l-2 border-transparent`
                     }`}
                   >
                     {thumb ? (
@@ -1819,19 +1828,19 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               <div className="relative">
                 <button
                   onClick={() => setShowMoreMenu(!showMoreMenu)}
-                  className={`p-1.5 ${cText400} ${cHover200} hover:bg-ink-800 rounded-lg transition-colors`}
+                  className={`p-1.5 ${cText400} ${cHover200} ${cHoverSurf} rounded-lg transition-colors`}
                 >
                   <MoreHorizontal size={16} />
                 </button>
                 {showMoreMenu && (
                   <>
                     <div className="fixed inset-0 z-10" onClick={() => setShowMoreMenu(false)} />
-                    <div className={`absolute right-0 top-full mt-1 z-20 bg-ink-900 border ${cBorder700} rounded-lg shadow-xl py-1 w-48`}>
+                    <div className={`absolute right-0 top-full mt-1 z-20 ${cCardBg} border ${cBorder700} rounded-lg shadow-xl py-1 w-48`}>
                       {fileUrl && (
                         <a
                           href={fileUrl}
                           download
-                          className={`flex items-center gap-2 w-full px-3 py-2 text-xs ${cText400} hover:bg-ink-800 ${cHover200} transition-colors`}
+                          className={`flex items-center gap-2 w-full px-3 py-2 text-xs ${cText400} ${cHoverSurf} ${cHover200} transition-colors`}
                           onClick={() => setShowMoreMenu(false)}
                         >
                           <Download size={14} />
@@ -1840,7 +1849,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                       )}
                       {fileUrl && (
                         <button
-                          className={`flex items-center gap-2 w-full text-left px-3 py-2 text-xs ${cText400} hover:bg-ink-800 ${cHover200} transition-colors`}
+                          className={`flex items-center gap-2 w-full text-left px-3 py-2 text-xs ${cText400} ${cHoverSurf} ${cHover200} transition-colors`}
                           onClick={() => {
                             setShowMoreMenu(false);
                             downloadFile(fileUrl, resource.filename || 'download', {
@@ -1882,7 +1891,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   if (e.key === 'Enter') commitName();
                   if (e.key === 'Escape') { setNameValue(resource.filename); setEditingName(false); }
                 }}
-                className={`w-full bg-ink-800 border border-indigo-500/50 rounded px-2 py-1 text-lg font-bold ${cPrimary} focus:outline-none`}
+                className={`w-full ${cCtrlBg} border border-indigo-500/50 rounded px-2 py-1 text-lg font-bold ${cPrimary} focus:outline-none`}
                 autoFocus
               />
             ) : (
@@ -1923,7 +1932,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               onBlur={commitNotes}
               placeholder={t('resources.infoPanel.notesPlaceholder')}
               rows={3}
-              className={`w-full bg-ink-800/50 border ${cBorder700_50} rounded-lg px-2.5 py-2 text-xs ${cText300} ${cPlaceholder} focus:outline-none focus:border-indigo-500/50 resize-none`}
+              className={`w-full ${cInputBg} border ${cBorder700_50} rounded-lg px-2.5 py-2 text-xs ${cText300} ${cPlaceholder} focus:outline-none focus:border-indigo-500/50 resize-none`}
             />
           </div>
 
@@ -2009,7 +2018,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 onBlur={commitPrompt}
                 placeholder={t('resources.infoPanel.promptPlaceholder', 'Paste the AI generation prompt...')}
                 rows={4}
-                className={`w-full bg-ink-800/50 border ${cBorder700_50} rounded-lg px-2.5 py-2 text-xs font-mono ${cText300} ${cPlaceholder} focus:outline-none focus:border-indigo-500/50 resize-none`}
+                className={`w-full ${cInputBg} border ${cBorder700_50} rounded-lg px-2.5 py-2 text-xs font-mono ${cText300} ${cPlaceholder} focus:outline-none focus:border-indigo-500/50 resize-none`}
               />
             </div>
           ) : (
@@ -2045,7 +2054,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               onBlur={commitUrl}
               onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
               placeholder={t('resources.infoPanel.urlPlaceholder')}
-              className={`w-full bg-ink-800/50 border ${cBorder700_50} rounded-lg px-2.5 py-1.5 text-xs ${cText300} ${cPlaceholder} focus:outline-none focus:border-indigo-500/50`}
+              className={`w-full ${cInputBg} border ${cBorder700_50} rounded-lg px-2.5 py-1.5 text-xs ${cText300} ${cPlaceholder} focus:outline-none focus:border-indigo-500/50`}
             />
           </div>
 
@@ -2176,7 +2185,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                       <button
                         key={ver.id}
                         onClick={() => handleSelectVersion(ver)}
-                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors hover:bg-ink-800/70 ${
+                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors ${island ? 'hover:bg-island-2' : 'hover:bg-ink-800/70'} ${
                           isViewing
                             ? 'bg-indigo-500/10 border border-indigo-500/20'
                             : 'bg-transparent'
@@ -2239,7 +2248,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               {/* Not started — no transcript loaded and not processing */}
               {!transcript && !transcriptLoading && transcribeStatus !== 'processing' && resource.transcript_status !== 'processing' && (
                 <div className="flex flex-col items-center justify-center py-16 text-center">
-                  <div className="p-4 bg-ink-800/50 rounded-full mb-4">
+                  <div className={`p-4 ${cInputBg} rounded-full mb-4`}>
                     <FileText size={28} className={cLabel} />
                   </div>
                   <h3 className={`text-sm font-medium ${cText200}`}>No Transcript Available</h3>
@@ -2285,14 +2294,14 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                     <span>{transcript.segments.length} segments</span>
                   </div>
 
-                  <div className={`bg-ink-900 border ${cBorder800} rounded-lg overflow-hidden`}>
+                  <div className={`${cCardBg} border ${cBorder800} rounded-lg overflow-hidden`}>
                     <div className="max-h-[50vh] overflow-y-auto custom-scrollbar">
                       {transcriptView === 'segments' ? (
                         <div className="divide-y divide-ink-800/50">
                           {transcript.segments.map((seg, i) => (
                             <div
                               key={i}
-                              className="flex gap-2 px-3 py-2 hover:bg-ink-800/30 transition-colors group"
+                              className={`flex gap-2 px-3 py-2 ${island ? 'hover:bg-island-2' : 'hover:bg-ink-800/30'} transition-colors group`}
                             >
                               <button
                                 className="text-[10px] font-mono text-indigo-400/70 group-hover:text-indigo-400 shrink-0 pt-0.5 transition-colors"
@@ -2317,7 +2326,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   {/* Toolbar */}
                   <div className="flex items-center gap-1.5">
                     {/* View toggle */}
-                    <div className={`flex bg-ink-800 border ${cBorder700} rounded-lg overflow-hidden`}>
+                    <div className={`flex ${cCtrlBg} border ${cBorder700} rounded-lg overflow-hidden`}>
                       <button
                         onClick={() => setTranscriptView('segments')}
                         className={`px-2.5 py-1 text-[10px] flex items-center gap-1 transition-colors ${
@@ -2345,7 +2354,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                     {/* Copy */}
                     <button
                       onClick={handleCopyTranscript}
-                      className={`px-2.5 py-1 text-[10px] bg-ink-800 hover:bg-ink-700 ${cText300} rounded-lg transition-colors flex items-center gap-1 border ${cBorder700}`}
+                      className={`px-2.5 py-1 text-[10px] ${cCtrlBg} ${cHoverSurf7} ${cText300} rounded-lg transition-colors flex items-center gap-1 border ${cBorder700}`}
                     >
                       {copied ? <Check size={10} className="text-emerald-400" /> : <Copy size={10} />}
                       {copied ? 'Copied!' : 'Copy'}
@@ -2355,23 +2364,23 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                     <div className="relative">
                       <button
                         onClick={() => setExportOpen(!exportOpen)}
-                        className={`px-2.5 py-1 text-[10px] bg-ink-800 hover:bg-ink-700 ${cText300} rounded-lg transition-colors flex items-center gap-1 border ${cBorder700}`}
+                        className={`px-2.5 py-1 text-[10px] ${cCtrlBg} ${cHoverSurf7} ${cText300} rounded-lg transition-colors flex items-center gap-1 border ${cBorder700}`}
                       >
                         <Download size={10} />
                         Export
                         <ChevronDown size={8} />
                       </button>
                       {exportOpen && (
-                        <div className={`absolute bottom-full mb-1 left-0 bg-ink-800 border ${cBorder700} rounded-lg shadow-xl overflow-hidden z-10 min-w-[100px]`}>
+                        <div className={`absolute bottom-full mb-1 left-0 ${island ? 'bg-card' : 'bg-ink-800'} border ${cBorder700} rounded-lg shadow-xl overflow-hidden z-10 min-w-[100px]`}>
                           <button
                             onClick={() => { handleExportSRT(); setExportOpen(false); }}
-                            className={`w-full px-3 py-1.5 text-[10px] ${cText300} hover:bg-ink-700 text-left transition-colors`}
+                            className={`w-full px-3 py-1.5 text-[10px] ${cText300} ${cHoverSurf7} text-left transition-colors`}
                           >
                             Export SRT
                           </button>
                           <button
                             onClick={() => { handleExportTXT(); setExportOpen(false); }}
-                            className={`w-full px-3 py-1.5 text-[10px] ${cText300} hover:bg-ink-700 text-left transition-colors`}
+                            className={`w-full px-3 py-1.5 text-[10px] ${cText300} ${cHoverSurf7} text-left transition-colors`}
                           >
                             Export TXT
                           </button>
@@ -2395,14 +2404,14 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 </div>
 
                 {resource.summary_status === 'processing' && (
-                  <div className="flex items-center gap-2 p-3 bg-ink-900 border border-ink-800 rounded-lg">
+                  <div className={`flex items-center gap-2 p-3 ${cCardBg} border border-ink-800 rounded-lg`}>
                     <Loader2 size={14} className="animate-spin text-indigo-400" />
                     <span className={`text-xs ${cText400}`}>Generating summary...</span>
                   </div>
                 )}
 
                 {(!resource.summary_status || resource.summary_status === 'pending' || resource.summary_status === 'none') && !summary && !summaryLoading && (
-                  <div className={`p-3 bg-ink-900 border ${cBorder800} rounded-lg`}>
+                  <div className={`p-3 ${cCardBg} border ${cBorder800} rounded-lg`}>
                     <p className={`text-xs ${cLabel} mb-2`}>Generate an AI summary with key points and topics.</p>
                     <button
                       onClick={handleSummarize}
@@ -2443,7 +2452,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
 
                 {summary && (
                   <div className="space-y-3">
-                    <div className={`p-3 bg-ink-900 border ${cBorder800} rounded-lg`}>
+                    <div className={`p-3 ${cCardBg} border ${cBorder800} rounded-lg`}>
                       <p className={`text-xs ${cText300} leading-relaxed`}>{summary.summary}</p>
                     </div>
                     {summary.key_points.length > 0 && (
@@ -2497,14 +2506,14 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   </div>
 
                   {resource.visual_analysis_status === 'processing' && (
-                    <div className={`flex items-center gap-2 p-3 bg-ink-900 border ${cBorder800} rounded-lg`}>
+                    <div className={`flex items-center gap-2 p-3 ${cCardBg} border ${cBorder800} rounded-lg`}>
                       <Loader2 size={14} className="animate-spin text-purple-400" />
                       <span className={`text-xs ${cText400}`}>Analyzing visual content...</span>
                     </div>
                   )}
 
                   {(!resource.visual_analysis_status || resource.visual_analysis_status === 'pending' || resource.visual_analysis_status === 'none') && (
-                    <div className={`p-3 bg-ink-900 border ${cBorder800} rounded-lg`}>
+                    <div className={`p-3 ${cCardBg} border ${cBorder800} rounded-lg`}>
                       <p className={`text-xs ${cLabel} mb-2`}>Analyze video frames to detect objects, scenes, and visual content.</p>
                       <button
                         onClick={handleVisualAnalysis}
@@ -2538,7 +2547,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   )}
 
                   {resource.visual_analysis_status === 'completed' && (resource as any).ai_analyze_text && (
-                    <div className={`p-3 bg-ink-900 border ${cBorder800} rounded-lg`}>
+                    <div className={`p-3 ${cCardBg} border ${cBorder800} rounded-lg`}>
                       <p className={`text-xs ${cText300} leading-relaxed whitespace-pre-wrap`}>
                         {(resource as any).ai_analyze_text}
                       </p>
