@@ -2404,7 +2404,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 </div>
 
                 {resource.summary_status === 'processing' && (
-                  <div className={`flex items-center gap-2 p-3 ${cCardBg} border border-ink-800 rounded-lg`}>
+                  <div className={`flex items-center gap-2 p-3 ${cCardBg} border ${cBorder800} rounded-lg`}>
                     <Loader2 size={14} className="animate-spin text-indigo-400" />
                     <span className={`text-xs ${cText400}`}>Generating summary...</span>
                   </div>
