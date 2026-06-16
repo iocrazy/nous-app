@@ -86,6 +86,8 @@ import { ResourceAnnotationOverlay, NormalizedAnnotation } from './ResourceAnnot
 import { AudioHero } from './AudioHero';
 import { AudioWaveformPlayer } from './AudioWaveformPlayer';
 import { AudioOverviewSide } from './AudioOverviewSide';
+import { AudioStageIsland } from './AudioStageIsland';
+import { PlaylistIsland } from './PlaylistIsland';
 import { MobileAudioUpload } from './MobileAudioUpload';
 import { LyricsView } from './LyricsView';
 import { buildSodaTheme } from '../utils/sodaTheme';
@@ -1173,6 +1175,126 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
     );
   }
 
+  // ─── Island audio stage slots ──────────────────────────────
+  // Uploaded/island audio fully adopts the download-detail audio layout:
+  // AudioStageIsland (own stage-head + cover-side | lyrics + bottom capsule)
+  // in the work island, PlaylistIsland in the info island. These slot nodes
+  // mirror DownloadDetailPage; only consumed when `islandAudioStage` is true.
+  const audioStageActions = (
+    <>
+      <button
+        onClick={() => setShowShareModal(true)}
+        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg btn-tint-indigo transition-colors"
+      >
+        <Share2 size={14} />
+        <span>{t('resources.share')}</span>
+      </button>
+      {fileUrl && (
+        <a
+          href={fileUrl}
+          download
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-content-2 hover:text-content ${cHoverSurf} rounded-lg transition-colors`}
+        >
+          <Download size={14} />
+          <span>{t('resources.download')}</span>
+        </a>
+      )}
+      <div className="relative">
+        <button
+          onClick={() => setShowMoreMenu(!showMoreMenu)}
+          className={`p-1.5 text-content-2 hover:text-content ${cHoverSurf} rounded-lg transition-colors`}
+        >
+          <MoreHorizontal size={16} />
+        </button>
+        {showMoreMenu && (
+          <>
+            <div className="fixed inset-0 z-10" onClick={() => setShowMoreMenu(false)} />
+            <div className={`absolute right-0 top-full mt-1 z-20 ${cCardBg} border border-line rounded-lg shadow-xl py-1 w-44`}>
+              {fileUrl && (
+                <button
+                  className={`block w-full text-left px-3 py-1.5 text-xs text-content-2 ${cHoverSurf} hover:text-content transition-colors`}
+                  onClick={() => {
+                    setShowMoreMenu(false);
+                    downloadFile(fileUrl, resource.filename || 'download', {
+                      onSuccess: (f) => addToast(`Downloaded: ${f}`, 'success'),
+                      onError: (msg) => addToast(`Download failed (${msg})`, 'error'),
+                    });
+                  }}
+                >
+                  {t('resources.downloadOriginal')}
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </>
+  );
+  const audioStageCoverSide = (
+    <>
+      <AudioOverviewSide
+        resourceId={resourceId || undefined}
+        coverUrl={audioCoverUrl}
+        title={resource.filename}
+        rating={resource.rating ?? 0}
+        onRatingChange={handleRating}
+        onCoverClick={() => islandCoverInputRef.current?.click()}
+      />
+      <input
+        ref={islandCoverInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleIslandCoverFile}
+      />
+    </>
+  );
+  const audioStageLyrics = lyrics?.lines?.length ? (
+    <LyricsView lines={lyrics.lines} currentTime={audioCurrentTime} variant="bare" />
+  ) : (
+    <div className="h-full flex flex-col items-center justify-center text-center gap-1.5">
+      <Music size={24} className={cFaint} />
+      <p className={`text-sm ${cLabel}`}>{t('resources.detail.noLyrics', 'No lyrics yet')}</p>
+    </div>
+  );
+  const audioStagePlayer = (
+    <AudioWaveformPlayer
+      layout="capsule"
+      src={fileUrl}
+      filename={resource.filename}
+      duration={resource.duration_seconds ?? undefined}
+      chorusStartSec={resource.chorus_start_ms != null ? resource.chorus_start_ms / 1000 : undefined}
+      chorusEditable={isUploadedAudio}
+      setChorusLabel={t('resources.detail.setChorus', 'Set chorus')}
+      clearChorusLabel={t('resources.detail.clearChorus', 'Clear')}
+      onChorusChange={
+        isUploadedAudio
+          ? async (sec) => {
+              try {
+                const ms = sec == null ? null : Math.round(sec * 1000);
+                const updated = await setResourceChorus(resource.id, ms);
+                setResource(updated);
+                addToast(
+                  t(
+                    ms == null
+                      ? 'resources.detail.chorusCleared'
+                      : 'resources.detail.chorusSet',
+                    ms == null ? 'Chorus removed' : 'Chorus marked',
+                  ),
+                  'success',
+                );
+              } catch (err) {
+                console.error('Failed to set chorus:', err);
+                addToast('Failed to set chorus', 'error');
+              }
+            }
+          : undefined
+      }
+      onTimeUpdate={setAudioCurrentTime}
+      theme={audioSodaTheme}
+    />
+  );
+
   return (
     <div className="flex flex-col h-full animate-in fade-in duration-300">
       {/* Top bar — [PanelLeft | ← Back] | [◀ prev | filename (2/5) | next ▶] | [Download | ⋯] */}
@@ -1435,8 +1557,9 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
       {/* Island stage-head — comet back · file nav/title/version · actions.
           Mirrors the download detail stage-head and carries the same controls
           (prev/next, version, transcode, share/download/more) so island loses
-          no functionality (D12). */}
-      {islandDesktop && (
+          no functionality (D12). Suppressed for island audio — AudioStageIsland
+          renders its own stage-head below. */}
+      {islandDesktop && !islandAudioStage && (
         <div className="stage-head hidden md:flex items-center gap-3 px-4 py-3 border-b border-line relative">
           <CometBack onClick={handleBack} title={t('common.back')} />
           <button
@@ -1650,7 +1773,39 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
         </div>
       )}
 
-      {/* Main content */}
+      {/* Island audio: the cover-tinted stage fills the work island (its own
+          stage-head + cover-side | lyrics + bottom capsule). --tint / --tint-deep
+          / --audio-bg are set on a display:contents wrapper so the .audio-stage
+          root inherits them (AudioStageIsland is pure layout). Mirrors
+          DownloadDetailPage; the Playlist island is portaled below. */}
+      {islandAudioStage && (
+        <div
+          className="contents"
+          style={{ ['--tint']: tint.tint, ['--tint-deep']: tint.tintDeep, ['--audio-bg']: audioSodaTheme.bg } as React.CSSProperties}
+        >
+          <AudioStageIsland
+            title={resource.filename}
+            author={undefined}
+            onBack={handleBack}
+            actions={audioStageActions}
+            coverSide={audioStageCoverSide}
+            lyrics={audioStageLyrics}
+            player={audioStagePlayer}
+          />
+        </div>
+      )}
+
+      {/* Island audio: the info island hosts the Playlist (COMING SOON) instead
+          of the inspector — the cover-side Overview already carries the audio
+          metadata, so portaling the inspector here would duplicate it. */}
+      {islandAudioStage && infoIslandEl && createPortal(
+        <PlaylistIsland title={resource.filename} author={undefined} coverUrl={audioCoverUrl} />,
+        infoIslandEl,
+      )}
+
+      {/* Main content — suppressed for island audio (AudioStageIsland replaces
+          the stage-head + viewport, PlaylistIsland replaces the inspector). */}
+      {!islandAudioStage && (
       <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-y-auto md:overflow-hidden">
         {/* File list panel — desktop only */}
         {showFileList && (
@@ -2716,6 +2871,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
           : inspectorPanel;
         })()}
       </div>
+      )}
 
       {/* Share Modal */}
       {showShareModal && (
