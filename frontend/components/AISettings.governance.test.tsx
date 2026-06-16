@@ -8,12 +8,12 @@
  *   - module flag true (or missing) → row visible, unchanged
  *
  * AI Providers section hiding rule:
- *   - ALL six governance modules locked → section hidden
+ *   - ALL seven governance modules locked → section hidden
  *   - ANY module allowed → section visible
  *   - Fetch error → fail-open (everything visible)
  *
  * Module names: chat, transcription, translation, visual_analysis, caption,
- *               classification. (summarization is not governed — always shown.)
+ *               classification, summarization.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -25,11 +25,13 @@ import type { AISettings as AISettingsType } from '../types';
 const ALL_ALLOWED = {
   chat: true, transcription: true, translation: true,
   visual_analysis: true, caption: true, classification: true,
+  summarization: true,
 };
 
 const ALL_LOCKED = {
   chat: false, transcription: false, translation: false,
   visual_analysis: false, caption: false, classification: false,
+  summarization: false,
 };
 
 // vi.mock is hoisted — use inline literals, not external variables.
@@ -41,10 +43,12 @@ vi.mock('../services/aiService', () => ({
   getAIGovernance: vi.fn().mockResolvedValue({
     chat: true, transcription: true, translation: true,
     visual_analysis: true, caption: true, classification: true,
+    summarization: true,
   }),
   GOVERNANCE_ALL_ALLOWED: {
     chat: true, transcription: true, translation: true,
     visual_analysis: true, caption: true, classification: true,
+    summarization: true,
   },
 }));
 vi.mock('../services/aiLibraryService', () => ({
@@ -219,15 +223,17 @@ describe('AISettings governance — Task Assignment rows', () => {
     });
   });
 
-  it('always shows Summarization row regardless of governance (not governed)', async () => {
+  it('hides Summarization row when summarization=false', async () => {
     const { getAIGovernance } = await import('../services/aiService');
-    // Even with all modules locked, summarization should be visible
-    vi.mocked(getAIGovernance).mockResolvedValueOnce({ ...ALL_LOCKED });
+    vi.mocked(getAIGovernance).mockResolvedValueOnce({
+      ...ALL_ALLOWED,
+      summarization: false,
+    });
 
     renderSettings();
 
     await waitFor(() => {
-      expect(screen.getByText('Summarization')).toBeInTheDocument();
+      expect(screen.getByText(MANAGED_TEXT)).toBeInTheDocument();
     });
   });
 });
@@ -254,6 +260,7 @@ describe('AISettings governance — AI Providers section', () => {
       visual_analysis: false,
       caption: true,   // one module still allowed
       classification: false,
+      summarization: false,
     });
 
     renderSettings();
@@ -263,7 +270,7 @@ describe('AISettings governance — AI Providers section', () => {
     });
   });
 
-  it('hides AI Providers section when ALL six modules are locked', async () => {
+  it('hides AI Providers section when ALL seven modules are locked', async () => {
     const { getAIGovernance } = await import('../services/aiService');
     vi.mocked(getAIGovernance).mockResolvedValueOnce({ ...ALL_LOCKED });
 

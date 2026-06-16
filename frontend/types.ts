@@ -572,6 +572,7 @@ export interface AIGovernanceFlags {
   visual_analysis: boolean;
   caption: boolean;
   classification: boolean;
+  summarization: boolean;
 }
 
 // Nous Platform Model (admin-configured, pay with points)

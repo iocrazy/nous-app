@@ -484,6 +484,7 @@ export const GOVERNANCE_ALL_ALLOWED: AIGovernanceFlags = {
   visual_analysis: true,
   caption: true,
   classification: true,
+  summarization: true,
 };
 
 /**
