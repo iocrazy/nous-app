@@ -70,6 +70,8 @@ async def test_get_governance_defaults_to_all_allowed():
     assert result.visual_analysis.user_allowed is True
     assert result.caption.user_allowed is True
     assert result.classification.user_allowed is True
+    assert result.summarization.user_allowed is True
+    assert result.summarization.api_key_set is False
 
 
 # ---------------------------------------------------------------------------
@@ -344,3 +346,70 @@ async def test_get_governance_never_returns_raw_api_key():
     _find_api_key(result_dict)
     # api_key_set should be True since the key is non-empty.
     assert result.visual_analysis.api_key_set is True
+
+
+# ---------------------------------------------------------------------------
+# T4-h: summarization module — GET defaults + PUT round-trip
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_governance_summarization_defaults_allowed():
+    """Absent summarization rows → user_allowed=True, api_key_set=False."""
+    from app.api.admin.settings_router import _read_governance_settings
+
+    repo = _make_repo_with_rows([])
+    with patch(
+        "app.api.admin.settings_router.get_system_settings_repository",
+        return_value=repo,
+    ):
+        result = await _read_governance_settings()
+
+    assert result.summarization.user_allowed is True
+    assert result.summarization.api_key_set is False
+    assert result.summarization.base_url == ""
+    assert result.summarization.model == ""
+
+
+@pytest.mark.asyncio
+async def test_put_governance_summarization_fields_written():
+    """PUT writes user_allowed/base_url/model/api_key for summarization."""
+    from app.api.admin.settings_router import update_ai_governance_settings
+    from app.schemas.admin import AIGovernanceUpdate, TaskModuleGovernanceUpdate
+
+    repo = _make_repo_with_rows([])
+
+    async def _fake_audit(**kwargs):
+        pass
+
+    with patch(
+        "app.api.admin.settings_router.get_system_settings_repository",
+        return_value=repo,
+    ):
+        with patch(
+            "app.api.admin.settings_router.create_audit_log", side_effect=_fake_audit
+        ):
+            from unittest.mock import MagicMock
+
+            fake_request = MagicMock()
+            fake_request.client.host = "127.0.0.1"
+            fake_auth = MagicMock()
+            fake_auth.user_id = "admin-1"
+
+            update = AIGovernanceUpdate(
+                summarization=TaskModuleGovernanceUpdate(
+                    user_allowed=False,
+                    base_url="https://api.platform.com/v1",
+                    model="qwen-plus",
+                    api_key="platform-sum-key",
+                )
+            )
+            await update_ai_governance_settings(update, fake_auth, fake_request)
+
+    calls = {call.args[0]: call.args[1] for call in repo.upsert_setting.call_args_list}
+    assert calls.get("ai_module.summarization.user_allowed") is False
+    assert (
+        calls.get("ai_module.summarization.base_url") == "https://api.platform.com/v1"
+    )
+    assert calls.get("ai_module.summarization.model") == "qwen-plus"
+    assert calls.get("ai_module.summarization.api_key") == "platform-sum-key"

@@ -4,14 +4,15 @@ Reads ``system_settings`` (service-role, via the SQLAlchemy engine) to
 determine whether end-users may configure a given AI module, and provides
 the admin-set fallback config when a module is locked.
 
-Six governed modules
---------------------
+Seven governed modules
+----------------------
 chat            — chat agent turns (toggle only; platform keys used when locked)
 transcription   — Whisper / volcengine ASR
 translation     — LLM translate
 visual_analysis — LLM visual/image analysis
 caption         — image captioning
 classification  — asset classification
+summarization   — LLM summary/rewrite of transcripts (summarize agent)
 
 Data model (``system_settings`` keys, value = JSONB)
 ----------------------------------------------------
@@ -40,7 +41,14 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 TASK_MODULES = frozenset(
-    {"transcription", "translation", "visual_analysis", "caption", "classification"}
+    {
+        "transcription",
+        "translation",
+        "visual_analysis",
+        "caption",
+        "classification",
+        "summarization",
+    }
 )
 CHAT_MODULE = "chat"
 ALL_MODULES: frozenset[str] = TASK_MODULES | {CHAT_MODULE}
