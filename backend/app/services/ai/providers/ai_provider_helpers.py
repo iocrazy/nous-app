@@ -64,9 +64,59 @@ async def resolve_task_provider_config(
     resolved slug is returned so the caller composes the SAME agent whose
     model was resolved (see #622/#623: prompt agent and model agent must
     match or the composed model overrides the resolved one).
+
+    Governance gate
+    ---------------
+    When an admin has locked this module (``ai_module.<task_key>.user_allowed
+    = false`` in system_settings), the user's task_assignment and BYOK are
+    IGNORED.  The admin-set base_url / model / api_key are used instead.
+    Locked + no admin api_key → fail-closed (RuntimeError) — WhisperService and
+    LLMAnalysisService use AIProviderFactory.get_provider directly (no env
+    fallback), so a missing key would silently fail; we surface the error early.
     """
     from app.repositories.agent_repository import get_agent_repository
     from app.services.ai.adapters.factory import provider_key_for_model
+    from app.services.ai.governance.ai_governance import get_module_governance
+
+    # ── Governance gate ───────────────────────────────────────────────────
+    governance = await get_module_governance(task_key)
+    if not governance.allowed:
+        # Module is admin-locked: bypass user BYOK + task_assignment.
+        if not governance.api_key_present:
+            logger.error(
+                "[governance] %s is admin-locked but no admin api_key is configured; "
+                "failing closed — no platform-key fallback for this service",
+                task_key,
+            )
+            raise RuntimeError(
+                f"AI module '{task_key}' is admin-locked but no admin API key is "
+                "configured. Contact your platform administrator."
+            )
+        # Derive provider_key from the admin-set model prefix.
+        # Unknown or missing prefix → "" (generic OpenAI-compatible; the qwen
+        # adapter accepts a custom base_url + api_key for any endpoint).
+        try:
+            derived_key = (
+                provider_key_for_model(governance.model) if governance.model else ""
+            )
+        except ValueError:
+            derived_key = ""
+        provider_config: Dict[str, Any] = {
+            "api_key": governance.api_key,
+            "base_url": governance.base_url,
+            "model": governance.model,
+        }
+        logger.info(
+            "[governance] %s locked by admin; using admin config "
+            "(provider_key=%r model=%r)",
+            task_key,
+            derived_key,
+            governance.model,
+        )
+        # Return the same tuple shape callers expect.
+        # agent_slug = default_slug so the caller composes the module's
+        # built-in default agent prompt (not a user-assigned one).
+        return derived_key, provider_config, governance.model, default_slug
 
     # Load settings first so we can read the user's assigned agent slug.
     # Reused below for the BYO provider lookup — a single read, not two.
