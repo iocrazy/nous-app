@@ -62,6 +62,23 @@ class SystemSettingsRepository:
             return None
         return result.data[0]
 
+    async def upsert_setting(
+        self, key: str, value: Any, updated_by: str
+    ) -> dict[str, Any]:
+        """Insert-or-update a setting row (safe for first-time writes with no seed).
+
+        Uses the supabase-py ``.upsert()`` which maps to PostgreSQL
+        ``INSERT ... ON CONFLICT DO UPDATE``.  The ``key`` column is the primary
+        key; a collision updates ``value`` and ``updated_by``.
+        """
+        client = await self._client()
+        result = (
+            await client.table(self.TABLE)
+            .upsert({"key": key, "value": value, "updated_by": updated_by})
+            .execute()
+        )
+        return result.data[0] if result.data else {"key": key, "value": value}
+
 
 def get_system_settings_repository() -> "SystemSettingsRepository":
     """Return the right SystemSettingsRepository implementation per env.

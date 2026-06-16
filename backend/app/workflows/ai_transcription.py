@@ -48,6 +48,52 @@ async def load_transcribe_inputs(parsed_media_id: int, user_id: str) -> dict[str
     if not audio_path:
         raise RuntimeError(f"no audio_path for parsed_media={parsed_media_id}")
 
+    # ── Governance gate ─────────────────────────────────────────────────
+    # Check BEFORE consulting user settings so a locked module short-circuits
+    # without depending on the user having settings configured.
+    from app.services.ai.adapters.factory import provider_key_for_model
+    from app.services.ai.governance.ai_governance import get_module_governance
+
+    governance = await get_module_governance("transcription")
+    if not governance.allowed:
+        if not governance.api_key_present:
+            logger.error(
+                "[governance] transcription is admin-locked but no admin api_key "
+                "is configured; failing closed — WhisperService has no env fallback"
+            )
+            raise RuntimeError(
+                "AI module 'transcription' is admin-locked but no admin API key "
+                "is configured. Contact your platform administrator."
+            )
+        # Derive provider key from admin model prefix.  Volcengine is a special
+        # ASR path; unknown prefix falls back to "openai" (Whisper API).
+        try:
+            admin_provider_key = (
+                provider_key_for_model(governance.model)
+                if governance.model
+                else "openai"
+            )
+        except ValueError:
+            admin_provider_key = "openai"
+        logger.info(
+            f"[governance] transcription locked by admin; using admin config "
+            f"(provider_key={admin_provider_key!r} model={governance.model!r})"
+        )
+        return {
+            "audio_path": audio_path,
+            "resource_id": str(media_row["resource_id"]),
+            "platform_id": media_row["platform_id"],
+            "provider_key": admin_provider_key,
+            "provider_config": {
+                "api_key": governance.api_key,
+                "base_url": governance.base_url,
+                "model": governance.model,
+            },
+            "language": "auto",
+            "task_assignment": "",
+        }
+    # ── End governance gate ─────────────────────────────────────────────
+
     if not settings_row:
         raise RuntimeError(f"no user_settings for {user_id}")
     settings = settings_row["settings_json"]
