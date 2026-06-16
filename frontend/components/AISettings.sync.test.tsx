@@ -16,6 +16,14 @@ vi.mock('../services/aiService', () => ({
   saveAISettings: vi.fn().mockResolvedValue(undefined),
   testAIConnection: vi.fn(),
   getNousModels: vi.fn().mockResolvedValue([]),
+  getAIGovernance: vi.fn().mockResolvedValue({
+    chat: true, transcription: true, translation: true,
+    visual_analysis: true, caption: true, classification: true,
+  }),
+  GOVERNANCE_ALL_ALLOWED: {
+    chat: true, transcription: true, translation: true,
+    visual_analysis: true, caption: true, classification: true,
+  },
 }));
 vi.mock('../services/aiLibraryService', () => ({
   aiLibraryService: { listAgents: vi.fn().mockResolvedValue([]) },
@@ -24,6 +32,8 @@ vi.mock('./StoryboardApiSettings', () => ({ StoryboardApiSettings: () => null })
 vi.mock('./MCPServersPanel', () => ({ MCPServersPanel: () => null }));
 vi.mock('./ApprovalsPanel', () => ({ ApprovalsPanel: () => null }));
 vi.mock('./TokenBillingDashboard', () => ({ TokenBillingDashboard: () => null }));
+vi.mock('./MemoryPanel', () => ({ MemoryPanel: () => null }));
+vi.mock('./AIHealthBoard', () => ({ AIHealthBoard: () => null }));
 vi.mock('../features/canvas-core/smart/NousCenterVerifyPanel', () => ({
   NousCenterVerifyPanel: () => null,
 }));
