@@ -29,9 +29,16 @@ import {
   X,
   Languages,
   ExternalLink,
+  Lock,
 } from 'lucide-react';
-import { AISettings as AISettingsType, AIProviderConfig, NousModelPublic, AILibraryAgent } from '../types';
-import { saveAISettings as saveAISettingsApi, testAIConnection as testAIConnectionApi, getNousModels } from '../services/aiService';
+import { AISettings as AISettingsType, AIProviderConfig, NousModelPublic, AILibraryAgent, AIGovernanceFlags } from '../types';
+import {
+  saveAISettings as saveAISettingsApi,
+  testAIConnection as testAIConnectionApi,
+  getNousModels,
+  getAIGovernance,
+  GOVERNANCE_ALL_ALLOWED,
+} from '../services/aiService';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { StoryboardApiSettings } from './StoryboardApiSettings';
 import { MCPServersPanel } from './MCPServersPanel';
@@ -376,9 +383,18 @@ const EnabledModelsField: React.FC<{
   );
 };
 
+/** Small note shown in place of a locked module's Task Assignment row. */
+const ManagedNote: React.FC = () => (
+  <div className="flex items-center gap-1.5 text-xs text-ink-500 py-1">
+    <Lock size={11} className="text-ink-600 shrink-0" aria-hidden />
+    <span>Managed by your administrator</span>
+  </div>
+);
+
 export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
   const [providerTab, setProviderTab] = useState<ProviderTab>('text');
   const [taskTab, setTaskTab] = useState<TaskTab>('media');
+  const [governance, setGovernance] = useState<AIGovernanceFlags>(GOVERNANCE_ALL_ALLOWED);
   const enabledSbProviders = useSettingsStore((s) => s.enabledSbProviders);
   const [localSettings, setLocalSettings] = useState<AISettingsType>(() => ({
     ...settings,
@@ -415,6 +431,16 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
 
   useEffect(() => {
     getNousModels().then(setNousModels).catch(() => {});
+  }, []);
+
+  // Fetch per-module governance flags once on mount.
+  // Fail-open: any error leaves governance as GOVERNANCE_ALL_ALLOWED (all true).
+  useEffect(() => {
+    getAIGovernance()
+      .then(setGovernance)
+      .catch((err) => {
+        console.error('[AISettings] governance fetch failed — defaulting to all-allowed:', err);
+      });
   }, []);
 
   useEffect(() => {
@@ -856,6 +882,8 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
         {/* Media Tasks */}
         {taskTab === 'media' && (
         <div className="px-6 pb-6 pt-2 space-y-5">
+          {/* Transcription — hidden when governance.transcription is false */}
+          {governance.transcription ? (
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <FileText size={16} className="text-ink-400" />
@@ -874,7 +902,18 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
               <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-500 pointer-events-none" />
             </div>
           </div>
+          ) : (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <FileText size={16} className="text-ink-500" />
+              <span className="text-sm font-medium text-ink-500">Transcription</span>
+            </div>
+            <ManagedNote />
+          </div>
+          )}
 
+          {/* Summarization — hidden when governance.summarization is false */}
+          {governance.summarization ? (
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Sparkles size={16} className="text-ink-400" />
@@ -882,7 +921,18 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
             </div>
             {renderAgentSelect('summarization', localSettings.task_assignment.summarization)}
           </div>
+          ) : (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Sparkles size={16} className="text-ink-500" />
+              <span className="text-sm font-medium text-ink-500">Summarization</span>
+            </div>
+            <ManagedNote />
+          </div>
+          )}
 
+          {/* Visual Analysis — hidden when governance.visual_analysis is false */}
+          {governance.visual_analysis ? (
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Search size={16} className="text-ink-400" />
@@ -890,7 +940,18 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
             </div>
             {renderAgentSelect('visual_analysis', localSettings.task_assignment.visual_analysis)}
           </div>
+          ) : (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Search size={16} className="text-ink-500" />
+              <span className="text-sm font-medium text-ink-500">Visual Analysis</span>
+            </div>
+            <ManagedNote />
+          </div>
+          )}
 
+          {/* Translation — hidden when governance.translation is false */}
+          {governance.translation ? (
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Languages size={16} className="text-ink-400" />
@@ -898,7 +959,18 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
             </div>
             {renderAgentSelect('translation', localSettings.task_assignment.translation ?? '')}
           </div>
+          ) : (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Languages size={16} className="text-ink-500" />
+              <span className="text-sm font-medium text-ink-500">Translation</span>
+            </div>
+            <ManagedNote />
+          </div>
+          )}
 
+          {/* Caption — hidden when governance.caption is false */}
+          {governance.caption ? (
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <ImageIcon size={16} className="text-ink-400" />
@@ -906,7 +978,18 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
             </div>
             {renderAgentSelect('caption', localSettings.task_assignment.caption ?? '')}
           </div>
+          ) : (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <ImageIcon size={16} className="text-ink-500" />
+              <span className="text-sm font-medium text-ink-500">Caption (Image → Prompt)</span>
+            </div>
+            <ManagedNote />
+          </div>
+          )}
 
+          {/* Classification — hidden when governance.classification is false */}
+          {governance.classification ? (
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Search size={16} className="text-ink-400" />
@@ -914,6 +997,15 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
             </div>
             {renderAgentSelect('classification', localSettings.task_assignment.classification ?? '')}
           </div>
+          ) : (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Search size={16} className="text-ink-500" />
+              <span className="text-sm font-medium text-ink-500">Classification (Auto Tag)</span>
+            </div>
+            <ManagedNote />
+          </div>
+          )}
         </div>
         )}
 
@@ -980,7 +1072,19 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
       {/* Capability health board — what each feature actually uses */}
       <AIHealthBoard />
 
-      {/* Provider Cards Section */}
+      {/* Provider Cards Section — hidden only when ALL governance-controlled
+          modules are locked (chat + 5 task modules). When every module is
+          admin-managed, no user BYOK key has any effect so the section is
+          irrelevant to end-users. Partial-lock keeps it visible. */}
+      {!(
+        !governance.chat &&
+        !governance.transcription &&
+        !governance.translation &&
+        !governance.visual_analysis &&
+        !governance.caption &&
+        !governance.classification &&
+        !governance.summarization
+      ) && (
       <section className={`bg-ink-900 border border-ink-800 rounded-xl overflow-hidden transition-opacity ${localSettings.ai_enabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
         <div className="px-6 py-4 border-b border-ink-800 bg-ink-900/50 flex items-center gap-3">
           <div className="p-2 bg-cyan-500/10 rounded-lg text-cyan-400">
@@ -1275,6 +1379,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
           </div>
         )}
       </section>
+      )}
 
       {/* Save Button */}
       <div className="flex flex-col items-end gap-2 pt-2 pb-4">

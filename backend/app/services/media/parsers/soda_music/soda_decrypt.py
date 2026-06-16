@@ -133,6 +133,8 @@ def extract_spade_key(play_auth: str) -> str:
 
 
 def _read_u32(data: bytes, offset: int) -> int:
+    if offset < 0 or offset + 4 > len(data):
+        raise SodaDecryptError("unexpected end of data while reading box header")
     return struct.unpack(">I", data[offset : offset + 4])[0]
 
 
@@ -207,6 +209,58 @@ def _parse_stsz(data: bytes, stsz: _Box) -> list[int]:
             break
         sizes.append(_read_u32(body, off))
     return sizes
+
+
+def _parse_stco(data: bytes, box: "_Box") -> list[int]:
+    """Chunk byte-offsets (32-bit ``stco``)."""
+    body = data[box.data_start : box.offset + box.size]
+    count = _read_u32(body, 4)
+    out = []
+    for i in range(count):
+        off = 8 + i * 4
+        if off + 4 > len(body):
+            break
+        out.append(_read_u32(body, off))
+    return out
+
+
+def _parse_co64(data: bytes, box: "_Box") -> list[int]:
+    """Chunk byte-offsets (64-bit ``co64``)."""
+    body = data[box.data_start : box.offset + box.size]
+    count = _read_u32(body, 4)
+    out = []
+    for i in range(count):
+        off = 8 + i * 8
+        if off + 8 > len(body):
+            break
+        out.append(struct.unpack(">Q", body[off : off + 8])[0])
+    return out
+
+
+def _parse_stsc(data: bytes, box: "_Box") -> list[tuple[int, int, int]]:
+    """Sample-to-chunk run table: (first_chunk, samples_per_chunk, sdi)."""
+    body = data[box.data_start : box.offset + box.size]
+    count = _read_u32(body, 4)
+    rows: list[tuple[int, int, int]] = []
+    for i in range(count):
+        off = 8 + i * 12
+        if off + 12 > len(body):
+            break
+        rows.append(struct.unpack(">III", body[off : off + 12]))
+    return rows
+
+
+def _chunk_sample_counts(
+    stsc_rows: list[tuple[int, int, int]], n_chunks: int
+) -> list[int]:
+    """Expand the stsc run-table into a per-chunk sample count (0-indexed)."""
+    counts = [0] * n_chunks
+    for idx, (first_chunk, per_chunk, _sdi) in enumerate(stsc_rows):
+        next_first = stsc_rows[idx + 1][0] if idx + 1 < len(stsc_rows) else n_chunks + 1
+        for ch in range(first_chunk, next_first):
+            if 1 <= ch <= n_chunks:
+                counts[ch - 1] = per_chunk
+    return counts
 
 
 @dataclass(frozen=True)
@@ -345,23 +399,64 @@ def decrypt_audio(file_data: bytes, play_auth: str) -> bytes:
     if mdat is None:
         raise SodaDecryptError("mdat box not found")
 
-    decrypted = bytearray()
-    read_ptr = mdat.data_start
-    for i, size in enumerate(sample_sizes):
-        if read_ptr + size > len(out):
-            break
-        chunk = bytes(out[read_ptr : read_ptr + size])
-        if i < len(senc_samples):
-            decrypted += _decrypt_sample(key, chunk, senc_samples[i])
-        else:
-            decrypted += chunk
-        read_ptr += size
+    stco = _find_box(out, b"stco", stbl.data_start, stbl.offset + stbl.size)
+    co64 = _find_box(out, b"co64", stbl.data_start, stbl.offset + stbl.size)
+    stsc = _find_box(out, b"stsc", stbl.data_start, stbl.offset + stbl.size)
 
-    if len(decrypted) != mdat.size - 8:
-        raise SodaDecryptError(
-            f"decrypted size mismatch: {len(decrypted)} != {mdat.size - 8}"
+    if (stco is not None or co64 is not None) and stsc is not None:
+        # Chunked / multi-track layout: decrypt each sample IN PLACE at its real
+        # stco/stsc-resolved offset. Reading sequentially from mdat.data_start
+        # (the path below) grabs the WRONG bytes when the audio is split across
+        # chunks or interleaved with another track — which silently corrupts the
+        # output. Touch only the audio track's sample bytes; leave any other
+        # track / padding in mdat exactly as-is, so size is preserved.
+        chunk_offsets = (
+            _parse_stco(out, stco) if stco is not None else _parse_co64(out, co64)
         )
-    out[mdat.data_start : mdat.offset + mdat.size] = decrypted
+        per_chunk = _chunk_sample_counts(_parse_stsc(out, stsc), len(chunk_offsets))
+        si = 0
+        for ci, chunk_off in enumerate(chunk_offsets):
+            off = chunk_off
+            for _ in range(per_chunk[ci]):
+                if si >= len(sample_sizes):
+                    break
+                size = sample_sizes[si]
+                if off + size > len(out):
+                    raise SodaDecryptError(
+                        f"sample {si} at {off}+{size} exceeds buffer {len(out)}"
+                    )
+                if si < len(senc_samples):
+                    out[off : off + size] = _decrypt_sample(
+                        key, bytes(out[off : off + size]), senc_samples[si]
+                    )
+                off += size
+                si += 1
+        if si != len(sample_sizes):
+            raise SodaDecryptError(
+                f"decrypted {si}/{len(sample_sizes)} samples "
+                "(chunk table inconsistent or stream truncated)"
+            )
+    else:
+        # Legacy fallback: no chunk table → assume samples are contiguous from
+        # mdat.data_start (the original single-track behavior). Rebuild mdat and
+        # validate the total, since here we have no per-sample offsets to trust.
+        decrypted = bytearray()
+        read_ptr = mdat.data_start
+        for i, size in enumerate(sample_sizes):
+            if read_ptr + size > len(out):
+                break
+            chunk = bytes(out[read_ptr : read_ptr + size])
+            if i < len(senc_samples):
+                decrypted += _decrypt_sample(key, chunk, senc_samples[i])
+            else:
+                decrypted += chunk
+            read_ptr += size
+
+        if len(decrypted) != mdat.size - 8:
+            raise SodaDecryptError(
+                f"decrypted size mismatch: {len(decrypted)} != {mdat.size - 8}"
+            )
+        out[mdat.data_start : mdat.offset + mdat.size] = decrypted
 
     stsd = _find_box(out, b"stsd", stbl.data_start, stbl.offset + stbl.size)
     if stsd is not None:

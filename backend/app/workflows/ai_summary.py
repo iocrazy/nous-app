@@ -16,6 +16,7 @@ import json
 from typing import Any, Optional
 
 from dbos import DBOS
+from loguru import logger
 
 
 @DBOS.step()
@@ -37,6 +38,47 @@ async def load_summary_inputs(parsed_media_id: int, user_id: str) -> dict[str, A
         raise RuntimeError(
             f"no transcript for parsed_media={parsed_media_id} user={user_id}"
         )
+
+    # ── Governance gate ─────────────────────────────────────────────────────
+    # Check BEFORE consulting user settings so a locked module short-circuits
+    # without depending on the user having settings configured.
+    from app.services.ai.adapters.factory import provider_key_for_model
+    from app.services.ai.governance.ai_governance import get_module_governance
+
+    governance = await get_module_governance("summarization")
+    if not governance.allowed:
+        if not governance.api_key_present:
+            logger.error(
+                "[governance] summarization is admin-locked but no admin api_key "
+                "is configured; failing closed — SummarizeService has no env fallback"
+            )
+            raise RuntimeError(
+                "AI module 'summarization' is admin-locked but no admin API key "
+                "is configured. Contact your platform administrator."
+            )
+        try:
+            admin_provider_key = (
+                provider_key_for_model(governance.model) if governance.model else ""
+            )
+        except ValueError:
+            admin_provider_key = ""
+        logger.info(
+            f"[governance] summarization locked by admin; using admin config "
+            f"(provider_key={admin_provider_key!r} model={governance.model!r})"
+        )
+        return {
+            "transcript": row["transcript"],
+            "title": row.get("title") or "",
+            "resource_id": str(row["resource_id"]),
+            "provider_key": admin_provider_key,
+            "provider_config": {
+                "api_key": governance.api_key,
+                "base_url": governance.base_url,
+                "app_id": "",
+                "model": governance.model,
+            },
+        }
+    # ── End governance gate ─────────────────────────────────────────────────
 
     settings_row = await db_engine.fetch_one(
         "SELECT settings_json FROM public.user_settings WHERE user_id = :uid",

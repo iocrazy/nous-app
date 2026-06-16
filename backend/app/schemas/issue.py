@@ -20,6 +20,9 @@ class IssueStatus(str, Enum):
     IN_PROGRESS = "in_progress"
     IN_REVIEW = "in_review"
     BLOCKED = "blocked"
+    # Spec-2 slice 2b: agent stalled, needs a human decision/info (a deliberate
+    # hand-off — distinct from BLOCKED, which means execution errored).
+    NEEDS_FOLLOWUP = "needs_followup"
     DONE = "done"
     CANCELLED = "cancelled"
 

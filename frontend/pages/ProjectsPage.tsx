@@ -17,6 +17,8 @@ import { ProjectSharesView } from '../components/ProjectSharesView';
 import { ProjectStoryboardTab } from '../components/project/ProjectStoryboardTab';
 import { ProjectScriptsTab } from '../components/project/ProjectScriptsTab';
 import { ProjectOutputTab } from '../components/project/ProjectOutputTab';
+import { StageSelector } from '../components/project/StageSelector';
+import { StageToolGrid } from '../components/project/StageToolGrid';
 import { islandUI } from '../utils/featureFlags';
 
 // Map URL tab param → ProjectNavSidebar section key
@@ -215,7 +217,12 @@ export function ProjectsPage() {
           onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
         />
         <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
-          <div className={island ? 'flex-1 overflow-y-auto px-8 pb-8' : 'flex-1 overflow-y-auto px-8 pt-20 pb-8'}>
+          {/* SOP stage stepper + recommended-tool grid (Phase 5b) */}
+          <div className="flex flex-col gap-1 px-8 pt-3 pb-1 border-b border-ink-200">
+            <StageSelector projectId={selectedProject.id} canWrite={true} />
+            <StageToolGrid projectId={selectedProject.id} setActiveTab={setActiveTab} />
+          </div>
+          <div className={island ? 'flex-1 overflow-y-auto px-8 pb-8' : 'flex-1 overflow-y-auto px-8 pt-4 pb-8'}>
             {activeTab === 'files' && (
               <ProjectFilesView
                 project={selectedProject}

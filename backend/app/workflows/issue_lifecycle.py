@@ -356,7 +356,8 @@ async def _run_dispatch_with_continuation(
     Routing:
       completed       → done if ``auto_close`` (slice 2a platform toggle) else
                         in_review (human confirms)
-      needs_input     → blocked   (with the agent's reason)
+      needs_input     → needs_followup (slice 2b: a deliberate hand-off, distinct
+                        from blocked=errored; carries the agent's reason)
       continue (capped)→ in_review (handed to a human after the cap; never
                         auto-closes — the agent never said it finished)
       none declared   → in_review (default — unchanged legacy behavior)
@@ -378,10 +379,9 @@ async def _run_dispatch_with_continuation(
     if outcome == "needs_input":
         await set_status(
             issue_id,
-            "blocked",
-            error_code="agent_needs_input",
-            error_message=reason,
+            "needs_followup",
             agent_outcome="needs_input",
+            outcome_reason=reason,
         )
     elif outcome == "completed":
         # slice 2a: self-close only when the platform toggle trusts agents to.

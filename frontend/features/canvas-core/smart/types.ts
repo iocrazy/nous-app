@@ -14,6 +14,20 @@
 import type { CropRegion } from '../editor/types';
 import type { CanvasNode } from '../types';
 
+/**
+ * A resource @-referenced inside a PromptNode body.
+ * Shape mirrors ResourceRefAttachment (frontend/types.ts) minus the 'kind'
+ * discriminant — stored per-canvas-node so the runner can forward refs as
+ * context attachments without re-fetching the resource record.
+ */
+export interface PromptResourceRef {
+  resource_id: string;   // Snowflake as string (bigint-safe)
+  name: string;          // display name snapshot
+  kind: 'video' | 'image' | 'doc' | 'audio' | 'pdf';
+  mime: string;
+  scope: { type: 'personal' | 'team'; id: string };
+}
+
 export type SmartNodeType = 'shot' | 'prompt' | 'output' | 'loop';
 
 export type LoopMode = 'serial' | 'parallel' | 'batch';
@@ -45,6 +59,12 @@ export interface PromptNodeData {
   run_started_at: string | null;
   run_finished_at: string | null;
   run_error: string | null;
+  /**
+   * Resources @-mentioned in the prompt body via the in-canvas picker.
+   * Persisted with the node so the runner can forward them as context
+   * attachments. Defaults to [] for nodes created before this field existed.
+   */
+  resource_refs: PromptResourceRef[];
 }
 
 export type OutputKind = 'text' | 'image' | 'video' | 'audio';

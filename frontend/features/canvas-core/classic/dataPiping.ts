@@ -37,9 +37,11 @@ function asPipedString(value: unknown): string | undefined {
  * non-string.
  *
  * Sources read from `data`:
- *   - prompt `prompt-out`  → `data.prompt`
- *   - text   `text-out`    → `data.text`
- *   - image  `image-out`   → `data.image_url ?? data.imageUrl`
+ *   - prompt    `prompt-out`  → `data.prompt`
+ *   - text      `text-out`    → `data.text`
+ *   - image     `image-out`   → `data.image_url ?? data.imageUrl`
+ *   - video     `video-out`   → `data.video_url`  (W3: video URL source)
+ *   - text_join `text-out`    → `[data.text_a, data.text_b].join(sep)` (W3 transform)
  *
  * Runnables read from `runResult`:
  *   - image_gen `image-out` → `runResult.image_url`
@@ -67,6 +69,21 @@ export function nodeOutputValue(
       return outputHandleId === 'image-out'
         ? asPipedString(data.image_url ?? data.imageUrl)
         : undefined;
+    // W3: video source — value lives in data.video_url (passive like `image`)
+    case 'video':
+      return outputHandleId === 'video-out' ? asPipedString(data.video_url) : undefined;
+
+    // W3: text_join transform — computed from effective data (text_a + sep + text_b).
+    // The cascade records the EFFECTIVE data for this node (not just stored data),
+    // so piped values from text-a-in / text-b-in are already folded into `data`
+    // by the time `nodeOutputValue` is called by a downstream node.
+    case 'text_join': {
+      if (outputHandleId !== 'text-out') return undefined;
+      const sep = typeof data.separator === 'string' ? data.separator : ' ';
+      const parts = [data.text_a, data.text_b]
+        .filter((v) => typeof v === 'string' && v.length > 0) as string[];
+      return parts.length > 0 ? parts.join(sep) : undefined;
+    }
 
     // --- runnables: value lives in the node's run_result ---
     case 'image_gen':
@@ -90,13 +107,14 @@ export function nodeOutputValue(
  * the (nodeType, handle) pair takes no run param. The keys match exactly what
  * the backend run service reads out of `node.data`:
  *
- *   - image_gen: `prompt-in` → `prompt`, `image-in` → `reference_image_url`
- *   - video_gen: `image-in`  → `source_image_url`, `prompt-in` → `prompt`
- *   - llm:       `prompt-in` → `prompt`, `image-in` → `reference_image_url`,
- *                `text-in`   → `prompt`  (a static-text source feeds the prompt;
- *                                         body derivation then picks it up)
- *   - comfy:     `prompt-in` → `prompt`, `image-in` → `reference_image_url`
- *   - sources (prompt/text/image) and sinks (output/preview/note/group) → null
+ *   - image_gen: `prompt-in`  → `prompt`, `image-in`  → `reference_image_url`
+ *   - video_gen: `image-in`   → `source_image_url`, `prompt-in` → `prompt`
+ *   - llm:       `prompt-in`  → `prompt`, `image-in`  → `reference_image_url`,
+ *                `text-in`    → `prompt`  (a static-text source feeds the prompt;
+ *                                          body derivation then picks it up)
+ *   - comfy:     `prompt-in`  → `prompt`, `image-in`  → `reference_image_url`
+ *   - text_join: `text-a-in` → `text_a`, `text-b-in` → `text_b`  (W3 transform)
+ *   - sources (prompt/text/image/video) and sinks (output/preview/note/group) → null
  */
 export function inputParamKey(
   nodeType: string | undefined,
@@ -121,6 +139,12 @@ export function inputParamKey(
     case 'comfy':
       if (inputHandleId === 'prompt-in') return 'prompt';
       if (inputHandleId === 'image-in') return 'reference_image_url';
+      return null;
+    // W3 transform: text_join maps its two inputs to data keys the cascade
+    // and `nodeOutputValue` read when computing the joined output.
+    case 'text_join':
+      if (inputHandleId === 'text-a-in') return 'text_a';
+      if (inputHandleId === 'text-b-in') return 'text_b';
       return null;
     default:
       return null;

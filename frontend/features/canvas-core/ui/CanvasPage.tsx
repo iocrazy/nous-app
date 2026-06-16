@@ -11,13 +11,15 @@
  * edits.
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
 import { ClassicPalette } from '../classic/ui/ClassicPalette';
 import { ClassicRunBar } from '../classic/ui/ClassicRunBar';
+import { CommandPalette } from '../palette/CommandPalette';
 import { CanvasComposer } from '../smart/CanvasComposer';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
+import { useCanvasRealtime } from '../realtime/useCanvasRealtime';
 import { CanvasConflictDialog } from './CanvasConflictDialog';
 import { CanvasSurface } from './CanvasSurface';
 import { useCanvasShortcuts } from './useCanvasShortcuts';
@@ -34,7 +36,19 @@ export default function CanvasPage() {
   const flushSave = useCanvasCoreStore((s) => s.flushSave);
   const reset = useCanvasCoreStore((s) => s.reset);
 
-  useCanvasShortcuts({ enabled: loadStatus === 'ready' });
+  // Cmd+K palette — canvas-only scope, active only when canvas is ready.
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  useCanvasShortcuts({
+    enabled: loadStatus === 'ready',
+    onOpenPalette: () => setPaletteOpen(true),
+  });
+
+  // Phase 6a — cross-tab / cross-user realtime invalidation.
+  // When another session saves a newer revision, applyRemoteUpdate in the
+  // store either rebases (clean local state) or surfaces a conflict (dirty
+  // edits) without clobbering. canvasId is null before params resolve.
+  useCanvasRealtime(canvasId);
 
   useEffect(() => {
     if (!canvasId) return;
@@ -81,6 +95,10 @@ export default function CanvasPage() {
       )}
       <CanvasConflictDialog />
       <SaveBadge status={saveStatus} error={saveError} />
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+      />
     </div>
   );
 }

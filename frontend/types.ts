@@ -560,6 +560,21 @@ export interface AISettings {
   };
 }
 
+/**
+ * Per-module governance flags returned by GET /api/v1/ai/governance.
+ * true = user may configure; false = admin-managed (hide the UI row).
+ * Absent = true (default-open / fail-open).
+ */
+export interface AIGovernanceFlags {
+  chat: boolean;
+  transcription: boolean;
+  translation: boolean;
+  visual_analysis: boolean;
+  caption: boolean;
+  classification: boolean;
+  summarization: boolean;
+}
+
 // Nous Platform Model (admin-configured, pay with points)
 export interface NousModelPublic {
   name: string;
@@ -860,6 +875,19 @@ export interface ScriptProjectSummary {
 }
 
 export type ProjectTab = 'files' | 'scripts' | 'storyboard' | 'output' | 'tasks' | 'shares' | 'trash';
+
+/** A single row from the global ``project_stages`` catalog (Phase 5b SOP). */
+export interface ProjectStage {
+  /** Snowflake BIGINT serialised as string for JS-safe transport. */
+  id: string;
+  slug: string;
+  name: string;
+  sort_order: number;
+  /** Tool slugs recommended for this stage (maps to TOOL_CATALOG in stageTools.ts). */
+  tools_recommended: string[];
+  created_at?: string;
+  updated_at?: string;
+}
 
 export type ScriptAssetType = 'worldview' | 'character' | 'location' | 'prop' | 'plot_point';
 

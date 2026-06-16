@@ -570,3 +570,187 @@ describe('runClassicCascade — abort wiring', () => {
     expect(hasAbortController('N')).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// W3: video source node (passive)
+// ---------------------------------------------------------------------------
+
+describe('runClassicCascade — W3 video source node (passive)', () => {
+  it('video source is skipped (passive), its video_url pipes into a downstream preview', async () => {
+    // V(video, passive source) → P(preview, passive sink). No runnables — just
+    // verify the video source is passively recorded and the cascade does not
+    // throw or fail.
+    const nodes = [
+      node('V', 'video', { video_url: 'https://cdn/v.mp4' }),
+      node('P', 'preview'),
+    ];
+    const conns = [wire('V', 'video-out', 'P', 'video-in')];
+    const ran: string[] = [];
+    const runner: ClassicRunner = async (ctx) => {
+      ran.push(ctx.nodeId);
+      return { ok: true, text: '', error: null };
+    };
+    const r = recorder();
+    const report = await runClassicCascade(nodes, conns, runner, r.handlers);
+
+    // Neither video nor preview dispatches to backend (both passive).
+    expect(ran).toEqual([]);
+    expect(report.skipped).toContain('V');
+    expect(report.skipped).toContain('P');
+    expect(report.failed).toEqual([]);
+    expect(report.blocked).toEqual([]);
+    expect(r.toasts).toEqual([]);
+  });
+
+  it('video source alongside a runnable chain is skipped, chain runs', async () => {
+    // V(video, passive) isolated; P(prompt) → L(llm, runnable).
+    const nodes = [
+      node('V', 'video', { video_url: 'v.mp4' }),
+      node('P', 'prompt', { prompt: 'hello' }),
+      node('L', 'llm'),
+    ];
+    const conns = [edge('P', 'L')];
+    const ran: string[] = [];
+    const runner: ClassicRunner = async (ctx) => {
+      ran.push(ctx.nodeId);
+      return { ok: true, text: 'ok', error: null };
+    };
+    const r = recorder();
+    const report = await runClassicCascade(nodes, conns, runner, r.handlers);
+
+    expect(ran).toEqual(['L']);
+    expect(report.succeeded).toContain('L');
+    expect(report.skipped).toContain('V');
+    expect(report.failed).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W3: text_join transform node
+// ---------------------------------------------------------------------------
+
+describe('runClassicCascade — W3 text_join transform node', () => {
+  it('text_join is skipped (not dispatched to backend), cascade succeeds', async () => {
+    const nodes = [
+      node('J', 'text_join', { text_a: 'Hello', text_b: 'World' }),
+    ];
+    const ran: string[] = [];
+    const runner: ClassicRunner = async (ctx) => {
+      ran.push(ctx.nodeId);
+      return { ok: true, text: 'ok', error: null };
+    };
+    const r = recorder();
+    const report = await runClassicCascade(nodes, [], runner, r.handlers);
+
+    // text_join is a transform — no backend call.
+    expect(ran).toEqual([]);
+    expect(report.skipped).toContain('J');
+    expect(report.failed).toEqual([]);
+    expect(report.blocked).toEqual([]);
+  });
+
+  it('text_join pipes its computed join into a downstream llm prompt', async () => {
+    // T1(text, passive) → J(text_join, transform) → L(llm, runnable).
+    // The llm receives the joined text as its prompt.
+    const nodes = [
+      node('T1', 'text', { text: 'Hello' }),
+      node('T2', 'text', { text: 'World' }),
+      node('J', 'text_join'),
+      node('L', 'llm'),
+    ];
+    const conns = [
+      wire('T1', 'text-out', 'J', 'text-a-in'),
+      wire('T2', 'text-out', 'J', 'text-b-in'),
+      wire('J', 'text-out', 'L', 'text-in'),
+    ];
+    let seenData: Record<string, unknown> | undefined;
+    const runner: ClassicRunner = async (ctx) => {
+      seenData = ctx.data;
+      return { ok: true, text: 'ok', error: null, result: { text: 'ok' } };
+    };
+    const r = recorder();
+    const report = await runClassicCascade(nodes, conns, runner, r.handlers);
+
+    expect(report.succeeded).toEqual(['L']);
+    // text_join joined 'Hello' + 'World' with a space → llm sees 'Hello World' as prompt
+    expect(seenData!.prompt).toBe('Hello World');
+  });
+
+  it('text_join with a custom separator joins correctly', async () => {
+    const nodes = [
+      node('T1', 'text', { text: 'Part A' }),
+      node('T2', 'text', { text: 'Part B' }),
+      node('J', 'text_join', { separator: '\n' }),
+      node('L', 'llm'),
+    ];
+    const conns = [
+      wire('T1', 'text-out', 'J', 'text-a-in'),
+      wire('T2', 'text-out', 'J', 'text-b-in'),
+      wire('J', 'text-out', 'L', 'text-in'),
+    ];
+    let seenData: Record<string, unknown> | undefined;
+    const runner: ClassicRunner = async (ctx) => {
+      seenData = ctx.data;
+      return { ok: true, text: 'ok', error: null };
+    };
+    const r = recorder();
+    await runClassicCascade(nodes, conns, runner, r.handlers);
+
+    expect(seenData!.prompt).toBe('Part A\nPart B');
+  });
+
+  it('text_join with static (non-piped) text_a and text_b uses own data directly', async () => {
+    // J has no incoming wires; its static data.text_a + text_b are used.
+    const nodes = [
+      node('J', 'text_join', { text_a: 'Static A', text_b: 'Static B' }),
+      node('L', 'llm'),
+    ];
+    const conns = [wire('J', 'text-out', 'L', 'text-in')];
+    let seenData: Record<string, unknown> | undefined;
+    const runner: ClassicRunner = async (ctx) => {
+      seenData = ctx.data;
+      return { ok: true, text: 'ok', error: null };
+    };
+    const r = recorder();
+    const report = await runClassicCascade(nodes, conns, runner, r.handlers);
+
+    expect(report.succeeded).toContain('L');
+    expect(seenData!.prompt).toBe('Static A Static B');
+  });
+
+  it('text_join does NOT mutate the persisted node data (immutability)', async () => {
+    const jNode = node('J', 'text_join', { text_a: 'own' });
+    const t2 = node('T2', 'text', { text: 'piped' });
+    const nodes = [t2, jNode, node('L', 'llm')];
+    const conns = [
+      wire('T2', 'text-out', 'J', 'text-b-in'),
+      wire('J', 'text-out', 'L', 'text-in'),
+    ];
+    const runner: ClassicRunner = async () => ({ ok: true, text: 'ok', error: null });
+    const r = recorder();
+    await runClassicCascade(nodes, conns, runner, r.handlers);
+
+    // The stored node data is untouched — transform built a per-run copy.
+    expect((jNode.data as Record<string, unknown>).text_b).toBeUndefined();
+  });
+
+  it('text_join failing downstream does not dispatch text_join (transform is skipped)', async () => {
+    // J(text_join) → L(llm, fails). J still not dispatched; L fails normally.
+    const nodes = [
+      node('J', 'text_join', { text_a: 'A', text_b: 'B' }),
+      node('L', 'llm'),
+    ];
+    const conns = [wire('J', 'text-out', 'L', 'text-in')];
+    const ran: string[] = [];
+    const runner: ClassicRunner = async (ctx) => {
+      ran.push(ctx.nodeId);
+      return { ok: false, text: '', error: 'llm down' };
+    };
+    const r = recorder();
+    const report = await runClassicCascade(nodes, conns, runner, r.handlers);
+
+    expect(ran).toEqual(['L']); // only llm dispatched, J is a transform (skipped)
+    expect(report.skipped).toContain('J');
+    expect(report.failed).toContain('L');
+  });
+});

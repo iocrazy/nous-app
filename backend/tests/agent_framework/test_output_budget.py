@@ -8,7 +8,6 @@ from app.agent_framework.output_budget import (
     DEFAULT_MIN_OUTPUT_TOKENS,
     PROVIDER_HARD_CAPS,
     derive_output_budget,
-    should_auto_continue,
 )
 
 
@@ -49,20 +48,6 @@ def test_custom_fraction():
     b = derive_output_budget(model="qwen-plus", consumed_input_tokens=0, fraction=0.5)
     # 50% of 131k = 65k, clamped to provider cap 8192
     assert b.max_tokens == 8_192
-
-
-@pytest.mark.unit
-def test_should_auto_continue_on_length_finish():
-    assert should_auto_continue("length") is True
-    assert should_auto_continue("LENGTH") is True
-
-
-@pytest.mark.unit
-def test_should_not_auto_continue_on_stop():
-    assert should_auto_continue("stop") is False
-    assert should_auto_continue("tool_calls") is False
-    assert should_auto_continue(None) is False
-    assert should_auto_continue("") is False
 
 
 @pytest.mark.unit

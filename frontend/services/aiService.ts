@@ -7,7 +7,7 @@
  * chat-related API calls use ``services/aiLibraryService.ts`` instead.
  */
 
-import { AISettings, AIProviderConfig, TranscriptData, SummaryData, NousModelPublic } from '../types';
+import { AISettings, AIProviderConfig, TranscriptData, SummaryData, NousModelPublic, AIGovernanceFlags } from '../types';
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
 
@@ -472,4 +472,39 @@ export const testAIConnection = async (
   }
 
   return response.json();
+};
+
+// --- AI Config Governance ---
+
+/** Fail-open defaults: every module allowed when response is absent or errors. */
+export const GOVERNANCE_ALL_ALLOWED: AIGovernanceFlags = {
+  chat: true,
+  transcription: true,
+  translation: true,
+  visual_analysis: true,
+  caption: true,
+  classification: true,
+  summarization: true,
+};
+
+/**
+ * Fetch per-module governance flags for the current user.
+ *
+ * Backend: GET /api/v1/ai/governance
+ * Returns { chat: bool, transcription: bool, translation: bool,
+ *           visual_analysis: bool, caption: bool, classification: bool }
+ * true = user may configure; false = admin-managed (lock the UI row).
+ * Throws on network/HTTP error — callers should default to GOVERNANCE_ALL_ALLOWED.
+ */
+export const getAIGovernance = async (): Promise<AIGovernanceFlags> => {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/ai/governance`, {
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) {
+    throw new Error(`GET /ai/governance failed: HTTP ${response.status}`);
+  }
+  const data = await response.json();
+  // Merge with all-allowed defaults so any absent key stays true.
+  return { ...GOVERNANCE_ALL_ALLOWED, ...data };
 };

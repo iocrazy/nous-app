@@ -9,8 +9,6 @@ produce a runaway 8k+ token reply that:
 This module gives:
   - ``derive_output_budget(model, system_tokens, history_tokens)``:
     compute a sensible per-turn cap based on remaining window
-  - ``apply_finish_reason``: detect ``finish_reason == 'length'`` from
-    a provider response and decide whether to auto-continue once
 
 It does NOT call the LLM — adapter layer enforces the budget by
 passing it to provider's max_tokens param. This module just centralizes
@@ -20,7 +18,6 @@ the policy.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 from app.agent_framework.context_window import model_window_size
 
@@ -89,15 +86,6 @@ def derive_output_budget(
     )
 
 
-def should_auto_continue(finish_reason: Optional[str]) -> bool:
-    """True if provider returned 'length' (output cap hit) — caller may
-    issue ONE auto-continue to capture the rest. Multi-continue would
-    risk infinite loops; runner enforces the once-only rule."""
-    if not finish_reason:
-        return False
-    return finish_reason.lower() == "length"
-
-
 __all__ = [
     "DEFAULT_MAX_OUTPUT_TOKENS",
     "DEFAULT_MIN_OUTPUT_TOKENS",
@@ -105,5 +93,4 @@ __all__ = [
     "OutputBudget",
     "PROVIDER_HARD_CAPS",
     "derive_output_budget",
-    "should_auto_continue",
 ]

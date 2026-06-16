@@ -19,11 +19,17 @@ describe('dispatchClassicNode — runnable AI-op types', () => {
 });
 
 describe('dispatchClassicNode — passive literal/sink types', () => {
-  for (const type of ['image', 'prompt', 'output', 'text', 'note', 'preview', 'group']) {
+  for (const type of ['image', 'prompt', 'output', 'text', 'note', 'preview', 'group', 'video']) {
     it(`treats '${type}' as passive (no dispatch)`, () => {
       expect(dispatchClassicNode(type)).toEqual({ kind: 'passive' });
     });
   }
+});
+
+describe('dispatchClassicNode — transform types (client-side data computation, W3)', () => {
+  it("treats 'text_join' as transform (not run, not passive, no backend call)", () => {
+    expect(dispatchClassicNode('text_join')).toEqual({ kind: 'transform' });
+  });
 });
 
 describe('dispatchClassicNode — unknown', () => {

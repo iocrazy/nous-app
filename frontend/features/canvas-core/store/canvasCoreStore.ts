@@ -9,9 +9,13 @@
  *   - `loadCanvas(id)`  — pull the row
  *   - `applyNodeChanges(...)` / `applyConnectionChanges(...)` (TBD in a
  *     follow-up React Flow integration PR)
- *   - `setViewport`     — wheel/pinch/pan
- *   - `markDirty()`     — schedules a debounced save
- *   - `flushSave()`     — explicit save (e.g. on blur / route leave)
+ *   - `setViewport`          — programmatic pan/zoom (bumps revision immediately)
+ *   - `setViewportOnMove`    — RAF-throttled path for onMove (no revision bump per tick)
+ *   - `flushViewportDirty`   — called at RAF frequency to batch viewport dirty signals
+ *   - `noteDragStart()`      — captures pre-drag history base without starting timer
+ *   - `setNodesDragTick()`   — mid-drag position update (no history timer reset)
+ *   - `markDirty()`          — schedules a debounced save
+ *   - `flushSave()`          — explicit save (e.g. on blur / route leave)
  *
  * On a 409 from the server we drop the in-flight save and surface the
  * server's snapshot as `conflict` so the UI can render a merge prompt.
@@ -109,6 +113,48 @@ interface CanvasState {
     patch: { data?: Record<string, unknown>; [k: string]: unknown },
   ): void;
 
+  // ---- Phase 6e performance: drag-tick + viewport throttle ----
+  /**
+   * Capture the pre-drag history snapshot without starting the 250ms
+   * history-debounce timer. Call this from React Flow's `onNodeDragStart`.
+   *
+   * Behaviour: identical to the guard in `noteDocumentEditStarting` —
+   * if a `pendingHistoryBase` is already set (consecutive drags within
+   * the same window) it is kept intact so undo lands on the state before
+   * the FIRST drag.  The history timer is started only by the drag-end
+   * `setNodes` call, which reduces timer-reset churn from O(drag_ticks)
+   * to O(1) per drag gesture.
+   */
+  noteDragStart(): void;
+
+  /**
+   * Update node positions during a mid-drag tick.  Stores the new nodes
+   * array and marks the document dirty for eventual persistence, but does
+   * NOT touch the history-debounce timer.  The timer is started by the
+   * drag-end `setNodes` call so each drag produces exactly one history
+   * entry regardless of how many ticks it spans.
+   */
+  setNodesDragTick(nodes: CanvasNode[]): void;
+
+  /**
+   * Update the viewport during an `onMove` tick without bumping `revision`
+   * or scheduling a save.  Callers must pair this with `flushViewportDirty`
+   * (called at RAF frequency) to coalesce N per-tick revision bumps into
+   * at most one per animation frame.
+   *
+   * Programmatic viewport changes (panViewportBy, zoomViewportAround, etc.)
+   * continue to use `setViewport` which bumps revision immediately.
+   */
+  setViewportOnMove(viewport: CanvasViewport): void;
+
+  /**
+   * Bump `revision` and schedule a debounced save.  Intended to be called
+   * at RAF frequency from `CanvasSurface.onMove` rather than on every
+   * wheel/pan tick, reducing save-debounce timer-reset churn from
+   * O(pan_ticks) to O(1) per animation frame.
+   */
+  flushViewportDirty(): void;
+
   // ---- Selection ----
   setSelection(ids: string[]): void;
   selectAll(): void;
@@ -124,6 +170,16 @@ interface CanvasState {
   flushSave(): Promise<void>;
   resolveConflictWithServer(): void;
   dismissConflict(): void;
+
+  // ---- Realtime sync (Phase 6a) ----
+  /**
+   * Called by useCanvasRealtime when Supabase Realtime broadcasts an UPDATE
+   * on the canvases row. Three cases:
+   *   - Self-echo / stale: row.base_updated_at <= current → no-op
+   *   - Newer + no unsaved edits → rebase to remote row
+   *   - Newer + unsaved local edits → surface as conflict (reuse 409 path)
+   */
+  applyRemoteUpdate(row: Canvas): void;
 }
 
 interface CanvasStoreFactoryOptions {
@@ -473,6 +529,60 @@ export function createCanvasCoreStore(
 
       dismissConflict() {
         set({ conflict: null, saveStatus: 'idle', saveError: null });
+      },
+
+      // ---- Phase 6e performance: drag-tick + viewport throttle ----
+
+      noteDragStart() {
+        // Capture pre-drag snapshot only once per burst — the guard ensures
+        // consecutive drags within the same debounce window share one entry.
+        if (pendingHistoryBase === null) {
+          const { nodes, connections } = get();
+          pendingHistoryBase = { nodes, connections };
+        }
+        // Intentionally NO historyTimer start here.  The drag-end setNodes
+        // call uses noteDocumentEditStarting which starts the timer exactly
+        // once, reducing timer-reset churn from O(drag_ticks) to O(1).
+      },
+
+      setNodesDragTick(nodes: CanvasNode[]) {
+        // Mid-drag: update positions, schedule save — but do NOT touch the
+        // history timer.  The pre-drag base was captured by noteDragStart();
+        // the drag-end setNodes() call will start the 250ms commit timer.
+        set({ nodes });
+        markDirty();
+      },
+
+      setViewportOnMove(viewport: CanvasViewport) {
+        // Update viewport for controlled-mode React Flow rendering without
+        // bumping revision.  Callers (CanvasSurface.onMove via RAF) call
+        // flushViewportDirty() at most once per animation frame.
+        set({ viewport: { ...viewport, zoom: clampZoom(viewport.zoom) } });
+      },
+
+      flushViewportDirty() {
+        // Called at RAF frequency — bumps revision and schedules a save.
+        markDirty();
+      },
+
+      // ---- Realtime sync (Phase 6a) ----
+      applyRemoteUpdate(row: Canvas) {
+        const s = get();
+
+        // Guard 1: store not loaded yet — ignore.
+        if (!s.baseUpdatedAt) return;
+
+        // Guard 2: self-echo / stale broadcast — ignore.
+        if (row.base_updated_at <= s.baseUpdatedAt) return;
+
+        // Guard 3: local dirty edits exist — surface as conflict, never clobber.
+        if (s.revision > s.persistedRevision) {
+          set({ conflict: row });
+          return;
+        }
+
+        // Happy path: newer row, clean local state — rebase.
+        applyServerRow(row);
       },
     };
   });

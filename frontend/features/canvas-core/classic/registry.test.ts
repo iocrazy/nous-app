@@ -31,6 +31,8 @@ describe('classicNodeDefinitions', () => {
         'preview',
         'prompt',
         'text',
+        'text_join',
+        'video',
         'video_gen',
       ].sort(),
     );
@@ -124,6 +126,25 @@ describe('classicNodeDefinitions', () => {
     expect(def.inputs.some((p) => p.id === 'image-in' && p.type === 'image')).toBe(true);
     expect(def.inputs.some((p) => p.id === 'prompt-in' && p.type === 'prompt')).toBe(true);
     expect(def.outputs).toEqual([{ id: 'video-out', type: 'video' }]);
+  });
+
+  // W3 additions
+
+  it('video is a passive source: zero inputs, one video output (video-out)', () => {
+    const def = classicNodeDefinitions.video;
+    expect(def.inputs).toEqual([]);
+    expect(def.outputs).toHaveLength(1);
+    expect(def.outputs[0]).toEqual({ id: 'video-out', type: 'video' });
+  });
+
+  it('text_join takes two text inputs and emits one text output', () => {
+    const def = classicNodeDefinitions.text_join;
+    expect(def.label).toBe('Text Join');
+    expect(def.inputs).toHaveLength(2);
+    expect(def.inputs.some((p) => p.id === 'text-a-in' && p.type === 'text')).toBe(true);
+    expect(def.inputs.some((p) => p.id === 'text-b-in' && p.type === 'text')).toBe(true);
+    expect(def.outputs).toHaveLength(1);
+    expect(def.outputs[0]).toEqual({ id: 'text-out', type: 'text' });
   });
 });
 
@@ -296,5 +317,57 @@ describe('canConnectClassic', () => {
     expect(canConnectClassic('image_gen', 'preview', imageGenImgOut, previewVideoIn)).toBe(
       false,
     );
+  });
+
+  // ---- video source node (W3) ----------------------------------------------
+
+  it('video-out → preview video-in ✓ (video source feeds preview)', () => {
+    const videoDef = classicNodeDefinitions.video;
+    const videoOut = videoDef.outputs.find((p) => p.type === 'video')!.id;
+    expect(canConnectClassic('video', 'preview', videoOut, previewVideoIn)).toBe(true);
+  });
+
+  it('video-out → output image-in ✗ (video vs image mismatch)', () => {
+    const videoDef = classicNodeDefinitions.video;
+    const videoOut = videoDef.outputs.find((p) => p.type === 'video')!.id;
+    expect(canConnectClassic('video', 'output', videoOut, outImgIn)).toBe(false);
+  });
+
+  // ---- text_join node (W3) -------------------------------------------------
+
+  it('text-out → text_join text-a-in ✓ (text feeds first join slot)', () => {
+    const textJoinDef = classicNodeDefinitions.text_join;
+    const textJoinAIn = textJoinDef.inputs.find((p) => p.id === 'text-a-in')!.id;
+    expect(canConnectClassic('text', 'text_join', textOut, textJoinAIn)).toBe(true);
+  });
+
+  it('text-out → text_join text-b-in ✓ (text feeds second join slot)', () => {
+    const textJoinDef = classicNodeDefinitions.text_join;
+    const textJoinBIn = textJoinDef.inputs.find((p) => p.id === 'text-b-in')!.id;
+    expect(canConnectClassic('text', 'text_join', textOut, textJoinBIn)).toBe(true);
+  });
+
+  it('llm text-out → text_join text-a-in ✓ (llm output feeds join slot)', () => {
+    const textJoinDef = classicNodeDefinitions.text_join;
+    const textJoinAIn = textJoinDef.inputs.find((p) => p.id === 'text-a-in')!.id;
+    expect(canConnectClassic('llm', 'text_join', llmTextOut, textJoinAIn)).toBe(true);
+  });
+
+  it('image-out → text_join text-a-in ✗ (image vs text mismatch)', () => {
+    const textJoinDef = classicNodeDefinitions.text_join;
+    const textJoinAIn = textJoinDef.inputs.find((p) => p.id === 'text-a-in')!.id;
+    expect(canConnectClassic('image', 'text_join', imgOut, textJoinAIn)).toBe(false);
+  });
+
+  it('text_join text-out → llm text-in ✓ (joined text feeds llm)', () => {
+    const textJoinDef = classicNodeDefinitions.text_join;
+    const textJoinOut = textJoinDef.outputs.find((p) => p.type === 'text')!.id;
+    expect(canConnectClassic('text_join', 'llm', textJoinOut, llmTextIn)).toBe(true);
+  });
+
+  it('text_join text-out → image_gen prompt-in ✗ (text vs prompt mismatch)', () => {
+    const textJoinDef = classicNodeDefinitions.text_join;
+    const textJoinOut = textJoinDef.outputs.find((p) => p.type === 'text')!.id;
+    expect(canConnectClassic('text_join', 'image_gen', textJoinOut, imageGenPromptIn)).toBe(false);
   });
 });

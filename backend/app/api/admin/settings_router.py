@@ -8,10 +8,14 @@ from app.repositories.admin.system_settings_repository import (
     get_system_settings_repository,
 )
 from app.schemas.admin import (
+    AIGovernanceResponse,
+    AIGovernanceUpdate,
+    ChatModuleGovernanceResponse,
     GraphMemorySettingsResponse,
     GraphMemorySettingsUpdate,
     SystemSettingResponse,
     SystemSettingUpdate,
+    TaskModuleGovernanceResponse,
 )
 from app.services.ai.memory.graph_memory import STRUCTURED_OUTPUT_MODES
 from app.utils.admin_helpers import create_audit_log
@@ -136,6 +140,150 @@ async def update_graph_memory_settings(
     )
     logger.info(f"Graph-memory settings updated by admin {auth.user_id}: {written}")
     return await _read_graph_settings()
+
+
+# ── AI Governance ────────────────────────────────────────────────────────────
+
+# Governed module names (must match ai_governance.py TASK_MODULES)
+_TASK_MODULE_NAMES = [
+    "transcription",
+    "translation",
+    "visual_analysis",
+    "caption",
+    "classification",
+    "summarization",
+]
+_ALL_MODULE_NAMES = ["chat"] + _TASK_MODULE_NAMES
+
+# system_settings keys that hold api_key material — never logged in audit.
+_GOVERNANCE_SECRET_KEYS = {f"ai_module.{m}.api_key" for m in _TASK_MODULE_NAMES}
+
+
+async def _read_governance_settings() -> AIGovernanceResponse:
+    """Build the masked governance bundle from system_settings rows."""
+    repo = get_system_settings_repository()
+    rows = await repo.list_non_transcode()
+    # Build a lookup of all ai_module.* values (raw JSONB).
+    data: dict = {
+        r["key"]: r.get("value")
+        for r in rows
+        if isinstance(r.get("key"), str) and r["key"].startswith("ai_module.")
+    }
+
+    def get_bool(key: str) -> bool:
+        v = data.get(key)
+        if isinstance(v, bool):
+            return v
+        # Absent (None) or unexpected type → True (default-open).
+        return True
+
+    def get_str(key: str) -> str:
+        v = data.get(key)
+        return str(v).strip() if v is not None else ""
+
+    return AIGovernanceResponse(
+        chat=ChatModuleGovernanceResponse(
+            user_allowed=get_bool("ai_module.chat.user_allowed"),
+        ),
+        transcription=TaskModuleGovernanceResponse(
+            user_allowed=get_bool("ai_module.transcription.user_allowed"),
+            base_url=get_str("ai_module.transcription.base_url"),
+            model=get_str("ai_module.transcription.model"),
+            api_key_set=bool(get_str("ai_module.transcription.api_key")),
+        ),
+        translation=TaskModuleGovernanceResponse(
+            user_allowed=get_bool("ai_module.translation.user_allowed"),
+            base_url=get_str("ai_module.translation.base_url"),
+            model=get_str("ai_module.translation.model"),
+            api_key_set=bool(get_str("ai_module.translation.api_key")),
+        ),
+        visual_analysis=TaskModuleGovernanceResponse(
+            user_allowed=get_bool("ai_module.visual_analysis.user_allowed"),
+            base_url=get_str("ai_module.visual_analysis.base_url"),
+            model=get_str("ai_module.visual_analysis.model"),
+            api_key_set=bool(get_str("ai_module.visual_analysis.api_key")),
+        ),
+        caption=TaskModuleGovernanceResponse(
+            user_allowed=get_bool("ai_module.caption.user_allowed"),
+            base_url=get_str("ai_module.caption.base_url"),
+            model=get_str("ai_module.caption.model"),
+            api_key_set=bool(get_str("ai_module.caption.api_key")),
+        ),
+        classification=TaskModuleGovernanceResponse(
+            user_allowed=get_bool("ai_module.classification.user_allowed"),
+            base_url=get_str("ai_module.classification.base_url"),
+            model=get_str("ai_module.classification.model"),
+            api_key_set=bool(get_str("ai_module.classification.api_key")),
+        ),
+        summarization=TaskModuleGovernanceResponse(
+            user_allowed=get_bool("ai_module.summarization.user_allowed"),
+            base_url=get_str("ai_module.summarization.base_url"),
+            model=get_str("ai_module.summarization.model"),
+            api_key_set=bool(get_str("ai_module.summarization.api_key")),
+        ),
+    )
+
+
+@router.get("/ai-governance", response_model=AIGovernanceResponse)
+async def get_ai_governance_settings(auth: AdminAuthDep):
+    """AI config governance config for the admin panel.  API keys are MASKED —
+    only ``*_api_key_set`` booleans are returned, never the raw keys."""
+    return await _read_governance_settings()
+
+
+@router.put("/ai-governance", response_model=AIGovernanceResponse)
+async def update_ai_governance_settings(
+    update: AIGovernanceUpdate,
+    auth: AdminAuthDep,
+    request: Request,
+):
+    """Write AI governance settings.
+
+    Only the modules/fields explicitly sent in the payload are written.
+    For task modules, ``api_key`` is only written when the value is
+    non-blank (omit or send blank to keep the stored key unchanged).
+    Returns the masked bundle — raw api_key values never leave the server.
+    """
+    repo = get_system_settings_repository()
+    data = update.model_dump(exclude_unset=True)
+
+    written: list[str] = []
+    for module, module_data in data.items():
+        if not module_data:
+            continue
+        # user_allowed (both chat and task modules)
+        if "user_allowed" in module_data and module_data["user_allowed"] is not None:
+            key = f"ai_module.{module}.user_allowed"
+            # Write JSONB native bool so the gate can do ``isinstance(v, bool)``.
+            await repo.upsert_setting(key, module_data["user_allowed"], auth.user_id)
+            written.append(key)
+        if module not in _TASK_MODULE_NAMES:
+            continue
+        # base_url / model (task modules only)
+        for field_name in ("base_url", "model"):
+            if field_name in module_data and module_data[field_name] is not None:
+                key = f"ai_module.{module}.{field_name}"
+                await repo.upsert_setting(key, module_data[field_name], auth.user_id)
+                written.append(key)
+        # api_key: write-only, only when non-blank.
+        api_key_val = module_data.get("api_key")
+        if isinstance(api_key_val, str) and api_key_val.strip():
+            key = f"ai_module.{module}.api_key"
+            await repo.upsert_setting(key, api_key_val, auth.user_id)
+            written.append(key)
+
+    client_ip = request.client.host if request.client else None
+    await create_audit_log(
+        admin_id=auth.user_id,
+        action="update_ai_governance_settings",
+        target_type="system_setting",
+        target_id="ai_governance",
+        # Never log raw api_key material.
+        details={"keys": [k for k in written if k not in _GOVERNANCE_SECRET_KEYS]},
+        ip_address=client_ip,
+    )
+    logger.info(f"AI governance settings updated by admin {auth.user_id}: {written}")
+    return await _read_governance_settings()
 
 
 @router.patch("/{key}", response_model=SystemSettingResponse)

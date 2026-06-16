@@ -1134,6 +1134,25 @@
       "share": "分享",
       "delete": "删除"
     },
+    "stages": {
+      "title": "阶段",
+      "selectStage": "选择阶段",
+      "currentStage": "当前阶段",
+      "recommendedTools": "推荐",
+      "planning": "规划",
+      "script": "脚本",
+      "storyboard": "分镜",
+      "generation": "生成",
+      "review": "审核",
+      "delivery": "交付"
+    },
+    "tools": {
+      "files": "文件",
+      "scripts": "脚本",
+      "storyboard": "分镜",
+      "output": "输出",
+      "tasks": "任务"
+    },
     "collect": {
       "title": "文件收集",
       "empty": "暂无收集链接",

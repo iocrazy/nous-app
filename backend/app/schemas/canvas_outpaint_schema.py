@@ -1,8 +1,8 @@
-"""Pydantic schemas for the outpaint derive endpoint (Phase 3 Day 13)."""
+"""Pydantic schemas for the outpaint derive endpoint (Phase 3 Day 13 + 6f)."""
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -20,8 +20,11 @@ class OutpaintDeriveRequest(BaseModel):
     top: float = Field(default=0.0, ge=0.0, le=MAX_PAD_PER_SIDE)
     right: float = Field(default=0.0, ge=0.0, le=MAX_PAD_PER_SIDE)
     bottom: float = Field(default=0.0, ge=0.0, le=MAX_PAD_PER_SIDE)
-    # Collected for the future AI outpaint path; the v1 blur fill is
-    # deterministic and ignores it.
+    # Fill mode: 'deterministic' = blur fill (always free, always works);
+    # 'ai' = nous-center outpaint workflow (falls back to deterministic when
+    # NOUS_CENTER_OUTPAINT_SLUG is not configured).
+    mode: Literal["deterministic", "ai"] = Field(default="deterministic")
+    # Prompt for the AI fill path; ignored in deterministic mode.
     prompt: Optional[str] = Field(default=None, max_length=2000)
     # Optional override; defaults to ``outpaint-{source.filename}``.
     filename: Optional[str] = Field(default=None, max_length=255)

@@ -181,6 +181,26 @@ async def list_providers():
     return {"providers": AIProviderFactory.available_providers()}
 
 
+@router.get("/governance")
+async def get_ai_governance(auth: AuthDep):
+    """Return per-module ``user_allowed`` booleans for all governed AI modules.
+
+    The frontend uses this to hide locked modules' config sections in
+    ``AISettings.tsx``.  Only boolean values are returned — no keys, no
+    admin config.  Absent settings ⇒ True (default-open).
+    """
+    from app.services.ai.governance.ai_governance import (
+        ALL_MODULES,
+        get_module_governance,
+    )
+
+    result: dict[str, bool] = {}
+    for module in sorted(ALL_MODULES):
+        g = await get_module_governance(module)
+        result[module] = g.allowed
+    return result
+
+
 @router.get("/nous-models")
 async def list_nous_models(category: str = None):
     """List enabled Nous models (public, no API keys).

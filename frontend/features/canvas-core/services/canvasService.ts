@@ -121,6 +121,48 @@ function pickCurrent(node: unknown): Canvas | null {
 }
 
 // ============================================================
+// Graph-run enqueue (Phase 6d-M4b)
+// ============================================================
+
+/** Shape of the `POST /api/v1/canvases/{id}/graph-runs` response envelope data. */
+export interface GraphRunResponse {
+  /** DBOS workflow id — also the task_tracking PK. Subtask rows have ids
+   *  `{task_id}-node-{position}` with `metadata.node_id` set to the canvas
+   *  node id. */
+  task_id: string;
+  dbos_workflow_id: string;
+}
+
+/**
+ * Enqueue a server-side graph run for the given canvas.
+ *
+ * The backend starts a DBOS workflow that executes each node in the
+ * provided `nodeOrder` (topologically sorted), creates a `task_tracking`
+ * row per node, and persists `run_result`/`run_status` back into the
+ * canvas `nodes_json`. The call returns immediately — use the returned
+ * `task_id` to correlate the per-node subtask rows that arrive via the
+ * existing Phase-6a Supabase Realtime subscription.
+ *
+ * Throws `ApiError` on any non-2xx response (400 empty order, 404 canvas
+ * not found, 403 access denied, 500 backend failure).
+ */
+export async function enqueueGraphRun(
+  canvasId: string,
+  nodeOrder: string[],
+  continueOnFailure: boolean,
+): Promise<GraphRunResponse> {
+  const response = await apiFetch(`/api/v1/canvases/${canvasId}/graph-runs`, {
+    method: 'POST',
+    json: {
+      canvas_id: canvasId,
+      node_order: nodeOrder,
+      continue_on_failure: continueOnFailure,
+    },
+  });
+  return readEnvelope<GraphRunResponse>(response);
+}
+
+// ============================================================
 // Crop derive (Phase 3 Day 6)
 // ============================================================
 
