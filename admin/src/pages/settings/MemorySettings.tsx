@@ -51,6 +51,7 @@ export function MemorySettings() {
   const [emBaseUrl, setEmBaseUrl] = useState('')
   const [emModel, setEmModel] = useState('')
   const [emKey, setEmKey] = useState('')
+  const [emDim, setEmDim] = useState('1536')
 
   // Hydrate local form from the masked GET (never includes raw keys).
   useEffect(() => {
@@ -64,11 +65,20 @@ export function MemorySettings() {
     setExMode(data.extractor_structured_output_mode || 'json_object')
     setEmBaseUrl(data.embedder_base_url)
     setEmModel(data.embedder_model)
+    setEmDim(String(data.embedder_dimensions ?? 1536))
     setExKey('')
     setEmKey('')
   }, [data])
 
+  const DIM_MAX = 2000
+  const dimNum = Number(emDim)
+  const dimInvalid = !Number.isInteger(dimNum) || dimNum < 1 || dimNum > DIM_MAX
+
   const handleSave = () => {
+    if (dimInvalid) {
+      Message.error(`Embedder dimensions must be an integer between 1 and ${DIM_MAX}`)
+      return
+    }
     const payload: GraphMemorySettingsUpdate = {
       enabled,
       falkordb_host: host,
@@ -79,6 +89,7 @@ export function MemorySettings() {
       extractor_structured_output_mode: exMode,
       embedder_base_url: emBaseUrl,
       embedder_model: emModel,
+      embedder_dimensions: dimNum,
     }
     // Only send key fields when the admin actually typed one — blank keeps the
     // stored key unchanged.
@@ -158,13 +169,31 @@ export function MemorySettings() {
       </Row>
 
       <Divider />
-      <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-2)' }}>Embedder (OpenAI-compatible)</div>
+      <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-2)' }}>Embedder (shared memory embedder)</div>
+      <div style={{ color: 'var(--color-text-3)', fontSize: 12, marginTop: 4, marginBottom: 4 }}>
+        Used by Graphiti (live, via these settings) and Honcho (its container env is kept in
+        sync with these values — see the memory-embedder runbook). Dimensions is shared by
+        both, so it is capped at {DIM_MAX} (Honcho's pgvector HNSW index limit).
+      </div>
       <Row label="Base URL" hint="Optional — defaults to the extractor/env config when blank.">
         <Input value={emBaseUrl} onChange={setEmBaseUrl} placeholder="https://.../v1" style={{ width: 260 }} />
       </Row>
       <Divider style={{ margin: 0 }} />
       <Row label="Model">
         <Input value={emModel} onChange={setEmModel} placeholder="e.g. Qwen/Qwen3-Embedding-4B" style={{ width: 260 }} />
+      </Row>
+      <Divider style={{ margin: 0 }} />
+      <Row
+        label="Dimensions"
+        hint={`Embedding output width; sizes the vector index. 1536 = Qwen3-Embedding-4B. Max ${DIM_MAX} (pgvector HNSW limit).`}
+      >
+        <Input
+          value={emDim}
+          onChange={setEmDim}
+          placeholder="1536"
+          style={{ width: 260 }}
+          status={dimInvalid ? 'error' : undefined}
+        />
       </Row>
       <Divider style={{ margin: 0 }} />
       <Row label="API key">
@@ -181,7 +210,7 @@ export function MemorySettings() {
 
       <Divider />
       <div style={{ textAlign: 'right' }}>
-        <Button type="primary" loading={updateMutation.isPending} onClick={handleSave}>
+        <Button type="primary" loading={updateMutation.isPending} disabled={dimInvalid} onClick={handleSave}>
           Save
         </Button>
       </div>

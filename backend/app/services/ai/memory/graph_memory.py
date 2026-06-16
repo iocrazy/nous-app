@@ -44,6 +44,11 @@ _TRUTHY = {"1", "true", "yes", "on"}
 
 DEFAULT_FALKORDB_PORT = 6379
 DEFAULT_DATABASE = "mediahub_memory"
+# Shared memory-embedder dimension. 1536 = Qwen3-Embedding-4B native (current
+# running default, matches Honcho's pgvector column). Admin-settable so the
+# 8B@higher-dim upgrade is a config change — but capped at 2000 at the admin
+# boundary because Honcho's pgvector HNSW index cannot exceed 2000 dimensions.
+DEFAULT_EMBEDDER_DIMENSIONS = 1536
 
 # Graphiti's OpenAIGenericClient can drive structured output two ways. json_object
 # (the default here) is provider-robust: the schema is injected into the prompt
@@ -73,6 +78,7 @@ _SETTINGS_MAP: dict[str, tuple[str, str]] = {
     "embedder_base_url": ("graph_embedder_base_url", "OPENAI_BASE_URL"),
     "embedder_api_key": ("graph_embedder_api_key", "OPENAI_API_KEY"),
     "embedder_model": ("graph_embedder_model", "GRAPH_EMBEDDER_MODEL"),
+    "embedder_dimensions": ("graph_embedder_dimensions", "GRAPH_EMBEDDER_DIMENSIONS"),
 }
 
 
@@ -114,6 +120,10 @@ class GraphMemoryConfig:
     embedder_base_url: str = ""
     embedder_api_key: str = ""
     embedder_model: str = ""
+    # Embedding output dimension. Sizes Graphiti's FalkorDB vector index and the
+    # `dimensions` truncation requested from the embedding API. See
+    # DEFAULT_EMBEDDER_DIMENSIONS.
+    embedder_dimensions: int = DEFAULT_EMBEDDER_DIMENSIONS
 
     @classmethod
     def from_env(cls) -> "GraphMemoryConfig":
@@ -167,6 +177,14 @@ class GraphMemoryConfig:
         ).lower()
         if mode not in STRUCTURED_OUTPUT_MODES:
             mode = DEFAULT_STRUCTURED_OUTPUT_MODE
+        try:
+            dimensions = int(
+                await resolve("embedder_dimensions", str(DEFAULT_EMBEDDER_DIMENSIONS))
+            )
+            if dimensions <= 0:
+                dimensions = DEFAULT_EMBEDDER_DIMENSIONS
+        except ValueError:
+            dimensions = DEFAULT_EMBEDDER_DIMENSIONS
         return cls(
             enabled=enabled,
             falkordb_host=host,
@@ -179,6 +197,7 @@ class GraphMemoryConfig:
             embedder_base_url=await resolve("embedder_base_url"),
             embedder_api_key=await resolve("embedder_api_key"),
             embedder_model=await resolve("embedder_model"),
+            embedder_dimensions=dimensions,
         )
 
     def operative(self) -> bool:
@@ -233,9 +252,12 @@ def _build_llm_and_embedder(config: "GraphMemoryConfig") -> tuple[Any, Any, Any]
     cross_encoder = OpenAIRerankerClient(config=llm_config)
     embedder = None
     if config.embedder_api_key:
-        ecfg = {
+        ecfg: dict[str, Any] = {
             "api_key": config.embedder_api_key,
             "base_url": config.embedder_base_url or None,
+            # Sizes the FalkorDB vector index and the `dimensions` value requested
+            # from the embedding API (Qwen3 MRL truncation when < native width).
+            "embedding_dim": config.embedder_dimensions,
         }
         if config.embedder_model:
             ecfg["embedding_model"] = config.embedder_model

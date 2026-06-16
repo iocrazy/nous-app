@@ -83,6 +83,21 @@ def test_build_embedder_when_embedder_key_set():
     assert llm is not None
     assert embedder is not None
     assert embedder.config.embedding_model == "Qwen/Qwen3-Embedding-4B"
+    # Default dimension flows into the embedder config (sizes the FalkorDB index).
+    assert embedder.config.embedding_dim == 1536
+
+
+def test_build_embedder_carries_explicit_dimension():
+    # Admin-set dimension is passed into OpenAIEmbedderConfig.embedding_dim.
+    _, embedder, _ = _build_llm_and_embedder(
+        _cfg(
+            extractor_api_key="ms-key",
+            embedder_api_key="ms-key",
+            embedder_dimensions=1024,
+        )
+    )
+    assert embedder is not None
+    assert embedder.config.embedding_dim == 1024
 
 
 # ----- _ensure_config --------------------------------------------------

@@ -38,9 +38,15 @@ _GRAPH_FIELD_TO_KEY = {
     "embedder_base_url": "graph_embedder_base_url",
     "embedder_api_key": "graph_embedder_api_key",
     "embedder_model": "graph_embedder_model",
+    "embedder_dimensions": "graph_embedder_dimensions",
 }
 _TRUTHY = {"1", "true", "yes", "on"}
 _SECRET_FIELDS = {"extractor_api_key", "embedder_api_key"}
+# Hard upper bound on the embedder dimension: Honcho's pgvector HNSW index cannot
+# exceed 2000 dimensions, and the embedder is shared, so the value is capped here
+# regardless of which subsystem consumes it. Raising it requires migrating Honcho
+# off pgvector (e.g. to LanceDB) — out of scope.
+_EMBEDDER_DIM_MAX = 2000
 
 
 def _to_response(row: dict) -> SystemSettingResponse:
@@ -85,7 +91,17 @@ async def _read_graph_settings() -> GraphMemorySettingsResponse:
         embedder_base_url=s("embedder_base_url"),
         embedder_model=s("embedder_model"),
         embedder_api_key_set=bool(s("embedder_api_key").strip()),
+        embedder_dimensions=_parse_dim(s("embedder_dimensions")),
     )
+
+
+def _parse_dim(raw: str) -> int:
+    """Stored dimension → int, defaulting to 1536 on empty/garbage."""
+    try:
+        value = int(raw.strip())
+        return value if value > 0 else 1536
+    except (ValueError, AttributeError):
+        return 1536
 
 
 @router.get("/graph-memory", response_model=GraphMemorySettingsResponse)
@@ -118,6 +134,19 @@ async def update_graph_memory_settings(
             ),
         )
 
+    # Reject an out-of-range dimension up front (422). The shared embedder feeds
+    # Honcho's pgvector HNSW index, which is hard-capped at 2000 dimensions —
+    # persisting a larger value would silently break the vector index.
+    dimensions = data.get("embedder_dimensions")
+    if dimensions is not None and not (1 <= dimensions <= _EMBEDDER_DIM_MAX):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "embedder_dimensions must be between 1 and "
+                f"{_EMBEDDER_DIM_MAX} (pgvector HNSW index limit)"
+            ),
+        )
+
     written: list[str] = []
     for field, key in _GRAPH_FIELD_TO_KEY.items():
         if field not in data or data[field] is None:
@@ -125,6 +154,9 @@ async def update_graph_memory_settings(
         value = data[field]
         if field == "enabled":
             value = "true" if value else "false"
+        elif field == "embedder_dimensions":
+            # Store as a jsonb string to match the seed + the other graph_* keys.
+            value = str(value)
         await repo.update(key, value, auth.user_id)
         written.append(field)
 
