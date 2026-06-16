@@ -76,10 +76,8 @@ async def load_transcribe_inputs(parsed_media_id: int, user_id: str) -> dict[str
         except ValueError:
             admin_provider_key = "openai"
         logger.info(
-            "[governance] transcription locked by admin; using admin config "
-            "(provider_key=%r model=%r)",
-            admin_provider_key,
-            governance.model,
+            f"[governance] transcription locked by admin; using admin config "
+            f"(provider_key={admin_provider_key!r} model={governance.model!r})"
         )
         return {
             "audio_path": audio_path,

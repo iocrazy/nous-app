@@ -84,9 +84,8 @@ async def resolve_task_provider_config(
         # Module is admin-locked: bypass user BYOK + task_assignment.
         if not governance.api_key_present:
             logger.error(
-                "[governance] %s is admin-locked but no admin api_key is configured; "
-                "failing closed — no platform-key fallback for this service",
-                task_key,
+                f"[governance] {task_key} is admin-locked but no admin api_key is "
+                "configured; failing closed — no platform-key fallback for this service"
             )
             raise RuntimeError(
                 f"AI module '{task_key}' is admin-locked but no admin API key is "
@@ -107,11 +106,8 @@ async def resolve_task_provider_config(
             "model": governance.model,
         }
         logger.info(
-            "[governance] %s locked by admin; using admin config "
-            "(provider_key=%r model=%r)",
-            task_key,
-            derived_key,
-            governance.model,
+            f"[governance] {task_key} locked by admin; using admin config "
+            f"(provider_key={derived_key!r} model={governance.model!r})"
         )
         # Return the same tuple shape callers expect.
         # agent_slug = default_slug so the caller composes the module's
