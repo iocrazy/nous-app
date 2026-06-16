@@ -51,6 +51,7 @@ export interface GraphMemorySettings {
   embedder_base_url: string
   embedder_model: string
   embedder_api_key_set: boolean
+  embedder_dimensions: number
 }
 
 export interface GraphMemorySettingsUpdate {
@@ -65,6 +66,7 @@ export interface GraphMemorySettingsUpdate {
   embedder_base_url?: string
   embedder_api_key?: string
   embedder_model?: string
+  embedder_dimensions?: number
 }
 
 // --- AI Config Governance — per-module user-config toggles + admin platform

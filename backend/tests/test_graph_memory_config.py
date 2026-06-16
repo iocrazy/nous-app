@@ -12,6 +12,7 @@ import pytest
 
 from app.services.ai.memory.graph_memory import (
     DEFAULT_DATABASE,
+    DEFAULT_EMBEDDER_DIMENSIONS,
     DEFAULT_FALKORDB_PORT,
     GraphMemoryConfig,
 )
@@ -140,6 +141,41 @@ async def test_reader_exception_degrades_to_env(monkeypatch):
     # A broken settings table must not sink memory config — env still applies.
     assert cfg.enabled is True
     assert cfg.falkordb_host == "env-host"
+
+
+@pytest.mark.asyncio
+async def test_embedder_dimensions_defaults_to_1536():
+    cfg = await GraphMemoryConfig.from_settings(reader=_reader({}), env={})
+    assert cfg.embedder_dimensions == DEFAULT_EMBEDDER_DIMENSIONS == 1536
+
+
+@pytest.mark.asyncio
+async def test_embedder_dimensions_db_override():
+    cfg = await GraphMemoryConfig.from_settings(
+        reader=_reader({"graph_embedder_dimensions": "1024"}), env={}
+    )
+    assert cfg.embedder_dimensions == 1024
+
+
+@pytest.mark.asyncio
+async def test_embedder_dimensions_env_fallback():
+    cfg = await GraphMemoryConfig.from_settings(
+        reader=_reader({}), env={"GRAPH_EMBEDDER_DIMENSIONS": "2000"}
+    )
+    assert cfg.embedder_dimensions == 2000
+
+
+@pytest.mark.asyncio
+async def test_embedder_dimensions_bad_value_falls_back():
+    # A non-numeric or non-positive value must not break the embedder build.
+    bad = await GraphMemoryConfig.from_settings(
+        reader=_reader({"graph_embedder_dimensions": "not-a-number"}), env={}
+    )
+    assert bad.embedder_dimensions == DEFAULT_EMBEDDER_DIMENSIONS
+    zero = await GraphMemoryConfig.from_settings(
+        reader=_reader({"graph_embedder_dimensions": "0"}), env={}
+    )
+    assert zero.embedder_dimensions == DEFAULT_EMBEDDER_DIMENSIONS
 
 
 def test_from_env_still_works_for_default_factory():

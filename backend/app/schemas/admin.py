@@ -241,6 +241,9 @@ class GraphMemorySettingsResponse(BaseModel):
     embedder_base_url: str = ""
     embedder_model: str = ""
     embedder_api_key_set: bool = False
+    # Shared memory-embedder output dimension (sizes the vector index). Capped at
+    # 2000 by the PUT validator — Honcho's pgvector HNSW index cannot exceed it.
+    embedder_dimensions: int = 1536
 
 
 class GraphMemorySettingsUpdate(BaseModel):
@@ -259,6 +262,7 @@ class GraphMemorySettingsUpdate(BaseModel):
     embedder_base_url: Optional[str] = None
     embedder_api_key: Optional[str] = None
     embedder_model: Optional[str] = None
+    embedder_dimensions: Optional[int] = None
 
 
 # ============================================
