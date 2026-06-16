@@ -920,7 +920,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           <div className="grid grid-cols-4 gap-1.5 sm:gap-2 mb-5">
              <button
                onClick={(e) => handleAction(e, 'copy')}
-               className="flex items-center justify-center gap-1 sm:gap-2 p-2 sm:p-2.5 rounded-lg bg-ink-800 hover:bg-ink-700 text-ink-400 hover:text-ink-50 transition-colors border border-ink-700 hover:border-ink-600"
+               className="flex flex-col items-center justify-center gap-1 p-2 sm:p-2.5 rounded-lg bg-ink-800 hover:bg-ink-700 text-ink-400 hover:text-ink-50 transition-colors border border-ink-700 hover:border-ink-600"
              >
                {copied ? <Check size={16} className="text-green-500 shrink-0" /> : <Copy size={16} className="shrink-0" />}
                <span className="text-[10px] sm:text-xs font-medium truncate">{copied ? 'Copied' : 'Copy'}</span>
@@ -933,7 +933,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
              <button
                onClick={(e) => handleAction(e, 'extract')}
                disabled={loadingAction === 'extract'}
-               className="ai-btn ai-btn-extract flex items-center justify-center gap-1 sm:gap-2 p-2 sm:p-2.5 rounded-lg text-teal-300 hover:text-teal-100"
+               className="ai-btn ai-btn-extract flex flex-col items-center justify-center gap-1 p-2 sm:p-2.5 rounded-lg text-teal-300 hover:text-teal-100"
              >
                {loadingAction === 'extract' ? <Loader2 size={16} className="animate-spin relative z-10 shrink-0" /> : <FileText size={16} className="relative z-10 shrink-0" />}
                <span className="ai-text text-[10px] sm:text-xs relative z-10 truncate">Transcript</span>
@@ -943,7 +943,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
              <button
                onClick={(e) => handleAction(e, 'rewrite')}
                disabled={loadingAction === 'rewrite'}
-               className="ai-btn ai-btn-rewrite flex items-center justify-center gap-1 sm:gap-2 p-2 sm:p-2.5 rounded-lg text-violet-300 hover:text-violet-100"
+               className="ai-btn ai-btn-rewrite flex flex-col items-center justify-center gap-1 p-2 sm:p-2.5 rounded-lg text-violet-300 hover:text-violet-100"
              >
                {loadingAction === 'rewrite' ? <Loader2 size={16} className="animate-spin relative z-10 shrink-0" /> : <PenTool size={16} className="relative z-10 shrink-0" />}
                <span className="ai-text text-[10px] sm:text-xs relative z-10 truncate">Summary</span>
@@ -953,7 +953,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
              <button
                onClick={(e) => handleAction(e, 'analyze')}
                disabled={loadingAction === 'analyze'}
-               className="ai-btn ai-btn-analyze flex items-center justify-center gap-1 sm:gap-2 p-2 sm:p-2.5 rounded-lg text-indigo-300 hover:text-indigo-100"
+               className="ai-btn ai-btn-analyze flex flex-col items-center justify-center gap-1 p-2 sm:p-2.5 rounded-lg text-indigo-300 hover:text-indigo-100"
              >
                {loadingAction === 'analyze' ? <Loader2 size={16} className="animate-spin relative z-10 shrink-0" /> : <Wand2 size={16} className="relative z-10 shrink-0" />}
                <span className="ai-text text-[10px] sm:text-xs relative z-10 truncate">Analyze</span>

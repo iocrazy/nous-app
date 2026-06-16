@@ -577,6 +577,38 @@ body {
   animation: gradient-shift 1s ease infinite;
 }
 
+/* Light theme: the dark gradient AI buttons read as heavy black blocks on a
+   light background. Swap to soft color-tinted fills + a readable dark-colored
+   label/icon, and drop the dark glow on hover. */
+[data-theme="light"] .ai-btn,
+[data-theme="light"] .ai-btn-analyze {
+  background: rgba(99, 102, 241, 0.1);
+  border-color: rgba(99, 102, 241, 0.35);
+  color: #4338ca;
+}
+[data-theme="light"] .ai-btn-extract {
+  background: rgba(20, 184, 166, 0.1);
+  border-color: rgba(20, 184, 166, 0.35);
+  color: #0f766e;
+}
+[data-theme="light"] .ai-btn-rewrite {
+  background: rgba(139, 92, 246, 0.1);
+  border-color: rgba(139, 92, 246, 0.35);
+  color: #6d28d9;
+}
+[data-theme="light"] .ai-btn:hover {
+  box-shadow: none;
+  filter: brightness(0.98);
+}
+/* The label uses a light indigo gradient clipped to text (invisible on a light
+   fill) — fall back to the button's own (dark) color in light theme. */
+[data-theme="light"] .ai-text {
+  background: none;
+  -webkit-text-fill-color: currentColor;
+  color: inherit;
+  animation: none;
+}
+
 /* Disabled state */
 .ai-btn:disabled {
   opacity: 0.5;
