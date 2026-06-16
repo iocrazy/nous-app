@@ -122,5 +122,29 @@ class SystemSettingsRepositoryOrm(SystemSettingsRepository):
             out = _row(row) if row else None
         return out
 
+    async def upsert_setting(
+        self, key: str, value: Any, updated_by: str
+    ) -> dict[str, Any]:
+        """Insert-or-update via ``INSERT ... ON CONFLICT DO UPDATE``.
+
+        Safe for first-time writes where the row may not exist yet (no seed
+        migration required).  Commits via ``write_scope()``.
+        """
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        async with write_scope() as session:
+            stmt = (
+                pg_insert(SystemSettings)
+                .values(key=key, value=value, updated_by=updated_by)
+                .on_conflict_do_update(
+                    index_elements=["key"],
+                    set_={"value": value, "updated_by": updated_by},
+                )
+                .returning(SystemSettings)
+            )
+            result = await session.execute(stmt)
+            row = result.scalars().first()
+        return _row(row) if row else {"key": key, "value": value}
+
 
 __all__ = ["SystemSettingsRepositoryOrm"]
