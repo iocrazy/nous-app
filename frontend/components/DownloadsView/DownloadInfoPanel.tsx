@@ -44,6 +44,10 @@ interface DownloadInfoPanelProps {
   onHoverRating: (star: number) => void;
   onNotesChange: (notes: string) => void;
   onNotesBlur: () => void;
+  /** Island shell: render as a bare integrated column (no fixed overlay / resize
+   *  handle / expand tab) to be portaled into the shell's info island — mirrors
+   *  the uploads ResourceInfoPanel so the two sidebars match. */
+  bare?: boolean;
 }
 
 const formatDate = (isoString?: string) => {
@@ -74,6 +78,7 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
   onHoverRating,
   onNotesChange,
   onNotesBlur,
+  bare = false,
 }) => {
   const { t } = useTranslation();
 
@@ -104,28 +109,8 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
   const cChipText = island ? 'text-content-3' : 'text-ink-500';
   const cChipBorder = island ? 'border-line' : 'border-ink-700/50';
 
-  return (
-    <>
-      {/* Info Panel */}
-      <div
-        className={`hidden md:flex fixed top-14 bottom-0 right-0 z-40 ${cSurface} border-l ${cBorderWrap} transition-transform duration-300 ease-in-out shadow-2xl ${
-          showInfoPanel ? 'translate-x-0' : 'translate-x-full'
-        }`}
-        style={{ width: `${infoPanelWidth}px` }}
-      >
-        <button
-          onClick={() => onTogglePanel(false)}
-          className={`absolute -left-10 bottom-8 w-10 h-12 ${cSurface} border-l border-y ${cBorderWrap} rounded-l-xl flex items-center justify-center ${cText400} ${cHoverPrimary} cursor-pointer ${cHoverSurface} transition-colors z-10`}
-        >
-          <ChevronRight size={20} />
-        </button>
-
-        <div
-          onMouseDown={onResizeStart}
-          className="w-1 h-full cursor-col-resize shrink-0 hover:bg-blue-500 active:bg-blue-500 transition-colors"
-        />
-
-        <div className="flex-1 overflow-y-auto">
+  const body = (
+    <div className="flex-1 overflow-y-auto">
           {/* Header */}
           <div className={`sticky top-0 z-10 flex items-center justify-between px-4 py-2 border-b ${cBorderHeader} ${cSurface}`}>
             <h3 className={`text-sm font-semibold ${cPrimary} truncate`}>{t('resources.infoPanel.title')}</h3>
@@ -381,6 +366,35 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
           {/* Bottom padding */}
           <div className="pb-6" />
         </div>
+  );
+
+  // Island shell: bare integrated column — portaled into the info island by
+  // DownloadsView so the My Downloads sidebar sits INSIDE the island frame (not
+  // a floating overlay), matching the My Uploads ResourceInfoPanel.
+  if (bare) {
+    return <div className="h-full flex flex-col overflow-hidden">{body}</div>;
+  }
+
+  return (
+    <>
+      {/* Info Panel — classic floating overlay */}
+      <div
+        className={`hidden md:flex fixed top-14 bottom-0 right-0 z-40 ${cSurface} border-l ${cBorderWrap} transition-transform duration-300 ease-in-out shadow-2xl ${
+          showInfoPanel ? 'translate-x-0' : 'translate-x-full'
+        }`}
+        style={{ width: `${infoPanelWidth}px` }}
+      >
+        <button
+          onClick={() => onTogglePanel(false)}
+          className={`absolute -left-10 bottom-8 w-10 h-12 ${cSurface} border-l border-y ${cBorderWrap} rounded-l-xl flex items-center justify-center ${cText400} ${cHoverPrimary} cursor-pointer ${cHoverSurface} transition-colors z-10`}
+        >
+          <ChevronRight size={20} />
+        </button>
+        <div
+          onMouseDown={onResizeStart}
+          className="w-1 h-full cursor-col-resize shrink-0 hover:bg-blue-500 active:bg-blue-500 transition-colors"
+        />
+        {body}
       </div>
 
       {/* Expand tab — visible when panel is closed */}
