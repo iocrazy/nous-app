@@ -122,7 +122,9 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
   // (sodaTheme.accent) so the Share button + comet trail sync with the play
   // button / waveform / background color. No cover-sampling (that diverged from
   // the theme color).
-  const tint = tintFromTheme({ accent: sodaTheme.accent });
+  // sodaTheme is undefined for non-audio (video) downloads — tintFromTheme is
+  // null-safe (reads theme?.accent), so pass it directly. Don't deref .accent here.
+  const tint = tintFromTheme(sodaTheme);
 
   // Toolbar download handler — only downloads from backend server (no CDN fallback)
   const handleToolbarDownload = async (type: 'video' | 'cover' | 'audio' | 'images') => {
