@@ -912,7 +912,8 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
           </div>
           )}
 
-          {/* Summarization — not governed; always shown */}
+          {/* Summarization — hidden when governance.summarization is false */}
+          {governance.summarization ? (
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Sparkles size={16} className="text-ink-400" />
@@ -920,6 +921,15 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
             </div>
             {renderAgentSelect('summarization', localSettings.task_assignment.summarization)}
           </div>
+          ) : (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Sparkles size={16} className="text-ink-500" />
+              <span className="text-sm font-medium text-ink-500">Summarization</span>
+            </div>
+            <ManagedNote />
+          </div>
+          )}
 
           {/* Visual Analysis — hidden when governance.visual_analysis is false */}
           {governance.visual_analysis ? (
@@ -1072,7 +1082,8 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
         !governance.translation &&
         !governance.visual_analysis &&
         !governance.caption &&
-        !governance.classification
+        !governance.classification &&
+        !governance.summarization
       ) && (
       <section className={`bg-ink-900 border border-ink-800 rounded-xl overflow-hidden transition-opacity ${localSettings.ai_enabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
         <div className="px-6 py-4 border-b border-ink-800 bg-ink-900/50 flex items-center gap-3">

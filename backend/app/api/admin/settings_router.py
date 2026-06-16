@@ -144,13 +144,14 @@ async def update_graph_memory_settings(
 
 # ── AI Governance ────────────────────────────────────────────────────────────
 
-# Governed module names (must match ai_governance.py)
+# Governed module names (must match ai_governance.py TASK_MODULES)
 _TASK_MODULE_NAMES = [
     "transcription",
     "translation",
     "visual_analysis",
     "caption",
     "classification",
+    "summarization",
 ]
 _ALL_MODULE_NAMES = ["chat"] + _TASK_MODULE_NAMES
 
@@ -213,6 +214,12 @@ async def _read_governance_settings() -> AIGovernanceResponse:
             base_url=get_str("ai_module.classification.base_url"),
             model=get_str("ai_module.classification.model"),
             api_key_set=bool(get_str("ai_module.classification.api_key")),
+        ),
+        summarization=TaskModuleGovernanceResponse(
+            user_allowed=get_bool("ai_module.summarization.user_allowed"),
+            base_url=get_str("ai_module.summarization.base_url"),
+            model=get_str("ai_module.summarization.model"),
+            api_key_set=bool(get_str("ai_module.summarization.api_key")),
         ),
     )
 

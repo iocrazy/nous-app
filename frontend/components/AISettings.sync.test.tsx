@@ -19,10 +19,12 @@ vi.mock('../services/aiService', () => ({
   getAIGovernance: vi.fn().mockResolvedValue({
     chat: true, transcription: true, translation: true,
     visual_analysis: true, caption: true, classification: true,
+    summarization: true,
   }),
   GOVERNANCE_ALL_ALLOWED: {
     chat: true, transcription: true, translation: true,
     visual_analysis: true, caption: true, classification: true,
+    summarization: true,
   },
 }));
 vi.mock('../services/aiLibraryService', () => ({
