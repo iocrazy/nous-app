@@ -16,7 +16,7 @@ import { AudioOverviewSide } from '../components/AudioOverviewSide';
 import { AudioToolsMenuItems } from '../components/AudioToolsMenu';
 import SodaLyricsTab from '../components/SodaLyricsTab';
 import { AudioWaveformPlayer } from '../components/AudioWaveformPlayer';
-import { extractCoverTint, tintFromTheme, type CoverTint } from '../utils/coverTint';
+import { tintFromTheme } from '../utils/coverTint';
 import { getDownloadUrl, getCoverDownloadUrl, getMusicDownloadUrl, getGalleryZipUrl } from '../services/dataService';
 import { getVideoUrl, getCoverUrl, isAlbumType, isAudioType } from '../utils/awemeType';
 import { buildSodaTheme } from '../utils/sodaTheme';
@@ -118,21 +118,11 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
     : undefined;
   const audioCoverUrl = isAudio && video ? getCoverUrl(video, mediaToken ?? undefined) : undefined;
 
-  // Cover-tint for the island audio stage (--tint / --tint-deep). Seeded from
-  // the sodaTheme accent, then canvas-sampled from the real cover. Gated to
-  // island desktop audio — no-op in classic / video / mobile.
-  const [tint, setTint] = useState<CoverTint>(() => tintFromTheme(sodaTheme));
-  useEffect(() => {
-    if (!islandDesktop || !isAudio || !audioCoverUrl) return;
-    let cancelled = false;
-    extractCoverTint(audioCoverUrl, tintFromTheme(sodaTheme)).then((t) => {
-      if (!cancelled) setTint(t);
-    });
-    return () => { cancelled = true; };
-    // sodaTheme is rebuilt each render (new object); the effect only reads its
-    // stable `accent` string via tintFromTheme, so key on that to avoid a
-    // sample-every-render loop (worse during playback as currentTime ticks).
-  }, [islandDesktop, isAudio, audioCoverUrl, sodaTheme?.accent]);
+  // Audio-stage accents (--tint / --tint-deep) derive from the DB theme accent
+  // (sodaTheme.accent) so the Share button + comet trail sync with the play
+  // button / waveform / background color. No cover-sampling (that diverged from
+  // the theme color).
+  const tint = tintFromTheme({ accent: sodaTheme.accent });
 
   // Toolbar download handler — only downloads from backend server (no CDN fallback)
   const handleToolbarDownload = async (type: 'video' | 'cover' | 'audio' | 'images') => {

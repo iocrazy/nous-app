@@ -89,7 +89,7 @@ import { AudioOverviewSide } from './AudioOverviewSide';
 import { MobileAudioUpload } from './MobileAudioUpload';
 import { LyricsView } from './LyricsView';
 import { buildSodaTheme } from '../utils/sodaTheme';
-import { extractCoverTint, tintFromTheme, type CoverTint } from '../utils/coverTint';
+import { tintFromTheme } from '../utils/coverTint';
 import { fetchComments } from '../services/reviewService';
 import {
   triggerTranscriptionByResource,
@@ -458,10 +458,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const [lyrics, setLyrics] = useState<{ lrc: string; lines: Array<{ text: string; line_start_ms: number | null }> } | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string>('');
   // Island audio capsule stage: playback position drives the synced lyrics
-  // column; tint is the cover-sampled backdrop (matches the download detail
-  // audio stage). island-desktop audio only — no-op elsewhere.
+  // column. island-desktop audio only — no-op elsewhere.
   const [audioCurrentTime, setAudioCurrentTime] = useState(0);
-  const [tint, setTint] = useState<CoverTint>(() => tintFromTheme(null));
   // Cover upload for the island audio capsule stage (the AudioHero cover-click
   // affordance lives inside FilePreview, which the stage replaces — so re-wire
   // it here to preserve cover replace in island, D12).
@@ -996,21 +994,6 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
     }
   }, [rightTab, lyrics, resourceId, islandDesktop, resource?.mime_type, resource?.source_type]);
 
-  // ─── Cover-tint for the island audio capsule stage (--tint / --tint-deep) ───
-  useEffect(() => {
-    const isAud = resource?.mime_type?.startsWith('audio/');
-    const coverUrl =
-      resource?.cover_image_path && resource?.id
-        ? getResourceCoverUrl(String(resource.id), undefined, resource.updated_at)
-        : resource?.thumbnail_path || undefined;
-    if (!islandDesktop || !isAud || !coverUrl) return;
-    let cancelled = false;
-    extractCoverTint(coverUrl, tintFromTheme(null)).then((tnt) => {
-      if (!cancelled) setTint(tnt);
-    });
-    return () => { cancelled = true; };
-  }, [islandDesktop, resource?.mime_type, resource?.cover_image_path, resource?.id, resource?.thumbnail_path, resource?.updated_at]);
-
   const loadTranscript = useCallback(async () => {
     try {
       setTranscriptLoading(true);
@@ -1166,6 +1149,9 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
       ? getResourceCoverUrl(String(resource.id), undefined, resource.updated_at)
       : resource.thumbnail_path || undefined;
   const audioSodaTheme = buildSodaTheme(null, String(resource.id));
+  // Accents (--tint / --tint-deep) derive from the same theme accent so the
+  // Share button + comet trail sync with the play button / waveform / background.
+  const tint = tintFromTheme({ accent: audioSodaTheme.accent });
   const islandAudioStage = islandDesktop && isAudio && !!fileUrl;
   const viewingVersion = selectedVersionId
     ? versions.find((v) => v.id === selectedVersionId)

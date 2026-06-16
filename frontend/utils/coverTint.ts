@@ -2,25 +2,12 @@ export interface CoverTint { tint: string; tintDeep: string }
 
 const INDIGO: CoverTint = { tint: '99,102,241', tintDeep: '24,28,46' };
 
-// How far to pull a sampled/accent color toward its own gray (0 = keep as-is,
-// 1 = fully desaturated). The mock's hand-picked tint is low-saturation; raw
-// cover samples (e.g. a saturated red album cover) would otherwise wash the
-// whole stage in vivid color. Muting keeps just a hint of the cover's hue so the
-// gradient stays soft like the mock regardless of how saturated the art is.
-const MUTE = 0.6;
-
-/** Desaturate an (r,g,b) toward its gray so the stage tint stays subtle. */
-function muteRgb(r: number, g: number, b: number): [number, number, number] {
-  const avg = (r + g + b) / 3;
-  const m = (x: number) => Math.round(x * (1 - MUTE) + avg * MUTE);
-  return [m(r), m(g), m(b)];
-}
-
-/** Build a CoverTint (muted tint + dark deep variant) from raw rgb. */
+/** Build a CoverTint (tint + dark deep variant) from raw rgb. The accent now
+ *  drives the audio-stage ACCENTS (play / wave / Share / trail) so they sync
+ *  with the DB theme color — kept vivid (no desaturation) to match. */
 function tintFromRgb(r: number, g: number, b: number): CoverTint {
-  const [mr, mg, mb] = muteRgb(r, g, b);
   const deep = (n: number) => Math.round(n * 0.18);
-  return { tint: `${mr},${mg},${mb}`, tintDeep: `${deep(mr)},${deep(mg)},${deep(mb)}` };
+  return { tint: `${r},${g},${b}`, tintDeep: `${deep(r)},${deep(g)},${deep(b)}` };
 }
 
 /** Fallback tint from a sodaTheme accent (hex "#rrggbb") or indigo. */
