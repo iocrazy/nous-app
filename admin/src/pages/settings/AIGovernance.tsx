@@ -38,7 +38,7 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
   )
 }
 
-type TaskModuleKey = 'transcription' | 'translation' | 'visual_analysis' | 'caption' | 'classification'
+type TaskModuleKey = 'transcription' | 'translation' | 'visual_analysis' | 'caption' | 'classification' | 'summarization'
 
 interface TaskModuleLocalState {
   user_allowed: boolean
@@ -54,6 +54,7 @@ interface LocalState {
   visual_analysis: TaskModuleLocalState
   caption: TaskModuleLocalState
   classification: TaskModuleLocalState
+  summarization: TaskModuleLocalState
 }
 
 const TASK_MODULES: ReadonlyArray<{ key: TaskModuleKey; label: string; hint: string }> = [
@@ -82,6 +83,11 @@ const TASK_MODULES: ReadonlyArray<{ key: TaskModuleKey; label: string; hint: str
     label: 'Classify',
     hint: 'Content classification and auto-tagging.',
   },
+  {
+    key: 'summarization',
+    label: 'Summarization / Rewrite',
+    hint: 'LLM summary/rewrite of transcripts. Platform key required when locked.',
+  },
 ]
 
 const PLATFORM_MANAGED: ReadonlyArray<{ label: string; hint: string }> = [
@@ -103,6 +109,7 @@ function defaultLocalState(): LocalState {
     visual_analysis: defaultTaskState(),
     caption: defaultTaskState(),
     classification: defaultTaskState(),
+    summarization: defaultTaskState(),
   }
 }
 
@@ -147,6 +154,12 @@ export function AIGovernance() {
         model: data.classification.model ?? '',
         api_key: '',
       },
+      summarization: {
+        user_allowed: data.summarization.user_allowed,
+        base_url: data.summarization.base_url ?? '',
+        model: data.summarization.model ?? '',
+        api_key: '',
+      },
     })
   }, [data])
 
@@ -178,6 +191,7 @@ export function AIGovernance() {
       visual_analysis: taskUpdate(state.visual_analysis),
       caption: taskUpdate(state.caption),
       classification: taskUpdate(state.classification),
+      summarization: taskUpdate(state.summarization),
     }
 
     updateMutation.mutate(payload, {
@@ -191,6 +205,7 @@ export function AIGovernance() {
           visual_analysis: { ...prev.visual_analysis, api_key: '' },
           caption: { ...prev.caption, api_key: '' },
           classification: { ...prev.classification, api_key: '' },
+          summarization: { ...prev.summarization, api_key: '' },
         }))
       },
       onError: (err) => Message.error((err as Error).message || 'Failed to save'),
