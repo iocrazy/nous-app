@@ -560,6 +560,20 @@ export interface AISettings {
   };
 }
 
+/**
+ * Per-module governance flags returned by GET /api/v1/ai/governance.
+ * true = user may configure; false = admin-managed (hide the UI row).
+ * Absent = true (default-open / fail-open).
+ */
+export interface AIGovernanceFlags {
+  chat: boolean;
+  transcription: boolean;
+  translation: boolean;
+  visual_analysis: boolean;
+  caption: boolean;
+  classification: boolean;
+}
+
 // Nous Platform Model (admin-configured, pay with points)
 export interface NousModelPublic {
   name: string;
