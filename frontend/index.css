@@ -824,3 +824,59 @@ body {
 .lib-scroll::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* ── Light-theme button system — "方案 D · 柔光浅染 · Tinted Hybrid"
+   (user-selected 2026-06-16). Scoped to `[data-theme="light"] .island-frame`
+   so it ONLY affects the island UI in light theme: classic (flag-OFF) never
+   renders `.island-frame`, and dark island is `[data-theme]` != light — both
+   stay byte-identical (D12). Identity: every action keeps its semantic tint
+   (soft fill + same-hue border) but with a DEEP text/icon color readable on a
+   white card; ONE hero CTA (Upload) uses a glowing indigo gradient to pull the
+   hierarchy. These rules are intentionally outside @layer so they win over the
+   layered `.btn-tint-*` base definitions (which carry dark-theme pale text)
+   regardless of specificity. Only the text color changes — the base soft
+   bg/border already read well on light. */
+
+[data-theme="light"] .island-frame .btn-tint-indigo { color: #4338ca; }
+[data-theme="light"] .island-frame .btn-tint-indigo:hover:not(:disabled) {
+  background: rgba(99, 102, 241, 0.18);
+  border-color: rgba(99, 102, 241, 0.5);
+}
+[data-theme="light"] .island-frame .btn-tint-amber { color: #b45309; }
+[data-theme="light"] .island-frame .btn-tint-amber:hover:not(:disabled) {
+  background: rgba(245, 158, 11, 0.2);
+  border-color: rgba(245, 158, 11, 0.55);
+}
+[data-theme="light"] .island-frame .btn-tint-violet { color: #6d28d9; }
+[data-theme="light"] .island-frame .btn-tint-violet:hover:not(:disabled) {
+  background: rgba(124, 58, 237, 0.18);
+  border-color: rgba(124, 58, 237, 0.5);
+}
+[data-theme="light"] .island-frame .btn-tint-green { color: #047857; }
+[data-theme="light"] .island-frame .btn-tint-green:hover:not(:disabled) {
+  background: rgba(16, 185, 129, 0.2);
+  border-color: rgba(16, 185, 129, 0.55);
+}
+[data-theme="light"] .island-frame .btn-tint-red { color: #b91c1c; }
+[data-theme="light"] .island-frame .btn-tint-red:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.16);
+  border-color: rgba(239, 68, 68, 0.5);
+}
+
+/* Hero CTA (Upload) — solid indigo gradient + soft glow. Sampled from the mock:
+   top #8c90f1 → bottom #5158e9 (indigo-500→600) with a top highlight. Keeps the
+   split-button corners (no border-radius override). Placed LAST so it wins over
+   the `.btn-tint-indigo` deep-text rule above (Upload carries both classes). */
+[data-theme="light"] .island-frame .btn-cta,
+[data-theme="light"] .island-frame .btn-cta:hover:not(:disabled) {
+  color: #ffffff;
+  border-color: transparent;
+}
+[data-theme="light"] .island-frame .btn-cta {
+  background: linear-gradient(180deg, #6f73ef, #4f46e5);
+  box-shadow: 0 2px 14px rgba(79, 70, 229, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+[data-theme="light"] .island-frame .btn-cta:hover:not(:disabled) {
+  background: linear-gradient(180deg, #7c80f1, #5850ea);
+  box-shadow: 0 3px 18px rgba(79, 70, 229, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}

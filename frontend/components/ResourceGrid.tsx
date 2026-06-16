@@ -636,7 +636,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                 {uploading ? (
                   <button
                     disabled
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg btn-tint-indigo opacity-70"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg btn-tint-indigo btn-cta opacity-70"
                   >
                     <Loader2 size={14} className="animate-spin" />
                     <span>{overallProgress}%</span>
@@ -646,14 +646,14 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                     <div className="flex">
                       <button
                         onClick={() => fileInputRef.current?.click()}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-l-lg btn-tint-indigo border-r-0 transition-colors"
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-l-lg btn-tint-indigo btn-cta border-r-0 transition-colors"
                       >
                         <Upload size={14} />
                         <span>{t('resources.upload')}</span>
                       </button>
                       <button
                         onClick={() => setShowUploadDropdown(prev => !prev)}
-                        className="px-1.5 py-1.5 text-xs font-medium rounded-r-lg btn-tint-indigo transition-colors"
+                        className="px-1.5 py-1.5 text-xs font-medium rounded-r-lg btn-tint-indigo btn-cta transition-colors"
                       >
                         <ChevronDown size={12} />
                       </button>
