@@ -41,12 +41,12 @@ describe('IslandWorkContext', () => {
     render(<IslandWorkProvider><Probe /></IslandWorkProvider>);
     expect(screen.getByTestId('w').textContent).toBe('360');
   });
-  it('clamps infoWidth to 250–480 (spec §2)', () => {
+  it('clamps infoWidth to 250–640 (spec §2)', () => {
     render(<IslandWorkProvider><Probe /></IslandWorkProvider>);
     fireEvent.click(screen.getByText('narrow'));
     expect(screen.getByTestId('w').textContent).toBe('250');
     fireEvent.click(screen.getByText('wide'));
-    expect(screen.getByTestId('w').textContent).toBe('480');
+    expect(screen.getByTestId('w').textContent).toBe('640');
   });
   it('setInfoIslandEl updates infoIslandEl (callback-ref re-renders consumers)', () => {
     render(<IslandWorkProvider><Probe /></IslandWorkProvider>);
