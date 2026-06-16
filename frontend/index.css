@@ -233,14 +233,13 @@
 
 /* Audio detail island — cover-tinted immersive stage (spec §5.3 / D8). --tint and
    --tint-deep are set per-track by DownloadDetailPage (coverTint util); fallbacks here. */
-/* Cover-tinted stage (mock mediahub-audio-redesign.html .stage). The tint is
-   muted at the source (utils/coverTint.muteRgb) so even a saturated album cover
-   yields a soft wash like the mock — not the vivid color it produced before. */
+/* Audio stage background = the DB-stored theme color (Soda background_color, or
+   a deep per-track color for uploads) as a SOLID fill — not a gradient, not flat
+   black. Driven by --audio-bg, set per item from sodaTheme.bg by the page.
+   --tint still drives the small accents (play button, waveform, Share, trail). */
 .audio-stage {
   position: relative;
-  background:
-    radial-gradient(900px 600px at 38% 30%, rgba(var(--tint, 99,102,241), .16), transparent 65%),
-    linear-gradient(165deg, rgb(var(--tint-deep, 24,28,46)), #0d1210 55%, #0a0d0c);
+  background: var(--audio-bg, #0a0a0d);
 }
 .lyrics-col {
   -webkit-mask-image: linear-gradient(transparent, #000 18%, #000 82%, transparent);

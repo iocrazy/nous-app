@@ -1733,7 +1733,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             view); other media keep the compact mobile preview. */}
         <div
           className={`w-full ${isAudio ? 'min-h-[78vh] sm:h-[50vh]' : 'h-64 sm:h-80'} md:h-auto md:flex-1 flex flex-col min-w-0 overflow-hidden shrink-0 md:shrink ${islandAudioStage ? 'audio-stage' : 'bg-ink-950'}`}
-          style={islandAudioStage ? ({ ['--tint']: tint.tint, ['--tint-deep']: tint.tintDeep } as React.CSSProperties) : undefined}
+          style={islandAudioStage ? ({ ['--tint']: tint.tint, ['--tint-deep']: tint.tintDeep, ['--audio-bg']: audioSodaTheme.bg } as React.CSSProperties) : undefined}
         >
           {/* Version preview banner */}
           {selectedVersionId && (
