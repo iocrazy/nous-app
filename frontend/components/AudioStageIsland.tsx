@@ -24,18 +24,18 @@ interface AudioStageIslandProps {
  */
 export const AudioStageIsland: React.FC<AudioStageIslandProps> = ({ title, author, onBack, actions, coverSide, lyrics, player }) => (
   <div className="audio-stage hidden sm:flex flex-col h-full min-h-0">
-    <div className="stage-head flex items-center gap-3 px-4 py-3 relative z-[2]">
+    <div className="stage-head flex items-center gap-3 px-4 py-3 relative z-30">
       <CometBack onClick={onBack} tinted />
       <div className="min-w-0">
         <div className="text-[13.5px] font-semibold text-ink-50 truncate">{title}</div>
         {author && <div className="text-[11.5px] text-ink-400 truncate">{author}</div>}
       </div>
-      <span className="comet-trail" />
+      <span className="comet-trail comet-trail--tint" />
       <div className="ml-auto flex items-center gap-2">{actions}</div>
     </div>
-    <div className="flex-1 min-h-0 flex items-start justify-center gap-8 px-6 py-4 overflow-auto relative z-[2]">
-      <div className="w-[min(440px,42%)] shrink-0">{coverSide}</div>
-      <div className="lyrics-col flex-1 max-w-[440px] self-stretch min-h-0 overflow-hidden">{lyrics}</div>
+    <div className="flex-1 min-h-0 flex items-center justify-center gap-[60px] pt-2.5 px-12 overflow-auto relative z-[2]">
+      <div className="max-w-[340px] shrink-0">{coverSide}</div>
+      <div className="lyrics-col flex-1 max-w-[440px] h-[min(420px,52vh)] overflow-hidden">{lyrics}</div>
     </div>
     <div className="audio-capsule shrink-0 relative z-[2]">{player}</div>
   </div>

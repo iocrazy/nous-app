@@ -32,9 +32,7 @@ import type { ChipId, DatePresetId, DurationPresetId, SocialMetric } from './typ
 import { SOCIAL_METRICS } from './types';
 import { filterVisibleChips } from './chipVisibility';
 import { FilterChip } from './FilterChip';
-import { SegmentedTypeFilter } from './SegmentedTypeFilter';
 import { FilterConfigPanel } from './FilterConfigPanel';
-import { islandUI } from '../../../utils/featureFlags';
 import { RatingFilterDropdown } from './RatingFilterDropdown';
 import { TagsFilterDropdown } from './TagsFilterDropdown';
 import { TypeFilterDropdown } from './TypeFilterDropdown';
@@ -49,6 +47,7 @@ import { useResourcesContext } from '../../../contexts/ResourcesContext';
 import { datePresetSummary } from './dateUtils';
 import { durationPresetSummary } from './durationUtils';
 import { aspectSummary } from './aspectUtils';
+import { islandUI } from '../../../utils/featureFlags';
 
 export interface FilterBarProps {
   /** Config hook instance — FilterBar is controlled via this. */
@@ -129,6 +128,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   allowedChips,
 }) => {
   const { t } = useTranslation();
+  const island = islandUI();
   const [openTarget, setOpenTarget] = useState<OpenTarget>(null);
   const { refreshTags } = useResourcesContext();
 
@@ -155,20 +155,11 @@ export const FilterBar: React.FC<FilterBarProps> = ({
     [setChipValue, refreshTags],
   );
 
-  // Island shell surfaces the media-type filter as an always-visible segmented
-  // control (spec §5.1) instead of the `type` dropdown chip, so drop `type` from
-  // the pinned chips here to avoid a duplicate control. Same multi-select state
-  // drives both, so nothing is lost (D12). Build-time constant → stable.
-  const island = islandUI();
-
   // Subset of pinnedChips that's actually rendered in the toolbar.
   // Disallowed chips stay pinned in localStorage but don't show here.
   const visiblePinnedChips = useMemo(
-    () =>
-      filterVisibleChips(pinnedChips, allowedChips).filter(
-        (id) => !(island && id === 'type'),
-      ),
-    [pinnedChips, allowedChips, island],
+    () => filterVisibleChips(pinnedChips, allowedChips),
+    [pinnedChips, allowedChips],
   );
 
   // Static icon registry — each chip carries a distinct lucide icon so the
@@ -369,12 +360,6 @@ export const FilterBar: React.FC<FilterBarProps> = ({
 
   return (
     <div className="flex items-center gap-1.5 flex-wrap" data-testid="resources-filter-bar">
-      {island && (
-        <SegmentedTypeFilter
-          selected={chipValues.type.types}
-          onChange={(next) => setChipValue('type', { types: next })}
-        />
-      )}
       {visiblePinnedChips.map((id) => (
         <FilterChip
           key={id}
@@ -404,7 +389,9 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border transition-colors text-xs ${
             isConfigOpen
               ? 'border-indigo-500/60 bg-indigo-500/10 text-indigo-300'
-              : 'border-ink-700/80 bg-ink-900/40 text-ink-400 hover:text-ink-200 hover:border-ink-600'
+              : island
+                ? 'border-line bg-island-2 text-content-2 hover:text-content-2 hover:border-line-strong'
+                : 'border-ink-700/80 bg-ink-900/40 text-ink-400 hover:text-ink-200 hover:border-ink-600'
           }`}
           title={t('resources.filter.filterConfig', 'Filter Settings')}
           aria-label={t('resources.filter.filterConfig', 'Filter Settings')}
@@ -431,7 +418,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
         <button
           type="button"
           onClick={clearAll}
-          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-ink-400 hover:text-ink-100 hover:bg-ink-800/60"
+          className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs ${island ? 'text-content-2 hover:text-content hover:bg-island-2' : 'text-ink-400 hover:text-ink-100 hover:bg-ink-800/60'}`}
           title={t('resources.filter.clearAll', 'Clear all filters')}
         >
           <X size={12} />

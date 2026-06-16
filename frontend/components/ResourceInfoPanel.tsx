@@ -16,6 +16,9 @@ interface ResourceInfoPanelProps {
   onRemoveTag: (tagId: string) => void;
   onCreate?: (name: string, color: string) => Promise<Tag | null>;
   onUpdate: (data: Partial<Resource>) => void;
+  /** Island shell: the surrounding info island already paints the card surface,
+   *  so render transparently to avoid a second box inside the island. */
+  island?: boolean;
 }
 
 function formatFileSize(bytes: number | null | undefined): string {
@@ -89,7 +92,7 @@ const AIStatusBadge: React.FC<{ status?: string }> = ({ status }) => {
 
 // ─── Star Rating ─────────────────────────────────────────
 
-const StarRating: React.FC<{ value: number; onChange: (v: number) => void }> = ({ value, onChange }) => {
+const StarRating: React.FC<{ value: number; onChange: (v: number) => void; island?: boolean }> = ({ value, onChange, island = false }) => {
   const [hover, setHover] = useState(0);
 
   return (
@@ -106,7 +109,7 @@ const StarRating: React.FC<{ value: number; onChange: (v: number) => void }> = (
             className={
               (hover || value) >= star
                 ? 'text-amber-400 fill-amber-400'
-                : 'text-ink-600'
+                : (island ? 'text-content-4' : 'text-ink-600')
             }
           />
         </button>
@@ -117,12 +120,12 @@ const StarRating: React.FC<{ value: number; onChange: (v: number) => void }> = (
 
 // ─── Info Row ────────────────────────────────────────────
 
-const InfoRow = ({ label, value, children }: { label: string; value?: string | null | undefined; children?: React.ReactNode }) => {
+const InfoRow = ({ label, value, children, island = false }: { label: string; value?: string | null | undefined; children?: React.ReactNode; island?: boolean }) => {
   if (!value && !children) return null;
   return (
     <div className="flex justify-between items-center py-1.5 pr-0.5">
-      <span className="text-xs text-ink-500">{label}</span>
-      {children || <span className="text-xs text-ink-300 text-right tabular-nums">{value}</span>}
+      <span className={`text-xs ${island ? 'text-content-3' : 'text-ink-500'}`}>{label}</span>
+      {children || <span className={`text-xs ${island ? 'text-content-2' : 'text-ink-300'} text-right tabular-nums`}>{value}</span>}
     </div>
   );
 };
@@ -140,11 +143,35 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
   onRemoveTag,
   onCreate,
   onUpdate,
+  island = false,
 }) => {
   const { t } = useTranslation();
   const { icon: IconComponent, color, bg } = getFileIcon(resource.mime_type);
 
   const isMedia = resource.mime_type?.startsWith('video/') || resource.mime_type?.startsWith('audio/');
+
+  // Island redesign: align neutral text/border to the mock --content/--line ladder.
+  // Classic (island=false) keeps the exact original ink classes for D12 byte-identical render.
+  const cPrimary = island ? 'text-content' : 'text-ink-50';
+  const cText300 = island ? 'text-content-2' : 'text-ink-300';
+  const cText400 = island ? 'text-content-2' : 'text-ink-400';
+  const cLabel = island ? 'text-content-3' : 'text-ink-500';
+  const cFaint = island ? 'text-content-4' : 'text-ink-600';
+  const cHoverPrimary = island ? 'hover:text-content' : 'hover:text-ink-50';
+  const cGroupHover400 = island ? 'group-hover:text-content-2' : 'group-hover:text-ink-400';
+  const cHover400 = island ? 'hover:text-content-2' : 'hover:text-ink-400';
+  const cBorderHeader = island ? 'border-line' : 'border-ink-800';
+  const cBorderSection = island ? 'border-line' : 'border-ink-800/60';
+  const cDashed = island ? 'border-line-strong' : 'border-ink-700/60';
+  const cDashedHover = island ? 'hover:border-line-strong' : 'hover:border-ink-600';
+  const cPlaceholder = island ? 'placeholder-content-4' : 'placeholder-ink-600';
+  // Surface tokens: the mock paints inputs/secondary surfaces with --island-2
+  // and hovers with --island-2; classic keeps the exact original ink surfaces
+  // so D12 stays byte-identical when island=false.
+  const cInputBg = island ? 'bg-island-2' : 'bg-ink-800/50';
+  const cInputBorder = island ? 'border-line' : 'border-ink-700/50';
+  const cFieldBg = island ? 'bg-island-2' : 'bg-ink-800';
+  const cHoverSurface = island ? 'hover:bg-island-2' : 'hover:bg-ink-800';
 
   // ─── Editable filename ──────────────────────────────
   const [editingName, setEditingName] = useState(false);
@@ -234,13 +261,13 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
   ]);
 
   return (
-    <div className="flex-1 min-w-0 h-full bg-ink-900 overflow-y-auto">
+    <div className={`flex-1 min-w-0 h-full overflow-y-auto ${island ? '' : 'bg-ink-900'}`}>
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-ink-800 sticky top-0 bg-ink-900 z-10">
-        <h3 className="text-sm font-semibold text-ink-50 select-none">{t('resources.infoPanel.title')}</h3>
+      <div className={`flex items-center justify-between p-4 border-b ${cBorderHeader} sticky top-0 z-10 ${island ? 'bg-island' : 'bg-ink-900'}`}>
+        <h3 className={`text-sm font-semibold ${cPrimary} select-none`}>{t('resources.infoPanel.title')}</h3>
         <button
           onClick={onClose}
-          className="p-1.5 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
+          className={`p-1.5 ${cText400} ${cHoverPrimary} ${cHoverSurface} rounded-lg transition-colors`}
         >
           <X size={16} />
         </button>
@@ -273,18 +300,18 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
               if (e.key === 'Enter') commitName();
               if (e.key === 'Escape') { setNameValue(resource.filename); setEditingName(false); }
             }}
-            className="w-full bg-ink-800 border border-indigo-500/50 rounded px-2 py-1 text-sm text-ink-50 focus:outline-none"
+            className={`w-full ${cFieldBg} border border-indigo-500/50 rounded px-2 py-1 text-sm ${cPrimary} focus:outline-none`}
             autoFocus
           />
         ) : readOnly ? (
-          <h4 className="text-sm font-medium text-ink-50 break-words leading-snug">{resource.filename}</h4>
+          <h4 className={`text-sm font-medium ${cPrimary} break-words leading-snug`}>{resource.filename}</h4>
         ) : (
           <div
             className="group flex items-start gap-1.5 cursor-pointer"
             onClick={() => setEditingName(true)}
           >
-            <h4 className="text-sm font-medium text-ink-50 break-words leading-snug flex-1">{resource.filename}</h4>
-            <Pencil size={12} className="text-ink-600 group-hover:text-ink-400 mt-0.5 shrink-0 transition-colors" />
+            <h4 className={`text-sm font-medium ${cPrimary} break-words leading-snug flex-1`}>{resource.filename}</h4>
+            <Pencil size={12} className={`${cFaint} ${cGroupHover400} mt-0.5 shrink-0 transition-colors`} />
           </div>
         )}
       </div>
@@ -292,7 +319,7 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
       {/* Notes */}
       {!readOnly && (
         <div className="px-4 mt-3">
-          <h4 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-1.5">
+          <h4 className={`text-[11px] font-semibold ${cLabel} uppercase tracking-widest mb-1.5`}>
             {t('resources.infoPanel.notes')}
           </h4>
           {notesValue || editingNotes ? (
@@ -306,12 +333,12 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
               autoFocus={editingNotes && !notesValue}
               placeholder={t('resources.infoPanel.notesPlaceholder')}
               rows={3}
-              className="w-full bg-ink-800/50 border border-ink-700/50 rounded-lg px-2.5 py-2 text-xs text-ink-300 placeholder-ink-600 focus:outline-none focus:border-indigo-500/50 resize-none"
+              className={`w-full ${cInputBg} border ${cInputBorder} rounded-lg px-2.5 py-2 text-xs ${cText300} ${cPlaceholder} focus:outline-none focus:border-indigo-500/50 resize-none`}
             />
           ) : (
             <button
               onClick={() => setEditingNotes(true)}
-              className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-ink-600 hover:text-ink-400 border border-dashed border-ink-700/60 hover:border-ink-600 rounded-lg transition-colors text-left"
+              className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 text-xs ${cFaint} ${cHover400} border border-dashed ${cDashed} ${cDashedHover} rounded-lg transition-colors text-left`}
             >
               <Plus size={12} className="shrink-0" />
               {t('resources.infoPanel.addNote', 'Add note')}
@@ -321,10 +348,10 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
       )}
       {readOnly && notesValue && (
         <div className="px-4 mt-3">
-          <h4 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-1.5">
+          <h4 className={`text-[11px] font-semibold ${cLabel} uppercase tracking-widest mb-1.5`}>
             {t('resources.infoPanel.notes')}
           </h4>
-          <p className="text-xs text-ink-400 whitespace-pre-wrap">{notesValue}</p>
+          <p className={`text-xs ${cText400} whitespace-pre-wrap`}>{notesValue}</p>
         </div>
       )}
 
@@ -342,12 +369,12 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
               onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
               autoFocus={editingUrl && !urlValue}
               placeholder={t('resources.infoPanel.urlPlaceholder')}
-              className="w-full bg-ink-800/50 border border-ink-700/50 rounded-lg px-2.5 py-1.5 text-xs text-ink-300 placeholder-ink-600 focus:outline-none focus:border-indigo-500/50"
+              className={`w-full ${cInputBg} border ${cInputBorder} rounded-lg px-2.5 py-1.5 text-xs ${cText300} ${cPlaceholder} focus:outline-none focus:border-indigo-500/50`}
             />
           ) : (
             <button
               onClick={() => setEditingUrl(true)}
-              className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-ink-600 hover:text-ink-400 border border-dashed border-ink-700/60 hover:border-ink-600 rounded-lg transition-colors text-left"
+              className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 text-xs ${cFaint} ${cHover400} border border-dashed ${cDashed} ${cDashedHover} rounded-lg transition-colors text-left`}
             >
               <Plus size={12} className="shrink-0" />
               {t('resources.infoPanel.addUrl', 'Add source link')}
@@ -373,12 +400,12 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
 
       {/* Folders */}
       {folderName && (
-        <div className="px-4 mt-4 border-t border-ink-800/60 pt-3">
-          <h4 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-2">
+        <div className={`px-4 mt-4 border-t ${cBorderSection} pt-3`}>
+          <h4 className={`text-[11px] font-semibold ${cLabel} uppercase tracking-widest mb-2`}>
             {t('resources.infoPanel.folders')}
           </h4>
-          <div className="flex items-center gap-1.5 text-xs text-ink-300">
-            <FolderOpen size={13} className="text-ink-500 shrink-0" />
+          <div className={`flex items-center gap-1.5 text-xs ${cText300}`}>
+            <FolderOpen size={13} className={`${cLabel} shrink-0`} />
             <span className="truncate">{folderName}</span>
           </div>
         </div>
@@ -388,8 +415,8 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
       {(resource.transcript_status && resource.transcript_status !== 'none') ||
        (resource.summary_status && resource.summary_status !== 'none') ||
        (resource.visual_analysis_status && resource.visual_analysis_status !== 'none') ? (
-        <div className="px-4 mt-4 border-t border-ink-800/60 pt-3">
-          <h4 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-2">
+        <div className={`px-4 mt-4 border-t ${cBorderSection} pt-3`}>
+          <h4 className={`text-[11px] font-semibold ${cLabel} uppercase tracking-widest mb-2`}>
             {t('resources.infoPanel.aiStatus')}
           </h4>
           <div className="space-y-0">
@@ -397,7 +424,7 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
               <div className="flex items-center justify-between py-1">
                 <div className="flex items-center gap-2">
                   <Brain size={12} className="text-cyan-400" />
-                  <span className="text-xs text-ink-400">Transcript</span>
+                  <span className={`text-xs ${cText400}`}>Transcript</span>
                 </div>
                 <AIStatusBadge status={resource.transcript_status} />
               </div>
@@ -406,7 +433,7 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
               <div className="flex items-center justify-between py-1">
                 <div className="flex items-center gap-2">
                   <Sparkles size={12} className="text-indigo-400" />
-                  <span className="text-xs text-ink-400">Summary</span>
+                  <span className={`text-xs ${cText400}`}>Summary</span>
                 </div>
                 <AIStatusBadge status={resource.summary_status} />
               </div>
@@ -415,7 +442,7 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
               <div className="flex items-center justify-between py-1">
                 <div className="flex items-center gap-2">
                   <Eye size={12} className="text-purple-400" />
-                  <span className="text-xs text-ink-400">Visual Analysis</span>
+                  <span className={`text-xs ${cText400}`}>Visual Analysis</span>
                 </div>
                 <AIStatusBadge status={resource.visual_analysis_status} />
               </div>
@@ -425,31 +452,32 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
       ) : null}
 
       {/* Properties */}
-      <div className="px-4 mt-4 border-t border-ink-800/60 pt-3">
-        <h4 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-2">
+      <div className={`px-4 mt-4 border-t ${cBorderSection} pt-3`}>
+        <h4 className={`text-[11px] font-semibold ${cLabel} uppercase tracking-widest mb-2`}>
           {t('resources.infoPanel.properties')}
         </h4>
         <div className="space-y-0">
-          <InfoRow label={t('resources.infoPanel.rating')}>
-            <StarRating value={resource.rating ?? 0} onChange={readOnly ? () => {} : handleRating} />
+          <InfoRow label={t('resources.infoPanel.rating')} island={island}>
+            <StarRating value={resource.rating ?? 0} onChange={readOnly ? () => {} : handleRating} island={island} />
           </InfoRow>
           {isMedia && resource.duration_seconds && (
-            <InfoRow label={t('resources.infoPanel.duration')} value={formatDuration(resource.duration_seconds)} />
+            <InfoRow label={t('resources.infoPanel.duration')} value={formatDuration(resource.duration_seconds)} island={island} />
           )}
-          <InfoRow label={t('resources.infoPanel.size')} value={formatFileSize(resource.file_size_bytes)} />
-          <InfoRow label={t('resources.infoPanel.type')} value={resource.file_type || resource.mime_type} />
+          <InfoRow label={t('resources.infoPanel.size')} value={formatFileSize(resource.file_size_bytes)} island={island} />
+          <InfoRow label={t('resources.infoPanel.type')} value={resource.file_type || resource.mime_type} island={island} />
           {resource.resolution && (
-            <InfoRow label={t('resources.infoPanel.resolution')} value={resource.resolution?.replace(/:/g, 'x')} />
+            <InfoRow label={t('resources.infoPanel.resolution')} value={resource.resolution?.replace(/:/g, 'x')} island={island} />
           )}
           {resource.current_version > 1 && (
-            <InfoRow label={t('resources.infoPanel.version')} value={`v${resource.current_version}`} />
+            <InfoRow label={t('resources.infoPanel.version')} value={`v${resource.current_version}`} island={island} />
           )}
           <InfoRow
             label={t('resources.infoPanel.source')}
             value={resource.source_type === 'web' ? t('resources.infoPanel.sourceWeb') : t('resources.infoPanel.sourceUpload')}
+            island={island}
           />
-          <InfoRow label={t('resources.infoPanel.created')} value={formatDate(resource.created_at)} />
-          <InfoRow label={t('resources.infoPanel.modified')} value={formatDate(resource.updated_at)} />
+          <InfoRow label={t('resources.infoPanel.created')} value={formatDate(resource.created_at)} island={island} />
+          <InfoRow label={t('resources.infoPanel.modified')} value={formatDate(resource.updated_at)} island={island} />
         </div>
       </div>
 

@@ -7,7 +7,7 @@ export interface IslandWorkValue {
   setInfoIslandEl: (el: HTMLDivElement | null) => void;
   infoVisible: boolean;
   setInfoVisible: (v: boolean) => void;
-  infoWidth: number;            // clamped 250–480 (spec §2)
+  infoWidth: number;            // clamped 250–640 (drag range widened per feedback)
   setInfoWidth: (w: number) => void;
   /** True when the current page provides an info island (gates the reopen tab). */
   infoAvailable: boolean;
@@ -37,7 +37,7 @@ export const IslandWorkProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [infoAvailable, setInfoAvailableState] = useState(false);
   const setInfoIslandEl = useCallback((el: HTMLDivElement | null) => setInfoIslandElState(el), []);
   const setInfoWidth = useCallback(
-    (w: number) => setInfoWidthState(Math.min(480, Math.max(250, w))),
+    (w: number) => setInfoWidthState(Math.min(640, Math.max(250, w))),
     [],
   );
   const setInfoAvailable = useCallback((v: boolean) => setInfoAvailableState(v), []);

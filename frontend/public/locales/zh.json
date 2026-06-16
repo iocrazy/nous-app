@@ -723,7 +723,11 @@
       "autoTagSlow": "仍在打标中 — 请到任务中心查看",
       "autoTagFailed": "智能打标失败",
       "addNote": "添加备注",
-      "addUrl": "添加来源链接"
+      "addUrl": "添加来源链接",
+      "author": "作者",
+      "platform": "平台",
+      "published": "发布时间",
+      "platformTags": "平台标签"
     },
     "folderInfoPanel": {
       "title": "文件夹信息",

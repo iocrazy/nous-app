@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -18,6 +19,7 @@ import {
   Layers,
   FileQuestion,
   PanelLeft,
+  PanelRightClose,
   RefreshCw,
   Search,
   Share2,
@@ -71,6 +73,9 @@ import { formatDateLocalized } from '../utils/formatDate';
 import { downloadFile } from '../utils/download';
 import { useToast } from './Toast';
 import { useAuth } from '../contexts/AuthContext';
+import { useIslandWork } from '../contexts/IslandWorkContext';
+import { islandUI } from '../utils/featureFlags';
+import { CometBack } from './CometBack';
 import { ShareModal } from './ShareModal';
 import { VersionManagerModal } from './VersionManagerModal';
 import VideoPlayer from './VideoPlayer';
@@ -79,8 +84,14 @@ import { ResourceReviewPanel } from './ResourceReviewPanel';
 import { useResizablePanel, ResizeHandle, detailCardClass, DetailBadge, RatingStars, AiIntentBadges } from './detail/DetailCardKit';
 import { ResourceAnnotationOverlay, NormalizedAnnotation } from './ResourceAnnotationOverlay';
 import { AudioHero } from './AudioHero';
+import { AudioWaveformPlayer } from './AudioWaveformPlayer';
+import { AudioOverviewSide } from './AudioOverviewSide';
+import { AudioStageIsland } from './AudioStageIsland';
+import { PlaylistIsland } from './PlaylistIsland';
 import { MobileAudioUpload } from './MobileAudioUpload';
 import { LyricsView } from './LyricsView';
+import { buildSodaTheme } from '../utils/sodaTheme';
+import { tintFromTheme } from '../utils/coverTint';
 import { fetchComments } from '../services/reviewService';
 import {
   triggerTranscriptionByResource,
@@ -185,7 +196,8 @@ const FilePreview: React.FC<{
   resource: Resource;
   fileUrl: string | null;
   onCoverUpdated?: (updated: Resource) => void;
-}> = ({ resource, fileUrl, onCoverUpdated }) => {
+  island?: boolean;
+}> = ({ resource, fileUrl, onCoverUpdated, island }) => {
   const { t } = useTranslation();
   const { addToast } = useToast();
   const mime = resource.mime_type || '';
@@ -210,8 +222,8 @@ const FilePreview: React.FC<{
     return (
       <div className="flex flex-col items-center gap-4 text-center">
         <IconComponent size={64} className={`${color} opacity-60`} />
-        <p className="text-ink-400 text-sm">{resource.filename}</p>
-        <p className="text-ink-500 text-xs">{t('resources.noPreview')}</p>
+        <p className={`${island ? 'text-content-2' : 'text-ink-400'} text-sm`}>{resource.filename}</p>
+        <p className={`${island ? 'text-content-3' : 'text-ink-500'} text-xs`}>{t('resources.noPreview')}</p>
       </div>
     );
   }
@@ -309,8 +321,8 @@ const FilePreview: React.FC<{
   return (
     <div className="flex flex-col items-center gap-4 text-center">
       <IconComponent size={64} className={`${color} opacity-60`} />
-      <p className="text-ink-300 font-medium">{resource.filename}</p>
-      <p className="text-ink-500 text-sm">{t('resources.noPreview')}</p>
+      <p className={`${island ? 'text-content-2' : 'text-ink-300'} font-medium`}>{resource.filename}</p>
+      <p className={`${island ? 'text-content-3' : 'text-ink-500'} text-sm`}>{t('resources.noPreview')}</p>
       <a
         href={fileUrl}
         download
@@ -368,6 +380,58 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
     return () => mq.removeEventListener('change', handler);
   }, []);
 
+  // Island app-shell integration (no-op in classic — useIslandWork returns an
+  // inert shape outside a shell, and `island` gates every island-only branch).
+  const island = islandUI();
+  const { infoIslandEl, setInfoVisible, setInfoAvailable } = useIslandWork();
+  // Island desktop = flag on AND the md+ split-pane layout is active (same
+  // breakpoint the rest of this page uses), so the inspector is never both
+  // mounted in the work island and portaled into the info island.
+  const islandDesktop = island && isDesktop;
+
+  // Island redesign: align neutral text/border ink to the mock --content/--line
+  // ladder. Classic (island=false) keeps the EXACT original ink classes so the
+  // D12 classic render stays byte-identical; only island swaps to the soft ladder.
+  const cPrimary = island ? 'text-content' : 'text-ink-50';
+  const cText100 = island ? 'text-content' : 'text-ink-100';
+  const cText200 = island ? 'text-content' : 'text-ink-200';
+  const cText300 = island ? 'text-content-2' : 'text-ink-300';
+  const cText400 = island ? 'text-content-2' : 'text-ink-400';
+  const cLabel = island ? 'text-content-3' : 'text-ink-500';
+  const cFaint = island ? 'text-content-4' : 'text-ink-600';
+  const cHover100 = island ? 'hover:text-content' : 'hover:text-ink-100';
+  const cHover200 = island ? 'hover:text-content' : 'hover:text-ink-200';
+  const cHover300 = island ? 'hover:text-content-2' : 'hover:text-ink-300';
+  const cGroupHover400 = island ? 'group-hover:text-content-2' : 'group-hover:text-ink-400';
+  const cBorder700 = island ? 'border-line' : 'border-ink-700';
+  const cBorder700_30 = island ? 'border-line' : 'border-ink-700/30';
+  const cBorder700_50 = island ? 'border-line' : 'border-ink-700/50';
+  const cBorder700_60 = island ? 'border-line' : 'border-ink-700/60';
+  const cBorder800 = island ? 'border-line' : 'border-ink-800';
+  const cBorder800_60 = island ? 'border-line' : 'border-ink-800/60';
+  const cBorder800_80 = island ? 'border-line' : 'border-ink-800/80';
+  const cHoverBorder700 = island ? 'hover:border-line' : 'hover:border-ink-700';
+  const cPlaceholder = island ? 'placeholder-content-4' : 'placeholder-ink-600';
+  // Surface backgrounds — map raw ink to the mock's semantic surface tokens in
+  // island; classic (island=false) keeps the EXACT original ink class so the
+  // D12 classic render stays byte-identical.
+  const cCardBg = island ? 'bg-card' : 'bg-ink-900';
+  const cCtrlBg = island ? 'bg-island-2' : 'bg-ink-800';
+  const cActiveBg = island ? 'bg-card' : 'bg-ink-800';
+  const cHoverSurf = island ? 'hover:bg-island-2' : 'hover:bg-ink-800';
+  const cHoverSurf7 = island ? 'hover:bg-island-2' : 'hover:bg-ink-700';
+  const cInputBg = island ? 'bg-island-2' : 'bg-ink-800/50';
+
+  // Island mode: this page owns an info island (the inspector). Mark it
+  // available + visible on mount so the shell mounts the info aside (our portal
+  // target), and tear it down on unmount. No-op in classic.
+  useEffect(() => {
+    if (!island) return;
+    setInfoAvailable(true);
+    setInfoVisible(true);
+    return () => { setInfoAvailable(false); setInfoVisible(false); };
+  }, [island, setInfoAvailable, setInfoVisible]);
+
   // File list panel state
   const [showFileList, setShowFileList] = useState(false);
   const [siblingFiles, setSiblingFiles] = useState<ResourceItem[]>([]);
@@ -395,6 +459,13 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const [rightTab, setRightTab] = useState<'info' | 'review' | 'transcript' | 'analysis' | 'lyrics'>('info');
   const [lyrics, setLyrics] = useState<{ lrc: string; lines: Array<{ text: string; line_start_ms: number | null }> } | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string>('');
+  // Island audio capsule stage: playback position drives the synced lyrics
+  // column. island-desktop audio only — no-op elsewhere.
+  const [audioCurrentTime, setAudioCurrentTime] = useState(0);
+  // Cover upload for the island audio capsule stage (the AudioHero cover-click
+  // affordance lives inside FilePreview, which the stage replaces — so re-wire
+  // it here to preserve cover replace in island, D12).
+  const islandCoverInputRef = useRef<HTMLInputElement>(null);
 
   // AI / Transcript / Analysis state
   const [transcript, setTranscript] = useState<TranscriptData | null>(null);
@@ -709,6 +780,21 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
     handleResourceUpdate({ rating: v });
   }, [handleResourceUpdate]);
 
+  // Island audio capsule stage cover upload (mirrors FilePreview.handleCoverFile).
+  const handleIslandCoverFile = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file
+    if (!f || !resource) return;
+    try {
+      const updated = await uploadResourceCover(resource.id, f);
+      setResource(updated);
+      addToast(t('resources.detail.coverUpdated', 'Cover updated'), 'success');
+    } catch (err) {
+      console.error('Failed to upload cover:', err);
+      addToast('Failed to upload cover', 'error');
+    }
+  }, [resource?.id, addToast, t]);
+
   // Close version dropdown on outside click
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -895,12 +981,20 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
     }
   }, [rightTab]);
 
-  // ─── Load lyrics for uploaded audio on tab switch ───
+  // ─── Load lyrics for uploaded audio — on tab switch (classic) OR up front
+  //     when the island audio capsule stage shows its synced lyrics column. ───
   useEffect(() => {
-    if (rightTab === 'lyrics' && !lyrics) {
+    // resource is null until loaded; this effect is defined before the
+    // !resource render guard, so every access (incl. the dep array) must be
+    // null-safe or the first render throws.
+    const islandAudioStage =
+      islandDesktop &&
+      resource?.mime_type?.startsWith('audio/') &&
+      resource?.source_type === 'upload';
+    if ((rightTab === 'lyrics' || islandAudioStage) && !lyrics) {
       getResourceLyrics(resourceId).then((d) => { if (d) setLyrics(d); }).catch(() => {});
     }
-  }, [rightTab, lyrics, resourceId]);
+  }, [rightTab, lyrics, resourceId, islandDesktop, resource?.mime_type, resource?.source_type]);
 
   const loadTranscript = useCallback(async () => {
     try {
@@ -1022,8 +1116,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center h-full min-h-[400px]">
-        <Loader2 size={32} className="animate-spin text-ink-500 mb-3" />
-        <p className="text-ink-500 text-sm">{t('common.loading')}</p>
+        <Loader2 size={32} className={`animate-spin ${cLabel} mb-3`} />
+        <p className={`${cLabel} text-sm`}>{t('common.loading')}</p>
       </div>
     );
   }
@@ -1032,11 +1126,11 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   if (error || !resource) {
     return (
       <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-center">
-        <FileQuestion size={48} className="text-ink-600 mb-4" />
-        <p className="text-ink-400 text-lg font-medium mb-2">{error || 'Resource not found'}</p>
+        <FileQuestion size={48} className={`${cFaint} mb-4`} />
+        <p className={`${cText400} text-lg font-medium mb-2`}>{error || 'Resource not found'}</p>
         <button
           onClick={handleBack}
-          className="flex items-center gap-2 px-4 py-2 bg-ink-800 hover:bg-ink-700 text-ink-300 rounded-lg transition-colors mt-4"
+          className={`flex items-center gap-2 px-4 py-2 ${cCtrlBg} ${cHoverSurf7} ${cText300} rounded-lg transition-colors mt-4`}
         >
           <ArrowLeft size={16} />
           {t('common.back')}
@@ -1049,6 +1143,18 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const isVideo = resource.mime_type?.startsWith('video/');
   const isAudio = resource.mime_type?.startsWith('audio/');
   const isUploadedAudio = isAudio && resource.source_type === 'upload';
+  // Island audio capsule stage (unifies uploaded audio with the download-detail
+  // audio layout): cover-tinted cover-side + synced lyrics column + bottom
+  // capsule player. Gated to island desktop audio; classic / mobile keep AudioHero.
+  const audioCoverUrl =
+    resource.cover_image_path && resource.id
+      ? getResourceCoverUrl(String(resource.id), undefined, resource.updated_at)
+      : resource.thumbnail_path || undefined;
+  const audioSodaTheme = buildSodaTheme(null, String(resource.id));
+  // Accents (--tint / --tint-deep) derive from the same theme accent so the
+  // Share button + comet trail sync with the play button / waveform / background.
+  const tint = tintFromTheme({ accent: audioSodaTheme.accent });
+  const islandAudioStage = islandDesktop && isAudio && !!fileUrl;
   const viewingVersion = selectedVersionId
     ? versions.find((v) => v.id === selectedVersionId)
     : versions.find((v) => v.version_number === resource.current_version);
@@ -1069,9 +1175,131 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
     );
   }
 
+  // ─── Island audio stage slots ──────────────────────────────
+  // Uploaded/island audio fully adopts the download-detail audio layout:
+  // AudioStageIsland (own stage-head + cover-side | lyrics + bottom capsule)
+  // in the work island, PlaylistIsland in the info island. These slot nodes
+  // mirror DownloadDetailPage; only consumed when `islandAudioStage` is true.
+  const audioStageActions = (
+    <>
+      <button
+        onClick={() => setShowShareModal(true)}
+        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg btn-tint-indigo transition-colors"
+      >
+        <Share2 size={14} />
+        <span>{t('resources.share')}</span>
+      </button>
+      {fileUrl && (
+        <a
+          href={fileUrl}
+          download
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-content-2 hover:text-content ${cHoverSurf} rounded-lg transition-colors`}
+        >
+          <Download size={14} />
+          <span>{t('resources.download')}</span>
+        </a>
+      )}
+      <div className="relative">
+        <button
+          onClick={() => setShowMoreMenu(!showMoreMenu)}
+          className={`p-1.5 text-content-2 hover:text-content ${cHoverSurf} rounded-lg transition-colors`}
+        >
+          <MoreHorizontal size={16} />
+        </button>
+        {showMoreMenu && (
+          <>
+            <div className="fixed inset-0 z-10" onClick={() => setShowMoreMenu(false)} />
+            <div className={`absolute right-0 top-full mt-1 z-20 ${cCardBg} border border-line rounded-lg shadow-xl py-1 w-44`}>
+              {fileUrl && (
+                <button
+                  className={`block w-full text-left px-3 py-1.5 text-xs text-content-2 ${cHoverSurf} hover:text-content transition-colors`}
+                  onClick={() => {
+                    setShowMoreMenu(false);
+                    downloadFile(fileUrl, resource.filename || 'download', {
+                      onSuccess: (f) => addToast(`Downloaded: ${f}`, 'success'),
+                      onError: (msg) => addToast(`Download failed (${msg})`, 'error'),
+                    });
+                  }}
+                >
+                  {t('resources.downloadOriginal')}
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </>
+  );
+  const audioStageCoverSide = (
+    <>
+      <AudioOverviewSide
+        resourceId={resourceId || undefined}
+        coverUrl={audioCoverUrl}
+        title={resource.filename}
+        rating={resource.rating ?? 0}
+        onRatingChange={handleRating}
+        onCoverClick={() => islandCoverInputRef.current?.click()}
+      />
+      <input
+        ref={islandCoverInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleIslandCoverFile}
+      />
+    </>
+  );
+  const audioStageLyrics = lyrics?.lines?.length ? (
+    <LyricsView lines={lyrics.lines} currentTime={audioCurrentTime} variant="bare" />
+  ) : (
+    <div className="h-full flex flex-col items-center justify-center text-center gap-1.5">
+      <Music size={24} className={cFaint} />
+      <p className={`text-sm ${cLabel}`}>{t('resources.detail.noLyrics', 'No lyrics yet')}</p>
+    </div>
+  );
+  const audioStagePlayer = (
+    <AudioWaveformPlayer
+      layout="capsule"
+      src={fileUrl}
+      filename={resource.filename}
+      duration={resource.duration_seconds ?? undefined}
+      chorusStartSec={resource.chorus_start_ms != null ? resource.chorus_start_ms / 1000 : undefined}
+      chorusEditable={isUploadedAudio}
+      setChorusLabel={t('resources.detail.setChorus', 'Set chorus')}
+      clearChorusLabel={t('resources.detail.clearChorus', 'Clear')}
+      onChorusChange={
+        isUploadedAudio
+          ? async (sec) => {
+              try {
+                const ms = sec == null ? null : Math.round(sec * 1000);
+                const updated = await setResourceChorus(resource.id, ms);
+                setResource(updated);
+                addToast(
+                  t(
+                    ms == null
+                      ? 'resources.detail.chorusCleared'
+                      : 'resources.detail.chorusSet',
+                    ms == null ? 'Chorus removed' : 'Chorus marked',
+                  ),
+                  'success',
+                );
+              } catch (err) {
+                console.error('Failed to set chorus:', err);
+                addToast('Failed to set chorus', 'error');
+              }
+            }
+          : undefined
+      }
+      onTimeUpdate={setAudioCurrentTime}
+      theme={audioSodaTheme}
+    />
+  );
+
   return (
     <div className="flex flex-col h-full animate-in fade-in duration-300">
       {/* Top bar — [PanelLeft | ← Back] | [◀ prev | filename (2/5) | next ▶] | [Download | ⋯] */}
+      {/* Classic top bar — island desktop renders the stage-head below instead. */}
+      {!island && (
       <div className="detail-header-glow hidden md:flex items-center justify-between px-4 py-2.5 mb-2 shrink-0">
         {/* Glowing accent line that dips to cradle the round Back button */}
         <svg
@@ -1324,23 +1552,275 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
           </div>
         </div>
       </div>
+      )}
 
-      {/* Main content */}
+      {/* Island stage-head — comet back · file nav/title/version · actions.
+          Mirrors the download detail stage-head and carries the same controls
+          (prev/next, version, transcode, share/download/more) so island loses
+          no functionality (D12). Suppressed for island audio — AudioStageIsland
+          renders its own stage-head below. */}
+      {islandDesktop && !islandAudioStage && (
+        <div className="stage-head hidden md:flex items-center gap-3 px-4 py-3 border-b border-line relative">
+          <CometBack onClick={handleBack} title={t('common.back')} />
+          <button
+            onClick={() => setShowFileList(!showFileList)}
+            className={`p-1.5 rounded-lg transition-colors ${
+              showFileList ? `${cActiveBg} text-indigo-400` : `text-content-2 hover:text-content ${cHoverSurf}`
+            }`}
+            title={t('resources.fileListPanel')}
+          >
+            <PanelLeft size={16} />
+          </button>
+          {/* Center: prev/next + filename + version + transcode badges */}
+          <div className="min-w-0 flex-1 flex items-center justify-center gap-2">
+            <button
+              onClick={() => navigateToSibling('prev')}
+              disabled={!hasPrev}
+              className={`p-1 rounded transition-colors ${
+                hasPrev ? `text-content-2 hover:text-content ${cHoverSurf}` : 'text-ink-700 cursor-not-allowed'
+              }`}
+              title={t('resources.prevFile')}
+            >
+              <ChevronLeft size={18} />
+            </button>
+            <div className="flex items-center gap-2 px-2 min-w-0">
+              <FileIcon size={14} className={iconColor} />
+              <span className="text-sm text-content font-medium max-w-[140px] md:max-w-[300px] truncate">
+                {resource.filename}
+              </span>
+              {versions.length > 0 && (
+                <div className="relative" ref={versionDropdownRef}>
+                  <button
+                    onClick={() => setShowVersionDropdown(!showVersionDropdown)}
+                    className={`flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-md transition-colors ${
+                      selectedVersionId
+                        ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
+                        : `${cCtrlBg} text-content-2 hover:text-content ${cHoverSurf7}`
+                    }`}
+                  >
+                    <Layers size={12} />
+                    <span>
+                      {selectedVersionId
+                        ? `v${versions.find(v => v.id === selectedVersionId)?.version_number ?? '?'}`
+                        : `v${resource.current_version}`}
+                    </span>
+                    <ChevronDown size={12} />
+                  </button>
+                  {showVersionDropdown && (
+                    <div className={`absolute left-1/2 -translate-x-1/2 top-full mt-1 z-30 ${cCardBg} border border-line rounded-lg shadow-xl w-56 py-1`}>
+                      <div className="px-3 py-1.5 border-b border-line">
+                        <p className="text-[10px] font-semibold text-content-3 uppercase tracking-widest">
+                          {t('resources.versions', 'Versions')}
+                        </p>
+                      </div>
+                      <div className="max-h-48 overflow-y-auto py-1">
+                        {versions
+                          .sort((a, b) => b.version_number - a.version_number)
+                          .map((ver) => {
+                            const isCurrentVer = ver.version_number === resource.current_version;
+                            const isSelected = selectedVersionId ? ver.id === selectedVersionId : isCurrentVer;
+                            return (
+                              <button
+                                key={ver.id}
+                                onClick={() => handleSelectVersion(ver)}
+                                className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors ${
+                                  isSelected
+                                    ? 'bg-indigo-500/10 text-indigo-300'
+                                    : `text-content-2 ${cHoverSurf} hover:text-content`
+                                }`}
+                              >
+                                <span className={`font-semibold ${isCurrentVer ? 'text-indigo-400' : ''}`}>
+                                  v{ver.version_number}
+                                </span>
+                                <span className="truncate flex-1 text-left">{ver.filename}</span>
+                                {ver.transcode_status === 'completed' && (
+                                  <span className="text-[9px] px-1 py-0.5 bg-emerald-500/20 text-emerald-400 rounded">
+                                    HLS
+                                  </span>
+                                )}
+                                {(ver.transcode_status === 'pending' || ver.transcode_status === 'processing') && (
+                                  <Loader2 size={10} className="animate-spin text-amber-400 shrink-0" />
+                                )}
+                                {isCurrentVer && (
+                                  <span className="text-[9px] px-1 py-0.5 bg-emerald-500/20 text-emerald-400 rounded">
+                                    current
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                      </div>
+                      <div className="border-t border-line px-2 py-1.5">
+                        <button
+                          onClick={() => { setShowVersionDropdown(false); setShowVersionManager(true); }}
+                          className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-indigo-400 hover:bg-indigo-500/10 rounded-md transition-colors"
+                        >
+                          <Layers size={12} />
+                          {t('resources.manageVersions', 'Manage Versions')}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              {isVideo && transcodeStatus === 'pending' && (
+                <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/15 text-amber-400 rounded-md">
+                  <Loader2 size={10} className="animate-spin" />
+                  {t('resources.transcoding', 'Transcoding...')}
+                </span>
+              )}
+              {isVideo && transcodeStatus === 'processing' && (
+                <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/15 text-amber-400 rounded-md">
+                  <Loader2 size={10} className="animate-spin" />
+                  {t('resources.transcoding', 'Transcoding...')}
+                </span>
+              )}
+              {isVideo && transcodeStatus === 'failed' && viewingVersion && (
+                <button
+                  onClick={async () => {
+                    try {
+                      await retryTranscode(resourceId, viewingVersion.id);
+                      setVersions((prev) =>
+                        prev.map((v) =>
+                          v.id === viewingVersion.id
+                            ? { ...v, transcode_status: 'pending' }
+                            : v,
+                        ),
+                      );
+                    } catch (err) {
+                      console.error('Retry transcode failed:', err);
+                    }
+                  }}
+                  className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-red-500/15 text-red-400 hover:bg-red-500/25 hover:text-red-300 rounded-md transition-colors cursor-pointer"
+                  title={t('resources.retryTranscode', 'Retry')}
+                >
+                  <RefreshCw size={10} />
+                  {t('resources.transcodeFailed', 'Transcode Failed')}
+                </button>
+              )}
+              {isVideo && transcodeStatus === 'completed' && (
+                <span className="px-1.5 py-0.5 text-[10px] font-medium bg-emerald-500/15 text-emerald-400 rounded-md">
+                  HLS
+                </span>
+              )}
+              {currentIndex >= 0 && siblingFiles.length > 0 && (
+                <span className="text-xs text-content-3">
+                  ({currentIndex + 1}/{siblingFiles.length})
+                </span>
+              )}
+            </div>
+            <button
+              onClick={() => navigateToSibling('next')}
+              disabled={!hasNext}
+              className={`p-1 rounded transition-colors ${
+                hasNext ? `text-content-2 hover:text-content ${cHoverSurf}` : 'text-ink-700 cursor-not-allowed'
+              }`}
+              title={t('resources.nextFile')}
+            >
+              <ChevronRight size={18} />
+            </button>
+          </div>
+          <span className="comet-trail" />
+          {/* Right: share + download + more */}
+          <div className="ml-auto flex items-center gap-1.5">
+            <button
+              onClick={() => setShowShareModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg btn-tint-indigo transition-colors"
+            >
+              <Share2 size={14} />
+              <span>{t('resources.share')}</span>
+            </button>
+            {fileUrl && (
+              <a
+                href={fileUrl}
+                download
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-content-2 hover:text-content ${cHoverSurf} rounded-lg transition-colors`}
+              >
+                <Download size={14} />
+                <span>{t('resources.download')}</span>
+              </a>
+            )}
+            <div className="relative">
+              <button
+                onClick={() => setShowMoreMenu(!showMoreMenu)}
+                className={`p-1.5 text-content-2 hover:text-content ${cHoverSurf} rounded-lg transition-colors`}
+              >
+                <MoreHorizontal size={16} />
+              </button>
+              {showMoreMenu && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setShowMoreMenu(false)} />
+                  <div className={`absolute right-0 top-full mt-1 z-20 ${cCardBg} border border-line rounded-lg shadow-xl py-1 w-44`}>
+                    {fileUrl && (
+                      <button
+                        className={`block w-full text-left px-3 py-1.5 text-xs text-content-2 ${cHoverSurf} hover:text-content transition-colors`}
+                        onClick={() => {
+                          setShowMoreMenu(false);
+                          downloadFile(fileUrl, resource.filename || 'download', {
+                            onSuccess: (f) => addToast(`Downloaded: ${f}`, 'success'),
+                            onError: (msg) => addToast(`Download failed (${msg})`, 'error'),
+                          });
+                        }}
+                      >
+                        {t('resources.downloadOriginal')}
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Island audio: the cover-tinted stage fills the work island (its own
+          stage-head + cover-side | lyrics + bottom capsule). --tint / --tint-deep
+          / --audio-bg are set on a display:contents wrapper so the .audio-stage
+          root inherits them (AudioStageIsland is pure layout). Mirrors
+          DownloadDetailPage; the Playlist island is portaled below. */}
+      {islandAudioStage && (
+        <div
+          className="contents"
+          style={{ ['--tint']: tint.tint, ['--tint-deep']: tint.tintDeep, ['--audio-bg']: audioSodaTheme.bg } as React.CSSProperties}
+        >
+          <AudioStageIsland
+            title={resource.filename}
+            author={undefined}
+            onBack={handleBack}
+            actions={audioStageActions}
+            coverSide={audioStageCoverSide}
+            lyrics={audioStageLyrics}
+            player={audioStagePlayer}
+          />
+        </div>
+      )}
+
+      {/* Island audio: the info island hosts the Playlist (COMING SOON) instead
+          of the inspector — the cover-side Overview already carries the audio
+          metadata, so portaling the inspector here would duplicate it. */}
+      {islandAudioStage && infoIslandEl && createPortal(
+        <PlaylistIsland title={resource.filename} author={undefined} coverUrl={audioCoverUrl} />,
+        infoIslandEl,
+      )}
+
+      {/* Main content — suppressed for island audio (AudioStageIsland replaces
+          the stage-head + viewport, PlaylistIsland replaces the inspector). */}
+      {!islandAudioStage && (
       <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-y-auto md:overflow-hidden">
         {/* File list panel — desktop only */}
         {showFileList && (
-          <div className="hidden md:flex w-64 border-r border-ink-800/80 flex-col shrink-0">
+          <div className={`hidden md:flex w-64 border-r ${cBorder800_80} flex-col shrink-0`}>
             {/* Header + search */}
-            <div className="px-3 py-2.5 border-b border-ink-800/60">
-              <p className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-2">{t('resources.fileListPanel')}</p>
+            <div className={`px-3 py-2.5 border-b ${cBorder800_60}`}>
+              <p className={`text-[11px] font-semibold ${cLabel} uppercase tracking-widest mb-2`}>{t('resources.fileListPanel')}</p>
               <div className="relative">
-                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-600" />
+                <Search size={13} className={`absolute left-2.5 top-1/2 -translate-y-1/2 ${cFaint}`} />
                 <input
                   type="text"
                   value={fileListSearch}
                   onChange={(e) => setFileListSearch(e.target.value)}
                   placeholder={t('resources.searchFiles')}
-                  className="w-full bg-ink-800/60 border border-ink-700/30 rounded-lg pl-8 pr-3 py-1.5 text-xs text-ink-200 placeholder-ink-600 focus:outline-none focus:border-indigo-500/50 transition-colors"
+                  className={`w-full ${island ? 'bg-island-2' : 'bg-ink-800/60'} border ${cBorder700_30} rounded-lg pl-8 pr-3 py-1.5 text-xs ${cText200} ${cPlaceholder} focus:outline-none focus:border-indigo-500/50 transition-colors`}
                 />
               </div>
             </div>
@@ -1362,7 +1842,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                     className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-all ${
                       isActive
                         ? 'bg-indigo-500/10 border-l-2 border-indigo-400'
-                        : 'hover:bg-ink-800/60 border-l-2 border-transparent'
+                        : `${island ? 'hover:bg-island-2' : 'hover:bg-ink-800/60'} border-l-2 border-transparent`
                     }`}
                   >
                     {thumb ? (
@@ -1377,14 +1857,14 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                         <SibIcon size={14} className={sibColor} />
                       </div>
                     )}
-                    <span className={`text-xs truncate ${isActive ? 'text-indigo-300 font-medium' : 'text-ink-400'}`}>
+                    <span className={`text-xs truncate ${isActive ? 'text-indigo-300 font-medium' : cText400}`}>
                       {item.resource?.filename ?? 'Untitled'}
                     </span>
                   </button>
                 );
               })}
               {filteredSiblings.length === 0 && (
-                <p className="text-xs text-ink-600 text-center py-6">{t('resources.noResources')}</p>
+                <p className={`text-xs ${cFaint} text-center py-6`}>{t('resources.noResources')}</p>
               )}
             </div>
           </div>
@@ -1392,7 +1872,10 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
 
         {/* Preview area — audio gets a tall hero (matches the download detail
             view); other media keep the compact mobile preview. */}
-        <div className={`w-full ${isAudio ? 'min-h-[78vh] sm:h-[50vh]' : 'h-64 sm:h-80'} md:h-auto md:flex-1 flex flex-col bg-ink-950 min-w-0 overflow-hidden shrink-0 md:shrink`}>
+        <div
+          className={`w-full ${isAudio ? 'min-h-[78vh] sm:h-[50vh]' : 'h-64 sm:h-80'} md:h-auto md:flex-1 flex flex-col min-w-0 overflow-hidden shrink-0 md:shrink ${islandAudioStage ? 'audio-stage' : 'bg-ink-950'}`}
+          style={islandAudioStage ? ({ ['--tint']: tint.tint, ['--tint-deep']: tint.tintDeep, ['--audio-bg']: audioSodaTheme.bg } as React.CSSProperties) : undefined}
+        >
           {/* Version preview banner */}
           {selectedVersionId && (
             <div className="flex items-center justify-center gap-2 px-3 py-1.5 bg-amber-500/10 border-b border-amber-500/20 text-xs text-amber-300 shrink-0">
@@ -1408,6 +1891,82 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               </button>
             </div>
           )}
+          {islandAudioStage ? (
+            <>
+              {/* Cover-tinted two-column stage (cover-side Overview | synced
+                  lyrics) + bottom play capsule — unifies uploaded audio with the
+                  download detail audio layout. The existing stage-head, inspector,
+                  file list, prev/next, versions and chorus all stay intact. */}
+              <div className="flex-1 min-h-0 flex items-center justify-center gap-[60px] pt-2.5 px-12 overflow-auto relative z-[2]">
+                <div className="max-w-[340px] shrink-0">
+                  <AudioOverviewSide
+                    resourceId={resourceId || undefined}
+                    coverUrl={audioCoverUrl}
+                    title={resource.filename}
+                    rating={resource.rating ?? 0}
+                    onRatingChange={handleRating}
+                    onCoverClick={isUploadedAudio ? () => islandCoverInputRef.current?.click() : undefined}
+                  />
+                  {isUploadedAudio && (
+                    <input
+                      ref={islandCoverInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleIslandCoverFile}
+                    />
+                  )}
+                </div>
+                <div className="lyrics-col flex-1 max-w-[440px] h-[min(420px,52vh)] overflow-hidden">
+                  {lyrics?.lines?.length ? (
+                    <LyricsView lines={lyrics.lines} currentTime={audioCurrentTime} variant="bare" />
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-center gap-1.5">
+                      <Music size={24} className={cFaint} />
+                      <p className={`text-sm ${cLabel}`}>{t('resources.detail.noLyrics', 'No lyrics yet')}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="audio-capsule shrink-0 relative z-[2]">
+                <AudioWaveformPlayer
+                  layout="capsule"
+                  src={fileUrl}
+                  filename={resource.filename}
+                  duration={resource.duration_seconds ?? undefined}
+                  chorusStartSec={resource.chorus_start_ms != null ? resource.chorus_start_ms / 1000 : undefined}
+                  chorusEditable={isUploadedAudio}
+                  setChorusLabel={t('resources.detail.setChorus', 'Set chorus')}
+                  clearChorusLabel={t('resources.detail.clearChorus', 'Clear')}
+                  onChorusChange={
+                    isUploadedAudio
+                      ? async (sec) => {
+                          try {
+                            const ms = sec == null ? null : Math.round(sec * 1000);
+                            const updated = await setResourceChorus(resource.id, ms);
+                            setResource(updated);
+                            addToast(
+                              t(
+                                ms == null
+                                  ? 'resources.detail.chorusCleared'
+                                  : 'resources.detail.chorusSet',
+                                ms == null ? 'Chorus removed' : 'Chorus marked',
+                              ),
+                              'success',
+                            );
+                          } catch (err) {
+                            console.error('Failed to set chorus:', err);
+                            addToast('Failed to set chorus', 'error');
+                          }
+                        }
+                      : undefined
+                  }
+                  onTimeUpdate={setAudioCurrentTime}
+                  theme={audioSodaTheme}
+                />
+              </div>
+            </>
+          ) : (
           <div className="flex-1 flex items-center justify-center min-h-0 min-w-0 overflow-hidden">
           {isVideo && fileUrl ? (
             <div className="w-full h-full relative">
@@ -1434,32 +1993,37 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             </div>
           ) : isAudio && fileUrl ? (
             <div className="w-full h-full">
-              <FilePreview resource={resource} fileUrl={fileUrl} onCoverUpdated={setResource} />
+              <FilePreview resource={resource} fileUrl={fileUrl} onCoverUpdated={setResource} island={island} />
             </div>
           ) : (
             <div className="p-6">
-              <FilePreview resource={resource} fileUrl={fileUrl} onCoverUpdated={setResource} />
+              <FilePreview resource={resource} fileUrl={fileUrl} onCoverUpdated={setResource} island={island} />
             </div>
           )}
           </div>
+          )}
         </div>
 
         {/* Resize handle — desktop only, invisible until hover (no persistent divider) */}
-        <ResizeHandle onMouseDown={handleResizeStart} />
+        {!islandDesktop && <ResizeHandle onMouseDown={handleResizeStart} />}
 
-        {/* Right: Inspector panel — full-width on mobile, resizable on desktop (no border-l divider) */}
+        {/* Right: Inspector panel — classic renders it as the split-pane column;
+            island desktop portals it (bare, no card chrome) into the shell's
+            info island. Same JSX, single source. */}
+        {(() => {
+        const inspectorPanel = (
         <div
-          className="w-full md:w-auto border-t md:border-t-0 border-ink-800 flex flex-col shrink-0"
-          style={isDesktop ? { width: panelWidth } : undefined}
+          className={islandDesktop ? 'h-full flex flex-col min-h-0' : 'w-full md:w-auto border-t md:border-t-0 border-ink-800 flex flex-col shrink-0'}
+          style={islandDesktop ? undefined : (isDesktop ? { width: panelWidth } : undefined)}
         >
           {/* Tab bar */}
-          <div className="flex border-b border-ink-800 shrink-0">
+          <div className={`flex border-b ${cBorder800} shrink-0`}>
             <button
               onClick={() => setRightTab('info')}
               className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
                 rightTab === 'info'
                   ? 'border-indigo-500 text-indigo-400'
-                  : 'border-transparent text-ink-400 hover:text-ink-200 hover:border-ink-700'
+                  : `border-transparent ${cText400} ${cHover200} ${cHoverBorder700}`
               }`}
             >
               <Eye size={16} />
@@ -1471,7 +2035,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
                   rightTab === 'review'
                     ? 'border-indigo-500 text-indigo-400'
-                    : 'border-transparent text-ink-400 hover:text-ink-200 hover:border-ink-700'
+                    : `border-transparent ${cText400} ${cHover200} ${cHoverBorder700}`
                 }`}
               >
                 <Pencil size={16} />
@@ -1483,7 +2047,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 onClick={() => setRightTab('lyrics')}
                 className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
                   rightTab === 'lyrics' ? 'border-indigo-500 text-indigo-400'
-                    : 'border-transparent text-ink-400 hover:text-ink-200 hover:border-ink-700'}`}
+                    : `border-transparent ${cText400} ${cHover200} ${cHoverBorder700}`}`}
               >
                 <Music size={16} />
                 {t('resources.detail.lyrics', 'Lyrics')}
@@ -1496,7 +2060,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
                     rightTab === 'transcript'
                       ? 'border-indigo-500 text-indigo-400'
-                      : 'border-transparent text-ink-400 hover:text-ink-200 hover:border-ink-700'
+                      : `border-transparent ${cText400} ${cHover200} ${cHoverBorder700}`
                   }`}
                 >
                   <FileText size={16} />
@@ -1508,7 +2072,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
                     rightTab === 'analysis'
                       ? 'border-indigo-500 text-indigo-400'
-                      : 'border-transparent text-ink-400 hover:text-ink-200 hover:border-ink-700'
+                      : `border-transparent ${cText400} ${cHover200} ${cHoverBorder700}`
                   }`}
                 >
                   <Sparkles size={16} />
@@ -1517,14 +2081,24 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 </button>
               </>
             )}
+            {islandDesktop && (
+              <button
+                onClick={() => setInfoVisible(false)}
+                aria-label="Collapse panel"
+                title="Collapse panel"
+                className="ml-auto px-3 py-3 text-content-2 hover:text-content transition-colors"
+              >
+                <PanelRightClose size={16} />
+              </button>
+            )}
           </div>
 
           {rightTab === 'info' ? (
-          <div className="overflow-y-auto flex-1 bg-ink-950 md:bg-transparent p-3">
-          <div className={detailCardClass}>
+          <div className={islandDesktop ? 'overflow-y-auto flex-1 p-3' : 'overflow-y-auto flex-1 bg-ink-950 md:bg-transparent p-3'}>
+          <div className={islandDesktop ? 'flex flex-col max-w-full' : detailCardClass}>
           {/* Mobile: ID row with share + more (like Downloads) */}
           <div className="flex md:hidden items-center justify-between px-4 pt-3 pb-1">
-            <span className="text-xs text-ink-600 font-mono">ID: {String(resource.id)}</span>
+            <span className={`text-xs ${cFaint} font-mono`}>ID: {String(resource.id)}</span>
             <div className="flex items-center gap-1">
               <button
                 onClick={() => setShowShareModal(true)}
@@ -1535,19 +2109,19 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               <div className="relative">
                 <button
                   onClick={() => setShowMoreMenu(!showMoreMenu)}
-                  className="p-1.5 text-ink-400 hover:text-ink-200 hover:bg-ink-800 rounded-lg transition-colors"
+                  className={`p-1.5 ${cText400} ${cHover200} ${cHoverSurf} rounded-lg transition-colors`}
                 >
                   <MoreHorizontal size={16} />
                 </button>
                 {showMoreMenu && (
                   <>
                     <div className="fixed inset-0 z-10" onClick={() => setShowMoreMenu(false)} />
-                    <div className="absolute right-0 top-full mt-1 z-20 bg-ink-900 border border-ink-700 rounded-lg shadow-xl py-1 w-48">
+                    <div className={`absolute right-0 top-full mt-1 z-20 ${cCardBg} border ${cBorder700} rounded-lg shadow-xl py-1 w-48`}>
                       {fileUrl && (
                         <a
                           href={fileUrl}
                           download
-                          className="flex items-center gap-2 w-full px-3 py-2 text-xs text-ink-400 hover:bg-ink-800 hover:text-ink-200 transition-colors"
+                          className={`flex items-center gap-2 w-full px-3 py-2 text-xs ${cText400} ${cHoverSurf} ${cHover200} transition-colors`}
                           onClick={() => setShowMoreMenu(false)}
                         >
                           <Download size={14} />
@@ -1556,7 +2130,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                       )}
                       {fileUrl && (
                         <button
-                          className="flex items-center gap-2 w-full text-left px-3 py-2 text-xs text-ink-400 hover:bg-ink-800 hover:text-ink-200 transition-colors"
+                          className={`flex items-center gap-2 w-full text-left px-3 py-2 text-xs ${cText400} ${cHoverSurf} ${cHover200} transition-colors`}
                           onClick={() => {
                             setShowMoreMenu(false);
                             downloadFile(fileUrl, resource.filename || 'download', {
@@ -1583,7 +2157,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 ? (resource.audio_bitrate_kbps ? <DetailBadge variant="accent">{resource.audio_bitrate_kbps}kbps</DetailBadge> : null)
                 : (resource.resolution && <DetailBadge variant="accent">{resource.resolution.replace(/:/g, 'x')}</DetailBadge>)}
             </div>
-            <span className="text-xs text-ink-500 font-mono truncate min-w-0">ID: {String(resource.id)}</span>
+            <span className={`text-xs ${cLabel} font-mono truncate min-w-0`}>ID: {String(resource.id)}</span>
           </div>
 
           {/* Editable Filename — big title */}
@@ -1598,7 +2172,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   if (e.key === 'Enter') commitName();
                   if (e.key === 'Escape') { setNameValue(resource.filename); setEditingName(false); }
                 }}
-                className="w-full bg-ink-800 border border-indigo-500/50 rounded px-2 py-1 text-lg font-bold text-ink-50 focus:outline-none"
+                className={`w-full ${cCtrlBg} border border-indigo-500/50 rounded px-2 py-1 text-lg font-bold ${cPrimary} focus:outline-none`}
                 autoFocus
               />
             ) : (
@@ -1606,8 +2180,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 className="group flex items-start gap-1.5 cursor-pointer"
                 onClick={() => setEditingName(true)}
               >
-                <h2 className="text-lg md:text-xl font-bold text-ink-100 break-words leading-tight flex-1">{resource.filename}</h2>
-                <Pencil size={14} className="text-ink-600 group-hover:text-ink-400 mt-1 shrink-0 transition-colors" />
+                <h2 className={`text-lg md:text-xl font-bold ${cText100} break-words leading-tight flex-1`}>{resource.filename}</h2>
+                <Pencil size={14} className={`${cFaint} ${cGroupHover400} mt-1 shrink-0 transition-colors`} />
               </div>
             )}
           </div>
@@ -1627,7 +2201,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
 
           {/* Rating — above notes (download-detail style) */}
           <div className="px-4 mt-3 flex items-center gap-4">
-            <span className="text-xs text-ink-500 uppercase tracking-wider">{t('resources.infoPanel.rating')}</span>
+            <span className={`text-xs ${cLabel} uppercase tracking-wider`}>{t('resources.infoPanel.rating')}</span>
             <RatingStars value={resource.rating ?? 0} onChange={handleRating} />
           </div>
 
@@ -1639,7 +2213,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               onBlur={commitNotes}
               placeholder={t('resources.infoPanel.notesPlaceholder')}
               rows={3}
-              className="w-full bg-ink-800/50 border border-ink-700/50 rounded-lg px-2.5 py-2 text-xs text-ink-300 placeholder-ink-600 focus:outline-none focus:border-indigo-500/50 resize-none"
+              className={`w-full ${cInputBg} border ${cBorder700_50} rounded-lg px-2.5 py-2 text-xs ${cText300} ${cPlaceholder} focus:outline-none focus:border-indigo-500/50 resize-none`}
             />
           </div>
 
@@ -1649,10 +2223,10 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             <div className="px-4 mt-2">
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-ink-500 uppercase tracking-wider">
+                  <span className={`text-[10px] ${cLabel} uppercase tracking-wider`}>
                     {t('resources.infoPanel.prompt', 'Prompt')}
                   </span>
-                  <div className="flex rounded overflow-hidden border border-ink-700/60">
+                  <div className={`flex rounded overflow-hidden border ${cBorder700_60}`}>
                     {(['en', 'zh'] as const).map((lang) => (
                       <button
                         key={lang}
@@ -1660,7 +2234,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                         className={`px-1.5 py-0.5 text-[9px] transition-colors ${
                           promptLang === lang
                             ? 'bg-indigo-500/30 text-indigo-200'
-                            : 'text-ink-500 hover:text-ink-300'
+                            : `${cLabel} ${cHover300}`
                         }`}
                       >
                         {lang === 'en' ? 'EN' : '中'}
@@ -1677,7 +2251,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                         'resources.infoPanel.generatePromptHint',
                         'Reverse-engineer the prompt from this image',
                       )}
-                      className="flex items-center gap-1 text-[10px] text-ink-500 hover:text-indigo-300 transition-colors disabled:opacity-50"
+                      className={`flex items-center gap-1 text-[10px] ${cLabel} hover:text-indigo-300 transition-colors disabled:opacity-50`}
                     >
                       {promptGenerating ? (
                         <Loader2 size={11} className="animate-spin" />
@@ -1697,7 +2271,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                         'resources.infoPanel.translatePromptHint',
                         'Translate from the other language',
                       )}
-                      className="flex items-center gap-1 text-[10px] text-ink-500 hover:text-indigo-300 transition-colors disabled:opacity-50"
+                      className={`flex items-center gap-1 text-[10px] ${cLabel} hover:text-indigo-300 transition-colors disabled:opacity-50`}
                     >
                       {promptTranslating ? (
                         <Loader2 size={11} className="animate-spin" />
@@ -1712,7 +2286,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   ) && (
                     <button
                       onClick={copyPrompt}
-                      className="flex items-center gap-1 text-[10px] text-ink-500 hover:text-indigo-300 transition-colors"
+                      className={`flex items-center gap-1 text-[10px] ${cLabel} hover:text-indigo-300 transition-colors`}
                     >
                       <Copy size={11} /> {t('resources.infoPanel.copyPrompt', 'Copy')}
                     </button>
@@ -1725,14 +2299,14 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 onBlur={commitPrompt}
                 placeholder={t('resources.infoPanel.promptPlaceholder', 'Paste the AI generation prompt...')}
                 rows={4}
-                className="w-full bg-ink-800/50 border border-ink-700/50 rounded-lg px-2.5 py-2 text-xs font-mono text-ink-300 placeholder-ink-600 focus:outline-none focus:border-indigo-500/50 resize-none"
+                className={`w-full ${cInputBg} border ${cBorder700_50} rounded-lg px-2.5 py-2 text-xs font-mono ${cText300} ${cPlaceholder} focus:outline-none focus:border-indigo-500/50 resize-none`}
               />
             </div>
           ) : (
             <div className="px-4 mt-1 flex items-center gap-3">
               <button
                 onClick={() => setPromptOpen(true)}
-                className="text-[11px] text-ink-600 hover:text-indigo-300 transition-colors"
+                className={`text-[11px] ${cFaint} hover:text-indigo-300 transition-colors`}
               >
                 + {t('resources.infoPanel.addPrompt', 'Add Prompt')}
               </button>
@@ -1740,7 +2314,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 <button
                   onClick={handleGeneratePrompt}
                   disabled={promptGenerating}
-                  className="flex items-center gap-1 text-[11px] text-ink-600 hover:text-indigo-300 transition-colors disabled:opacity-50"
+                  className={`flex items-center gap-1 text-[11px] ${cFaint} hover:text-indigo-300 transition-colors disabled:opacity-50`}
                 >
                   {promptGenerating ? (
                     <Loader2 size={11} className="animate-spin" />
@@ -1761,7 +2335,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               onBlur={commitUrl}
               onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
               placeholder={t('resources.infoPanel.urlPlaceholder')}
-              className="w-full bg-ink-800/50 border border-ink-700/50 rounded-lg px-2.5 py-1.5 text-xs text-ink-300 placeholder-ink-600 focus:outline-none focus:border-indigo-500/50"
+              className={`w-full ${cInputBg} border ${cBorder700_50} rounded-lg px-2.5 py-1.5 text-xs ${cText300} ${cPlaceholder} focus:outline-none focus:border-indigo-500/50`}
             />
           </div>
 
@@ -1775,7 +2349,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   'resources.infoPanel.autoTagHint',
                   'Classify this image into bilingual tags across 12 dimensions',
                 )}
-                className="flex items-center gap-1 text-[10px] text-ink-500 hover:text-indigo-300 transition-colors disabled:opacity-50"
+                className={`flex items-center gap-1 text-[10px] ${cLabel} hover:text-indigo-300 transition-colors disabled:opacity-50`}
               >
                 {autoTagging ? (
                   <Loader2 size={11} className="animate-spin" />
@@ -1801,40 +2375,40 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
           />
 
           {/* Properties — simple rows (Type omitted: already shown as badge above the title) */}
-          <div className="px-4 mt-4 border-t border-ink-800/60 pt-3 flex flex-col gap-1.5">
+          <div className={`px-4 mt-4 border-t ${cBorder800_60} pt-3 flex flex-col gap-1.5`}>
             <div className="flex items-center justify-between text-xs">
-              <span className="text-ink-500">{t('resources.infoPanel.size')}</span>
-              <span className="text-ink-300">{formatFileSize(resource.file_size_bytes)}</span>
+              <span className={cLabel}>{t('resources.infoPanel.size')}</span>
+              <span className={cText300}>{formatFileSize(resource.file_size_bytes)}</span>
             </div>
             {(isVideo || isAudio) && resource.duration_seconds != null && (
               <div className="flex items-center justify-between text-xs">
-                <span className="text-ink-500">{t('resources.infoPanel.duration')}</span>
-                <span className="text-ink-300">{formatDuration(resource.duration_seconds)}</span>
+                <span className={cLabel}>{t('resources.infoPanel.duration')}</span>
+                <span className={cText300}>{formatDuration(resource.duration_seconds)}</span>
               </div>
             )}
             {resource.current_version > 1 && (
               <div className="flex items-center justify-between text-xs">
-                <span className="text-ink-500">{t('resources.infoPanel.version')}</span>
-                <span className="text-ink-300">v{resource.current_version}</span>
+                <span className={cLabel}>{t('resources.infoPanel.version')}</span>
+                <span className={cText300}>v{resource.current_version}</span>
               </div>
             )}
             <div className="flex items-center justify-between text-xs">
-              <span className="text-ink-500">{t('resources.infoPanel.source')}</span>
-              <span className="text-ink-300">{resource.source_type === 'web' ? t('resources.infoPanel.sourceWeb') : t('resources.infoPanel.sourceUpload')}</span>
+              <span className={cLabel}>{t('resources.infoPanel.source')}</span>
+              <span className={cText300}>{resource.source_type === 'web' ? t('resources.infoPanel.sourceWeb') : t('resources.infoPanel.sourceUpload')}</span>
             </div>
             <div className="flex items-center justify-between text-xs">
-              <span className="text-ink-500">{t('resources.infoPanel.created')}</span>
-              <span className="text-ink-300">{formatDate(resource.created_at)}</span>
+              <span className={cLabel}>{t('resources.infoPanel.created')}</span>
+              <span className={cText300}>{formatDate(resource.created_at)}</span>
             </div>
             <div className="flex items-center justify-between text-xs">
-              <span className="text-ink-500">{t('resources.infoPanel.modified')}</span>
-              <span className="text-ink-300">{formatDate(resource.updated_at)}</span>
+              <span className={cLabel}>{t('resources.infoPanel.modified')}</span>
+              <span className={cText300}>{formatDate(resource.updated_at)}</span>
             </div>
           </div>
 
           {/* Source link */}
           {resource.media_id && (
-            <div className="px-4 mt-3 border-t border-ink-800/60 pt-3">
+            <div className={`px-4 mt-3 border-t ${cBorder800_60} pt-3`}>
               <a
                 href={`/resources/media/${resource.media_id}`}
                 className="inline-flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
@@ -1849,8 +2423,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
 
           {/* Appears in N canvases — back-reference into Project Assets */}
           {canvasRefs.length > 0 && (
-            <div className="px-4 mt-3 border-t border-ink-800/60 pt-3">
-              <h4 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-2">
+            <div className={`px-4 mt-3 border-t ${cBorder800_60} pt-3`}>
+              <h4 className={`text-[11px] font-semibold ${cLabel} uppercase tracking-widest mb-2`}>
                 {t('projectAssets.appearsInCanvases', { count: canvasRefs.length })}
               </h4>
               <div className="flex flex-col gap-1">
@@ -1858,10 +2432,10 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   <button
                     key={`${ref.canvas_id}:${ref.role}`}
                     onClick={() => navigate(`${teamId ? `/team/${teamId}` : ''}/canvas/${ref.canvas_id}`)}
-                    className="flex items-center gap-2 text-sm text-ink-300 hover:text-ink-100 text-left"
+                    className={`flex items-center gap-2 text-sm ${cText300} ${cHover100} text-left`}
                   >
                     <span className="flex-1 truncate">{ref.canvas_name}</span>
-                    <span className="text-xs text-ink-600">{t(`projectAssets.role.${ref.role}`)}</span>
+                    <span className={`text-xs ${cFaint}`}>{t(`projectAssets.role.${ref.role}`)}</span>
                   </button>
                 ))}
               </div>
@@ -1870,9 +2444,9 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
 
           {/* Versions */}
           {versions.length > 0 && (
-            <div className="px-4 mt-3 border-t border-ink-800/60 pt-3">
+            <div className={`px-4 mt-3 border-t ${cBorder800_60} pt-3`}>
               <div className="flex items-center justify-between mb-2">
-                <h4 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest">
+                <h4 className={`text-[11px] font-semibold ${cLabel} uppercase tracking-widest`}>
                   {t('resources.versions')}
                 </h4>
                 <button
@@ -1892,7 +2466,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                       <button
                         key={ver.id}
                         onClick={() => handleSelectVersion(ver)}
-                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors hover:bg-ink-800/70 ${
+                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors ${island ? 'hover:bg-island-2' : 'hover:bg-ink-800/70'} ${
                           isViewing
                             ? 'bg-indigo-500/10 border border-indigo-500/20'
                             : 'bg-transparent'
@@ -1900,7 +2474,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                       >
                         <div className="flex items-center gap-1.5">
                           <span className={`font-medium ${
-                            isViewing ? 'text-indigo-400' : 'text-ink-300'
+                            isViewing ? 'text-indigo-400' : cText300
                           }`}>
                             v{ver.version_number}
                           </span>
@@ -1911,7 +2485,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                             <span className="text-amber-400/60 text-[10px]">viewing</span>
                           )}
                         </div>
-                        <span className="text-ink-500 text-[10px]">
+                        <span className={`${cLabel} text-[10px]`}>
                           {formatDate(ver.created_at)}
                         </span>
                       </button>
@@ -1947,19 +2521,19 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               {(resource.transcript_status === 'processing' || transcribeStatus === 'processing') && !transcript && (
                 <div className="flex flex-col items-center justify-center py-16 text-center">
                   <Loader2 size={32} className="animate-spin text-indigo-400 mb-4" />
-                  <h3 className="text-sm font-medium text-ink-200">Transcribing...</h3>
-                  <p className="text-xs text-ink-500 mt-1">This may take a few minutes.</p>
+                  <h3 className={`text-sm font-medium ${cText200}`}>Transcribing...</h3>
+                  <p className={`text-xs ${cLabel} mt-1`}>This may take a few minutes.</p>
                 </div>
               )}
 
               {/* Not started — no transcript loaded and not processing */}
               {!transcript && !transcriptLoading && transcribeStatus !== 'processing' && resource.transcript_status !== 'processing' && (
                 <div className="flex flex-col items-center justify-center py-16 text-center">
-                  <div className="p-4 bg-ink-800/50 rounded-full mb-4">
-                    <FileText size={28} className="text-ink-500" />
+                  <div className={`p-4 ${cInputBg} rounded-full mb-4`}>
+                    <FileText size={28} className={cLabel} />
                   </div>
-                  <h3 className="text-sm font-medium text-ink-200">No Transcript Available</h3>
-                  <p className="text-xs text-ink-500 mt-1 mb-4 max-w-[220px]">
+                  <h3 className={`text-sm font-medium ${cText200}`}>No Transcript Available</h3>
+                  <p className={`text-xs ${cLabel} mt-1 mb-4 max-w-[220px]`}>
                     Generate a transcript to see timestamped text from this media.
                   </p>
                   <button
@@ -1989,7 +2563,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               {/* Transcript content */}
               {transcript && (
                 <div className="space-y-3">
-                  <div className="flex flex-wrap items-center gap-2 text-[10px] text-ink-500">
+                  <div className={`flex flex-wrap items-center gap-2 text-[10px] ${cLabel}`}>
                     <span className="flex items-center gap-1">
                       <Clock size={10} />
                       {formatTimestamp(transcript.duration)} total
@@ -2001,14 +2575,14 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                     <span>{transcript.segments.length} segments</span>
                   </div>
 
-                  <div className="bg-ink-900 border border-ink-800 rounded-lg overflow-hidden">
+                  <div className={`${cCardBg} border ${cBorder800} rounded-lg overflow-hidden`}>
                     <div className="max-h-[50vh] overflow-y-auto custom-scrollbar">
                       {transcriptView === 'segments' ? (
                         <div className="divide-y divide-ink-800/50">
                           {transcript.segments.map((seg, i) => (
                             <div
                               key={i}
-                              className="flex gap-2 px-3 py-2 hover:bg-ink-800/30 transition-colors group"
+                              className={`flex gap-2 px-3 py-2 ${island ? 'hover:bg-island-2' : 'hover:bg-ink-800/30'} transition-colors group`}
                             >
                               <button
                                 className="text-[10px] font-mono text-indigo-400/70 group-hover:text-indigo-400 shrink-0 pt-0.5 transition-colors"
@@ -2016,13 +2590,13 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                               >
                                 [{formatTimestamp(seg.start)}]
                               </button>
-                              <p className="text-xs text-ink-300 leading-relaxed">{seg.text}</p>
+                              <p className={`text-xs ${cText300} leading-relaxed`}>{seg.text}</p>
                             </div>
                           ))}
                         </div>
                       ) : (
                         <div className="p-3">
-                          <p className="text-xs text-ink-300 leading-relaxed whitespace-pre-wrap">
+                          <p className={`text-xs ${cText300} leading-relaxed whitespace-pre-wrap`}>
                             {transcript.text}
                           </p>
                         </div>
@@ -2033,13 +2607,13 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   {/* Toolbar */}
                   <div className="flex items-center gap-1.5">
                     {/* View toggle */}
-                    <div className="flex bg-ink-800 border border-ink-700 rounded-lg overflow-hidden">
+                    <div className={`flex ${cCtrlBg} border ${cBorder700} rounded-lg overflow-hidden`}>
                       <button
                         onClick={() => setTranscriptView('segments')}
                         className={`px-2.5 py-1 text-[10px] flex items-center gap-1 transition-colors ${
                           transcriptView === 'segments'
                             ? 'bg-indigo-600 text-white'
-                            : 'text-ink-400 hover:text-ink-200'
+                            : `${cText400} ${cHover200}`
                         }`}
                       >
                         <List size={10} />
@@ -2050,7 +2624,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                         className={`px-2.5 py-1 text-[10px] flex items-center gap-1 transition-colors ${
                           transcriptView === 'fulltext'
                             ? 'bg-indigo-600 text-white'
-                            : 'text-ink-400 hover:text-ink-200'
+                            : `${cText400} ${cHover200}`
                         }`}
                       >
                         <AlignLeft size={10} />
@@ -2061,7 +2635,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                     {/* Copy */}
                     <button
                       onClick={handleCopyTranscript}
-                      className="px-2.5 py-1 text-[10px] bg-ink-800 hover:bg-ink-700 text-ink-300 rounded-lg transition-colors flex items-center gap-1 border border-ink-700"
+                      className={`px-2.5 py-1 text-[10px] ${cCtrlBg} ${cHoverSurf7} ${cText300} rounded-lg transition-colors flex items-center gap-1 border ${cBorder700}`}
                     >
                       {copied ? <Check size={10} className="text-emerald-400" /> : <Copy size={10} />}
                       {copied ? 'Copied!' : 'Copy'}
@@ -2071,23 +2645,23 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                     <div className="relative">
                       <button
                         onClick={() => setExportOpen(!exportOpen)}
-                        className="px-2.5 py-1 text-[10px] bg-ink-800 hover:bg-ink-700 text-ink-300 rounded-lg transition-colors flex items-center gap-1 border border-ink-700"
+                        className={`px-2.5 py-1 text-[10px] ${cCtrlBg} ${cHoverSurf7} ${cText300} rounded-lg transition-colors flex items-center gap-1 border ${cBorder700}`}
                       >
                         <Download size={10} />
                         Export
                         <ChevronDown size={8} />
                       </button>
                       {exportOpen && (
-                        <div className="absolute bottom-full mb-1 left-0 bg-ink-800 border border-ink-700 rounded-lg shadow-xl overflow-hidden z-10 min-w-[100px]">
+                        <div className={`absolute bottom-full mb-1 left-0 ${island ? 'bg-card' : 'bg-ink-800'} border ${cBorder700} rounded-lg shadow-xl overflow-hidden z-10 min-w-[100px]`}>
                           <button
                             onClick={() => { handleExportSRT(); setExportOpen(false); }}
-                            className="w-full px-3 py-1.5 text-[10px] text-ink-300 hover:bg-ink-700 text-left transition-colors"
+                            className={`w-full px-3 py-1.5 text-[10px] ${cText300} ${cHoverSurf7} text-left transition-colors`}
                           >
                             Export SRT
                           </button>
                           <button
                             onClick={() => { handleExportTXT(); setExportOpen(false); }}
-                            className="w-full px-3 py-1.5 text-[10px] text-ink-300 hover:bg-ink-700 text-left transition-colors"
+                            className={`w-full px-3 py-1.5 text-[10px] ${cText300} ${cHoverSurf7} text-left transition-colors`}
                           >
                             Export TXT
                           </button>
@@ -2106,20 +2680,20 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   <div className="p-1 bg-indigo-500/10 rounded text-indigo-400">
                     <Sparkles size={14} />
                   </div>
-                  <h3 className="text-xs font-medium text-ink-200">Summary</h3>
+                  <h3 className={`text-xs font-medium ${cText200}`}>Summary</h3>
                   {getAIStatusIndicator(resource.summary_status)}
                 </div>
 
                 {resource.summary_status === 'processing' && (
-                  <div className="flex items-center gap-2 p-3 bg-ink-900 border border-ink-800 rounded-lg">
+                  <div className={`flex items-center gap-2 p-3 ${cCardBg} border ${cBorder800} rounded-lg`}>
                     <Loader2 size={14} className="animate-spin text-indigo-400" />
-                    <span className="text-xs text-ink-400">Generating summary...</span>
+                    <span className={`text-xs ${cText400}`}>Generating summary...</span>
                   </div>
                 )}
 
                 {(!resource.summary_status || resource.summary_status === 'pending' || resource.summary_status === 'none') && !summary && !summaryLoading && (
-                  <div className="p-3 bg-ink-900 border border-ink-800 rounded-lg">
-                    <p className="text-xs text-ink-500 mb-2">Generate an AI summary with key points and topics.</p>
+                  <div className={`p-3 ${cCardBg} border ${cBorder800} rounded-lg`}>
+                    <p className={`text-xs ${cLabel} mb-2`}>Generate an AI summary with key points and topics.</p>
                     <button
                       onClick={handleSummarize}
                       disabled={summaryLoading}
@@ -2159,15 +2733,15 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
 
                 {summary && (
                   <div className="space-y-3">
-                    <div className="p-3 bg-ink-900 border border-ink-800 rounded-lg">
-                      <p className="text-xs text-ink-300 leading-relaxed">{summary.summary}</p>
+                    <div className={`p-3 ${cCardBg} border ${cBorder800} rounded-lg`}>
+                      <p className={`text-xs ${cText300} leading-relaxed`}>{summary.summary}</p>
                     </div>
                     {summary.key_points.length > 0 && (
                       <div>
-                        <h4 className="text-[10px] font-medium text-ink-400 uppercase tracking-wider mb-1.5">Key Points</h4>
+                        <h4 className={`text-[10px] font-medium ${cText400} uppercase tracking-wider mb-1.5`}>Key Points</h4>
                         <ul className="space-y-1">
                           {summary.key_points.map((point, i) => (
-                            <li key={i} className="flex items-start gap-1.5 text-xs text-ink-300">
+                            <li key={i} className={`flex items-start gap-1.5 text-xs ${cText300}`}>
                               <ChevronRight size={12} className="text-indigo-400 mt-0.5 shrink-0" />
                               {point}
                             </li>
@@ -2177,7 +2751,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                     )}
                     {summary.topics.length > 0 && (
                       <div>
-                        <h4 className="text-[10px] font-medium text-ink-400 uppercase tracking-wider mb-1.5">Topics</h4>
+                        <h4 className={`text-[10px] font-medium ${cText400} uppercase tracking-wider mb-1.5`}>Topics</h4>
                         <div className="flex flex-wrap gap-1.5">
                           {summary.topics.map((topic, i) => {
                             const colors = [
@@ -2208,20 +2782,20 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                     <div className="p-1 bg-purple-500/10 rounded text-purple-400">
                       <Eye size={14} />
                     </div>
-                    <h3 className="text-xs font-medium text-ink-200">Visual Analysis</h3>
+                    <h3 className={`text-xs font-medium ${cText200}`}>Visual Analysis</h3>
                     {getAIStatusIndicator(resource.visual_analysis_status)}
                   </div>
 
                   {resource.visual_analysis_status === 'processing' && (
-                    <div className="flex items-center gap-2 p-3 bg-ink-900 border border-ink-800 rounded-lg">
+                    <div className={`flex items-center gap-2 p-3 ${cCardBg} border ${cBorder800} rounded-lg`}>
                       <Loader2 size={14} className="animate-spin text-purple-400" />
-                      <span className="text-xs text-ink-400">Analyzing visual content...</span>
+                      <span className={`text-xs ${cText400}`}>Analyzing visual content...</span>
                     </div>
                   )}
 
                   {(!resource.visual_analysis_status || resource.visual_analysis_status === 'pending' || resource.visual_analysis_status === 'none') && (
-                    <div className="p-3 bg-ink-900 border border-ink-800 rounded-lg">
-                      <p className="text-xs text-ink-500 mb-2">Analyze video frames to detect objects, scenes, and visual content.</p>
+                    <div className={`p-3 ${cCardBg} border ${cBorder800} rounded-lg`}>
+                      <p className={`text-xs ${cLabel} mb-2`}>Analyze video frames to detect objects, scenes, and visual content.</p>
                       <button
                         onClick={handleVisualAnalysis}
                         disabled={visualAnalysisLoading}
@@ -2254,8 +2828,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   )}
 
                   {resource.visual_analysis_status === 'completed' && (resource as any).ai_analyze_text && (
-                    <div className="p-3 bg-ink-900 border border-ink-800 rounded-lg">
-                      <p className="text-xs text-ink-300 leading-relaxed whitespace-pre-wrap">
+                    <div className={`p-3 ${cCardBg} border ${cBorder800} rounded-lg`}>
+                      <p className={`text-xs ${cText300} leading-relaxed whitespace-pre-wrap`}>
                         {(resource as any).ai_analyze_text}
                       </p>
                     </div>
@@ -2268,7 +2842,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               {lyrics?.lines?.length ? (
                 <LyricsView lines={lyrics.lines} />
               ) : (
-                <div className="text-center text-ink-500 text-sm py-8 space-y-3">
+                <div className={`text-center ${cLabel} text-sm py-8 space-y-3`}>
                   <p>{t('resources.detail.noLyrics', 'No lyrics yet')}</p>
                   <label className="inline-block px-3 py-1.5 rounded bg-indigo-600 text-white text-xs cursor-pointer hover:bg-indigo-500">
                     {t('resources.detail.uploadLrc', 'Upload .lrc')}
@@ -2288,7 +2862,16 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             </div>
           ) : null}
         </div>
+        );
+        // Classic: render inline in the split-pane row. Island desktop: portal
+        // into the shell's info island (the players/preview stay in the work
+        // island; only the inspector relocates).
+        return islandDesktop
+          ? (infoIslandEl ? createPortal(inspectorPanel, infoIslandEl) : null)
+          : inspectorPanel;
+        })()}
       </div>
+      )}
 
       {/* Share Modal */}
       {showShareModal && (

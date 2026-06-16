@@ -2,14 +2,21 @@ export interface CoverTint { tint: string; tintDeep: string }
 
 const INDIGO: CoverTint = { tint: '99,102,241', tintDeep: '24,28,46' };
 
+/** Build a CoverTint (tint + dark deep variant) from raw rgb. The accent now
+ *  drives the audio-stage ACCENTS (play / wave / Share / trail) so they sync
+ *  with the DB theme color — kept vivid (no desaturation) to match. */
+function tintFromRgb(r: number, g: number, b: number): CoverTint {
+  const deep = (n: number) => Math.round(n * 0.18);
+  return { tint: `${r},${g},${b}`, tintDeep: `${deep(r)},${deep(g)},${deep(b)}` };
+}
+
 /** Fallback tint from a sodaTheme accent (hex "#rrggbb") or indigo. */
 export function tintFromTheme(theme?: { accent?: string } | null): CoverTint {
   const hex = theme?.accent;
   if (!hex || !/^#?[0-9a-fA-F]{6}$/.test(hex)) return INDIGO;
   const h = hex.replace('#', '');
   const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
-  const deep = (n: number) => Math.round(n * 0.18);
-  return { tint: `${r},${g},${b}`, tintDeep: `${deep(r)},${deep(g)},${deep(b)}` };
+  return tintFromRgb(r, g, b);
 }
 
 /** Canvas-sample the cover's average color → tint. Any failure → fallback. */
@@ -30,8 +37,7 @@ export function extractCoverTint(url: string, fallback: CoverTint): Promise<Cove
           let r = 0, g = 0, b = 0, n = 0;
           for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; }
           r = Math.round(r / n); g = Math.round(g / n); b = Math.round(b / n);
-          const deep = (x: number) => Math.round(x * 0.18);
-          resolve({ tint: `${r},${g},${b}`, tintDeep: `${deep(r)},${deep(g)},${deep(b)}` });
+          resolve(tintFromRgb(r, g, b));
         } catch { resolve(fallback); }
       };
       img.onerror = () => resolve(fallback);

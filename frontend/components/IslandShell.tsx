@@ -36,7 +36,7 @@ function IslandShellFrame({ isDetailPage, topBarProps, sidebarProps, children }:
 
   // Drag the divider to resize the right info island. The island is on the RIGHT
   // edge, so width grows as the pointer moves left (innerWidth - clientX, minus
-  // the frame's right padding). `setInfoWidth` clamps to 250–480. Listeners are
+  // the frame's right padding). `setInfoWidth` clamps to 250–640. Listeners are
   // removed on pointerup so we never leak a live move handler.
   const startDrag = (e: React.PointerEvent) => {
     e.preventDefault();

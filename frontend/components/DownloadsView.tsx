@@ -16,6 +16,8 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { useLibraryContext } from '../contexts/LibraryContext';
 import { useTeamContext } from '../contexts/TeamContext';
+import { useIslandWork } from '../contexts/IslandWorkContext';
+import { islandUI } from '../utils/featureFlags';
 import { Video } from '../types';
 import { FilterBar } from './resources/filter/FilterBar';
 import { useFilterBarConfig } from '../hooks/useFilterBarConfig';
@@ -410,6 +412,20 @@ export const DownloadsView: React.FC = () => {
   const [panelRating, setPanelRating] = useState(0);
   const [panelHoverRating, setPanelHoverRating] = useState(0);
   const resizeStartRef = useRef<{ x: number; width: number } | null>(null);
+
+  // ─── Island info-island integration ────────────────────
+  // In island mode the My Downloads info panel renders INSIDE the shell's info
+  // island (portaled, bare) instead of a floating overlay — matching My Uploads.
+  // ResourcesShell yields infoAvailable/infoVisible to us when isDownloadsView.
+  const island = islandUI();
+  const { infoIslandEl, infoVisible, setInfoVisible, setInfoAvailable } = useIslandWork();
+  const hasSelection = !!selectedVideo;
+  useEffect(() => { if (island) setInfoAvailable(hasSelection); }, [island, hasSelection, setInfoAvailable]);
+  useEffect(() => { if (island) setInfoVisible(showInfoPanel && hasSelection); }, [island, showInfoPanel, hasSelection, setInfoVisible]);
+  // Reflect the shell's reopen-handle (infoVisible→true) back into showInfoPanel.
+  useEffect(() => { if (island && infoVisible && !showInfoPanel) setShowInfoPanel(true); }, [island, infoVisible, showInfoPanel]);
+  // When the selection clears, also release the island panel availability.
+  useEffect(() => { if (island && !hasSelection) setInfoAvailable(false); }, [island, hasSelection, setInfoAvailable]);
   const [renameTarget, setRenameTarget] = useState<Video | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [shareTargetResourceId, setShareTargetResourceId] = useState<string | null>(null);
@@ -1202,31 +1218,37 @@ export const DownloadsView: React.FC = () => {
         )}
       </div>
 
-      {/* Info Panel */}
-      {selectedVideo && (
-        <DownloadInfoPanel
-          selectedVideo={selectedVideo}
-          showInfoPanel={showInfoPanel}
-          infoPanelWidth={infoPanelWidth}
-          panelNotes={panelNotes}
-          panelRating={panelRating}
-          panelHoverRating={panelHoverRating}
-          selectedResourceData={selectedResourceData}
-          selectedVideoTags={selectedVideoTags}
-          allTags={allTags}
-          mediaToken={mediaToken}
-          onClose={() => setSelectedVideo(null)}
-          onTogglePanel={setShowInfoPanel}
-          onResizeStart={handlePanelResizeStart}
-          onAddTag={handleAddTag}
-          onRemoveTag={handleRemoveTag}
-          onCreateTag={handleCreateTag}
-          onRating={handlePanelRating}
-          onHoverRating={setPanelHoverRating}
-          onNotesChange={setPanelNotes}
-          onNotesBlur={handlePanelNotesBlur}
-        />
-      )}
+      {/* Info Panel — island: bare column portaled into the shell's info island
+          (integrated, like My Uploads); classic: floating overlay in place. */}
+      {selectedVideo && (() => {
+        const useIsland = island && !!infoIslandEl;
+        const panel = (
+          <DownloadInfoPanel
+            bare={useIsland}
+            selectedVideo={selectedVideo}
+            showInfoPanel={showInfoPanel}
+            infoPanelWidth={infoPanelWidth}
+            panelNotes={panelNotes}
+            panelRating={panelRating}
+            panelHoverRating={panelHoverRating}
+            selectedResourceData={selectedResourceData}
+            selectedVideoTags={selectedVideoTags}
+            allTags={allTags}
+            mediaToken={mediaToken}
+            onClose={() => setSelectedVideo(null)}
+            onTogglePanel={setShowInfoPanel}
+            onResizeStart={handlePanelResizeStart}
+            onAddTag={handleAddTag}
+            onRemoveTag={handleRemoveTag}
+            onCreateTag={handleCreateTag}
+            onRating={handlePanelRating}
+            onHoverRating={setPanelHoverRating}
+            onNotesChange={setPanelNotes}
+            onNotesBlur={handlePanelNotesBlur}
+          />
+        );
+        return useIsland ? createPortal(panel, infoIslandEl) : panel;
+      })()}
 
       {/* Batch Selection Toolbar */}
       {selectedIds.size > 0 && (

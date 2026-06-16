@@ -86,22 +86,25 @@ const ResourcesShellIsland: React.FC<ResourcesShellProps> = ({ sidebarProps, inf
 
   const hasSelection = !isDownloadsView && (!!selectedResource?.resource || !!selectedFolder);
 
+  // On the Downloads view, DownloadsView owns the info island (it portals its own
+  // DownloadInfoPanel + drives infoAvailable/infoVisible). The shell must NOT touch
+  // those here, or the two would fight over the same island-work state.
   // Page tells the shell whether there's an info panel to (re)open.
-  useEffect(() => { setInfoAvailable(hasSelection); }, [hasSelection, setInfoAvailable]);
+  useEffect(() => { if (!isDownloadsView) setInfoAvailable(hasSelection); }, [hasSelection, isDownloadsView, setInfoAvailable]);
   // Island visibility = user intent (showInfoPanel) AND a selection exists.
-  useEffect(() => { setInfoVisible(showInfoPanel && hasSelection); }, [showInfoPanel, hasSelection, setInfoVisible]);
+  useEffect(() => { if (!isDownloadsView) setInfoVisible(showInfoPanel && hasSelection); }, [showInfoPanel, hasSelection, isDownloadsView, setInfoVisible]);
   // Only the reopen direction is mirrored back here: the shell flips infoVisible→true via its
   // reopen handle, so we reflect that into showInfoPanel (ResourcesContext stays the source of
   // truth). The collapse/hide direction flows the OTHER way (showInfoPanel→false drives effect 2),
   // never via setInfoVisible(false) from the shell — that asymmetry is what keeps this loop-free.
   // Guarded so it can't loop.
-  useEffect(() => { if (infoVisible && !showInfoPanel) setShowInfoPanel(true); }, [infoVisible, showInfoPanel, setShowInfoPanel]);
+  useEffect(() => { if (!isDownloadsView && infoVisible && !showInfoPanel) setShowInfoPanel(true); }, [infoVisible, showInfoPanel, isDownloadsView, setShowInfoPanel]);
 
   return (
     <div className="flex h-full min-h-0">
       <ResourcesSidebar {...sidebarProps} island />
       <div className="flex-1 min-w-0 flex flex-col">{children}</div>
-      {infoIslandEl && createPortal(
+      {!isDownloadsView && infoIslandEl && createPortal(
         <ResourcesInfoPanelWrapper island {...infoPanelProps} />,
         infoIslandEl,
       )}

@@ -17,6 +17,9 @@ interface FolderInfoPanelProps {
   readOnly?: boolean;
   onClose: () => void;
   onRename: (name: string) => void;
+  /** Island shell: render transparently — the info island already paints the
+   *  card surface, so a bg here would be a box inside a box. */
+  island?: boolean;
 }
 
 function formatDate(dateStr: string | null | undefined): string {
@@ -30,12 +33,12 @@ function formatDate(dateStr: string | null | undefined): string {
   });
 }
 
-const InfoRow = ({ label, value }: { label: string; value?: string | null }) => {
+const InfoRow = ({ label, value, island = false }: { label: string; value?: string | null; island?: boolean }) => {
   if (!value) return null;
   return (
     <div className="flex justify-between items-center py-1.5">
-      <span className="text-xs text-ink-500">{label}</span>
-      <span className="text-xs text-ink-300 text-right">{value}</span>
+      <span className={`text-xs ${island ? 'text-content-3' : 'text-ink-500'}`}>{label}</span>
+      <span className={`text-xs ${island ? 'text-content-2' : 'text-ink-300'} text-right`}>{value}</span>
     </div>
   );
 };
@@ -46,6 +49,7 @@ export const FolderInfoPanel: React.FC<FolderInfoPanelProps> = ({
   readOnly = false,
   onClose,
   onRename,
+  island = false,
 }) => {
   const { t } = useTranslation();
 
@@ -77,26 +81,44 @@ export const FolderInfoPanel: React.FC<FolderInfoPanelProps> = ({
   const hasPreview = previewItems && previewItems.length > 0;
   const previewSlots = previewItems ? previewItems.slice(0, 4) : [];
 
+  // Island redesign: align neutral text/border to the mock --content/--line ladder.
+  // Classic (island=false) keeps the exact original ink classes for D12 byte-identical render.
+  const cPrimary = island ? 'text-content' : 'text-ink-50';
+  const cText400 = island ? 'text-content-2' : 'text-ink-400';
+  const cLabel = island ? 'text-content-3' : 'text-ink-500';
+  const cFaint = island ? 'text-content-4' : 'text-ink-600';
+  const cHoverPrimary = island ? 'hover:text-content' : 'hover:text-ink-50';
+  const cGroupHover400 = island ? 'group-hover:text-content-2' : 'group-hover:text-ink-400';
+  const cBorderHeader = island ? 'border-line' : 'border-ink-800';
+  const cBorderSection = island ? 'border-line' : 'border-ink-800/60';
+  // Surface tokens — mirror the resource/download panels: island paints the
+  // preview/placeholder/input/hover surfaces with --island-2; classic keeps the
+  // exact original ink surfaces so D12 stays byte-identical when island=false.
+  const cHoverSurface = island ? 'hover:bg-island-2' : 'hover:bg-ink-800';
+  const cPreviewBg = island ? 'bg-island-2' : 'bg-ink-800/50';
+  const cTileBg = island ? 'bg-island-2' : 'bg-ink-800';
+  const cFieldBg = island ? 'bg-island-2' : 'bg-ink-800';
+
   return (
-    <div className="flex-1 min-w-0 h-full bg-ink-900 overflow-y-auto">
+    <div className={`flex-1 min-w-0 h-full overflow-y-auto ${island ? '' : 'bg-ink-900'}`}>
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-ink-800 sticky top-0 bg-ink-900 z-10">
-        <h3 className="text-sm font-semibold text-ink-50">{t('resources.folderInfoPanel.title')}</h3>
+      <div className={`flex items-center justify-between p-4 border-b ${cBorderHeader} sticky top-0 z-10 ${island ? 'bg-island' : 'bg-ink-900'}`}>
+        <h3 className={`text-sm font-semibold ${cPrimary}`}>{t('resources.folderInfoPanel.title')}</h3>
         <button
           onClick={onClose}
-          className="p-1.5 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
+          className={`p-1.5 ${cText400} ${cHoverPrimary} ${cHoverSurface} rounded-lg transition-colors`}
         >
           <X size={16} />
         </button>
       </div>
 
       {/* Preview — 4-grid thumbnails or folder icon fallback */}
-      <div className={`mx-4 mt-4 h-44 rounded-xl overflow-hidden bg-ink-800/50 ${hasPreview ? '' : 'flex items-center justify-center'}`}>
+      <div className={`mx-4 mt-4 h-44 rounded-xl overflow-hidden ${cPreviewBg} ${hasPreview ? '' : 'flex items-center justify-center'}`}>
         {hasPreview ? (
           <div className="w-full h-full grid grid-cols-2 grid-rows-2 gap-px">
             {[0, 1, 2, 3].map((idx) => {
               const item = previewSlots[idx];
-              if (!item) return <div key={idx} className="bg-ink-800" />;
+              if (!item) return <div key={idx} className={cTileBg} />;
               const src = (item.thumbnail_path || item.cover_image_path) && item.resource_id
                 ? getResourceCoverUrl(String(item.resource_id))
                 : null;
@@ -110,8 +132,8 @@ export const FolderInfoPanel: React.FC<FolderInfoPanelProps> = ({
                   onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                 />
               ) : (
-                <div key={idx} className="bg-ink-800 flex items-center justify-center">
-                  <FolderOpen size={16} className="text-ink-600" />
+                <div key={idx} className={`${cTileBg} flex items-center justify-center`}>
+                  <FolderOpen size={16} className={cFaint} />
                 </div>
               );
             })}
@@ -138,25 +160,25 @@ export const FolderInfoPanel: React.FC<FolderInfoPanelProps> = ({
               if (e.key === 'Enter') commitName();
               if (e.key === 'Escape') { setNameValue(folder.name); setEditingName(false); }
             }}
-            className="w-full bg-ink-800 border border-indigo-500/50 rounded px-2 py-1 text-sm text-ink-50 focus:outline-none"
+            className={`w-full ${cFieldBg} border border-indigo-500/50 rounded px-2 py-1 text-sm ${cPrimary} focus:outline-none`}
             autoFocus
           />
         ) : readOnly ? (
-          <h4 className="text-sm font-medium text-ink-50 break-words leading-snug">{folder.name}</h4>
+          <h4 className={`text-sm font-medium ${cPrimary} break-words leading-snug`}>{folder.name}</h4>
         ) : (
           <div
             className="group flex items-start gap-1.5 cursor-pointer"
             onClick={() => setEditingName(true)}
           >
-            <h4 className="text-sm font-medium text-ink-50 break-words leading-snug flex-1">{folder.name}</h4>
-            <Pencil size={12} className="text-ink-600 group-hover:text-ink-400 mt-0.5 shrink-0 transition-colors" />
+            <h4 className={`text-sm font-medium ${cPrimary} break-words leading-snug flex-1`}>{folder.name}</h4>
+            <Pencil size={12} className={`${cFaint} ${cGroupHover400} mt-0.5 shrink-0 transition-colors`} />
           </div>
         )}
       </div>
 
       {/* Properties */}
-      <div className="px-4 mt-6 border-t border-ink-800/60 pt-3">
-        <h4 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-2">
+      <div className={`px-4 mt-6 border-t ${cBorderSection} pt-3`}>
+        <h4 className={`text-[11px] font-semibold ${cLabel} uppercase tracking-widest mb-2`}>
           {t('resources.infoPanel.properties')}
         </h4>
         <div className="space-y-0">
@@ -164,19 +186,23 @@ export const FolderInfoPanel: React.FC<FolderInfoPanelProps> = ({
             <InfoRow
               label={t('resources.folderInfoPanel.itemCount', 'Items')}
               value={String(folder.resource_count)}
+              island={island}
             />
           )}
           <InfoRow
             label={t('resources.infoPanel.type')}
             value={t('resources.folderInfoPanel.typeFolder', 'Folder')}
+            island={island}
           />
           <InfoRow
             label={t('resources.infoPanel.created')}
             value={formatDate(folder.created_at)}
+            island={island}
           />
           <InfoRow
             label={t('resources.infoPanel.modified')}
             value={formatDate(folder.updated_at)}
+            island={island}
           />
         </div>
       </div>

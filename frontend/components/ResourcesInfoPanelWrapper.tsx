@@ -98,7 +98,7 @@ export const ResourcesInfoPanelWrapper: React.FC<ResourcesInfoPanelWrapperProps>
           <button
             onClick={() => setShowInfoPanel(false)}
             title={t('resources.toggleInfoPanel')}
-            className="w-8 h-8 grid place-items-center rounded-lg text-ink-400 hover:text-ink-50 hover:bg-ink-800 transition-colors"
+            className="w-8 h-8 grid place-items-center rounded-lg text-content-2 hover:text-content hover:bg-island-2 transition-colors"
           >
             <ChevronRight size={18} />
           </button>
@@ -107,6 +107,7 @@ export const ResourcesInfoPanelWrapper: React.FC<ResourcesInfoPanelWrapperProps>
           {selectedFolder ? (
             <FolderInfoPanel
               folder={selectedFolder}
+              island
               previewItems={
                 isRecycleView
                   ? trashedFolderPreviews[String(selectedFolder.id)]
@@ -121,6 +122,7 @@ export const ResourcesInfoPanelWrapper: React.FC<ResourcesInfoPanelWrapperProps>
           ) : selectedResource?.resource ? (
             <ResourceInfoPanel
               resource={selectedResource.resource}
+              island
               allTags={allTags}
               assignedTags={selectedResourceTags.map(item => item.tag).filter((t): t is Tag => !!t)}
               folderName={selectedResource.folder_id ? folders.find(f => f.id === selectedResource.folder_id)?.name : null}

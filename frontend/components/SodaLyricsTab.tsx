@@ -152,7 +152,7 @@ const SodaLyricsTab = ({ mediaId, currentTime, theme, variant = 'card', sourcePl
     );
     if (isBare) {
       return (
-        <div className="flex flex-col items-center justify-center gap-2 py-20 text-white/55">
+        <div className="flex flex-col items-center justify-center gap-2 h-full text-white/55">
           <Music size={20} />
           <span className="text-sm">{label}</span>
           {fetchBtn}
