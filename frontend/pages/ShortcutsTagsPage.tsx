@@ -34,10 +34,13 @@ const getTagStyle = (color: string, isSelected: boolean) => {
       boxShadow: `0 0 12px ${baseColor}40, inset 0 0 12px ${baseColor}15`,
     };
   }
+  // Unselected: theme-aware via CSS vars (the ink ladder + content tokens flip
+  // per data-theme). The old hardcoded dark grays (rgba(63,63,70,.3)/#a1a1aa)
+  // were near-invisible on the light-theme white page.
   return {
-    backgroundColor: 'rgba(63, 63, 70, 0.3)',
-    color: '#a1a1aa',
-    borderColor: '#3f3f46',
+    backgroundColor: 'var(--ink-800)',
+    color: 'var(--content-2)',
+    borderColor: 'var(--ink-700)',
   };
 };
 
