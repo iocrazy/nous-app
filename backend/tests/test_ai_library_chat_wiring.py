@@ -10,6 +10,7 @@ the call site. These tests verify the wiring matches the contract:
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -263,6 +264,65 @@ async def test_recall_returns_empty_when_supabase_unavailable():
             settings=MagicMock(),
         )
     assert result == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_memory_recalls_run_concurrently():
+    """The three recalls (L1 / graph / honcho) must run concurrently via
+    asyncio.gather, not serially. Each gated coroutine blocks until all THREE
+    have started — a serial implementation would never reach the third and the
+    barrier would time out, failing the test."""
+    settings = MagicMock()
+    started = 0
+    all_started = asyncio.Event()
+    lock = asyncio.Lock()
+
+    async def _gate(result):
+        nonlocal started
+        async with lock:
+            started += 1
+            if started == 3:
+                all_started.set()
+        # Serial execution can never satisfy this — only the first recall
+        # would run, so the event never sets and wait_for raises.
+        await asyncio.wait_for(all_started.wait(), timeout=2.0)
+        return result
+
+    async def _mem(**_k):
+        return await _gate([])
+
+    async def _graph(**_k):
+        return await _gate(["fact"])
+
+    async def _honcho(**_k):
+        return await _gate("ctx")
+
+    with (
+        patch(
+            "app.services.ai.chat.ai_library_chat_wiring._safe_recall_memories",
+            side_effect=_mem,
+        ),
+        patch(
+            "app.services.ai.chat.ai_library_chat_wiring._safe_recall_graph_facts",
+            side_effect=_graph,
+        ),
+        patch(
+            "app.services.ai.chat.ai_library_chat_wiring._safe_recall_honcho_context",
+            side_effect=_honcho,
+        ),
+    ):
+        stack = await build_agent_runner_stack(
+            agent=_agent(),
+            skill_repo=MagicMock(),
+            user_id=uuid4(),
+            session_id=uuid4(),
+            user_query="hi",
+            settings=settings,
+        )
+
+    assert all_started.is_set()  # all three were in flight simultaneously
+    assert stack.recalled_memories == []
 
 
 # ─── G1+G5: MCP registry wiring ─────────────────────────────────────
