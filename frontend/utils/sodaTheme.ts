@@ -41,9 +41,31 @@ export interface SodaTheme {
   bg: string;
   /** '#0a0a0a' or '#ffffff' — readable icon color ON the accent button. */
   onAccent: string;
+  /** Readable text ramp ON `bg` (primary → quaternary). Black-or-white chosen by
+   *  WCAG contrast against `bg`, so the title/artist/stats stay legible on ANY
+   *  stored background color (the deep-green-vs-pale-green readability bug). */
+  onBg: string;
+  onBg2: string;
+  onBg3: string;
+  onBg4: string;
 }
 
-// Neutral, non-blue fallbacks.
+/** Dark-text ramp — for light backgrounds. */
+const DARK_TEXT = {
+  onBg: 'rgba(0,0,0,0.92)',
+  onBg2: 'rgba(0,0,0,0.66)',
+  onBg3: 'rgba(0,0,0,0.5)',
+  onBg4: 'rgba(0,0,0,0.34)',
+};
+/** Light-text ramp — for dark backgrounds. */
+const LIGHT_TEXT = {
+  onBg: 'rgba(255,255,255,0.95)',
+  onBg2: 'rgba(255,255,255,0.72)',
+  onBg3: 'rgba(255,255,255,0.55)',
+  onBg4: 'rgba(255,255,255,0.4)',
+};
+
+// Neutral, non-blue fallbacks. (bg is near-black → light text ramp.)
 const FALLBACK: SodaTheme = {
   accent: '#e4e4e7', // zinc-200
   accentSoft: 'rgba(228,228,231,0.6)',
@@ -53,6 +75,7 @@ const FALLBACK: SodaTheme = {
   gradientCss: 'linear-gradient(180deg,#18181b,#000)',
   bg: '#09090b', // zinc-950
   onAccent: '#0a0a0a',
+  ...LIGHT_TEXT,
 };
 
 const HEX6 = /^[0-9a-fA-F]{6}$/;
@@ -98,6 +121,29 @@ function luminance([r, g, b]: [number, number, number]): number {
   return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
 }
 
+/** One sRGB channel (0..255) → linear-light (0..1), per WCAG. */
+function srgbToLinear(c: number): number {
+  const cs = c / 255;
+  return cs <= 0.03928 ? cs / 12.92 : Math.pow((cs + 0.055) / 1.055, 2.4);
+}
+
+/** WCAG relative luminance (0..1) of an [r,g,b] triple (gamma-corrected). */
+function relLuminance([r, g, b]: [number, number, number]): number {
+  return 0.2126 * srgbToLinear(r) + 0.7152 * srgbToLinear(g) + 0.0722 * srgbToLinear(b);
+}
+
+/**
+ * Pick the more legible text ramp (black-vs-white) for a given background by
+ * comparing actual WCAG contrast ratios — correct across the whole gamut, unlike
+ * a single linear-luminance threshold. Returns the {onBg..onBg4} ramp.
+ */
+function readableRamp(bgRgb: [number, number, number]): Pick<SodaTheme, 'onBg' | 'onBg2' | 'onBg3' | 'onBg4'> {
+  const l = relLuminance(bgRgb);
+  const contrastWhite = 1.05 / (l + 0.05);
+  const contrastBlack = (l + 0.05) / 0.05;
+  return contrastBlack >= contrastWhite ? DARK_TEXT : LIGHT_TEXT;
+}
+
 /** Build an rgba string from an [r,g,b] triple at a given alpha. */
 function rgba([r, g, b]: [number, number, number], a: number): string {
   return `rgba(${r},${g},${b},${a})`;
@@ -139,6 +185,7 @@ function randomThemeFromSeed(seed: string): SodaTheme {
   const hue = hashSeed(seed) % 360;
   const accentRgb = hslToRgb(hue, 0.62, 0.58); // vivid but not neon
   const accentHex = `#${accentRgb.map((c) => c.toString(16).padStart(2, '0')).join('')}`;
+  const bgRgb = hslToRgb(hue, 0.4, 0.07);
   return {
     accent: accentHex,
     accentSoft: rgba(accentRgb, 0.6),
@@ -146,8 +193,9 @@ function randomThemeFromSeed(seed: string): SodaTheme {
     lyricActive: `#${hslToRgb(hue, 0.7, 0.85).map((c) => c.toString(16).padStart(2, '0')).join('')}`,
     lyricNormal: rgba(hslToRgb(hue, 0.22, 0.62), 0.7),
     gradientCss: `linear-gradient(180deg, ${rgba(hslToRgb(hue, 0.4, 0.12), 1)} 0%, #000 100%)`,
-    bg: rgba(hslToRgb(hue, 0.4, 0.07), 1),
+    bg: rgba(bgRgb, 1),
     onAccent: luminance(accentRgb) > 0.6 ? '#0a0a0a' : '#ffffff',
+    ...readableRamp(bgRgb),
   };
 }
 
@@ -180,6 +228,13 @@ export function buildSodaTheme(colors?: SodaColors | null, seed?: string): SodaT
   const lyricNormal = colorFrom(colors.normal_lyric_color) ?? FALLBACK.lyricNormal;
   const bg = colorFrom(colors.background_color) ?? FALLBACK.bg;
 
+  // Readable text ramp ON bg: pick from the real bg rgb when present, else keep
+  // the dark-bg (light text) fallback ramp.
+  const bgRgb = parseRgb(colors.background_color?.rgb);
+  const ramp = bgRgb
+    ? readableRamp(bgRgb)
+    : { onBg: FALLBACK.onBg, onBg2: FALLBACK.onBg2, onBg3: FALLBACK.onBg3, onBg4: FALLBACK.onBg4 };
+
   // Gradient from the 2-entry cover_gradient_effect_color array.
   let gradientCss = FALLBACK.gradientCss;
   const grad = colors.cover_gradient_effect_color;
@@ -191,5 +246,5 @@ export function buildSodaTheme(colors?: SodaColors | null, seed?: string): SodaT
     }
   }
 
-  return { accent, accentSoft, waveUnplayed, lyricActive, lyricNormal, gradientCss, bg, onAccent };
+  return { accent, accentSoft, waveUnplayed, lyricActive, lyricNormal, gradientCss, bg, onAccent, ...ramp };
 }

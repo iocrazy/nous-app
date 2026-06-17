@@ -27,8 +27,8 @@ export const AudioStageIsland: React.FC<AudioStageIslandProps> = ({ title, autho
     <div className="stage-head flex items-center gap-3 px-4 py-3 relative z-30">
       <CometBack onClick={onBack} tinted />
       <div className="min-w-0">
-        <div className="text-[13.5px] font-semibold text-ink-50 truncate">{title}</div>
-        {author && <div className="text-[11.5px] text-ink-400 truncate">{author}</div>}
+        <div className="text-[13.5px] font-semibold truncate" style={{ color: 'var(--audio-fg, var(--ink-50))' }}>{title}</div>
+        {author && <div className="text-[11.5px] truncate" style={{ color: 'var(--audio-fg-3, var(--ink-400))' }}>{author}</div>}
       </div>
       <span className="comet-trail comet-trail--tint" />
       <div className="ml-auto flex items-center gap-2">{actions}</div>
