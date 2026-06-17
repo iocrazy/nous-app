@@ -22,6 +22,7 @@ Design notes:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from dataclasses import dataclass
@@ -136,21 +137,24 @@ async def build_agent_runner_stack(
     fallback_models: list[str] = list(agent.get("fallback_models") or [])
     budget_cents = agent.get("budget_per_run_cents")
 
-    # ── 1. Memory recall (best-effort) ──────────────────────────────
-    recalled = await _safe_recall_memories(
-        agent_id=UUID(agent["id"]),
-        user_id=user_id,
-        session_id=session_id,
-        user_query=user_query,
-        settings=settings,
-    )
-
-    graph_facts = await _safe_recall_graph_facts(
-        user_id=user_id, user_query=user_query, session_id=session_id
-    )
-
-    honcho_context = await _safe_recall_honcho_context(
-        user_id=str(user_id), session_id=session_id
+    # ── 1. Memory recall (best-effort, concurrent) ──────────────────
+    # The three recalls are independent (none consumes another's output) and
+    # each is internally exception-safe (degrades to []/None, never raises),
+    # so we gather them instead of stacking three serial awaits on the chat
+    # hot path. L1 = embedding + cheap-LLM; graph = FalkorDB search (10s cap);
+    # honcho = HTTP user-model (10s cap) — serially that's their SUM per turn.
+    recalled, graph_facts, honcho_context = await asyncio.gather(
+        _safe_recall_memories(
+            agent_id=UUID(agent["id"]),
+            user_id=user_id,
+            session_id=session_id,
+            user_query=user_query,
+            settings=settings,
+        ),
+        _safe_recall_graph_facts(
+            user_id=user_id, user_query=user_query, session_id=session_id
+        ),
+        _safe_recall_honcho_context(user_id=str(user_id), session_id=session_id),
     )
 
     # ── 2. HookRegistry per-turn ────────────────────────────────────
