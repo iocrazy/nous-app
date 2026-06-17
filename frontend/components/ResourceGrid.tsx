@@ -526,7 +526,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
             )}
           </div>
 
-          <div className="flex flex-wrap items-center justify-end gap-2 min-w-0">
+          <div className="flex items-center justify-end gap-2 shrink-0">
             {/* Search box */}
             <ToolbarSearch
               onQueryChange={onQueryChange}
