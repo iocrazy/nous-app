@@ -912,7 +912,7 @@ export const DownloadsView: React.FC = () => {
       >
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
-            <span className="text-sm text-ink-200 font-medium truncate">{t('resources.downloads')}</span>
+            <h2 className="text-lg font-semibold text-ink-100 whitespace-nowrap truncate">{t('resources.downloads')}</h2>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
