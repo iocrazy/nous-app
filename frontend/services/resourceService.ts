@@ -402,6 +402,11 @@ export interface FetchResourcesParams {
    *  ids to scope to (folder_id IN …). Empty/undefined at root means "no folder
    *  constraint" → every file in the scope/library. */
   flattenFolderIds?: string[];
+  /** Server-side keyword search on resources.filename (ILIKE). Makes search hit
+   *  the database across the whole (flattened) scope instead of only filtering
+   *  the already-loaded page — fixes "search returns nothing for items beyond
+   *  the first page". */
+  search?: string;
   /** AND-semantic tag id filter. */
   tag_ids?: string[];
   /** Minimum rating (>= filter; 1..5). */
@@ -637,6 +642,13 @@ function buildResourceItemsQuery(
     query = query.eq('library_id', params.libraryId);
   } else if (!params.isPersonal) {
     query = query.is('library_id', null);
+  }
+
+  // ── Server-side keyword search (resources.filename ILIKE). Single-condition
+  //    on the embedded resources table — supabase-js encodes the pattern value,
+  //    so no manual escaping of the user's query is needed. `%` are wildcards. ──
+  if (params.search && params.search.trim()) {
+    query = query.ilike('resources.filename', `%${params.search.trim()}%`);
   }
 
   // ── Apply tag intersection (if any) on the resources embed. ──

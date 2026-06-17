@@ -399,6 +399,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
           libraryId: selectedLibraryId,
           flatten: flattenActive,
           flattenFolderIds,
+          search: debouncedSearch.trim() || undefined,
           ...filterParamsRef.current,
         },
         cursor,
@@ -409,9 +410,10 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     // filterParamsKey is the JSON fingerprint read via filterParamsRef.current;
     // selectedSmartRulesKey re-triggers when the selected smart folder's rules
     // load or change (rules themselves are read via smartFoldersRef.current);
-    // flattenKey re-triggers when the flatten toggle / search recursion changes.
+    // flattenKey re-triggers when the flatten toggle / search recursion changes;
+    // debouncedSearch re-triggers the server-side keyword search on text change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isPersonal, scopeId, selectedFolderId, selectedLibraryId, selectedSmartFolderId, selectedSmartRulesKey, filterParamsKey, flattenKey],
+    [isPersonal, scopeId, selectedFolderId, selectedLibraryId, selectedSmartFolderId, selectedSmartRulesKey, filterParamsKey, flattenKey, debouncedSearch],
   );
   const {
     items: resources,
@@ -741,9 +743,10 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     // filterParamsKey is a JSON fingerprint of filterParams — using it
     // directly in the dep array would trigger on every object re-create.
     // flattenKey re-loads when the flatten toggle / recursive search changes
-    // the folder scope of the fetch.
+    // the folder scope of the fetch; debouncedSearch re-loads for the
+    // server-side keyword search as the query text changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPersonal, scopeId, selectedFolderId, selectedSmartFolderId, selectedLibraryId, sidebarView, filterParamsKey, flattenKey]);
+  }, [isPersonal, scopeId, selectedFolderId, selectedSmartFolderId, selectedLibraryId, sidebarView, filterParamsKey, flattenKey, debouncedSearch]);
 
   // Bulk load tag names for search
   useEffect(() => {
