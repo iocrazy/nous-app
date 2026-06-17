@@ -129,22 +129,41 @@ class RunRecorder:
     HEARTBEAT_RATE_LIMIT_S: float = 15.0  # local, DB-write throttle
     EVENT_VALUE_MAX_CHARS: int = 4000  # per-field payload truncation
 
+    async def _start_once(self) -> None:
+        """One start attempt: pause/concurrency pre-flight → price snapshot →
+        insert the agent_runs row (which sets self.run_id). _snapshot_price is
+        already internally best-effort, so only pre-flight and the insert can
+        raise here."""
+        await self._pre_flight_check_paused()
+        await self._snapshot_price()
+        await self._insert_row()
+
     async def __aenter__(self) -> "RunRecorder":
         try:
-            await self._pre_flight_check_paused()
-            await self._snapshot_price()
-            await self._insert_row()
+            await self._start_once()
         except AgentPausedError:
             # Re-raise — caller needs to surface the pause to the user,
             # and we intentionally do NOT persist a run row for pre-flight rejections.
             raise
         except Exception as err:
-            # Telemetry failures don't break agent runs. Log and continue
-            # without a persisted row; methods below become no-ops because
-            # self.run_id stays None.
-            logger.error(
-                f"[RunRecorder] start failed (telemetry disabled for this run): {err}"
-            )
+            # Retry ONCE on a transient failure (pgbouncer recycle, brief
+            # network blip). Without a persisted row self.run_id stays None,
+            # which silently disables BOTH telemetry AND cancellation for the
+            # whole run — a single transient blip shouldn't cost that. A pause
+            # surfacing on the retry still propagates.
+            logger.warning(f"[RunRecorder] start failed, retrying once: {err}")
+            try:
+                await asyncio.sleep(0.1)
+                await self._start_once()
+            except AgentPausedError:
+                raise
+            except Exception as err2:
+                # Both attempts failed — degrade gracefully (no row, no
+                # telemetry/cancel), never break the agent run.
+                logger.error(
+                    "[RunRecorder] start retry also failed "
+                    f"(telemetry disabled for this run): {err2}"
+                )
         # Keep heartbeat_at fresh for the WHOLE turn — a single >2min LLM/tool
         # call would otherwise let the run go silent between iterations and the
         # liveness reaper would falsely mark a healthy run dead (acute on a

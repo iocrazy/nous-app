@@ -234,3 +234,90 @@ async def test_start_failure_arms_no_background_heartbeat(monkeypatch):
     await rec.__aenter__()
     assert rec.run_id is None
     assert rec._heartbeat_task is None
+
+
+# ─── #9: start retries once so a transient blip doesn't disable telemetry ──
+
+
+@pytest.mark.asyncio
+async def test_start_retries_once_on_transient_failure(monkeypatch):
+    """A transient insert failure must NOT permanently disable telemetry +
+    cancellation: __aenter__ retries the start once, and the second attempt
+    sets run_id."""
+    from app.services.ai.runner.run_recorder import RunRecorder
+
+    rec = _make_recorder()
+    attempts = {"n": 0}
+
+    async def _flaky_start():
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise RuntimeError("pgbouncer recycled the connection")
+        rec.run_id = "999"
+
+    monkeypatch.setattr(rec, "_start_once", _flaky_start)
+    monkeypatch.setattr(rec, "_start_background_heartbeat", lambda: None)
+
+    out = await rec.__aenter__()
+    assert out is rec
+    assert rec.run_id == "999"
+    assert attempts["n"] == 2  # failed once, retried, succeeded
+
+
+@pytest.mark.asyncio
+async def test_start_pause_propagates_without_retry(monkeypatch):
+    """A pause must surface to the caller — never retried, never swallowed."""
+    from app.services.ai.runner.run_recorder import AgentPausedError
+
+    rec = _make_recorder()
+    attempts = {"n": 0}
+
+    async def _paused():
+        attempts["n"] += 1
+        raise AgentPausedError("agent paused")
+
+    monkeypatch.setattr(rec, "_start_once", _paused)
+
+    with pytest.raises(AgentPausedError):
+        await rec.__aenter__()
+    assert attempts["n"] == 1  # not retried
+    assert rec.run_id is None
+
+
+@pytest.mark.asyncio
+async def test_start_pause_on_retry_still_propagates(monkeypatch):
+    """If the first attempt is a transient error but the retry hits a pause,
+    the pause still propagates (not swallowed by the retry's except)."""
+    from app.services.ai.runner.run_recorder import AgentPausedError
+
+    rec = _make_recorder()
+    attempts = {"n": 0}
+
+    async def _then_paused():
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise RuntimeError("transient")
+        raise AgentPausedError("paused on retry")
+
+    monkeypatch.setattr(rec, "_start_once", _then_paused)
+
+    with pytest.raises(AgentPausedError):
+        await rec.__aenter__()
+    assert attempts["n"] == 2
+
+
+@pytest.mark.asyncio
+async def test_start_both_attempts_fail_degrades_gracefully(monkeypatch):
+    """Both attempts failing → no row, run_id None, no crash, no heartbeat."""
+    rec = _make_recorder()
+
+    async def _always_boom():
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(rec, "_start_once", _always_boom)
+    monkeypatch.setattr(rec, "_start_background_heartbeat", lambda: None)
+
+    out = await rec.__aenter__()
+    assert out is rec
+    assert rec.run_id is None
+    assert rec._heartbeat_task is None
