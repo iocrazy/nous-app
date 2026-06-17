@@ -17,6 +17,14 @@ from app.services.ai.prompts.prompt_composer import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _enable_delegate(monkeypatch):
+    """Audit #4: Delegate is gated off by default in prod
+    (FEATURE_WORKFORCE_DELEGATE). These tests pin the feature-ON advertisement
+    contract; default-off is covered by test_delegate_not_advertised_by_default."""
+    monkeypatch.setenv("FEATURE_WORKFORCE_DELEGATE", "1")
+
+
 @pytest.fixture
 def fake_agent():
     return {
@@ -239,6 +247,20 @@ def test_empty_skills_still_advertises_delegate(fake_agent):
     tools = composer._build_tools([])
     names = [t["function"]["name"] for t in tools]
     assert names == ["Delegate"]
+
+
+@pytest.mark.unit
+def test_delegate_not_advertised_by_default(fake_agent, fake_skills, monkeypatch):
+    """Audit #4: with FEATURE_WORKFORCE_DELEGATE off, Delegate is NOT
+    advertised — the execution chain isn't wired, so the LLM must not be
+    able to queue tasks that orphan. Skill still advertised when bound."""
+    monkeypatch.delenv("FEATURE_WORKFORCE_DELEGATE", raising=False)
+    composer = PromptComposer(agent_repo=None, skill_repo=None)
+    names = [t["function"]["name"] for t in composer._build_tools(fake_skills)]
+    assert "Delegate" not in names
+    assert "Skill" in names
+    # No skills + gated off → empty tool list.
+    assert composer._build_tools([]) == []
 
 
 @pytest.mark.unit

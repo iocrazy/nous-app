@@ -34,6 +34,14 @@ def _reset_rate_limit_history() -> None:
     _dt_mod._dispatch_history.clear()
 
 
+@pytest.fixture(autouse=True)
+def _enable_delegate(monkeypatch) -> None:
+    """Audit #4: Delegate is gated off by default in prod
+    (FEATURE_WORKFORCE_DELEGATE). These tests pin the feature-ON contract;
+    the default-off gate is covered by test_delegate_disabled_by_default."""
+    monkeypatch.setenv("FEATURE_WORKFORCE_DELEGATE", "1")
+
+
 def _build_repos(*, target: dict | None = None):
     agent_repo = MagicMock()
     agent_repo.get_by_slug = AsyncMock(return_value=target)
@@ -455,3 +463,24 @@ async def test_rate_limit_is_per_caller_not_global():
     svc_b._detect_cycle = AsyncMock(return_value=None)
     out = await svc_b.execute({"agent_slug": "summary", "prompt": "p"})
     assert "error" not in out
+
+
+# ─── audit #4: feature gate (default off) ────────────────────────────
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_delegate_disabled_by_default(monkeypatch):
+    """With FEATURE_WORKFORCE_DELEGATE unset, execute() fail-closes before
+    touching repos — the inbox→worker chain isn't wired, so a queued
+    delegation would orphan forever."""
+    monkeypatch.delenv("FEATURE_WORKFORCE_DELEGATE", raising=False)
+    svc, agent_repo, workforce, *_ = _service(
+        target={"id": str(uuid4()), "slug": "summary", "is_persistent": True}
+    )
+
+    out = await svc.execute({"agent_slug": "summary", "prompt": "hi"})
+
+    assert "not enabled" in out["error"]
+    agent_repo.get_by_slug.assert_not_awaited()
+    workforce.enqueue_inbox.assert_not_awaited()
