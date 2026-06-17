@@ -892,7 +892,7 @@ async def _dispatch_character_episode(character: Dict[str, Any]) -> None:
     try:
         from app.services.ai.memory.graph_memory import get_graph_memory_service
 
-        if not get_graph_memory_service().config.enabled:
+        if not await get_graph_memory_service().is_enabled():
             return
         if not character or not character.get("id"):
             return

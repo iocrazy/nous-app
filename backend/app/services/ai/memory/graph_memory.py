@@ -28,6 +28,7 @@ Graphiti's LLM + embedder default to its OpenAI-compatible env config
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from dataclasses import dataclass, field
@@ -58,6 +59,14 @@ DEFAULT_EMBEDDER_DIMENSIONS = 1536
 # Qwen returns choices=None for Graphiti's complex nested schema, so it is opt-in.
 STRUCTURED_OUTPUT_MODES = ("json_object", "json_schema")
 DEFAULT_STRUCTURED_OUTPUT_MODE = "json_object"
+
+# Hard ceiling on a single hybrid retrieval. search() sits on the synchronous
+# chat hot path, so a FalkorDB host that accepts the TCP connection but never
+# responds (vs. cleanly refusing) must NOT stall the turn — the timeout fires,
+# the safety contract logs it, and recall degrades to no facts. Matches the
+# Honcho read ceiling. Ingestion (add_episode) is deliberately NOT bounded here:
+# it runs off the hot path and its LLM extraction legitimately takes longer.
+GRAPH_SEARCH_TIMEOUT_S = 10.0
 
 
 # system_settings key (admin-set, DB) → env-var fallback. Lets the Graphiti
@@ -288,6 +297,16 @@ class GraphMemoryService:
         except Exception:  # noqa: BLE001
             logger.warning("[graph_memory] from_settings failed; keeping env config")
 
+    async def is_enabled(self) -> bool:
+        """Public enable-gate. Callers MUST await this instead of reading
+        ``.config.enabled`` directly: the latter is only the cheap env default
+        (``from_env``) until ``_ensure_config`` swaps in the system_settings
+        (admin-panel) values on first use. Reading the raw field makes the
+        admin Memory-panel toggle inert unless ``FEATURE_GRAPH_MEMORY`` is also
+        set in the environment — the exact bug this method closes."""
+        await self._ensure_config()
+        return self.config.enabled
+
     def _client(self) -> Optional[Any]:
         if self.graphiti is not None:
             # Injected client is honoured only when the flag is on —
@@ -368,7 +387,10 @@ class GraphMemoryService:
         if client is None or not query.strip() or not group_ids:
             return []
         try:
-            edges = await client.search(query, group_ids=group_ids, num_results=limit)
+            edges = await asyncio.wait_for(
+                client.search(query, group_ids=group_ids, num_results=limit),
+                timeout=GRAPH_SEARCH_TIMEOUT_S,
+            )
             facts: list[GraphFact] = []
             for edge in edges or []:
                 fact_text = getattr(edge, "fact", None)
@@ -381,6 +403,14 @@ class GraphMemoryService:
                     )
                 )
             return facts
+        except asyncio.TimeoutError:
+            logger.warning(
+                "[graph_memory] search timed out after %ss (groups=%s); "
+                "degrading to no facts",
+                GRAPH_SEARCH_TIMEOUT_S,
+                group_ids,
+            )
+            return []
         except Exception:  # noqa: BLE001
             logger.exception("[graph_memory] search failed (groups=%s)", group_ids)
             return []

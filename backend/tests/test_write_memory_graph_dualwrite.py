@@ -126,3 +126,21 @@ async def test_empty_turn_skips_write(service: RecordingService) -> None:
     )
     assert ok is False
     assert service.calls == []
+
+
+# ============================================================
+# _build_memory_writer — contradiction wiring (regression)
+# ============================================================
+
+
+def test_build_memory_writer_wires_contradiction_classifier() -> None:
+    """The production writer MUST carry a contradiction_classifier; without it
+    the supersede post-pass is dead and conflicting memories ('prefers Vue' →
+    later 'now uses React') accumulate and are recalled together forever."""
+    from app.workflows.write_memory import _build_memory_writer
+
+    async def _llm(prompt: str) -> str:
+        return "REPLACES"
+
+    writer = _build_memory_writer(_llm)
+    assert writer.contradiction_classifier is _llm
