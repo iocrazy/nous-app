@@ -471,7 +471,10 @@ async def _safe_recall_graph_facts(
         from app.services.ai.memory.graph_memory import get_graph_memory_service
 
         service = get_graph_memory_service()
-        if not service.config.enabled:
+        # is_enabled() loads the admin-panel (system_settings) config first;
+        # reading service.config.enabled directly would see only the env
+        # default and keep the panel toggle inert.
+        if not await service.is_enabled():
             return []
         group_ids = [f"user-{user_id}"]
         project_id = await _resolve_session_project(session_id)

@@ -94,6 +94,9 @@ class TestDynamicFingerprint:
 class FakeService(GraphMemoryService):
     def __init__(self, *, enabled: bool, facts=None, raise_=False):
         super().__init__(config=GraphMemoryConfig(enabled=enabled, falkordb_host="h"))
+        # Treat the injected config as already DB-resolved so the real
+        # is_enabled()/_ensure_config gate honours it without a settings read.
+        self._config_loaded = True
         self._facts = facts or []
         self._raise = raise_
         self.queries: list[dict] = []
@@ -208,3 +211,51 @@ async def test_recall_failure_degrades_to_empty(
         user_id=UUID(int=42), user_query="anything"
     )
     assert facts == []
+
+
+@pytest.mark.asyncio
+async def test_recall_honors_admin_panel_toggle_over_env_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: the recall gate must consult the DB-sourced (admin-panel)
+    config, not the cheap env default. A service whose env default is
+    disabled but whose system_settings say enabled must still recall —
+    otherwise the Memory panel toggle is inert unless FEATURE_GRAPH_MEMORY
+    is also set in the environment."""
+    from app.services.ai.chat import ai_library_chat_wiring as wiring
+    from app.services.ai.memory import graph_memory as gm
+
+    captured: list[dict] = []
+
+    class _Edge:
+        fact = "recalled via DB toggle"
+        valid_at = None
+
+    class _Client:
+        async def search(self, query, group_ids=None, num_results=10):
+            captured.append({"query": query, "group_ids": group_ids})
+            return [_Edge()]
+
+    class _DbToggledService(GraphMemoryService):
+        """Env default disabled + no injected client → the real
+        is_enabled()/_ensure_config path runs from_settings; we only stub
+        _client so search doesn't dial a real FalkorDB."""
+
+        def _client(self):  # type: ignore[override]
+            return _Client() if self.config.enabled else None
+
+    svc = _DbToggledService(config=GraphMemoryConfig(enabled=False))
+
+    async def fake_from_settings(**_kw):
+        return GraphMemoryConfig(enabled=True, falkordb_host="db.test")
+
+    monkeypatch.setattr(gm.GraphMemoryConfig, "from_settings", fake_from_settings)
+    monkeypatch.setattr(
+        "app.services.ai.memory.graph_memory.get_graph_memory_service",
+        lambda: svc,
+    )
+    facts = await wiring._safe_recall_graph_facts(
+        user_id=UUID(int=7), user_query="what do I like?"
+    )
+    assert facts == ["recalled via DB toggle"]
+    assert captured  # the DB-enabled gate let the search through

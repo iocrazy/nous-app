@@ -49,6 +49,34 @@ async def load_recent_messages_step(session_id: str) -> dict[str, list[str]]:
     }
 
 
+def _build_memory_writer(llm_call: Any) -> Any:
+    """Assemble the production MemoryWriter from a cheap-LLM call closure.
+
+    Extracted as a pure, awaitable-free seam so the wiring is unit-testable
+    without invoking the DBOS step. The crucial invariant is that
+    ``contradiction_classifier`` IS set: without it the supersede post-pass is
+    dead and conflicting facts ("prefers Vue" → later "now uses React") both
+    stay status='active' and are recalled together forever — consolidation
+    only merges near-duplicates, it never supersedes a contradiction. The pass
+    is bounded (≤3 cheap-LLM classify calls per inserted row, only when a
+    high-similarity neighbour exists) and fully non-fatal — see
+    ``MemoryWriter._supersede_contradicting``.
+    """
+    from app.services.ai.memory.extractor import (
+        AssistantMemoryExtractor,
+        UserMemoryExtractor,
+    )
+    from app.services.ai.memory.writer import MemoryWriter
+    from app.services.ai.providers.embedding_service import EmbeddingService
+
+    return MemoryWriter(
+        user_extractor=UserMemoryExtractor(llm_call=llm_call),
+        assistant_extractor=AssistantMemoryExtractor(llm_call=llm_call),
+        embedding_service=EmbeddingService(),
+        contradiction_classifier=llm_call,
+    )
+
+
 @DBOS.step(retries_allowed=True, max_attempts=2)
 async def extract_and_persist_memories_step(
     *,
@@ -60,22 +88,8 @@ async def extract_and_persist_memories_step(
 ) -> dict[str, Any]:
     """Run extractor LLM calls + persist memory rows. workflow_id
     memoization keeps replay safe (same run_id+inputs = same rows)."""
-    from app.services.ai.memory.extractor import (
-        AssistantMemoryExtractor,
-        UserMemoryExtractor,
-    )
-    from app.services.ai.memory.writer import MemoryWriter
-    from app.services.ai.providers.embedding_service import EmbeddingService
-
     llm_call = await _build_cheap_llm_call()
-    user_extractor = UserMemoryExtractor(llm_call=llm_call)
-    asst_extractor = AssistantMemoryExtractor(llm_call=llm_call)
-
-    writer = MemoryWriter(
-        user_extractor=user_extractor,
-        assistant_extractor=asst_extractor,
-        embedding_service=EmbeddingService(),
-    )
+    writer = _build_memory_writer(llm_call)
     rows = await writer.write(
         agent_id=UUID(agent_id),
         user_id=UUID(user_id),
@@ -323,7 +337,7 @@ async def write_memory_workflow(
     # here skips the step entirely for the (default) disabled case.
     from app.services.ai.memory.graph_memory import get_graph_memory_service
 
-    if get_graph_memory_service().config.enabled:
+    if await get_graph_memory_service().is_enabled():
         graph = await write_graph_episode_step(
             user_id=user_id,
             session_id=session_id,

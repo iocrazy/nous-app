@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
@@ -167,6 +168,56 @@ async def test_search_failure_returns_empty() -> None:
     fake = FakeGraphiti(raise_on="search")
     service = GraphMemoryService(config=_enabled_config(), graphiti=fake)
     assert await service.search("q", group_ids=["g"]) == []
+
+
+@pytest.mark.asyncio
+async def test_is_enabled_loads_db_config_over_env_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """is_enabled() must consult the admin-panel (system_settings) config, not
+    the cheap env default. A service whose env default is disabled but whose
+    DB config is enabled must report True — the bug was that callers read
+    .config.enabled directly and never triggered the DB load."""
+    service = GraphMemoryService(config=GraphMemoryConfig(enabled=False))
+
+    async def fake_from_settings(**_kw):
+        return _enabled_config()  # admin panel turned graph memory ON in the DB
+
+    monkeypatch.setattr(GraphMemoryConfig, "from_settings", fake_from_settings)
+    assert service.config.enabled is False  # before: cheap env default
+    assert await service.is_enabled() is True  # after: DB-sourced
+    assert service.config.enabled is True  # config swapped in place, once
+
+
+@pytest.mark.asyncio
+async def test_is_enabled_stays_false_when_db_also_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = GraphMemoryService(config=GraphMemoryConfig(enabled=False))
+
+    async def fake_from_settings(**_kw):
+        return GraphMemoryConfig(enabled=False)
+
+    monkeypatch.setattr(GraphMemoryConfig, "from_settings", fake_from_settings)
+    assert await service.is_enabled() is False
+
+
+@pytest.mark.asyncio
+async def test_search_times_out_and_degrades_to_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A FalkorDB that accepts the connection but never responds must not stall
+    the chat turn: search() wraps the call in a timeout and degrades to []."""
+    import app.services.ai.memory.graph_memory as gm
+
+    class HangingGraphiti:
+        async def search(self, query, group_ids=None, num_results=10):
+            await asyncio.sleep(60)  # never returns within the timeout
+
+    monkeypatch.setattr(gm, "GRAPH_SEARCH_TIMEOUT_S", 0.05)
+    service = GraphMemoryService(config=_enabled_config(), graphiti=HangingGraphiti())
+    facts = await service.search("q", group_ids=["user-1"], limit=5)
+    assert facts == []  # timed out, logged, degraded — never raised
 
 
 @pytest.mark.asyncio

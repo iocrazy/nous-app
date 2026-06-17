@@ -18,6 +18,9 @@ class RecordingService(GraphMemoryService):
 
     def __init__(self, *, enabled: bool = True, succeed: bool = True):
         super().__init__(config=GraphMemoryConfig(enabled=enabled, falkordb_host="h"))
+        # Treat the injected config as already DB-resolved so the real
+        # is_enabled()/_ensure_config gate honours it without a settings read.
+        self._config_loaded = True
         self.calls: list[dict] = []
         self._succeed = succeed
 
