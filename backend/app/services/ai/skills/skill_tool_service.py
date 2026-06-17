@@ -24,6 +24,25 @@ _BINARY_NOTE = (
     "report the limitation back to the user if you cannot fetch it."
 )
 
+# Audit #14: skills.body_md and skill_files.content are unbounded TEXT columns.
+# Returning one whole into the next LLM request blows the context window + cost.
+# Cap at the same ceiling resource_fetch_tool uses for docs (64k chars) and tell
+# the agent it was truncated so it can ask for a specific sub-section instead.
+MAX_SKILL_CONTENT_CHARS = 64000
+
+
+def _cap_skill_content(text: str) -> str:
+    """Truncate over-long skill content with an explicit notice."""
+    if len(text) <= MAX_SKILL_CONTENT_CHARS:
+        return text
+    remaining = len(text) - MAX_SKILL_CONTENT_CHARS
+    return (
+        text[:MAX_SKILL_CONTENT_CHARS]
+        + f"\n[... truncated, {remaining} chars remaining; this skill content "
+        "exceeds the inline cap — reference a specific file/section if you "
+        "need more]"
+    )
+
 
 class SkillToolService:
     def __init__(self, skill_repo: SkillRepository) -> None:
@@ -100,14 +119,14 @@ class SkillToolService:
                 "skill": slug,
                 "file": file_path,
                 "description": skill.get("description", ""),
-                "prompt": f.get("content") or "",
+                "prompt": _cap_skill_content(f.get("content") or ""),
                 "file_type": file_type,
             }
 
         return {
             "skill": slug,
             "description": skill.get("description", ""),
-            "prompt": skill.get("body_md") or "",
+            "prompt": _cap_skill_content(skill.get("body_md") or ""),
         }
 
 
