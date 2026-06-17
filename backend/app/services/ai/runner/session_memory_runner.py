@@ -23,31 +23,46 @@ from app.repositories.session_memory_repository import (
     get_session_memory_repository,
 )
 
+# Fallback model when the agent's own model is unknown/empty — a cheap Qwen
+# tier (DashScope) for session-note maintenance.
+_FALLBACK_SUMMARY_MODEL = "qwen-turbo"
 
-# Cheap-summarizer prompt routed through the same OpenAI-compatible
-# adapter the chat compactor uses. Kept here (not in agent_framework) to
-# avoid pulling settings imports into a primitive layer.
-async def _default_summarizer(prompt: str) -> str:
-    """Cheap LLM call for session-memory maintenance. Routes through the
-    qwen-flash / qwen-turbo adapter — same one chat compactor uses."""
+
+# Cheap-summarizer prompt routed through the agent's OWN provider, the same way
+# the chat compactor's summarizer does (get_adapter over global settings keys).
+# Kept here (not in agent_framework) to avoid pulling settings into a primitive.
+async def _default_summarizer(prompt: str, model: str = "") -> str:
+    """Cheap LLM call for session-memory maintenance.
+
+    Audit #17: previously hardcoded a QwenAdapter, so this silently no-op'd
+    for any user/agent on a non-Qwen provider (e.g. Doubao-only). Now routes
+    through the agent's own ``model`` via the adapter factory (platform keys,
+    same convention as the chat compactor's summarizer), falling back to a
+    cheap Qwen tier when the model is empty or its prefix is unknown.
+    """
     try:
-        from app.core.config import settings
-        from app.services.ai.providers.ai_provider import QwenAdapter
+        from uuid import UUID
 
-        api_key = getattr(settings, "DASHSCOPE_API_KEY", None) or getattr(
-            settings, "QWEN_API_KEY", None
-        )
-        if not api_key:
-            logger.debug("session_memory summarizer: no Qwen key — skipping")
-            return ""
-        adapter = QwenAdapter(api_key=api_key, model="qwen-turbo")
-        # Minimal "messages" shape the adapter accepts.
+        from app.core.config import settings
         from app.schemas.ai_library import ComposedSystemPrompt
+        from app.services.ai.adapters.factory import get_adapter
+
+        summary_model = (model or "").strip() or _FALLBACK_SUMMARY_MODEL
+        try:
+            adapter = get_adapter(summary_model, settings)
+        except ValueError:
+            # Unknown model prefix → fall back to the cheap default provider.
+            summary_model = _FALLBACK_SUMMARY_MODEL
+            adapter = get_adapter(summary_model, settings)
 
         composed = ComposedSystemPrompt(
-            agent_id=None,  # type: ignore[arg-type]  — runner doesn't need it
+            # Audit #17: ComposedSystemPrompt.agent_id is a required UUID — the
+            # old ``agent_id=None`` raised a ValidationError that the broad
+            # except swallowed, so this summarizer never actually ran. Use the
+            # nil UUID (maintenance call needs no real agent identity).
+            agent_id=UUID(int=0),
             agent_slug="session_memory_updater",
-            model="qwen-turbo",
+            model=summary_model,
             temperature=0.1,
             max_tokens=2048,
             system_message="You maintain markdown session notes. Output only the markdown.",
@@ -73,9 +88,15 @@ async def maybe_update_session_memory(
     """Dispatch the session-memory updater. Best-effort. Never raises."""
     try:
         repo = repo or get_session_memory_repository()
+
+        # Audit #17: route the maintenance summarizer through the agent's own
+        # model (not a hardcoded Qwen) so it works off-Qwen.
+        async def _summarizer(prompt: str) -> str:
+            return await _default_summarizer(prompt, model=model)
+
         svc = SessionMemoryService(
             repo=repo,
-            summarizer=_default_summarizer,
+            summarizer=_summarizer,
             trigger=trigger or SessionMemoryTrigger(),
         )
         await svc.maybe_update(session_id, messages, model=model)
