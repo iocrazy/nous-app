@@ -352,21 +352,24 @@ class PromptComposer:
     def _build_tools(self, skills: list[dict[str, Any]]) -> list[dict]:
         """Build the function-calling tools list.
 
-        Two built-in tools are advertised:
+        Built-in tools advertised:
         - ``Skill`` — load a skill definition (only when skills are bound)
-        - ``Delegate`` — hand a sub-task to another persistent agent
-          (always, even when the agent has no skills of its own — a
-          coordinator pattern)
+        - ``Delegate`` — hand a sub-task to another persistent agent. Gated
+          behind ``FEATURE_WORKFORCE_DELEGATE`` (audit #4): the inbox→worker
+          execution chain isn't fully wired, so advertising it would let the
+          LLM queue tasks that orphan forever. Off (default) → not advertised.
 
-        Returns empty only when both conditions disable both tools (no
-        skills AND ``Delegate`` is somehow undesired — currently we
-        always emit Delegate, so this list is always non-empty in
-        practice).
+        Returns ``[]`` when no skills are bound AND Delegate is gated off.
         """
+        from app.services.workforce.delegate_feature import (
+            delegate_feature_enabled,
+        )
+
         tools: list[dict] = []
         if skills:
             tools.append(self._skill_tool_spec())
-        tools.append(self._delegate_tool_spec())
+        if delegate_feature_enabled():
+            tools.append(self._delegate_tool_spec())
         return tools
 
     def _skill_tool_spec(self) -> dict:

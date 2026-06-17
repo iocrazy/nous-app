@@ -128,6 +128,24 @@ class DelegateToolService:
         self.workforce_repo = workforce_repo or get_agent_workforce_repository()
 
     async def execute(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        # Audit #4 fail-closed gate: the inbox→worker execution chain isn't
+        # fully wired (scheduled InboxProcessor has no dispatcher), so a queued
+        # delegation orphans forever. Refuse rather than silently accept — even
+        # if the tool somehow reaches here while ungated (model replaying an old
+        # tool_call, worker sub-delegation). See delegate_feature.py.
+        from app.services.workforce.delegate_feature import (
+            delegate_feature_enabled,
+        )
+
+        if not delegate_feature_enabled():
+            return {
+                "error": (
+                    "delegation is not enabled (FEATURE_WORKFORCE_DELEGATE off); "
+                    "the inbox→worker execution chain is not wired yet, so a "
+                    "delegated task would never run"
+                ),
+            }
+
         slug = (args.get("agent_slug") or args.get("agent") or "").strip()
         prompt = (args.get("prompt") or "").strip()
         if not slug:
