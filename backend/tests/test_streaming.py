@@ -255,6 +255,98 @@ async def test_stream_turn_cooperative_cancel_stops_before_adapter():
     assert chunks == []
 
 
+# ─── #5: streaming path runs Pre/Post hooks (was bypassed entirely) ───
+
+
+@pytest.mark.asyncio
+async def test_stream_runs_pre_hook_abort_blocks_tool():
+    """The streaming path must run PreToolUse hooks. An abort blocks the tool
+    (skill never executes) and stops the stream with a [blocked] note."""
+    from app.services.infra.hooks import HookContext, HookRegistry, HookResult
+
+    async def gate(ctx: HookContext) -> HookResult:
+        return HookResult(decision="abort", abort_reason="blocked by gate")
+
+    reg = HookRegistry()
+    reg.register_pre(gate, name="gate")
+
+    ran = {"n": 0}
+
+    class _Skill:
+        async def execute(self, args):
+            ran["n"] += 1
+            return {"prompt": "ran"}
+
+    runner = AgentRunner(
+        adapter=_StreamingAdapterWithToolCall(), skill_tool=_Skill(), hooks=reg
+    )
+    chunks = []
+    async for c in runner.stream_turn(
+        _composed(), [{"role": "user", "content": "do foo"}]
+    ):
+        chunks.append(c)
+    assert ran["n"] == 0  # tool blocked before execution
+    assert any("blocked" in (c.delta_text or "") for c in chunks)
+
+
+@pytest.mark.asyncio
+async def test_stream_runs_pre_hook_modify_replaces_args():
+    """PreToolUse modify must rewrite the tool args on the streaming path too."""
+    from app.services.infra.hooks import HookContext, HookRegistry, HookResult
+
+    captured: dict = {}
+
+    class _Skill:
+        async def execute(self, args):
+            captured.update(args)
+            return {"prompt": "ran"}
+
+    async def sanitizer(ctx: HookContext) -> HookResult:
+        return HookResult(decision="modify", modified_args={"skill": "safe"})
+
+    reg = HookRegistry()
+    reg.register_pre(sanitizer, name="sanitizer")
+    runner = AgentRunner(
+        adapter=_StreamingAdapterWithToolCall(), skill_tool=_Skill(), hooks=reg
+    )
+    async for _ in runner.stream_turn(
+        _composed(), [{"role": "user", "content": "do foo"}]
+    ):
+        pass
+    assert captured == {"skill": "safe"}
+
+
+@pytest.mark.asyncio
+async def test_stream_runs_post_hooks_and_side_effects():
+    """PostToolUse must fire on the streaming path (CostAuditor / MemoryHarvester
+    side-effects), receiving the tool result."""
+    from unittest.mock import MagicMock
+
+    from app.services.infra.hooks import HookContext, HookRegistry, HookResult
+
+    seen: list[dict] = []
+    fire = MagicMock()
+
+    async def auditor(ctx: HookContext, result: dict) -> HookResult:
+        seen.append(result)
+        return HookResult(decision="continue", side_effect=fire)
+
+    reg = HookRegistry()
+    reg.register_post(auditor, name="auditor")
+    runner = AgentRunner(
+        adapter=_StreamingAdapterWithToolCall(),
+        skill_tool=_StubSkillTool(),
+        hooks=reg,
+    )
+    async for _ in runner.stream_turn(
+        _composed(), [{"role": "user", "content": "do foo"}]
+    ):
+        pass
+    assert len(seen) == 1
+    assert seen[0]["skill"] == "foo"
+    fire.assert_called_once_with()
+
+
 # ─── StreamChunk shape ───────────────────────────────────────────────
 
 

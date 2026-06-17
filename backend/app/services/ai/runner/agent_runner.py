@@ -464,6 +464,43 @@ class AgentRunner:
                 except _json.JSONDecodeError:
                     args = {}
 
+                # ── PreToolUse chain (mirrors run_turn) ─────────────────────
+                # The streaming path previously ran NO hooks, so CapabilityGate
+                # / BudgetGuard / RateLimit were silently bypassed on the main
+                # ChatPanel route. _run_pre_hooks also fires registered
+                # side-effects + honours fail_closed security gates.
+                pre_result = await self._run_pre_hooks(
+                    composed=composed,
+                    recorder=recorder,
+                    tool_name=tool_name,
+                    args=args,
+                    iteration=iteration,
+                )
+                if pre_result is not None:
+                    if pre_result.decision == "abort":
+                        yield StreamChunk(
+                            delta_text=(
+                                f"\n\n[blocked: "
+                                f"{pre_result.abort_reason or tool_name}]"
+                            ),
+                            finish_reason="stop",
+                            usage={"hook_decision": "abort"},
+                        )
+                        return
+                    if pre_result.decision == "await_approval":
+                        _req = pre_result.approval_request
+                        yield StreamChunk(
+                            delta_text=(
+                                "\n\n[awaiting approval: "
+                                f"{_req.reason if _req else 'approval required'}]"
+                            ),
+                            finish_reason="stop",
+                            usage={"hook_decision": "await_approval"},
+                        )
+                        return
+                    if pre_result.decision == "modify" and pre_result.modified_args:
+                        args = pre_result.modified_args
+
                 # Yield synthetic UI hint
                 hint_label = args.get("skill") or "" if tool_name == "Skill" else ""
                 yield StreamChunk(
@@ -544,6 +581,40 @@ class AgentRunner:
                             "iteration": iteration,
                         },
                     )
+
+                # ── PostToolUse chain (mirrors run_turn) ────────────────────
+                # Fires CostAuditor + MemoryHarvester side-effects, which the
+                # streaming path previously skipped entirely.
+                post_result = await self._run_post_hooks(
+                    composed=composed,
+                    recorder=recorder,
+                    tool_name=tool_name,
+                    args=args,
+                    tool_result=result,
+                    iteration=iteration,
+                )
+                if post_result is not None:
+                    if post_result.decision == "abort":
+                        yield StreamChunk(
+                            delta_text=(
+                                f"\n\n[blocked post-tool: "
+                                f"{post_result.abort_reason or tool_name}]"
+                            ),
+                            finish_reason="stop",
+                            usage={"hook_decision": "abort"},
+                        )
+                        return
+                    if post_result.decision == "await_approval":
+                        _req = post_result.approval_request
+                        yield StreamChunk(
+                            delta_text=(
+                                "\n\n[awaiting approval: "
+                                f"{_req.reason if _req else 'approval required'}]"
+                            ),
+                            finish_reason="stop",
+                            usage={"hook_decision": "await_approval"},
+                        )
+                        return
 
                 if loop_guard.is_looping():
                     warning = loop_guard.render_warning()
@@ -1083,7 +1154,9 @@ class AgentRunner:
 
         last_result: Optional[HookResult] = None
         for entry in self.hooks.get_pre_hooks():
-            hook_result = await self._safe_invoke_pre(entry.name, entry.hook, ctx)
+            hook_result = await self._safe_invoke_pre(
+                entry.name, entry.hook, ctx, fail_closed=entry.fail_closed
+            )
             if hook_result is None:
                 continue
             self._dispatch_side_effect(entry.name, hook_result)
@@ -1146,10 +1219,27 @@ class AgentRunner:
         name: str,
         hook: PreToolUseHook,
         ctx: HookContext,
+        *,
+        fail_closed: bool = False,
     ) -> Optional[HookResult]:
         try:
             return await hook(ctx)
-        except Exception:  # noqa: BLE001 — hook failures must never break the run
+        except Exception as exc:  # noqa: BLE001
+            if fail_closed:
+                # Security-relevant gate (e.g. CapabilityGate): a bug in the
+                # gate must BLOCK the tool, not silently let it through.
+                logger.exception(
+                    "[hook:%s] PreToolUse raised; failing CLOSED (blocking tool)",
+                    name,
+                )
+                return HookResult(
+                    decision="abort",
+                    abort_reason=(
+                        f"security hook '{name}' failed closed: "
+                        f"{exc.__class__.__name__}"
+                    ),
+                )
+            # Default fail-open: a buggy non-security hook must never break a run.
             logger.exception("[hook:%s] PreToolUse raised; continuing run", name)
             return None
 

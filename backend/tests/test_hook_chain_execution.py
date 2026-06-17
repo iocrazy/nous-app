@@ -319,6 +319,29 @@ async def test_pre_hook_exception_is_swallowed_run_continues():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_fail_closed_pre_hook_exception_blocks_tool():
+    """A hook registered fail_closed that RAISES must block the tool (abort),
+    not silently continue — the security-gate contract (CapabilityGate). A bug
+    in the access-control gate must never let a gated tool call through."""
+
+    async def broken_gate(ctx: HookContext) -> HookResult:
+        raise ValueError("profile evaluation bug")
+
+    reg = HookRegistry()
+    reg.register_pre(broken_gate, name="capability_gate", fail_closed=True)
+
+    adapter = _adapter_with_one_tool_call_then_done()
+    skill = FakeSkillTool()
+    runner = AgentRunner(adapter=adapter, skill_tool=skill, hooks=reg)
+    result = await runner.run_turn(_composed(), [{"role": "user", "content": "hi"}])
+
+    assert result["aborted"] is True
+    assert "failed closed" in (result.get("abort_reason") or "")
+    assert skill.calls == []  # tool blocked, never executed
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_post_hook_exception_is_swallowed_run_continues():
     async def broken_hook(ctx: HookContext, result: dict) -> HookResult:
         raise RuntimeError("boom")

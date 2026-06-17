@@ -152,6 +152,12 @@ class _PreEntry:
     name: str
     priority: int
     hook: PreToolUseHook
+    # When True, an EXCEPTION raised by this hook fails CLOSED — the runner
+    # treats it as an ``abort`` and blocks the tool call. Default False keeps
+    # the framework's fail-open contract (a buggy telemetry hook can't break a
+    # run). Set True only on security-relevant gates (e.g. CapabilityGate),
+    # where silently letting a blocked tool through is the worse failure.
+    fail_closed: bool = False
 
 
 @dataclass(frozen=True)
@@ -183,8 +189,11 @@ class HookRegistry:
         *,
         name: str,
         priority: int = 50,
+        fail_closed: bool = False,
     ) -> None:
-        self._pre.append(_PreEntry(name=name, priority=priority, hook=hook))
+        self._pre.append(
+            _PreEntry(name=name, priority=priority, hook=hook, fail_closed=fail_closed)
+        )
 
     def register_post(
         self,
