@@ -181,8 +181,28 @@ class LLMFallbackChain:
                 ),
             )
 
+            # Audit #8 (fix A): the wire model MUST match the adapter we just
+            # built. ``adapter_factory(model)`` resolved THIS model's provider
+            # endpoint + key and baked ``default_model=model``; ``composed.model``
+            # still holds the PRIMARY name on every fallback attempt. Realign it
+            # per attempt or fallback misroutes (cross-provider: right key, wrong
+            # model name → 400) or silently re-calls the failing primary
+            # (same-provider). Copy only when it actually differs so the common
+            # primary path keeps object identity and avoids needless churn.
+            #
+            # COUPLING: this enforces "wire model == resolved model". If
+            # ``model_override`` is ever wired through prompt_composer, then
+            # ``primary_model`` in ai_library_chat_wiring.py MUST derive from it
+            # too — otherwise this realignment clobbers the override on the
+            # primary attempt.
+            composed_attempt = (
+                composed
+                if composed.model == model
+                else composed.model_copy(update={"model": model})
+            )
+
             try:
-                response = await mw.call(composed, messages)
+                response = await mw.call(composed_attempt, messages)
             except RunCancelled:
                 # Cancel terminates the whole chain — no fallback attempts.
                 raise

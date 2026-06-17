@@ -277,3 +277,81 @@ async def test_deadline_stops_chain_before_later_models():
 
     primary.call.assert_awaited()  # primary tried
     fb0.call.assert_not_awaited()  # deadline blocked the fallback
+
+
+# ── Audit #8 (fix A): wire model realigned per attempt ────────────────────
+
+
+def _captured_model(adapter: AsyncMock) -> str:
+    """The composed.model the adapter's call() actually received."""
+    composed_arg = adapter.call.await_args.args[0]
+    return composed_arg.model
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_cross_provider_fallback_realigns_wire_model():
+    """Primary (qwen) fails → fallback (doubao) must receive composed.model
+    == its OWN model, not the stale primary name. Otherwise the doubao
+    endpoint+key gets a qwen model name → 400/misroute."""
+    primary = AsyncMock()
+    primary.call.side_effect = _StatusError(503)
+    doubao = AsyncMock()
+    doubao.call.return_value = {"choices": [{"message": {"content": "ok"}}]}
+
+    chain = LLMFallbackChain(
+        primary_model="qwen-max",
+        fallback_models=["doubao-seed-2"],
+        adapter_factory=_make_factory({"qwen-max": primary, "doubao-seed-2": doubao}),
+        max_retries_per_model=0,
+        base_delay_s=0,
+    )
+    composed = _composed()
+    response = await chain.call(composed, [])
+
+    assert response["_actual_model"] == "doubao-seed-2"
+    assert _captured_model(primary) == "qwen-max"
+    assert _captured_model(doubao) == "doubao-seed-2"  # realigned, not qwen-max
+    # Original composed object is never mutated.
+    assert composed.model == "qwen-max"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_same_provider_fallback_switches_wire_model():
+    """qwen-max → qwen-plus: the fallback attempt must actually carry
+    qwen-plus on the wire, not silently re-call the failing qwen-max."""
+    primary = AsyncMock()
+    primary.call.side_effect = _StatusError(503)
+    plus = AsyncMock()
+    plus.call.return_value = {"choices": [{"message": {"content": "ok"}}]}
+
+    chain = LLMFallbackChain(
+        primary_model="qwen-max",
+        fallback_models=["qwen-plus"],
+        adapter_factory=_make_factory({"qwen-max": primary, "qwen-plus": plus}),
+        max_retries_per_model=0,
+        base_delay_s=0,
+    )
+    await chain.call(_composed(), [])
+
+    assert _captured_model(plus) == "qwen-plus"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_primary_success_keeps_composed_identity():
+    """On the common primary path (composed.model == primary_model) no copy
+    is made — the exact composed object is forwarded unchanged."""
+    primary = AsyncMock()
+    primary.call.return_value = {"choices": [{"message": {"content": "ok"}}]}
+
+    chain = LLMFallbackChain(
+        primary_model="qwen-max",
+        fallback_models=["qwen-plus"],
+        adapter_factory=_make_factory({"qwen-max": primary}),
+    )
+    composed = _composed()
+    await chain.call(composed, [])
+
+    assert primary.call.await_args.args[0] is composed  # same object, no churn

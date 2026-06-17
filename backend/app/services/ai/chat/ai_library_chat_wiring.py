@@ -133,6 +133,12 @@ async def build_agent_runner_stack(
       3. Wrap adapter in LLMFallbackChain (retry + fallback semantics)
       4. Construct AgentRunner with hooks + Delegate tool
     """
+    # Audit #8 coupling: primary_model is the model the chain resolves the
+    # primary adapter (endpoint + key) for, and LLMFallbackChain realigns
+    # composed.model to it per attempt. ``model_override`` (prompt_composer)
+    # is NOT plumbed here today; if it is ever wired through, derive
+    # primary_model from it too, else the chain's per-attempt realignment
+    # will clobber the override on the primary call.
     primary_model = agent.get("model") or "qwen-max"
     fallback_models: list[str] = list(agent.get("fallback_models") or [])
     budget_cents = agent.get("budget_per_run_cents")

@@ -19,6 +19,7 @@ import httpx
 from loguru import logger
 
 from app.schemas.ai_library import ComposedSystemPrompt
+from app.services.ai.adapters._model_routing import resolve_wire_model
 from app.services.ai.adapters.base import StreamChunk
 
 
@@ -59,7 +60,9 @@ class OpenAICompatibleAdapter:
         messages: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         body: Dict[str, Any] = {
-            "model": composed.model or self.default_model,
+            # Audit #8 (fix C): route-authoritative — the wire model must match
+            # the model this adapter resolved its endpoint + key for.
+            "model": resolve_wire_model(composed.model, self.default_model),
             "temperature": composed.temperature,
             "max_tokens": composed.max_tokens,
             "messages": [

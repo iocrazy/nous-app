@@ -15,6 +15,7 @@ from anthropic import AsyncAnthropic
 from loguru import logger
 
 from app.schemas.ai_library import ComposedSystemPrompt
+from app.services.ai.adapters._model_routing import resolve_wire_model
 
 
 class ClaudeAdapter:
@@ -140,7 +141,11 @@ class ClaudeAdapter:
         composed: ComposedSystemPrompt,
         messages: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        model = composed.model or self.default_model
+        # Audit #8 (fix C): ClaudeAdapter builds the request itself (Anthropic
+        # Messages format, no _build_body), so it needs the same route-authoritative
+        # guard as OpenAICompatibleAdapter — otherwise a misrouted composed.model
+        # would be sent to a Claude endpoint resolved for a different model.
+        model = resolve_wire_model(composed.model, self.default_model)
         anthropic_messages = self._convert_messages(messages)
         anthropic_tools = self._convert_tools(composed.tools or [])
 
