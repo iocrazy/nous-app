@@ -503,6 +503,8 @@
     "gridView": "平铺模式",
     "listView": "列表模式",
     "justifiedView": "自适应模式",
+    "flattenFolders": "展开显示子文件",
+    "showFolders": "显示文件夹",
     "mimeType": "MIME 类型",
     "fileProperties": "文件属性",
     "copyToTitle": "复制到",

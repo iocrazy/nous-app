@@ -10,6 +10,7 @@ import {
   LayoutGrid,
   LayoutList,
   LayoutTemplate,
+  FolderTree,
   ArrowUpDown,
   ChevronDown,
   ChevronLeft,
@@ -281,7 +282,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
   const {
     isPersonal, scopeId, selectedFolderId, selectedLibraryId, selectedSmartFolderId,
     isResourcesView, isRecycleView, isSharedView, isTempView,
-    loading, viewMode, setViewMode, sortBy, setSortBy,
+    loading, viewMode, setViewMode, flattenFolders, setFlattenFolders, sortBy, setSortBy,
     searchQuery, folderChain, folderPreviews,
     selectedResource, setSelectedResource,
     selectedFolder, setSelectedFolder,
@@ -629,6 +630,23 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                 <LayoutList size={14} />
               )}
             </button>
+
+            {/* Flatten toggle — "show child files": list every file from the
+                current folder + all descendants, hiding folder cards. */}
+            {isResourcesView && (
+              <button
+                onClick={() => setFlattenFolders((v) => !v)}
+                className={`p-1.5 rounded-lg transition-colors ${
+                  flattenFolders
+                    ? 'text-indigo-400 bg-indigo-500/10'
+                    : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800'
+                }`}
+                title={flattenFolders ? t('resources.showFolders') : t('resources.flattenFolders')}
+                aria-pressed={flattenFolders}
+              >
+                <FolderTree size={14} />
+              </button>
+            )}
 
             {/* Upload button */}
             {canUpload && (

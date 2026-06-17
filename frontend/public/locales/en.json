@@ -503,6 +503,8 @@
     "gridView": "Grid View",
     "listView": "List View",
     "justifiedView": "Justified View",
+    "flattenFolders": "Show child files",
+    "showFolders": "Show folders",
     "mimeType": "MIME Type",
     "fileProperties": "File Properties",
     "copyToTitle": "Copy To",

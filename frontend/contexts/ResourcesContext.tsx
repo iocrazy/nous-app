@@ -155,6 +155,13 @@ export interface ResourcesContextType {
   // ── View / UI state ──
   viewMode: 'grid' | 'list' | 'justified';
   setViewMode: React.Dispatch<React.SetStateAction<'grid' | 'list' | 'justified'>>;
+  /** "Show child files" toggle — flatten the current folder + all descendants
+   *  into one flat file list (folders hidden). Persisted. */
+  flattenFolders: boolean;
+  setFlattenFolders: React.Dispatch<React.SetStateAction<boolean>>;
+  /** True when folders should be hidden + files shown flat: the manual toggle
+   *  OR an active search (search is always recursive + folderless). */
+  flattenActive: boolean;
   sortBy: SortBy;
   setSortBy: React.Dispatch<React.SetStateAction<SortBy>>;
   searchQuery: string;
@@ -273,6 +280,22 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
 
   // ── View / UI state ──
   const [viewMode, setViewMode] = useState<'grid' | 'list' | 'justified'>('grid');
+  // "Show child files" — flatten folders into a recursive flat file list.
+  // Persisted so the preference survives reloads (mirrors useLibrary's pattern).
+  const [flattenFolders, setFlattenFolders] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('mediahub_resources_flatten') === '1';
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('mediahub_resources_flatten', flattenFolders ? '1' : '0');
+    } catch {
+      /* ignore quota / privacy-mode failures */
+    }
+  }, [flattenFolders]);
   const [sortBy, setSortBy] = useState<SortBy>('newest');
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -321,6 +344,32 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   //    the same way via the search_smart_folder RPC (mig 276). ──
   const RESOURCE_PAGE_SIZE =
     typeof window !== 'undefined' && window.innerWidth < 768 ? 20 : 40;
+  // ── Flatten / recursive mode ──────────────────────────────────────────
+  // Folders are hidden + files shown flat when the user enables the toggle OR
+  // a search is active (search is always recursive + folderless). At root the
+  // descendant set is "everything", expressed as an undefined id list (the
+  // query then drops the folder constraint); inside a folder we resolve the
+  // {current + all descendants} id set from the full `folders` tree by BFS.
+  const flattenActive = flattenFolders || !!debouncedSearch.trim();
+  const flattenFolderIds = useMemo<string[] | undefined>(() => {
+    if (!flattenActive || !selectedFolderId) return undefined;
+    const childrenByParent = new Map<string | null, string[]>();
+    for (const f of folders) {
+      const p = f.parent_id ? String(f.parent_id) : null;
+      (childrenByParent.get(p) ?? childrenByParent.set(p, []).get(p)!).push(String(f.id));
+    }
+    const ids: string[] = [];
+    const stack: string[] = [String(selectedFolderId)];
+    while (stack.length) {
+      const id = stack.pop()!;
+      ids.push(id);
+      for (const k of childrenByParent.get(id) ?? []) stack.push(k);
+    }
+    return ids;
+  }, [flattenActive, selectedFolderId, folders]);
+  // Stable fingerprint for the fetch dep arrays (array identity is unstable).
+  const flattenKey = flattenActive ? (flattenFolderIds?.join(',') ?? 'root') : 'off';
+
   const fetchResourcesPage = useCallback(
     async (cursor: KeysetCursor | null, signal: AbortSignal) => {
       if (selectedSmartFolderId) {
@@ -348,6 +397,9 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
           scopeId,
           folderId: selectedFolderId,
           libraryId: selectedLibraryId,
+          flatten: flattenActive,
+          flattenFolderIds,
+          search: debouncedSearch.trim() || undefined,
           ...filterParamsRef.current,
         },
         cursor,
@@ -357,9 +409,11 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     },
     // filterParamsKey is the JSON fingerprint read via filterParamsRef.current;
     // selectedSmartRulesKey re-triggers when the selected smart folder's rules
-    // load or change (rules themselves are read via smartFoldersRef.current).
+    // load or change (rules themselves are read via smartFoldersRef.current);
+    // flattenKey re-triggers when the flatten toggle / search recursion changes;
+    // debouncedSearch re-triggers the server-side keyword search on text change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isPersonal, scopeId, selectedFolderId, selectedLibraryId, selectedSmartFolderId, selectedSmartRulesKey, filterParamsKey],
+    [isPersonal, scopeId, selectedFolderId, selectedLibraryId, selectedSmartFolderId, selectedSmartRulesKey, filterParamsKey, flattenKey, debouncedSearch],
   );
   const {
     items: resources,
@@ -688,8 +742,11 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     return () => { cancelled = true; };
     // filterParamsKey is a JSON fingerprint of filterParams — using it
     // directly in the dep array would trigger on every object re-create.
+    // flattenKey re-loads when the flatten toggle / recursive search changes
+    // the folder scope of the fetch; debouncedSearch re-loads for the
+    // server-side keyword search as the query text changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPersonal, scopeId, selectedFolderId, selectedSmartFolderId, selectedLibraryId, sidebarView, filterParamsKey]);
+  }, [isPersonal, scopeId, selectedFolderId, selectedSmartFolderId, selectedLibraryId, sidebarView, filterParamsKey, flattenKey, debouncedSearch]);
 
   // Bulk load tag names for search
   useEffect(() => {
@@ -1109,6 +1166,9 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
 
     viewMode,
     setViewMode,
+    flattenFolders,
+    setFlattenFolders,
+    flattenActive,
     sortBy,
     setSortBy,
     searchQuery,
@@ -1150,7 +1210,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     resourceTagNamesMap, resourceTagIdsMap, loading, folderChain,
     recycleFolderId, recycleFolderItems, pendingPermanentDelete, pendingBatchPermanentDelete, pendingBatchPermanentDeleteFolders,
     selectedResource, selectedFolder, selectedResourceTags, selectedIds, lastClickedId, multiSelectMode,
-    viewMode, sortBy, searchQuery, debouncedSearch, showInfoPanel, infoPanelWidth,
+    viewMode, flattenFolders, flattenActive, sortBy, searchQuery, debouncedSearch, showInfoPanel, infoPanelWidth,
     filterParams, setFilterParams, reloadResources,
     loadMoreResources, hasMoreResources, isLoadingMoreResources,
     loadMoreTrashed, hasMoreTrashed, isLoadingMoreTrashed,

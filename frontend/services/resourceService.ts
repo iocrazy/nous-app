@@ -394,6 +394,19 @@ export interface FetchResourcesParams {
   scopeId: string;
   folderId?: string | null;
   libraryId?: string | null;
+  /** Flatten/recursive mode — ignore the single-folder constraint so files from
+   *  the current folder AND all descendant folders surface in one flat list
+   *  (used by the "show child files" toggle + recursive search). */
+  flatten?: boolean;
+  /** When `flatten` and inside a folder: the {current + all descendant} folder
+   *  ids to scope to (folder_id IN …). Empty/undefined at root means "no folder
+   *  constraint" → every file in the scope/library. */
+  flattenFolderIds?: string[];
+  /** Server-side keyword search on resources.filename (ILIKE). Makes search hit
+   *  the database across the whole (flattened) scope instead of only filtering
+   *  the already-loaded page — fixes "search returns nothing for items beyond
+   *  the first page". */
+  search?: string;
   /** AND-semantic tag id filter. */
   tag_ids?: string[];
   /** Minimum rating (>= filter; 1..5). */
@@ -613,7 +626,13 @@ function buildResourceItemsQuery(
     .eq('resources.is_trashed', false)
     .neq('resource.source_type', 'web');
 
-  if (params.folderId) {
+  if (params.flatten) {
+    // Recursive/flat mode: scope to {current + descendant} folders, or drop the
+    // folder constraint entirely at root (whole scope/library).
+    if (params.flattenFolderIds && params.flattenFolderIds.length > 0) {
+      query = query.in('folder_id', params.flattenFolderIds);
+    }
+  } else if (params.folderId) {
     query = query.eq('folder_id', params.folderId);
   } else {
     query = query.is('folder_id', null);
@@ -623,6 +642,21 @@ function buildResourceItemsQuery(
     query = query.eq('library_id', params.libraryId);
   } else if (!params.isPersonal) {
     query = query.is('library_id', null);
+  }
+
+  // ── Server-side keyword search (resources.filename OR resources.notes ILIKE).
+  //    Both columns carry pg_trgm GIN indexes (filename: mig 300, notes: mig
+  //    154), so `ILIKE '%q%'` is index-backed and fast at scale. PostgREST's
+  //    or() value grammar splits only on the first two dots + top-level commas,
+  //    so dotted filenames ("image.jpg") are safe in the value; we strip just
+  //    commas/parens (which would break the logic-tree parse). `*` = wildcard. ──
+  if (params.search && params.search.trim()) {
+    const safe = params.search.trim().replace(/[(),]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (safe) {
+      query = query.or(`filename.ilike.*${safe}*,notes.ilike.*${safe}*`, {
+        referencedTable: 'resources',
+      });
+    }
   }
 
   // ── Apply tag intersection (if any) on the resources embed. ──

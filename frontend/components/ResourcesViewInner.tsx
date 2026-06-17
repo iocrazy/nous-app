@@ -61,7 +61,7 @@ export const ResourcesViewInner: React.FC = () => {
     selectedResource, setSelectedResource, selectedFolder, setSelectedFolder,
     selectedIds, setSelectedIds,
     lastClickedId, setLastClickedId, multiSelectMode, setMultiSelectMode,
-    viewMode, setViewMode, sortBy, setSortBy,
+    viewMode, setViewMode, flattenActive, sortBy, setSortBy,
     searchQuery, setSearchQuery, debouncedSearch, setDebouncedSearch,
     showInfoPanel, setShowInfoPanel, infoPanelWidth, setInfoPanelWidth,
     loadFolders, loadChildFolders, loadTrashedResources, loadDownloadedResources,
@@ -328,6 +328,7 @@ export const ResourcesViewInner: React.FC = () => {
     selectedSmartFolderId, isSharedView, isRecycleView, isDownloadsView,
     smartFolders, libraries, folderChain, navigate, resPath, setRecycleFolderId,
     searchScope: resourceSearchScope,
+    flatten: flattenActive,
   });
 
   // ─── Operations hook ──────────────────────────────────
