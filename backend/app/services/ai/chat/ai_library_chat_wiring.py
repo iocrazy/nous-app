@@ -186,6 +186,9 @@ async def build_agent_runner_stack(
             CapabilityGateHook(capability_profile),
             name="capability_gate",
             priority=25,
+            # Security gate: if profile evaluation itself errors, BLOCK the
+            # tool rather than silently allowing a gated call through.
+            fail_closed=True,
         )
 
     registry.register_post(
