@@ -37,18 +37,29 @@ def service(monkeypatch: pytest.MonkeyPatch) -> RecordingService:
 
 
 class TestBuildTurnEpisode:
-    def test_renders_only_the_latest_pair(self) -> None:
+    def test_renders_only_the_latest_user_message(self) -> None:
+        # Latest user message only — assistant reply is excluded (it would
+        # pollute the graph with "the assistant said X" facts), and older
+        # turns are dropped (the per-turn episode carries just the new turn).
         body = _build_turn_episode(
             ["older question", "what export size?"],
             ["older answer", "use 9:16 vertical"],
         )
-        assert body == "user: what export size?\nassistant: use 9:16 vertical"
+        assert body == "user: what export size?"
+        assert "assistant" not in body
         assert "older" not in body
+
+    def test_excludes_assistant_text(self) -> None:
+        # assistant reply never reaches the episode
+        assert _build_turn_episode(["hi"], ["hello there"]) == "user: hi"
 
     def test_handles_one_sided_turns(self) -> None:
         assert _build_turn_episode(["hi"], []) == "user: hi"
-        assert _build_turn_episode([], ["hello"]) == "assistant: hello"
+        # assistant-only turn → nothing to ingest (no user fact)
+        assert _build_turn_episode([], ["hello"]) == ""
         assert _build_turn_episode([], []) == ""
+        # blank user message → empty
+        assert _build_turn_episode(["   "], ["reply"]) == ""
 
     def test_clips_to_max_chars(self) -> None:
         body = _build_turn_episode(["x" * 10000], [], max_chars=100)
@@ -75,7 +86,9 @@ async def test_writes_episode_with_user_group(service: RecordingService) -> None
     call = service.calls[0]
     assert call["group_id"] == "user-42"
     assert call["name"] == "chat-777-888"
-    assert "9:16 vertical" in call["body"]
+    # user message is ingested; the assistant reply is excluded (noise)
+    assert "what export size?" in call["body"]
+    assert "9:16 vertical" not in call["body"]
 
 
 @pytest.mark.asyncio
