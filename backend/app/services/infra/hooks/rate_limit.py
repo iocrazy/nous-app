@@ -52,7 +52,17 @@ class RateLimitHook:
 
             redis = await get_async_redis()
             window = int(time.time() // 60)
-            key = f"rate:tools:{ctx.user_id}:{ctx.agent_id}:{window}"
+            # Bucket on the delegation-tree ROOT, not the individual agent. A
+            # delegating agent spawns sub-agents each with their own agent_id;
+            # keying on agent_id gave every sub-agent a fresh bucket, so the
+            # tree's effective tool-call rate was N× the cap. delegation_chain[0]
+            # is the tree-root slug (== this agent for a top-level/un-delegated
+            # turn, so non-delegated behaviour is unchanged); fall back to this
+            # agent's slug for legacy paths with an empty chain.
+            tree_root = (
+                ctx.delegation_chain[0] if ctx.delegation_chain else ctx.agent_slug
+            )
+            key = f"rate:tools:{ctx.user_id}:{tree_root}:{window}"
             count = await redis.incr(key)
             if count == 1:
                 await redis.expire(key, _WINDOW_TTL_S)

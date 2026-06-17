@@ -11,11 +11,16 @@ from app.services.infra.hooks import HookContext
 from app.services.infra.hooks.rate_limit import RateLimitHook
 
 
-def _ctx() -> HookContext:
+def _ctx(
+    *,
+    agent_id: str = "00000000-0000-0000-0000-000000000002",
+    agent_slug: str = "script_ai",
+    delegation_chain: tuple[str, ...] = (),
+) -> HookContext:
     return HookContext(
         run_id="0",
-        agent_id=UUID("00000000-0000-0000-0000-000000000002"),
-        agent_slug="script_ai",
+        agent_id=UUID(agent_id),
+        agent_slug=agent_slug,
         user_id=UUID("00000000-0000-0000-0000-000000000003"),
         session_id=None,
         tool_name="Skill",
@@ -24,6 +29,7 @@ def _ctx() -> HookContext:
         accumulated_completion_tokens=0,
         accumulated_cost_cents=0.0,
         iteration=1,
+        delegation_chain=delegation_chain,
     )
 
 
@@ -75,12 +81,46 @@ async def test_over_limit_aborts_with_reason(fake_redis: FakeRedis) -> None:
 
 
 @pytest.mark.asyncio
-async def test_key_scopes_user_and_agent(fake_redis: FakeRedis) -> None:
+async def test_key_scopes_user_and_tree_root(fake_redis: FakeRedis) -> None:
     hook = RateLimitHook(limit_per_min=1)
-    await hook(_ctx())
+    # Un-delegated turn: chain root falls back to this agent's slug.
+    await hook(_ctx(delegation_chain=("script_ai",)))
     key = next(iter(fake_redis.counts))
     assert "00000000-0000-0000-0000-000000000003" in key  # user
-    assert "00000000-0000-0000-0000-000000000002" in key  # agent
+    assert "script_ai" in key  # delegation-tree root slug
+
+
+@pytest.mark.asyncio
+async def test_delegation_subtree_shares_one_bucket(fake_redis: FakeRedis) -> None:
+    """Two agents in the SAME delegation tree (different agent_id, same chain
+    root) share one bucket — a delegating agent can't multiply the cap."""
+    hook = RateLimitHook(limit_per_min=2)
+    root = _ctx(
+        agent_id="00000000-0000-0000-0000-0000000000aa",
+        agent_slug="orchestrator",
+        delegation_chain=("orchestrator",),
+    )
+    sub = _ctx(
+        agent_id="00000000-0000-0000-0000-0000000000bb",
+        agent_slug="worker",
+        delegation_chain=("orchestrator", "worker"),
+    )
+    assert (await hook(root)).decision == "continue"
+    assert (await hook(sub)).decision == "continue"
+    # Third call anywhere in the tree trips the shared bucket.
+    assert (await hook(sub)).decision == "abort"
+    assert len(fake_redis.counts) == 1  # one shared key, not per-agent
+
+
+@pytest.mark.asyncio
+async def test_separate_trees_get_separate_buckets(fake_redis: FakeRedis) -> None:
+    """Different delegation-tree roots get independent buckets."""
+    hook = RateLimitHook(limit_per_min=1)
+    a = _ctx(agent_slug="alpha", delegation_chain=("alpha",))
+    b = _ctx(agent_slug="beta", delegation_chain=("beta",))
+    assert (await hook(a)).decision == "continue"
+    assert (await hook(b)).decision == "continue"  # different tree, own bucket
+    assert len(fake_redis.counts) == 2
 
 
 @pytest.mark.asyncio
