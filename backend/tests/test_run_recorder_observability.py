@@ -17,7 +17,10 @@ under test runs without supabase.
 
 from __future__ import annotations
 
+import asyncio
 from uuid import uuid4
+
+import pytest
 
 from app.agent_framework.context_compactor import (
     CompactionStats,
@@ -160,3 +163,74 @@ def test_note_subagent_handles_garbage_envelope():
     # Counter still bumps (we observed the spawn happened); other
     # fields stay clean.
     assert rec.metadata["subagents"]["count"] == 1
+
+
+# ─── #11: background heartbeat (keeps a long turn from being false-reaped) ──
+
+
+@pytest.mark.asyncio
+async def test_background_heartbeat_ticks_during_long_turn(monkeypatch):
+    """The background loop must refresh the heartbeat repeatedly even when the
+    runner never calls heartbeat() between iterations (one long LLM/tool call).
+    Without it a >2min single call would let the run go silent and the liveness
+    reaper would falsely mark it dead (acute cross-pod)."""
+    rec = _make_recorder()
+    rec.run_id = "123"
+    calls = {"n": 0}
+
+    async def _fake_hb():
+        calls["n"] += 1
+
+    monkeypatch.setattr(rec, "heartbeat", _fake_hb)
+    monkeypatch.setattr(rec, "HEARTBEAT_RATE_LIMIT_S", 0.01)
+
+    rec._start_background_heartbeat()
+    assert rec._heartbeat_task is not None
+    await asyncio.sleep(0.05)  # ~several ticks of the 0.01s loop
+    rec._heartbeat_task.cancel()
+    try:
+        await rec._heartbeat_task
+    except asyncio.CancelledError:
+        pass
+    assert calls["n"] >= 2  # fired multiple times during the "long turn"
+
+
+@pytest.mark.asyncio
+async def test_aexit_cancels_background_heartbeat(monkeypatch):
+    """__aexit__ must stop the background loop (before _finish flips status)."""
+    rec = _make_recorder()
+    rec.run_id = "123"
+
+    async def _noop():
+        return None
+
+    async def _fake_finish(**_k):
+        return None
+
+    monkeypatch.setattr(rec, "heartbeat", _noop)
+    monkeypatch.setattr(rec, "HEARTBEAT_RATE_LIMIT_S", 0.01)
+    monkeypatch.setattr(rec, "_finish", _fake_finish)
+    monkeypatch.setattr(rec, "_maybe_export_langfuse", lambda **_k: None)
+
+    rec._start_background_heartbeat()
+    task = rec._heartbeat_task
+    assert task is not None
+
+    await rec.__aexit__(None, None, None)
+    assert rec._heartbeat_task is None
+    assert task.cancelled() or task.done()
+
+
+@pytest.mark.asyncio
+async def test_start_failure_arms_no_background_heartbeat(monkeypatch):
+    """If the insert fails (telemetry disabled, run_id stays None), no
+    background task is armed — __aexit__ stays a clean no-op."""
+    rec = _make_recorder()
+
+    async def _boom():
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(rec, "_pre_flight_check_paused", _boom)
+    await rec.__aenter__()
+    assert rec.run_id is None
+    assert rec._heartbeat_task is None
