@@ -31,10 +31,12 @@ def _make_composed(**overrides: Any) -> ComposedSystemPrompt:
 
 
 def test_build_body_injects_system_then_user_messages() -> None:
+    # default_model aligned with composed.model — the realistic factory case
+    # (audit #8: a mismatch now self-heals to default_model, covered separately).
     adapter = OpenAICompatibleAdapter(
         api_url="https://example.com/v1/chat/completions",
         api_key="sk-test",
-        default_model="fallback-model",
+        default_model="test-model",
     )
     composed = _make_composed()
     messages = [{"role": "user", "content": "hi"}]
@@ -79,6 +81,56 @@ def test_build_body_falls_back_to_default_model_when_composed_empty() -> None:
     composed = _make_composed(model="")
     body = adapter._build_body(composed, [])
     assert body["model"] == "fallback-model"
+
+
+def test_build_body_self_heals_on_model_mismatch() -> None:
+    """Audit #8 fix C: adapter resolved for default_model must not send a
+    different composed.model on the wire — self-heal to the resolved model."""
+    adapter = OpenAICompatibleAdapter(
+        api_url="https://doubao.example/v1/chat/completions",
+        api_key="sk",
+        default_model="doubao-seed-2",
+    )
+    composed = _make_composed(model="qwen-max")  # misrouted name
+
+    with patch("app.services.ai.adapters._model_routing.inc_metric") as mock_metric:
+        body = adapter._build_body(composed, [])
+
+    assert body["model"] == "doubao-seed-2"  # resolved model wins, not composed
+    mock_metric.assert_called_once_with("adapter_wire_model_mismatch")
+
+
+def test_build_body_no_mismatch_signal_when_aligned() -> None:
+    """No false-positive metric when composed.model == default_model."""
+    adapter = OpenAICompatibleAdapter(
+        api_url="https://example.com",
+        api_key="sk",
+        default_model="qwen-max",
+    )
+    composed = _make_composed(model="qwen-max")
+
+    with patch("app.services.ai.adapters._model_routing.inc_metric") as mock_metric:
+        body = adapter._build_body(composed, [])
+
+    assert body["model"] == "qwen-max"
+    mock_metric.assert_not_called()
+
+
+def test_build_body_generic_adapter_honors_composed_model() -> None:
+    """When default_model is empty (generic adapter), composed.model carries
+    the routing decision and is honored without a mismatch signal."""
+    adapter = OpenAICompatibleAdapter(
+        api_url="https://example.com",
+        api_key="sk",
+        default_model="",
+    )
+    composed = _make_composed(model="qwen-plus")
+
+    with patch("app.services.ai.adapters._model_routing.inc_metric") as mock_metric:
+        body = adapter._build_body(composed, [])
+
+    assert body["model"] == "qwen-plus"
+    mock_metric.assert_not_called()
 
 
 @pytest.mark.asyncio

@@ -177,3 +177,27 @@ async def test_call_invokes_messages_create_with_normalized_output() -> None:
     assert kwargs["system"] == "You are helpful."
     # Empty tools list must NOT be passed — Anthropic rejects tools=[]
     assert "tools" not in kwargs
+
+
+@pytest.mark.asyncio
+async def test_call_self_heals_on_model_mismatch() -> None:
+    """Audit #8 fix C: ClaudeAdapter builds the request itself (no _build_body),
+    so it carries the same route-authoritative guard — a misrouted composed.model
+    must not be sent to a Claude endpoint resolved for default_model."""
+    adapter = ClaudeAdapter(api_key="sk-ant-test", default_model="claude-opus-4-5")
+    composed = _make_composed(model="qwen-max")  # misrouted name
+
+    fake_response = MagicMock()
+    fake_response.content = [MagicMock(type="text", text="ok")]
+    fake_response.stop_reason = "end_turn"
+
+    with (
+        patch.object(adapter, "_client") as mock_client,
+        patch("app.services.ai.adapters._model_routing.inc_metric") as mock_metric,
+    ):
+        mock_client.messages.create = AsyncMock(return_value=fake_response)
+        await adapter.call(composed, [{"role": "user", "content": "hi"}])
+
+    kwargs = mock_client.messages.create.call_args.kwargs
+    assert kwargs["model"] == "claude-opus-4-5"  # resolved model wins
+    mock_metric.assert_called_once_with("adapter_wire_model_mismatch")
