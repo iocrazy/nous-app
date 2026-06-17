@@ -387,6 +387,7 @@ class SubAgentTaskService:
                 return self._build_envelope(
                     result=result,
                     sub_run_id=recorder.run_id,
+                    recorder=recorder,
                 )
         except Exception as exc:
             logger.exception("[subagent_task] run_turn failed slug={}", slug)
@@ -397,6 +398,7 @@ class SubAgentTaskService:
         *,
         result: dict[str, Any],
         sub_run_id: Any,
+        recorder: Any = None,
     ) -> dict[str, Any]:
         """Map AgentRunner.run_turn's verbose result into the compact
         envelope the parent agent reads. Keep this small — extra
@@ -405,11 +407,25 @@ class SubAgentTaskService:
         error = result.get("error")
         status = "failed" if error else "success"
 
+        # Whole-sub-turn token total. The recorder accumulates prompt+completion
+        # across ALL iterations and is the source of truth; run_turn's result
+        # carries only the LAST iteration's usage under result['raw']['usage']
+        # and NEVER a top-level 'usage' — so the previous `result['usage']` read
+        # always yielded 0 and the parent's fan-out cost tree was blank.
+        tokens_used = 0
+        if recorder is not None:
+            tokens_used = int(getattr(recorder, "prompt_tokens", 0) or 0) + int(
+                getattr(recorder, "completion_tokens", 0) or 0
+            )
+        if tokens_used == 0:
+            usage = (result.get("raw") or {}).get("usage") or {}
+            tokens_used = int(usage.get("total_tokens", 0) or 0)
+
         return {
             "summary": content,
             "key_findings": [],
             "files_created": [],
-            "tokens_used": (result.get("usage") or {}).get("total_tokens", 0),
+            "tokens_used": tokens_used,
             "sub_run_id": str(sub_run_id) if sub_run_id else None,
             "status": status,
             **({"error": error} if error else {}),
