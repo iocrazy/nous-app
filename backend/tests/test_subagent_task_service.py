@@ -109,22 +109,50 @@ async def test_failed_envelope_has_expected_keys(service):
         assert key in out, f"failed envelope missing key {key!r}"
 
 
+class _FakeRecorder:
+    """Minimal stand-in exposing the accumulated-token properties."""
+
+    def __init__(self, prompt_tokens: int, completion_tokens: int):
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+
+
 async def test_build_envelope_success_shape():
     """Success envelope carries the sub-run id, summary text, and
     token usage — what the parent LLM needs to reason about cost
-    and what the Runs UI links to for drill-down."""
+    and what the Runs UI links to for drill-down. tokens_used comes from
+    the recorder's ACCUMULATED prompt+completion (whole sub-turn, all
+    iterations), NOT result['usage'] — run_turn never sets that key, so the
+    old read always yielded 0 and the parent cost tree was blank."""
     sub_run_id = uuid4()
     fake_result = {
         "content": "Found 3 relevant docs in /docs/",
-        "usage": {"total_tokens": 1234, "input_tokens": 800, "output_tokens": 434},
+        # run_turn's REAL shape: last-iteration usage under 'raw'. The recorder
+        # (800+434) must win over this 99 so multi-iteration turns total right.
+        "raw": {"usage": {"total_tokens": 99}},
     }
-    env = SubAgentTaskService._build_envelope(result=fake_result, sub_run_id=sub_run_id)
+    env = SubAgentTaskService._build_envelope(
+        result=fake_result,
+        sub_run_id=sub_run_id,
+        recorder=_FakeRecorder(prompt_tokens=800, completion_tokens=434),
+    )
     assert env["status"] == "success"
     assert env["summary"] == "Found 3 relevant docs in /docs/"
     assert env["sub_run_id"] == str(sub_run_id)
-    assert env["tokens_used"] == 1234
+    assert env["tokens_used"] == 1234  # recorder accumulation, not the 99 raw
     for key in ENVELOPE_KEYS:
         assert key in env
+
+
+async def test_build_envelope_tokens_fallback_to_raw_usage():
+    """Without a recorder, fall back to run_turn's REAL shape
+    (result['raw']['usage']['total_tokens']) — never the nonexistent
+    result['usage'] the old code read."""
+    env = SubAgentTaskService._build_envelope(
+        result={"content": "ok", "raw": {"usage": {"total_tokens": 777}}},
+        sub_run_id=uuid4(),
+    )
+    assert env["tokens_used"] == 777
 
 
 async def test_build_envelope_failed_shape():
