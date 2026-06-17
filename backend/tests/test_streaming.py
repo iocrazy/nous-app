@@ -154,6 +154,107 @@ async def test_streaming_records_usage_from_final_chunk():
     assert recorder.usage_calls == [(10, 3)]
 
 
+# ─── #2: stream pre-flight (compaction + budget) + heartbeat ──────────
+
+
+@pytest.mark.asyncio
+async def test_stream_turn_rejects_over_budget_before_calling_adapter(monkeypatch):
+    """The streaming path must run the same context-budget guard as run_turn:
+    an over-budget turn yields ONE clean terminal chunk and never reaches the
+    provider (which would otherwise return a cryptic error)."""
+    import app.agent_framework as af
+
+    def _raise(**_kw):
+        raise af.ContextWindowError("context window exceeded")
+
+    monkeypatch.setattr(af, "check_context_budget", _raise)
+
+    class _NeverAdapter:
+        async def call(self, c, m):
+            raise AssertionError("adapter.call must not run when over budget")
+
+        async def stream(self, c, m):
+            raise AssertionError("adapter.stream must not run when over budget")
+            yield  # pragma: no cover — makes this an async generator
+
+    runner = AgentRunner(adapter=_NeverAdapter(), skill_tool=None)
+    chunks = []
+    async for chunk in runner.stream_turn(
+        _composed(), [{"role": "user", "content": "hi"}]
+    ):
+        chunks.append(chunk)
+    assert len(chunks) == 1
+    assert chunks[0].finish_reason == "length"
+    assert "too long" in (chunks[0].delta_text or "")
+    assert chunks[0].usage.get("error_code") == "context_budget_exceeded"
+
+
+@pytest.mark.asyncio
+async def test_stream_turn_heartbeats_each_iteration():
+    """Long multi-iteration streams must refresh the heartbeat between
+    iterations, else the sweeper can wrongly reap a healthy run as lost."""
+
+    class _CountingRecorder:
+        def __init__(self):
+            self.heartbeats = 0
+
+        def record_usage(self, **k): ...
+        def record_skill(self, *a): ...
+
+        async def heartbeat(self):
+            self.heartbeats += 1
+
+        async def check_cancelled(self):
+            return False
+
+    rec = _CountingRecorder()
+    runner = AgentRunner(
+        adapter=_StreamingAdapterWithToolCall(), skill_tool=_StubSkillTool()
+    )
+    async for _ in runner.stream_turn(
+        _composed(),
+        [{"role": "user", "content": "do foo"}],
+        recorder=rec,
+        auto_recorder=False,
+    ):
+        pass
+    # Two iterations (tool-call round + final text) → at least two heartbeats.
+    assert rec.heartbeats >= 2
+
+
+@pytest.mark.asyncio
+async def test_stream_turn_cooperative_cancel_stops_before_adapter():
+    """A DB-side (cooperative) cancel between iterations stops the stream."""
+
+    class _CancelRecorder:
+        def record_usage(self, **k): ...
+        def record_skill(self, *a): ...
+
+        async def heartbeat(self): ...
+
+        async def check_cancelled(self):
+            return True  # cancelled immediately
+
+    class _NeverStreamAdapter:
+        async def call(self, c, m):
+            return {"choices": [{"message": {"content": ""}}]}
+
+        async def stream(self, c, m):
+            raise AssertionError("must stop before streaming on cancel")
+            yield  # pragma: no cover
+
+    runner = AgentRunner(adapter=_NeverStreamAdapter(), skill_tool=None)
+    chunks = []
+    async for chunk in runner.stream_turn(
+        _composed(),
+        [{"role": "user", "content": "hi"}],
+        recorder=_CancelRecorder(),
+        auto_recorder=False,
+    ):
+        chunks.append(chunk)
+    assert chunks == []
+
+
 # ─── StreamChunk shape ───────────────────────────────────────────────
 
 

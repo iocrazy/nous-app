@@ -263,6 +263,26 @@ class AgentRunner:
         from app.agent_framework._metrics_helper import inc_metric
         from app.services.ai.adapters.base import StreamChunk, StreamingNotSupported
 
+        # Pre-flight: shared compaction + context-budget guard (mirrors
+        # run_turn). The streaming path — the primary ChatPanel route —
+        # previously skipped both, so a long conversation could overflow the
+        # model window mid-stream and surface a cryptic provider error. On
+        # budget rejection, emit one clean terminal chunk and stop.
+        user_messages, preflight_err = await self._preflight_compact_and_budget(
+            composed, user_messages, recorder
+        )
+        if preflight_err is not None:
+            yield StreamChunk(
+                delta_text=(
+                    "This conversation has grown too long for the selected "
+                    "model's context window. Start a new session or switch to "
+                    "a larger-context model to continue."
+                ),
+                finish_reason="length",
+                usage={"error_code": preflight_err.get("error_code")},
+            )
+            return
+
         stream_method = getattr(self.adapter, "stream", None)
         if stream_method is None:
             resp = await self.adapter.call(composed, user_messages)
@@ -340,6 +360,16 @@ class AgentRunner:
             if abort is not None and abort.is_aborted():
                 inc_metric("streaming_aborted_mid")
                 raise RunAborted("user cancel between stream iterations")
+
+            # Heartbeat + cooperative cancel between iterations (mirrors
+            # run_turn). Without this a long multi-iteration stream never
+            # refreshes heartbeat_at, so the sweeper can wrongly mark a healthy
+            # run heartbeat_lost; and a DB-side cancel would be ignored.
+            if recorder is not None:
+                await recorder.heartbeat()
+                if await recorder.check_cancelled():
+                    inc_metric("streaming_cancelled_cooperative")
+                    return
 
             # Per-iteration tool_call accumulation. Provider sends each
             # tool_call as deltas across multiple chunks; we stitch them.
@@ -548,6 +578,52 @@ class AgentRunner:
             logger.warning(f"[AgentRunner] FinishIssue handler raised: {fi_exc!r}")
             return {"error": f"FinishIssue failed: {fi_exc.__class__.__name__}"}
 
+    async def _preflight_compact_and_budget(
+        self,
+        composed: ComposedSystemPrompt,
+        user_messages: list[dict],
+        recorder: Optional[RunRecorder],
+    ) -> tuple[list[dict], Optional[dict[str, Any]]]:
+        """Shared pre-flight for run_turn AND stream_turn.
+
+        Runs tiered compaction (prune tool results / emergency-cap bodies)
+        then the context-budget guard. Returns
+        ``(possibly_compacted_user_messages, error_or_None)``. The error dict
+        (``error`` + ``error_code='context_budget_exceeded'``) lets each caller
+        surface it in its own shape — run_turn returns it, stream_turn yields a
+        terminal chunk. Extracted because the streaming path (the primary
+        ChatPanel route) silently lacked BOTH protections, so a long
+        conversation could overflow the window with a cryptic provider error
+        instead of a clean rejection.
+        """
+        user_messages, compaction_stats = await _DEFAULT_COMPACTOR.maybe_compact(
+            system_message=composed.system_message,
+            user_messages=user_messages,
+            model=composed.model,
+        )
+        if (
+            recorder is not None
+            and compaction_stats.tokens_saved > 0
+            and hasattr(recorder, "note_compaction")
+        ):
+            recorder.note_compaction(compaction_stats)
+
+        try:
+            from app.agent_framework import ContextWindowError, check_context_budget
+
+            check_context_budget(
+                system_prompt=composed.system_message,
+                user_messages=user_messages,
+                model=composed.model,
+            )
+        except ContextWindowError as exc:
+            logger.warning(f"[AgentRunner] context budget rejected: {exc}")
+            return user_messages, {
+                "error": str(exc),
+                "error_code": "context_budget_exceeded",
+            }
+        return user_messages, None
+
     async def run_turn(
         self,
         composed: ComposedSystemPrompt,
@@ -565,29 +641,16 @@ class AgentRunner:
         creating the AbortController and the watcher coroutine that
         fires it.
         """
-        # Pre-flight 1: tiered compaction (Phase 1 of issue #199).
-        # Yellow tier prunes tool results in place; orange/red emergency-
-        # caps message bodies (Phase 2 will swap that for an LLM head
-        # summary). On green this is essentially free — identity return,
-        # no token re-count. On any other tier we feed the COMPACTED list
-        # into the budget check below so we don't reject a turn that
-        # would have fit after pruning.
-        user_messages, compaction_stats = await _DEFAULT_COMPACTOR.maybe_compact(
-            system_message=composed.system_message,
-            user_messages=user_messages,
-            model=composed.model,
+        # Pre-flight: tiered compaction (prune tool results / emergency-cap
+        # bodies) + context-budget guard, shared with stream_turn via
+        # _preflight_compact_and_budget so the two paths can never again
+        # diverge on these protections. On green compaction is ~free; the
+        # budget guard rejects a turn that wouldn't fit even after pruning.
+        user_messages, preflight_err = await self._preflight_compact_and_budget(
+            composed, user_messages, recorder
         )
-        # hasattr instead of try/except AttributeError so a real bug
-        # inside note_compaction (e.g., supabase write failing with
-        # AttributeError on a None response) doesn't get swallowed —
-        # Phase 5 wires the helper in; until then this branch is just
-        # quiet.
-        if (
-            recorder is not None
-            and compaction_stats.tokens_saved > 0
-            and hasattr(recorder, "note_compaction")
-        ):
-            recorder.note_compaction(compaction_stats)
+        if preflight_err is not None:
+            return {"content": "", "raw": None, **preflight_err}
 
         # Phase 5 of #199: hand the per-turn recorder to the
         # SubAgentTaskService so any spawn() inside this turn can roll
@@ -602,32 +665,6 @@ class AgentRunner:
                 self.skill_tool.subagent_task.parent_recorder = recorder
             except Exception:  # noqa: BLE001 — telemetry side-effect
                 pass
-
-        # Pre-flight 2: context budget guard. A small-context model
-        # (e.g. user filled qwen-max with a heavy AGENT spec) would
-        # otherwise return truncated nonsense or fail with cryptic
-        # provider errors. Reject early with a structured error.
-        try:
-            from app.agent_framework import (
-                ContextWindowError,
-                check_context_budget,
-            )
-
-            check_context_budget(
-                system_prompt=composed.system_message,
-                user_messages=user_messages,
-                model=composed.model,
-            )
-        except ContextWindowError as exc:
-            logger.warning(f"[AgentRunner] context budget rejected: {exc}")
-            return {
-                "content": "",
-                "raw": None,
-                "error": str(exc),
-                "error_code": "context_budget_exceeded",
-            }
-        # ContextWindowWarning is emitted via warnings module — picked
-        # up by loguru's stdlib bridge if configured. Don't block on it.
 
         messages = list(user_messages)
         iteration = 0
