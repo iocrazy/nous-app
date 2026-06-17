@@ -337,6 +337,16 @@ async def run_issue_agent_step(
     )
 
 
+# Issue statuses that mean "stop working this issue". If an external actor
+# (a human, or another agent) moved the issue into one of these mid-dispatch,
+# preempt the continuation loop instead of burning the remaining turn budget /
+# LLM spend and writing a status the user already overrode. Mirrors Symphony's
+# per-turn tracker reconciliation (SPEC §16.5: re-fetch state each turn, stop if
+# no longer active). The agent's own completion stays in_progress through the
+# loop (set_status runs after), so it is never mistaken for an external stop.
+PREEMPT_STATUSES = frozenset({"cancelled", "done", "closed"})
+
+
 async def _run_dispatch_with_continuation(
     issue_id: int,
     issue_row: dict[str, Any],
@@ -345,6 +355,7 @@ async def _run_dispatch_with_continuation(
     *,
     run_turn: Callable[..., Awaitable[dict[str, Any]]],
     set_status: Callable[..., Awaitable[None]],
+    load_issue: Callable[[int], Awaitable[dict[str, Any]]],
     max_continuations: int = ISSUE_MAX_CONTINUATIONS,
     auto_close: bool = False,
 ) -> dict[str, Any]:
@@ -352,6 +363,10 @@ async def _run_dispatch_with_continuation(
     FinishIssue outcome. ``continue`` auto-runs another bounded turn; everything
     else terminates the dispatch. Deps are injected so this is unit-testable
     without DBOS/DB (mirrors _run_reply_turns).
+
+    Before every turn the issue is re-loaded and the dispatch is preempted if it
+    was externally moved to a terminal/cancelled status (see ``PREEMPT_STATUSES``)
+    — the external status is left untouched.
 
     Routing:
       completed       → done if ``auto_close`` (slice 2a platform toggle) else
@@ -366,6 +381,24 @@ async def _run_dispatch_with_continuation(
     outcome: Optional[str] = None
     reason: Optional[str] = None
     while True:
+        # Reconcile against external state before (re)running. A user or another
+        # agent may have cancelled/closed the issue since dispatch; if so, stop
+        # without overwriting their status.
+        fresh = await load_issue(issue_id)
+        fresh_status = (fresh or {}).get("status")
+        if fresh_status in PREEMPT_STATUSES:
+            logger.info(
+                f"[execute_issue] issue {issue_id} externally set to "
+                f"{fresh_status!r} mid-dispatch; preempting after "
+                f"{attempt} continuation(s)"
+            )
+            return {
+                "issue_id": issue_id,
+                "preempted": True,
+                "preempted_status": fresh_status,
+                "outcome": outcome,
+                "attempts": attempt,
+            }
         res = await run_turn(
             issue_row, agent_id, user_id, is_continuation=(attempt > 0)
         )
@@ -435,6 +468,7 @@ async def execute_issue(issue_id: int) -> dict[str, Any]:
                 user_id,
                 run_turn=run_issue_agent_step,
                 set_status=set_status,
+                load_issue=load_issue,
                 auto_close=auto_close,
             )
             return {"issue_id": issue_id, "executed": True, **routed}
