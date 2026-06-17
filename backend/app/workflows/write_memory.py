@@ -13,11 +13,25 @@ NEXT chat, not the current one. DBOS retry policy is conservative
 
 from __future__ import annotations
 
+import os
 from typing import Any, Optional
 from uuid import UUID
 
 from dbos import DBOS
 from loguru import logger
+
+_DISABLE_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def _l1_memory_enabled() -> bool:
+    """L1 (``agent_memories``) kill-switch. Defaults ON. Set
+    ``MEDIAHUB_DISABLE_L1_MEMORY`` once Honcho + Graphiti are validated on real
+    traffic to retire the home-grown L1 layer — the Honcho (user model) and
+    Graphiti (temporal graph) dual-writes keep running. Recall honours the same
+    flag (see ai_library_chat_wiring._memory_recall_enabled)."""
+    val = os.getenv("MEDIAHUB_DISABLE_L1_MEMORY", "").strip().lower()
+    return val not in _DISABLE_TRUTHY
+
 
 _RECENT_TURNS_PER_CHANNEL = 10
 
@@ -332,13 +346,19 @@ async def write_memory_workflow(
     if not msgs["user_msgs"] and not msgs["asst_msgs"]:
         return {"rows_written": 0, "reason": "no_messages"}
 
-    result = await extract_and_persist_memories_step(
-        run_id=run_id,
-        agent_id=agent_id,
-        user_id=user_id,
-        user_msgs=msgs["user_msgs"],
-        asst_msgs=msgs["asst_msgs"],
-    )
+    # L1 (agent_memories) write — kill-switchable so the home-grown layer can be
+    # retired once Honcho + Graphiti are validated, without touching their
+    # dual-writes below. Default ON.
+    if _l1_memory_enabled():
+        result = await extract_and_persist_memories_step(
+            run_id=run_id,
+            agent_id=agent_id,
+            user_id=user_id,
+            user_msgs=msgs["user_msgs"],
+            asst_msgs=msgs["asst_msgs"],
+        )
+    else:
+        result = {"rows_written": 0, "reason": "l1_disabled"}
 
     # Phase 4 M2: Graphiti dual-write, AFTER the L1 path so a graph
     # outage can never cost an agent_memories row. Cheap flag check

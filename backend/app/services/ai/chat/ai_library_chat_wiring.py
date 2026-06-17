@@ -574,12 +574,17 @@ async def _resolve_session_project(session_id: Optional[str]) -> Optional[str]:
 
 
 def _memory_recall_enabled() -> bool:
-    """Feature flag — defaults ON in M1.5; can be killed via env if needed."""
-    return os.getenv("MEDIAHUB_DISABLE_MEMORY_RECALL", "").lower() not in (
-        "1",
-        "true",
-        "yes",
-    )
+    """L1 (agent_memories) recall flag — defaults ON. Killed by either
+    ``MEDIAHUB_DISABLE_MEMORY_RECALL`` (recall-only) or
+    ``MEDIAHUB_DISABLE_L1_MEMORY`` (the unified L1 retirement switch that also
+    stops the L1 write — see write_memory._l1_memory_enabled). Honcho + Graphiti
+    recall are independent of this flag."""
+    _off = {"1", "true", "yes", "on"}
+    if os.getenv("MEDIAHUB_DISABLE_MEMORY_RECALL", "").strip().lower() in _off:
+        return False
+    if os.getenv("MEDIAHUB_DISABLE_L1_MEMORY", "").strip().lower() in _off:
+        return False
+    return True
 
 
 def _build_sonnet_call(settings: Any):
