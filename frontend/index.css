@@ -263,7 +263,18 @@
 /* Cover-side overview column — faithful port of the audio mock `.side` stack
    (mockups/mediahub-audio-redesign.html): cover → song → artist → stats → stars
    → tags, centered and compact under the cover. */
-.audio-side { display: flex; flex-direction: column; align-items: center; max-width: 340px; }
+/* The cover-side text sits directly on --audio-bg (an arbitrary stored color),
+   so re-scope the semantic --content ladder to the bg-derived readable ramp
+   (--audio-fg*, black-or-white picked by WCAG contrast). This keeps the song /
+   artist / stats / stars legible on ANY background; falls back to the dark-theme
+   ladder when the ramp vars are absent. */
+.audio-side {
+  display: flex; flex-direction: column; align-items: center; max-width: 340px;
+  --content: var(--audio-fg, #e7e7ea);
+  --content-2: var(--audio-fg-2, #a3a3ad);
+  --content-3: var(--audio-fg-3, #74747e);
+  --content-4: var(--audio-fg-4, #55555e);
+}
 .audio-song { font-size: 19px; font-weight: 720; margin-top: 20px; text-align: center; color: var(--content, #e7e7ea); line-height: 1.25; }
 .audio-artist { font-size: 12.5px; color: var(--content-3, #74747e); margin-top: 4px; }
 .audio-ovr { display: flex; gap: 16px; margin-top: 16px; font-size: 12px; color: var(--content-2, #a3a3ad); align-items: center; }

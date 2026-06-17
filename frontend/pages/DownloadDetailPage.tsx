@@ -686,7 +686,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
              .audio-stage root inherits them (AudioStageIsland is pure layout). */
           <div
             className="contents"
-            style={{ ['--tint']: tint.tint, ['--tint-deep']: tint.tintDeep, ['--audio-bg']: sodaTheme.bg } as React.CSSProperties}
+            style={{ ['--tint']: tint.tint, ['--tint-deep']: tint.tintDeep, ['--audio-bg']: sodaTheme.bg, ['--audio-fg']: sodaTheme.onBg, ['--audio-fg-2']: sodaTheme.onBg2, ['--audio-fg-3']: sodaTheme.onBg3, ['--audio-fg-4']: sodaTheme.onBg4 } as React.CSSProperties}
           >
             <AudioStageIsland
               title={titleText}

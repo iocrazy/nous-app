@@ -1781,7 +1781,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
       {islandAudioStage && (
         <div
           className="contents"
-          style={{ ['--tint']: tint.tint, ['--tint-deep']: tint.tintDeep, ['--audio-bg']: audioSodaTheme.bg } as React.CSSProperties}
+          style={{ ['--tint']: tint.tint, ['--tint-deep']: tint.tintDeep, ['--audio-bg']: audioSodaTheme.bg, ['--audio-fg']: audioSodaTheme.onBg, ['--audio-fg-2']: audioSodaTheme.onBg2, ['--audio-fg-3']: audioSodaTheme.onBg3, ['--audio-fg-4']: audioSodaTheme.onBg4 } as React.CSSProperties}
         >
           <AudioStageIsland
             title={resource.filename}
@@ -1874,7 +1874,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             view); other media keep the compact mobile preview. */}
         <div
           className={`w-full ${isAudio ? 'min-h-[78vh] sm:h-[50vh]' : 'h-64 sm:h-80'} md:h-auto md:flex-1 flex flex-col min-w-0 overflow-hidden shrink-0 md:shrink ${islandAudioStage ? 'audio-stage' : 'bg-ink-950'}`}
-          style={islandAudioStage ? ({ ['--tint']: tint.tint, ['--tint-deep']: tint.tintDeep, ['--audio-bg']: audioSodaTheme.bg } as React.CSSProperties) : undefined}
+          style={islandAudioStage ? ({ ['--tint']: tint.tint, ['--tint-deep']: tint.tintDeep, ['--audio-bg']: audioSodaTheme.bg, ['--audio-fg']: audioSodaTheme.onBg, ['--audio-fg-2']: audioSodaTheme.onBg2, ['--audio-fg-3']: audioSodaTheme.onBg3, ['--audio-fg-4']: audioSodaTheme.onBg4 } as React.CSSProperties) : undefined}
         >
           {/* Version preview banner */}
           {selectedVersionId && (
