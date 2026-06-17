@@ -9,7 +9,12 @@ with the **same logical embedder**. Its configuration lives in **one place** —
 | Base URL | `graph_embedder_base_url` | (empty → env/extractor fallback) |
 | API key | `graph_embedder_api_key` | (empty) |
 | Model | `graph_embedder_model` | (empty) |
-| **Dimensions** | `graph_embedder_dimensions` | `1536` |
+| **Dimensions** | `graph_embedder_dimensions` | `1536` (code default); **prod runs `4096`** |
+
+> **Prod state (2026-06-17): Qwen3-Embedding-8B @ 4096.** Graphiti indexes 4096 on
+> FalkorDB; Honcho was migrated off pgvector onto its **LanceDB** backend to index
+> 4096 (see "Honcho LanceDB backend" below). The `1536` code default is the
+> conservative fallback for a fresh install.
 
 ## How each subsystem consumes it
 
@@ -21,25 +26,61 @@ with the **same logical embedder**. Its configuration lives in **one place** —
   cold start.
 
 - **Honcho** is a third-party service that reads its **own container `.env`**
-  (`EMBEDDING_*`, `VECTOR_STORE_DIMENSIONS`); it cannot read mediahub's database.
-  Its `.env` is therefore a **materialization** of the same values above. When the
-  embedder model/dimension changes, the Honcho env must be re-synced **manually**
-  (procedure below). This is deliberate — auto-syncing from the app would mean the
-  backend mutating a third-party container and restarting it, which is not built.
+  (`EMBEDDING_*`, `VECTOR_STORE_*`); it cannot read mediahub's database. Its `.env` is
+  therefore a **materialization** of the same values above. When the embedder
+  model/dimension changes, the Honcho env must be re-synced **manually** (procedure
+  below). This is deliberate — auto-syncing from the app would mean the backend
+  mutating a third-party container and restarting it, which is not built.
 
-## The 2000-dimension cap (why it exists)
+## The dimension cap (4096)
 
-Honcho's default vector backend is **pgvector**, and **pgvector's HNSW index is
-hard-capped at 2000 dimensions** (8KB index-page limit). The shared embedder feeds
-that index, so the admin panel **rejects any `dimensions` > 2000** (HTTP 422).
+The admin panel **rejects any `dimensions` > 4096** (HTTP 422) — 4096 is
+Qwen3-Embedding-8B's native width, the largest embedder we use. Both backends index
+4096: Graphiti on **FalkorDB** (no dim ceiling — verified to build indexes at 4096
+and 8192) and Honcho on its **LanceDB** backend (`fixed_size_list(float32, N)`, no
+page limit).
 
-- `1536` (Qwen3-Embedding-4B native) — current default, fits comfortably.
-- `4096` (Qwen3-Embedding-8B native) — **does not fit pgvector HNSW**. To use it you
-  must either truncate to ≤2000 via the embedder's `dimensions` param (MRL), or
-  migrate Honcho off pgvector (LanceDB / Turbopuffer), which is a separate project.
+History: the cap used to be **2000**, because Honcho ran on **pgvector** and
+pgvector's HNSW index is hard-capped at 2000 dimensions (8KB index-page limit).
+Migrating Honcho to LanceDB (below) removed that ceiling.
 
-FalkorDB (Graphiti's backend) has **no** such limit — it indexes 4096+ fine. The cap
-exists only because the embedder is shared and Honcho is the lower ceiling.
+## Honcho LanceDB backend (how it's set up)
+
+Honcho supports `VECTOR_STORE_TYPE` ∈ {`pgvector`, `turbopuffer`, `lancedb`}.
+To index >2000 dims it runs on **lancedb** (embedded, file-based; the `lancedb`
+package ships in the Honcho image). Its `.env` (dev stack `honcho-dev/.env`):
+
+```
+EMBEDDING_MODEL_CONFIG__MODEL=Qwen/Qwen3-Embedding-8B
+EMBEDDING_VECTOR_DIMENSIONS=4096          # authoritative (VECTOR_STORE_DIMENSIONS is deprecated)
+VECTOR_STORE_TYPE=lancedb
+VECTOR_STORE_MIGRATED=true                # else _uses_pgvector() stays true and queries hit pgvector
+VECTOR_STORE_LANCEDB_PATH=/app/lancedb_data
+```
+
+Compose: a **shared** host volume `…/honcho-dev/lancedb_data:/app/lancedb_data` is
+mounted into **both** the `api` and `deriver` services (they must see the same lance
+files). Data flow: the deriver writes document/observation rows to the pgvector
+`documents` table (embedding column left NULL), and the **reconciler `sync_vectors`
+task** (300s interval) embeds them via the configured embedder and writes the vectors
+to LanceDB at the configured dim.
+
+Boot gotcha: `src/startup/embedding_validator.py` **always** asserts the pgvector
+`documents` / `message_embeddings` column dim == `EMBEDDING_VECTOR_DIMENSIONS`, even
+on the lancedb path — so those columns must be `vector(4096)` or the api crash-loops.
+Since the HNSW index can't be 4096, drop the index and ALTER the column with no index:
+
+```sql
+DROP INDEX IF EXISTS ix_documents_embedding_hnsw;
+DROP INDEX IF EXISTS ix_message_embeddings_embedding_hnsw;
+ALTER TABLE documents          ALTER COLUMN embedding TYPE vector(4096) USING NULL;
+ALTER TABLE message_embeddings ALTER COLUMN embedding TYPE vector(4096) USING NULL;
+```
+
+Synology networking note: the NAS **host shell** cannot curl Honcho's published port
+(`192.168.50.9:18000` → 503 "Unable to connect", a host↔docker-bridge hairpin quirk),
+but **containers can** — the mediahub backend container reaches it at 200. Test Honcho
+connectivity from a container, not the host shell.
 
 ## Procedure: change the embedder (incl. dimension)
 

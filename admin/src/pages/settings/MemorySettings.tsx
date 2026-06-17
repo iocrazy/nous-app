@@ -70,7 +70,7 @@ export function MemorySettings() {
     setEmKey('')
   }, [data])
 
-  const DIM_MAX = 2000
+  const DIM_MAX = 4096
   const dimNum = Number(emDim)
   const dimInvalid = !Number.isInteger(dimNum) || dimNum < 1 || dimNum > DIM_MAX
 
@@ -173,7 +173,8 @@ export function MemorySettings() {
       <div style={{ color: 'var(--color-text-3)', fontSize: 12, marginTop: 4, marginBottom: 4 }}>
         Used by Graphiti (live, via these settings) and Honcho (its container env is kept in
         sync with these values — see the memory-embedder runbook). Dimensions is shared by
-        both, so it is capped at {DIM_MAX} (Honcho's pgvector HNSW index limit).
+        both; capped at {DIM_MAX} (Qwen3-Embedding-8B native width). Graphiti runs on FalkorDB
+        and Honcho on LanceDB, so 4096 is indexable on both.
       </div>
       <Row label="Base URL" hint="Optional — defaults to the extractor/env config when blank.">
         <Input value={emBaseUrl} onChange={setEmBaseUrl} placeholder="https://.../v1" style={{ width: 260 }} />
@@ -185,7 +186,7 @@ export function MemorySettings() {
       <Divider style={{ margin: 0 }} />
       <Row
         label="Dimensions"
-        hint={`Embedding output width; sizes the vector index. 1536 = Qwen3-Embedding-4B. Max ${DIM_MAX} (pgvector HNSW limit).`}
+        hint={`Embedding output width; sizes the vector index. 1536 = Qwen3-Embedding-4B, 4096 = Qwen3-Embedding-8B. Max ${DIM_MAX}.`}
       >
         <Input
           value={emDim}
