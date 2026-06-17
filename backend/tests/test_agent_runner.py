@@ -226,3 +226,12 @@ async def test_timeout_sec_exceeded_returns_run_timeout(monkeypatch):
     assert result.get("error_code") == "run_timeout"
     # LLM called once (iteration 1); iteration 2 was cut off by the cap.
     assert adapter.call.await_count == 1
+
+
+@pytest.mark.unit
+def test_tool_iteration_cap_unified_at_ten():
+    """Audit #15: run_turn and stream_turn share one ceiling (was 5 vs 10).
+    Guards against a future accidental divergence reintroducing the bug."""
+    from app.services.ai.runner.agent_runner import MAX_TOOL_ITERATIONS
+
+    assert MAX_TOOL_ITERATIONS == 10
