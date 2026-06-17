@@ -52,6 +52,9 @@ interface UseResourcesDisplayOptions {
   /** Eagle-style scope toggles — when omitted, defaults to all three
    *  fields (name / notes / tags). */
   searchScope?: ResourceSearchField[];
+  /** Flatten mode (manual toggle OR active search): hide folders entirely so
+   *  only the recursive flat file list shows. */
+  flatten?: boolean;
 }
 
 export function useResourcesDisplay({
@@ -81,6 +84,7 @@ export function useResourcesDisplay({
   resPath,
   setRecycleFolderId,
   searchScope = DEFAULT_RESOURCE_SCOPE,
+  flatten = false,
 }: UseResourcesDisplayOptions) {
   const { t } = useTranslation();
 
@@ -182,6 +186,11 @@ export function useResourcesDisplay({
   }, [filteredItems, sortBy]);
 
   const filteredFolders = useMemo(() => {
+    // Flatten mode (manual toggle OR active search) hides folders entirely —
+    // the resource list is fetched recursively (current folder + descendants),
+    // so showing folder cards would be redundant + the old name-only filter
+    // surfaced folders that contain no matching files (the reported bug).
+    if (flatten) return [];
     if (!debouncedSearch.trim()) return childFolders;
     // Folders only have a name. If 'name' isn't in the scope, the user
     // explicitly opted out of name search — leave folders unfiltered
@@ -189,7 +198,7 @@ export function useResourcesDisplay({
     if (!searchScope.includes('name')) return childFolders;
     const q = debouncedSearch.trim().toLowerCase();
     return childFolders.filter((f) => f.name.toLowerCase().includes(q));
-  }, [childFolders, debouncedSearch, searchScope]);
+  }, [childFolders, debouncedSearch, searchScope, flatten]);
 
   const allSelectableIds = useMemo(() => {
     const ids: string[] = [];

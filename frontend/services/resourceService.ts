@@ -394,6 +394,14 @@ export interface FetchResourcesParams {
   scopeId: string;
   folderId?: string | null;
   libraryId?: string | null;
+  /** Flatten/recursive mode — ignore the single-folder constraint so files from
+   *  the current folder AND all descendant folders surface in one flat list
+   *  (used by the "show child files" toggle + recursive search). */
+  flatten?: boolean;
+  /** When `flatten` and inside a folder: the {current + all descendant} folder
+   *  ids to scope to (folder_id IN …). Empty/undefined at root means "no folder
+   *  constraint" → every file in the scope/library. */
+  flattenFolderIds?: string[];
   /** AND-semantic tag id filter. */
   tag_ids?: string[];
   /** Minimum rating (>= filter; 1..5). */
@@ -613,7 +621,13 @@ function buildResourceItemsQuery(
     .eq('resources.is_trashed', false)
     .neq('resource.source_type', 'web');
 
-  if (params.folderId) {
+  if (params.flatten) {
+    // Recursive/flat mode: scope to {current + descendant} folders, or drop the
+    // folder constraint entirely at root (whole scope/library).
+    if (params.flattenFolderIds && params.flattenFolderIds.length > 0) {
+      query = query.in('folder_id', params.flattenFolderIds);
+    }
+  } else if (params.folderId) {
     query = query.eq('folder_id', params.folderId);
   } else {
     query = query.is('folder_id', null);
