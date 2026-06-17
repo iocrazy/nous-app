@@ -110,20 +110,28 @@ async def extract_and_persist_memories_step(
 def _build_turn_episode(
     user_msgs: list[str], asst_msgs: list[str], *, max_chars: int = 6000
 ) -> str:
-    """Render the MOST RECENT user/assistant pair as an episode body.
+    """Render the MOST RECENT user message as a graph episode body.
+
+    Only the user's message is ingested. Including the assistant's reply
+    makes Graphiti extract facts ABOUT THE ASSISTANT ("the assistant
+    congratulated the user", "the assistant described Vue as solid"),
+    which pollute the user's memory graph with non-durable noise (~5 of 7
+    extracted facts in prod validation were assistant-side). ``asst_msgs``
+    is accepted (the caller passes the full turn) but deliberately
+    excluded. The "user:" prefix is kept so Graphiti anchors first-person
+    facts to a "user" entity.
 
     The L1 writer consumes the whole rolling window every harvest; an
-    episode ingested per turn must only carry the new turn, otherwise
-    the graph re-ingests the same exchanges N times. Empty when there
-    is nothing new to say.
+    episode ingested per turn must only carry the new turn, otherwise the
+    graph re-ingests the same exchanges N times. Empty when there is no
+    new user message.
     """
-    parts: list[str] = []
-    if user_msgs:
-        parts.append(f"user: {user_msgs[-1]}")
-    if asst_msgs:
-        parts.append(f"assistant: {asst_msgs[-1]}")
-    body = "\n".join(p for p in parts if p.strip())
-    return body[:max_chars]
+    if not user_msgs:
+        return ""
+    latest = user_msgs[-1].strip()
+    if not latest:
+        return ""
+    return f"user: {latest}"[:max_chars]
 
 
 async def _write_graph_episode(
