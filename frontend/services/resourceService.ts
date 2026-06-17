@@ -644,11 +644,19 @@ function buildResourceItemsQuery(
     query = query.is('library_id', null);
   }
 
-  // ── Server-side keyword search (resources.filename ILIKE). Single-condition
-  //    on the embedded resources table — supabase-js encodes the pattern value,
-  //    so no manual escaping of the user's query is needed. `%` are wildcards. ──
+  // ── Server-side keyword search (resources.filename OR resources.notes ILIKE).
+  //    Both columns carry pg_trgm GIN indexes (filename: mig 300, notes: mig
+  //    154), so `ILIKE '%q%'` is index-backed and fast at scale. PostgREST's
+  //    or() value grammar splits only on the first two dots + top-level commas,
+  //    so dotted filenames ("image.jpg") are safe in the value; we strip just
+  //    commas/parens (which would break the logic-tree parse). `*` = wildcard. ──
   if (params.search && params.search.trim()) {
-    query = query.ilike('resources.filename', `%${params.search.trim()}%`);
+    const safe = params.search.trim().replace(/[(),]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (safe) {
+      query = query.or(`filename.ilike.*${safe}*,notes.ilike.*${safe}*`, {
+        referencedTable: 'resources',
+      });
+    }
   }
 
   // ── Apply tag intersection (if any) on the resources embed. ──
