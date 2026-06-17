@@ -515,18 +515,18 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
         className="hidden md:block px-3 md:px-6 pt-3 pb-2 border-b border-ink-800/80 space-y-2"
         style={{ paddingRight: (selectedResource?.resource || selectedFolder) && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
       >
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <div className="flex items-center gap-3 min-w-0">
             {breadcrumbSegments.length <= 1 ? (
               <div>
-                <h2 className="text-lg font-semibold text-ink-100">{breadcrumbSegments[0]?.label}</h2>
+                <h2 className="text-lg font-semibold text-ink-100 whitespace-nowrap">{breadcrumbSegments[0]?.label}</h2>
               </div>
             ) : (
               <Breadcrumb segments={breadcrumbSegments} />
             )}
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex flex-wrap items-center justify-end gap-2 min-w-0">
             {/* Search box */}
             <ToolbarSearch
               onQueryChange={onQueryChange}
