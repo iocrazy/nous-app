@@ -74,7 +74,8 @@ def _build_runner_stack_mock(content: str = "OK"):
     runner.run_turn = AsyncMock(return_value={"content": content})
     stack = MagicMock()
     stack.runner = runner
-    stack.recalled_memories = []
+    stack.graph_facts = []
+    stack.user_context = None
     stack.primary_model = "doubao-seed-2-0-pro-260215"
     stack.fallback_chain_active = False
     return stack

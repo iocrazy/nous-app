@@ -201,7 +201,8 @@ async def test_chat_persists_both_messages_and_bumps_counters() -> None:
 
     fake_stack = MagicMock()
     fake_stack.runner = runner
-    fake_stack.recalled_memories = []
+    fake_stack.graph_facts = []
+    fake_stack.user_context = None
     fake_stack.primary_model = "qwen-max"
     fake_stack.fallback_chain_active = False
 
@@ -372,7 +373,8 @@ async def test_chat_persists_tool_calls_into_metadata_json() -> None:
     }
     fake_stack = MagicMock()
     fake_stack.runner = runner
-    fake_stack.recalled_memories = []
+    fake_stack.graph_facts = []
+    fake_stack.user_context = None
     fake_stack.primary_model = "qwen-max"
     fake_stack.fallback_chain_active = False
     fake_agent_repo_instance = MagicMock()
@@ -530,7 +532,8 @@ async def test_chat_streams_chunks_via_callback() -> None:
     }
     fake_stack = MagicMock()
     fake_stack.runner = runner
-    fake_stack.recalled_memories = []
+    fake_stack.graph_facts = []
+    fake_stack.user_context = None
     fake_stack.primary_model = "qwen-max"
     fake_stack.fallback_chain_active = False
     fake_agent_repo_instance = MagicMock()
@@ -693,7 +696,8 @@ async def test_chat_chunk_callback_failure_does_not_abort_turn() -> None:
 
     fake_stack = MagicMock()
     fake_stack.runner = runner
-    fake_stack.recalled_memories = []
+    fake_stack.graph_facts = []
+    fake_stack.user_context = None
     fake_stack.primary_model = "qwen-max"
     fake_stack.fallback_chain_active = False
     fake_agent_repo_instance = MagicMock()

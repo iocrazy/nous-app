@@ -1,4 +1,4 @@
-"""Agent messaging & memory: inbox, outbox, commitments, approval requests, memories."""
+"""Agent messaging: inbox, outbox, commitments, approval requests."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import datetime
 import uuid
 from typing import Optional
 
-from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -14,7 +13,6 @@ from sqlalchemy import (
     DateTime,
     ForeignKeyConstraint,
     Index,
-    Integer,
     PrimaryKeyConstraint,
     SmallInteger,
     Text,
@@ -280,187 +278,6 @@ class AgentCommitments(Base):
     fulfilled_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True))
     fulfillment_notes: Mapped[Optional[str]] = mapped_column(Text)
     fulfillment_run_id: Mapped[Optional[int]] = mapped_column(BigInteger)
-
-
-class AgentMemories(Base):
-    __tablename__ = "agent_memories"
-    __table_args__ = (
-        CheckConstraint(
-            "extracted_from IS NULL OR (extracted_from = ANY (ARRAY['user_msg'::text,"
-            " 'assistant_msg'::text, 'active_call'::text]))",
-            name="agent_memories_extracted_from_check",
-        ),
-        CheckConstraint(
-            "kind IS NULL OR (kind = ANY (ARRAY['declarative'::text, 'procedural'::text, 'episodic'::text]))",
-            name="agent_memories_kind_check",
-        ),
-        CheckConstraint(
-            "scope IS NULL OR (scope = ANY (ARRAY['session'::text, 'agent_user'::text,"
-            " 'user_global'::text, 'team_agent'::text, 'root_tree'::text]))",
-            name="agent_memories_scope_check",
-        ),
-        CheckConstraint(
-            "status = ANY (ARRAY['active'::text, 'archived'::text, 'superseded'::text])",
-            name="agent_memories_status_check",
-        ),
-        ForeignKeyConstraint(
-            ["agent_id"],
-            ["public.ai_agents.id"],
-            ondelete="CASCADE",
-            name="agent_memories_agent_id_fkey",
-        ),
-        ForeignKeyConstraint(
-            ["run_id"],
-            ["public.agent_runs.id"],
-            ondelete="SET NULL",
-            name="agent_memories_run_id_fkey",
-        ),
-        ForeignKeyConstraint(
-            ["superseded_by"],
-            ["public.agent_memories.id"],
-            ondelete="SET NULL",
-            name="agent_memories_superseded_by_fkey",
-        ),
-        PrimaryKeyConstraint("id", name="agent_memories_pkey"),
-        Index(
-            "idx_agent_memories_active_for_archival",
-            "last_recalled_at",
-            "created_at",
-            postgresql_where="(status = 'active'::text)",
-        ),
-        Index(
-            "idx_agent_memories_active_leaves",
-            "agent_id",
-            "user_id",
-            "consolidation_level",
-            postgresql_where="((status = 'active'::text) AND (superseded_by IS NULL))",
-        ),
-        Index(
-            "idx_agent_memories_active_namespace",
-            "agent_id",
-            "user_id",
-            "scope",
-            "created_at",
-            postgresql_where="((status = 'active'::text) AND (user_id IS NOT NULL))",
-        ),
-        Index("idx_agent_memories_agent", "agent_id", "created_at"),
-        Index(
-            "idx_agent_memories_embedding",
-            "embedding",
-            postgresql_ops={"embedding": "vector_cosine_ops"},
-            postgresql_using="ivfflat",
-            postgresql_with={"lists": "100"},
-        ),
-        Index(
-            "idx_agent_memories_kind_active",
-            "agent_id",
-            "user_id",
-            "kind",
-            "created_at",
-            postgresql_where="((status = 'active'::text) AND (kind IS NOT NULL))",
-        ),
-        Index(
-            "idx_agent_memories_namespace",
-            "agent_id",
-            "user_id",
-            "scope",
-            "created_at",
-            postgresql_where="(user_id IS NOT NULL)",
-        ),
-        Index(
-            "idx_agent_memories_session_recent",
-            "session_id",
-            "created_at",
-            postgresql_where="((session_id IS NOT NULL) AND (status = 'active'::text))",
-        ),
-        Index(
-            "idx_agent_memories_thread",
-            "thread_id",
-            "created_at",
-            postgresql_where="((thread_id IS NOT NULL) AND (status = 'active'::text))",
-        ),
-        {"schema": "public"},
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, primary_key=True, server_default=text("gen_random_uuid()")
-    )
-    agent_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
-    summary: Mapped[str] = mapped_column(Text, nullable=False)
-    metadata_json: Mapped[dict] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb")
-    )
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(True),
-        nullable=False,
-        server_default=text("now()"),
-    )
-    reinforcement_count: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        server_default=text("0"),
-        comment="Increments each time this memory is recalled. Used in salience scoring (MemU pattern).",
-    )
-    status: Mapped[str] = mapped_column(
-        Text,
-        nullable=False,
-        server_default=text("'active'::text"),
-        comment=(
-            "Lifecycle: active (retrievable) / archived (decayed, hidden from retrieval)"
-            " / superseded (replaced by a newer contradictory memory — M2.C)."
-        ),
-    )
-    consolidation_level: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        server_default=text("0"),
-        comment="Wave 5d M2.B: number of merge passes — 0=original, 1+ = consolidated super-memory",
-    )
-    # pgvector fix: raw file had NullType; prod column is vector(1536)
-    embedding: Mapped[Optional[list[float]]] = mapped_column(Vector(1536))
-    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid)
-    scope: Mapped[Optional[str]] = mapped_column(
-        Text,
-        comment="Namespace layer. M1.B writes only agent_user; M2/M3 may activate others.",
-    )
-    when_to_use: Mapped[Optional[str]] = mapped_column(
-        Text,
-        comment="Embedding is built on THIS field, not summary. RemiMem pattern: better recall.",
-    )
-    last_recalled_at: Mapped[Optional[datetime.datetime]] = mapped_column(
-        DateTime(True)
-    )
-    extracted_from: Mapped[Optional[str]] = mapped_column(
-        Text,
-        comment=(
-            "Source channel: user_msg / assistant_msg (passive harvest)"
-            " / active_call (agent invoked remember() tool). Wave 5d M2.D adds active_call."
-        ),
-    )
-    archived_at: Mapped[Optional[datetime.datetime]] = mapped_column(
-        DateTime(True),
-        comment="When status transitioned to non-active. Used by sweeper for re-evaluation cooldown.",
-    )
-    superseded_by: Mapped[Optional[uuid.UUID]] = mapped_column(
-        Uuid,
-        comment="When this row was merged into a super, points at the super's id. Audit trail; not used for retrieval.",
-    )
-    thread_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        Uuid,
-        comment="Phase M (M3.A): groups related memories. Retriever pulls full thread when one member matches.",
-    )
-    kind: Mapped[Optional[str]] = mapped_column(
-        Text,
-        comment="Phase M (M3.C): declarative=fact / procedural=how-to / episodic=event.",
-    )
-    session_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        Uuid,
-        comment=(
-            "Phase N N1: session this memory was harvested from."
-            " Used by threading.assign_thread_for to group same-session memories."
-        ),
-    )
-    run_id: Mapped[Optional[int]] = mapped_column(BigInteger)
 
 
 class AgentApprovalRequests(Base):

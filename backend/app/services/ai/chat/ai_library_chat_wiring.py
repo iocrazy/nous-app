@@ -11,9 +11,9 @@ Design notes:
   Adversarial-review #8 hardened CostAuditor itself against pollution
   even with a shared singleton, but per-turn instantiation is belt +
   suspenders.
-- Memory recall happens BEFORE prompt composition so RecalledMemory list
-  flows into ComposerInput. Recall failure degrades to "no memories this
-  turn" — never breaks the chat.
+- Memory recall (Graphiti graph facts + Honcho user context) happens
+  BEFORE prompt composition so it flows into ComposerInput. Recall failure
+  degrades to "no memories this turn" — never breaks the chat.
 - Fallback chain wraps the adapter at the entry point so retry/fallback
   semantics apply uniformly to every adapter.call inside AgentRunner.
 - write_memory_task signature is curried with run-scoped IDs so the
@@ -29,12 +29,8 @@ from dataclasses import dataclass
 from typing import Any, Optional
 from uuid import UUID
 
-from app.services.ai.adapters import get_adapter
 from app.services.ai.adapters.factory import get_adapter_for_user
 from app.services.ai.llm.llm_fallback_chain import LLMFallbackChain
-from app.services.ai.memory.retriever import MemoryRetriever
-from app.services.ai.prompts.prompt_composer import RecalledMemory
-from app.services.ai.providers.embedding_service import EmbeddingService
 from app.services.ai.runner.agent_runner import AgentRunner
 from app.services.ai.skills.skill_tool_service import SkillToolService
 from app.services.infra.hooks import HookRegistry
@@ -89,7 +85,6 @@ class AgentRunnerStack:
     """
 
     runner: AgentRunner
-    recalled_memories: list[RecalledMemory]
     # Phase 4 M3: bi-temporal facts from the Graphiti graph (flag-gated;
     # empty when FEATURE_GRAPH_MEMORY is off).
     graph_facts: list[str]
@@ -128,7 +123,7 @@ async def build_agent_runner_stack(
     the extended chain (M2 multi-agent scope).
 
     Steps:
-      1. Recall relevant memories (P0-isolated by user_id)
+      1. Recall memory (Graphiti graph facts + Honcho user context)
       2. Build per-turn HookRegistry with BudgetGuard + CostAuditor + MemoryHarvester
       3. Wrap adapter in LLMFallbackChain (retry + fallback semantics)
       4. Construct AgentRunner with hooks + Delegate tool
@@ -144,19 +139,12 @@ async def build_agent_runner_stack(
     budget_cents = agent.get("budget_per_run_cents")
 
     # ── 1. Memory recall (best-effort, concurrent) ──────────────────
-    # The three recalls are independent (none consumes another's output) and
-    # each is internally exception-safe (degrades to []/None, never raises),
-    # so we gather them instead of stacking three serial awaits on the chat
-    # hot path. L1 = embedding + cheap-LLM; graph = FalkorDB search (10s cap);
-    # honcho = HTTP user-model (10s cap) — serially that's their SUM per turn.
-    recalled, graph_facts, honcho_context = await asyncio.gather(
-        _safe_recall_memories(
-            agent_id=UUID(agent["id"]),
-            user_id=user_id,
-            session_id=session_id,
-            user_query=user_query,
-            settings=settings,
-        ),
+    # The two recalls are independent (neither consumes the other's output)
+    # and each is internally exception-safe (degrades to []/None, never
+    # raises), so we gather them instead of stacking serial awaits on the
+    # chat hot path. graph = FalkorDB search (10s cap); honcho = HTTP
+    # user-model (10s cap) — serially that's their SUM per turn.
+    graph_facts, honcho_context = await asyncio.gather(
         _safe_recall_graph_facts(
             user_id=user_id, user_query=user_query, session_id=session_id
         ),
@@ -407,65 +395,11 @@ async def build_agent_runner_stack(
 
     return AgentRunnerStack(
         runner=runner,
-        recalled_memories=recalled,
         graph_facts=graph_facts,
         primary_model=primary_model,
         fallback_chain_active=bool(fallback_models),
         user_context=honcho_context,
     )
-
-
-async def _safe_recall_memories(
-    *,
-    agent_id: UUID,
-    user_id: UUID,
-    # ai_sessions.id is BIGINT Snowflake (mig 231) → numeric string.
-    session_id: Optional[str],
-    user_query: str,
-    settings: Any,
-) -> list[RecalledMemory]:
-    """Best-effort memory recall. Empty list on any failure."""
-    if not _memory_recall_enabled():
-        return []
-
-    try:
-        from app.db import get_async_supabase_admin
-
-        client = await get_async_supabase_admin()
-    except Exception:  # noqa: BLE001
-        logger.exception("[m1.5] supabase admin unavailable; skipping memory recall")
-        return []
-
-    embedding_service = EmbeddingService()
-
-    async def embedding_call(text: str):
-        return await embedding_service.generate_embedding(text)
-
-    sonnet_call = _build_sonnet_call(settings)
-    redis_client = _get_redis_client_or_none()
-
-    retriever = MemoryRetriever(
-        supabase_client=client,
-        embedding_call=embedding_call,
-        sonnet_call=sonnet_call,
-        redis_client=redis_client,
-    )
-
-    try:
-        records = await retriever.recall(
-            user_id=user_id,
-            agent_id=agent_id,
-            session_id=session_id,
-            user_query=user_query,
-        )
-    except Exception:  # noqa: BLE001
-        logger.exception("[m1.5] memory recall failed; degrading to no recall")
-        return []
-
-    return [
-        RecalledMemory(id=r.id, summary=r.summary, when_to_use=r.when_to_use)
-        for r in records
-    ]
 
 
 async def _safe_recall_graph_facts(
@@ -573,51 +507,6 @@ async def _resolve_session_project(session_id: Optional[str]) -> Optional[str]:
         return None
 
 
-def _memory_recall_enabled() -> bool:
-    """L1 (agent_memories) recall flag — defaults ON. Killed by either
-    ``MEDIAHUB_DISABLE_MEMORY_RECALL`` (recall-only) or
-    ``MEDIAHUB_DISABLE_L1_MEMORY`` (the unified L1 retirement switch that also
-    stops the L1 write — see write_memory._l1_memory_enabled). Honcho + Graphiti
-    recall are independent of this flag."""
-    _off = {"1", "true", "yes", "on"}
-    if os.getenv("MEDIAHUB_DISABLE_MEMORY_RECALL", "").strip().lower() in _off:
-        return False
-    if os.getenv("MEDIAHUB_DISABLE_L1_MEMORY", "").strip().lower() in _off:
-        return False
-    return True
-
-
-def _build_sonnet_call(settings: Any):
-    """Construct a cheap-model adapter callable for memory ranking.
-
-    Uses Qwen-Turbo (cheapest in our adapter set). If the call fails the
-    retriever falls back to top-N salience — never breaks the chat.
-    """
-    cheap_model = os.getenv("MEDIAHUB_MEMORY_RANKER_MODEL", "qwen-turbo")
-
-    async def _call(prompt: str) -> str:
-        from uuid import UUID as _UUID
-
-        from app.schemas.ai_library import ComposedSystemPrompt
-
-        adapter = get_adapter(cheap_model, settings)
-        composed = ComposedSystemPrompt(
-            agent_id=_UUID(int=0),
-            agent_slug="memory_ranker",
-            model=cheap_model,
-            temperature=0.0,
-            max_tokens=512,
-            system_message="You rank candidate memories. Output bracketed numbers only.",
-            tools=[],
-            skill_manifest=[],
-            cache_fingerprint="memory_ranker_v1",
-        )
-        resp = await adapter.call(composed, [{"role": "user", "content": prompt}])
-        return resp["choices"][0]["message"].get("content") or ""
-
-    return _call
-
-
 async def _load_user_provider_config(user_id: UUID) -> dict[str, Any]:
     """Read ``user_settings.settings_json.ai_settings.ai_providers`` for
     one user. Returns the providers dict or empty {} on any failure.
@@ -648,24 +537,6 @@ async def _load_user_provider_config(user_id: UUID) -> dict[str, Any]:
     except Exception as err:
         logger.warning(f"[wiring] user_settings lookup failed for {user_id}: {err}")
         return {}
-
-
-def _get_redis_client_or_none():
-    """Lazy redis import — graceful degradation if redis-py isn't installed
-    or REDIS_URL isn't set."""
-    url = os.getenv("REDIS_URL")
-    if not url:
-        return None
-    try:
-        import redis.asyncio as aioredis  # type: ignore
-    except ImportError:
-        logger.debug("[m1.5] redis-py async not available; cache disabled")
-        return None
-    try:
-        return aioredis.from_url(url, decode_responses=True)
-    except Exception:  # noqa: BLE001
-        logger.exception("[m1.5] redis client init failed; cache disabled")
-        return None
 
 
 __all__ = ["AgentRunnerStack", "build_agent_runner_stack"]

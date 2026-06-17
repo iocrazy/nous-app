@@ -471,7 +471,8 @@ class AILibraryChatService:
             settings=settings,
         )
 
-        # Compose prompt with recalled memories injected after cache_boundary.
+        # Compose prompt with graph facts + user context injected after
+        # cache_boundary.
         # M (G→J→F→I→H follow-up): prompt now explicitly notes that the
         # Delegate tool can hand off to persistent specialists listed in
         # <available_workers>. Without this hint the LLM tends to do the
@@ -563,7 +564,6 @@ class AILibraryChatService:
                     "agent_slug": agent_slug,
                     "request_instructions": request_instructions,
                     "session_id": session_id,
-                    "recalled_memories": stack.recalled_memories,
                 }
             )
             composed = payload.metadata["composed"]
@@ -573,7 +573,6 @@ class AILibraryChatService:
                 ComposerInput(
                     agent_slug=agent_slug,
                     request_instructions=request_instructions,
-                    recalled_memories=stack.recalled_memories,
                     graph_facts=stack.graph_facts,
                     user_context=stack.user_context,
                 )

@@ -155,7 +155,8 @@ async def test_chat_full_pipeline_fires_all_side_effects() -> None:
     }
     fake_stack = MagicMock()
     fake_stack.runner = runner
-    fake_stack.recalled_memories = []
+    fake_stack.graph_facts = []
+    fake_stack.user_context = None
     fake_stack.primary_model = "qwen-max"
     fake_stack.fallback_chain_active = False
     fake_agent_repo = MagicMock()

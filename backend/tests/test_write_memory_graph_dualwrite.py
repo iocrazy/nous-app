@@ -7,27 +7,8 @@ import pytest
 from app.services.ai.memory.graph_memory import GraphMemoryConfig, GraphMemoryService
 from app.workflows.write_memory import (
     _build_turn_episode,
-    _l1_memory_enabled,
     _write_graph_episode,
 )
-
-
-class TestL1KillSwitch:
-    """MEDIAHUB_DISABLE_L1_MEMORY retires the L1 (agent_memories) layer."""
-
-    def test_default_enabled(self, monkeypatch) -> None:
-        monkeypatch.delenv("MEDIAHUB_DISABLE_L1_MEMORY", raising=False)
-        assert _l1_memory_enabled() is True
-
-    def test_disabled_by_truthy_values(self, monkeypatch) -> None:
-        for v in ("1", "true", "TRUE", "yes", "on"):
-            monkeypatch.setenv("MEDIAHUB_DISABLE_L1_MEMORY", v)
-            assert _l1_memory_enabled() is False, v
-
-    def test_stays_enabled_for_falsey_values(self, monkeypatch) -> None:
-        for v in ("", "0", "false", "no"):
-            monkeypatch.setenv("MEDIAHUB_DISABLE_L1_MEMORY", v)
-            assert _l1_memory_enabled() is True, v
 
 
 class RecordingService(GraphMemoryService):
@@ -161,21 +142,3 @@ async def test_empty_turn_skips_write(service: RecordingService) -> None:
     )
     assert ok is False
     assert service.calls == []
-
-
-# ============================================================
-# _build_memory_writer — contradiction wiring (regression)
-# ============================================================
-
-
-def test_build_memory_writer_wires_contradiction_classifier() -> None:
-    """The production writer MUST carry a contradiction_classifier; without it
-    the supersede post-pass is dead and conflicting memories ('prefers Vue' →
-    later 'now uses React') accumulate and are recalled together forever."""
-    from app.workflows.write_memory import _build_memory_writer
-
-    async def _llm(prompt: str) -> str:
-        return "REPLACES"
-
-    writer = _build_memory_writer(_llm)
-    assert writer.contradiction_classifier is _llm

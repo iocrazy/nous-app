@@ -22,7 +22,6 @@ from app.models.agent_messaging import (  # noqa: F401
     AgentApprovalRequests,
     AgentCommitments,
     AgentInbox,
-    AgentMemories,
     AgentOutbox,
 )
 from app.models.agents import (  # noqa: F401
@@ -164,7 +163,6 @@ __all__ = [
     "AgentApprovalRequests",
     "AgentCommitments",
     "AgentInbox",
-    "AgentMemories",
     "AgentOutbox",
     "AgentRunEvents",
     "AgentRuns",

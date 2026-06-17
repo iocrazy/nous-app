@@ -77,39 +77,34 @@ async def test_locked_chat_skips_user_provider_lookup():
                 ):
                     with patch.object(
                         wiring_mod,
-                        "_safe_recall_memories",
+                        "_safe_recall_graph_facts",
                         new=AsyncMock(return_value=[]),
                     ):
                         with patch.object(
                             wiring_mod,
-                            "_safe_recall_graph_facts",
-                            new=AsyncMock(return_value=[]),
+                            "_safe_recall_honcho_context",
+                            new=AsyncMock(return_value=None),
                         ):
-                            with patch.object(
-                                wiring_mod,
-                                "_safe_recall_honcho_context",
-                                new=AsyncMock(return_value=None),
+                            with patch(
+                                "app.services.ai.runner.agent_runner.AgentRunner",
+                                return_value=MagicMock(),
                             ):
                                 with patch(
-                                    "app.services.ai.runner.agent_runner.AgentRunner",
+                                    "app.services.workforce.delegate_tool.DelegateToolService",
                                     return_value=MagicMock(),
                                 ):
-                                    with patch(
-                                        "app.services.workforce.delegate_tool.DelegateToolService",
-                                        return_value=MagicMock(),
-                                    ):
-                                        from uuid import UUID
+                                    from uuid import UUID
 
-                                        await wiring_mod.build_agent_runner_stack(
-                                            agent=_make_fake_agent(),
-                                            skill_repo=MagicMock(),
-                                            user_id=UUID(
-                                                "00000000-0000-0000-0000-000000000099"
-                                            ),
-                                            session_id="1",
-                                            user_query="hello",
-                                            settings=_make_minimal_settings(),
-                                        )
+                                    await wiring_mod.build_agent_runner_stack(
+                                        agent=_make_fake_agent(),
+                                        skill_repo=MagicMock(),
+                                        user_id=UUID(
+                                            "00000000-0000-0000-0000-000000000099"
+                                        ),
+                                        session_id="1",
+                                        user_query="hello",
+                                        settings=_make_minimal_settings(),
+                                    )
 
     # _load_user_provider_config must NOT have been called when locked.
     mock_load.assert_not_called()
@@ -145,39 +140,34 @@ async def test_allowed_chat_calls_user_provider_lookup():
                 ):
                     with patch.object(
                         wiring_mod,
-                        "_safe_recall_memories",
+                        "_safe_recall_graph_facts",
                         new=AsyncMock(return_value=[]),
                     ):
                         with patch.object(
                             wiring_mod,
-                            "_safe_recall_graph_facts",
-                            new=AsyncMock(return_value=[]),
+                            "_safe_recall_honcho_context",
+                            new=AsyncMock(return_value=None),
                         ):
-                            with patch.object(
-                                wiring_mod,
-                                "_safe_recall_honcho_context",
-                                new=AsyncMock(return_value=None),
+                            with patch(
+                                "app.services.ai.runner.agent_runner.AgentRunner",
+                                return_value=MagicMock(),
                             ):
                                 with patch(
-                                    "app.services.ai.runner.agent_runner.AgentRunner",
+                                    "app.services.workforce.delegate_tool.DelegateToolService",
                                     return_value=MagicMock(),
                                 ):
-                                    with patch(
-                                        "app.services.workforce.delegate_tool.DelegateToolService",
-                                        return_value=MagicMock(),
-                                    ):
-                                        from uuid import UUID
+                                    from uuid import UUID
 
-                                        await wiring_mod.build_agent_runner_stack(
-                                            agent=_make_fake_agent(),
-                                            skill_repo=MagicMock(),
-                                            user_id=UUID(
-                                                "00000000-0000-0000-0000-000000000099"
-                                            ),
-                                            session_id="1",
-                                            user_query="hello",
-                                            settings=_make_minimal_settings(),
-                                        )
+                                    await wiring_mod.build_agent_runner_stack(
+                                        agent=_make_fake_agent(),
+                                        skill_repo=MagicMock(),
+                                        user_id=UUID(
+                                            "00000000-0000-0000-0000-000000000099"
+                                        ),
+                                        session_id="1",
+                                        user_query="hello",
+                                        settings=_make_minimal_settings(),
+                                    )
 
     # _load_user_provider_config MUST have been called when allowed.
     mock_load.assert_called_once()

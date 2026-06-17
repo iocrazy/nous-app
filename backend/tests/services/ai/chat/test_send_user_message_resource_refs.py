@@ -108,7 +108,8 @@ def _make_fake_stack(runner: Any, composed: Any) -> Any:
     """Return a stack object matching AgentRunnerStack shape."""
     stack = MagicMock()
     stack.runner = runner
-    stack.recalled_memories = []
+    stack.graph_facts = []
+    stack.user_context = None
     return stack
 
 
