@@ -42,6 +42,7 @@ Design principles:
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -119,6 +120,11 @@ class RunRecorder:
     _last_heartbeat_monotonic: float = field(default=0.0, init=False)
     _cancelled: bool = field(default=False, init=False)
     _event_seq: int = field(default=0, init=False)
+    # Background task that keeps heartbeat_at fresh for the whole turn (not
+    # just between iterations) so the liveness reaper can't false-kill a
+    # healthy run stuck in one long LLM/tool call. Started on a successful
+    # insert, cancelled on __aexit__.
+    _heartbeat_task: Optional["asyncio.Task[Any]"] = field(default=None, init=False)
 
     HEARTBEAT_RATE_LIMIT_S: float = 15.0  # local, DB-write throttle
     EVENT_VALUE_MAX_CHARS: int = 4000  # per-field payload truncation
@@ -139,9 +145,47 @@ class RunRecorder:
             logger.error(
                 f"[RunRecorder] start failed (telemetry disabled for this run): {err}"
             )
+        # Keep heartbeat_at fresh for the WHOLE turn — a single >2min LLM/tool
+        # call would otherwise let the run go silent between iterations and the
+        # liveness reaper would falsely mark a healthy run dead (acute on a
+        # multi-pod deploy: one pod's restart-reconcile reaps another pod's
+        # live runs). Only armed when the insert succeeded (run_id set).
+        if self.run_id is not None:
+            self._start_background_heartbeat()
         return self
 
+    def _start_background_heartbeat(self) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return  # no loop (sync test path) — between-iteration heartbeat only
+        self._heartbeat_task = loop.create_task(self._heartbeat_loop())
+
+    async def _heartbeat_loop(self) -> None:
+        """Refresh heartbeat every HEARTBEAT_RATE_LIMIT_S until cancelled.
+        Delegates to ``heartbeat()`` so the rate-limit guard dedupes against
+        between-iteration calls. Cancelled cleanly in __aexit__; if the
+        process dies, the task dies with it and the run correctly goes stale."""
+        try:
+            while True:
+                await asyncio.sleep(self.HEARTBEAT_RATE_LIMIT_S)
+                await self.heartbeat()
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 — a heartbeat blip must not crash the run
+            logger.warning("[RunRecorder] background heartbeat stopped", exc_info=True)
+
     async def __aexit__(self, exc_type, exc, tb) -> bool:
+        # Stop the background heartbeat first so it can't race _finish (which
+        # flips status away from 'running').
+        if self._heartbeat_task is not None:
+            self._heartbeat_task.cancel()
+            try:
+                await self._heartbeat_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+            self._heartbeat_task = None
+
         if self.run_id is None:
             # Start failed; nothing to finalize.
             return False
