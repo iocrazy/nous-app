@@ -198,11 +198,22 @@ async def test_put_writes_dimensions_as_string(monkeypatch, client):
 
 
 @pytest.mark.asyncio
+async def test_put_accepts_4096_dimensions(monkeypatch, client):
+    repo = _FakeRepo(_seed_rows())
+    _install_repo(monkeypatch, repo)
+    # 4096 = Qwen3-Embedding-8B native; valid now that both backends index it
+    # (Graphiti=FalkorDB, Honcho=LanceDB).
+    r = await client.put(URL, json={"embedder_dimensions": 4096})
+    assert r.status_code == 200
+    assert dict(repo.updates).get("graph_embedder_dimensions") == "4096"
+
+
+@pytest.mark.asyncio
 async def test_put_rejects_dimensions_over_cap(monkeypatch, client):
     repo = _FakeRepo(_seed_rows())
     _install_repo(monkeypatch, repo)
-    # 4096 (Qwen3-8B native) exceeds pgvector's HNSW 2000-dim limit.
-    r = await client.put(URL, json={"embedder_dimensions": 4096})
+    # 8192 exceeds the 4096 native-width cap.
+    r = await client.put(URL, json={"embedder_dimensions": 8192})
     assert r.status_code == 422
     assert repo.updates == []  # nothing persisted on a rejected payload
 

@@ -45,10 +45,12 @@ _TRUTHY = {"1", "true", "yes", "on"}
 
 DEFAULT_FALKORDB_PORT = 6379
 DEFAULT_DATABASE = "mediahub_memory"
-# Shared memory-embedder dimension. 1536 = Qwen3-Embedding-4B native (current
-# running default, matches Honcho's pgvector column). Admin-settable so the
-# 8B@higher-dim upgrade is a config change — but capped at 2000 at the admin
-# boundary because Honcho's pgvector HNSW index cannot exceed 2000 dimensions.
+# Shared memory-embedder dimension. 1536 = Qwen3-Embedding-4B native; this stays
+# the conservative code default for a fresh install. Prod runs 4096
+# (Qwen3-Embedding-8B) via system_settings: Graphiti on FalkorDB and Honcho on
+# its LanceDB backend both index 4096 (pgvector's HNSW 2000-dim cap no longer
+# applies once Honcho is off pgvector). Admin boundary caps at 4096 = the model's
+# native max (see settings_router._EMBEDDER_DIM_MAX).
 DEFAULT_EMBEDDER_DIMENSIONS = 1536
 
 # Graphiti's OpenAIGenericClient can drive structured output two ways. json_object

@@ -42,11 +42,12 @@ _GRAPH_FIELD_TO_KEY = {
 }
 _TRUTHY = {"1", "true", "yes", "on"}
 _SECRET_FIELDS = {"extractor_api_key", "embedder_api_key"}
-# Hard upper bound on the embedder dimension: Honcho's pgvector HNSW index cannot
-# exceed 2000 dimensions, and the embedder is shared, so the value is capped here
-# regardless of which subsystem consumes it. Raising it requires migrating Honcho
-# off pgvector (e.g. to LanceDB) — out of scope.
-_EMBEDDER_DIM_MAX = 2000
+# Hard upper bound on the embedder dimension = Qwen3-Embedding-8B native width.
+# Both consumers now index 4096: Graphiti on FalkorDB (no dim ceiling) and Honcho
+# on its LanceDB backend. (The earlier 2000 cap was pgvector's HNSW limit, which
+# no longer applies now that Honcho is migrated off pgvector — see the
+# memory-embedder runbook.)
+_EMBEDDER_DIM_MAX = 4096
 
 
 def _to_response(row: dict) -> SystemSettingResponse:
