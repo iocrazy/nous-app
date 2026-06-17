@@ -286,6 +286,15 @@ class GraphMemoryService:
     # default_factory keeps construction cheap; the DB load happens once on
     # first real async use via _ensure_config.
     _config_loaded: bool = False
+    # True when ``graphiti`` was injected (tests). Prod leaves it None and lets
+    # _client()/_build_client construct real clients. The flag lets search()
+    # tell an injected fake (query in one call) apart from a prod-built client
+    # cached into ``graphiti`` (where each group lives in its own FalkorDB
+    # graph and must be queried per-group). Set in __post_init__.
+    _injected: bool = field(default=False, init=False)
+
+    def __post_init__(self) -> None:
+        self._injected = self.graphiti is not None
 
     async def _ensure_config(self) -> None:
         """Swap the env-default config for the DB-sourced one on first use.
@@ -309,11 +318,15 @@ class GraphMemoryService:
         await self._ensure_config()
         return self.config.enabled
 
-    def _client(self) -> Optional[Any]:
-        if self.graphiti is not None:
-            # Injected client is honoured only when the flag is on —
-            # tests rely on disabled => zero calls.
-            return self.graphiti if self.config.enabled else None
+    def _build_client(self, *, database: str) -> Optional[Any]:
+        """Build a fresh Graphiti pointed at one FalkorDB graph (``database``).
+
+        Construction is network-free (the driver connects lazily on first
+        query). Returns ``None`` on any import/build failure so callers degrade
+        per the safety contract. Used both for the cached default client
+        (ingestion) and for per-group search clients — graphiti's FalkorDB
+        driver maps ``group_id`` to the graph name, so reads must target the
+        specific group's graph rather than the default one."""
         if not self.config.operative():
             return None
         try:
@@ -323,7 +336,7 @@ class GraphMemoryService:
             driver = FalkorDriver(
                 host=self.config.falkordb_host,
                 port=self.config.falkordb_port,
-                database=self.config.falkordb_database,
+                database=database,
             )
             llm_client, embedder, cross_encoder = _build_llm_and_embedder(self.config)
             kwargs: dict[str, Any] = {"graph_driver": driver}
@@ -335,13 +348,24 @@ class GraphMemoryService:
             # Graphiti from defaulting to the OPENAI_API_KEY-reading reranker.
             if cross_encoder is not None:
                 kwargs["cross_encoder"] = cross_encoder
-            self.graphiti = Graphiti(**kwargs)
-            return self.graphiti
+            return Graphiti(**kwargs)
         except Exception:  # noqa: BLE001
             logger.exception(
                 "[graph_memory] failed to build Graphiti client; disabling"
             )
             return None
+
+    def _client(self) -> Optional[Any]:
+        if self.graphiti is not None:
+            # Injected client is honoured only when the flag is on —
+            # tests rely on disabled => zero calls.
+            return self.graphiti if self.config.enabled else None
+        if not self.config.operative():
+            return None
+        # Default client points at the configured graph. Ingestion uses it;
+        # graphiti clones the driver per group_id internally on write.
+        self.graphiti = self._build_client(database=self.config.falkordb_database)
+        return self.graphiti
 
     async def add_chat_episode(
         self,
@@ -378,33 +402,47 @@ class GraphMemoryService:
             )
             return False
 
+    async def _collect_edges(
+        self, query: str, group_ids: list[str], limit: int
+    ) -> list[Any]:
+        """Gather raw graphiti edges across ``group_ids``.
+
+        graphiti's FalkorDB driver maps each ``group_id`` to its own graph
+        (database), and ``client.search`` only queries the driver's current
+        graph. So the prod path builds a fresh client per group graph and
+        merges; an injected test client is queried once with all groups."""
+        if self._injected:
+            client = self._client()
+            if client is None:
+                return []
+            edges = await client.search(query, group_ids=group_ids, num_results=limit)
+            return list(edges or [])
+        all_edges: list[Any] = []
+        for gid in group_ids:
+            client = self._build_client(database=gid)
+            if client is None:
+                continue
+            edges = await client.search(query, group_ids=[gid], num_results=limit)
+            all_edges.extend(edges or [])
+        return all_edges
+
     async def search(
         self, query: str, *, group_ids: list[str], limit: int = 10
     ) -> list[GraphFact]:
         """Hybrid fact retrieval scoped to ``group_ids`` (e.g. the
-        user's personal group plus the session's project group).
-        Empty list on any failure or when disabled."""
+        user's personal group plus the session's project group). Each group is
+        its own FalkorDB graph, so results are merged across graphs, deduped by
+        fact text, and capped to ``limit``. Empty list on any failure / when
+        disabled. The whole multi-graph fan-out is bounded by one timeout so the
+        chat hot path can't stall."""
         await self._ensure_config()
-        client = self._client()
-        if client is None or not query.strip() or not group_ids:
+        if not query.strip() or not group_ids:
             return []
         try:
             edges = await asyncio.wait_for(
-                client.search(query, group_ids=group_ids, num_results=limit),
+                self._collect_edges(query, group_ids, limit),
                 timeout=GRAPH_SEARCH_TIMEOUT_S,
             )
-            facts: list[GraphFact] = []
-            for edge in edges or []:
-                fact_text = getattr(edge, "fact", None)
-                if not fact_text:
-                    continue
-                facts.append(
-                    GraphFact(
-                        fact=str(fact_text),
-                        valid_at=getattr(edge, "valid_at", None),
-                    )
-                )
-            return facts
         except asyncio.TimeoutError:
             logger.warning(
                 "[graph_memory] search timed out after %ss (groups=%s); "
@@ -416,6 +454,20 @@ class GraphMemoryService:
         except Exception:  # noqa: BLE001
             logger.exception("[graph_memory] search failed (groups=%s)", group_ids)
             return []
+        facts: list[GraphFact] = []
+        seen: set[str] = set()
+        for edge in edges:
+            fact_text = getattr(edge, "fact", None)
+            if not fact_text:
+                continue
+            key = str(fact_text)
+            if key in seen:
+                continue
+            seen.add(key)
+            facts.append(GraphFact(fact=key, valid_at=getattr(edge, "valid_at", None)))
+            if len(facts) >= limit:
+                break
+        return facts
 
 
 _service: Optional[GraphMemoryService] = None

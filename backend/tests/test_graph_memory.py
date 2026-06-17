@@ -171,6 +171,56 @@ async def test_search_failure_returns_empty() -> None:
 
 
 @pytest.mark.asyncio
+async def test_search_targets_each_group_graph(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """graphiti's FalkorDB driver stores each group_id in its own graph
+    (database). client.search only queries the driver's current graph, so the
+    real (non-injected) path must build a client per group graph and merge —
+    regression: recall always hit the empty default graph and returned nothing.
+    """
+    built: list[str] = []
+
+    class PerGraphClient:
+        def __init__(self, db: str) -> None:
+            self.db = db
+
+        async def search(self, query, group_ids=None, num_results=10):
+            return [FakeEdge(f"fact::{self.db}")]
+
+    service = GraphMemoryService(config=_enabled_config())  # not injected
+    service._config_loaded = True  # skip the DB settings load
+
+    def fake_build(*, database: str):
+        built.append(database)
+        return PerGraphClient(database)
+
+    monkeypatch.setattr(service, "_build_client", fake_build)
+    facts = await service.search("q", group_ids=["user-1", "project-2"], limit=10)
+    # one client built per group graph, in order
+    assert built == ["user-1", "project-2"]
+    # facts merged across both group graphs
+    assert {f.fact for f in facts} == {"fact::user-1", "fact::project-2"}
+
+
+@pytest.mark.asyncio
+async def test_search_dedups_and_caps_to_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Merged cross-graph results are deduped by fact text and capped to limit."""
+
+    class DupClient:
+        async def search(self, query, group_ids=None, num_results=10):
+            return [FakeEdge("same"), FakeEdge("a"), FakeEdge("b"), FakeEdge("same")]
+
+    service = GraphMemoryService(config=_enabled_config())
+    service._config_loaded = True
+    monkeypatch.setattr(service, "_build_client", lambda *, database: DupClient())
+    facts = await service.search("q", group_ids=["user-1"], limit=2)
+    assert [f.fact for f in facts] == ["same", "a"]
+
+
+@pytest.mark.asyncio
 async def test_is_enabled_loads_db_config_over_env_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -225,10 +225,10 @@ async def test_recall_honors_admin_panel_toggle_over_env_default(
 
     class _DbToggledService(GraphMemoryService):
         """Env default disabled + no injected client → the real
-        is_enabled()/_ensure_config path runs from_settings; we only stub
-        _client so search doesn't dial a real FalkorDB."""
+        is_enabled()/_ensure_config path runs from_settings; we only stub the
+        per-group client builder so search doesn't dial a real FalkorDB."""
 
-        def _client(self):  # type: ignore[override]
+        def _build_client(self, *, database):  # type: ignore[override]
             return _Client() if self.config.enabled else None
 
     svc = _DbToggledService(config=GraphMemoryConfig(enabled=False))
