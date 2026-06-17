@@ -65,3 +65,24 @@ async def test_inaccessible_returns_error_not_raise():
         )
     assert "error" in result
     assert "not accessible" in result["error"]
+
+
+# ─── audit #20: path containment ─────────────────────────────────────
+
+
+def test_contained_doc_path_normal_stays_under_root(monkeypatch):
+    from app.services.ai.tools.resource_fetch_tool import _contained_doc_path
+
+    monkeypatch.setenv("DOWNLOAD_PATH", "/app/downloads")
+    p = _contained_doc_path("user1/doc.pdf")
+    assert p is not None
+    assert str(p).startswith("/app/downloads")
+
+
+def test_contained_doc_path_traversal_blocked(monkeypatch):
+    from app.services.ai.tools.resource_fetch_tool import _contained_doc_path
+
+    monkeypatch.setenv("DOWNLOAD_PATH", "/app/downloads")
+    assert _contained_doc_path("../../etc/passwd") is None
+    assert _contained_doc_path("a/b/../../../../etc/passwd") is None
+    assert _contained_doc_path("/etc/passwd") is None

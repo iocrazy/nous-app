@@ -46,7 +46,11 @@ from app.services.infra.hooks import (
 
 logger = logging.getLogger(__name__)
 
-MAX_TOOL_ITERATIONS = 5
+# Audit #15: single tool-call loop ceiling shared by run_turn (buffered) and
+# stream_turn (SSE). Previously run_turn capped at 5 while stream_turn capped at
+# 10 → the same agent/task truncated when buffered but completed when streamed.
+# Unified to 10; the per-run wall-clock deadline (timeout_sec) is the real bound.
+MAX_TOOL_ITERATIONS = 10
 
 # Module-level singleton — ContextCompactor is stateless. Reusing the
 # same instance per turn avoids the GC churn of allocating a fresh
@@ -322,7 +326,9 @@ class AgentRunner:
 
         messages = list(user_messages)
         iteration = 0
-        MAX_STREAM_ITERATIONS = 10
+        # Audit #15: share the unified module ceiling instead of a divergent
+        # local literal (was 10 here vs 5 in run_turn).
+        MAX_STREAM_ITERATIONS = MAX_TOOL_ITERATIONS
         # mig 286: same wall-clock cap as run_turn (see comment there).
         import time as _time
 

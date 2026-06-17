@@ -20,6 +20,21 @@ from typing import Any, Optional
 from loguru import logger
 
 
+def _contained_doc_path(fp: str) -> Optional[Path]:
+    """Resolve a resource ``file_path`` under DOWNLOAD_PATH, or None if it
+    escapes (audit #20).
+
+    ``fp`` comes from an already-ownership-validated DB row, not agent input,
+    so this is defense-in-depth: a buggy/malicious upload import that stored a
+    ``../``-containing path must not let a doc read escape the downloads dir.
+    """
+    download_root = Path(os.environ.get("DOWNLOAD_PATH", "/app/downloads")).resolve()
+    candidate = (download_root / fp).resolve()
+    if not candidate.is_relative_to(download_root):
+        return None
+    return candidate
+
+
 async def _fetch_dispatch(
     *, resource_id: str, mode: str | None, args: dict | None, user_id: str
 ) -> dict[str, Any]:
@@ -116,7 +131,14 @@ async def _fetch_dispatch(
     fp = row.get("file_path") or ""
     if not fp:
         return {"error": "resource has no file_path on disk"}
-    abs_path = Path(os.environ.get("DOWNLOAD_PATH", "/app/downloads")) / fp
+    # Audit #20: defense-in-depth path containment (see _contained_doc_path).
+    abs_path = _contained_doc_path(fp)
+    if abs_path is None:
+        logger.warning(
+            f"[resource_fetch] path escape blocked: resource file_path={fp!r} "
+            f"resolved outside download root"
+        )
+        return {"error": "resource path is outside the allowed directory"}
     if not abs_path.exists():
         return {"error": f"file missing on disk: {abs_path.name}"}
 

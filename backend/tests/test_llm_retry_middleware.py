@@ -313,3 +313,40 @@ async def test_no_deadline_uses_full_retry_budget():
         await mw.call(_composed(), [])
 
     assert adapter.call.await_count == 3  # 1 + 2 retries
+
+
+# ---------------------------------------------------------------------------
+# Audit #18: "unknown" errors retried at most once
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_unknown_error_retried_once_then_fails():
+    """A ValueError classifies as 'unknown' → one retry (2 calls) then
+    LLMCallError, NOT the full max_retries budget."""
+    adapter = AsyncMock()
+    adapter.call.side_effect = ValueError("mystery")
+
+    mw = LLMRetryMiddleware(adapter, max_retries=3, base_delay_s=0)
+    with pytest.raises(LLMCallError):
+        await mw.call(_composed(), [])
+
+    assert adapter.call.await_count == 2  # first try + exactly one retry
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_unknown_then_success_recovers():
+    """One transient 'unknown' failure still recovers on the single retry."""
+    adapter = AsyncMock()
+    adapter.call.side_effect = [
+        ValueError("blip"),
+        {"choices": [{"message": {"content": "ok"}}]},
+    ]
+
+    mw = LLMRetryMiddleware(adapter, max_retries=3, base_delay_s=0)
+    result = await mw.call(_composed(), [])
+
+    assert result["choices"][0]["message"]["content"] == "ok"
+    assert adapter.call.await_count == 2

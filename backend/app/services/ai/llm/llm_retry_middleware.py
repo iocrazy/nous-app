@@ -183,6 +183,12 @@ class LLMRetryMiddleware:
     ) -> dict[str, Any]:
         last_exc: Optional[BaseException] = None
         start = self.monotonic()
+        # Audit #18: an "unknown" classification (no status_code, not a
+        # Timeout/Connection/Network name) might be a transient blip OR a hard
+        # error (parse/ValueError/adapter bug). Give it ONE retry so we don't
+        # drop a recoverable transient, but fail fast after that instead of
+        # burning the full max_retries budget amplifying a hard failure.
+        unknown_failures = 0
         for attempt in range(0, self.max_retries + 1):  # attempt=0 is first try
             # AI-007: stop before a fresh attempt once the deadline is hit.
             if attempt > 0 and self._deadline_remaining(start) <= 0:
@@ -205,6 +211,14 @@ class LLMRetryMiddleware:
                 last_exc = exc
                 if classification == "non_retryable":
                     raise LLMCallError(f"non-retryable: {exc}") from exc
+                if classification == "unknown":
+                    unknown_failures += 1
+                    # First unknown → retry once; second → give up (don't
+                    # spend the whole budget on a likely-hard failure).
+                    if unknown_failures > 1:
+                        raise LLMCallError(
+                            f"unknown error retried once, giving up: {exc}"
+                        ) from exc
                 if attempt >= self.max_retries:
                     break  # exhausted; raise after loop
                 # Sleep before next try, polling cancel every poll-interval.
