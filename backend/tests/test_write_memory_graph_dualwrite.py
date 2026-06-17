@@ -5,7 +5,29 @@ from __future__ import annotations
 import pytest
 
 from app.services.ai.memory.graph_memory import GraphMemoryConfig, GraphMemoryService
-from app.workflows.write_memory import _build_turn_episode, _write_graph_episode
+from app.workflows.write_memory import (
+    _build_turn_episode,
+    _l1_memory_enabled,
+    _write_graph_episode,
+)
+
+
+class TestL1KillSwitch:
+    """MEDIAHUB_DISABLE_L1_MEMORY retires the L1 (agent_memories) layer."""
+
+    def test_default_enabled(self, monkeypatch) -> None:
+        monkeypatch.delenv("MEDIAHUB_DISABLE_L1_MEMORY", raising=False)
+        assert _l1_memory_enabled() is True
+
+    def test_disabled_by_truthy_values(self, monkeypatch) -> None:
+        for v in ("1", "true", "TRUE", "yes", "on"):
+            monkeypatch.setenv("MEDIAHUB_DISABLE_L1_MEMORY", v)
+            assert _l1_memory_enabled() is False, v
+
+    def test_stays_enabled_for_falsey_values(self, monkeypatch) -> None:
+        for v in ("", "0", "false", "no"):
+            monkeypatch.setenv("MEDIAHUB_DISABLE_L1_MEMORY", v)
+            assert _l1_memory_enabled() is True, v
 
 
 class RecordingService(GraphMemoryService):
