@@ -144,9 +144,7 @@ export function ParserPage() {
           onSubmitted={() => setShowActiveTasks(true)}
         />
       ) : (
-      <div className="relative group">
-        <div className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl opacity-30 group-hover:opacity-60 transition duration-500 blur"></div>
-        <div className="relative bg-ink-900 rounded-xl p-2 border border-ink-800 shadow-xl">
+      <div className="bg-ink-900 rounded-xl p-2 border border-ink-800">
           {parserMode === 'single' ? (
             <div className="flex items-center">
               <LinkIcon className="ml-3 text-ink-500 w-5 h-5 flex-shrink-0" />
@@ -190,7 +188,6 @@ export function ParserPage() {
             </div>
           )}
         </div>
-      </div>
       )}
 
       {/* AI Processing + tag selection only apply to single/batch parse */}
