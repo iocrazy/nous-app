@@ -44,10 +44,6 @@ async def test_memory_harvester_dispatch_survives_running_loop():
 
     with (
         patch(
-            "app.services.ai.chat.ai_library_chat_wiring._safe_recall_memories",
-            AsyncMock(return_value=[]),
-        ),
-        patch(
             # The closure does a LOCAL import of start_workflow_routed at wiring
             # time, so patch the source module BEFORE building the stack.
             "app.services.infra.dbos_orchestrator.start_workflow_routed",

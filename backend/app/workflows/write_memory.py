@@ -13,25 +13,10 @@ NEXT chat, not the current one. DBOS retry policy is conservative
 
 from __future__ import annotations
 
-import os
 from typing import Any, Optional
-from uuid import UUID
 
 from dbos import DBOS
 from loguru import logger
-
-_DISABLE_TRUTHY = {"1", "true", "yes", "on"}
-
-
-def _l1_memory_enabled() -> bool:
-    """L1 (``agent_memories``) kill-switch. Defaults ON. Set
-    ``MEDIAHUB_DISABLE_L1_MEMORY`` once Honcho + Graphiti are validated on real
-    traffic to retire the home-grown L1 layer — the Honcho (user model) and
-    Graphiti (temporal graph) dual-writes keep running. Recall honours the same
-    flag (see ai_library_chat_wiring._memory_recall_enabled)."""
-    val = os.getenv("MEDIAHUB_DISABLE_L1_MEMORY", "").strip().lower()
-    return val not in _DISABLE_TRUTHY
-
 
 _RECENT_TURNS_PER_CHANNEL = 10
 
@@ -63,64 +48,6 @@ async def load_recent_messages_step(session_id: str) -> dict[str, list[str]]:
     }
 
 
-def _build_memory_writer(llm_call: Any) -> Any:
-    """Assemble the production MemoryWriter from a cheap-LLM call closure.
-
-    Extracted as a pure, awaitable-free seam so the wiring is unit-testable
-    without invoking the DBOS step. The crucial invariant is that
-    ``contradiction_classifier`` IS set: without it the supersede post-pass is
-    dead and conflicting facts ("prefers Vue" → later "now uses React") both
-    stay status='active' and are recalled together forever — consolidation
-    only merges near-duplicates, it never supersedes a contradiction. The pass
-    is bounded (≤3 cheap-LLM classify calls per inserted row, only when a
-    high-similarity neighbour exists) and fully non-fatal — see
-    ``MemoryWriter._supersede_contradicting``.
-    """
-    from app.services.ai.memory.extractor import (
-        AssistantMemoryExtractor,
-        UserMemoryExtractor,
-    )
-    from app.services.ai.memory.writer import MemoryWriter
-    from app.services.ai.providers.embedding_service import EmbeddingService
-
-    return MemoryWriter(
-        user_extractor=UserMemoryExtractor(llm_call=llm_call),
-        assistant_extractor=AssistantMemoryExtractor(llm_call=llm_call),
-        embedding_service=EmbeddingService(),
-        contradiction_classifier=llm_call,
-    )
-
-
-@DBOS.step(retries_allowed=True, max_attempts=2)
-async def extract_and_persist_memories_step(
-    *,
-    run_id: Optional[str],
-    agent_id: str,
-    user_id: str,
-    user_msgs: list[str],
-    asst_msgs: list[str],
-) -> dict[str, Any]:
-    """Run extractor LLM calls + persist memory rows. workflow_id
-    memoization keeps replay safe (same run_id+inputs = same rows)."""
-    llm_call = await _build_cheap_llm_call()
-    writer = _build_memory_writer(llm_call)
-    rows = await writer.write(
-        agent_id=UUID(agent_id),
-        user_id=UUID(user_id),
-        # agent_runs.id is BIGINT Snowflake (mig 232) — pass the numeric
-        # string through; UUID() would raise ValueError on a bigint.
-        run_id=run_id,
-        user_messages=user_msgs,
-        assistant_messages=asst_msgs,
-    )
-    result = {"rows_written": rows}
-    logger.info(
-        f"[write_memory] wrote {result['rows_written']} rows "
-        f"agent={agent_id} user={user_id}"
-    )
-    return result
-
-
 def _build_turn_episode(
     user_msgs: list[str], asst_msgs: list[str], *, max_chars: int = 6000
 ) -> str:
@@ -135,10 +62,9 @@ def _build_turn_episode(
     excluded. The "user:" prefix is kept so Graphiti anchors first-person
     facts to a "user" entity.
 
-    The L1 writer consumes the whole rolling window every harvest; an
-    episode ingested per turn must only carry the new turn, otherwise the
-    graph re-ingests the same exchanges N times. Empty when there is no
-    new user message.
+    An episode ingested per turn must only carry the new turn, otherwise
+    the graph re-ingests the same exchanges N times. Empty when there is
+    no new user message.
     """
     if not user_msgs:
         return ""
@@ -161,8 +87,8 @@ async def _write_graph_episode(
     tests can exercise it without a DBOS workflow context.
 
     Failures never propagate — the service swallows them and this
-    returns False; the L1 ``agent_memories`` result is already final
-    by the time this runs.
+    returns False; a missed episode degrades future recall, never the
+    current chat.
     """
     from app.services.ai.memory.graph_memory import get_graph_memory_service
 
@@ -293,34 +219,6 @@ async def write_honcho_turn_step(
     return {"honcho_written": written}
 
 
-async def _build_cheap_llm_call():
-    """Cheap-model extractor LLM closure. Mirrors memory_tasks._build_cheap_llm_call."""
-    from app.core.config import settings
-    from app.schemas.ai_library import ComposedSystemPrompt
-    from app.services.ai.adapters import get_adapter
-
-    cheap_model = "qwen-turbo"
-    adapter = get_adapter(cheap_model, settings)
-
-    composed = ComposedSystemPrompt(
-        agent_id=UUID(int=0),
-        agent_slug="memory_extractor",
-        model=cheap_model,
-        temperature=0.0,
-        max_tokens=1024,
-        system_message="You extract facts to remember from chat history. Output JSON.",
-        tools=[],
-        skill_manifest=[],
-        cache_fingerprint="memory_extract_v1",
-    )
-
-    async def _call(prompt: str) -> str:
-        resp = await adapter.call(composed, [{"role": "user", "content": prompt}])
-        return resp["choices"][0]["message"].get("content") or ""
-
-    return _call
-
-
 @DBOS.workflow()
 async def write_memory_workflow(
     *,
@@ -331,38 +229,27 @@ async def write_memory_workflow(
     iteration: int = 0,
     tool_name: str = "",
 ) -> dict[str, Any]:
-    """DBOS port of write_memory_task.
+    """DBOS dual-write workflow: Graphiti (temporal graph) + Honcho (user
+    model). The home-grown L1 ``agent_memories`` layer has been removed —
+    these two layers are the durable memory now.
 
     All ID args are str (UUID JSON-encoded) for DBOS serializer
-    compatibility. Conversion to UUID happens inside the step.
+    compatibility.
 
     `iteration` and `tool_name` are kept on the boundary for parity
     with the Celery hook signature; not used downstream yet.
     """
     if not session_id:
-        return {"rows_written": 0, "reason": "no_session_id"}
+        return {"reason": "no_session_id"}
 
     msgs = await load_recent_messages_step(session_id)
     if not msgs["user_msgs"] and not msgs["asst_msgs"]:
-        return {"rows_written": 0, "reason": "no_messages"}
+        return {"reason": "no_messages"}
 
-    # L1 (agent_memories) write — kill-switchable so the home-grown layer can be
-    # retired once Honcho + Graphiti are validated, without touching their
-    # dual-writes below. Default ON.
-    if _l1_memory_enabled():
-        result = await extract_and_persist_memories_step(
-            run_id=run_id,
-            agent_id=agent_id,
-            user_id=user_id,
-            user_msgs=msgs["user_msgs"],
-            asst_msgs=msgs["asst_msgs"],
-        )
-    else:
-        result = {"rows_written": 0, "reason": "l1_disabled"}
+    result: dict[str, Any] = {}
 
-    # Phase 4 M2: Graphiti dual-write, AFTER the L1 path so a graph
-    # outage can never cost an agent_memories row. Cheap flag check
-    # here skips the step entirely for the (default) disabled case.
+    # Phase 4 M2: Graphiti dual-write. Cheap flag check here skips the step
+    # entirely for the (default) disabled case.
     from app.services.ai.memory.graph_memory import get_graph_memory_service
 
     if await get_graph_memory_service().is_enabled():
@@ -377,7 +264,7 @@ async def write_memory_workflow(
         result = {**result, **graph}
 
     # Phase 4 M5: Honcho user-model dual-write — same contract as the
-    # graph step (after L1, flag-gated, failures stay in the step).
+    # graph step (flag-gated, failures stay in the step).
     from app.services.ai.memory.honcho_memory import get_honcho_memory_service
 
     if get_honcho_memory_service().config.enabled:

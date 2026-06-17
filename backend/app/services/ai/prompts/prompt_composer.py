@@ -48,16 +48,6 @@ class AgentNotFoundError(Exception):
 
 
 @dataclass(frozen=True)
-class RecalledMemory:
-    """One memory the retriever decided to inject. Identity by id; UI int
-    label is assigned by the composer when rendering."""
-
-    id: UUID
-    summary: str
-    when_to_use: str
-
-
-@dataclass(frozen=True)
 class ComposerInput:
     """Immutable input to :meth:`PromptComposer.compose`."""
 
@@ -65,11 +55,8 @@ class ComposerInput:
     request_instructions: Optional[str] = None
     session_id: Optional[str] = None
     model_override: Optional[str] = None
-    # M1.B: caller (chat service) recalls memories first then passes them
-    # in. PromptComposer doesn't do retrieval — separation of concerns.
-    recalled_memories: list[RecalledMemory] = field(default_factory=list)
     # Phase 4 M3: bi-temporal facts retrieved from the Graphiti graph
-    # (plain strings — graph edges have no agent_memories identity).
+    # (plain strings — graph edges have no row identity).
     graph_facts: list[str] = field(default_factory=list)
     # Phase 4 L2: Honcho working representation of the user (markdown
     # observation list). Caller fetches it; composer only renders.
@@ -120,7 +107,6 @@ class PromptComposer:
             skills=skills,
             workers=workers,
             request_instructions=inp.request_instructions,
-            recalled_memories=inp.recalled_memories,
             graph_facts=inp.graph_facts,
             user_context=inp.user_context,
         )
@@ -137,7 +123,6 @@ class PromptComposer:
         prefix_fp = self._prefix_fingerprint(agent, skills, workers)
         dynamic_fp = self._dynamic_fingerprint(
             prefix_fp,
-            inp.recalled_memories,
             inp.graph_facts,
             user_context=inp.user_context,
         )
@@ -154,7 +139,7 @@ class PromptComposer:
             cache_fingerprint=prefix_fp,  # back-compat alias
             prefix_fingerprint=prefix_fp,
             dynamic_fingerprint=dynamic_fp,
-            recalled_memory_ids=[m.id for m in inp.recalled_memories],
+            recalled_memory_ids=[],
             # mig 286: per-run wall-clock cap, enforced by AgentRunner
             # between LLM iterations.
             timeout_sec=agent.get("timeout_sec"),
@@ -169,19 +154,18 @@ class PromptComposer:
         agent: dict[str, Any],
         skills: list[dict[str, Any]],
         request_instructions: Optional[str],
-        recalled_memories: list["RecalledMemory"] = None,
         workers: list[dict[str, Any]] = None,
         graph_facts: list[str] = None,
         user_context: Optional[str] = None,
     ) -> str:
         """Render the full system message string, sections joined by \\n\\n.
 
-        Layout (M1.B + M3):
+        Layout (M3 + Phase 4):
             Identity / Soul / Agent / <available_skills>
             <available_workers> [M3 — persistent agents Delegate can target]
             <!-- CACHE_BOUNDARY -->
-            <recalled_memories> [M1.B injection — after boundary so the
-                                 prefix cache stays stable across turns]
+            <graph_facts> [Graphiti] / <user_context> [Honcho] — after the
+                          boundary so the prefix cache stays stable per turn
             Request Instructions
             Runtime
 
@@ -191,7 +175,6 @@ class PromptComposer:
         persistent agent invalidates the cache, which is correct.
         """
         parts: list[str] = []
-        recalled_memories = recalled_memories or []
         graph_facts = graph_facts or []
 
         identity = (agent.get("identity_md") or "").strip()
@@ -219,13 +202,8 @@ class PromptComposer:
 
         parts.append(CACHE_BOUNDARY_MARKER)
 
-        # Memory section MUST be AFTER cache_boundary so the stable prefix
-        # remains cacheable across turns. Recall results change every turn.
-        if recalled_memories:
-            parts.append(self._render_memory_section(recalled_memories))
-
-        # Graph facts share the post-boundary zone for the same cache-
-        # safety reason — they change per turn and per user.
+        # Graph facts live AFTER the cache_boundary so the stable prefix
+        # remains cacheable across turns — they change per turn and per user.
         if graph_facts:
             parts.append(self._render_graph_facts_section(graph_facts))
 
@@ -240,29 +218,6 @@ class PromptComposer:
         parts.append(self._render_runtime_line(agent))
 
         return "\n\n".join(parts)
-
-    def _render_memory_section(self, memories: list["RecalledMemory"]) -> str:
-        """Render <recalled_memories> XML manifest with int-mapped refs.
-
-        LLM sees [0]/[1]/[2] not raw UUIDs (Mem Zero pattern).
-        """
-        header = (
-            "## Recalled Memories\n"
-            "These are facts the system remembers about this user from past "
-            "conversations. Use them to personalise your reply when relevant. "
-            "Reference by [N] if you cite one.\n"
-        )
-        xml: list[str] = ["<recalled_memories>"]
-        for i, mem in enumerate(memories):
-            summary = (mem.summary or "").replace("<", "&lt;").replace(">", "&gt;")
-            when = (mem.when_to_use or "").replace("<", "&lt;").replace(">", "&gt;")
-            xml.append("  <memory>")
-            xml.append(f"    <ref>[{i}]</ref>")
-            xml.append(f"    <when_to_use>{when}</when_to_use>")
-            xml.append(f"    <fact>{summary}</fact>")
-            xml.append("  </memory>")
-        xml.append("</recalled_memories>")
-        return header + "\n" + "\n".join(xml)
 
     def _render_user_context_section(self, user_context: str) -> str:
         """Render <user_context> — the Honcho working representation of
@@ -514,23 +469,18 @@ class PromptComposer:
     def _dynamic_fingerprint(
         self,
         prefix_fp: str,
-        recalled_memories: list["RecalledMemory"],
         graph_facts: list[str] | None = None,
         user_context: Optional[str] = None,
     ) -> str:
-        """Prefix fingerprint extended with recalled memory id set hash.
+        """Prefix fingerprint extended with per-turn memory content hashes.
 
-        Critical for cache safety (plan-eng-review Issue 2.2): when memory
-        recall changes, downstream cache providers must see a different
-        fingerprint and not serve a stale prefix that could leak another
-        user's facts.
+        Critical for cache safety (plan-eng-review Issue 2.2): when the
+        injected memory (graph facts / user model) changes, downstream cache
+        providers must see a different fingerprint and not serve a stale
+        prefix that could leak another user's facts.
         """
         h = hashlib.sha1()  # noqa: S324
         h.update(prefix_fp.encode())
-        # Order doesn't matter — recall set is what we hash, not order.
-        for mid in sorted(str(m.id) for m in recalled_memories):
-            h.update(mid.encode())
-            h.update(b"|")
         # Phase 4 M3: graph facts are content-hashed (no row ids) — a
         # changed fact set must change the fingerprint too.
         for fact in sorted(graph_facts or []):

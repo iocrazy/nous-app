@@ -161,10 +161,8 @@ def test_dynamic_fingerprint_varies_with_user_context() -> None:
     from app.services.ai.prompts.prompt_composer import PromptComposer
 
     composer = PromptComposer(None, None)
-    base = composer._dynamic_fingerprint("prefix", [], [], user_context=None)
-    with_ctx = composer._dynamic_fingerprint(
-        "prefix", [], [], user_context=_REPRESENTATION
-    )
+    base = composer._dynamic_fingerprint("prefix", [], user_context=None)
+    with_ctx = composer._dynamic_fingerprint("prefix", [], user_context=_REPRESENTATION)
     assert base != with_ctx
 
 

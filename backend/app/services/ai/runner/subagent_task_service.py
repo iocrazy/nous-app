@@ -326,7 +326,6 @@ class SubAgentTaskService:
                         "parent only sees your final output, not your "
                         "intermediate steps."
                     ),
-                    recalled_memories=stack.recalled_memories,
                 )
             )
         except Exception as exc:

@@ -21,9 +21,8 @@ short structured answer back".
 - qwen-plus   ~¥0.004/k in + ¥0.012/k out  → ≈ ¥0.0020  / call
 - 16x cheaper on classification tasks; saves ~¥56k/month at 10k users.
 
-This module complements (does not replace) :mod:`app.services.memory.extractor`
-which has its own ``LLMCall`` type for memory-specific extraction; a future
-refactor may have the extractors subclass :class:`Tasklet`.
+This module provides a lightweight ``LLMCall`` / ``Tasklet`` seam for cheap
+classification-style calls.
 
 Public surface:
 - :class:`Tasklet` — base class

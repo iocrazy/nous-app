@@ -14,7 +14,6 @@ from app.services.ai.memory.graph_memory import (
 from app.services.ai.prompts.prompt_composer import (
     CACHE_BOUNDARY_MARKER,
     PromptComposer,
-    RecalledMemory,
 )
 
 AGENT = {
@@ -59,30 +58,18 @@ class TestGraphFactsRendering:
         section = _composer()._render_graph_facts_section(["a <b> c"])
         assert "<fact>a &lt;b&gt; c</fact>" in section
 
-    def test_graph_facts_after_recalled_memories(self) -> None:
-        msg = _composer()._assemble_system_message(
-            agent=AGENT,
-            skills=[],
-            request_instructions=None,
-            recalled_memories=[
-                RecalledMemory(id=UUID(int=1), summary="s", when_to_use="w")
-            ],
-            graph_facts=["fact one"],
-        )
-        assert msg.index("<recalled_memories>") < msg.index("<graph_facts>")
-
 
 class TestDynamicFingerprint:
     def test_fact_set_changes_fingerprint(self) -> None:
         composer = _composer()
-        base = composer._dynamic_fingerprint("prefix", [], [])
-        with_facts = composer._dynamic_fingerprint("prefix", [], ["a fact"])
+        base = composer._dynamic_fingerprint("prefix", [])
+        with_facts = composer._dynamic_fingerprint("prefix", ["a fact"])
         assert base != with_facts
 
     def test_fact_order_does_not_change_fingerprint(self) -> None:
         composer = _composer()
-        ab = composer._dynamic_fingerprint("prefix", [], ["a", "b"])
-        ba = composer._dynamic_fingerprint("prefix", [], ["b", "a"])
+        ab = composer._dynamic_fingerprint("prefix", ["a", "b"])
+        ba = composer._dynamic_fingerprint("prefix", ["b", "a"])
         assert ab == ba
 
 

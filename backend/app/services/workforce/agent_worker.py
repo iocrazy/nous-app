@@ -189,7 +189,6 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
                     "Produce a complete, self-contained response — the "
                     "result will be delivered back as a single message."
                 ),
-                recalled_memories=stack.recalled_memories,
             )
         )
 

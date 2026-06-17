@@ -83,14 +83,6 @@ ALLOWED_BYPASS_PATHS: dict[str, str] = {
     # fire-and-forget — telemetry tracked via session_memory.version
     # bumps + last_updated_at, not RunRecorder.
     "services/ai/runner/session_memory_runner.py": "session-memory maintenance auxiliary LLM, fire-and-forget",
-    # Wave F (F6) memory consolidation sweeper: weekly DBOS workflow.
-    # cheap-model merges similar memories into super-memories. Off-chat-
-    # path, scheduled job — telemetry via DBOS workflow status.
-    "workflows/scheduled_memory_consolidation.py": "memory consolidation auxiliary LLM, scheduled DBOS workflow",
-    # Wave J (J6) active_remember contradiction check: cheap-LLM
-    # classifier inside the built-in 'remember' skill path. Side-effect
-    # of a tool call, not a primary chat completion.
-    "services/ai/skills/skill_tool_service.py": "active_remember contradiction classifier, side-effect of remember()",
     # Phase 2 of #199: head summarizer for context compaction. Cheap
     # model (default Haiku 4.5) called from inside ContextCompactor's
     # orange/red tier when a long conversation needs to fit the

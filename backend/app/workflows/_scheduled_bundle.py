@@ -34,12 +34,6 @@ from app.workflows.scheduled_health import (  # noqa: F401
     update_system_status_workflow,
 )
 from app.workflows.scheduled_master import scheduled_master_workflow  # noqa: F401
-from app.workflows.scheduled_memory_archival import (  # noqa: F401
-    memory_archival_workflow,
-)
-from app.workflows.scheduled_memory_consolidation import (  # noqa: F401
-    memory_consolidation_workflow,
-)
 from app.workflows.scheduled_quotas import (  # noqa: F401
     grant_daily_free_points_workflow,
     reclaim_daily_free_points_workflow,

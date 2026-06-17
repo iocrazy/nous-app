@@ -9,7 +9,7 @@ import pytest
 from app.agent_framework.context_engine import ContextEngine, ContextPayload
 from app.schemas.ai_library import ComposedSystemPrompt
 from app.services.ai.chat.chat_context_engine import ChatContextEngine
-from app.services.ai.prompts.prompt_composer import ComposerInput, RecalledMemory
+from app.services.ai.prompts.prompt_composer import ComposerInput
 
 _AGENT_ID = uuid4()
 
@@ -35,7 +35,7 @@ class _FakeComposer:
             cache_fingerprint="prefix-fp",
             prefix_fingerprint="prefix-fp",
             dynamic_fingerprint="dynamic-fp",
-            recalled_memory_ids=[m.id for m in inp.recalled_memories],
+            recalled_memory_ids=[],
         )
 
 
@@ -94,29 +94,6 @@ async def test_assemble_forwards_optional_fields(engine):
     assert composer.received.request_instructions == "be brief"
     assert composer.received.session_id == "sess-1"
     assert composer.received.model_override == "qwen-plus"
-
-
-@pytest.mark.asyncio
-async def test_assemble_normalizes_recalled_memory_dicts(engine):
-    """Tolerate dict-shaped memories (test fixtures + admin tools)."""
-    mem_id = uuid4()
-    payload = await engine.assemble(
-        {
-            "agent_slug": "x",
-            "recalled_memories": [
-                {"id": mem_id, "summary": "user is heygo", "when_to_use": "any"}
-            ],
-        }
-    )
-    assert payload.metadata["recalled_memory_ids"] == [str(mem_id)]
-
-
-@pytest.mark.asyncio
-async def test_assemble_accepts_recalled_memory_objects(engine):
-    mem = RecalledMemory(id=uuid4(), summary="x", when_to_use="y")
-    composer: _FakeComposer = engine._composer  # noqa: SLF001
-    await engine.assemble({"agent_slug": "x", "recalled_memories": [mem]})
-    assert composer.received.recalled_memories == [mem]
 
 
 # ─── Error paths ──────────────────────────────────────────────────────

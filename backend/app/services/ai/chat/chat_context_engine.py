@@ -19,7 +19,6 @@ Request shape this engine accepts:
         "request_instructions": Optional[str],
         "session_id": Optional[str],
         "model_override": Optional[str],
-        "recalled_memories": list[RecalledMemory],  # default []
         "user_messages": list[dict],                # passed through verbatim
     }
 
@@ -40,7 +39,6 @@ from app.repositories.skill_repository import (
 from app.services.ai.prompts.prompt_composer import (
     ComposerInput,
     PromptComposer,
-    RecalledMemory,
 )
 
 
@@ -82,21 +80,12 @@ class ChatContextEngine:
         if not agent_slug:
             raise ValueError("ChatContextEngine: 'agent_slug' is required")
 
-        recalled = request.get("recalled_memories") or []
-        # Tolerate two shapes: raw RecalledMemory objects (preferred) or
-        # plain dicts that look like one (some test fixtures pass dicts).
-        normalized = [
-            m if isinstance(m, RecalledMemory) else RecalledMemory(**m)
-            for m in recalled
-        ]
-
         composed = await self._composer.compose(
             ComposerInput(
                 agent_slug=agent_slug,
                 request_instructions=request.get("request_instructions"),
                 session_id=request.get("session_id"),
                 model_override=request.get("model_override"),
-                recalled_memories=normalized,
             )
         )
 
@@ -116,9 +105,6 @@ class ChatContextEngine:
                 "model": composed.model,
                 "tools": composed.tools,
                 "skill_manifest": composed.skill_manifest,
-                "recalled_memory_ids": [
-                    str(uid) for uid in composed.recalled_memory_ids
-                ],
                 "dynamic_fingerprint": composed.dynamic_fingerprint,
             },
         )

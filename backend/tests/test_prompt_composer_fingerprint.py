@@ -1,4 +1,10 @@
-"""Unit tests for PromptComposer fingerprint split + memory injection (M1.B)."""
+"""Unit tests for PromptComposer fingerprint split + memory injection.
+
+L1 (``agent_memories``) recalled-memory injection has been removed; the
+per-turn memory injected into the prompt is now Graphiti graph facts +
+the Honcho user context. These tests exercise the fingerprint split
+(prefix vs dynamic) using graph facts as the per-turn signal.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +16,6 @@ from app.services.ai.prompts.prompt_composer import (
     CACHE_BOUNDARY_MARKER,
     ComposerInput,
     PromptComposer,
-    RecalledMemory,
 )
 
 
@@ -50,6 +55,9 @@ def _make_composer_with_fixed_repos(
         async def get_skill_ids(self, agent_id):
             return skill_ids
 
+        async def list_persistent(self):
+            return []
+
     class _SkillRepo:
         async def list_by_ids(self, ids):
             return skills
@@ -66,53 +74,29 @@ def _make_composer_with_fixed_repos(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_memory_injected_after_cache_boundary():
-    """★ Critical: memory section is AFTER the boundary so prefix cache stays valid."""
+async def test_graph_facts_injected_after_cache_boundary():
+    """★ Critical: graph facts are AFTER the boundary so prefix cache stays valid."""
     agent = _agent_dict()
     composer = _make_composer_with_fixed_repos(agent, [], [])
 
-    mem = RecalledMemory(
-        id=uuid4(),
-        summary="User prefers short replies.",
-        when_to_use="When drafting responses.",
+    inp = ComposerInput(
+        agent_slug="script_ai", graph_facts=["User prefers short replies."]
     )
-    inp = ComposerInput(agent_slug="script_ai", recalled_memories=[mem])
     result = await composer.compose(inp)
 
     boundary_idx = result.system_message.index(CACHE_BOUNDARY_MARKER)
-    memory_idx = result.system_message.index("<recalled_memories>")
-    assert memory_idx > boundary_idx, "memory must appear after cache boundary"
+    facts_idx = result.system_message.index("<graph_facts>")
+    assert facts_idx > boundary_idx, "graph facts must appear after cache boundary"
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_no_memory_section_when_empty_list():
+async def test_no_graph_facts_section_when_empty_list():
     agent = _agent_dict()
     composer = _make_composer_with_fixed_repos(agent, [], [])
-    inp = ComposerInput(agent_slug="script_ai", recalled_memories=[])
+    inp = ComposerInput(agent_slug="script_ai", graph_facts=[])
     result = await composer.compose(inp)
-    assert "<recalled_memories>" not in result.system_message
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_memory_section_uses_int_refs_not_uuids():
-    """LLM must see [0]/[1] — never raw UUID strings (Mem Zero pattern)."""
-    agent = _agent_dict()
-    composer = _make_composer_with_fixed_repos(agent, [], [])
-
-    mems = [
-        RecalledMemory(id=uuid4(), summary="A", when_to_use="ax"),
-        RecalledMemory(id=uuid4(), summary="B", when_to_use="bx"),
-    ]
-    inp = ComposerInput(agent_slug="script_ai", recalled_memories=mems)
-    result = await composer.compose(inp)
-
-    assert "[0]" in result.system_message
-    assert "[1]" in result.system_message
-    # Verify UUID strings are NOT in system_message
-    for mem in mems:
-        assert str(mem.id) not in result.system_message
+    assert "<graph_facts>" not in result.system_message
 
 
 # ---------------------------------------------------------------------------
@@ -123,18 +107,15 @@ async def test_memory_section_uses_int_refs_not_uuids():
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_prefix_fingerprint_stable_across_different_memory_sets():
-    """Same agent+skills, different recalled memories → same prefix_fingerprint."""
+    """Same agent+skills, different graph facts → same prefix_fingerprint."""
     agent = _agent_dict()
     composer = _make_composer_with_fixed_repos(agent, [_skill_dict()], [1])
 
-    mem_a = RecalledMemory(id=uuid4(), summary="A", when_to_use="x")
-    mem_b = RecalledMemory(id=uuid4(), summary="B", when_to_use="y")
-
     res1 = await composer.compose(
-        ComposerInput(agent_slug="script_ai", recalled_memories=[mem_a])
+        ComposerInput(agent_slug="script_ai", graph_facts=["A"])
     )
     res2 = await composer.compose(
-        ComposerInput(agent_slug="script_ai", recalled_memories=[mem_b])
+        ComposerInput(agent_slug="script_ai", graph_facts=["B"])
     )
     assert res1.prefix_fingerprint == res2.prefix_fingerprint
 
@@ -142,18 +123,15 @@ async def test_prefix_fingerprint_stable_across_different_memory_sets():
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_dynamic_fingerprint_differs_when_memory_set_differs():
-    """Memory set change MUST change dynamic_fingerprint (P0 isolation)."""
+    """Graph fact change MUST change dynamic_fingerprint (P0 isolation)."""
     agent = _agent_dict()
     composer = _make_composer_with_fixed_repos(agent, [_skill_dict()], [1])
 
-    mem_a = RecalledMemory(id=uuid4(), summary="A", when_to_use="x")
-    mem_b = RecalledMemory(id=uuid4(), summary="B", when_to_use="y")
-
     res1 = await composer.compose(
-        ComposerInput(agent_slug="script_ai", recalled_memories=[mem_a])
+        ComposerInput(agent_slug="script_ai", graph_facts=["A"])
     )
     res2 = await composer.compose(
-        ComposerInput(agent_slug="script_ai", recalled_memories=[mem_b])
+        ComposerInput(agent_slug="script_ai", graph_facts=["B"])
     )
     assert res1.dynamic_fingerprint != res2.dynamic_fingerprint
 
@@ -164,9 +142,8 @@ async def test_dynamic_fingerprint_equals_prefix_when_no_memories():
     agent = _agent_dict()
     composer = _make_composer_with_fixed_repos(agent, [], [])
     res = await composer.compose(ComposerInput(agent_slug="script_ai"))
-    # No memories → dynamic hash includes only the prefix hash itself
-    # (still differs from raw prefix string due to inner SHA wrap, but
-    # both are stable). What matters: same input → same dynamic.
+    # No per-turn memory → dynamic hash includes only the prefix hash itself.
+    # What matters: same input → same dynamic.
     res2 = await composer.compose(ComposerInput(agent_slug="script_ai"))
     assert res.dynamic_fingerprint == res2.dynamic_fingerprint
 
@@ -176,14 +153,12 @@ async def test_dynamic_fingerprint_equals_prefix_when_no_memories():
 async def test_dynamic_fingerprint_invariant_to_memory_order():
     agent = _agent_dict()
     composer = _make_composer_with_fixed_repos(agent, [], [])
-    mem_a = RecalledMemory(id=uuid4(), summary="A", when_to_use="x")
-    mem_b = RecalledMemory(id=uuid4(), summary="B", when_to_use="y")
 
     res_ab = await composer.compose(
-        ComposerInput(agent_slug="script_ai", recalled_memories=[mem_a, mem_b])
+        ComposerInput(agent_slug="script_ai", graph_facts=["A", "B"])
     )
     res_ba = await composer.compose(
-        ComposerInput(agent_slug="script_ai", recalled_memories=[mem_b, mem_a])
+        ComposerInput(agent_slug="script_ai", graph_facts=["B", "A"])
     )
     # Set semantics — order doesn't matter
     assert res_ab.dynamic_fingerprint == res_ba.dynamic_fingerprint
@@ -201,14 +176,11 @@ async def test_back_compat_cache_fingerprint_alias():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_recalled_memory_ids_populated():
+async def test_recalled_memory_ids_empty_after_l1_removal():
+    """L1 recall is gone — recalled_memory_ids is always empty now."""
     agent = _agent_dict()
     composer = _make_composer_with_fixed_repos(agent, [], [])
-    mems = [
-        RecalledMemory(id=uuid4(), summary="A", when_to_use="x"),
-        RecalledMemory(id=uuid4(), summary="B", when_to_use="y"),
-    ]
     res = await composer.compose(
-        ComposerInput(agent_slug="script_ai", recalled_memories=mems)
+        ComposerInput(agent_slug="script_ai", graph_facts=["A", "B"])
     )
-    assert res.recalled_memory_ids == [m.id for m in mems]
+    assert res.recalled_memory_ids == []
