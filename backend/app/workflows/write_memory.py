@@ -91,9 +91,18 @@ async def _write_graph_episode(
     current chat.
     """
     from app.services.ai.memory.graph_memory import get_graph_memory_service
+    from app.services.ai.memory.memory_prefs import get_memory_prefs
 
     service = get_graph_memory_service()
     if not service.config.enabled:
+        return False
+    # Honour the per-user "learn from my chats" toggle, same as the Honcho
+    # write path. Disabling memory learning must stop EVERY durable layer —
+    # gating only L2 (Honcho) while L3 (Graphiti) kept ingesting was a privacy
+    # gap: the panel toggle gave a false sense of control. Checked after the
+    # global flag so disabled deployments never pay the settings read.
+    prefs = await get_memory_prefs(user_id)
+    if not prefs.learn:
         return False
     body = _build_turn_episode(user_msgs, asst_msgs)
     if not body:

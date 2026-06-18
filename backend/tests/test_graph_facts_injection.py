@@ -246,3 +246,33 @@ async def test_recall_honors_admin_panel_toggle_over_env_default(
     )
     assert facts == ["recalled via DB toggle"]
     assert captured  # the DB-enabled gate let the search through
+
+
+@pytest.mark.asyncio
+async def test_recall_suppressed_when_inject_pref_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The per-user 'inject memory' toggle suppresses graph fact recall too,
+    mirroring the Honcho read gate — opting out must hide L3 facts, not just
+    the L2 user model. The search must never even be issued."""
+    from app.services.ai.chat import ai_library_chat_wiring as wiring
+    from app.services.ai.memory import graph_memory as gm
+    from app.services.ai.memory.memory_prefs import MemoryPrefs
+
+    class _Svc:
+        async def is_enabled(self) -> bool:
+            return True
+
+        async def search(self, *a, **k):  # pragma: no cover - must not run
+            raise AssertionError("search must not run when inject pref is off")
+
+    monkeypatch.setattr(gm, "get_graph_memory_service", lambda: _Svc())
+
+    async def _prefs(_uid: str) -> MemoryPrefs:
+        return MemoryPrefs(learn=True, inject=False)
+
+    monkeypatch.setattr("app.services.ai.memory.memory_prefs.get_memory_prefs", _prefs)
+    facts = await wiring._safe_recall_graph_facts(
+        user_id=UUID(int=7), user_query="what do I like?"
+    )
+    assert facts == []

@@ -423,6 +423,13 @@ async def _safe_recall_graph_facts(
         # default and keep the panel toggle inert.
         if not await service.is_enabled():
             return []
+        # Honour the per-user "inject memory" toggle, mirroring the Honcho
+        # read gate (_safe_recall_honcho_context). Opting out of injection
+        # must suppress graph facts too, not just the L2 user model.
+        from app.services.ai.memory.memory_prefs import get_memory_prefs
+
+        if not (await get_memory_prefs(str(user_id))).inject:
+            return []
         group_ids = [f"user-{user_id}"]
         project_id = await _resolve_session_project(session_id)
         if project_id:
