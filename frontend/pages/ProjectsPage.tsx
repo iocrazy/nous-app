@@ -262,7 +262,7 @@ export function ProjectsPage() {
           collapsed={sidebarCollapsed}
           onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
         />
-        <div className={island ? 'flex-1 min-w-0 px-8 pb-8' : 'flex-1 min-w-0 px-8 pt-20 pb-8'}>
+        <div className={island ? 'flex-1 min-w-0 h-full overflow-y-auto px-8 pt-3 pb-8' : 'flex-1 min-w-0 px-8 pt-20 pb-8'}>
           <ProjectsListView
             projects={filteredProjects}
             onProjectSelect={handleProjectSelect}

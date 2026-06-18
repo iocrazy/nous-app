@@ -78,48 +78,48 @@ const ScheduleForm: React.FC<ScheduleFormProps> = ({ initial, onCancel, onSubmit
   };
 
   return (
-    <form onSubmit={submit} className="space-y-3 p-4 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800/50">
-      <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">
+    <form onSubmit={submit} className="space-y-3 p-4 border border-ink-800 rounded-lg bg-ink-900/50">
+      <h3 className="text-sm font-medium text-ink-100">
         {editing ? 'Edit schedule' : 'New schedule'}
       </h3>
       <label className="block text-xs">
-        <span className="text-gray-700 dark:text-gray-300">Name</span>
+        <span className="text-ink-300">Name</span>
         <input
           type="text" required maxLength={200}
           value={form.name}
           onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-          className="mt-1 w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900"
+          className="mt-1 w-full px-2 py-1 text-sm border border-ink-700 rounded bg-ink-900"
         />
       </label>
       <label className="block text-xs">
-        <span className="text-gray-700 dark:text-gray-300">Cron expression</span>
+        <span className="text-ink-300">Cron expression</span>
         <input
           type="text" required
           value={form.cron_expr}
           onChange={(e) => setForm((f) => ({ ...f, cron_expr: e.target.value }))}
           placeholder="0 9 * * *"
-          className="mt-1 w-full px-2 py-1 font-mono text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900"
+          className="mt-1 w-full px-2 py-1 font-mono text-sm border border-ink-700 rounded bg-ink-900"
         />
-        <span className="text-[10px] text-gray-500 mt-0.5 block">5-field cron: m h dom mon dow. Example: <code>0 9 * * 1-5</code> = 9am every weekday</span>
+        <span className="text-[10px] text-ink-500 mt-0.5 block">5-field cron: m h dom mon dow. Example: <code>0 9 * * 1-5</code> = 9am every weekday</span>
       </label>
       {!editing && (
         <label className="block text-xs">
-          <span className="text-gray-700 dark:text-gray-300">Task type</span>
+          <span className="text-ink-300">Task type</span>
           <input
             type="text" required
             value={form.task_type}
             onChange={(e) => setForm((f) => ({ ...f, task_type: e.target.value }))}
-            className="mt-1 w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900"
+            className="mt-1 w-full px-2 py-1 text-sm border border-ink-700 rounded bg-ink-900"
           />
         </label>
       )}
       <label className="block text-xs">
-        <span className="text-gray-700 dark:text-gray-300">Payload (JSON)</span>
+        <span className="text-ink-300">Payload (JSON)</span>
         <textarea
           rows={4}
           value={form.payload_json}
           onChange={(e) => setForm((f) => ({ ...f, payload_json: e.target.value }))}
-          className="mt-1 w-full px-2 py-1 font-mono text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900"
+          className="mt-1 w-full px-2 py-1 font-mono text-xs border border-ink-700 rounded bg-ink-900"
         />
       </label>
       <label className="inline-flex items-center gap-2 text-xs">
@@ -128,10 +128,10 @@ const ScheduleForm: React.FC<ScheduleFormProps> = ({ initial, onCancel, onSubmit
           checked={form.enabled}
           onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))}
         />
-        <span className="text-gray-700 dark:text-gray-300">Enabled</span>
+        <span className="text-ink-300">Enabled</span>
       </label>
       <div className="flex justify-end gap-2 pt-2">
-        <button type="button" onClick={onCancel} className="px-3 py-1 text-xs rounded border border-gray-300 dark:border-gray-600">
+        <button type="button" onClick={onCancel} className="px-3 py-1 text-xs rounded border border-ink-700">
           Cancel
         </button>
         <button type="submit" disabled={submitting} className="px-3 py-1 text-xs rounded btn-tint-indigo disabled:opacity-50">
@@ -218,14 +218,14 @@ export const SchedulesPage: React.FC = () => {
   return (
     <div className="max-w-3xl mx-auto p-6 space-y-4">
       <header className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+        <h1 className="text-xl font-semibold text-ink-100 flex items-center gap-2">
           <Calendar className="w-5 h-5" />
           Schedules
         </h1>
         {!creating && !editing && (
           <button
             onClick={() => setCreating(true)}
-            className="inline-flex items-center gap-1 px-3 py-1.5 text-sm rounded bg-blue-600 text-white hover:bg-blue-700"
+            className="inline-flex items-center gap-1 px-3 py-1.5 text-sm rounded btn-tint-indigo"
           >
             <Plus className="w-4 h-4" /> New
           </button>
@@ -244,35 +244,35 @@ export const SchedulesPage: React.FC = () => {
       )}
 
       {loading ? (
-        <div className="flex items-center gap-2 text-sm text-gray-500"><Loader2 className="w-4 h-4 animate-spin" /> Loading…</div>
+        <div className="flex items-center gap-2 text-sm text-ink-500"><Loader2 className="w-4 h-4 animate-spin" /> Loading…</div>
       ) : schedules.length === 0 ? (
-        <div className="text-sm text-gray-500 italic">No schedules yet. Create one to run a task on a cron schedule.</div>
+        <div className="text-sm text-ink-500 italic">No schedules yet. Create one to run a task on a cron schedule.</div>
       ) : (
         <ul className="space-y-2">
           {schedules.map((s) => (
-            <li key={s.id} className="border border-gray-200 dark:border-gray-700 rounded p-3 bg-white dark:bg-gray-800 flex items-center gap-3">
-              <span className={s.enabled ? 'text-emerald-500' : 'text-gray-400'} title={s.enabled ? 'Enabled' : 'Disabled'}>
+            <li key={s.id} className="border border-ink-800 rounded p-3 bg-ink-900 flex items-center gap-3">
+              <span className={s.enabled ? 'text-emerald-500' : 'text-ink-400'} title={s.enabled ? 'Enabled' : 'Disabled'}>
                 <Clock className="w-4 h-4" />
               </span>
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{s.name}</div>
-                <div className="text-xs text-gray-500 font-mono">{s.cron_expr}</div>
-                <div className="text-[10px] text-gray-400">
+                <div className="text-sm font-medium text-ink-100 truncate">{s.name}</div>
+                <div className="text-xs text-ink-500 font-mono">{s.cron_expr}</div>
+                <div className="text-[10px] text-ink-400">
                   next: {new Date(s.next_fire_at).toLocaleString()} · fired {s.fire_count}× · failed {s.fail_count}×
                 </div>
               </div>
               <div className="flex items-center gap-1">
-                <button title="Fire now" onClick={() => onFireNow(s.id)} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700">
+                <button title="Fire now" onClick={() => onFireNow(s.id)} className="p-1 rounded hover:bg-ink-800">
                   <Play className="w-3.5 h-3.5" />
                 </button>
                 <button
                   title={s.enabled ? 'Disable' : 'Enable'}
                   onClick={() => onToggle(s)}
-                  className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700"
+                  className="p-1 rounded hover:bg-ink-800"
                 >
-                  {s.enabled ? <Power className="w-3.5 h-3.5 text-emerald-500" /> : <PowerOff className="w-3.5 h-3.5 text-gray-400" />}
+                  {s.enabled ? <Power className="w-3.5 h-3.5 text-emerald-500" /> : <PowerOff className="w-3.5 h-3.5 text-ink-400" />}
                 </button>
-                <button title="Edit" onClick={() => setEditing(s)} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700">
+                <button title="Edit" onClick={() => setEditing(s)} className="p-1 rounded hover:bg-ink-800">
                   <Pencil className="w-3.5 h-3.5" />
                 </button>
                 <button title="Delete" onClick={() => onDelete(s.id)} className="p-1 rounded hover:bg-rose-100 text-rose-500">
