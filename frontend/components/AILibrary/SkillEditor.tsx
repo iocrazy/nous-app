@@ -486,7 +486,7 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
                   type="button"
                   onClick={save}
                   disabled={saving}
-                  className="inline-flex items-center gap-1.5 rounded-md bg-indigo-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-400 disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 rounded-md btn-tint-indigo px-3 py-1.5 text-sm font-medium disabled:opacity-50"
                 >
                   <Save className="h-3.5 w-3.5" />
                   {saving

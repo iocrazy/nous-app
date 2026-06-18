@@ -145,7 +145,7 @@ export const MembersView: React.FC<MembersViewProps> = ({
         {isOwner && (
           <button
             onClick={() => setShowInviteModal(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors"
+            className="flex items-center gap-2 px-4 py-2 btn-tint-indigo rounded-lg font-medium transition-colors"
           >
             <UserPlus size={16} />
             {t('members.inviteMembers')}

@@ -159,7 +159,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
           <button
             onClick={onCreateProject}
             data-testid="new-project-btn"
-            className="flex items-center gap-2 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors text-sm"
+            className="flex items-center gap-2 px-4 py-1.5 btn-tint-indigo rounded-lg font-medium transition-colors text-sm"
           >
             <Plus size={14} />
             {t('mediatrack.newProject', 'New Project')}
@@ -240,7 +240,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
           ) : (
             <button
               onClick={onCreateProject}
-              className="mt-4 flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-medium transition-colors text-sm"
+              className="mt-4 flex items-center gap-2 px-5 py-2.5 btn-tint-indigo rounded-xl font-medium transition-colors text-sm"
             >
               <Plus size={16} />
               {t('mediatrack.createProject', 'Create Project')}

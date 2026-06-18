@@ -341,7 +341,7 @@ export const NewSkillModal: React.FC<NewSkillModalProps> = ({
             <button
               type="submit"
               disabled={!canSubmit}
-              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-md btn-tint-indigo px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"
             >
               {submitting
                 ? t('common.saving', 'Creating...')

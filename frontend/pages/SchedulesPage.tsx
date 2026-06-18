@@ -134,7 +134,7 @@ const ScheduleForm: React.FC<ScheduleFormProps> = ({ initial, onCancel, onSubmit
         <button type="button" onClick={onCancel} className="px-3 py-1 text-xs rounded border border-gray-300 dark:border-gray-600">
           Cancel
         </button>
-        <button type="submit" disabled={submitting} className="px-3 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
+        <button type="submit" disabled={submitting} className="px-3 py-1 text-xs rounded btn-tint-indigo disabled:opacity-50">
           {submitting ? 'Saving…' : 'Save'}
         </button>
       </div>

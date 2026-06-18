@@ -2,6 +2,7 @@ import {
   LayoutGrid, Star, Clock, Zap, Archive,
   FolderOpen, ChevronLeft, ChevronRight,
 } from 'lucide-react';
+import { islandUI } from '../../utils/featureFlags';
 
 interface ProjectFilterSidebarProps {
   activeFilter: string;
@@ -82,7 +83,7 @@ export function ProjectFilterSidebar({
   }
 
   return (
-    <div className="group relative flex w-52 flex-col border-r border-ink-800/40 pt-16">
+    <div className={`group relative flex w-52 flex-col border-r border-ink-800/40 ${islandUI() ? '' : 'pt-16'}`}>
       {/* Header */}
       <div className="px-4 pt-4 pb-3">
         <span className="text-sm font-semibold text-ink-200">Projects</span>
