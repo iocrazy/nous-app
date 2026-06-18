@@ -817,7 +817,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
       {/* Content area */}
       <div
         ref={contentScrollRef}
-        className="flex-1 md:min-h-0 overflow-y-auto p-3 md:p-6 relative lib-scroll"
+        className="flex-1 md:min-h-0 overflow-y-auto p-3 md:p-6 relative"
         style={{ paddingRight: !islandUI() && (selectedResource?.resource || selectedFolder) && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
         onDragEnter={canUploadDrop ? onDragEnter : undefined}
         onDragOver={canUploadDrop ? onDragOver : undefined}
