@@ -72,7 +72,7 @@ export function DashboardPage() {
       {dashboardSubView === 'overview' && (
         <div className="space-y-8">
           <header className="mb-8">
-            <h1 className="text-2xl font-bold text-ink-50">{t('dashboard.title')}</h1>
+            <h1 className="text-lg font-semibold text-ink-100">{t('dashboard.title')}</h1>
             <p className="text-ink-400 text-sm">{t('dashboard.subtitle')}</p>
           </header>
 

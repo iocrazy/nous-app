@@ -140,7 +140,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
     <div>
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-bold text-ink-50">{externalTitle || t('mediatrack.projects', 'Projects')}</h1>
+        <h1 className="text-lg font-semibold text-ink-100">{externalTitle || t('mediatrack.projects', 'Projects')}</h1>
         <div className="flex items-center gap-2">
           {/* Search */}
           <div className="relative">

@@ -114,7 +114,7 @@ export const UsagePage: React.FC = () => {
     <div className="max-w-6xl mx-auto space-y-6 p-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="text-2xl font-bold text-ink-100">
+          <h1 className="text-lg font-semibold text-ink-100">
             {t('aiUsage.title', 'AI Usage')}
           </h1>
           <p className="mt-1 text-sm text-ink-400">

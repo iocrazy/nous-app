@@ -137,7 +137,7 @@ export const MembersView: React.FC<MembersViewProps> = ({
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h2 className="text-2xl font-bold text-ink-100">{t('members.title')}</h2>
+          <h2 className="text-lg font-semibold text-ink-100">{t('members.title')}</h2>
           <span className="bg-ink-800 text-ink-400 rounded-full px-2.5 py-0.5 text-sm">
             {members.length}
           </span>
