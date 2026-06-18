@@ -142,3 +142,51 @@ async def test_empty_turn_skips_write(service: RecordingService) -> None:
     )
     assert ok is False
     assert service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_learn_pref_off_skips_graph_write(
+    service: RecordingService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The per-user 'learn from my chats' toggle gates the Graphiti write too,
+    not just Honcho — disabling it must stop ALL durable layers (privacy)."""
+    from app.services.ai.memory.memory_prefs import MemoryPrefs
+
+    async def _prefs(_uid: str) -> MemoryPrefs:
+        return MemoryPrefs(learn=False, inject=True)
+
+    monkeypatch.setattr("app.services.ai.memory.memory_prefs.get_memory_prefs", _prefs)
+    ok = await _write_graph_episode(
+        user_id="42",
+        session_id="777",
+        run_id="888",
+        iteration=0,
+        user_msgs=["what export size?"],
+        asst_msgs=["9:16"],
+    )
+    assert ok is False
+    assert service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_learn_pref_on_allows_graph_write(
+    service: RecordingService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """learn=True (the default) lets the write through — the gate only blocks
+    on explicit opt-out, and a settings hiccup fails open."""
+    from app.services.ai.memory.memory_prefs import MemoryPrefs
+
+    async def _prefs(_uid: str) -> MemoryPrefs:
+        return MemoryPrefs(learn=True, inject=True)
+
+    monkeypatch.setattr("app.services.ai.memory.memory_prefs.get_memory_prefs", _prefs)
+    ok = await _write_graph_episode(
+        user_id="42",
+        session_id="777",
+        run_id="888",
+        iteration=0,
+        user_msgs=["what export size?"],
+        asst_msgs=["9:16"],
+    )
+    assert ok is True
+    assert len(service.calls) == 1
