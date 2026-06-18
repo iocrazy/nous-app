@@ -185,7 +185,7 @@ export const WorkforcePage: React.FC = () => {
     <div className="max-w-6xl mx-auto space-y-6">
       <header className="flex items-end justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-ink-100">
+          <h1 className="text-lg font-semibold text-ink-100">
             {t('workforce.title', 'Workforce')}
           </h1>
           <p className="text-sm text-ink-500 mt-1">

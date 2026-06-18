@@ -111,7 +111,7 @@ export const SharedPage: React.FC = () => {
     <div className="flex-1 overflow-auto p-6">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-bold text-ink-100">{t('shared.title')}</h1>
+        <h1 className="text-lg font-semibold text-ink-100">{t('shared.title')}</h1>
 
         {/* Filter */}
         <div className="flex items-center gap-2">
