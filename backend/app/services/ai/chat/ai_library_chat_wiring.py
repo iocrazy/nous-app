@@ -41,6 +41,16 @@ from app.services.workforce.delegate_tool import DelegateToolService
 
 logger = logging.getLogger(__name__)
 
+# Overall wall-clock budget for the whole memory-recall step on the chat hot
+# path. The per-recall functions already bound their own search/HTTP calls, but
+# their *setup* (first-call system_settings load + cold DB/embedder connection
+# pools right after a backend restart) falls OUTSIDE those inner timeouts — that
+# cold spike once turned the first chat turn into a ~14s hang (2026-06-18). This
+# is the belt-and-suspenders ceiling: if recall (both layers, including cold
+# setup) can't finish in time, proceed with NO memory rather than stall the
+# turn. Memory is best-effort enrichment; warm recall is well under 2s.
+MEMORY_RECALL_BUDGET_S = 4.0
+
 
 def _resolve_tool_rate_limit(capability_profile: dict[str, Any]) -> int:
     """Tool-calls-per-minute cap for the RateLimit hook.
@@ -138,18 +148,31 @@ async def build_agent_runner_stack(
     fallback_models: list[str] = list(agent.get("fallback_models") or [])
     budget_cents = agent.get("budget_per_run_cents")
 
-    # ── 1. Memory recall (best-effort, concurrent) ──────────────────
-    # The two recalls are independent (neither consumes the other's output)
-    # and each is internally exception-safe (degrades to []/None, never
-    # raises), so we gather them instead of stacking serial awaits on the
-    # chat hot path. graph = FalkorDB search (10s cap); honcho = HTTP
-    # user-model (10s cap) — serially that's their SUM per turn.
-    graph_facts, honcho_context = await asyncio.gather(
-        _safe_recall_graph_facts(
-            user_id=user_id, user_query=user_query, session_id=session_id
-        ),
-        _safe_recall_honcho_context(user_id=str(user_id), session_id=session_id),
-    )
+    # ── 1. Memory recall (best-effort, concurrent, hard wall-clock budget) ──
+    # The two recalls are independent (neither consumes the other's output) and
+    # each is internally exception-safe (degrades to []/None), so we gather them
+    # concurrently. graph = FalkorDB search (3s inner cap); honcho = HTTP
+    # user-model. The whole step is additionally bounded by
+    # MEMORY_RECALL_BUDGET_S so cold-start setup (outside the inner timeouts)
+    # can never stall the turn — on budget overrun we proceed with no memory.
+    try:
+        graph_facts, honcho_context = await asyncio.wait_for(
+            asyncio.gather(
+                _safe_recall_graph_facts(
+                    user_id=user_id, user_query=user_query, session_id=session_id
+                ),
+                _safe_recall_honcho_context(
+                    user_id=str(user_id), session_id=session_id
+                ),
+            ),
+            timeout=MEMORY_RECALL_BUDGET_S,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "[memory] recall exceeded %.1fs budget; proceeding without memory",
+            MEMORY_RECALL_BUDGET_S,
+        )
+        graph_facts, honcho_context = [], None
 
     # ── 2. HookRegistry per-turn ────────────────────────────────────
     registry = HookRegistry()
