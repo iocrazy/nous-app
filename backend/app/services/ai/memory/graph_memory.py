@@ -62,6 +62,15 @@ DEFAULT_EMBEDDER_DIMENSIONS = 1536
 STRUCTURED_OUTPUT_MODES = ("json_object", "json_schema")
 DEFAULT_STRUCTURED_OUTPUT_MODE = "json_object"
 
+# Entity/edge extraction must be deterministic. graphiti's ``LLMConfig`` dataclass
+# defaults ``temperature`` to 1 (its base ``LLMClient`` uses 0, but the config
+# overrides it) — so an extractor built without an explicit temperature samples
+# at 1.0, and the SAME turn yields different entities/edges each run: a follow-up
+# like "switched from Figma to Penpot" intermittently extracts the switch edge or
+# nothing at all. That looks like model "lossiness" but is just stochastic
+# decoding. Pin it to 0 so extraction is reproducible across runs and providers.
+EXTRACTOR_TEMPERATURE = 0.0
+
 # Hard ceiling on a single hybrid retrieval. search() sits on the synchronous
 # chat hot path, so a FalkorDB host that accepts the TCP connection but never
 # responds (vs. cleanly refusing) must NOT stall the turn — the timeout fires,
@@ -252,6 +261,7 @@ def _build_llm_and_embedder(config: "GraphMemoryConfig") -> tuple[Any, Any, Any]
         base_url=config.extractor_base_url or None,
         api_key=config.extractor_api_key,
         model=config.extractor_model or None,
+        temperature=EXTRACTOR_TEMPERATURE,
     )
     llm = OpenAIGenericClient(
         config=llm_config,
