@@ -56,6 +56,17 @@ def test_build_llm_carries_explicit_config():
     assert reranker.config.base_url == "https://ms.example/v1"
 
 
+def test_build_llm_pins_extraction_temperature_to_zero():
+    # Extraction must be deterministic. graphiti's LLMConfig defaults temperature
+    # to 1; an unset temperature samples at 1.0 and the same turn yields different
+    # entities/edges each run (intermittently dropping facts). Both the extractor
+    # LLM and the reranker (shared config) must run at 0.
+    llm, _, reranker = _build_llm_and_embedder(_cfg(extractor_api_key="ms-key"))
+    assert llm.config.temperature == 0.0
+    assert llm.temperature == 0.0
+    assert reranker.config.temperature == 0.0
+
+
 def test_build_llm_defaults_to_json_object_mode():
     # ModelScope/Qwen (and DeepSeek-class providers) reject Graphiti's complex
     # json_schema constrained-decoding payload (returns choices=None); json_object
