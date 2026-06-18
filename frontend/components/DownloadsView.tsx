@@ -908,7 +908,7 @@ export const DownloadsView: React.FC = () => {
       {/* Toolbar */}
       <div
         className="hidden md:block px-6 py-2 border-b border-ink-800/80 space-y-2"
-        style={{ paddingRight: selectedVideo && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
+        style={{ paddingRight: !island && selectedVideo && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
       >
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
@@ -1033,7 +1033,7 @@ export const DownloadsView: React.FC = () => {
             // (~7rem + safe-area). Desktop reverts to the original 20 px.
             : 'px-3 pt-3 pb-[calc(7rem+env(safe-area-inset-bottom,6px))] md:pb-5'
         }`}
-        style={{ paddingRight: selectedVideo && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
+        style={{ paddingRight: !island && selectedVideo && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
         onTouchStart={handlePullStart}
         onTouchMove={handlePullMove}
         onTouchEnd={handlePullEnd}
