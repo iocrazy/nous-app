@@ -134,7 +134,7 @@ export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, o
                 document.getElementById('billing-packages')?.scrollIntoView({ behavior: 'smooth' });
               }
             }}
-            className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-black font-semibold rounded-xl transition-colors"
+            className="px-5 py-2.5 btn-tint-amber font-semibold rounded-xl transition-colors"
           >
             {t('billing.buyPoints')}
           </button>
@@ -352,7 +352,7 @@ export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, o
               <button
                 onClick={handleAdjustPoints}
                 disabled={adjusting || !adjustAmount || !adjustDescription.trim()}
-                className="px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:bg-ink-700 disabled:text-ink-500 text-black font-semibold rounded-lg transition-colors flex items-center gap-2"
+                className="px-4 py-2 btn-tint-amber disabled:bg-ink-700 disabled:text-ink-500 font-semibold rounded-lg transition-colors flex items-center gap-2"
               >
                 {adjusting && <Loader2 size={16} className="animate-spin" />}
                 {t('billing.adjustSubmit', 'Adjust Points')}

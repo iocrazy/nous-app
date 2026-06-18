@@ -385,7 +385,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
             <button
               onClick={save}
               disabled={saving}
-              className="rounded-lg bg-indigo-500/10 border border-indigo-500/30 px-4 py-2 text-sm font-medium text-indigo-400 hover:bg-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+              className="rounded-lg btn-tint-indigo px-4 py-2 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
             >
               {saving ? t('common.saving') : t('aiLibrary.agents.saveChanges')}
             </button>

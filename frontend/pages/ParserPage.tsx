@@ -161,7 +161,7 @@ export function ParserPage() {
               <button
                 onClick={handleParse}
                 disabled={isParsing || !urlInput}
-                className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-lg font-medium transition-all shadow-lg shadow-indigo-500/20 flex items-center gap-2 flex-shrink-0"
+                className="btn-tint-indigo disabled:opacity-50 disabled:cursor-not-allowed px-6 py-2.5 rounded-lg font-medium transition-all flex items-center gap-2 flex-shrink-0"
               >
                 {isParsing && taskProgress < 100 ? <Loader2 className="animate-spin w-4 h-4" /> : t('parser.analyze')}
               </button>
@@ -182,7 +182,7 @@ export function ParserPage() {
                 <button
                   onClick={handleParse}
                   disabled={isParsing || !batchInput}
-                  className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2 rounded-lg font-medium transition-all shadow-lg shadow-indigo-500/20 flex items-center gap-2"
+                  className="btn-tint-indigo disabled:opacity-50 disabled:cursor-not-allowed px-6 py-2 rounded-lg font-medium transition-all flex items-center gap-2"
                 >
                   {isParsing && taskProgress < 100 ? <Loader2 className="animate-spin w-4 h-4" /> : t('parser.processBatch')}
                 </button>

@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { TopBar } from './TopBar';
 import { Sidebar } from './Sidebar';
 import { IslandWorkProvider, useIslandWork } from '../contexts/IslandWorkContext';
@@ -31,8 +32,19 @@ export function IslandShell(props: IslandShellProps) {
 }
 
 function IslandShellFrame({ isDetailPage, topBarProps, sidebarProps, children }: IslandShellProps) {
-  const { setInfoIslandEl, infoVisible, setInfoVisible, infoWidth, setInfoWidth, infoAvailable } =
+  const { setInfoIslandEl, infoVisible, setInfoVisible, infoWidth, setInfoWidth, infoAvailable, setInfoAvailable } =
     useIslandWork();
+  const { pathname } = useLocation();
+
+  // Clear the info-island on navigation. Pages that own an info panel
+  // (Resources / Downloads / detail pages) re-assert availability from their
+  // own selection effects after mount; pages that don't (Points, Billing,
+  // Projects, AI Library, …) would otherwise inherit a stale "‹ Info" reopen
+  // handle / empty aside left behind by the previous page.
+  useEffect(() => {
+    setInfoVisible(false);
+    setInfoAvailable(false);
+  }, [pathname, setInfoVisible, setInfoAvailable]);
 
   // Drag the divider to resize the right info island. The island is on the RIGHT
   // edge, so width grows as the pointer moves left (innerWidth - clientX, minus
