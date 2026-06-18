@@ -58,7 +58,9 @@ function formatElapsed(ms: number): string {
 const TERMINAL = new Set(['completed', 'failed', 'cancelled', 'lost']);
 
 export const FlowGroupCard: React.FC<FlowGroupCardProps> = ({ group, flowId, renderTask }) => {
-  const [open, setOpen] = useState(true);
+  // Default collapsed: the Tasks list should read as a clean stack of flow
+  // headers (summary counts only); the user expands a flow to see its steps.
+  const [open, setOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const { addToast } = useToast();
 
