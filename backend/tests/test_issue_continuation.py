@@ -46,7 +46,30 @@ class _Recorder:
         )
 
 
-async def _run(rec: _Recorder, max_continuations=2, auto_close=False):
+def _const_load_issue(status: str = "in_progress"):
+    """A load_issue fake that always reports the same issue status."""
+
+    async def _load(issue_id):
+        return {"id": issue_id, "status": status}
+
+    return _load
+
+
+def _scripted_load_issue(statuses: list[str]):
+    """A load_issue fake that walks a script of statuses, one per call, then
+    repeats the last entry (mirrors _Recorder's outcome scripting)."""
+    seq = list(statuses)
+
+    async def _load(issue_id):
+        idx = min(_load.calls, len(seq) - 1)
+        _load.calls += 1
+        return {"id": issue_id, "status": seq[idx]}
+
+    _load.calls = 0
+    return _load
+
+
+async def _run(rec: _Recorder, max_continuations=2, auto_close=False, load_issue=None):
     return await _run_dispatch_with_continuation(
         1,
         {"id": 1},
@@ -54,6 +77,7 @@ async def _run(rec: _Recorder, max_continuations=2, auto_close=False):
         "user-1",
         run_turn=rec.run_turn,
         set_status=rec.set_status,
+        load_issue=load_issue or _const_load_issue(),
         max_continuations=max_continuations,
         auto_close=auto_close,
     )
@@ -142,3 +166,60 @@ async def test_no_declaration_falls_back_to_in_review_plain():
     assert call["status"] == "in_review"
     assert call["agent_outcome"] is None
     assert call["error_code"] is None
+
+
+# --- External-state preemption (Symphony §16.5 per-turn reconciliation) -------
+
+
+@pytest.mark.asyncio
+async def test_preempt_before_first_turn_when_already_cancelled():
+    # Issue cancelled between dispatch and the first turn → never run, never
+    # overwrite the external status.
+    rec = _Recorder([("completed", "should not run")])
+    res = await _run(rec, load_issue=_const_load_issue("cancelled"))
+    assert rec.turns == []  # no agent turn burned
+    assert rec.status_calls == []  # external status left untouched
+    assert res["preempted"] is True
+    assert res["preempted_status"] == "cancelled"
+    assert res["attempts"] == 0
+
+
+@pytest.mark.asyncio
+async def test_preempt_between_continuation_turns():
+    # First check active → run turn (continue); before the 2nd turn the issue is
+    # cancelled externally → preempt instead of burning the rest of the budget.
+    rec = _Recorder([("continue", "wip"), ("completed", "should not run")])
+    res = await _run(
+        rec,
+        max_continuations=2,
+        load_issue=_scripted_load_issue(["in_progress", "cancelled"]),
+    )
+    assert rec.turns == [False]  # only the first turn ran
+    assert rec.status_calls == []  # don't clobber the external cancel
+    assert res["preempted"] is True
+    assert res["preempted_status"] == "cancelled"
+    assert res["attempts"] == 1
+
+
+@pytest.mark.asyncio
+async def test_preempt_on_external_done():
+    # Any terminal status (not just cancelled) preempts.
+    rec = _Recorder([("continue", "wip"), ("continue", "wip2")])
+    res = await _run(
+        rec,
+        load_issue=_scripted_load_issue(["in_progress", "done"]),
+    )
+    assert rec.turns == [False]
+    assert res["preempted"] is True
+    assert res["preempted_status"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_no_preempt_when_status_stays_in_progress():
+    # The agent's own completion (status stays in_progress through the loop, set
+    # only after) must NOT be mistaken for an external stop.
+    rec = _Recorder([("completed", "done")])
+    res = await _run(rec, load_issue=_const_load_issue("in_progress"))
+    assert rec.turns == [False]
+    assert res.get("preempted") is not True
+    assert rec.status_calls[-1]["status"] == "in_review"
