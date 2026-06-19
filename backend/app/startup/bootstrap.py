@@ -231,6 +231,36 @@ async def _bg_reap_internal_queue() -> None:
         await asyncio.sleep(interval)
 
 
+async def _bg_memory_warmup() -> None:
+    """Pre-warm the memory-recall connection pools so the FIRST chat turn after
+    a restart doesn't pay cold-start latency on the synchronous hot path.
+
+    Memory recall (graph + Honcho) is gathered before the prompt on every chat
+    turn. Its inner timeouts (graph search 3s) and the call-site budget (4s)
+    bound the *common* cold case, but the deepest-cold moment — a freshly
+    recreated backend container AND a cold qwen embedder box at the same time —
+    once produced a ~12s spike that slipped past those async timeouts (the cold
+    embed/connection setup blocked uncancellably). Firing one throwaway recall
+    here moves that one-time cold cost off a user's turn and into background
+    startup. Fully best-effort: any failure is swallowed."""
+    try:
+        from uuid import uuid4
+
+        from app.services.ai.chat.ai_library_chat_wiring import (
+            _safe_recall_graph_facts,
+            _safe_recall_honcho_context,
+        )
+
+        uid = uuid4()
+        await _safe_recall_graph_facts(
+            user_id=uid, user_query="warmup", session_id=None
+        )
+        await _safe_recall_honcho_context(user_id=str(uid), session_id=None)
+        logger.info("[bootstrap] memory recall pools warmed")
+    except Exception as exc:  # noqa: BLE001 — warmup must never affect startup
+        logger.warning(f"memory warmup failed (non-fatal): {exc!r}")
+
+
 def install_background_bootstrap(app: FastAPI) -> None:
     """Spawn all background bootstrap tasks into `app.state.bg_tasks`."""
     app.state.bg_tasks = BackgroundTaskRegistry()
@@ -246,3 +276,6 @@ def install_background_bootstrap(app: FastAPI) -> None:
     # double alerts in the gateway/worker split.
     if role_from_env().serves_http_api:
         app.state.bg_tasks.spawn("stall_detector", _bg_stall_detector())
+        # Memory recall runs on the chat hot path, served by this process —
+        # warm its pools here so the first turn after a restart isn't cold.
+        app.state.bg_tasks.spawn("memory_warmup", _bg_memory_warmup())
