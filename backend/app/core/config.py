@@ -1131,8 +1131,15 @@ class Settings(BaseSettings):
         "MUST be empty in production. Example: 192.168.50.10/32,127.0.0.1/32",
     )
     SSRF_DNS_TIMEOUT_SECONDS: float = Field(
-        default=2.0,
-        description="DNS resolution timeout for url_guard async path",
+        default=5.0,
+        description="DNS resolution timeout for url_guard async path. "
+        "Bumped 2.0->5.0: douyin domains (v.douyin.com / www.douyin.com) "
+        "resolve from the NAS in 0.9-5.0s (measured), and a 2s cap "
+        "intermittently tripped 'dns resolution timed out' in the SSRF "
+        "guard's pre-fetch check — which is the FIRST step of the douyin "
+        "ABogus parser (short-link resolution, before any cookie use), so a "
+        "slow-DNS moment failed the whole parse with 'All enabled Douyin "
+        "parse methods failed'. Not a cookie problem.",
     )
     SSRF_DNS_CACHE_TTL_SECONDS: int = Field(
         default=60,

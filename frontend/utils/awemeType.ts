@@ -30,13 +30,25 @@ export const MEDIA_TYPE_MAP: Record<string | number, string> = {
 export const AWEME_TYPE_MAP = MEDIA_TYPE_MAP;
 
 /**
- * Check if media type is a video type
+ * Check if media type is a video type.
+ *
+ * Content-driven (NOT a fixed allowlist): anything that isn't an album/image
+ * or audio is a downloadable video. Mirrors the backend download gate
+ * (`download_strategies.py`: video when `media_type not in (2, 68)`). A fixed
+ * (0/4/61) allowlist silently dropped the "Fetch Video" action for newer
+ * douyin types like 51 ("翻唱"/cover posts) even though they carry
+ * video_download_urls — the user saw only a "Cover" option and could never
+ * fetch the video. Inlined album/audio checks keep this self-contained
+ * (isVideoType is declared before isAlbumType in this file).
  */
 export const isVideoType = (mediaType?: string | number): boolean => {
   if (mediaType === undefined || mediaType === null) return false;
   const type = String(mediaType);
-  return type === 'video' || type === 'special' || type === 'short' || type === 'live_clip' ||
-         type === '0' || type === '4' || type === '61';
+  // Album / image types
+  if (type === 'carousel' || type === 'image_text' || type === '2' || type === '68') return false;
+  // Audio (handled by its own audio screen / extract flow)
+  if (type === 'audio') return false;
+  return true;
 };
 
 /**

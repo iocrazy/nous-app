@@ -83,7 +83,16 @@ def _do_douyin_download(
             )
 
     # ── Pre-download: validate URL accessibility, refresh if expired ──
-    if int(media_type) in (0, 4, 61):  # Video types
+    # Content-driven, NOT a hardcoded type allowlist. Any non-image douyin
+    # type carries video_download_urls (the formatter routes unknown types
+    # with a `video` field as video — see formatter "未知媒体类型 N, 检测到
+    # video 字段, 按视频处理"). A fixed (0,4,61) allowlist silently skipped
+    # the whole video branch for newer types like 51 ("翻唱"/cover posts):
+    # cover downloaded, video never attempted → results["video"]=None,
+    # failed_parts=[] → "Video download did not complete". Mirror the
+    # `needed` calc above (`"image" if (2,68) else "video"`) so the EXEC
+    # gate and the URL-prep gate never disagree again.
+    if int(media_type) not in (2, 68):  # Video (everything that isn't an image)
         if download_video:
             # Set stage boundaries for fine-grained video progress
             if "video" in stages:
