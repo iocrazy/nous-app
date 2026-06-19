@@ -1574,7 +1574,7 @@ class ResourcesRepository:
         # shape is unchanged). scope_id is always a teams.id snowflake post PR-C.
         sql_parts = [
             "SELECT r.id::text, r.filename AS name, ",
-            "       r.mime_type AS mime, r.file_size AS size, ",
+            "       r.mime_type AS mime, r.file_size_bytes AS size, ",
             "       r.updated_at, ri.scope_id::text, ",
             "       CASE WHEN t.kind = 'personal' THEN 'personal' ELSE 'team' END AS scope_type ",
             "FROM public.resources r ",
