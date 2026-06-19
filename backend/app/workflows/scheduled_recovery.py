@@ -114,9 +114,12 @@ async def collect_retryable_downloads_step() -> dict[str, Any]:
             "skipped_exhausted": 0,
         }
 
-    # Resolve media_id -> owner (resources.creator_id) in one batch.
+    # Resolve media_id -> {owner, resource_id} in one batch. resource_id is
+    # required so the retried download_workflow runs chain_followups_step
+    # (extract_audio / thumbnail / transcode / AI) — without it the chain
+    # early-returns and a successfully-retried video never gets its audio.
     media_ids = [v.get("id") for v in failed if v.get("id") is not None]
-    owner_map = await repo.get_media_owner_map(media_ids)
+    owner_map = await repo.get_media_resource_owner_map(media_ids)
 
     max_attempts = _max_download_retry_attempts()
 
@@ -125,7 +128,9 @@ async def collect_retryable_downloads_step() -> dict[str, Any]:
     skipped_exhausted = 0
     for video in failed:
         platform_id = video.get("platform_id")
-        user_id = owner_map.get(str(video.get("id")))
+        entry = owner_map.get(str(video.get("id"))) or {}
+        user_id = entry.get("user_id")
+        resource_id = entry.get("resource_id") or None
         if not user_id:
             skipped_orphan += 1
             continue
@@ -158,6 +163,8 @@ async def collect_retryable_downloads_step() -> dict[str, Any]:
                 "platform_id": platform_id,
                 "user_id": user_id,
                 "media_type": int(video.get("media_type", 0)),
+                "resource_id": resource_id,
+                "video_title": video.get("title") or "",
             }
         )
 
@@ -193,6 +200,13 @@ async def _dispatch_download_retries(specs: list[dict[str, Any]]) -> int:
                     "download_video": True,
                     "download_cover": True,
                     "media_type": int(spec.get("media_type", 0)),
+                    # Thread resource_id + title so the retried download runs
+                    # chain_followups_step (extract_audio / thumbnail /
+                    # transcode / AI). Omitting resource_id made the chain
+                    # early-return — a retried video downloaded but never got
+                    # its audio extracted.
+                    "resource_id": spec.get("resource_id"),
+                    "video_title": spec.get("video_title", ""),
                 },
             )
             retried += 1

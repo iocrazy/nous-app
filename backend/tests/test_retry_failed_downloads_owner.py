@@ -33,6 +33,14 @@ class _FakeRepo:
         wanted = {str(m) for m in media_ids}
         return {k: v for k, v in self._owner_map.items() if k in wanted}
 
+    async def get_media_resource_owner_map(self, media_ids):
+        wanted = {str(m) for m in media_ids}
+        return {
+            k: {"user_id": v, "resource_id": f"res-{k}"}
+            for k, v in self._owner_map.items()
+            if k in wanted
+        }
+
 
 def _patch_engine_execute(monkeypatch):
     """Capture collect's committing writes (db_engine.execute) — collect uses
@@ -70,7 +78,15 @@ async def test_collect_resolves_owner_and_resets_pending(monkeypatch):
     assert out["total_failed"] == 2
     assert out["skipped_orphan"] == 1
     assert out["skipped_exhausted"] == 0
-    assert out["specs"] == [{"platform_id": "p1", "user_id": "u1", "media_type": 0}]
+    assert out["specs"] == [
+        {
+            "platform_id": "p1",
+            "user_id": "u1",
+            "media_type": 0,
+            "resource_id": "res-m1",
+            "video_title": "",
+        }
+    ]
     # only the owned one was reset to pending + retry counter bumped 0->1 via
     # the committing engine; orphan left alone
     assert len(writes) == 1
@@ -160,7 +176,15 @@ async def test_collect_skips_exhausted_downloads(monkeypatch):
     assert out["skipped_exhausted"] == 2
     assert out["skipped_orphan"] == 0
     # only the under-cap one dispatches, with counter bumped 2->3
-    assert out["specs"] == [{"platform_id": "fresh", "user_id": "u1", "media_type": 0}]
+    assert out["specs"] == [
+        {
+            "platform_id": "fresh",
+            "user_id": "u1",
+            "media_type": 0,
+            "resource_id": "res-m1",
+            "video_title": "",
+        }
+    ]
     assert len(writes) == 1
     assert writes[0][1]["pid"] == "fresh"
     assert writes[0][1]["cnt"] == 3
