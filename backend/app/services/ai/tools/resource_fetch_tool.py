@@ -58,7 +58,7 @@ async def _fetch_dispatch(
           FROM public.resources r
           JOIN public.resource_items ri ON ri.resource_id = r.id
          WHERE r.id::text = :rid
-           AND r.is_trashed = false AND ri.is_trashed = false
+           AND r.is_trashed = false
            -- After Spec 1 PR-C: ri.scope_id is always a teams.id snowflake;
            -- personal scope is a single-member team containing the user.
            AND ri.scope_id::text IN (

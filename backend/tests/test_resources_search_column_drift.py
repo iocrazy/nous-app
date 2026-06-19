@@ -1,13 +1,20 @@
-"""Regression test for the /api/v1/resources/search schema-drift 500.
+"""Regression tests for resources query schema-drift (UndefinedColumnError 500s).
 
-Background — 2026-06-19: GET /api/v1/resources/search returned 500 with
-`asyncpg.exceptions.UndefinedColumnError: column r.file_size does not exist
-(HINT: Perhaps you meant "r.file_type")`. The raw SQL in
-ResourcesRepository.list_accessible_for_user selected `r.file_size AS size`,
-but the resources table column is `file_size_bytes` (file_size never existed).
-Every resource search hit the error → broken picker / search.
+Background — 2026-06-19, two drift bugs in the same queries:
 
-This pins the column name so the drift can't silently come back.
+1. `r.file_size` — GET /api/v1/resources/search returned 500
+   (`column r.file_size does not exist`). The resources column is
+   `file_size_bytes`; `file_size` never existed.
+
+2. `ri.is_trashed` — `resource_items` has no `is_trashed` column (trashing is
+   tracked only at the resource level, `r.is_trashed`). Three queries filtered
+   on `ri.is_trashed = false` (added in #361), which raises UndefinedColumnError.
+   In the search query PostgreSQL reported `file_size` first (a SELECT column),
+   masking the `ri.is_trashed` error until #794 fixed file_size — then the
+   search still 500'd on `ri.is_trashed`. The AI resource-fetch / ref-resolver
+   queries hit it directly (low traffic, so it went unnoticed).
+
+These pins keep both drifts from coming back across all three query sites.
 """
 
 from __future__ import annotations
@@ -16,22 +23,39 @@ import importlib
 import inspect
 import re
 
+_FILES = [
+    "app.repositories.resources_repository",
+    "app.services.ai.tools.resource_fetch_tool",
+    "app.services.ai.chat.resource_ref_resolver",
+]
 
-def _repo_source() -> str:
-    mod = importlib.import_module("app.repositories.resources_repository")
-    return inspect.getsource(mod.ResourcesRepository.list_accessible_for_user)
+
+def _module_source(dotted: str) -> str:
+    return inspect.getsource(importlib.import_module(dotted))
 
 
-def test_search_uses_real_size_column() -> None:
-    source = _repo_source()
-    # The real column is file_size_bytes.
+def test_no_nonexistent_file_size_column() -> None:
+    source = inspect.getsource(
+        importlib.import_module(
+            "app.repositories.resources_repository"
+        ).ResourcesRepository.list_accessible_for_user
+    )
     assert "file_size_bytes" in source, (
-        "resources search must select r.file_size_bytes — the resources table "
-        "has no `file_size` column (it is file_size_bytes)."
+        "resources search must select r.file_size_bytes (the resources table "
+        "has no `file_size` column)."
     )
-    # The nonexistent `r.file_size` (not followed by _bytes) must not appear.
-    assert not re.search(r"\br\.file_size\b(?!_bytes)", source), (
-        "resources search references r.file_size, which does not exist and "
-        "raises UndefinedColumnError (asyncpg) → 500 on every search. Use "
-        "r.file_size_bytes."
-    )
+    assert not re.search(
+        r"\br\.file_size\b(?!_bytes)", source
+    ), "resources search references r.file_size — does not exist, 500s."
+
+
+def test_no_nonexistent_resource_items_is_trashed() -> None:
+    """No query may filter on ri.is_trashed — resource_items has no such column;
+    trashing lives on resources.is_trashed only."""
+    for dotted in _FILES:
+        source = _module_source(dotted)
+        assert not re.search(r"\bri\.is_trashed\b", source), (
+            f"{dotted} filters on ri.is_trashed, but resource_items has no "
+            "is_trashed column → asyncpg UndefinedColumnError (500). Trashing "
+            "is tracked only on resources (r.is_trashed)."
+        )

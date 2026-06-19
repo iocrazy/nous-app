@@ -36,7 +36,6 @@ async def _fetch_accessible_meta(
           LEFT JOIN public.teams t ON t.id::text = ri.scope_id::text
          WHERE r.id::text = ANY(:ids)
            AND r.is_trashed = false
-           AND ri.is_trashed = false
            -- PR-E 4c: ri.scope_id is always a teams.id snowflake; the
            -- personal/team distinction now comes from teams.kind, not the
            -- (dropped) scope_type column.

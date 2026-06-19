@@ -1580,7 +1580,7 @@ class ResourcesRepository:
             "FROM public.resources r ",
             "JOIN public.resource_items ri ON ri.resource_id = r.id ",
             "LEFT JOIN public.teams t ON t.id::text = ri.scope_id::text ",
-            "WHERE r.is_trashed = false AND ri.is_trashed = false ",
+            "WHERE r.is_trashed = false ",
         ]
         params: dict = {"user_id": user_id, "limit": capped_limit}
 
