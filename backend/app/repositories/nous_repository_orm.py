@@ -101,7 +101,8 @@ _PUBLIC_COLS = (
     NousModels.id,
     NousModels.name,
     NousModels.display_name,
-    NousModels.category,
+    NousModels.type,
+    NousModels.description,
     NousModels.pricing_type,
     NousModels.pricing_value,
     NousModels.sort_order,
@@ -132,7 +133,7 @@ class NousRepositoryOrm(NousRepository):
     """ORM-backed NousRepository. Overrides every DB method on nous_models."""
 
     async def list_enabled(
-        self, category: Optional[str] = None
+        self, type_filter: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         try:
             stmt = (
@@ -140,8 +141,8 @@ class NousRepositoryOrm(NousRepository):
                 .where(NousModels.is_enabled.is_(True))
                 .order_by(NousModels.sort_order)
             )
-            if category:
-                stmt = stmt.where(NousModels.category == category)
+            if type_filter:
+                stmt = stmt.where(NousModels.type == type_filter)
             async with read_scope() as session:
                 result = await session.execute(stmt)
                 # Partial-column SELECT → mappings() gives DB-column-keyed rows.
