@@ -384,6 +384,7 @@ async def chain_followups_step(
     fresh_download_path: Optional[str],
     flow_id: Optional[str] = None,
     video_title: str = "",
+    media_type: int = 0,
 ) -> None:
     """Dispatch thumbnail + extract_audio + transcode + AI pipeline.
     Best-effort — failures here never fail the workflow.
@@ -405,7 +406,17 @@ async def chain_followups_step(
     elif fresh_download_path.endswith(".mkv"):
         mime_type = "video/x-matroska"
 
-    if mime_type.startswith("video/"):
+    # Image-text (图文, media_type 2/68) posts are downloaded directly as
+    # slides + a separate background-music track (music_download) — by design
+    # there is no main video. The thumbnail + extract_audio pipeline operates
+    # on a main video file via ffmpeg, so dispatching it here just produces a
+    # guaranteed-failing extract_audio task ("Step run_extract_audio_step
+    # exceeded its maximum of 2 retries") while the audio was already obtained.
+    # `mime_type` defaults to video/mp4 above, so without this guard image-text
+    # wrongly passes the video check. Skip the video-only pipeline for them.
+    is_image_text = int(media_type) in (2, 68)
+
+    if mime_type.startswith("video/") and not is_image_text:
         import uuid as _uuid
 
         from app.services.infra.dbos_orchestrator import start_workflow_routed
@@ -830,6 +841,7 @@ async def download_workflow(
         fresh_download_path=finalize.get("fresh_download_path"),
         flow_id=flow_id,
         video_title=video_title,
+        media_type=media_type,
     )
 
     return {
