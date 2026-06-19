@@ -183,33 +183,43 @@ async def list_providers():
 
 @router.get("/governance")
 async def get_ai_governance(auth: AuthDep):
-    """Return per-module ``user_allowed`` booleans for all governed AI modules.
+    """Return per-module ``user_allowed`` booleans plus the Nous master-control
+    state for all governed AI modules.
 
-    The frontend uses this to hide locked modules' config sections in
-    ``AISettings.tsx``.  Only boolean values are returned — no keys, no
-    admin config.  Absent settings ⇒ True (default-open).
+    The frontend uses this to hide locked modules' BYOK config and to gate the
+    Nous provider card + per-module Nous options.  Only booleans are returned —
+    no keys, no admin config.  Absent BYOK settings ⇒ True (default-open); the
+    Nous global switch is default-OFF.
     """
     from app.services.ai.governance.ai_governance import (
         ALL_MODULES,
         get_module_governance,
+        is_nous_allowed,
+        is_nous_globally_enabled,
     )
 
-    result: dict[str, bool] = {}
+    result: dict = {}
     for module in sorted(ALL_MODULES):
         g = await get_module_governance(module)
         result[module] = g.allowed
+
+    result["nous_enabled"] = await is_nous_globally_enabled()
+    result["nous_modules"] = {
+        module: await is_nous_allowed(module) for module in sorted(ALL_MODULES)
+    }
     return result
 
 
 @router.get("/nous-models")
-async def list_nous_models(category: str = None):
-    """List enabled Nous models (public, no API keys).
+async def list_nous_models(type: str | None = None):
+    """List enabled Nous models (public, no API keys), optionally filtered by
+    model type (``llm`` / ``embedding`` / ``tts`` / ``asr``).
 
-    Returns models available for users to select in Task Assignment.
-    If no models are configured, returns empty list.
+    Returns models available for users to select. If none are configured,
+    returns an empty list.
     """
     from app.repositories.nous_repository import get_nous_repository
 
     repo = get_nous_repository()
-    models = await repo.list_enabled(category)
+    models = await repo.list_enabled(type)
     return {"models": models}

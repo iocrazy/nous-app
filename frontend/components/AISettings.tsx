@@ -673,8 +673,13 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
       }
     }
 
-    // Append Nous platform transcription models
-    const matchingNousModels = nousModels.filter((m) => m.category === 'transcription');
+    // Append Nous platform ASR models (gated by admin master control).
+    const nousAllowed =
+      governance.nous_enabled &&
+      (governance.nous_modules?.transcription ?? true);
+    const matchingNousModels = nousAllowed
+      ? nousModels.filter((m) => m.type === 'asr')
+      : [];
     for (const model of matchingNousModels) {
       const pricingLabel =
         model.pricing_type === 'per_hour'
@@ -683,8 +688,8 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
             ? `${model.pricing_value} pts`
             : `${model.pricing_value} pts/1k tokens`;
       options.push({
-        value: model.name,
-        label: `${model.display_name} (${pricingLabel})`,
+        value: `nous:${model.name}`,
+        label: `${model.display_name} (Nous · ${pricingLabel})`,
       });
     }
 
@@ -1369,6 +1374,46 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
               </div>
             );
           })}
+          {governance.nous_enabled && (
+            <div className="bg-ink-950 border border-indigo-700/40 rounded-xl overflow-hidden">
+              <div className="px-6 py-4 flex items-center gap-4">
+                <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-400">
+                  <Sparkles size={18} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-ink-100">Nous (Platform)</span>
+                    <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300">
+                      Platform-managed
+                    </span>
+                  </div>
+                  <p className="text-xs text-ink-400 mt-0.5">
+                    Platform-provided models. No API key required — select one as an
+                    agent's model or a transcription option.
+                  </p>
+                </div>
+              </div>
+              <div className="px-6 pb-4 space-y-1.5">
+                {nousModels.filter((m) => m.type === 'llm').length === 0 ? (
+                  <p className="text-xs text-ink-500">No platform LLM models available.</p>
+                ) : (
+                  nousModels
+                    .filter((m) => m.type === 'llm')
+                    .map((m) => (
+                      <div
+                        key={m.name}
+                        className="flex items-center justify-between text-sm text-ink-200 border-t border-ink-800 pt-1.5 first:border-t-0 first:pt-0"
+                      >
+                        <span className="font-medium">{m.display_name}</span>
+                        <span className="text-xs text-ink-500">
+                          {m.description || m.type}
+                        </span>
+                      </div>
+                    ))
+                )}
+              </div>
+            </div>
+          )}
         </div>
         )}
 

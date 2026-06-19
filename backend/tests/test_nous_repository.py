@@ -81,7 +81,7 @@ async def test_list_enabled_with_category_applies_extra_eq(
 
     eq_values = [c[1] for c in fake_query.calls if c[0] == "eq"]
     assert ("is_enabled", True) in eq_values
-    assert ("category", "transcription") in eq_values
+    assert ("type", "transcription") in eq_values
 
 
 @pytest.mark.asyncio
@@ -195,3 +195,44 @@ async def test_delete_returns_false_on_exception(
 ) -> None:
     fake_query._raises = RuntimeError("boom")
     assert await repo.delete("m1") is False
+
+
+@pytest.mark.asyncio
+async def test_list_enabled_filters_on_type_column():
+    """list_enabled(type_filter=...) selects + filters the `type` column."""
+    from app.repositories.nous_repository import NousRepository
+
+    repo = NousRepository()
+
+    captured = {}
+
+    class _Q:
+        def select(self, cols):
+            captured["select"] = cols
+            return self
+
+        def eq(self, col, val):
+            captured.setdefault("eq", []).append((col, val))
+            return self
+
+        def order(self, col):
+            return self
+
+        async def execute(self):
+            class _R:
+                data = []
+
+            return _R()
+
+    class _Client:
+        def table(self, _name):
+            return _Q()
+
+    import unittest.mock as m
+
+    with m.patch.object(repo, "_get_client", m.AsyncMock(return_value=_Client())):
+        await repo.list_enabled("llm")
+
+    assert "type" in captured["select"]
+    assert "category" not in captured["select"]
+    assert ("type", "llm") in captured["eq"]

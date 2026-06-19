@@ -13,8 +13,10 @@ import type {
   AILibraryAgent,
   AILibrarySkill,
   AISettings as AISettingsType,
+  NousModelPublic,
 } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
+import { getNousModels, getAIGovernance } from '../../services/aiService';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../Toast';
 import {
@@ -91,7 +93,27 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
   // ``userProfile.role === 'admin'`` is still useful elsewhere (Workforce,
   // approval queue) — keeping the deconstruct above so callers don't break.
   void userProfile;
-  const modelGroups = useMemo(() => getAvailableModels(aiSettings), [aiSettings]);
+  const [nousLlm, setNousLlm] = useState<NousModelPublic[]>([]);
+  const [nousEnabled, setNousEnabled] = useState(false);
+
+  useEffect(() => {
+    getNousModels('llm').then(setNousLlm).catch(() => {});
+    getAIGovernance()
+      .then((g) => setNousEnabled(Boolean(g.nous_enabled)))
+      .catch(() => setNousEnabled(false));
+  }, []);
+
+  const modelGroups = useMemo(() => {
+    const base = getAvailableModels(aiSettings);
+    if (nousEnabled && nousLlm.length > 0) {
+      base.push({
+        providerKey: 'nous',
+        providerName: PROVIDER_DISPLAY_NAMES.nous,
+        models: nousLlm.map((m) => m.name),
+      });
+    }
+    return base;
+  }, [aiSettings, nousEnabled, nousLlm]);
   const [agent, setAgent] = useState<AILibraryAgent | null>(null);
   const [sub, setSub] = useState<SubTab>('dashboard');
   const [draft, setDraft] = useState<Partial<AILibraryAgent>>({});
@@ -757,6 +779,7 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   volcengine: 'Volcengine',
   ollama: 'Ollama',
   lmstudio: 'LM Studio',
+  nous: 'Nous (Platform)',
 };
 
 /**

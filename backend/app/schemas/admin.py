@@ -274,12 +274,14 @@ class ChatModuleGovernanceResponse(BaseModel):
     """Governance state for the chat module (toggle only — agent owns the model)."""
 
     user_allowed: bool = True
+    nous_allowed: bool = True
 
 
 class TaskModuleGovernanceResponse(BaseModel):
     """Governance state for a task module (toggle + admin base_url/model/key)."""
 
     user_allowed: bool = True
+    nous_allowed: bool = True
     base_url: str = ""
     model: str = ""
     api_key_set: bool = False
@@ -289,6 +291,7 @@ class AIGovernanceResponse(BaseModel):
     """Admin-facing AI governance config.  API key fields are NEVER returned;
     only ``*_api_key_set`` booleans indicate whether a key is stored."""
 
+    nous_user_enabled: bool = False
     chat: ChatModuleGovernanceResponse = ChatModuleGovernanceResponse()
     transcription: TaskModuleGovernanceResponse = TaskModuleGovernanceResponse()
     translation: TaskModuleGovernanceResponse = TaskModuleGovernanceResponse()
@@ -302,6 +305,7 @@ class ChatModuleGovernanceUpdate(BaseModel):
     """Partial update for the chat module (toggle only)."""
 
     user_allowed: Optional[bool] = None
+    nous_allowed: Optional[bool] = None
 
 
 class TaskModuleGovernanceUpdate(BaseModel):
@@ -309,6 +313,7 @@ class TaskModuleGovernanceUpdate(BaseModel):
     blank/omit to keep the existing stored key unchanged."""
 
     user_allowed: Optional[bool] = None
+    nous_allowed: Optional[bool] = None
     base_url: Optional[str] = None
     model: Optional[str] = None
     api_key: Optional[str] = None  # write-only; blank = keep existing
@@ -318,6 +323,7 @@ class AIGovernanceUpdate(BaseModel):
     """Partial update — only modules/fields the admin sends are written.
     api_key is written only when a non-blank value is provided."""
 
+    nous_user_enabled: Optional[bool] = None
     chat: Optional[ChatModuleGovernanceUpdate] = None
     transcription: Optional[TaskModuleGovernanceUpdate] = None
     translation: Optional[TaskModuleGovernanceUpdate] = None

@@ -13,7 +13,8 @@ interface NousModel {
   id: string
   name: string
   display_name: string
-  category: string
+  type: string
+  description?: string
   actual_provider: string
   actual_model: string
   api_key_masked: string
@@ -27,10 +28,11 @@ interface NousModel {
   updated_at: string
 }
 
-const CATEGORY_OPTIONS = [
-  { label: 'Transcription', value: 'transcription' },
-  { label: 'Summarization', value: 'summarization' },
-  { label: 'Analysis', value: 'analysis' },
+const TYPE_OPTIONS = [
+  { label: 'LLM', value: 'llm' },
+  { label: 'Embedding', value: 'embedding' },
+  { label: 'TTS', value: 'tts' },
+  { label: 'ASR', value: 'asr' },
 ]
 
 const PRICING_TYPE_OPTIONS = [
@@ -39,10 +41,11 @@ const PRICING_TYPE_OPTIONS = [
   { label: 'Per Token', value: 'per_token' },
 ]
 
-const CATEGORY_COLORS: Record<string, string> = {
-  transcription: 'blue',
-  summarization: 'green',
-  analysis: 'purple',
+const TYPE_COLORS: Record<string, string> = {
+  llm: 'arcoblue',
+  embedding: 'green',
+  tts: 'orange',
+  asr: 'purple',
 }
 
 export function AIModelsPage() {
@@ -148,10 +151,10 @@ export function AIModelsPage() {
       ),
     },
     {
-      title: 'Category',
-      dataIndex: 'category',
-      width: 130,
-      render: (val: string) => <Tag color={CATEGORY_COLORS[val] || 'gray'}>{val}</Tag>,
+      title: 'Type',
+      dataIndex: 'type',
+      width: 110,
+      render: (val: string) => <Tag color={TYPE_COLORS[val] || 'gray'}>{val}</Tag>,
     },
     {
       title: 'Provider : Model',
@@ -227,8 +230,11 @@ export function AIModelsPage() {
           <FormItem label="Display Name" field="display_name" rules={[{ required: true }]}>
             <Input placeholder="e.g. Nous LLM (Volcengine 2.0)" />
           </FormItem>
-          <FormItem label="Category" field="category" rules={[{ required: true }]}>
-            <Select options={CATEGORY_OPTIONS} />
+          <FormItem label="Description" field="description">
+            <Input placeholder="Optional usage note, e.g. fast, cheap, short clips" />
+          </FormItem>
+          <FormItem label="Type" field="type" rules={[{ required: true }]}>
+            <Select options={TYPE_OPTIONS} />
           </FormItem>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <FormItem label="Actual Provider" field="actual_provider" rules={[{ required: true }]}>

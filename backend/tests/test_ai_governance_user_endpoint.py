@@ -105,19 +105,28 @@ async def test_governance_endpoint_locked_module():
 
 @pytest.mark.asyncio
 async def test_governance_endpoint_exact_module_set():
-    """Response keys must match ALL_MODULES exactly — no extras, no missing."""
+    """Module bool keys must match ALL_MODULES; nous keys are additive."""
     from app.api.ai_settings_router import get_ai_governance
 
     with patch(
         "app.services.ai.governance.ai_governance.get_module_governance",
         new=AsyncMock(return_value=_gov_allowed()),
     ):
-        from unittest.mock import MagicMock
+        with patch(
+            "app.services.ai.governance.ai_governance.is_nous_globally_enabled",
+            new=AsyncMock(return_value=False),
+        ):
+            with patch(
+                "app.services.ai.governance.ai_governance.is_nous_allowed",
+                new=AsyncMock(return_value=False),
+            ):
+                from unittest.mock import MagicMock
 
-        fake_auth = MagicMock()
-        result = await get_ai_governance(fake_auth)
+                fake_auth = MagicMock()
+                result = await get_ai_governance(fake_auth)
 
-    assert set(result.keys()) == ALL_MODULES
+    module_keys = set(result.keys()) - {"nous_enabled", "nous_modules"}
+    assert module_keys == ALL_MODULES
 
 
 # ---------------------------------------------------------------------------
@@ -127,19 +136,31 @@ async def test_governance_endpoint_exact_module_set():
 
 @pytest.mark.asyncio
 async def test_governance_endpoint_no_key_material():
-    """Response values must be plain booleans — no api_key, base_url, model."""
+    """Module values must be plain booleans — no api_key, base_url, model.
+    (nous_modules is a nested bool map and is exempt from this flat check.)"""
     from app.api.ai_settings_router import get_ai_governance
 
     with patch(
         "app.services.ai.governance.ai_governance.get_module_governance",
         new=AsyncMock(return_value=_gov_locked()),
     ):
-        from unittest.mock import MagicMock
+        with patch(
+            "app.services.ai.governance.ai_governance.is_nous_globally_enabled",
+            new=AsyncMock(return_value=False),
+        ):
+            with patch(
+                "app.services.ai.governance.ai_governance.is_nous_allowed",
+                new=AsyncMock(return_value=False),
+            ):
+                from unittest.mock import MagicMock
 
-        fake_auth = MagicMock()
-        result = await get_ai_governance(fake_auth)
+                fake_auth = MagicMock()
+                result = await get_ai_governance(fake_auth)
 
     for module, value in result.items():
+        if module == "nous_modules":
+            assert isinstance(value, dict)
+            continue
         assert isinstance(
             value, bool
         ), f"Module {module!r}: expected bool, got {type(value).__name__!r} = {value!r}"

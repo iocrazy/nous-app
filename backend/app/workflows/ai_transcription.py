@@ -111,6 +111,29 @@ async def load_transcribe_inputs(parsed_media_id: int, user_id: str) -> dict[str
     # granted'. master read this same field in ai_tasks.py.
     task_assignment = ai_settings.get("task_assignment", {}).get("transcription") or ""
 
+    # Nous platform ASR: task_assignment.transcription = 'nous:<model_name>'.
+    # Resolve to the platform provider config and route through the SAME ASR
+    # dispatch (a volcengine nous model → _run_volcengine_asr automatically).
+    if task_assignment.startswith("nous:"):
+        from app.services.ai.providers.ai_provider_helpers import resolve_nous_model
+
+        nous_name = task_assignment.split(":", 1)[1]
+        nous = await resolve_nous_model(nous_name, "transcription")
+        if nous is None:
+            raise RuntimeError(
+                f"transcription references unknown platform model '{nous_name}'"
+            )
+        n_provider_key, n_provider_config, n_model = nous
+        return {
+            "audio_path": audio_path,
+            "resource_id": str(media_row["resource_id"]),
+            "platform_id": media_row["platform_id"],
+            "provider_key": n_provider_key,
+            "provider_config": n_provider_config,
+            "language": ai_settings.get("preferred_language", "auto"),
+            "task_assignment": f"{n_provider_key}:{n_model}",
+        }
+
     return {
         "audio_path": audio_path,
         "resource_id": str(media_row["resource_id"]),

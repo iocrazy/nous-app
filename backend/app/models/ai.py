@@ -425,8 +425,8 @@ class NousModels(Base):
     __tablename__ = "nous_models"
     __table_args__ = (
         CheckConstraint(
-            "category = ANY (ARRAY['transcription'::text, 'summarization'::text, 'analysis'::text])",
-            name="nous_models_category_check",
+            "type = ANY (ARRAY['llm'::text, 'embedding'::text, 'tts'::text, 'asr'::text])",
+            name="nous_models_type_check",
         ),
         CheckConstraint(
             "pricing_type = ANY (ARRAY['per_hour'::text, 'per_request'::text, 'per_token'::text])",
@@ -442,7 +442,7 @@ class NousModels(Base):
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     display_name: Mapped[str] = mapped_column(Text, nullable=False)
-    category: Mapped[str] = mapped_column(Text, nullable=False)
+    type: Mapped[str] = mapped_column(Text, nullable=False)
     actual_provider: Mapped[str] = mapped_column(Text, nullable=False)
     actual_model: Mapped[str] = mapped_column(Text, nullable=False)
     api_key: Mapped[str] = mapped_column(Text, nullable=False)
@@ -466,6 +466,7 @@ class NousModels(Base):
     )
     app_id: Mapped[Optional[str]] = mapped_column(Text)
     base_url: Mapped[Optional[str]] = mapped_column(Text)
+    description: Mapped[Optional[str]] = mapped_column(Text)
 
 
 class Skills(Base):

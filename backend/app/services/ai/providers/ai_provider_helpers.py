@@ -41,6 +41,45 @@ def get_provider_config(ai_settings: dict, provider_key: str) -> dict:
     return providers.get(provider_key, {})
 
 
+async def resolve_nous_model(
+    model_name: str, module: str
+) -> Optional[Tuple[str, Dict[str, Any], str]]:
+    """Resolve a model name against the platform ``nous_models`` registry.
+
+    Full-table lookup by ``name`` (enabled + disabled), then:
+      - found + enabled + nous allowed for ``module`` → return
+        ``(actual_provider, {api_key, base_url, model, app_id}, actual_model)``
+        — the platform config, ready for the existing adapter factory.
+      - found + (disabled OR nous gated off) → **fail-closed** (RuntimeError);
+        never silently fall back to a guessed BYOK provider.
+      - not found → ``None`` (an ordinary BYOK model name like ``gpt-4o``).
+    """
+    from app.repositories.nous_repository import get_nous_repository
+    from app.services.ai.governance.ai_governance import is_nous_allowed
+
+    if not model_name:
+        return None
+    repo = get_nous_repository()
+    row = await repo.get_by_name(model_name)
+    if not row:
+        return None  # ordinary BYOK model name — leave the caller's path intact.
+
+    if not await is_nous_allowed(module):
+        raise RuntimeError(
+            f"Platform model '{model_name}' is disabled for this feature."
+        )
+    if not row.get("is_enabled"):
+        raise RuntimeError(f"Platform model '{model_name}' is no longer available.")
+
+    provider_config: Dict[str, Any] = {
+        "api_key": row.get("api_key", ""),
+        "base_url": row.get("base_url") or "",
+        "model": row["actual_model"],
+        "app_id": row.get("app_id") or "",
+    }
+    return row["actual_provider"], provider_config, row["actual_model"]
+
+
 DEFAULT_ANALYZE_AGENT_SLUG = "analyze"
 DEFAULT_TRANSLATE_AGENT_SLUG = "translate"
 DEFAULT_CAPTION_AGENT_SLUG = "caption"
@@ -91,6 +130,17 @@ async def resolve_task_provider_config(
                 f"AI module '{task_key}' is admin-locked but no admin API key is "
                 "configured. Contact your platform administrator."
             )
+        # Admin may lock a module directly TO a platform Nous model name —
+        # run the shared nous lookup first.
+        nous = await resolve_nous_model(governance.model, task_key)
+        if nous is not None:
+            n_provider_key, n_provider_config, n_model = nous
+            logger.info(
+                f"[governance] {task_key} locked to nous model "
+                f"{governance.model!r} → provider {n_provider_key!r}"
+            )
+            return n_provider_key, n_provider_config, n_model, default_slug
+
         # Derive provider_key from the admin-set model prefix.
         # Unknown or missing prefix → "" (generic OpenAI-compatible; the qwen
         # adapter accepts a custom base_url + api_key for any endpoint).
@@ -139,6 +189,14 @@ async def resolve_task_provider_config(
             "model; caller will use built-in default"
         )
         return "", {}, "", resolved_slug
+
+    # Shared nous lookup: if the agent's model names a platform Nous model,
+    # return the platform config while KEEPING resolved_slug so the caller
+    # still composes THIS agent's custom prompt (prompt preserved).
+    nous = await resolve_nous_model(model, task_key)
+    if nous is not None:
+        n_provider_key, n_provider_config, n_model = nous
+        return n_provider_key, n_provider_config, n_model, resolved_slug
 
     try:
         provider_key = provider_key_for_model(model)

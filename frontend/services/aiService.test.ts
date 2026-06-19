@@ -251,11 +251,11 @@ describe('saveAISettings', () => {
 });
 
 describe('getNousModels', () => {
-  it('threads category query', async () => {
+  it('threads type query', async () => {
     const spy = stubJson({ models: [{ name: 'nous-x' }] });
-    await getNousModels('transcription');
+    await getNousModels('asr');
     const url = spy.mock.calls[0][0] as string;
-    expect(url).toContain('category=transcription');
+    expect(url).toContain('type=asr');
   });
 
   it('returns [] on error', async () => {

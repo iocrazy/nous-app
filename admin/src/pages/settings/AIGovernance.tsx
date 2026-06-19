@@ -42,13 +42,16 @@ type TaskModuleKey = 'transcription' | 'translation' | 'visual_analysis' | 'capt
 
 interface TaskModuleLocalState {
   user_allowed: boolean
+  nous_allowed: boolean
   base_url: string
   model: string
   api_key: string
 }
 
 interface LocalState {
+  nous_user_enabled: boolean
   chat_allowed: boolean
+  chat_nous_allowed: boolean
   transcription: TaskModuleLocalState
   translation: TaskModuleLocalState
   visual_analysis: TaskModuleLocalState
@@ -98,12 +101,14 @@ const PLATFORM_MANAGED: ReadonlyArray<{ label: string; hint: string }> = [
 ]
 
 function defaultTaskState(): TaskModuleLocalState {
-  return { user_allowed: true, base_url: '', model: '', api_key: '' }
+  return { user_allowed: true, nous_allowed: true, base_url: '', model: '', api_key: '' }
 }
 
 function defaultLocalState(): LocalState {
   return {
+    nous_user_enabled: false,
     chat_allowed: true,
+    chat_nous_allowed: true,
     transcription: defaultTaskState(),
     translation: defaultTaskState(),
     visual_analysis: defaultTaskState(),
@@ -123,39 +128,47 @@ export function AIGovernance() {
   useEffect(() => {
     if (!data) return
     setState({
+      nous_user_enabled: data.nous_user_enabled,
       chat_allowed: data.chat.user_allowed,
+      chat_nous_allowed: data.chat.nous_allowed,
       transcription: {
         user_allowed: data.transcription.user_allowed,
+        nous_allowed: data.transcription.nous_allowed,
         base_url: data.transcription.base_url ?? '',
         model: data.transcription.model ?? '',
         api_key: '',
       },
       translation: {
         user_allowed: data.translation.user_allowed,
+        nous_allowed: data.translation.nous_allowed,
         base_url: data.translation.base_url ?? '',
         model: data.translation.model ?? '',
         api_key: '',
       },
       visual_analysis: {
         user_allowed: data.visual_analysis.user_allowed,
+        nous_allowed: data.visual_analysis.nous_allowed,
         base_url: data.visual_analysis.base_url ?? '',
         model: data.visual_analysis.model ?? '',
         api_key: '',
       },
       caption: {
         user_allowed: data.caption.user_allowed,
+        nous_allowed: data.caption.nous_allowed,
         base_url: data.caption.base_url ?? '',
         model: data.caption.model ?? '',
         api_key: '',
       },
       classification: {
         user_allowed: data.classification.user_allowed,
+        nous_allowed: data.classification.nous_allowed,
         base_url: data.classification.base_url ?? '',
         model: data.classification.model ?? '',
         api_key: '',
       },
       summarization: {
         user_allowed: data.summarization.user_allowed,
+        nous_allowed: data.summarization.nous_allowed,
         base_url: data.summarization.base_url ?? '',
         model: data.summarization.model ?? '',
         api_key: '',
@@ -179,13 +192,15 @@ export function AIGovernance() {
     // a new value — blank means keep the stored key unchanged.
     const taskUpdate = (m: TaskModuleLocalState): AIGovernanceModuleUpdate => ({
       user_allowed: m.user_allowed,
+      nous_allowed: m.nous_allowed,
       base_url: m.base_url,
       model: m.model,
       ...(m.api_key.trim() ? { api_key: m.api_key.trim() } : {}),
     })
 
     const payload: AIGovernanceUpdate = {
-      chat: { user_allowed: state.chat_allowed },
+      nous_user_enabled: state.nous_user_enabled,
+      chat: { user_allowed: state.chat_allowed, nous_allowed: state.chat_nous_allowed },
       transcription: taskUpdate(state.transcription),
       translation: taskUpdate(state.translation),
       visual_analysis: taskUpdate(state.visual_analysis),
@@ -227,6 +242,20 @@ export function AIGovernance() {
 
   return (
     <Card title="AI Config Governance" style={{ marginBottom: 20 }}>
+      {/* ── Nous master control ─────────────────────────────────────────── */}
+      <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-2)' }}>Nous Platform (user-side)</div>
+      <Row
+        label="Enable Nous for users"
+        hint="Master switch. OFF ⇒ no platform models surface anywhere. Default OFF — turn on only when you accept platform-key cost exposure."
+      >
+        <Switch
+          checked={state.nous_user_enabled}
+          onChange={(checked) => setState((prev) => ({ ...prev, nous_user_enabled: checked }))}
+          disabled={updateMutation.isPending}
+        />
+      </Row>
+      <Divider />
+
       {/* ── Chat ────────────────────────────────────────────────────────── */}
       <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-2)' }}>Chat</div>
       <Row
@@ -237,6 +266,13 @@ export function AIGovernance() {
           checked={state.chat_allowed}
           onChange={(checked) => setState((prev) => ({ ...prev, chat_allowed: checked }))}
           disabled={updateMutation.isPending}
+        />
+      </Row>
+      <Row label="Allow Nous models (chat)" hint="Only effective when the master switch is on.">
+        <Switch
+          checked={state.chat_nous_allowed}
+          onChange={(checked) => setState((prev) => ({ ...prev, chat_nous_allowed: checked }))}
+          disabled={updateMutation.isPending || !state.nous_user_enabled}
         />
       </Row>
 
@@ -254,6 +290,13 @@ export function AIGovernance() {
                 checked={m.user_allowed}
                 onChange={(checked) => setTaskField(key, 'user_allowed', checked)}
                 disabled={updateMutation.isPending}
+              />
+            </Row>
+            <Row label="Allow Nous models" hint="Only effective when the master switch is on.">
+              <Switch
+                checked={m.nous_allowed}
+                onChange={(checked) => setTaskField(key, 'nous_allowed', checked)}
+                disabled={updateMutation.isPending || !state.nous_user_enabled}
               />
             </Row>
             {!m.user_allowed && (

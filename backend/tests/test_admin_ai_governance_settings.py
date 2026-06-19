@@ -18,7 +18,7 @@ Tests that:
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -413,3 +413,42 @@ async def test_put_governance_summarization_fields_written():
     )
     assert calls.get("ai_module.summarization.model") == "qwen-plus"
     assert calls.get("ai_module.summarization.api_key") == "platform-sum-key"
+
+
+@pytest.mark.asyncio
+async def test_update_writes_global_nous_and_per_module_nous_allowed():
+    """PUT writes nous.user_enabled + ai_module.<m>.nous_allowed."""
+    from app.api.admin.settings_router import update_ai_governance_settings
+    from app.schemas.admin import (
+        AIGovernanceUpdate,
+        ChatModuleGovernanceUpdate,
+        TaskModuleGovernanceUpdate,
+    )
+
+    writes = []
+
+    repo = MagicMock()
+    repo.upsert_setting = AsyncMock(side_effect=lambda k, v, u: writes.append((k, v)))
+    repo.list_non_transcode = AsyncMock(return_value=[])
+
+    update = AIGovernanceUpdate(
+        nous_user_enabled=True,
+        chat=ChatModuleGovernanceUpdate(nous_allowed=False),
+        transcription=TaskModuleGovernanceUpdate(nous_allowed=True),
+    )
+
+    fake_auth = MagicMock()
+    fake_auth.user_id = "admin-1"
+    fake_request = MagicMock()
+    fake_request.client = None
+
+    with patch(
+        "app.api.admin.settings_router.get_system_settings_repository",
+        return_value=repo,
+    ):
+        with patch("app.api.admin.settings_router.create_audit_log", new=AsyncMock()):
+            await update_ai_governance_settings(update, fake_auth, fake_request)
+
+    assert ("nous.user_enabled", True) in writes
+    assert ("ai_module.chat.nous_allowed", False) in writes
+    assert ("ai_module.transcription.nous_allowed", True) in writes

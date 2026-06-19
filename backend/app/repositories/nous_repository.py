@@ -33,9 +33,9 @@ class NousRepository:
     # ------------------------------------------------------------------
 
     async def list_enabled(
-        self, category: Optional[str] = None
+        self, type_filter: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """List enabled Nous models, optionally filtered by category.
+        """List enabled Nous models, optionally filtered by model type.
 
         Returns public fields only (no api_key, app_id, base_url).
         """
@@ -44,13 +44,14 @@ class NousRepository:
             query = (
                 client.table(self.TABLE)
                 .select(
-                    "id, name, display_name, category, pricing_type, pricing_value, sort_order"
+                    "id, name, display_name, type, description, "
+                    "pricing_type, pricing_value, sort_order"
                 )
                 .eq("is_enabled", True)
                 .order("sort_order")
             )
-            if category:
-                query = query.eq("category", category)
+            if type_filter:
+                query = query.eq("type", type_filter)
             result = await query.execute()
             return result.data or []
         except Exception as e:
