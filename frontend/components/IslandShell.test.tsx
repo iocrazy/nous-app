@@ -58,6 +58,24 @@ describe('IslandShell', () => {
     expect(screen.queryByRole('separator')).toBeNull();
   });
 
+  it('keeps the info portal target mounted even when hidden (first-nav portal race fix)', () => {
+    // Regression: the portal-target <aside> must stay mounted regardless of
+    // infoVisible. Gating its mount on visibility raced a page's createPortal on
+    // first navigation (lazy detail routes), leaving the panel blank until a
+    // manual refresh. Visibility is now a CSS concern, not a mount concern.
+    const { container } = render(
+      <MemoryRouter>
+        <IslandShell {...baseProps}><div /></IslandShell>
+      </MemoryRouter>,
+    );
+    // Splitter is still hidden (not visible)...
+    expect(screen.queryByRole('separator')).toBeNull();
+    // ...but the portal target aside IS in the DOM, just `hidden`.
+    const aside = container.querySelector('aside');
+    expect(aside).toBeTruthy();
+    expect(aside?.className).toContain('hidden');
+  });
+
   it('renders the splitter + info aside once a page makes it visible', () => {
     render(
       <MemoryRouter>

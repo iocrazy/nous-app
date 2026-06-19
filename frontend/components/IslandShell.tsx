@@ -78,22 +78,30 @@ function IslandShellFrame({ isDetailPage, topBarProps, sidebarProps, children }:
         <main className="island-card flex-1 min-w-0 overflow-auto">
           {children}
         </main>
-        {/* Right info island — a page portals into infoIslandEl (spec §2) */}
+        {/* Right info island — a page portals into infoIslandEl (spec §2).
+            The portal TARGET (<aside> + ref) is ALWAYS mounted; visibility is a
+            CSS concern (`hidden`), never a mount concern. Gating the mount on
+            `infoVisible` raced the page's portal on first navigation: a lazy-
+            loaded detail route (e.g. the video player) renders its `createPortal`
+            before the visible-gated aside has mounted, so `infoIslandEl` is null
+            and the panel stays blank until a manual refresh. Keeping the target
+            mounted means the portal always has somewhere to render. */}
         {infoVisible && (
-          <>
-            <div
-              role="separator"
-              aria-orientation="vertical"
-              onPointerDown={startDrag}
-              className="w-3 shrink-0 cursor-col-resize flex items-center justify-center group"
-            >
-              <span className="w-1 h-11 rounded bg-line-strong group-hover:bg-accent transition-colors" />
-            </div>
-            <aside className="island-card shrink-0 overflow-auto" style={{ width: infoWidth }}>
-              <div ref={setInfoIslandEl} className="h-full" />
-            </aside>
-          </>
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            onPointerDown={startDrag}
+            className="w-3 shrink-0 cursor-col-resize flex items-center justify-center group"
+          >
+            <span className="w-1 h-11 rounded bg-line-strong group-hover:bg-accent transition-colors" />
+          </div>
         )}
+        <aside
+          className={`island-card shrink-0 overflow-auto ${infoVisible ? '' : 'hidden'}`}
+          style={infoVisible ? { width: infoWidth } : undefined}
+        >
+          <div ref={setInfoIslandEl} className="h-full" />
+        </aside>
         {!infoVisible && infoAvailable && (
           <button className="island-reopen" onClick={() => setInfoVisible(true)}>‹ Info</button>
         )}
