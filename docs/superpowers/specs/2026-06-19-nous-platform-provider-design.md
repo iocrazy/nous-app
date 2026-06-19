@@ -61,8 +61,11 @@ admin nous_models (enabled)            ← type: llm | embedding | tts | asr  (+
 - `schemas/nous.py`, `schemas/admin.py`: type enum + `description`.
 - `api/admin/nous_router.py`: accept/return type enum + `description` (api_key stays masked/write-only).
 - `api/ai_settings_router.py`: `GET /api/v1/ai/nous-models` returns `name, display_name, type, description, sort_order`; supports `?type=` filter (replaces `?category=`). Enabled-only, no keys.
-- `services/ai/providers/ai_provider_helpers.py`: add the Nous lookup branch in the agent/transcription resolution. Lookup by `name` among **enabled** nous models. Build the adapter from the platform config. Fail-closed on disabled/missing.
+- `services/ai/providers/ai_provider_helpers.py`: add a **shared Nous-resolution step** applied to whichever model name the resolver lands on. `resolve_task_provider_config` derives the model name in two places — the governance-**locked** path (`governance.model`, ~line 99/115) and the **unlocked** agent path (`agent.model`, ~line 144). The Nous lookup must run for **both** (admin may lock a module directly to a Nous model name), so factor it into one helper called before `provider_key_for_model(...)` in each branch. Lookup by `name`; fail-closed on disabled/missing.
 - Adapter factory: construct an adapter from a nous platform config (provider/model/key/base_url).
+- **`schemas/nous.py`** has the `category` enum as `Literal[...]` in **4 places** (Create / Update / 2× Response) — all must change to the new type enum. `nous_repository.py::list_enabled(category)` + `nous_repository_orm.py` select/filter on `category` and must follow the rename to `type`.
+
+> **Verified during design review (2026-06-19):** the `nous_models_category_check` CHECK constraint (mig116) and the resolver insertion points above are confirmed in code. **Open item for planning:** the **transcription** provider/model resolution does **not** live in `ai_provider_helpers.py` — it is a separate path (whisper/ASR). Decision **1b** (ASR Nous models) therefore touches a second, not-yet-located resolution path and is higher-uncertainty than the LLM/agent path; the plan must locate it first and may split ASR into its own task.
 
 **Frontend (`frontend/`)**
 - `components/AISettings.tsx`: add a **Nous provider card** (no key field; renders enabled Nous models with type badge + description; read-only informational). Transcription dropdown: append ASR Nous models as options.
@@ -90,6 +93,10 @@ admin nous_models (enabled)            ← type: llm | embedding | tts | asr  (+
 
 - **Backend unit:** resolver returns platform config when `agent.model` matches an enabled Nous model; fail-closed when disabled/missing; unchanged BYOK path when the model is not a Nous name. Migration remap (`transcription→asr`, `summarization→llm`, `analysis→llm`). `nous-models` endpoint returns type + description and honors `?type=` filter.
 - **Frontend:** Nous provider card renders enabled models with badges/descriptions and no key field; agent picker shows only `llm` Nous models; transcription dropdown shows `asr` Nous models.
+
+## Accepted risks (v1)
+
+- **Platform cost exposure.** With no billing (scope A) and an **unlocked** module, any user can assign an agent that uses a Nous model and run it on the **platform key at platform expense**. The admin's only lever in v1 is enabling/disabling Nous models globally (and locking modules). This is the cost hole that the deferred *Nous Billing* project closes; accepted for v1.
 
 ## Explicitly deferred (not v1)
 
