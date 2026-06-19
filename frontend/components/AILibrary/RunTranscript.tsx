@@ -120,7 +120,10 @@ export const RunTranscript: React.FC<{ runId: string; isRunning: boolean }> = ({
     return () => window.clearInterval(id);
   }, [isRunning, fetchEvents]);
 
-  if (loaded && events.length === 0) return null; // pre-mig-285 runs have no events
+  // Render nothing until the first fetch resolves: showing the empty
+  // "Transcript (0)" shell during the load window made it flash in then vanish
+  // once we learn the run has no events (pre-mig-285 runs / analysis runs).
+  if (!loaded || events.length === 0) return null;
 
   return (
     <section className="rounded-lg border border-ink-800 bg-ink-900/60 p-4">
