@@ -188,6 +188,7 @@ class DownloaderService:
         headers: Dict[str, Any] = None,
         progress_tracker=None,
         platform_id: str = None,
+        min_video_bytes: int = 200 * 1024,
     ) -> bool:
         """
         Download a single file with optional progress tracking
@@ -198,6 +199,11 @@ class DownloaderService:
             headers: Request headers
             progress_tracker: Optional progress tracker (DownloadProgressTracker instance)
             platform_id: Optional platform ID for looking up cached browser cookies (Douyin)
+            min_video_bytes: Reject .mp4 responses smaller than this as CDN error
+                pages / truncated responses. Defaults to 200KB, the right floor
+                for full-length videos. Live Photo slide clips are legitimately
+                2-3s loops (~70-180KB), so the slide path passes a much smaller
+                floor — ffprobe integrity verification below is the real gate.
 
         Returns:
             bool: Whether download was successful
@@ -334,7 +340,7 @@ class DownloaderService:
 
                         # Minimum size check: video files should be > 200KB
                         # CDN error pages or truncated responses are typically < 200KB
-                        if file_path.endswith(".mp4") and actual_size < 200 * 1024:
+                        if file_path.endswith(".mp4") and actual_size < min_video_bytes:
                             logger.error(
                                 f"[Download/File] Video too small ({actual_size} bytes), "
                                 f"likely CDN error response: {os.path.basename(file_path)}"
@@ -391,7 +397,7 @@ class DownloaderService:
                             )
 
                         # Minimum size check: video files should be > 200KB
-                        if file_path.endswith(".mp4") and actual_size < 200 * 1024:
+                        if file_path.endswith(".mp4") and actual_size < min_video_bytes:
                             logger.error(
                                 f"[Download/File] Video too small ({actual_size} bytes), "
                                 f"likely CDN error response: {os.path.basename(file_path)}"
@@ -704,7 +710,16 @@ class DownloaderService:
         for j, url in enumerate(url_list):
             try:
                 if await DownloaderService.download_file(
-                    url, file_path, headers, platform_id=platform_id
+                    url,
+                    file_path,
+                    headers,
+                    platform_id=platform_id,
+                    # Live Photo slide clips are 2-3s loops (~70-180KB). The
+                    # default 200KB floor (sized for full videos) silently
+                    # deleted every real slide as a "CDN error response" →
+                    # 0/N slides. Drop the floor here; the bare 403 error page
+                    # is ~353B and ffprobe integrity-checks the result anyway.
+                    min_video_bytes=16 * 1024,
                 ):
                     return {"success": True, "path": file_path}
             except Exception as e:
