@@ -464,6 +464,45 @@ class MediaRepository:
             logger.error(f"get_media_owner_map failed: {e}")
             return {}
 
+    async def get_media_resource_owner_map(
+        self, media_ids: List[Any]
+    ) -> Dict[str, Dict[str, str]]:
+        """Like get_media_owner_map but also returns the resource_id.
+
+        The download-retry path (scheduled_recovery) re-dispatches
+        download_workflow; without resource_id the chain_followups_step
+        (extract_audio / thumbnail / transcode / AI) early-returns, so a
+        successfully-retried download never gets its audio/AI. Returns
+        ``{media_id_str: {"user_id": creator_id, "resource_id": resource_id}}``
+        for non-trashed resources (orphans omitted, same as
+        get_media_owner_map).
+        """
+        if not media_ids:
+            return {}
+        try:
+            client = await self._get_client()
+            res = (
+                await client.table("resources")
+                .select("id, media_id, creator_id")
+                .in_("media_id", [str(m) for m in media_ids])
+                .eq("is_trashed", False)
+                .execute()
+            )
+            out: Dict[str, Dict[str, str]] = {}
+            for row in res.data or []:
+                mid = row.get("media_id")
+                cid = row.get("creator_id")
+                rid = row.get("id")
+                if mid is not None and cid and str(mid) not in out:
+                    out[str(mid)] = {
+                        "user_id": str(cid),
+                        "resource_id": str(rid) if rid is not None else "",
+                    }
+            return out
+        except Exception as e:
+            logger.error(f"get_media_resource_owner_map failed: {e}")
+            return {}
+
     async def get_all(
         self,
         skip: int = 0,

@@ -19,6 +19,7 @@ const KNOWN_PLATFORMS: string[] = [
   'youtube',
   'tiktok',
   'twitter',
+  'qishui',
   'upload',
   'other',
 ];
@@ -104,6 +105,7 @@ export const SourceFilterDropdown: React.FC<SourceFilterDropdownProps> = ({
           'tiktok',
           'xiaohongshu',
           'twitter',
+          'qishui',
         ].includes(platform);
         return (
           <button
