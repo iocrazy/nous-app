@@ -52,6 +52,7 @@ TASK_MODULES = frozenset(
 )
 CHAT_MODULE = "chat"
 ALL_MODULES: frozenset[str] = TASK_MODULES | {CHAT_MODULE}
+NOUS_GLOBAL_KEY = "nous.user_enabled"
 
 
 @dataclass(frozen=True)
@@ -159,10 +160,48 @@ async def _get_module_governance_inner(module: str) -> AIModuleGovernance:
     )
 
 
+async def is_nous_globally_enabled() -> bool:
+    """Master switch for the user-side Nous platform-provider feature.
+
+    Reads ``nous.user_enabled`` (system_settings). DEFAULT-OFF: absent or any
+    non-``True`` value → False, so platform-cost exposure is opt-in only.
+    DB unreachable (``_read_raw`` returns None) ⇒ False (fail-closed for cost).
+    """
+    return (await _read_raw(NOUS_GLOBAL_KEY)) is True
+
+
+async def is_nous_allowed(module: str) -> bool:
+    """Whether users may use platform Nous models for ``module``.
+
+    Two layers (AND): the global switch must be on, AND the per-module
+    ``ai_module.<module>.nous_allowed`` must not be explicitly false.
+    Per-module DEFAULT-ON once the global switch is on (absent → allowed).
+    Unexpected per-module type degrades to allowed (degrade-safe), but the
+    global switch alone still fully gates the feature.
+    """
+    if not await is_nous_globally_enabled():
+        return False
+    raw = await _read_raw(f"ai_module.{module}.nous_allowed")
+    if raw is None:
+        return True
+    if isinstance(raw, bool):
+        return raw
+    logger.warning(
+        "[governance] ai_module.%s.nous_allowed has unexpected type %s "
+        "— treating as allowed (degrade-safe)",
+        module,
+        type(raw).__name__,
+    )
+    return True
+
+
 __all__ = [
     "AIModuleGovernance",
     "ALL_MODULES",
     "CHAT_MODULE",
+    "NOUS_GLOBAL_KEY",
     "TASK_MODULES",
     "get_module_governance",
+    "is_nous_allowed",
+    "is_nous_globally_enabled",
 ]
