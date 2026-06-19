@@ -19,8 +19,8 @@ Surface admin-configured platform AI models (the `nous_models` registry) on the 
 
 ## Key decisions (confirmed)
 
-1. **Model TYPE classification, not feature-scenario.** `nous_models.category` is reclassified from `transcription | summarization | analysis` (use-case) to **model type**: `llm | embedding | tts | asr`. A model's type is intrinsic; one LLM serves many features.
-   - Migration remap of existing rows: `transcription → asr`, `summarization → llm`, `analysis → llm`. `embedding` and `tts` are new types with no existing rows.
+1. **Classify Nous models purely by model TYPE: `llm | embedding | tts | asr`.** Type is intrinsic to the model; one LLM serves many features. (The column is renamed `category → type` to make this unambiguous.)
+   - **No data migration:** `nous_models` is **empty in prod (0 rows, verified 2026-06-19)**, so the migration just **swaps the CHECK constraint** from the old `('transcription','summarization','analysis')` to `('llm','embedding','tts','asr')` (and renames the column). There is nothing to remap.
 2. **Per-slot typing (supersedes the earlier "2a list-all").** Each selection slot shows Nous models of the type it needs:
    - Agent model picker (LLM modules) → **llm** Nous models.
    - Transcription dropdown → **asr** Nous models.
@@ -57,7 +57,7 @@ admin nous_models (enabled)            ← type: llm | embedding | tts | asr  (+
 ### Components
 
 **Backend**
-- `nous_models` model + migration: change `category` values to `llm|embedding|tts|asr` (remap existing), add nullable `description text`.
+- `nous_models` model + migration: rename `category → type`, swap its CHECK constraint to `('llm','embedding','tts','asr')` (no data remap — table is empty in prod), add nullable `description text`.
 - `schemas/nous.py`, `schemas/admin.py`: type enum + `description`.
 - `api/admin/nous_router.py`: accept/return type enum + `description` (api_key stays masked/write-only).
 - `api/ai_settings_router.py`: `GET /api/v1/ai/nous-models` returns `name, display_name, type, description, sort_order`; supports `?type=` filter (replaces `?category=`). Enabled-only, no keys.
@@ -91,7 +91,7 @@ admin nous_models (enabled)            ← type: llm | embedding | tts | asr  (+
 
 ### Testing
 
-- **Backend unit:** resolver returns platform config when `agent.model` matches an enabled Nous model; fail-closed when disabled/missing; unchanged BYOK path when the model is not a Nous name. Migration remap (`transcription→asr`, `summarization→llm`, `analysis→llm`). `nous-models` endpoint returns type + description and honors `?type=` filter.
+- **Backend unit:** resolver returns platform config when `agent.model` matches an enabled Nous model; fail-closed when disabled/missing; unchanged BYOK path when the model is not a Nous name. Migration swaps the CHECK constraint to the `type` enum (no data remap — table is empty). `nous-models` endpoint returns `type` + `description` and honors `?type=` filter.
 - **Frontend:** Nous provider card renders enabled models with badges/descriptions and no key field; agent picker shows only `llm` Nous models; transcription dropdown shows `asr` Nous models.
 
 ## Accepted risks (v1)
