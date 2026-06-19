@@ -211,7 +211,7 @@ async def get_ai_governance(auth: AuthDep):
 
 
 @router.get("/nous-models")
-async def list_nous_models(type: str = None):
+async def list_nous_models(type: str | None = None):
     """List enabled Nous models (public, no API keys), optionally filtered by
     model type (``llm`` / ``embedding`` / ``tts`` / ``asr``).
 
