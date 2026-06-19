@@ -75,16 +75,19 @@ export interface GraphMemorySettingsUpdate {
 
 export interface AIGovernanceChatSettings {
   user_allowed: boolean
+  nous_allowed: boolean
 }
 
 export interface AIGovernanceTaskSettings {
   user_allowed: boolean
+  nous_allowed: boolean
   base_url: string
   model: string
   api_key_set: boolean
 }
 
 export interface AIGovernanceSettings {
+  nous_user_enabled: boolean
   chat: AIGovernanceChatSettings
   transcription: AIGovernanceTaskSettings
   translation: AIGovernanceTaskSettings
@@ -96,6 +99,7 @@ export interface AIGovernanceSettings {
 
 export interface AIGovernanceModuleUpdate {
   user_allowed: boolean
+  nous_allowed?: boolean
   base_url?: string
   model?: string
   /** Only send when non-blank — blank keeps the stored key unchanged. */
@@ -103,6 +107,7 @@ export interface AIGovernanceModuleUpdate {
 }
 
 export interface AIGovernanceUpdate {
+  nous_user_enabled?: boolean
   chat?: AIGovernanceModuleUpdate
   transcription?: AIGovernanceModuleUpdate
   translation?: AIGovernanceModuleUpdate
