@@ -138,3 +138,62 @@ async def test_agent_path_uses_nous_platform_config_and_keeps_slug():
     assert pk == "doubao"
     assert model == "doubao-pro-32k"
     assert slug == "my-analyze"
+
+
+@pytest.mark.asyncio
+async def test_transcription_nous_ref_routes_to_platform_config():
+    """task_assignment.transcription = 'nous:<name>' → platform ASR config,
+    provider_key = actual_provider (so a volcengine nous model still routes
+    through the volcengine ASR branch)."""
+    import app.workflows.ai_transcription as trans_mod
+    from app.services.ai.governance.ai_governance import AIModuleGovernance
+
+    fake_media_row = {
+        "id": 1,
+        "extract_audio_path": "/tmp/a.mp3",
+        "download_path": None,
+        "platform_id": "p1",
+        "resource_id": 7,
+    }
+    fake_settings_row = {
+        "settings_json": {
+            "ai_settings": {
+                "whisper_provider": "openai",
+                "preferred_language": "en",
+                "ai_providers": {},
+                "task_assignment": {"transcription": "nous:nous-asr"},
+            }
+        }
+    }
+
+    with patch(
+        "app.services.ai.governance.ai_governance.get_module_governance",
+        new=AsyncMock(return_value=AIModuleGovernance(allowed=True)),
+    ):
+        with patch(
+            "app.db.engine.fetch_one",
+            side_effect=[fake_media_row, fake_settings_row],
+        ):
+            with patch(
+                "app.services.ai.providers.ai_provider_helpers.resolve_nous_model",
+                new=AsyncMock(
+                    return_value=(
+                        "volcengine",
+                        {
+                            "api_key": "plat-key",
+                            "base_url": "",
+                            "model": "seed-asr",
+                            "app_id": "app-1",
+                        },
+                        "seed-asr",
+                    )
+                ),
+            ):
+                result = await trans_mod.load_transcribe_inputs(1, "u1")
+
+    assert result["provider_key"] == "volcengine"
+    assert result["provider_config"]["api_key"] == "plat-key"
+    assert result["provider_config"]["app_id"] == "app-1"
+    # task_assignment is normalized to provider:model so the volcengine branch
+    # picks the right ASR resource from the model part.
+    assert result["task_assignment"] == "volcengine:seed-asr"
