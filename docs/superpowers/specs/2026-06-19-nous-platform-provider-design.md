@@ -29,6 +29,20 @@ Surface admin-configured platform AI models (the `nous_models` registry) on the 
 5. **Admin annotation.** Add an optional `description` field to `nous_models` (admin writes a short usage note, e.g. "fast, cheap, short clips"). User pickers show `display_name` + type badge + `description`.
 6. **Disabled/missing model → fail-closed.** If an agent (or transcription setting) references a Nous model that is disabled or deleted, the resolver raises a clear error ("platform model X is no longer available") rather than silently falling back to a wrong model.
 
+## Admin master control over user-side Nous (global + per-module)
+
+Admin gets two layers of control over whether users may use platform Nous models, reusing the existing `system_settings` governance structure:
+
+- **Global master switch** — `nous.user_enabled` (boolean, **default `false`**). The whole user-side Nous feature is **off until admin opts in**, so there is no surprise platform-cost exposure. When off: no Nous provider card, no Nous options anywhere.
+- **Per-module** — `ai_module.<module>.nous_allowed` (boolean, **default `true` when the global switch is on**). Once the global switch is on, every module allows Nous unless admin turns a specific one off. Independent from the existing `ai_module.<module>.user_allowed` (BYOK self-config) — they are orthogonal axes (one gates BYOK, the other gates platform-Nous).
+
+**Enforcement (defense in depth):**
+- **Frontend** reads both layers via `GET /api/v1/ai/governance` (extended): show the Nous provider card only when global is on; show a module's Nous options only when `global_on AND module.nous_allowed`.
+- **Resolver** independently re-checks `global_on AND module.nous_allowed` whenever it resolves a model name to a Nous model. If the gate is closed (e.g. a stale user assignment, or a client that bypassed the UI), **fail-closed** with a clear error ("platform models are disabled for this feature"), never silently run on the platform key.
+- **Admin UI** (`AIGovernance.tsx`) gains a global Nous toggle + a per-module Nous toggle, written through the existing `PUT /admin/settings/ai-governance`.
+
+This closes the cost-exposure hole: default-off plus a one-click global kill and per-module trims.
+
 ## Architecture
 
 Three focused changes; **no new tables**, reuse the existing `nous_models` + agent + `task_assignment` machinery.
@@ -60,7 +74,8 @@ admin nous_models (enabled)            ← type: llm | embedding | tts | asr  (+
 - `nous_models` model + migration: rename `category → type`, swap its CHECK constraint to `('llm','embedding','tts','asr')` (no data remap — table is empty in prod), add nullable `description text`.
 - `schemas/nous.py`, `schemas/admin.py`: type enum + `description`.
 - `api/admin/nous_router.py`: accept/return type enum + `description` (api_key stays masked/write-only).
-- `api/ai_settings_router.py`: `GET /api/v1/ai/nous-models` returns `name, display_name, type, description, sort_order`; supports `?type=` filter (replaces `?category=`). Enabled-only, no keys.
+- `api/ai_settings_router.py`: `GET /api/v1/ai/nous-models` returns `name, display_name, type, description, sort_order`; supports `?type=` filter (replaces `?category=`). Enabled-only, no keys. `GET /api/v1/ai/governance` extended to also return the global `nous.user_enabled` + per-module `nous_allowed`.
+- `services/ai/governance/ai_governance.py` + `api/admin/settings_router.py`: read/write the global `nous.user_enabled` and per-module `ai_module.<module>.nous_allowed`; the resolver consults them (fail-closed gate above).
 - `services/ai/providers/ai_provider_helpers.py`: add a **shared Nous-resolution step** applied to whichever model name the resolver lands on. `resolve_task_provider_config` derives the model name in two places — the governance-**locked** path (`governance.model`, ~line 99/115) and the **unlocked** agent path (`agent.model`, ~line 144). The Nous lookup must run for **both** (admin may lock a module directly to a Nous model name), so factor it into one helper called before `provider_key_for_model(...)` in each branch. Lookup by `name`; fail-closed on disabled/missing.
 - Adapter factory: construct an adapter from a nous platform config (provider/model/key/base_url).
 - **`schemas/nous.py`** has the `category` enum as `Literal[...]` in **4 places** (Create / Update / 2× Response) — all must change to the new type enum. `nous_repository.py::list_enabled(category)` + `nous_repository_orm.py` select/filter on `category` and must follow the rename to `type`.
@@ -73,6 +88,7 @@ admin nous_models (enabled)            ← type: llm | embedding | tts | asr  (+
 
 **Admin (`admin/`)**
 - Nous model config form: `category` → **type** dropdown (`llm|embedding|tts|asr`) + a `description` text field.
+- `AIGovernance.tsx`: a **global Nous toggle** (`nous.user_enabled`) + a **per-module Nous toggle** (`nous_allowed`) per feature module, written via the existing `PUT /admin/settings/ai-governance`.
 
 ### Data flow / resolution detail
 
@@ -96,7 +112,7 @@ admin nous_models (enabled)            ← type: llm | embedding | tts | asr  (+
 
 ## Accepted risks (v1)
 
-- **Platform cost exposure.** With no billing (scope A) and an **unlocked** module, any user can assign an agent that uses a Nous model and run it on the **platform key at platform expense**. The admin's only lever in v1 is enabling/disabling Nous models globally (and locking modules). This is the cost hole that the deferred *Nous Billing* project closes; accepted for v1.
+- **Platform cost is unmetered (but gated).** With no billing (scope A), Nous usage runs on the platform key at platform expense with no per-use metering. This is **bounded** by the admin master control (global `nous.user_enabled` default-off + per-module `nous_allowed` + per-model `is_enabled`): nothing is exposed until admin opts in, and admin can kill it globally or per-module at any time. What's deferred to *Nous Billing* is **quotas/metering/charging**, not access control. Accepted for v1.
 
 ## Explicitly deferred (not v1)
 
