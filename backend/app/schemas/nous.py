@@ -6,13 +6,16 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel
 
+NousModelType = Literal["llm", "embedding", "tts", "asr"]
+
 
 class NousModelCreate(BaseModel):
     """Request body for creating a Nous model."""
 
     name: str
     display_name: str
-    category: Literal["transcription", "summarization", "analysis"]
+    type: NousModelType
+    description: Optional[str] = None
     actual_provider: str
     actual_model: str
     api_key: str
@@ -29,7 +32,8 @@ class NousModelUpdate(BaseModel):
 
     name: Optional[str] = None
     display_name: Optional[str] = None
-    category: Optional[Literal["transcription", "summarization", "analysis"]] = None
+    type: Optional[NousModelType] = None
+    description: Optional[str] = None
     actual_provider: Optional[str] = None
     actual_model: Optional[str] = None
     api_key: Optional[str] = None
@@ -47,7 +51,8 @@ class NousModelResponse(BaseModel):
     id: str
     name: str
     display_name: str
-    category: str
+    type: str
+    description: Optional[str] = None
     actual_provider: str
     actual_model: str
     api_key_masked: str
@@ -66,6 +71,7 @@ class NousModelPublic(BaseModel):
 
     name: str
     display_name: str
-    category: str
+    type: str
+    description: Optional[str] = None
     pricing_type: str
     pricing_value: float
