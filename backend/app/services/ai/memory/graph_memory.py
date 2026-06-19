@@ -71,17 +71,13 @@ DEFAULT_STRUCTURED_OUTPUT_MODE = "json_object"
 # decoding. Pin it to 0 so extraction is reproducible across runs and providers.
 EXTRACTOR_TEMPERATURE = 0.0
 
-# Hard ceiling on a single hybrid retrieval. search() sits on the SYNCHRONOUS
-# chat hot path (gathered before the prompt is built), so it must fail fast and
-# degrade to no facts rather than stall the turn. Warm recall is ~0.3-0.8s; the
-# real risk is a slow/cold embedder — right after the qwen box restarts, the
-# first query-embedding calls take 10s+ (model cold-load), and a generous ceiling
-# turned EVERY chat turn into a ~10s hang until the provider warmed (2026-06-18
-# prod incident). 3s caps that: a cold/slow provider drops graph facts for a
-# minute instead of breaking chat — they're best-effort enrichment, not required.
-# Ingestion (add_episode) is deliberately NOT bounded here: it runs off the hot
-# path and its LLM extraction legitimately takes longer.
-GRAPH_SEARCH_TIMEOUT_S = 3.0
+# Hard ceiling on a single hybrid retrieval. search() sits on the synchronous
+# chat hot path, so a FalkorDB host that accepts the TCP connection but never
+# responds (vs. cleanly refusing) must NOT stall the turn — the timeout fires,
+# the safety contract logs it, and recall degrades to no facts. Matches the
+# Honcho read ceiling. Ingestion (add_episode) is deliberately NOT bounded here:
+# it runs off the hot path and its LLM extraction legitimately takes longer.
+GRAPH_SEARCH_TIMEOUT_S = 10.0
 
 
 # system_settings key (admin-set, DB) → env-var fallback. Lets the Graphiti
