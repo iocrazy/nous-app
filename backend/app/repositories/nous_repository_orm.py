@@ -15,7 +15,7 @@ Two write paths, both pass-through dicts whose keys come from typed Pydantic
 schemas (NousModelCreate / NousModelUpdate):
 
   create(data) : data = NousModelCreate.model_dump() → name / display_name /
-                 category / actual_provider / actual_model / api_key /
+                 type / description / actual_provider / actual_model / api_key /
                  pricing_type / pricing_value / is_enabled / sort_order /
                  app_id / base_url — ALL mapped columns on NousModels. OK.
   update(id,d) : data = NousModelUpdate.model_dump(exclude_none=True) + the repo
@@ -69,7 +69,7 @@ the parity surface is small:
   is_enabled (bool) / sort_order (int) → native, passed straight to response.
 
 There are NO date columns and NO date/timestamptz RANGE filters in this repo
-(every query filters by equality on name/category/is_enabled and orders by
+(every query filters by equality on name/type/is_enabled and orders by
 sort_order), so there is no timestamptz<VARCHAR binding hazard.
 
 Writes commit via ``write_scope()`` (the silent-rollback P0 lesson). Reads use
