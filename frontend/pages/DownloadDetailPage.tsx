@@ -99,13 +99,32 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
   }, []);
 
   // Island mode: this page owns an info island (the detail panel). Mark it
-  // available + visible on mount so the shell mounts the info aside (giving us a
-  // portal target), and tear it down on unmount. No-op in classic.
+  // available + visible on mount, and tear it down on unmount. No-op in classic.
+  //
+  // Re-assert across the next frame + a short tick: web cards navigate here with
+  // `preloaded` router state, so FileDetailDispatcher mounts this page
+  // IMMEDIATELY — overlapping the list view's (DownloadsView) route-transition
+  // teardown. The list keys infoVisible/infoAvailable off its own selection and
+  // its `setInfoVisible(false)` (no selection) can land AFTER our claim, hiding
+  // the panel until a manual refresh. Uploaded resources don't hit this because
+  // the dispatcher shows a spinner while it fetches source_type, so the list has
+  // fully unmounted before ResourceDetailPage mounts. Re-claiming after the
+  // transition settles makes the detail's intent win. The claims are one-shot,
+  // so a later user collapse (onCollapse) is not fought.
   useEffect(() => {
     if (!island) return;
-    setInfoAvailable(true);
-    setInfoVisible(true);
-    return () => { setInfoAvailable(false); setInfoVisible(false); };
+    const claim = () => { setInfoAvailable(true); setInfoVisible(true); };
+    claim();
+    const raf = requestAnimationFrame(claim);
+    const t1 = window.setTimeout(claim, 80);
+    const t2 = window.setTimeout(claim, 250);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+      setInfoAvailable(false);
+      setInfoVisible(false);
+    };
   }, [island, setInfoAvailable, setInfoVisible]);
 
   // Audio palette + cover-tint. Computed before the early returns (video-null
