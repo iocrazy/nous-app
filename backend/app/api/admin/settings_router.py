@@ -214,42 +214,62 @@ async def _read_governance_settings() -> AIGovernanceResponse:
         v = data.get(key)
         return str(v).strip() if v is not None else ""
 
+    def get_nous(module: str) -> bool:
+        v = data.get(f"ai_module.{module}.nous_allowed")
+        if isinstance(v, bool):
+            return v
+        return True  # default-on (gated by the global switch)
+
+    # nous.user_enabled is NOT ai_module.*-prefixed, so it is absent from `data`.
+    # Read it directly from the full row set (default-off when absent).
+    nous_global_on = any(
+        r.get("key") == "nous.user_enabled" and r.get("value") is True for r in rows
+    )
+
     return AIGovernanceResponse(
+        nous_user_enabled=nous_global_on,
         chat=ChatModuleGovernanceResponse(
             user_allowed=get_bool("ai_module.chat.user_allowed"),
+            nous_allowed=get_nous("chat"),
         ),
         transcription=TaskModuleGovernanceResponse(
             user_allowed=get_bool("ai_module.transcription.user_allowed"),
+            nous_allowed=get_nous("transcription"),
             base_url=get_str("ai_module.transcription.base_url"),
             model=get_str("ai_module.transcription.model"),
             api_key_set=bool(get_str("ai_module.transcription.api_key")),
         ),
         translation=TaskModuleGovernanceResponse(
             user_allowed=get_bool("ai_module.translation.user_allowed"),
+            nous_allowed=get_nous("translation"),
             base_url=get_str("ai_module.translation.base_url"),
             model=get_str("ai_module.translation.model"),
             api_key_set=bool(get_str("ai_module.translation.api_key")),
         ),
         visual_analysis=TaskModuleGovernanceResponse(
             user_allowed=get_bool("ai_module.visual_analysis.user_allowed"),
+            nous_allowed=get_nous("visual_analysis"),
             base_url=get_str("ai_module.visual_analysis.base_url"),
             model=get_str("ai_module.visual_analysis.model"),
             api_key_set=bool(get_str("ai_module.visual_analysis.api_key")),
         ),
         caption=TaskModuleGovernanceResponse(
             user_allowed=get_bool("ai_module.caption.user_allowed"),
+            nous_allowed=get_nous("caption"),
             base_url=get_str("ai_module.caption.base_url"),
             model=get_str("ai_module.caption.model"),
             api_key_set=bool(get_str("ai_module.caption.api_key")),
         ),
         classification=TaskModuleGovernanceResponse(
             user_allowed=get_bool("ai_module.classification.user_allowed"),
+            nous_allowed=get_nous("classification"),
             base_url=get_str("ai_module.classification.base_url"),
             model=get_str("ai_module.classification.model"),
             api_key_set=bool(get_str("ai_module.classification.api_key")),
         ),
         summarization=TaskModuleGovernanceResponse(
             user_allowed=get_bool("ai_module.summarization.user_allowed"),
+            nous_allowed=get_nous("summarization"),
             base_url=get_str("ai_module.summarization.base_url"),
             model=get_str("ai_module.summarization.model"),
             api_key_set=bool(get_str("ai_module.summarization.api_key")),
@@ -281,7 +301,17 @@ async def update_ai_governance_settings(
     data = update.model_dump(exclude_unset=True)
 
     written: list[str] = []
+
+    # Global Nous master switch (top-level, not under a module).
+    if data.get("nous_user_enabled") is not None:
+        await repo.upsert_setting(
+            "nous.user_enabled", data["nous_user_enabled"], auth.user_id
+        )
+        written.append("nous.user_enabled")
+
     for module, module_data in data.items():
+        if module == "nous_user_enabled":
+            continue  # handled above; not a per-module dict
         if not module_data:
             continue
         # user_allowed (both chat and task modules)
@@ -289,6 +319,10 @@ async def update_ai_governance_settings(
             key = f"ai_module.{module}.user_allowed"
             # Write JSONB native bool so the gate can do ``isinstance(v, bool)``.
             await repo.upsert_setting(key, module_data["user_allowed"], auth.user_id)
+            written.append(key)
+        if "nous_allowed" in module_data and module_data["nous_allowed"] is not None:
+            key = f"ai_module.{module}.nous_allowed"
+            await repo.upsert_setting(key, module_data["nous_allowed"], auth.user_id)
             written.append(key)
         if module not in _TASK_MODULE_NAMES:
             continue
