@@ -436,9 +436,9 @@ export const saveAISettings = async (
 
 // --- Nous Models ---
 
-export const getNousModels = async (category?: string): Promise<NousModelPublic[]> => {
+export const getNousModels = async (type?: string): Promise<NousModelPublic[]> => {
   const apiUrl = getApiUrl();
-  const params = category ? `?category=${category}` : '';
+  const params = type ? `?type=${type}` : '';
   const response = await fetch(`${apiUrl}/api/v1/ai/nous-models${params}`, {
     headers: await getAuthHeaders(),
   });
@@ -485,6 +485,8 @@ export const GOVERNANCE_ALL_ALLOWED: AIGovernanceFlags = {
   caption: true,
   classification: true,
   summarization: true,
+  nous_enabled: false,
+  nous_modules: {},
 };
 
 /**

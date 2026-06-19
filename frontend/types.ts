@@ -573,13 +573,20 @@ export interface AIGovernanceFlags {
   caption: boolean;
   classification: boolean;
   summarization: boolean;
+  /** Global Nous master switch (default false). */
+  nous_enabled?: boolean;
+  /** Per-module Nous allow flags (default-on once nous_enabled). */
+  nous_modules?: Record<string, boolean>;
 }
 
-// Nous Platform Model (admin-configured, pay with points)
+// Nous Platform Model (admin-configured, runs on the platform key)
+export type NousModelType = 'llm' | 'embedding' | 'tts' | 'asr';
+
 export interface NousModelPublic {
   name: string;
   display_name: string;
-  category: 'transcription' | 'summarization' | 'analysis';
+  type: NousModelType;
+  description?: string | null;
   pricing_type: 'per_hour' | 'per_request' | 'per_token';
   pricing_value: number;
 }
