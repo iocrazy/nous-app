@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
 from app.core.deps import (  # noqa: F401 — get_auth re-exported for test override
     AuthDep,
@@ -10,6 +10,7 @@ from app.core.deps import (  # noqa: F401 — get_auth re-exported for test over
 )
 from app.repositories.hotspots_repository import HotspotsRepository
 from app.schemas.topics import DatesResponse, HotspotListResponse, HotspotOut
+from app.services.storyboard.script.script_ai_service import ScriptAIService
 
 router = APIRouter(prefix="/topics")
 
@@ -50,3 +51,25 @@ async def list_hotspots(
 async def hotspot_dates(auth: AuthDep, limit_days: int = Query(60, ge=1, le=180)):
     repo = HotspotsRepository()
     return DatesResponse(dates=await repo.distinct_dates(limit_days))
+
+
+async def _generate_script_for(title: str, summary: str, user_id: str) -> list:
+    """Reuse the existing script_ai agent. Real signature (verified):
+    ScriptAIService(user_id=...).generate_outline(premise) -> List[Dict[str,str]]."""
+    svc = ScriptAIService(user_id=user_id)
+    premise = f"Topic: {title}\n\nContext: {summary or ''}"
+    return await svc.generate_outline(premise)
+
+
+@router.post("/{hotspot_id}/generate-script")
+async def generate_script(hotspot_id: str, auth: AuthDep):
+    repo = HotspotsRepository()
+    row = await repo.get_by_id(hotspot_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="hotspot not found")
+    script = await _generate_script_for(
+        row.get("title") or "",
+        row.get("ai_summary") or row.get("summary") or "",
+        auth.user_id,
+    )
+    return {"success": True, "script": script}

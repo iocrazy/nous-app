@@ -73,6 +73,17 @@ class HotspotsRepository:
         result = await q.order("captured_at", desc=True).limit(limit).execute()
         return result.data or []
 
+    async def get_by_id(self, hotspot_id: str) -> dict | None:
+        client = await self._client()
+        result = (
+            await client.table(self.TABLE)
+            .select("*")
+            .eq("id", hotspot_id)
+            .limit(1)
+            .execute()
+        )
+        return (result.data or [None])[0]
+
     async def distinct_dates(self, limit_days: int = 60) -> list[str]:
         client = await self._client()
         result = (
