@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import calendar
 from datetime import datetime, timezone
-from time import mktime
 
 import feedparser
 import httpx
@@ -33,7 +33,7 @@ class RssAdapter(SourceAdapter):
             captured = None
             if getattr(e, "published_parsed", None):
                 captured = datetime.fromtimestamp(
-                    mktime(e.published_parsed), tz=timezone.utc
+                    calendar.timegm(e.published_parsed), tz=timezone.utc
                 )
             out.append(
                 HotspotCandidate(
