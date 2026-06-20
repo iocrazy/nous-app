@@ -285,14 +285,16 @@ export function AIModelsPage() {
           <FormItem label={editingModel ? 'API Key (leave empty to keep existing)' : 'API Key'} field="api_key" rules={editingModel ? [] : [{ required: true }]}>
             <Input.Password placeholder="API Key" />
           </FormItem>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <FormItem label="App ID" field="app_id">
-              <Input placeholder="Optional (volcengine)" />
-            </FormItem>
-            <FormItem label="Base URL" field="base_url">
-              <Input placeholder="Optional override" />
-            </FormItem>
-          </div>
+          <FormItem
+            label="API Base URL"
+            field="base_url"
+            extra="Manually enter the OpenAI-compatible base URL (ends with /v1). Used to fetch the model list. Leave blank only for built-in providers that have a default."
+          >
+            <Input placeholder="https://api.deepseek.com/v1" />
+          </FormItem>
+          <FormItem label="App ID" field="app_id">
+            <Input placeholder="Optional (volcengine)" />
+          </FormItem>
           <div style={{ marginBottom: 12 }}>
             <Button size="small" loading={probeLoading} onClick={handleProbeModels} icon={<IconSync />}>
               Test &amp; Load Models
