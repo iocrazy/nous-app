@@ -34,6 +34,7 @@ const STATE_ICON: Record<string, { icon: React.ReactNode; cls: string; label: st
   completed: { icon: <CheckCircle2 className="w-4 h-4" />, cls: 'text-emerald-500', label: 'Completed' },
   failed:    { icon: <XCircle className="w-4 h-4" />,      cls: 'text-rose-500',    label: 'Failed' },
   cancelled: { icon: <Ban className="w-4 h-4" />,          cls: 'text-amber-500',   label: 'Cancelled' },
+  lost:      { icon: <XCircle className="w-4 h-4" />,      cls: 'text-rose-500',    label: 'Lost' },
 };
 
 function stateMeta(state: string) {

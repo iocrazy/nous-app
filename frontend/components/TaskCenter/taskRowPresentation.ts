@@ -29,7 +29,10 @@ export function taskRowActions(
 ): TaskRowActions {
   const hasResource = !!task.resource_id;
   const running = task.status === 'pending' || task.status === 'processing';
-  const retryable = task.status === 'failed' || task.status === 'cancelled';
+  // 'lost' = worker died (zombie reaper / sweepers) — terminal + retryable,
+  // backend retry_task accepts it. Without it a lost row showed no Retry.
+  const retryable =
+    task.status === 'failed' || task.status === 'cancelled' || task.status === 'lost';
   return {
     // A resource may exist even on a partial failure, so gate open/download on
     // the resource itself rather than on success.

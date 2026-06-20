@@ -150,7 +150,7 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
                 </>
               )}
 
-              {(task.status === 'failed' || task.status === 'cancelled') && (
+              {(task.status === 'failed' || task.status === 'cancelled' || task.status === 'lost') && (
                 <>
                   {actions.open && (
                     <button
@@ -170,10 +170,10 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
                       <RotateCcw size={12} />
                     </button>
                   )}
-                  {task.status === 'failed' ? (
-                    <XCircle size={14} className="text-red-400 shrink-0" />
-                  ) : (
+                  {task.status === 'cancelled' ? (
                     <X size={14} className="text-ink-500 shrink-0" />
+                  ) : (
+                    <XCircle size={14} className="text-red-400 shrink-0" />
                   )}
                 </>
               )}
