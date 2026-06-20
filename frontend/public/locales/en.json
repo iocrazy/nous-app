@@ -1996,6 +1996,11 @@
     "source": "Source",
     "score": "Score",
     "scriptStarted": "Script generation started",
-    "downloadStarted": "Download dispatched"
+    "downloadStarted": "Download dispatched",
+    "parseLink": "Parse Link",
+    "pasteHint": "Paste single / batch / playlist links",
+    "analyze": "Analyze",
+    "savedToResources": "Saved to Resources",
+    "saveToResources": "Save to Resources"
   }
 }

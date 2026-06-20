@@ -7,6 +7,7 @@ import { getHotspots, getHotspotDates, type Hotspot } from '../services/topicSer
 import { useToast } from '../components/Toast';
 import { Timeline } from '../components/TopicInspiration/Timeline';
 import { HotspotInfoPanel } from '../components/TopicInspiration/HotspotInfoPanel';
+import { FloatingParse } from '../components/TopicInspiration/FloatingParse';
 
 const CATEGORIES = ['all', 'model', 'product', 'industry', 'paper', 'tips'] as const;
 
@@ -117,6 +118,9 @@ export const TopicInspirationPage: React.FC = () => {
 
       {/* Task 16: right info island portal */}
       <HotspotInfoPanel hotspot={selected} />
+
+      {/* Task 17: floating parse widget — bottom-right, 3 states */}
+      <FloatingParse />
     </div>
   );
 };
