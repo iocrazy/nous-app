@@ -33,7 +33,8 @@
     "sharedCollections": "团队媒体库",
     "newCollection": "新建集合",
     "dashboard": "数据面板",
-    "settings": "设置"
+    "settings": "设置",
+    "topicInspiration": "话题灵感"
   },
   "sidebar": {
     "personal": "个人",
@@ -1981,5 +1982,16 @@
     "default": "默认",
     "recentFailures": "近期 {{runs}} 次运行中 {{failures}} 次失败",
     "recentOk": "近期 {{runs}} 次运行正常"
+  },
+  "topic": {
+    "title": "Topic Inspiration",
+    "subtitle": "AI 精选高价值话题与灵感",
+    "currentHot": "当前热点",
+    "generateScript": "生成脚本",
+    "parseDownload": "解析下载",
+    "addTag": "标签",
+    "viewSource": "查看来源",
+    "reason": "为什么值得关注",
+    "aiSummary": "AI 摘要"
   }
 }

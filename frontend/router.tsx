@@ -42,7 +42,9 @@ function lazyWithRetry<T extends { default: any }>(
 }
 
 // Lazy-loaded pages (code-split per route)
-const ParserPage = lazyWithRetry(() => import('./pages/ParserPage').then(m => ({ default: m.ParserPage })));
+const TopicInspirationPage = lazyWithRetry(() =>
+  import('./pages/TopicInspirationPage').then((m) => ({ default: m.TopicInspirationPage })),
+);
 const DashboardPage = lazyWithRetry(() => import('./pages/DashboardPage').then(m => ({ default: m.DashboardPage })));
 const SettingsPage = lazyWithRetry(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
 const CleanupPage = lazyWithRetry(() => import('./pages/CleanupPage').then(m => ({ default: m.CleanupPage })));
@@ -140,7 +142,7 @@ export const router = createBrowserRouter([
         element: <AppLayout />,
         children: [
           { index: true, element: <Navigate to="parser" replace /> },
-          { path: 'parser', element: <SuspenseWrap><ModuleGuard moduleKey="parser"><ParserPage /></ModuleGuard></SuspenseWrap> },
+          { path: 'parser', element: <SuspenseWrap><ModuleGuard moduleKey="parser"><TopicInspirationPage /></ModuleGuard></SuspenseWrap> },
           { path: 'dashboard', element: <SuspenseWrap><ModuleGuard moduleKey="dashboard"><DashboardPage /></ModuleGuard></SuspenseWrap> },
           { path: 'dashboard/:subview', element: <SuspenseWrap><ModuleGuard moduleKey="dashboard"><DashboardPage /></ModuleGuard></SuspenseWrap> },
           { path: 'resources', element: <SuspenseWrap><ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard></SuspenseWrap> },
