@@ -6,6 +6,7 @@ import { islandUI } from '../utils/featureFlags';
 import { getHotspots, getHotspotDates, type Hotspot } from '../services/topicService';
 import { useToast } from '../components/Toast';
 import { Timeline } from '../components/TopicInspiration/Timeline';
+import { HotspotInfoPanel } from '../components/TopicInspiration/HotspotInfoPanel';
 
 const CATEGORIES = ['all', 'model', 'product', 'industry', 'paper', 'tips'] as const;
 
@@ -114,8 +115,8 @@ export const TopicInspirationPage: React.FC = () => {
         )}
       </div>
 
-      {/* selected is consumed by Task 16 detail panel */}
-      {selected && null}
+      {/* Task 16: right info island portal */}
+      <HotspotInfoPanel hotspot={selected} />
     </div>
   );
 };
