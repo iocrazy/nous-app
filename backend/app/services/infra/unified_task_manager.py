@@ -44,7 +44,10 @@ VALID_TASK_TYPES = frozenset(
     }
 )
 VALID_TASK_STATUSES = frozenset(
-    {"pending", "processing", "completed", "failed", "cancelled"}
+    # 'lost' = worker died before/while running (sweepers / DBOS zombie reaper
+    # write it). A real terminal status that lives in task_tracking, so it must
+    # be a queryable filter value — else the UI can't list or filter lost tasks.
+    {"pending", "processing", "completed", "failed", "cancelled", "lost"}
 )
 
 # sort key → (column, descending)

@@ -33,9 +33,13 @@ export type TaskType =
 
 export type TaskCategory = 'transfer' | 'processing' | 'ai';
 
-export type TaskStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
+// 'lost' = worker died before/while running (written by the sweepers / DBOS
+// zombie reaper). Terminal + retryable — backend retry_task accepts it. Treated
+// as a failed-like terminal everywhere so it never silently vanishes from the
+// UI (the invisible-zombie symptom diagnosed 2026-06-20).
+export type TaskStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'lost';
 
-export type TaskPhase = 'queued' | 'dedup_check' | 'processing' | 'completed' | 'failed' | 'cancelled';
+export type TaskPhase = 'queued' | 'dedup_check' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'lost';
 
 /** Row shape of public.task_tracking after the D8-A migration. PK is
  * dbos_workflow_id (UUID string == dbos.workflow_status.workflow_uuid).
@@ -201,6 +205,7 @@ function wsStatusToTaskStatus(wsStatus?: string): TaskStatus | undefined {
     case 'downloading': return 'processing';
     case 'completed': return 'completed';
     case 'failed': return 'failed';
+    case 'lost': return 'lost';
     default: return undefined;
   }
 }
@@ -808,7 +813,7 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const clearCompleted = useCallback(async () => {
     // Optimistic: remove completed/failed/cancelled from local state
     const completedIds = state.tasks
-      .filter(t => ['completed', 'failed', 'cancelled'].includes(t.status))
+      .filter(t => ['completed', 'failed', 'cancelled', 'lost'].includes(t.status))
       .map(t => t.id);
     for (const id of completedIds) {
       dispatch({ type: 'DELETE', id });
@@ -907,6 +912,7 @@ export function taskPhaseLabel(phase?: TaskPhase): string {
     case 'completed': return 'Done';
     case 'failed': return 'Failed';
     case 'cancelled': return 'Cancelled';
+    case 'lost': return 'Lost';
     default: return '';
   }
 }

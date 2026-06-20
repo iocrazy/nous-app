@@ -34,7 +34,7 @@ interface TaskToolbarProps {
   totalCount: number;
 }
 
-const STATUS_OPTIONS: TaskStatus[] = ['pending', 'processing', 'completed', 'failed', 'cancelled'];
+const STATUS_OPTIONS: TaskStatus[] = ['pending', 'processing', 'completed', 'failed', 'lost', 'cancelled'];
 const TYPE_OPTIONS: TaskType[] = ['parse', 'download', 'upload', 'transcode', 'ai_pipeline', 'ai_extract', 'ai_transcription', 'ai_summary'];
 const GROUP_OPTIONS: { value: GroupBy; label: string }[] = [
   { value: 'none', label: 'None' },

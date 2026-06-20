@@ -33,6 +33,7 @@ function StatusIcon({ status }: { status: TaskStatus | undefined }) {
     case 'completed':
       return <CheckCircle2 size={12} className={v.color} />;
     case 'failed':
+    case 'lost':
       return <XCircle size={12} className={v.color} />;
     case 'cancelled':
       return <Ban size={12} className={v.color} />;

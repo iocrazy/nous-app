@@ -32,6 +32,7 @@ full control.
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict
 
@@ -39,6 +40,11 @@ from dbos import DBOS
 from loguru import logger
 
 from app.services.infra.dbos_orchestrator import _resolve_pinned_app_version
+
+# Workflows on this queue (and `sched-*` workflows) are DBOS-internal
+# housekeeping — reaped by `_pre_launch_sweep_stale_scheduled`, NEVER by the
+# user-facing zombie reaper below.
+_INTERNAL_QUEUE = "_dbos_internal_queue"
 
 
 @DBOS.step()
@@ -311,6 +317,58 @@ def _dbos_claims_workflow(
     return True
 
 
+def _is_permanent_dbos_orphan(
+    status: "str | None",
+    queue_name: "str | None",
+    name: "str | None",
+    app_version: "str | None",
+    current_version: "str | None",
+    age_seconds: float,
+    max_age_seconds: float,
+) -> bool:
+    """Pure decision: True when a `dbos.workflow_status` row is a permanently-
+    orphaned USER workflow that will never run and should be cancelled (the
+    "zombie" download/parse). Tested without a DB.
+
+    A zombie is ALL of:
+      * PENDING / ENQUEUED — anything terminal already agrees with the UI.
+      * user-facing — NOT on `_dbos_internal_queue`, NOT a `sched-*` workflow
+        (those go through `_pre_launch_sweep_stale_scheduled`).
+      * permanently orphaned — EITHER a post-deploy version-orphan
+        (`app_version != current_version`, both known: no executor of that
+        version exists) OR frozen in PENDING/ENQUEUED past `max_age_seconds`
+        (worker died and DBOS recovery never re-claimed it).
+
+    Conservative: a same-version row younger than `max_age_seconds` is NOT a
+    zombie (real backlog item or one DBOS will still recover). When either
+    version is unknown we fall through to the age backstop only — never cancel
+    young work on a version we can't compare.
+    """
+    if not status or status.strip().upper() not in _DBOS_LIVE_STATUSES:
+        return False
+    if (queue_name or "") == _INTERNAL_QUEUE:
+        return False
+    if (name or "").startswith("sched-"):
+        return False
+    # Post-deploy version-orphan: both versions known and different → no live
+    # executor of that version will ever pick this up.
+    if current_version and app_version and app_version != current_version:
+        return True
+    # Age backstop: frozen far beyond any realistic queue wait.
+    return age_seconds >= max_age_seconds
+
+
+def _zombie_max_age_seconds() -> float:
+    """Frozen-PENDING age past which a same-version user workflow is presumed a
+    dead orphan. Generous default (6h) so a genuine queue backlog is never
+    cancelled — the precise signal is the version-orphan check; this is only a
+    backstop for same-version rows a dead worker left behind. Env-overridable."""
+    try:
+        return float(os.environ.get("DBOS_ZOMBIE_MAX_AGE_SECONDS", str(6 * 3600)))
+    except (TypeError, ValueError):
+        return 6 * 3600.0
+
+
 async def _dbos_status_row(
     dbos_workflow_id: "str | None",
 ) -> "tuple[str | None, str | None]":
@@ -468,6 +526,115 @@ async def _mark_timed_out(row: Dict[str, Any]) -> None:
         )
 
 
+@DBOS.step()
+async def reap_dbos_zombies_step() -> Dict[str, int]:
+    """Cancel permanently-orphaned PENDING/ENQUEUED USER workflows directly in
+    `dbos.workflow_status`, then reconcile their `task_tracking` row.
+
+    These are the "zombie" downloads/parses (diagnosed 2026-06-20): a worker
+    died/redeployed mid-flight, DBOS left the workflow PENDING tagged with an
+    OLD `application_version` (no executor of that version exists → DBOS
+    recovery never re-claims it), while `reap_stuck_pending_tasks` /
+    `_mark_lost` independently flipped the `task_tracking` row to a terminal
+    state. The two tables then diverge forever — engine says PENDING (a phantom
+    "running" task), UI reads `task_tracking` and shows lost/nothing. Neither
+    existing sweeper cancels the engine row, so it lingers indefinitely.
+
+    Cancelling = `UPDATE dbos.workflow_status SET status='CANCELLED'` (DBOS
+    recovery skips CANCELLED — the same blessed method as
+    `_pre_launch_sweep_stale_scheduled`, which only handles `sched-*`). User
+    workflows on real queues are this reaper's job. The `task_tracking` row is
+    reconciled to the same terminal state `_mark_lost` writes so the UI shows a
+    retryable lost task (backend `retry_task` already accepts lost rows).
+
+    Skips boot grace (DBOS is recovering in-flight work then). Internal-queue /
+    `sched-*` rows are excluded — they belong to the pre-launch sweep.
+    """
+    from app.db import engine as db_engine
+    from app.workflows.sweep_guard import within_boot_grace
+
+    if not db_engine.is_configured():
+        return {"zombies_cancelled": 0}
+    if within_boot_grace():
+        return {"zombies_cancelled": 0, "skipped_boot_grace": 1}
+
+    current_version = _resolve_pinned_app_version()
+    max_age = _zombie_max_age_seconds()
+
+    # Candidate user-facing PENDING/ENQUEUED rows. The 180s floor avoids racing
+    # freshly-enqueued work; precise version/age filtering is the pure helper's
+    # job. Bounded LIMIT keeps one tick cheap even after a bad deploy.
+    rows = await db_engine.fetch_all(
+        "SELECT workflow_uuid, queue_name, name, application_version, status, "
+        "EXTRACT(EPOCH FROM (now() - to_timestamp(updated_at / 1000.0))) AS age_s "
+        "FROM dbos.workflow_status "
+        "WHERE status IN ('PENDING', 'ENQUEUED') "
+        "AND queue_name <> :iq AND name NOT LIKE 'sched-%' "
+        "AND updated_at / 1000.0 < EXTRACT(EPOCH FROM now()) - 180 "
+        "ORDER BY updated_at ASC LIMIT 200",
+        {"iq": _INTERNAL_QUEUE},
+    )
+
+    cancelled = 0
+    for row in rows or []:
+        if not _is_permanent_dbos_orphan(
+            row.get("status"),
+            row.get("queue_name"),
+            row.get("name"),
+            row.get("application_version"),
+            current_version,
+            float(row.get("age_s") or 0.0),
+            max_age,
+        ):
+            continue
+        if await _cancel_dbos_zombie(row.get("workflow_uuid")):
+            cancelled += 1
+
+    if cancelled:
+        logger.warning(
+            f"[workflow_health] reaped {cancelled} DBOS zombie workflow(s) "
+            "(PENDING engine orphans the UI never showed)"
+        )
+    return {"zombies_cancelled": cancelled}
+
+
+async def _cancel_dbos_zombie(workflow_uuid: "str | None") -> bool:
+    """Cancel one engine zombie + reconcile its task_tracking row. Returns True
+    when this call actually cancelled it (False if it raced to terminal or on
+    error). The CANCELLED guard keeps it idempotent across overlapping ticks."""
+    if not workflow_uuid:
+        return False
+    from app.db import engine as db_engine
+
+    try:
+        n = await db_engine.execute(
+            "UPDATE dbos.workflow_status "
+            "SET status = 'CANCELLED', updated_at = EXTRACT(EPOCH FROM now()) * 1000 "
+            "WHERE workflow_uuid = :wid AND status IN ('PENDING', 'ENQUEUED')",
+            {"wid": workflow_uuid},
+        )
+        if not n:
+            return False  # raced — another tick / the engine already finalized it
+        # Reconcile the UI row to the same terminal state _mark_lost writes:
+        # status='failed' (UI-known, retryable) + phase='lost' (operator signal).
+        # Guard against clobbering a genuinely-completed row whose lifecycle
+        # trigger lagged.
+        await db_engine.execute(
+            "UPDATE public.task_tracking SET phase = 'lost', status = 'failed', "
+            "error_code = 'worker_lost', error_msg = 'Worker died before "
+            "executing; stale engine task cleared. Use Retry to re-queue.', "
+            "completed_at = :done WHERE dbos_workflow_id = :wid "
+            "AND status <> 'completed'",
+            {"done": datetime.now(timezone.utc), "wid": workflow_uuid},
+        )
+        return True
+    except Exception as exc:
+        logger.opt(exception=True).warning(
+            f"[workflow_health] _cancel_dbos_zombie failed for {workflow_uuid}: {exc}"
+        )
+        return False
+
+
 @DBOS.scheduled("*/2 * * * *")  # every 2 minutes
 @DBOS.workflow()
 async def workflow_health_sweeper_workflow(
@@ -488,6 +655,12 @@ async def workflow_health_sweeper_workflow(
     await _refresh_policy()
 
     counters = await classify_and_act_step()
+    # Layer 2: cancel engine-side zombies (PENDING in dbos.workflow_status that
+    # the UI never showed). Separate step from classify_and_act because it scans
+    # dbos.workflow_status directly, not active task_tracking rows.
+    counters["zombies_cancelled"] = (await reap_dbos_zombies_step()).get(
+        "zombies_cancelled", 0
+    )
     if (
         counters["lost_marked"]
         or counters["auto_cancelled"]
@@ -495,5 +668,6 @@ async def workflow_health_sweeper_workflow(
         or counters["stalled"]
         or counters["lost"]
         or counters["orphan_pending"]
+        or counters["zombies_cancelled"]
     ):
         logger.info(f"[workflow_health] tick: {counters}")

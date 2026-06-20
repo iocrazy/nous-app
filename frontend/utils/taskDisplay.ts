@@ -63,6 +63,7 @@ export const STATUS_VISUAL: Record<TaskStatus, StatusVisual> = {
   completed:  { color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', label: 'Done',       badgeBg: 'bg-emerald-500/25', badgeText: 'text-emerald-100' },
   failed:     { color: 'text-rose-400',    bg: 'bg-rose-500/10',    border: 'border-rose-500/30',    label: 'Failed',     badgeBg: 'bg-rose-500/25',    badgeText: 'text-rose-100' },
   cancelled:  { color: 'text-amber-400',   bg: 'bg-amber-500/10',   border: 'border-amber-500/30',   label: 'Cancelled',  badgeBg: 'bg-amber-500/25',   badgeText: 'text-amber-100' },
+  lost:       { color: 'text-rose-400',    bg: 'bg-rose-500/10',    border: 'border-rose-500/30',    label: 'Lost',       badgeBg: 'bg-rose-500/25',    badgeText: 'text-rose-100' },
 };
 
 export function statusVisual(status: TaskStatus | undefined): StatusVisual {
@@ -73,7 +74,7 @@ export function statusVisual(status: TaskStatus | undefined): StatusVisual {
 
 export type GroupBy = 'none' | 'status' | 'type' | 'flow' | 'date' | 'agent';
 
-const STATUS_ORDER: TaskStatus[] = ['processing', 'pending', 'failed', 'completed', 'cancelled'];
+const STATUS_ORDER: TaskStatus[] = ['processing', 'pending', 'failed', 'lost', 'completed', 'cancelled'];
 
 export interface TaskGroup {
   key: string;
