@@ -1992,6 +1992,10 @@
     "addTag": "Tag",
     "viewSource": "View Source",
     "reason": "Why it matters",
-    "aiSummary": "AI Summary"
+    "aiSummary": "AI Summary",
+    "source": "Source",
+    "score": "Score",
+    "scriptStarted": "Script generation started",
+    "downloadStarted": "Download dispatched"
   }
 }

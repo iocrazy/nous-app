@@ -1992,6 +1992,10 @@
     "addTag": "标签",
     "viewSource": "查看来源",
     "reason": "为什么值得关注",
-    "aiSummary": "AI 摘要"
+    "aiSummary": "AI 摘要",
+    "source": "来源",
+    "score": "评分",
+    "scriptStarted": "已开始生成脚本",
+    "downloadStarted": "已派发下载"
   }
 }

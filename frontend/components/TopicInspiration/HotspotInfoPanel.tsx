@@ -15,7 +15,11 @@ export const HotspotInfoPanel: React.FC<{ hotspot: Hotspot | null }> = ({ hotspo
 
   useEffect(() => {
     setInfoAvailable(!!hotspot);
-    if (hotspot && infoIslandEl) setInfoVisible(true);
+    if (hotspot && infoIslandEl) {
+      setInfoVisible(true);
+    } else {
+      setInfoVisible(false);
+    }
   }, [hotspot, infoIslandEl, setInfoAvailable, setInfoVisible]);
 
   if (!hotspot || !infoIslandEl) return null;
@@ -107,7 +111,9 @@ export const HotspotInfoPanel: React.FC<{ hotspot: Hotspot | null }> = ({ hotspo
           </div>
         )}
         {typeof hotspot.score === 'number' && (
-          <div>Score: {Math.round(hotspot.score * 100)}</div>
+          <div>
+            {t('topic.score', 'Score')}: {Math.round(hotspot.score * 100)}
+          </div>
         )}
         {hotspot.captured_at && (
           <div>{hotspot.captured_at.slice(0, 16).replace('T', ' ')}</div>
