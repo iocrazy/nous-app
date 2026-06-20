@@ -236,6 +236,22 @@ services:
     depends_on:
       - mediahub
 
+  # NewsNow - Topic Inspiration data engine (self-hosted, MIT)
+  # Provides /api/s?id=<platform> trending feeds consumed by the
+  # newsnow adapter (NEWSNOW_API_URL=http://mediahub-newsnow:4000).
+  # Deployment: Watchtower does NOT create new services automatically.
+  # After merging, run manually on NAS:
+  #   sudo docker compose -f docker/docker-compose.yml up -d newsnow
+  # See docs/runbook/newsnow-selfhost.md for full procedure.
+  newsnow:
+    image: ghcr.io/ourongxing/newsnow:latest
+    container_name: mediahub-newsnow
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      - PORT=4000
+
   # MediaHub Admin Panel (ACR + Watchtower auto-update)
   mediahub-admin:
     image: crpi-eat03wohif79y6f2.cn-shanghai.personal.cr.aliyuncs.com/heygo/mediahub-admin:latest
