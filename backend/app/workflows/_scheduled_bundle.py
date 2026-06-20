@@ -51,6 +51,7 @@ from app.workflows.temp_resource_sweeper import (  # noqa: F401
     sweep_temp_resources,
     temp_resource_sweeper_scheduled,
 )
+from app.workflows.topic_inspiration import topic_fetch_workflow  # noqa: F401
 from app.workflows.workflow_health_sweeper import (  # noqa: F401
     workflow_health_sweeper_workflow,
 )
