@@ -450,15 +450,22 @@ async def _persist_classification(row: Dict[str, Any], classification: str) -> N
 
 
 async def _mark_lost(row: Dict[str, Any]) -> None:
-    """Mark a LOST row's phase=lost / status=failed so the UI shows it
-    correctly. The row stays around — operator can inspect."""
+    """Mark a LOST row's phase=lost / status=lost so the UI shows it as an
+    interrupted, retryable task. The row stays around — operator can inspect.
+
+    Verdict taxonomy (E3): a stale heartbeat / no-live-claim proves only that
+    NOBODY is running it — infra dropped it, the workflow did NOT fault. So the
+    terminal status is 'lost' (retryable), NOT 'failed' (which means a real
+    bug). 'failed' is reserved for E1 (a real DBOS ERROR, with the decoded
+    reason) — see scheduled_recovery.reap_stuck_pending_tasks_step Pass A."""
     from app.db import engine as db_engine
 
     try:
         await db_engine.execute(
             "UPDATE public.task_tracking SET phase = 'lost', "
-            "status = 'failed', error_code = 'worker_lost', "
-            "error_msg = 'Worker heartbeat went stale; presumed dead.', "
+            "status = 'lost', error_code = 'worker_lost', "
+            "error_msg = 'Worker died / went silent — nobody was running this "
+            "task. Not a fault; use Retry to re-queue.', "
             "completed_at = :done WHERE dbos_workflow_id = :wid",
             {"done": datetime.now(timezone.utc), "wid": row["dbos_workflow_id"]},
         )
@@ -615,14 +622,16 @@ async def _cancel_dbos_zombie(workflow_uuid: "str | None") -> bool:
         )
         if not n:
             return False  # raced — another tick / the engine already finalized it
-        # Reconcile the UI row to the same terminal state _mark_lost writes:
-        # status='failed' (UI-known, retryable) + phase='lost' (operator signal).
-        # Guard against clobbering a genuinely-completed row whose lifecycle
-        # trigger lagged.
+        # Reconcile the UI row to the same terminal state _mark_lost writes.
+        # A version-orphan (E2) is infra-drop — the worker redeployed and no
+        # executor of that version will ever run it — NOT a fault. So status
+        # is 'lost' (retryable), NOT 'failed'. phase='lost' is the operator
+        # signal. Guard against clobbering a genuinely-completed row whose
+        # lifecycle trigger lagged.
         await db_engine.execute(
-            "UPDATE public.task_tracking SET phase = 'lost', status = 'failed', "
-            "error_code = 'worker_lost', error_msg = 'Worker died before "
-            "executing; stale engine task cleared. Use Retry to re-queue.', "
+            "UPDATE public.task_tracking SET phase = 'lost', status = 'lost', "
+            "error_code = 'worker_lost', error_msg = 'Worker redeployed before "
+            "this ran — nobody executed it. Not a fault; use Retry to re-queue.', "
             "completed_at = :done WHERE dbos_workflow_id = :wid "
             "AND status <> 'completed'",
             {"done": datetime.now(timezone.utc), "wid": workflow_uuid},
