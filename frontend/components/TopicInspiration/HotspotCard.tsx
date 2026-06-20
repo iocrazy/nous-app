@@ -35,9 +35,9 @@ export const HotspotCard: React.FC<{ hotspot: Hotspot; onSelect: (h: Hotspot) =>
           {hotspot.ai_summary || hotspot.summary}
         </p>
       ) : null}
-      {hotspot.tags.length > 0 && (
+      {(hotspot.tags?.length ?? 0) > 0 && (
         <div className="mt-2 flex flex-wrap gap-1">
-          {hotspot.tags.map((tag) => (
+          {(hotspot.tags ?? []).map((tag) => (
             <span
               key={tag}
               className={`text-[10px] px-2 py-0.5 rounded-full ${
@@ -50,7 +50,7 @@ export const HotspotCard: React.FC<{ hotspot: Hotspot; onSelect: (h: Hotspot) =>
         </div>
       )}
       {hotspot.reason && (
-        <div className="mt-2.5 rounded-lg border-l-[3px] border-emerald-500 bg-emerald-500/[0.07] px-3 py-2 text-xs text-emerald-700 dark:text-emerald-300">
+        <div className="topic-reason-callout mt-2.5 rounded-lg border-l-[3px] border-emerald-500 bg-emerald-500/[0.07] px-3 py-2 text-xs">
           {hotspot.reason}
         </div>
       )}

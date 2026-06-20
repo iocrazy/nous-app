@@ -620,6 +620,16 @@ body {
   animation: none;
 }
 
+/* Topic Inspiration reason callout — emerald text flips with [data-theme],
+   not OS prefers-color-scheme (Tailwind v4 default `dark:` would not track
+   the island theme toggle). Default (dark) = emerald-300; light overrides. */
+.topic-reason-callout {
+  color: #6ee7b7; /* emerald-300 */
+}
+[data-theme="light"] .topic-reason-callout {
+  color: #047857; /* emerald-700 */
+}
+
 /* Disabled state */
 .ai-btn:disabled {
   opacity: 0.5;
