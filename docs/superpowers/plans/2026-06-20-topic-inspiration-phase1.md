@@ -1255,8 +1255,12 @@ git commit -m "feat(topic-inspiration): topics REST — list hotspots + calendar
 - Test: `backend/tests/topics/test_topics_closeloop.py`
 
 **Interfaces:**
-- Consumes: `HotspotsRepository`（取单条）、`ScriptAIService`（已有，生成脚本）、`dedup_and_dispatch`（已有，解析下载）。
-- Produces: `POST /topics/{id}/generate-script` → `{success, script}`（用 hotspot title+summary 喂 `script_ai`）；`POST /topics/{id}/parse-download` → `{success, task_id}`（仅当 `media_url` 非空，否则 400）。
+- Consumes: `HotspotsRepository`（取单条）、`ScriptAIService`（已有，生成脚本）。
+- Produces: `POST /topics/{id}/generate-script` → `{success, script}`（用 hotspot title+summary 喂 `script_ai`）。
+
+> **设计修正（实现期签名核实后，2026-06-20）**：原计划的 **解析下载后端 endpoint 取消**。核实发现：从原始 URL 解析+下载的正门是 `handle_media_fetch_dispatch`，需要 `validate_url_async` + `URLRouter.detect_platform` + `MediaFetchRequest` + `BackgroundTasks` 一整套边缘序列；`dedup_and_dispatch(platform_id=...)` 是 post-parse 步骤、不能用空 platform_id 调。**不重造这条链**——闭环"解析下载"由**前端直接调已有的 `parseShareLink(media_url)`**（parserService → `/media/fetch`，100% 复用现成解析全链）。本 task 后端只做 generate-script + repo `get_by_id`。前端 Task 12/16 对应实现 `parseDownload` = 包一层 `parseShareLink`。
+>
+> **ScriptAIService 真实签名（已核实，照此实现）**：构造器收 `user_id`（`ScriptAIService(user_id=...)`），`generate_outline(premise: str, chapter_count=5, ...) -> List[Dict[str,str]]`（返回章节 outline 列表，**不是 string**）。
 
 - [ ] **Step 1: 加 repo 取单条方法**（先补 `get_by_id`）
 
@@ -1284,21 +1288,16 @@ def client(monkeypatch):
 
     class _Repo:
         async def get_by_id(self, hid):
-            if hid == "media1":
-                return {"id": "media1", "title": "Vid", "summary": "s", "media_url": "https://m/v.mp4", "url": "https://m/v"}
-            return {"id": "news1", "title": "News", "summary": "s", "media_url": None, "url": "https://n/1"}
+            if hid == "news1":
+                return {"id": "news1", "title": "News", "summary": "s", "ai_summary": None, "url": "https://n/1"}
+            return None  # unknown id -> 404
 
     monkeypatch.setattr(tr, "HotspotsRepository", lambda: _Repo())
 
     async def fake_script(title, summary, user_id):
-        return "GENERATED SCRIPT"
+        return [{"title": "Chapter 1", "summary": "..."}]
 
     monkeypatch.setattr(tr, "_generate_script_for", fake_script)
-
-    async def fake_dispatch(**kwargs):
-        return {"task_id": "task-123"}
-
-    monkeypatch.setattr(tr, "_parse_download_for", lambda **k: fake_dispatch(**k))
 
     app = FastAPI()
     app.dependency_overrides[tr.get_auth] = lambda: type("A", (), {"user_id": "u1"})()
@@ -1308,17 +1307,13 @@ def client(monkeypatch):
 
 def test_generate_script_any_item(client):
     r = client.post("/api/v1/topics/news1/generate-script")
-    assert r.status_code == 200 and r.json()["script"] == "GENERATED SCRIPT"
+    assert r.status_code == 200
+    assert r.json()["script"] == [{"title": "Chapter 1", "summary": "..."}]
 
 
-def test_parse_download_requires_media(client):
-    r = client.post("/api/v1/topics/news1/parse-download")
-    assert r.status_code == 400  # pure news, no media
-
-
-def test_parse_download_ok_for_media(client):
-    r = client.post("/api/v1/topics/media1/parse-download")
-    assert r.status_code == 200 and r.json()["task_id"] == "task-123"
+def test_generate_script_404_for_unknown(client):
+    r = client.post("/api/v1/topics/missing/generate-script")
+    assert r.status_code == 404
 ```
 
 - [ ] **Step 3: 跑测试确认失败**
@@ -1331,30 +1326,15 @@ Expected: FAIL（endpoint 未实现 / helper 未定义）。
 ```python
 from fastapi import HTTPException
 
-from app.services.storyboard.script.script_ai_service import ScriptAIService  # adjust to探查路径
-from app.api.media_fetch_helpers import dedup_and_dispatch
+from app.services.storyboard.script.script_ai_service import ScriptAIService
 
 
-async def _generate_script_for(title: str, summary: str, user_id: str) -> str:
-    svc = ScriptAIService()
-    # 复用已有 script_ai agent: 用标题+摘要作为灵感输入
-    prompt = f"Topic: {title}\n\nContext: {summary or ''}\n\nWrite a short video script based on this topic."
-    result = await svc.generate_outline(prompt, user_id=user_id)  # signature 以 script_ai_service 实际为准
-    return result if isinstance(result, str) else (result.get("content") or "")
-
-
-async def _parse_download_for(*, url: str, media_url: str, user_id: str) -> dict:
-    return await dedup_and_dispatch(
-        platform_id="",  # parser 自行识别; 以 media_fetch_helpers 实际签名为准
-        user_id=user_id,
-        resource_id=None,
-        media_type=0,
-        video_title="",
-        download_video=True,
-        download_cover=True,
-        url=media_url or url,
-        background_tasks=None,
-    )
+async def _generate_script_for(title: str, summary: str, user_id: str) -> list:
+    """Reuse the existing script_ai agent. Real signature (verified):
+    ScriptAIService(user_id=...).generate_outline(premise) -> List[Dict[str,str]]."""
+    svc = ScriptAIService(user_id=user_id)
+    premise = f"Topic: {title}\n\nContext: {summary or ''}"
+    return await svc.generate_outline(premise)
 
 
 @router.post("/{hotspot_id}/generate-script")
@@ -1367,35 +1347,25 @@ async def generate_script(hotspot_id: str, auth: AuthDep):
         row.get("title") or "", row.get("ai_summary") or row.get("summary") or "", auth.user_id
     )
     return {"success": True, "script": script}
-
-
-@router.post("/{hotspot_id}/parse-download")
-async def parse_download(hotspot_id: str, auth: AuthDep):
-    repo = HotspotsRepository()
-    row = await repo.get_by_id(hotspot_id)
-    if not row:
-        raise HTTPException(status_code=404, detail="hotspot not found")
-    if not row.get("media_url"):
-        raise HTTPException(status_code=400, detail="hotspot has no parseable media")
-    result = await _parse_download_for(
-        url=row.get("url") or "", media_url=row["media_url"], user_id=auth.user_id
-    )
-    return {"success": True, "task_id": result.get("task_id")}
 ```
 
-> 实现者注意：`ScriptAIService` 的实际方法名/签名 + `dedup_and_dispatch` 的实际必填参数以探查报告里的真实签名为准（`script_ai_service.py` / `media_fetch_helpers.py:144`）。helper 抽成 `_generate_script_for` / `_parse_download_for` 是为了让 Step 2 的测试能 monkeypatch。
+> **实现者注意**：
+> - `_generate_script_for` 抽成模块级 async 函数，是为了让 Step 2 的测试 monkeypatch `tr._generate_script_for`。
+> - **`ScriptAIService` 真实签名已核实**：`ScriptAIService(user_id=...)`（user_id 进构造器）+ `generate_outline(premise, chapter_count=5, ...)` 返回 `List[Dict[str,str]]`（章节 outline）。端点直接返回该 list 作为 `script`。
+> - **不要**新增 parse-download 后端 endpoint（设计修正见本 task 顶部）——闭环解析下载走前端 `parseShareLink`。
+> - `get_by_id`（Step 1）仍需要。
 
 - [ ] **Step 5: 跑测试确认通过**
 
 Run: `cd backend && uv run pytest tests/topics/test_topics_closeloop.py -v`
-Expected: PASS（3 passed）。
+Expected: PASS（2 passed）。
 
 - [ ] **Step 6: lint + commit**
 
 ```bash
-cd backend && uv run black app/api/topics_router.py app/repositories/hotspots_repository.py && uv run isort app/api/topics_router.py && uv run flake8 app/api/topics_router.py
+cd backend && uv run black app/api/topics_router.py app/repositories/hotspots_repository.py && uv run isort app/api/topics_router.py && uv run flake8 app/api/topics_router.py app/repositories/hotspots_repository.py
 git add backend/app/api/topics_router.py backend/app/repositories/hotspots_repository.py backend/tests/topics/test_topics_closeloop.py
-git commit -m "feat(topic-inspiration): close-loop endpoints — generate-script (all) + parse-download (media only)"
+git commit -m "feat(topic-inspiration): close-loop endpoint — generate-script (reuses script_ai)"
 ```
 
 ---
@@ -1527,20 +1497,21 @@ export async function getHotspotDates(): Promise<string[]> {
   return (await jsonOrThrow(resp)).dates as string[];
 }
 
-export async function generateScript(id: string): Promise<string> {
+// generate-script returns the script_ai outline (a list of chapter objects), not a string.
+export async function generateScript(id: string): Promise<unknown> {
   const resp = await fetch(`${base()}/${id}/generate-script`, {
     method: 'POST',
     headers: await getAuthHeaders(),
   });
-  return (await jsonOrThrow(resp)).script as string;
+  return (await jsonOrThrow(resp)).script;
 }
 
-export async function parseDownload(id: string): Promise<string> {
-  const resp = await fetch(`${base()}/${id}/parse-download`, {
-    method: 'POST',
-    headers: await getAuthHeaders(),
-  });
-  return (await jsonOrThrow(resp)).task_id as string;
+// 解析下载: NO new backend endpoint — reuse the existing, battle-tested parser
+// (parseShareLink → POST /api/v1/media/fetch). Only callable when a hotspot has media_url.
+import { parseShareLink } from './parserService';
+
+export async function parseDownload(mediaUrl: string): Promise<unknown> {
+  return parseShareLink(mediaUrl, { video_bool: true, cover_bool: true });
 }
 ```
 
@@ -1951,9 +1922,10 @@ export const HotspotInfoPanel: React.FC<{ hotspot: Hotspot | null }> = ({ hotspo
   };
 
   const onParse = async () => {
+    if (!hotspot.media_url) return;
     setBusy(true);
     try {
-      await parseDownload(hotspot.id);
+      await parseDownload(hotspot.media_url);
       addToast(t('topic.downloadStarted', 'Download dispatched'), 'success');
     } catch (e) {
       addToast(`${(e as Error).message}`, 'error');
