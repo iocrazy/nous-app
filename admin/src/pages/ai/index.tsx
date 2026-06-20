@@ -3,7 +3,7 @@ import {
   Table, Button, Modal, Form, Input, Select, Switch, InputNumber,
   Space, Message, Popconfirm, Tag, Typography, Card,
 } from '@arco-design/web-react'
-import { IconPlus, IconEdit, IconDelete } from '@arco-design/web-react/icon'
+import { IconPlus, IconEdit, IconDelete, IconSync } from '@arco-design/web-react/icon'
 import { useAuth } from '../../auth/AuthProvider'
 
 const { Title } = Typography
@@ -55,6 +55,11 @@ export function AIModelsPage() {
   const [loading, setLoading] = useState(false)
   const [modalVisible, setModalVisible] = useState(false)
   const [editingModel, setEditingModel] = useState<NousModel | null>(null)
+  // Models fetched from the provider via "Test & Load Models" — the admin
+  // picks actual_model from these instead of hand-typing. Empty for providers
+  // that don't expose /v1/models (e.g. volcengine ASR) → manual entry fallback.
+  const [fetchedModels, setFetchedModels] = useState<string[]>([])
+  const [probeLoading, setProbeLoading] = useState(false)
   const [form] = Form.useForm()
 
   const apiBase = import.meta.env.VITE_API_URL || ''
@@ -76,8 +81,43 @@ export function AIModelsPage() {
 
   useEffect(() => { fetchModels() }, [fetchModels])
 
+  const handleProbeModels = async () => {
+    const provider_key = form.getFieldValue('actual_provider')
+    if (!provider_key) {
+      Message.warning('Enter Actual Provider first')
+      return
+    }
+    setProbeLoading(true)
+    try {
+      const res = await fetch(`${apiBase}/api/v1/admin/nous-models/probe-models`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          provider_key,
+          api_key: form.getFieldValue('api_key') || '',
+          base_url: form.getFieldValue('base_url') || '',
+          app_id: form.getFieldValue('app_id') || '',
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.success && Array.isArray(data.models) && data.models.length) {
+        setFetchedModels(data.models)
+        Message.success(`Loaded ${data.models.length} models`)
+      } else {
+        setFetchedModels([])
+        Message.warning(data.error || 'No model list — enter the model manually')
+      }
+    } catch {
+      setFetchedModels([])
+      Message.error('Probe failed — enter the model manually')
+    } finally {
+      setProbeLoading(false)
+    }
+  }
+
   const handleCreate = () => {
     setEditingModel(null)
+    setFetchedModels([])
     form.resetFields()
     form.setFieldsValue({ pricing_type: 'per_hour', pricing_value: 8, is_enabled: true, sort_order: 0 })
     setModalVisible(true)
@@ -85,6 +125,9 @@ export function AIModelsPage() {
 
   const handleEdit = (record: NousModel) => {
     setEditingModel(record)
+    // Seed the model dropdown with the current value so it stays selectable
+    // before a fresh probe.
+    setFetchedModels(record.actual_model ? [record.actual_model] : [])
     form.setFieldsValue({
       ...record,
       api_key: '', // don't pre-fill masked key
@@ -236,25 +279,38 @@ export function AIModelsPage() {
           <FormItem label="Type" field="type" rules={[{ required: true }]}>
             <Select options={TYPE_OPTIONS} />
           </FormItem>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <FormItem label="Actual Provider" field="actual_provider" rules={[{ required: true }]}>
-              <Input placeholder="e.g. volcengine" />
-            </FormItem>
-            <FormItem label="Actual Model" field="actual_model" rules={[{ required: true }]}>
-              <Input placeholder="e.g. seed-asr" />
-            </FormItem>
-          </div>
+          <FormItem label="Actual Provider" field="actual_provider" rules={[{ required: true }]}>
+            <Input placeholder="e.g. deepseek, doubao, volcengine" />
+          </FormItem>
           <FormItem label={editingModel ? 'API Key (leave empty to keep existing)' : 'API Key'} field="api_key" rules={editingModel ? [] : [{ required: true }]}>
             <Input.Password placeholder="API Key" />
           </FormItem>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <FormItem label="App ID" field="app_id">
-              <Input placeholder="Optional" />
+              <Input placeholder="Optional (volcengine)" />
             </FormItem>
             <FormItem label="Base URL" field="base_url">
               <Input placeholder="Optional override" />
             </FormItem>
           </div>
+          <div style={{ marginBottom: 12 }}>
+            <Button size="small" loading={probeLoading} onClick={handleProbeModels} icon={<IconSync />}>
+              Test &amp; Load Models
+            </Button>
+          </div>
+          <FormItem
+            label="Actual Model"
+            field="actual_model"
+            rules={[{ required: true }]}
+            extra="Load the provider's models above, then pick one. Providers without a model catalog (e.g. volcengine ASR) — type the model name directly."
+          >
+            <Select
+              placeholder="Load from provider, or type a model name"
+              allowCreate
+              showSearch
+              options={fetchedModels.map((m) => ({ label: m, value: m }))}
+            />
+          </FormItem>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
             <FormItem label="Pricing Type" field="pricing_type">
               <Select options={PRICING_TYPE_OPTIONS} />
