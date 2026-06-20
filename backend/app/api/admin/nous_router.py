@@ -11,11 +11,13 @@ from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
 from app.repositories.nous_repository import get_nous_repository
+from app.schemas.ai import TestConnectionRequest, TestConnectionResponse
 from app.schemas.nous import (
     NousModelCreate,
     NousModelResponse,
     NousModelUpdate,
 )
+from app.services.ai.providers.ai_provider import AIProviderFactory
 
 router = APIRouter()
 
@@ -55,6 +57,29 @@ async def list_nous_models(auth: AdminAuthDep):
     repo = get_nous_repository()
     rows = await repo.list_all()
     return [_to_response(r) for r in rows]
+
+
+@router.post("/probe-models", response_model=TestConnectionResponse)
+async def probe_nous_models(body: TestConnectionRequest, auth: AdminAuthDep):
+    """Self-check a provider key and return the models it exposes.
+
+    Lets the admin pick ``actual_model`` from a fetched list instead of
+    hand-typing it. Reuses the shared provider test-connection (which calls
+    the provider's ``/v1/models``). Providers without an OpenAI-compatible
+    model catalog (e.g. volcengine ASR) return ``success=False`` — the UI then
+    falls back to manual model entry. The platform key is used server-side
+    only and never echoed back.
+    """
+    result = await AIProviderFactory.test_connection(
+        provider_key=body.provider_key,
+        config={
+            "api_key": body.api_key,
+            "app_id": body.app_id,
+            "base_url": body.base_url,
+            "model": body.model,
+        },
+    )
+    return TestConnectionResponse(**result)
 
 
 @router.post("", response_model=NousModelResponse)
