@@ -644,6 +644,43 @@ async def _cancel_dbos_zombie(workflow_uuid: "str | None") -> bool:
         return False
 
 
+def _worker_registry_stale_seconds() -> float:
+    """Heartbeat age past which a worker_registry row is 'would-flag' as a
+    presumed-dead process. Generous (3× the 2-min tick = 6 min). P1 only logs
+    it — nothing acts on it. Env-overridable."""
+    try:
+        return float(os.environ.get("WORKER_REGISTRY_STALE_SECONDS", str(6 * 60)))
+    except (TypeError, ValueError):
+        return 6 * 60.0
+
+
+@DBOS.step()
+async def refresh_worker_registry_step() -> Dict[str, int]:
+    """Worker Foundation P1 (OBSERVE-ONLY). Refresh THIS worker's
+    `worker_registry` heartbeat and LOG — never act on — any executor whose
+    heartbeat is stale. Runs on the worker as a side effect of the existing
+    2-min tick: no dedicated thread, no extra Supavisor-pool pressure, so a busy
+    worker refreshes itself for free. NOTHING reads worker_registry for a
+    decision yet — this phase exists to verify the heartbeat stays fresh under
+    real load before P2/P3 rely on it."""
+    from app.db import engine as db_engine
+    from app.services.infra import worker_identity
+
+    if not db_engine.is_configured():
+        return {"registry_written": 0, "stale_seen": 0}
+
+    written = 1 if await worker_identity.upsert_registry(db_engine) else 0
+    stale = await worker_identity.stale_executor_ids(
+        db_engine, _worker_registry_stale_seconds()
+    )
+    if stale:
+        logger.warning(
+            f"[worker_registry] OBSERVE — would-flag stale worker(s): {stale} "
+            "(no action — P1 observe-only)"
+        )
+    return {"registry_written": written, "stale_seen": len(stale)}
+
+
 @DBOS.scheduled("*/2 * * * *")  # every 2 minutes
 @DBOS.workflow()
 async def workflow_health_sweeper_workflow(
@@ -670,6 +707,10 @@ async def workflow_health_sweeper_workflow(
     counters["zombies_cancelled"] = (await reap_dbos_zombies_step()).get(
         "zombies_cancelled", 0
     )
+    # P1 (observe-only): refresh this worker's liveness row + log stale workers.
+    # Writes/observes worker_registry; nothing acts on it yet.
+    reg = await refresh_worker_registry_step()
+    counters["stale_workers_seen"] = reg.get("stale_seen", 0)
     if (
         counters["lost_marked"]
         or counters["auto_cancelled"]
@@ -678,5 +719,6 @@ async def workflow_health_sweeper_workflow(
         or counters["lost"]
         or counters["orphan_pending"]
         or counters["zombies_cancelled"]
+        or counters["stale_workers_seen"]
     ):
         logger.info(f"[workflow_health] tick: {counters}")
