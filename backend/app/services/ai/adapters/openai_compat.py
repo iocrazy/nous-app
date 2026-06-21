@@ -21,6 +21,10 @@ from loguru import logger
 from app.schemas.ai_library import ComposedSystemPrompt
 from app.services.ai.adapters._model_routing import resolve_wire_model
 from app.services.ai.adapters.base import StreamChunk
+from app.services.ai.runner.reasoning import (
+    MIN_REASONING_MAX_TOKENS,
+    model_uses_reasoning,
+)
 
 
 def _ensure_chat_completions_suffix(url: str) -> str:
@@ -59,12 +63,21 @@ class OpenAICompatibleAdapter:
         composed: ComposedSystemPrompt,
         messages: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
+        # Audit #8 (fix C): route-authoritative — the wire model must match
+        # the model this adapter resolved its endpoint + key for.
+        wire_model = resolve_wire_model(composed.model, self.default_model)
+        max_tokens = composed.max_tokens
+        # Reasoning models (Qwen3 <think>) spend 1-2k tokens thinking BEFORE the
+        # answer; a small cap truncates mid-thought, leaving no answer at all.
+        # Floor it so there's room for thinking + answer.
+        if model_uses_reasoning(wire_model) and (
+            max_tokens is None or max_tokens < MIN_REASONING_MAX_TOKENS
+        ):
+            max_tokens = MIN_REASONING_MAX_TOKENS
         body: Dict[str, Any] = {
-            # Audit #8 (fix C): route-authoritative — the wire model must match
-            # the model this adapter resolved its endpoint + key for.
-            "model": resolve_wire_model(composed.model, self.default_model),
+            "model": wire_model,
             "temperature": composed.temperature,
-            "max_tokens": composed.max_tokens,
+            "max_tokens": max_tokens,
             "messages": [
                 {"role": "system", "content": composed.system_message},
                 *messages,

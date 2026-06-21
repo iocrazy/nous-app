@@ -34,6 +34,11 @@ if TYPE_CHECKING:
 
 from app.agent_framework import ContextCompactor
 from app.schemas.ai_library import ComposedSystemPrompt
+from app.services.ai.runner.reasoning import (
+    ReasoningStreamFilter,
+    model_uses_reasoning,
+    strip_reasoning,
+)
 from app.services.ai.runner.run_recorder import RunRecorder
 from app.services.ai.skills.skill_tool_service import SkillToolService
 from app.services.infra.hooks import (
@@ -383,15 +388,27 @@ class AgentRunner:
             final_finish: Optional[str] = None
             final_usage: Optional[dict] = None
 
+            # Suppress a Qwen3 <think>…</think> block from the streamed text
+            # (gated on the model so non-thinking models keep streaming live).
+            # tool_call deltas are forwarded untouched.
+            reason_filter = ReasoningStreamFilter(
+                enabled=model_uses_reasoning(getattr(composed, "model", ""))
+            )
             try:
                 async for chunk in stream_method(composed, messages):
                     if abort is not None and abort.is_aborted():
                         inc_metric("streaming_aborted_mid")
                         raise RunAborted("user cancel mid-stream")
 
-                    # Forward text delta as-is to caller
-                    if chunk.delta_text or chunk.tool_call_delta:
-                        yield chunk
+                    # Forward filtered text delta + tool_call deltas to caller.
+                    emit_text = reason_filter.feed(chunk.delta_text)
+                    if emit_text or chunk.tool_call_delta:
+                        yield StreamChunk(
+                            delta_text=emit_text,
+                            tool_call_delta=chunk.tool_call_delta,
+                            finish_reason=chunk.finish_reason,
+                            usage=chunk.usage,
+                        )
 
                     # Stitch tool_call deltas
                     if chunk.tool_call_delta:
@@ -401,6 +418,11 @@ class AgentRunner:
                         )
 
                     if chunk.finish_reason:
+                        # Surface any buffered (un-closed/truncated) thinking so
+                        # a max_tokens truncation isn't a silent blank reply.
+                        tail = reason_filter.flush()
+                        if tail:
+                            yield StreamChunk(delta_text=tail)
                         final_finish = chunk.finish_reason
                         final_usage = chunk.usage
                         if recorder is not None and chunk.usage:
@@ -424,7 +446,7 @@ class AgentRunner:
                 resp = await self.adapter.call(composed, messages)
                 msg = resp["choices"][0]["message"]
                 yield StreamChunk(
-                    delta_text=msg.get("content") or "",
+                    delta_text=strip_reasoning(msg.get("content") or ""),
                     finish_reason=resp["choices"][0].get("finish_reason") or "stop",
                     usage=resp.get("usage"),
                 )
@@ -909,12 +931,14 @@ class AgentRunner:
                 # msg.get("content") can be None (e.g. Claude emits null
                 # content on a pure-tool-use turn). The `or ""` guarantees
                 # the contract — callers always receive a str.
+                # strip_reasoning drops a Qwen3 <think>…</think> block so every
+                # caller (chat + summarize/translate/caption/… services) gets
+                # only the answer; no-op for non-thinking models. raw stays full.
+                content = strip_reasoning(msg.get("content") or "")
                 if recorder is not None and hasattr(recorder, "record_event"):
-                    await recorder.record_event(
-                        "assistant", {"content": msg.get("content") or ""}
-                    )
+                    await recorder.record_event("assistant", {"content": content})
                 return {
-                    "content": msg.get("content") or "",
+                    "content": content,
                     "raw": resp,
                     "tool_calls": tool_call_trace,
                 }
