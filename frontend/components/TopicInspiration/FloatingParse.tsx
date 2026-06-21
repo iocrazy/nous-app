@@ -5,9 +5,24 @@ import { Link2, X, Loader2 } from 'lucide-react';
 import { islandUI } from '../../utils/featureFlags';
 import { useToast } from '../Toast';
 import { detectParseMode } from './parseModeDetect';
-import { parseShareLink } from '../../services/parserService';
+import {
+  parseShareLink,
+  parseBatchLinks,
+  getSodaPlaylist,
+  downloadSodaTracks,
+  type SodaPlaylistResult,
+} from '../../services/parserService';
 
 type Phase = 'collapsed' | 'input' | 'result';
+
+const URL_RE = /https?:\/\/[^\s]+/g;
+
+interface ParseOutcome {
+  kind: 'single' | 'batch' | 'playlist';
+  title: string;
+  detail: string;
+  playlist?: SodaPlaylistResult;
+}
 
 export const FloatingParse: React.FC = () => {
   const { t } = useTranslation();
@@ -16,17 +31,68 @@ export const FloatingParse: React.FC = () => {
   const [phase, setPhase] = useState<Phase>('collapsed');
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<Record<string, unknown> | null>(null);
+  const [result, setResult] = useState<ParseOutcome | null>(null);
 
   const detection = useMemo(() => detectParseMode(input), [input]);
 
+  // Unified parse: route by the detected mode so playlist / batch links don't
+  // get mis-handled as a single link (which fails with "Track unavailable").
   const onAnalyze = async () => {
+    const text = input.trim();
+    const urls = text.match(URL_RE) || [];
     setBusy(true);
     try {
-      // Unified parse: single link first; batch/playlist routed to existing batch endpoints later
-      const res = await parseShareLink(input.trim(), { video_bool: true, cover_bool: true });
-      setResult(res as Record<string, unknown>);
+      if (detection.mode === 'playlist') {
+        const pl = await getSodaPlaylist(text);
+        setResult({
+          kind: 'playlist',
+          title: pl.title || t('topic.playlist', 'Playlist'),
+          detail: t('topic.tracksFound', '{{n}} tracks', { n: pl.tracks.length }),
+          playlist: pl,
+        });
+      } else if (detection.mode === 'batch') {
+        const res = await parseBatchLinks(urls, { video_bool: true, cover_bool: true });
+        setResult({
+          kind: 'batch',
+          title: t('topic.batchParse', 'Batch'),
+          detail: t('topic.batchSubmitted', '{{n}} dispatched, {{f}} failed', {
+            n: res.submitted,
+            f: res.failed,
+          }),
+        });
+      } else {
+        const res = (await parseShareLink(text, {
+          video_bool: true,
+          cover_bool: true,
+        })) as { title?: string; videos?: Array<{ title?: string }> };
+        setResult({
+          kind: 'single',
+          title: res?.title || res?.videos?.[0]?.title || t('topic.parsed', 'Parsed'),
+          detail: t('topic.downloadDispatched', 'Download dispatched — see Task Center'),
+        });
+      }
       setPhase('result');
+    } catch (e) {
+      addToast(`${(e as Error).message}`, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onDownloadPlaylist = async () => {
+    if (!result?.playlist) return;
+    setBusy(true);
+    try {
+      const items = result.playlist.tracks.map((tr) => ({
+        id: tr.track_id,
+        kind: tr.kind ?? ('track' as const),
+      }));
+      const r = await downloadSodaTracks(items, result.playlist.title || undefined);
+      addToast(
+        t('topic.playlistDispatched', '{{n}} tracks dispatched', { n: r.submitted }),
+        'success',
+      );
+      onReset();
     } catch (e) {
       addToast(`${(e as Error).message}`, 'error');
     } finally {
@@ -99,23 +165,30 @@ export const FloatingParse: React.FC = () => {
 
       {phase === 'result' && result && (
         <div className="space-y-2">
-          <div className="text-sm text-content">
-            {(result?.title as string) ||
-              (result?.videos as Array<{ title?: string }>)?.[0]?.title ||
-              'Parsed'}
-          </div>
-          {/* AI Processing toggle + Tags + Save to Resources: absorbs ParserPage lines 196-239.
-              MVP gives "Save to Resources" direct action; AI toggle/Tags wired via EagleTagPicker
-              + parserService in Phase 2. */}
-          <button
-            onClick={() => {
-              addToast(t('topic.savedToResources', 'Saved to Resources'), 'success');
-              onReset();
-            }}
-            className="w-full px-3 py-2 rounded-lg text-sm font-semibold bg-amber-500/[0.12] text-[var(--amb-tx,#b45309)] border border-amber-500/35"
-          >
-            {t('topic.saveToResources', 'Save to Resources')}
-          </button>
+          <div className="text-sm font-medium text-content">{result.title}</div>
+          <div className="text-xs text-content-3">{result.detail}</div>
+          {result.kind === 'playlist' ? (
+            // Playlist: getSodaPlaylist only fetched the track list — the user
+            // dispatches the actual download here.
+            <button
+              disabled={busy || !result.playlist?.tracks.length}
+              onClick={onDownloadPlaylist}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold bg-amber-500/[0.12] text-[var(--amb-tx,#b45309)] border border-amber-500/35 disabled:opacity-50"
+            >
+              {busy ? <Loader2 size={14} className="animate-spin" /> : null}
+              {t('topic.downloadAll', 'Download all ({{n}})', {
+                n: result.playlist?.tracks.length ?? 0,
+              })}
+            </button>
+          ) : (
+            // single/batch already dispatched the download at parse time.
+            <button
+              onClick={onReset}
+              className="w-full px-3 py-2 rounded-lg text-sm font-semibold bg-island-2 text-content-2 border border-line"
+            >
+              {t('common.done', 'Done')}
+            </button>
+          )}
         </div>
       )}
     </div>

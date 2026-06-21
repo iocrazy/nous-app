@@ -2001,6 +2001,14 @@
     "pasteHint": "Paste single / batch / playlist links",
     "analyze": "Analyze",
     "savedToResources": "Saved to Resources",
-    "saveToResources": "Save to Resources"
+    "saveToResources": "Save to Resources",
+    "playlist": "Playlist",
+    "tracksFound": "{{n}} tracks",
+    "batchParse": "Batch",
+    "batchSubmitted": "{{n}} dispatched, {{f}} failed",
+    "parsed": "Parsed",
+    "downloadDispatched": "Download dispatched — see Task Center",
+    "playlistDispatched": "{{n}} tracks dispatched",
+    "downloadAll": "Download all ({{n}})"
   }
 }
