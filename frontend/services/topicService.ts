@@ -42,6 +42,26 @@ export async function getHotspotDates(): Promise<string[]> {
   return (await jsonOrThrow(resp)).dates as string[];
 }
 
+export type SourceHealthStatus = 'ok' | 'degraded' | 'dead';
+
+export interface SourceHealth {
+  id: string;
+  name: string;
+  kind: string;
+  category?: string | null;
+  enabled: boolean;
+  health: SourceHealthStatus;
+  consecutive_failures: number;
+  last_error?: string | null;
+  last_fetched_at?: string | null;
+  last_ok_at?: string | null;
+}
+
+export async function getSourceHealth(): Promise<SourceHealth[]> {
+  const resp = await fetch(`${base()}/sources/health`, { headers: await getAuthHeaders() });
+  return (await jsonOrThrow(resp)).sources as SourceHealth[];
+}
+
 // generate-script returns the script_ai outline (a list of chapter objects), not a string.
 export async function generateScript(id: string): Promise<unknown> {
   const resp = await fetch(`${base()}/${id}/generate-script`, {

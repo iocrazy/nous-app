@@ -31,3 +31,22 @@ class HotspotListResponse(BaseModel):
 class DatesResponse(BaseModel):
     success: bool = True
     dates: list[str]
+
+
+class SourceHealthOut(BaseModel):
+    id: str
+    name: str
+    kind: str
+    category: Optional[str] = None
+    enabled: bool = True
+    health: str = "ok"  # ok | degraded | dead
+    consecutive_failures: int = 0
+    last_error: Optional[str] = None
+    last_fetched_at: Optional[str] = None
+    last_ok_at: Optional[str] = None
+
+
+class SourceHealthResponse(BaseModel):
+    success: bool = True
+    count: int
+    sources: list[SourceHealthOut]
