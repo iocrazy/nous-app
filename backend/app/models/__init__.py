@@ -55,6 +55,9 @@ from app.models.billing import (  # noqa: F401
     PointPricing,
     PointTransactions,
 )
+from app.models.generated_media import (  # noqa: F401
+    GeneratedMedia,
+)
 from app.models.library import (  # noqa: F401
     Authors,
     Collections,
@@ -206,6 +209,7 @@ __all__ = [
     "TempTokens",
     # media
     "Folders",
+    "GeneratedMedia",
     "ParsedMedia",
     "ResourceAccessLogs",
     "ResourceAnalysis",
