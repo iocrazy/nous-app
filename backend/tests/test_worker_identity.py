@@ -61,6 +61,17 @@ def test_resolve_executor_id_flag_on_leaves_gateway_and_combined(monkeypatch):
     assert wi.resolve_executor_id(ProcessRole.COMBINED) == "combined"
 
 
+def test_multi_worker_enabled_tracks_flag(monkeypatch):
+    monkeypatch.delenv("FEATURE_MULTI_WORKER_ID", raising=False)
+    assert wi.multi_worker_enabled() is False
+    for on in ("1", "true", "yes", "on", "TRUE"):
+        monkeypatch.setenv("FEATURE_MULTI_WORKER_ID", on)
+        assert wi.multi_worker_enabled() is True
+    for off in ("0", "false", "no", ""):
+        monkeypatch.setenv("FEATURE_MULTI_WORKER_ID", off)
+        assert wi.multi_worker_enabled() is False
+
+
 class _FakeEngine:
     def __init__(self, *, fetch_rows=None, raise_on=None):
         self.executed: list[str] = []

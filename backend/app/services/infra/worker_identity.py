@@ -46,6 +46,14 @@ def _multi_worker_id_enabled() -> bool:
     )
 
 
+def multi_worker_enabled() -> bool:
+    """Public accessor for the HA gate (see ``_multi_worker_id_enabled``). The
+    owner-dead orphan reaper (P2) is a no-op unless this is on: single-worker
+    needs no cross-worker death detection (DBOS recovery + boot grace cover a
+    restart), and the verdict only ever acts on a SIBLING's stale rows."""
+    return _multi_worker_id_enabled()
+
+
 def resolve_executor_id(role: Any) -> str:
     """The DBOS executor_id for a process role.
 
