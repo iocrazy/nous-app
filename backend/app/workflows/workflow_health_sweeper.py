@@ -644,6 +644,157 @@ async def _cancel_dbos_zombie(workflow_uuid: "str | None") -> bool:
         return False
 
 
+# ── P2 (HA): owner-dead orphan reaper ──────────────────────────────────
+# Flip side of P3a's per-replica recovery isolation. A dead replica's in-flight
+# rows are NEVER reclaimed by a sibling (so no double-exec) — but they'd linger
+# forever. Detect the dead OWNER via the P1 worker_registry process heartbeat
+# (EVIDENCE, never a per-task timer — coarse mediahub steps would false-stale,
+# #492) and free the task so Retry can re-dispatch it to a live worker.
+
+# Floor below which a freshly-claimed row is left alone, so a worker that just
+# picked up work isn't reaped during the gap before its first heartbeat.
+_OWNER_DEAD_AGE_FLOOR_SECONDS = 180.0
+
+
+def _is_owner_dead_orphan(
+    status: "str | None",
+    queue_name: "str | None",
+    name: "str | None",
+    executor_id: "str | None",
+    stale_executor_ids: "frozenset[str] | set[str]",
+    age_seconds: float,
+    age_floor_seconds: float,
+) -> bool:
+    """Pure decision: True when a `dbos.workflow_status` row is a non-terminal
+    USER workflow whose OWNING worker is provably dead (its executor_id is in
+    the registry stale set). Bias to ALIVE on any ambiguity: an empty/unknown
+    owner, a live owner, or a too-young row is never an orphan."""
+    if (status or "").upper() not in ("PENDING", "ENQUEUED", "RUNNING"):
+        return False
+    if queue_name == _INTERNAL_QUEUE:
+        return False
+    if (name or "").startswith("sched-"):
+        return False
+    if not executor_id or executor_id not in stale_executor_ids:
+        return False
+    if age_seconds < age_floor_seconds:
+        return False
+    return True
+
+
+async def _cancel_owner_dead_orphan(workflow_uuid: "str | None") -> bool:
+    """Cancel one owner-dead orphan + reconcile its task_tracking row to
+    lost(retryable). Returns True only when this call cancelled it. Unlike
+    `_cancel_dbos_zombie` this also cancels RUNNING (the worker died mid-step,
+    so nothing is actually executing). The CANCELLED guard keeps it idempotent
+    across overlapping ticks; DBOS recovery skips CANCELLED rows."""
+    if not workflow_uuid:
+        return False
+    from app.db import engine as db_engine
+
+    try:
+        n = await db_engine.execute(
+            "UPDATE dbos.workflow_status "
+            "SET status = 'CANCELLED', updated_at = EXTRACT(EPOCH FROM now()) * 1000 "
+            "WHERE workflow_uuid = :wid "
+            "AND status IN ('PENDING', 'ENQUEUED', 'RUNNING')",
+            {"wid": workflow_uuid},
+        )
+        if not n:
+            return False  # raced — another tick / the engine already finalized it
+        # E3 infra-drop, same treatment as _mark_lost / _cancel_dbos_zombie: the
+        # owning worker went offline, NOT a fault → 'lost' (retryable), never
+        # 'failed'. Guard against clobbering a genuinely-completed row whose
+        # lifecycle trigger lagged.
+        await db_engine.execute(
+            "UPDATE public.task_tracking SET phase = 'lost', status = 'lost', "
+            "error_code = 'worker_lost', error_msg = 'Owning worker went offline "
+            "— task interrupted. Not a fault; use Retry to re-queue.', "
+            "completed_at = :done WHERE dbos_workflow_id = :wid "
+            "AND status <> 'completed'",
+            {"done": datetime.now(timezone.utc), "wid": workflow_uuid},
+        )
+        return True
+    except Exception as exc:
+        logger.opt(exception=True).warning(
+            f"[workflow_health] _cancel_owner_dead_orphan failed for "
+            f"{workflow_uuid}: {exc}"
+        )
+        return False
+
+
+@DBOS.step()
+async def reap_owner_dead_orphans_step() -> Dict[str, int]:
+    """P2 (HA enablement, behind FEATURE_MULTI_WORKER_ID). Cancel non-terminal
+    DBOS workflows whose OWNING worker's worker_registry heartbeat is stale,
+    then reconcile each task_tracking row to lost(retryable).
+
+    No-op unless multi-worker is enabled: with a lone 'worker' executor there is
+    no sibling to detect, and DBOS recovery + boot grace already cover a single
+    worker's restart. The current process is excluded from the stale set twice
+    (its row was just refreshed this tick, and we filter self defensively) so a
+    worker can never reap its OWN running tasks.
+
+    Skips boot grace (DBOS is recovering in-flight work then). Internal-queue /
+    `sched-*` rows belong to the pre-launch sweep, not here.
+    """
+    from app.db import engine as db_engine
+    from app.services.infra import worker_identity
+    from app.workflows.sweep_guard import within_boot_grace
+
+    if not worker_identity.multi_worker_enabled():
+        return {"owner_dead_cancelled": 0, "skipped_disabled": 1}
+    if not db_engine.is_configured():
+        return {"owner_dead_cancelled": 0}
+    if within_boot_grace():
+        return {"owner_dead_cancelled": 0, "skipped_boot_grace": 1}
+
+    stale_list = await worker_identity.stale_executor_ids(
+        db_engine, _worker_registry_stale_seconds()
+    )
+    me = worker_identity.current_executor_id()
+    stale = {s for s in stale_list if s and s != me}
+    if not stale:
+        return {"owner_dead_cancelled": 0}
+
+    # Named params per stale id (tiny list — usually 0-1 dead workers); keeps
+    # the IN list injection-safe without relying on driver array encoding.
+    placeholders = {f"e{i}": eid for i, eid in enumerate(sorted(stale))}
+    in_clause = ", ".join(f":{k}" for k in placeholders)
+    rows = await db_engine.fetch_all(
+        "SELECT workflow_uuid, executor_id, status, queue_name, name, "
+        "EXTRACT(EPOCH FROM (now() - to_timestamp(updated_at / 1000.0))) AS age_s "
+        "FROM dbos.workflow_status "
+        "WHERE status IN ('PENDING', 'ENQUEUED', 'RUNNING') "
+        f"AND executor_id IN ({in_clause}) "
+        "AND queue_name <> :iq AND name NOT LIKE 'sched-%' "
+        "ORDER BY updated_at ASC LIMIT 200",
+        {**placeholders, "iq": _INTERNAL_QUEUE},
+    )
+
+    cancelled = 0
+    for row in rows or []:
+        if not _is_owner_dead_orphan(
+            row.get("status"),
+            row.get("queue_name"),
+            row.get("name"),
+            row.get("executor_id"),
+            stale,
+            float(row.get("age_s") or 0.0),
+            _OWNER_DEAD_AGE_FLOOR_SECONDS,
+        ):
+            continue
+        if await _cancel_owner_dead_orphan(row.get("workflow_uuid")):
+            cancelled += 1
+
+    if cancelled:
+        logger.warning(
+            f"[workflow_health] reaped {cancelled} owner-dead orphan(s) from "
+            f"stale worker(s) {sorted(stale)} → lost(retryable) (HA multi-worker)"
+        )
+    return {"owner_dead_cancelled": cancelled}
+
+
 def _worker_registry_stale_seconds() -> float:
     """Heartbeat age past which a worker_registry row is 'would-flag' as a
     presumed-dead process. Generous (3× the 2-min tick = 6 min). P1 only logs
@@ -711,6 +862,14 @@ async def workflow_health_sweeper_workflow(
     # Writes/observes worker_registry; nothing acts on it yet.
     reg = await refresh_worker_registry_step()
     counters["stale_workers_seen"] = reg.get("stale_seen", 0)
+    # P2 (HA, flag-gated): cancel orphans owned by a provably-dead worker. MUST
+    # run AFTER the registry refresh above so this worker's own heartbeat is
+    # fresh before we read the stale set — otherwise a worker could flag itself
+    # on its first tick and reap its own running tasks. No-op when the flag is
+    # off (single-worker).
+    counters["owner_dead_cancelled"] = (await reap_owner_dead_orphans_step()).get(
+        "owner_dead_cancelled", 0
+    )
     if (
         counters["lost_marked"]
         or counters["auto_cancelled"]
@@ -720,5 +879,6 @@ async def workflow_health_sweeper_workflow(
         or counters["orphan_pending"]
         or counters["zombies_cancelled"]
         or counters["stale_workers_seen"]
+        or counters["owner_dead_cancelled"]
     ):
         logger.info(f"[workflow_health] tick: {counters}")
