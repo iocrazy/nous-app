@@ -29,9 +29,17 @@ async function jsonOrThrow(resp: Response) {
   return resp.json();
 }
 
-export async function getHotspots(day?: string, category?: string): Promise<Hotspot[]> {
+export async function getHotspots(
+  day?: string,
+  category?: string,
+  q?: string,
+): Promise<Hotspot[]> {
   const params = new URLSearchParams();
-  if (day) params.set('day', day);
+  // Server-side search: the query MUST reach the backend WHERE clause, never
+  // filter client-side over an already-truncated page.
+  const term = (q || '').trim();
+  if (term) params.set('q', term);
+  else if (day) params.set('day', day); // day only narrows plain browsing
   if (category && category !== 'all') params.set('category', category);
   const resp = await fetch(`${base()}?${params.toString()}`, { headers: await getAuthHeaders() });
   return (await jsonOrThrow(resp)).hotspots as Hotspot[];
