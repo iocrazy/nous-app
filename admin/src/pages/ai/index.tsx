@@ -1,12 +1,12 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
-  Table, Button, Modal, Form, Input, Select, Switch, InputNumber,
-  Space, Message, Popconfirm, Tag, Typography, Card,
+  Button, Modal, Form, Input, Select, Switch,
+  Space, Message, Popconfirm, Tag, Typography, Card, Spin,
 } from '@arco-design/web-react'
-import { IconPlus, IconEdit, IconDelete, IconSync } from '@arco-design/web-react/icon'
+import { IconPlus, IconDelete, IconSync } from '@arco-design/web-react/icon'
 import { useAuth } from '../../auth/AuthProvider'
 
-const { Title } = Typography
+const { Title, Text } = Typography
 const FormItem = Form.Item
 
 interface NousModel {
@@ -28,18 +28,15 @@ interface NousModel {
   updated_at: string
 }
 
-const TYPE_OPTIONS = [
-  { label: 'LLM', value: 'llm' },
-  { label: 'Embedding', value: 'embedding' },
-  { label: 'TTS', value: 'tts' },
-  { label: 'ASR', value: 'asr' },
-]
-
-const PRICING_TYPE_OPTIONS = [
-  { label: 'Per Hour', value: 'per_hour' },
-  { label: 'Per Request', value: 'per_request' },
-  { label: 'Per Token', value: 'per_token' },
-]
+// A provider card groups every model that shares the same provider + base URL
+// (and therefore the same platform key).
+interface ProviderGroup {
+  provider: string
+  base_url: string
+  api_key_masked: string
+  app_id?: string
+  models: NousModel[]
+}
 
 const TYPE_COLORS: Record<string, string> = {
   llm: 'arcoblue',
@@ -48,18 +45,34 @@ const TYPE_COLORS: Record<string, string> = {
   asr: 'purple',
 }
 
+// Full-auto: infer the model TYPE from its name so the admin never picks it.
+function guessType(model: string): string {
+  const m = model.toLowerCase()
+  if (m.includes('embed')) return 'embedding'
+  if (m.includes('asr') || m.includes('whisper') || m.includes('stt')) return 'asr'
+  if (m.includes('tts') || m.includes('speech') || m.includes('voice')) return 'tts'
+  return 'llm'
+}
+
+function sanitizeName(model: string): string {
+  return 'nous-' + model.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+}
+
 export function AIModelsPage() {
   const { session } = useAuth()
   const token = session?.access_token
   const [models, setModels] = useState<NousModel[]>([])
   const [loading, setLoading] = useState(false)
+
   const [modalVisible, setModalVisible] = useState(false)
-  const [editingModel, setEditingModel] = useState<NousModel | null>(null)
-  // Models fetched from the provider via "Test & Load Models" — the admin
-  // picks actual_model from these instead of hand-typing. Empty for providers
-  // that don't expose /v1/models (e.g. volcengine ASR) → manual entry fallback.
+  // 'new' = configure a brand-new provider; 'add' = add models to an existing
+  // provider card (key inherited server-side, so no re-typing).
+  const [modalMode, setModalMode] = useState<'new' | 'add'>('new')
+  const [modalGroup, setModalGroup] = useState<ProviderGroup | null>(null)
   const [fetchedModels, setFetchedModels] = useState<string[]>([])
+  const [selectedModels, setSelectedModels] = useState<string[]>([])
   const [probeLoading, setProbeLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [form] = Form.useForm()
 
   const apiBase = import.meta.env.VITE_API_URL || ''
@@ -69,10 +82,8 @@ export function AIModelsPage() {
     setLoading(true)
     try {
       const res = await fetch(`${apiBase}/api/v1/admin/nous-models`, { headers })
-      if (res.ok) {
-        setModels(await res.json())
-      }
-    } catch (e) {
+      if (res.ok) setModels(await res.json())
+    } catch {
       Message.error('Failed to fetch models')
     } finally {
       setLoading(false)
@@ -81,7 +92,48 @@ export function AIModelsPage() {
 
   useEffect(() => { fetchModels() }, [fetchModels])
 
-  const handleProbeModels = async () => {
+  const groups = useMemo<ProviderGroup[]>(() => {
+    const map = new Map<string, ProviderGroup>()
+    for (const m of models) {
+      const key = `${m.actual_provider}|${m.base_url || ''}`
+      if (!map.has(key)) {
+        map.set(key, {
+          provider: m.actual_provider,
+          base_url: m.base_url || '',
+          api_key_masked: m.api_key_masked,
+          app_id: m.app_id,
+          models: [],
+        })
+      }
+      map.get(key)!.models.push(m)
+    }
+    return Array.from(map.values())
+  }, [models])
+
+  const openAddProvider = () => {
+    setModalMode('new')
+    setModalGroup(null)
+    setFetchedModels([])
+    setSelectedModels([])
+    form.resetFields()
+    setModalVisible(true)
+  }
+
+  const openAddModels = (group: ProviderGroup) => {
+    setModalMode('add')
+    setModalGroup(group)
+    setFetchedModels([])
+    setSelectedModels([])
+    form.resetFields()
+    form.setFieldsValue({
+      actual_provider: group.provider,
+      base_url: group.base_url,
+      app_id: group.app_id || '',
+    })
+    setModalVisible(true)
+  }
+
+  const handleProbe = async () => {
     const provider_key = form.getFieldValue('actual_provider')
     if (!provider_key) {
       Message.warning('Enter Actual Provider first')
@@ -97,9 +149,9 @@ export function AIModelsPage() {
           api_key: form.getFieldValue('api_key') || '',
           base_url: form.getFieldValue('base_url') || '',
           app_id: form.getFieldValue('app_id') || '',
-          // Editing an existing model: let the backend fall back to the stored
-          // key when the API Key field is left blank.
-          name: editingModel?.name,
+          // 'add' mode: no key typed → backend falls back to the stored key of
+          // an existing model in this provider group.
+          name: modalMode === 'add' ? modalGroup?.models[0]?.name : undefined,
         }),
       })
       const data = await res.json().catch(() => ({}))
@@ -108,246 +160,217 @@ export function AIModelsPage() {
         Message.success(`Loaded ${data.models.length} models`)
       } else {
         setFetchedModels([])
-        Message.warning(data.error || 'No model list — enter the model manually')
+        Message.warning(data.error || 'No model list — type the model name(s) manually')
       }
     } catch {
       setFetchedModels([])
-      Message.error('Probe failed — enter the model manually')
+      Message.error('Probe failed — type the model name(s) manually')
     } finally {
       setProbeLoading(false)
     }
   }
 
-  const handleCreate = () => {
-    setEditingModel(null)
-    setFetchedModels([])
-    form.resetFields()
-    form.setFieldsValue({ pricing_type: 'per_hour', pricing_value: 8, is_enabled: true, sort_order: 0 })
-    setModalVisible(true)
-  }
+  // Models already configured in the target provider (hidden from the picker).
+  const existingModels = useMemo(
+    () => new Set((modalGroup?.models || []).map((m) => m.actual_model)),
+    [modalGroup],
+  )
 
-  const handleEdit = (record: NousModel) => {
-    setEditingModel(record)
-    // Seed the model dropdown with the current value so it stays selectable
-    // before a fresh probe.
-    setFetchedModels(record.actual_model ? [record.actual_model] : [])
-    form.setFieldsValue({
-      ...record,
-      api_key: '', // don't pre-fill masked key
-    })
-    setModalVisible(true)
-  }
-
-  const handleSubmit = async () => {
-    try {
-      const values = await form.validate()
-      // Remove empty api_key on edit (keep existing)
-      if (editingModel && !values.api_key) {
-        delete values.api_key
-      }
-
-      const url = editingModel
-        ? `${apiBase}/api/v1/admin/nous-models/${editingModel.id}`
-        : `${apiBase}/api/v1/admin/nous-models`
-      const method = editingModel ? 'PUT' : 'POST'
-
-      const res = await fetch(url, { method, headers, body: JSON.stringify(values) })
-      if (res.ok) {
-        Message.success(editingModel ? 'Model updated' : 'Model created')
-        setModalVisible(false)
-        fetchModels()
-      } else {
-        const err = await res.json().catch(() => ({ detail: 'Request failed' }))
-        Message.error(err.detail || 'Failed')
-      }
-    } catch {
-      // validation error
+  const handleSaveModels = async () => {
+    if (!selectedModels.length) {
+      Message.warning('Pick at least one model')
+      return
     }
+    let values: Record<string, unknown>
+    try {
+      values = await form.validate()
+    } catch {
+      return
+    }
+    setSaving(true)
+    let ok = 0
+    const failed: string[] = []
+    for (const model of selectedModels) {
+      const payload = {
+        name: sanitizeName(model),
+        display_name: model,
+        type: guessType(model),
+        actual_provider: values.actual_provider as string,
+        actual_model: model,
+        // 'new' provider → the typed key; 'add' → blank, backend inherits it.
+        api_key: (values.api_key as string) || '',
+        base_url: (values.base_url as string) || '',
+        app_id: (values.app_id as string) || '',
+        pricing_type: 'per_hour',
+        pricing_value: 0,
+        is_enabled: true,
+        sort_order: 0,
+      }
+      try {
+        const res = await fetch(`${apiBase}/api/v1/admin/nous-models`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(payload),
+        })
+        if (res.ok) ok += 1
+        else failed.push(model)
+      } catch {
+        failed.push(model)
+      }
+    }
+    setSaving(false)
+    if (ok) Message.success(`Added ${ok} model${ok > 1 ? 's' : ''}`)
+    if (failed.length) Message.error(`Failed: ${failed.join(', ')}`)
+    setModalVisible(false)
+    fetchModels()
   }
 
-  const handleDelete = async (id: string) => {
+  const handleDeleteModel = async (id: string) => {
     const res = await fetch(`${apiBase}/api/v1/admin/nous-models/${id}`, { method: 'DELETE', headers })
     if (res.ok) {
-      Message.success('Model deleted')
+      Message.success('Model removed')
       fetchModels()
     } else {
-      Message.error('Failed to delete')
+      Message.error('Failed to remove')
     }
   }
 
   const handleToggleEnabled = async (record: NousModel) => {
     const res = await fetch(`${apiBase}/api/v1/admin/nous-models/${record.id}`, {
-      method: 'PUT', headers,
+      method: 'PUT',
+      headers,
       body: JSON.stringify({ is_enabled: !record.is_enabled }),
     })
     if (res.ok) {
-      setModels(prev => prev.map(m => m.id === record.id ? { ...m, is_enabled: !m.is_enabled } : m))
+      setModels((prev) => prev.map((m) => (m.id === record.id ? { ...m, is_enabled: !m.is_enabled } : m)))
     }
   }
 
-  const columns = [
-    {
-      title: 'Name',
-      dataIndex: 'display_name',
-      render: (val: string, record: NousModel) => (
-        <div>
-          <div style={{ fontWeight: 500 }}>{val}</div>
-          <div style={{ fontSize: 12, color: 'var(--color-text-3)' }}>{record.name}</div>
-        </div>
-      ),
-    },
-    {
-      title: 'Type',
-      dataIndex: 'type',
-      width: 110,
-      render: (val: string) => <Tag color={TYPE_COLORS[val] || 'gray'}>{val}</Tag>,
-    },
-    {
-      title: 'Provider : Model',
-      render: (_: unknown, record: NousModel) => (
-        <span style={{ fontSize: 13 }}>{record.actual_provider}:{record.actual_model}</span>
-      ),
-    },
-    {
-      title: 'API Key',
-      dataIndex: 'api_key_masked',
-      width: 120,
-      render: (val: string) => (
-        <span style={{ fontSize: 12, fontFamily: 'monospace', whiteSpace: 'nowrap', color: 'var(--color-text-3)' }}>
-          {'••••' + (val || '').slice(-4)}
-        </span>
-      ),
-    },
-    {
-      title: 'Pricing',
-      width: 120,
-      render: (_: unknown, record: NousModel) => {
-        const unit = record.pricing_type === 'per_hour' ? '/hr' : record.pricing_type === 'per_request' ? '/req' : '/1k tok'
-        return <span>{record.pricing_value} pts{unit}</span>
-      },
-    },
-    {
-      title: 'Enabled',
-      width: 80,
-      render: (_: unknown, record: NousModel) => (
-        <Switch checked={record.is_enabled} onChange={() => handleToggleEnabled(record)} size="small" />
-      ),
-    },
-    {
-      title: 'Actions',
-      width: 100,
-      render: (_: unknown, record: NousModel) => (
-        <Space>
-          <Button icon={<IconEdit />} size="mini" onClick={() => handleEdit(record)} />
-          <Popconfirm title="Delete this model?" onOk={() => handleDelete(record.id)}>
-            <Button icon={<IconDelete />} size="mini" status="danger" />
-          </Popconfirm>
-        </Space>
-      ),
-    },
-  ]
+  const pickerOptions = fetchedModels
+    .filter((m) => !existingModels.has(m))
+    .map((m) => ({ label: `${m}  ·  ${guessType(m)}`, value: m }))
 
   return (
     <div style={{ padding: '0 4px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <Title heading={5} style={{ margin: 0 }}>Nous AI Models</Title>
-        <Button type="primary" icon={<IconPlus />} onClick={handleCreate}>Add Model</Button>
+        <Button type="primary" icon={<IconPlus />} onClick={openAddProvider}>Add Provider</Button>
       </div>
 
-      <Card>
-        <Table
-          columns={columns}
-          data={models}
-          rowKey="id"
-          loading={loading}
-          pagination={false}
-          noDataElement={<div style={{ padding: 40, textAlign: 'center', color: 'var(--color-text-3)' }}>No models configured. Click "Add Model" to create one.</div>}
-        />
-      </Card>
+      {loading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><Spin /></div>
+      ) : groups.length === 0 ? (
+        <Card>
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--color-text-3)' }}>
+            No providers configured. Click "Add Provider" — enter the base URL + key once, then pick the models.
+          </div>
+        </Card>
+      ) : (
+        <Space direction="vertical" style={{ width: '100%' }} size={16}>
+          {groups.map((g) => (
+            <Card key={`${g.provider}|${g.base_url}`}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 15 }}>{g.provider}</div>
+                  <div style={{ fontSize: 12, color: 'var(--color-text-3)', fontFamily: 'monospace' }}>
+                    {g.base_url || '(provider default base URL)'}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--color-text-3)', marginTop: 2 }}>
+                    Key&nbsp;
+                    <span style={{ fontFamily: 'monospace' }}>{'••••' + (g.api_key_masked || '').slice(-4)}</span>
+                  </div>
+                </div>
+                <Button size="small" icon={<IconPlus />} onClick={() => openAddModels(g)}>Add Models</Button>
+              </div>
+
+              <Text style={{ fontSize: 12, color: 'var(--color-text-3)' }}>Enabled Models</Text>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 8 }}>
+                {g.models.map((m) => (
+                  <div
+                    key={m.id}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      border: '1px solid var(--color-border-2)', borderRadius: 6,
+                      padding: '4px 8px', opacity: m.is_enabled ? 1 : 0.5,
+                    }}
+                  >
+                    <Tag color={TYPE_COLORS[m.type] || 'gray'} size="small">{m.type}</Tag>
+                    <span style={{ fontSize: 13, fontFamily: 'monospace' }}>{m.actual_model}</span>
+                    <Switch
+                      size="small"
+                      checked={m.is_enabled}
+                      onChange={() => handleToggleEnabled(m)}
+                    />
+                    <Popconfirm title="Remove this model?" onOk={() => handleDeleteModel(m.id)}>
+                      <Button icon={<IconDelete />} size="mini" status="danger" type="text" />
+                    </Popconfirm>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          ))}
+        </Space>
+      )}
 
       <Modal
-        title={editingModel ? 'Edit Model' : 'Add Model'}
+        title={modalMode === 'new' ? 'Add Provider' : `Add Models — ${modalGroup?.provider}`}
         visible={modalVisible}
-        onOk={handleSubmit}
+        onOk={handleSaveModels}
+        confirmLoading={saving}
+        okText="Add"
         onCancel={() => setModalVisible(false)}
         autoFocus={false}
         style={{ maxWidth: 520 }}
       >
         <Form form={form} layout="vertical">
-          <FormItem label="Name" field="name" rules={[{ required: true, message: 'Required' }]}>
-            <Input placeholder="e.g. nous-llm" />
-          </FormItem>
-          <FormItem label="Display Name" field="display_name" rules={[{ required: true }]}>
-            <Input placeholder="e.g. Nous LLM (Volcengine 2.0)" />
-          </FormItem>
-          <FormItem label="Description" field="description">
-            <Input placeholder="Optional usage note, e.g. fast, cheap, short clips" />
-          </FormItem>
-          <FormItem label="Type" field="type" rules={[{ required: true }]}>
-            <Select options={TYPE_OPTIONS} />
-          </FormItem>
-          <FormItem label="Actual Provider" field="actual_provider" rules={[{ required: true }]}>
-            <Input placeholder="e.g. deepseek, doubao, volcengine" />
-          </FormItem>
-          <FormItem
-            label={editingModel ? 'API Key (leave empty to keep existing)' : 'API Key'}
-            field="api_key"
-            rules={editingModel ? [] : [{ required: true }]}
-            extra={
-              editingModel
-                ? `A key is stored (••••${(editingModel.api_key_masked || '').slice(-4)}). For security it is never shown — leave blank to keep it, "Test & Load Models" reuses it automatically. Type a new key only to replace.`
-                : undefined
-            }
-          >
-            <Input.Password
-              placeholder={
-                editingModel
-                  ? `Stored ••••${(editingModel.api_key_masked || '').slice(-4)} — leave blank to keep`
-                  : 'API Key'
-              }
-            />
-          </FormItem>
-          <FormItem
-            label="API Base URL"
-            field="base_url"
-            extra="Manually enter the OpenAI-compatible base URL (ends with /v1). Used to fetch the model list. Leave blank only for built-in providers that have a default."
-          >
-            <Input placeholder="https://api.deepseek.com/v1" />
-          </FormItem>
-          <FormItem label="App ID" field="app_id">
-            <Input placeholder="Optional (volcengine)" />
-          </FormItem>
+          {modalMode === 'new' ? (
+            <>
+              <FormItem label="Actual Provider" field="actual_provider" rules={[{ required: true }]}>
+                <Input placeholder="e.g. openai, deepseek, doubao" />
+              </FormItem>
+              <FormItem
+                label="API Base URL"
+                field="base_url"
+                extra="OpenAI-compatible base URL (ends with /v1). Leave blank only for built-in providers with a default."
+              >
+                <Input placeholder="https://api.deepseek.com/v1" />
+              </FormItem>
+              <FormItem label="API Key" field="api_key" rules={[{ required: true }]}>
+                <Input.Password placeholder="API Key (entered once for all models below)" />
+              </FormItem>
+              <FormItem label="App ID" field="app_id">
+                <Input placeholder="Optional (volcengine)" />
+              </FormItem>
+            </>
+          ) : (
+            <div style={{ marginBottom: 12, fontSize: 13, color: 'var(--color-text-2)' }}>
+              <div><b>Provider:</b> {modalGroup?.provider}</div>
+              <div style={{ fontFamily: 'monospace', fontSize: 12 }}>{modalGroup?.base_url}</div>
+              <div style={{ fontSize: 12, color: 'var(--color-text-3)', marginTop: 2 }}>
+                Key reused from this provider — no need to re-enter.
+              </div>
+            </div>
+          )}
+
           <div style={{ marginBottom: 12 }}>
-            <Button size="small" loading={probeLoading} onClick={handleProbeModels} icon={<IconSync />}>
+            <Button size="small" loading={probeLoading} onClick={handleProbe} icon={<IconSync />}>
               Test &amp; Load Models
             </Button>
           </div>
+
           <FormItem
-            label="Actual Model"
-            field="actual_model"
-            rules={[{ required: true }]}
-            extra="Load the provider's models above, then pick one. Providers without a model catalog (e.g. volcengine ASR) — type the model name directly."
+            label="Models"
+            extra="Pick the models to enable. Type auto-detected from the name. Providers without a model catalog (e.g. volcengine ASR) — type the model name and press Enter."
           >
             <Select
-              placeholder="Load from provider, or type a model name"
+              mode="multiple"
               allowCreate
               showSearch
-              options={fetchedModels.map((m) => ({ label: m, value: m }))}
+              placeholder="Load models above, then select"
+              value={selectedModels}
+              onChange={setSelectedModels}
+              options={pickerOptions}
             />
-          </FormItem>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-            <FormItem label="Pricing Type" field="pricing_type">
-              <Select options={PRICING_TYPE_OPTIONS} />
-            </FormItem>
-            <FormItem label="Price (points)" field="pricing_value">
-              <InputNumber min={0} precision={1} />
-            </FormItem>
-            <FormItem label="Sort Order" field="sort_order">
-              <InputNumber min={0} />
-            </FormItem>
-          </div>
-          <FormItem label="Enabled" field="is_enabled" triggerPropName="checked">
-            <Switch />
           </FormItem>
         </Form>
       </Modal>
