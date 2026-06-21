@@ -8,7 +8,10 @@ export interface ParseDetection {
 }
 
 const URL_RE = /https?:\/\/[^\s]+/g;
-const PLAYLIST_HINTS = ['/playlist', 'music.', '/songlist', 'list='];
+// 'qishui' covers Soda Music (汽水音乐) share links (qishui.douyin.com /
+// music.douyin.com/qishui) — both tracks and playlists go through the Soda
+// playlist resolver. Plain Douyin video links (v.douyin.com) stay single.
+const PLAYLIST_HINTS = ['/playlist', 'music.', '/songlist', 'list=', 'qishui'];
 
 export function detectParseMode(input: string): ParseDetection {
   const text = (input || '').trim();

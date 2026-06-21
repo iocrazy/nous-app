@@ -20,6 +20,14 @@ describe('detectParseMode', () => {
     expect(r.mode).toBe('playlist');
   });
 
+  it('detects Soda Music (qishui) links as playlist', () => {
+    expect(detectParseMode('https://qishui.douyin.com/s/iABCdef/').mode).toBe('playlist');
+    // even inside the messy share text qishui pastes
+    expect(
+      detectParseMode('歌单｜深夜 emo https://qishui.douyin.com/s/iXYZ/ @汽水音乐').mode,
+    ).toBe('playlist');
+  });
+
   it('empty input is single with count 0', () => {
     expect(detectParseMode('   ').count).toBe(0);
   });
