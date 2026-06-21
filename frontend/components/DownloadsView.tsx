@@ -46,6 +46,7 @@ import { trashResourceByPlatformId, updateResource } from '../services/resourceS
 import { createTag, addResourceTag } from '../services/unifiedTagService';
 import { getDownloadUrl, getMusicDownloadUrl } from '../services/dataService';
 import { downloadFile, downloadWithAuth } from '../utils/download';
+import { exportMediaAsZip } from '../utils/zipExport';
 import { useAuth } from '../contexts/AuthContext';
 
 import { DownloadInfoPanel } from './DownloadsView/DownloadInfoPanel';
@@ -600,32 +601,23 @@ export const DownloadsView: React.FC = () => {
       .map((pid) => byId.get(pid))
       .filter((v): v is Video => !!v);
     if (vids.length === 0) return;
-    addToast(`Downloading ${vids.length} item(s)…`, 'info');
-    for (const v of vids) {
-      const baseName = (v.title || v.platform_id || 'media')
-        .replace(/[\\/:*?"<>|]/g, '_')
-        .trim()
-        .slice(0, 100);
-      try {
-        if (
-          v.download_path &&
-          v.video_download_status?.toLowerCase() === 'completed' &&
-          v.platform_id
-        ) {
-          const ok = await downloadWithAuth(
-            getDownloadUrl(v.platform_id),
-            `${baseName}.mp4`,
-            {},
-          );
-          if (ok) continue;
-        }
-        const url = getVideoUrl(v, mediaToken ?? undefined);
-        if (url) await downloadFile(url, `${baseName}.mp4`, {});
-      } catch (err) {
-        console.error('Batch download failed for', v.platform_id, err);
+    // Package the selection into ONE zip in the browser (approach A: client
+    // memory, no server-side zipping). Per-item file resolved by media_type.
+    addToast(`Packaging ${vids.length} item(s) into a zip…`, 'info');
+    try {
+      const { ok, failed } = await exportMediaAsZip(vids);
+      if (ok === 0) {
+        addToast('Download failed — no files could be fetched', 'error');
+      } else if (failed > 0) {
+        addToast(`Downloaded ${ok} item(s) as zip · ${failed} failed`, 'info');
+      } else {
+        addToast(`Downloaded ${ok} item(s) as zip`, 'success');
       }
+    } catch (err) {
+      console.error('[DownloadsView] batch zip export failed', err);
+      addToast('Download failed', 'error');
     }
-  }, [library, selectedIds, addToast, mediaToken]);
+  }, [library, selectedIds, addToast]);
 
   const handleBatchShare = useCallback(() => {
     if (selectedIds.size !== 1) {
@@ -1256,6 +1248,14 @@ export const DownloadsView: React.FC = () => {
           <span className="text-sm text-ink-300 font-medium">
             {t('resources.selected', { count: selectedIds.size })}
           </span>
+          <div className="w-px h-5 bg-ink-700" />
+          <button
+            onClick={handleBatchDownload}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-ink-200 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
+          >
+            <Download size={14} />
+            {t('common.download', 'Download')}
+          </button>
           <div className="w-px h-5 bg-ink-700" />
           <button
             onClick={handleBatchDelete}

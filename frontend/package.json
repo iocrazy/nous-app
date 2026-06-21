@@ -24,6 +24,7 @@
     "hls.js": "^1.6.15",
     "i18next": "^25.7.4",
     "i18next-http-backend": "^3.0.2",
+    "jszip": "^3.10.1",
     "konva": "^10.2.1",
     "lucide-react": "^0.475.0",
     "qrcode.react": "^4.2.0",
