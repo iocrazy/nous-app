@@ -149,6 +149,14 @@ services:
       - TZ=Asia/Shanghai
       - REDIS_URL=redis://redis:6379/0
       - MEDIAHUB_ROLE=worker          # skip API router, run DBOS pool
+      # Worker Foundation HA (P3a). These reach os.environ via compose
+      # interpolation (worker_identity reads os.environ directly, NOT pydantic
+      # .env). With the flag OFF (default) executor_id stays bare 'worker' —
+      # byte-for-byte the single-worker behavior, so these lines are inert until
+      # rollout. WORKER_REPLICA_INDEX=0 makes THIS the worker-0 replica once the
+      # flag flips. See docs/superpowers/plans/2026-06-20-worker-foundation.md.
+      - FEATURE_MULTI_WORKER_ID=${FEATURE_MULTI_WORKER_ID:-}
+      - WORKER_REPLICA_INDEX=0
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
       - DOUBAO_API_KEY=${DOUBAO_API_KEY:-}
@@ -176,6 +184,64 @@ services:
       timeout: 5s
       retries: 3
       start_period: 60s
+
+  # ── Worker Foundation HA: second worker replica (worker-1) ──────
+  # ⚠️ DELIBERATELY COMMENTED OUT — DO NOT UNCOMMENT until
+  #    FEATURE_MULTI_WORKER_ID=true is set in docker/.env first.
+  #
+  # WHY THE GUARD: with the flag OFF, resolve_executor_id() returns the bare
+  # 'worker' for EVERY worker process. Two workers sharing one executor_id make
+  # DBOS startup recovery (keyed on executor_id) re-run the OTHER worker's
+  # in-flight workflows → double download / double AI billing. The per-replica
+  # executor_id (worker-0 / worker-1) that prevents this only activates when the
+  # flag is on. So an accidental `docker compose up -d` with this service active
+  # but the flag off would spawn exactly the un-isolated second worker we are
+  # trying to avoid. Keeping it commented makes that impossible by default.
+  #
+  # ROLLOUT (after the 2-worker validation rig passed — scripts/ha_validation_rig.py):
+  #   1. set FEATURE_MULTI_WORKER_ID=true in docker/.env on the NAS
+  #   2. uncomment this block
+  #   3. sudo docker compose up -d   (re-interpolates env + creates worker-1;
+  #                                   Watchtower will NOT do this — manual only)
+  #   4. verify both rows in worker_registry (worker-0 + worker-1, fresh
+  #      heartbeats) and that neither re-runs the other's workflows.
+  # Plan: docs/superpowers/plans/2026-06-20-worker-foundation.md
+  #
+  # mediahub-worker-1:
+  #   image: crpi-eat03wohif79y6f2.cn-shanghai.personal.cr.aliyuncs.com/heygo/mediahub-backend:latest
+  #   container_name: mediahub-app-worker-1
+  #   restart: unless-stopped
+  #   init: true
+  #   labels:
+  #     - "com.centurylinklabs.watchtower.enable=true"
+  #     - "autoheal=true"
+  #   expose:
+  #     - "8080"
+  #     - "8090"
+  #   volumes:
+  #     - ${DOWNLOAD_HOST_PATH:-/volume2/sources/MediaHub.library}:/app/downloads
+  #     - ./.env:/app/.env
+  #     - ./config/config.yml:/app/config.yml
+  #   environment:
+  #     - TZ=Asia/Shanghai
+  #     - REDIS_URL=redis://redis:6379/0
+  #     - MEDIAHUB_ROLE=worker
+  #     - FEATURE_MULTI_WORKER_ID=${FEATURE_MULTI_WORKER_ID:-}
+  #     - WORKER_REPLICA_INDEX=1          # ← the ONLY difference from worker-0
+  #     - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+  #     - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+  #     - DOUBAO_API_KEY=${DOUBAO_API_KEY:-}
+  #     - WHISPER_PROVIDER=${WHISPER_PROVIDER:-openai_api}
+  #     - DBOS_DATABASE_URL=${DBOS_DATABASE_URL:-}
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "curl -fs http://localhost:8090/healthz/lite || exit 1"]
+  #     interval: 30s
+  #     timeout: 5s
+  #     retries: 3
+  #     start_period: 60s
 
   # ── GPU Transcode Support (when GPU transcoding lands) ──
   # The mediahub service above can be augmented with:
