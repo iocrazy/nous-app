@@ -2009,6 +2009,11 @@
     "parsed": "已解析",
     "downloadDispatched": "已派发下载 — 见 Task Center",
     "playlistDispatched": "已派发 {{n}} 首",
-    "downloadAll": "全部下载（{{n}}）"
+    "downloadAll": "全部下载（{{n}}）",
+    "sourceHealth": "信源健康",
+    "sourcesHealthy": "信源正常",
+    "sourcesUnhealthy": "{{count}} 个信源异常",
+    "sourceDisabled": "已禁用",
+    "lastOk": "上次成功"
   }
 }

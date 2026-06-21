@@ -9,6 +9,7 @@ import { Timeline } from '../components/TopicInspiration/Timeline';
 import { HotspotInfoPanel } from '../components/TopicInspiration/HotspotInfoPanel';
 import { FloatingParse } from '../components/TopicInspiration/FloatingParse';
 import { CurrentHotspots } from '../components/TopicInspiration/CurrentHotspots';
+import { SourceHealthBadge } from '../components/TopicInspiration/SourceHealthBadge';
 
 const CATEGORIES = ['all', 'model', 'product', 'industry', 'paper', 'tips'] as const;
 const TOP_HOTSPOTS_COUNT = 5;
@@ -75,6 +76,9 @@ export const TopicInspirationPage: React.FC = () => {
       <div className="flex items-center gap-2">
         <Lightbulb size={22} className={island ? 'text-content-2' : 'text-ink-300'} />
         <h1 className={`text-[22px] font-bold ${cPrimary}`}>{t('topic.title')}</h1>
+        <div className="ml-auto">
+          <SourceHealthBadge />
+        </div>
       </div>
       <p className={`text-xs mt-1 ${cSub}`}>{t('topic.subtitle')}</p>
 

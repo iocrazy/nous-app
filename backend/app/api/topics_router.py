@@ -9,7 +9,14 @@ from app.core.deps import (  # noqa: F401 — get_auth re-exported for test over
     get_auth,
 )
 from app.repositories.hotspots_repository import HotspotsRepository
-from app.schemas.topics import DatesResponse, HotspotListResponse, HotspotOut
+from app.repositories.signal_sources_repository import SignalSourcesRepository
+from app.schemas.topics import (
+    DatesResponse,
+    HotspotListResponse,
+    HotspotOut,
+    SourceHealthOut,
+    SourceHealthResponse,
+)
 from app.services.storyboard.script.script_ai_service import ScriptAIService
 
 router = APIRouter(prefix="/topics")
@@ -51,6 +58,31 @@ async def list_hotspots(
 async def hotspot_dates(auth: AuthDep, limit_days: int = Query(60, ge=1, le=180)):
     repo = HotspotsRepository()
     return DatesResponse(dates=await repo.distinct_dates(limit_days))
+
+
+def _to_health_out(row: dict) -> SourceHealthOut:
+    return SourceHealthOut(
+        id=str(row.get("id")),
+        name=row.get("name") or "",
+        kind=row.get("kind") or "",
+        category=row.get("category"),
+        enabled=bool(row.get("enabled", True)),
+        health=row.get("health") or "ok",
+        consecutive_failures=int(row.get("consecutive_failures") or 0),
+        last_error=row.get("last_error"),
+        last_fetched_at=row.get("last_fetched_at"),
+        last_ok_at=row.get("last_ok_at"),
+    )
+
+
+@router.get("/sources/health", response_model=SourceHealthResponse)
+async def source_health(auth: AuthDep):
+    """Read-only health of all signal sources (worst-first). Surfaces which
+    feeds have gone degraded/dead so a maintainer can react. No mutation."""
+    repo = SignalSourcesRepository()
+    rows = await repo.list_all()
+    sources = [_to_health_out(r) for r in rows]
+    return SourceHealthResponse(count=len(sources), sources=sources)
 
 
 async def _generate_script_for(title: str, summary: str, user_id: str) -> list:

@@ -2009,6 +2009,11 @@
     "parsed": "Parsed",
     "downloadDispatched": "Download dispatched — see Task Center",
     "playlistDispatched": "{{n}} tracks dispatched",
-    "downloadAll": "Download all ({{n}})"
+    "downloadAll": "Download all ({{n}})",
+    "sourceHealth": "Source health",
+    "sourcesHealthy": "Sources OK",
+    "sourcesUnhealthy": "{{count}} sources down",
+    "sourceDisabled": "Disabled",
+    "lastOk": "Last OK"
   }
 }
