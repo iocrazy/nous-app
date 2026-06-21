@@ -29,7 +29,7 @@ import { useFilterBarConfig } from '../hooks/useFilterBarConfig';
 import { ResourcesModals } from './ResourcesModals';
 import { ProjectAssetsTree, type ProjectAssetsSelection } from './resources/ProjectAssetsTree';
 import { fetchCanvasAssets, type CanvasAssetItem } from '../services/projectAssetsService';
-import { fetchGenerations, generatedMediaFileUrl, type GenerationItem } from '../services/generatedMediaService';
+import { fetchGenerations, generatedMediaCoverUrl, generatedMediaFileUrl, type GenerationItem } from '../services/generatedMediaService';
 import type { Resource } from '../types';
 import {
   moveResourceItem,
@@ -636,7 +636,7 @@ export const ResourcesViewInner: React.FC = () => {
                         >
                           <div className="aspect-square bg-ink-800 flex items-center justify-center overflow-hidden">
                             <img
-                              src={generatedMediaFileUrl(item.id)}
+                              src={generatedMediaCoverUrl(item.id)}
                               alt={item.prompt ?? item.media_kind}
                               className="w-full h-full object-cover"
                               loading="lazy"

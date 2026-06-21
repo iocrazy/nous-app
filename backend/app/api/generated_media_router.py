@@ -43,6 +43,30 @@ async def list_generations(
     return {"data": page}
 
 
+@router.get("/{gen_id}/cover")
+async def get_generation_cover(gen_id: int):
+    """Serve a thumbnail/preview for a generated-media item (no auth required).
+
+    Thumbnails are world-readable-by-id (same posture as GET /resources/{id}/cover).
+    Use this URL in browser <img> tags — no Bearer header needed.
+    Keep GET /{gen_id}/file for auth-gated full-resolution downloads.
+    """
+    row = await GeneratedMediaRepository().get_by_id(gen_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="not found")
+    base = os.path.realpath(settings.DOWNLOAD_PATH)
+    real = os.path.realpath(os.path.join(settings.DOWNLOAD_PATH, row["file_path"]))
+    if not (real == base or real.startswith(base + os.sep)):
+        raise HTTPException(status_code=404, detail="not found")
+    if not os.path.isfile(real):
+        raise HTTPException(status_code=404, detail="file missing")
+    return FileResponse(
+        real,
+        media_type=row.get("mime") or "application/octet-stream",
+        headers={"Cache-Control": "public, max-age=604800, immutable"},
+    )
+
+
 @router.get("/{gen_id}/file")
 async def get_generation_file(gen_id: int, auth: AuthDep):
     row = await GeneratedMediaRepository().get(gen_id, await _scope(auth))

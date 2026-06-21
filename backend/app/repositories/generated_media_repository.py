@@ -71,6 +71,13 @@ class GeneratedMediaRepository:
             {"id": gen_id, "scope_id": scope_id},
         )
 
+    async def get_by_id(self, gen_id: int) -> Optional[dict]:
+        """Fetch a row by id without a scope filter (for public-serve endpoints)."""
+        return await db_engine.fetch_one(
+            f"SELECT {_COLS} FROM public.generated_media WHERE id = :id",
+            {"id": gen_id},
+        )
+
     async def delete(self, gen_id: int, scope_id: int) -> bool:
         n = await db_engine.execute(
             "DELETE FROM public.generated_media WHERE id = :id AND scope_id = :scope_id",

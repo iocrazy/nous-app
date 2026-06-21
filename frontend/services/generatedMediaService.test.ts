@@ -4,7 +4,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fetchGenerations } from './generatedMediaService';
+import { fetchGenerations, generatedMediaCoverUrl, generatedMediaFileUrl } from './generatedMediaService';
 
 vi.mock('../utils/apiConfig', () => ({ getApiUrl: () => 'https://api.test' }));
 vi.mock('./parserService', () => ({
@@ -51,5 +51,19 @@ describe('fetchGenerations', () => {
   it('throws on non-ok response', async () => {
     stubFetch({}, 500);
     await expect(fetchGenerations()).rejects.toThrow('HTTP 500');
+  });
+});
+
+describe('generatedMediaCoverUrl', () => {
+  it('returns the no-auth /cover URL for the given id', () => {
+    const url = generatedMediaCoverUrl('5');
+    expect(url).toContain('/api/v1/generated-media/5/cover');
+  });
+});
+
+describe('generatedMediaFileUrl', () => {
+  it('returns the auth-gated /file URL for the given id', () => {
+    const url = generatedMediaFileUrl('5');
+    expect(url).toContain('/api/v1/generated-media/5/file');
   });
 });

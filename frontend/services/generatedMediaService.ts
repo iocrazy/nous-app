@@ -52,3 +52,11 @@ export async function fetchGenerations(
 export function generatedMediaFileUrl(id: string): string {
   return `${getApiUrl()}/api/v1/generated-media/${id}/file`;
 }
+
+/**
+ * Returns the no-auth cover/thumbnail URL for a generated-media item.
+ * Safe to use directly in browser <img src> without Authorization headers.
+ */
+export function generatedMediaCoverUrl(id: string): string {
+  return `${getApiUrl()}/api/v1/generated-media/${id}/cover`;
+}

@@ -223,3 +223,68 @@ async def test_get_file_happy_path(monkeypatch, tmp_path, client):
     assert resp.status_code == 200, resp.text
     assert resp.content == file_content
     assert "image/jpeg" in resp.headers.get("content-type", "")
+
+
+# ---------------------------------------------------------------------------
+# /cover endpoint tests (no-auth public thumbnail)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cover_404_when_row_missing(monkeypatch, client):
+    """GET /{id}/cover returns 404 when repo.get_by_id returns None."""
+
+    async def _fake_get_by_id(self, gen_id: int):
+        return None
+
+    monkeypatch.setattr(r.GeneratedMediaRepository, "get_by_id", _fake_get_by_id)
+
+    resp = await client.get("/api/v1/generated-media/99/cover")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_cover_404_when_file_missing_on_disk(monkeypatch, tmp_path, client):
+    """GET /{id}/cover returns 404 (file missing) when row exists but file is absent."""
+
+    async def _fake_get_by_id(self, gen_id: int):
+        return {"id": gen_id, "file_path": "ghost.jpg", "mime": "image/jpeg"}
+
+    fake_settings = types.SimpleNamespace(DOWNLOAD_PATH=str(tmp_path))
+    monkeypatch.setattr(r.GeneratedMediaRepository, "get_by_id", _fake_get_by_id)
+    monkeypatch.setattr(r, "settings", fake_settings)
+
+    resp = await client.get("/api/v1/generated-media/11/cover")
+    assert resp.status_code == 404
+    assert resp.json()["error"] == "file missing"
+
+
+@pytest.mark.asyncio
+async def test_cover_happy_path_no_auth(monkeypatch, tmp_path):
+    """GET /{id}/cover returns 200 + file bytes with NO auth header required.
+
+    This test deliberately does NOT install the auth override fixture and
+    does NOT pass any Authorization header — verifying the endpoint is public.
+    """
+    file_name = "thumb.jpg"
+    file_content = b"\xff\xd8\xff\xe0JFIF cover bytes"
+    (tmp_path / file_name).write_bytes(file_content)
+
+    async def _fake_get_by_id(self, gen_id: int):
+        return {"id": gen_id, "file_path": file_name, "mime": "image/jpeg"}
+
+    fake_settings = types.SimpleNamespace(DOWNLOAD_PATH=str(tmp_path))
+
+    # Build a fresh client WITHOUT the auth override (cover must be public).
+    app.dependency_overrides.pop(get_auth, None)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        monkeypatch.setattr(r.GeneratedMediaRepository, "get_by_id", _fake_get_by_id)
+        monkeypatch.setattr(r, "settings", fake_settings)
+
+        resp = await ac.get("/api/v1/generated-media/30/cover")
+
+    assert resp.status_code == 200, resp.text
+    assert resp.content == file_content
+    assert "image/jpeg" in resp.headers.get("content-type", "")
+    assert "public" in resp.headers.get("cache-control", "")
