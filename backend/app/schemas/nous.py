@@ -75,3 +75,20 @@ class NousModelPublic(BaseModel):
     description: Optional[str] = None
     pricing_type: str
     pricing_value: float
+
+
+class NousProbeRequest(BaseModel):
+    """Admin 'Test & Load Models' request.
+
+    ``name`` is the existing model being edited (optional): when ``api_key`` is
+    left blank in the edit form (the stored key is never sent to the client),
+    the backend falls back to that model's stored key so probing works without
+    re-typing the key.
+    """
+
+    provider_key: str
+    api_key: Optional[str] = ""
+    app_id: Optional[str] = ""
+    base_url: Optional[str] = ""
+    model: Optional[str] = ""
+    name: Optional[str] = None

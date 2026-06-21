@@ -11,11 +11,12 @@ from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
 from app.repositories.nous_repository import get_nous_repository
-from app.schemas.ai import TestConnectionRequest, TestConnectionResponse
+from app.schemas.ai import TestConnectionResponse
 from app.schemas.nous import (
     NousModelCreate,
     NousModelResponse,
     NousModelUpdate,
+    NousProbeRequest,
 )
 from app.services.ai.providers.ai_provider import AIProviderFactory
 
@@ -60,7 +61,7 @@ async def list_nous_models(auth: AdminAuthDep):
 
 
 @router.post("/probe-models", response_model=TestConnectionResponse)
-async def probe_nous_models(body: TestConnectionRequest, auth: AdminAuthDep):
+async def probe_nous_models(body: NousProbeRequest, auth: AdminAuthDep):
     """Self-check a provider key and return the models it exposes.
 
     Lets the admin pick ``actual_model`` from a fetched list instead of
@@ -69,12 +70,26 @@ async def probe_nous_models(body: TestConnectionRequest, auth: AdminAuthDep):
     model catalog (e.g. volcengine ASR) return ``success=False`` — the UI then
     falls back to manual model entry. The platform key is used server-side
     only and never echoed back.
+
+    Edit-form fallback: the stored key is never sent to the client, so the
+    edit form's API Key field is blank. When ``api_key`` is blank and ``name``
+    references an existing model, reuse that model's stored key (and app_id)
+    so probing works without re-typing the key.
     """
+    api_key = (body.api_key or "").strip()
+    app_id = body.app_id or ""
+    if not api_key and body.name:
+        repo = get_nous_repository()
+        existing = await repo.get_by_name(body.name)
+        if existing:
+            api_key = existing.get("api_key") or ""
+            app_id = app_id or existing.get("app_id") or ""
+
     result = await AIProviderFactory.test_connection(
         provider_key=body.provider_key,
         config={
-            "api_key": body.api_key,
-            "app_id": body.app_id,
+            "api_key": api_key,
+            "app_id": app_id,
             "base_url": body.base_url,
             "model": body.model,
         },
