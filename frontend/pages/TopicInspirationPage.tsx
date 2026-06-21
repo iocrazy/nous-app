@@ -1,5 +1,5 @@
 // frontend/pages/TopicInspirationPage.tsx
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Lightbulb } from 'lucide-react';
 import { islandUI } from '../utils/featureFlags';
@@ -8,8 +8,10 @@ import { useToast } from '../components/Toast';
 import { Timeline } from '../components/TopicInspiration/Timeline';
 import { HotspotInfoPanel } from '../components/TopicInspiration/HotspotInfoPanel';
 import { FloatingParse } from '../components/TopicInspiration/FloatingParse';
+import { CurrentHotspots } from '../components/TopicInspiration/CurrentHotspots';
 
 const CATEGORIES = ['all', 'model', 'product', 'industry', 'paper', 'tips'] as const;
+const TOP_HOTSPOTS_COUNT = 5;
 
 export const TopicInspirationPage: React.FC = () => {
   const { t } = useTranslation();
@@ -43,6 +45,16 @@ export const TopicInspirationPage: React.FC = () => {
       alive = false;
     };
   }, [day, category]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Top N hotspots by score for the CurrentHotspots block
+  const topByScore = useMemo<Hotspot[]>(
+    () =>
+      hotspots
+        .filter((h) => typeof h.score === 'number' && h.score !== null)
+        .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+        .slice(0, TOP_HOTSPOTS_COUNT),
+    [hotspots],
+  );
 
   const cPrimary = island ? 'text-content' : 'text-ink-50';
   const cSub = island ? 'text-content-3' : 'text-ink-400';
@@ -106,20 +118,31 @@ export const TopicInspirationPage: React.FC = () => {
         {loading ? t('common.loading') : `${hotspots.length} hotspots`}
       </div>
 
-      {/* Timeline — selected state wired for Task 16 */}
+      {/* Current Hotspots block — rendered above timeline when scored hotspots exist */}
+      {!loading && topByScore.length > 0 && (
+        <div className="mt-4">
+          <CurrentHotspots items={topByScore} />
+        </div>
+      )}
+
+      {/* Timeline — selectedId wired for highlight ring */}
       <div className="mt-4">
         {!loading && hotspots.length > 0 && (
-          <Timeline hotspots={hotspots} onSelect={setSelected} />
+          <Timeline
+            hotspots={hotspots}
+            onSelect={setSelected}
+            selectedId={selected?.id}
+          />
         )}
         {!loading && hotspots.length === 0 && (
           <p className={`text-sm ${cSub}`}>No hotspots found.</p>
         )}
       </div>
 
-      {/* Task 16: right info island portal */}
+      {/* Right info island portal */}
       <HotspotInfoPanel hotspot={selected} />
 
-      {/* Task 17: floating parse widget — bottom-right, 3 states */}
+      {/* Floating parse widget — bottom-right, 3 states */}
       <FloatingParse />
     </div>
   );
