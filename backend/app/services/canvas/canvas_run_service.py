@@ -240,7 +240,7 @@ class CanvasRunService:
         try:
             adapter = await self._get_adapter(model)
         except Exception as exc:
-            logger.exception("canvas run: adapter init failed for %s", model)
+            logger.exception("canvas run: adapter init failed for {}", model)
             return CanvasPromptRunResult(
                 ok=False,
                 text="",
@@ -253,7 +253,7 @@ class CanvasRunService:
         try:
             response = await adapter.call(composed, messages)
         except Exception as exc:
-            logger.exception("canvas run: adapter call failed for %s", model)
+            logger.exception("canvas run: adapter call failed for {}", model)
             return CanvasPromptRunResult(
                 ok=False, text="", error=f"adapter call failed: {exc}"
             )
@@ -301,7 +301,7 @@ class CanvasRunService:
         try:
             dispatch = resolve_classic_dispatch(node_type, node)
         except ClassicDispatchError as exc:
-            logger.info("canvas classic dispatch rejected: %s", exc)
+            logger.info("canvas classic dispatch rejected: {}", exc)
             return CanvasPromptRunResult(ok=False, text="", error=str(exc))
 
         if dispatch.kind == "op":
@@ -393,7 +393,7 @@ class CanvasRunService:
                 aspect_ratio=params["aspect_ratio"],
             )
         except Exception as exc:
-            logger.exception("canvas image_gen failed for node %s", node_id)
+            logger.exception("canvas image_gen failed for node {}", node_id)
             return CanvasPromptRunResult(
                 ok=False, text="", error=f"image generation failed: {exc}"
             )
@@ -492,7 +492,7 @@ class CanvasRunService:
                 motion_intensity=params["motion_intensity"],
             )
         except Exception as exc:
-            logger.exception("canvas video_gen failed for node %s", node_id)
+            logger.exception("canvas video_gen failed for node {}", node_id)
             return CanvasPromptRunResult(
                 ok=False, text="", error=f"video generation failed: {exc}"
             )
@@ -595,7 +595,7 @@ class CanvasRunService:
         except NousCenterNotConfigured as exc:
             return CanvasPromptRunResult(ok=False, text="", error=str(exc))
         except Exception as exc:
-            logger.exception("nous-center workflow %s failed", workflow_slug)
+            logger.exception("nous-center workflow {} failed", workflow_slug)
             return CanvasPromptRunResult(
                 ok=False, text="", error=f"nous-center call failed: {exc}"
             )

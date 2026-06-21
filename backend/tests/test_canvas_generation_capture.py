@@ -162,3 +162,35 @@ async def test_video_gen_captures_generated_media(monkeypatch):
     assert origin.canvas_id == 77
     assert origin.derivation_kind == "video_gen"
     assert calls.get("mime") == "video/mp4"
+
+
+@pytest.mark.asyncio
+async def test_video_gen_capture_failure_is_nonfatal(monkeypatch):
+    """When register_generated_media raises, _run_video_gen still returns ok."""
+    import app.services.canvas.canvas_run_service as crs
+
+    async def _raise_register(**kwargs):
+        raise RuntimeError("db down")
+
+    async def _fake_scope(uid):
+        return "42"
+
+    monkeypatch.setattr(crs, "register_generated_media", _raise_register)
+    monkeypatch.setattr(crs, "_resolve_personal_team_id", _fake_scope)
+
+    svc = crs.CanvasRunService()
+    monkeypatch.setattr(
+        svc, "_storyboard_ai_service", lambda: _make_video_storyboard_svc()
+    )
+
+    res = await svc._run_video_gen(
+        node={"data": {"source_image_url": "http://x/img.png", "prompt": "zoom"}},
+        node_id="n2",
+        project_id="7",
+        user_id="u-uuid",
+        canvas_id=77,
+    )
+
+    # Capture failure must NOT propagate — result is still ok.
+    assert res.ok, f"expected ok=True even on capture error, got error={res.error!r}"
+    assert res.text == "http://x/v.mp4"
