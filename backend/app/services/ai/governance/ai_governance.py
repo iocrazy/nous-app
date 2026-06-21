@@ -48,6 +48,7 @@ TASK_MODULES = frozenset(
         "caption",
         "classification",
         "summarization",
+        "topic_scorer",
     }
 )
 CHAT_MODULE = "chat"

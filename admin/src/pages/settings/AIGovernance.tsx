@@ -38,7 +38,7 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
   )
 }
 
-type TaskModuleKey = 'transcription' | 'translation' | 'visual_analysis' | 'caption' | 'classification' | 'summarization'
+type TaskModuleKey = 'transcription' | 'translation' | 'visual_analysis' | 'caption' | 'classification' | 'summarization' | 'topic_scorer'
 
 interface TaskModuleLocalState {
   user_allowed: boolean
@@ -58,6 +58,7 @@ interface LocalState {
   caption: TaskModuleLocalState
   classification: TaskModuleLocalState
   summarization: TaskModuleLocalState
+  topic_scorer: TaskModuleLocalState
 }
 
 const TASK_MODULES: ReadonlyArray<{ key: TaskModuleKey; label: string; hint: string }> = [
@@ -91,6 +92,11 @@ const TASK_MODULES: ReadonlyArray<{ key: TaskModuleKey; label: string; hint: str
     label: 'Summarization / Rewrite',
     hint: 'LLM summary/rewrite of transcripts. Platform key required when locked.',
   },
+  {
+    key: 'topic_scorer',
+    label: 'Topic Scorer',
+    hint: 'Scores news hotspots for the Topic Inspiration feed (score/reason/summary).',
+  },
 ]
 
 const PLATFORM_MANAGED: ReadonlyArray<{ label: string; hint: string }> = [
@@ -115,6 +121,7 @@ function defaultLocalState(): LocalState {
     caption: defaultTaskState(),
     classification: defaultTaskState(),
     summarization: defaultTaskState(),
+    topic_scorer: defaultTaskState(),
   }
 }
 
@@ -173,6 +180,13 @@ export function AIGovernance() {
         model: data.summarization.model ?? '',
         api_key: '',
       },
+      topic_scorer: {
+        user_allowed: data.topic_scorer.user_allowed,
+        nous_allowed: data.topic_scorer.nous_allowed,
+        base_url: data.topic_scorer.base_url ?? '',
+        model: data.topic_scorer.model ?? '',
+        api_key: '',
+      },
     })
   }, [data])
 
@@ -207,6 +221,7 @@ export function AIGovernance() {
       caption: taskUpdate(state.caption),
       classification: taskUpdate(state.classification),
       summarization: taskUpdate(state.summarization),
+      topic_scorer: taskUpdate(state.topic_scorer),
     }
 
     updateMutation.mutate(payload, {
@@ -221,6 +236,7 @@ export function AIGovernance() {
           caption: { ...prev.caption, api_key: '' },
           classification: { ...prev.classification, api_key: '' },
           summarization: { ...prev.summarization, api_key: '' },
+          topic_scorer: { ...prev.topic_scorer, api_key: '' },
         }))
       },
       onError: (err) => Message.error((err as Error).message || 'Failed to save'),
