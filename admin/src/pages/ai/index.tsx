@@ -97,6 +97,9 @@ export function AIModelsPage() {
           api_key: form.getFieldValue('api_key') || '',
           base_url: form.getFieldValue('base_url') || '',
           app_id: form.getFieldValue('app_id') || '',
+          // Editing an existing model: let the backend fall back to the stored
+          // key when the API Key field is left blank.
+          name: editingModel?.name,
         }),
       })
       const data = await res.json().catch(() => ({}))
@@ -208,8 +211,12 @@ export function AIModelsPage() {
     {
       title: 'API Key',
       dataIndex: 'api_key_masked',
-      width: 140,
-      render: (val: string) => <span style={{ fontSize: 12, fontFamily: 'monospace' }}>{val}</span>,
+      width: 120,
+      render: (val: string) => (
+        <span style={{ fontSize: 12, fontFamily: 'monospace', whiteSpace: 'nowrap', color: 'var(--color-text-3)' }}>
+          {'••••' + (val || '').slice(-4)}
+        </span>
+      ),
     },
     {
       title: 'Pricing',
@@ -282,8 +289,23 @@ export function AIModelsPage() {
           <FormItem label="Actual Provider" field="actual_provider" rules={[{ required: true }]}>
             <Input placeholder="e.g. deepseek, doubao, volcengine" />
           </FormItem>
-          <FormItem label={editingModel ? 'API Key (leave empty to keep existing)' : 'API Key'} field="api_key" rules={editingModel ? [] : [{ required: true }]}>
-            <Input.Password placeholder="API Key" />
+          <FormItem
+            label={editingModel ? 'API Key (leave empty to keep existing)' : 'API Key'}
+            field="api_key"
+            rules={editingModel ? [] : [{ required: true }]}
+            extra={
+              editingModel
+                ? `A key is stored (••••${(editingModel.api_key_masked || '').slice(-4)}). For security it is never shown — leave blank to keep it, "Test & Load Models" reuses it automatically. Type a new key only to replace.`
+                : undefined
+            }
+          >
+            <Input.Password
+              placeholder={
+                editingModel
+                  ? `Stored ••••${(editingModel.api_key_masked || '').slice(-4)} — leave blank to keep`
+                  : 'API Key'
+              }
+            />
           </FormItem>
           <FormItem
             label="API Base URL"

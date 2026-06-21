@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.schemas.ai import TestConnectionRequest
+from app.schemas.nous import NousProbeRequest
 
 
 @pytest.mark.asyncio
@@ -14,7 +14,7 @@ async def test_probe_models_returns_provider_models():
     returns the fetched model list (so admin selects instead of hand-typing)."""
     from app.api.admin.nous_router import probe_nous_models
 
-    body = TestConnectionRequest(
+    body = NousProbeRequest(
         provider_key="deepseek",
         api_key="sk-x",
         base_url="https://api.deepseek.com",
@@ -53,7 +53,7 @@ async def test_probe_models_surfaces_failure():
     manual entry)."""
     from app.api.admin.nous_router import probe_nous_models
 
-    body = TestConnectionRequest(provider_key="volcengine", api_key="k", app_id="a")
+    body = NousProbeRequest(provider_key="volcengine", api_key="k", app_id="a")
     fake_auth = MagicMock()
     fake_auth.user_id = "admin-1"
 
@@ -68,3 +68,43 @@ async def test_probe_models_surfaces_failure():
     assert resp.success is False
     assert resp.models is None
     assert resp.error == "no /models"
+
+
+@pytest.mark.asyncio
+async def test_probe_blank_key_falls_back_to_stored_key():
+    """Edit form sends a blank api_key (stored key never leaves the server).
+    When ``name`` references an existing model, the probe reuses its stored
+    key + app_id — so 'Test & Load Models' works without re-typing the key."""
+    from app.api.admin.nous_router import probe_nous_models
+
+    body = NousProbeRequest(
+        provider_key="openai",
+        api_key="",  # blank — edit form doesn't carry the stored key
+        base_url="http://10.0.0.10:8000/v1",
+        name="nous-qwen3-llm",
+    )
+    fake_auth = MagicMock()
+    fake_auth.user_id = "admin-1"
+
+    repo = MagicMock()
+    repo.get_by_name = AsyncMock(
+        return_value={"api_key": "stored-secret", "app_id": "stored-app"}
+    )
+
+    captured = {}
+
+    async def _fake_test_connection(*, provider_key, config):
+        captured["config"] = config
+        return {"success": True, "models": ["qwen3-6-35b"], "error": None}
+
+    with patch("app.api.admin.nous_router.get_nous_repository", return_value=repo):
+        with patch(
+            "app.api.admin.nous_router.AIProviderFactory.test_connection",
+            new=AsyncMock(side_effect=_fake_test_connection),
+        ):
+            resp = await probe_nous_models(body, fake_auth)
+
+    assert resp.success is True
+    assert captured["config"]["api_key"] == "stored-secret"
+    assert captured["config"]["app_id"] == "stored-app"
+    repo.get_by_name.assert_awaited_once_with("nous-qwen3-llm")
