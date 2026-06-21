@@ -53,7 +53,7 @@ async def _download_to(
         return written
     except BaseException:
         Path(part).unlink(missing_ok=True)
-        logger.opt(exception=True).warning("[genmedia] download failed: %s", source_url)
+        logger.opt(exception=True).warning("[genmedia] download failed: {}", source_url)
         raise
 
 
