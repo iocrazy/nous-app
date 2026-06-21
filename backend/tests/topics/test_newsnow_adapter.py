@@ -22,6 +22,16 @@ async def test_newsnow_maps_items(monkeypatch):
     assert out[0].source_label == "HN"
 
 
+def test_newsnow_default_url_reads_settings(monkeypatch):
+    # No explicit api_url -> must read settings.NEWSNOW_API_URL (pydantic
+    # Settings from bind-mounted /app/.env), NOT os.getenv.
+    import app.services.topics.adapters.newsnow_adapter as mod
+
+    monkeypatch.setattr(mod.settings, "NEWSNOW_API_URL", "http://configured:4000/")
+    adapter = NewsNowAdapter()
+    assert adapter.api_url == "http://configured:4000"  # trailing slash stripped
+
+
 @pytest.mark.asyncio
 async def test_newsnow_raises_on_bad_status(monkeypatch):
     async def fake_get_json(url, timeout):

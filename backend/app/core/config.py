@@ -1228,6 +1228,10 @@ class Settings(BaseSettings):
         default="https://mediahubserver.heygo.cn:88",
         description="Public URL for media file access",
     )
+    NEWSNOW_API_URL: str = Field(
+        default="http://localhost:4000",
+        description="Self-hosted NewsNow API base URL (Topic Inspiration newsnow adapter)",
+    )
     AI_DEFAULT_SUMMARY_MODEL: str = Field(
         default="gpt-4o-mini", description="Default LLM model for summaries"
     )
