@@ -9,12 +9,24 @@ def client(monkeypatch):
 
     class _FakeRepo:
         async def list_for_date(self, day, category, limit=100):
-            return [{
-                "id": "1", "title": "Hello", "url": "u", "origin_url": "u",
-                "source_label": "S", "summary": None, "ai_summary": None, "reason": None,
-                "score": None, "tags": [], "category": "model", "media_url": None,
-                "cover_url": None, "captured_at": "2026-06-20T06:00:00Z",
-            }]
+            return [
+                {
+                    "id": "1",
+                    "title": "Hello",
+                    "url": "u",
+                    "origin_url": "u",
+                    "source_label": "S",
+                    "summary": None,
+                    "ai_summary": None,
+                    "reason": None,
+                    "score": None,
+                    "tags": [],
+                    "category": "model",
+                    "media_url": None,
+                    "cover_url": None,
+                    "captured_at": "2026-06-20T06:00:00Z",
+                }
+            ]
 
         async def distinct_dates(self, limit_days=60):
             return ["2026-06-20", "2026-06-19"]

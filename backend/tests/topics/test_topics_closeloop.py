@@ -10,7 +10,13 @@ def client(monkeypatch):
     class _Repo:
         async def get_by_id(self, hid):
             if hid == "news1":
-                return {"id": "news1", "title": "News", "summary": "s", "ai_summary": None, "url": "https://n/1"}
+                return {
+                    "id": "news1",
+                    "title": "News",
+                    "summary": "s",
+                    "ai_summary": None,
+                    "url": "https://n/1",
+                }
             return None  # unknown id -> 404
 
     monkeypatch.setattr(tr, "HotspotsRepository", lambda: _Repo())

@@ -1,6 +1,7 @@
 import pytest
-from app.workflows.topic_inspiration import run_topic_fetch_once
+
 from app.services.topics.adapters.base import HotspotCandidate
+from app.workflows.topic_inspiration import run_topic_fetch_once
 
 
 class _FakeSources:
@@ -13,7 +14,11 @@ class _FakeSources:
 
     async def mark_health(self, sid, *, ok, error=None, dead_threshold=3):
         self.health_calls.append((sid, ok))
-        return {"health": "ok" if ok else "dead", "consecutive_failures": 0, "flipped_to_dead": not ok}
+        return {
+            "health": "ok" if ok else "dead",
+            "consecutive_failures": 0,
+            "flipped_to_dead": not ok,
+        }
 
 
 class _FakeHotspots:
@@ -30,10 +35,18 @@ class _FakeHotspots:
 
 @pytest.mark.asyncio
 async def test_fetch_isolates_failing_source(monkeypatch):
-    sources = _FakeSources([
-        {"id": "1", "kind": "rss", "name": "Good", "config": {}, "category": "model"},
-        {"id": "2", "kind": "rss", "name": "Bad", "config": {}, "category": None},
-    ])
+    sources = _FakeSources(
+        [
+            {
+                "id": "1",
+                "kind": "rss",
+                "name": "Good",
+                "config": {},
+                "category": "model",
+            },
+            {"id": "2", "kind": "rss", "name": "Bad", "config": {}, "category": None},
+        ]
+    )
     hotspots = _FakeHotspots()
 
     async def fake_fetch(source):
@@ -45,7 +58,9 @@ async def test_fetch_isolates_failing_source(monkeypatch):
         async def fetch(self, s):
             return await fake_fetch(s)
 
-    monkeypatch.setattr("app.workflows.topic_inspiration.get_adapter", lambda k: _Adapter())
+    monkeypatch.setattr(
+        "app.workflows.topic_inspiration.get_adapter", lambda k: _Adapter()
+    )
     result = await run_topic_fetch_once(sources_repo=sources, hotspots_repo=hotspots)
 
     assert result["sources"] == 2
