@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from app.services.topics.topic_scorer import TopicScorerService
+from app.services.topics.topic_scorer import _MAX_OUTPUT_TOKENS, TopicScorerService
 
 
 def test_normalize_result_clamps_and_validates():
@@ -78,21 +78,24 @@ class _FakeGovernanceUnconfigured:
 
 
 def _make_composed(model: str = "deepseek-chat"):
-    """Build a minimal composed-prompt stand-in with model_copy support."""
+    """Build a minimal composed-prompt stand-in with model_copy support.
+
+    ``model_copy(update=...)`` carries every key through (not just ``model``)
+    so tests can assert on ``max_tokens`` and other overrides.
+    """
 
     class _Composed:
-        pass
+        def model_copy(self, *, update=None):
+            new_obj = _Composed()
+            new_obj.model = self.model  # type: ignore[attr-defined]
+            new_obj.max_tokens = self.max_tokens  # type: ignore[attr-defined]
+            for key, value in (update or {}).items():
+                setattr(new_obj, key, value)
+            return new_obj
 
     obj = _Composed()
     obj.model = model  # type: ignore[attr-defined]
-
-    def _model_copy(*, update=None):
-        new_obj = _Composed()
-        new_obj.model = (update or {}).get("model", obj.model)  # type: ignore[attr-defined]
-        new_obj._model_copy = _model_copy  # type: ignore[attr-defined]
-        return new_obj
-
-    obj.model_copy = _model_copy  # type: ignore[attr-defined]
+    obj.max_tokens = 4096  # type: ignore[attr-defined]
     return obj
 
 
@@ -215,6 +218,33 @@ async def test_score_items_happy_path(monkeypatch):
     out = await svc.score_items([{"i": 0, "title": "t", "content": "c"}])
     assert out[0]["score"] == 0.8
     assert out[0]["category"] == "model"
+
+
+@pytest.mark.asyncio
+async def test_score_items_raises_output_token_budget(monkeypatch):
+    """The composed prompt handed to the runner must carry the raised
+    max_tokens so qwen3 finishes the JSON answer without truncating."""
+    svc = TopicScorerService()
+    seen = {}
+
+    class _Runner:
+        async def run_turn(self, composed, user_messages):
+            seen["model"] = composed.model
+            seen["max_tokens"] = composed.max_tokens
+            return {"content": '[{"i":0,"score":0.7,"category":"tips","tags":[]}]'}
+
+    class _Composer:
+        async def compose(self, inp):
+            return _make_composed("deepseek-chat")
+
+    _patch_nous(monkeypatch)
+    _patch_governance(monkeypatch, _FakeGovernanceConfigured())
+    _patch_adapter_and_runner(monkeypatch, _Runner())
+    monkeypatch.setattr(svc, "_build_composer", lambda: _Composer())
+
+    await svc.score_items([{"i": 0, "title": "t", "content": "c"}])
+    assert seen["max_tokens"] == _MAX_OUTPUT_TOKENS
+    assert seen["model"] == "deepseek-chat"
 
 
 @pytest.mark.asyncio

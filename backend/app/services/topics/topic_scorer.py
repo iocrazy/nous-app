@@ -34,6 +34,12 @@ from app.services.ai.skills.skill_tool_service import SkillToolService
 AGENT_SLUG = "topic-scorer"
 _VALID_CATEGORIES = {"model", "product", "industry", "paper", "tips"}
 _MAX_CONTENT_CHARS = 600  # trim each item's content to bound prompt tokens
+# qwen3-6-35b is a reasoning model: it burns 1-2k tokens on <think> BEFORE the
+# JSON answer. With the agent's default 4096 cap, large batches truncated the
+# answer mid-array ("Unterminated string"), dropping reason/ai_summary for most
+# items. Raise the per-call ceiling so a small batch's full JSON always fits.
+# Pairs with workflows.topic_inspiration._SCORE_BATCH_SIZE (kept small).
+_MAX_OUTPUT_TOKENS = 8000
 
 
 class TopicScorerService:
@@ -193,7 +199,9 @@ class TopicScorerService:
                 ),
             )
         )
-        composed = composed.model_copy(update={"model": model})
+        composed = composed.model_copy(
+            update={"model": model, "max_tokens": _MAX_OUTPUT_TOKENS}
+        )
         user_messages = [{"role": "user", "content": self.build_user_payload(items)}]
         result = await runner.run_turn(composed, user_messages=user_messages)
         if result.get("error"):
