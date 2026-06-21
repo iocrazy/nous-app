@@ -100,9 +100,7 @@ def _patch_governance(monkeypatch, governance_obj):
     async def _fake(module):
         return governance_obj
 
-    monkeypatch.setattr(
-        "app.services.topics.topic_scorer.get_module_governance", _fake
-    )
+    monkeypatch.setattr("app.services.topics.topic_scorer.get_module_governance", _fake)
 
 
 def _patch_adapter_and_runner(monkeypatch, runner_instance):
@@ -128,9 +126,7 @@ async def test_score_items_happy_path(monkeypatch):
 
     class _Runner:
         async def run_turn(self, composed, user_messages):
-            return {
-                "content": '[{"i":0,"score":0.8,"category":"model","tags":["x"]}]'
-            }
+            return {"content": '[{"i":0,"score":0.8,"category":"model","tags":["x"]}]'}
 
     composed_obj = _make_composed("deepseek-chat")
 
