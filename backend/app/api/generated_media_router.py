@@ -54,6 +54,8 @@ async def get_generation_cover(gen_id: int):
     row = await GeneratedMediaRepository().get_by_id(gen_id)
     if not row:
         raise HTTPException(status_code=404, detail="not found")
+    if row.get("media_kind") != "image":
+        raise HTTPException(status_code=404, detail="no cover")
     base = os.path.realpath(settings.DOWNLOAD_PATH)
     real = os.path.realpath(os.path.join(settings.DOWNLOAD_PATH, row["file_path"]))
     if not (real == base or real.startswith(base + os.sep)):

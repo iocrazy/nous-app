@@ -15,6 +15,31 @@ _COLS = (
     "promoted_resource_id, created_at"
 )
 
+# Snowflake BIGINT columns: must be str() before reaching the frontend to avoid
+# JS precision loss (same guard used throughout resources_repository.py).
+_BIGINT_COLS = (
+    "id",
+    "scope_id",
+    "canvas_id",
+    "parent_resource_id",
+    "promoted_resource_id",
+)
+_UUID_COLS = ("creator_id", "agent_id")
+
+
+def _normalize(row: Optional[dict]) -> Optional[dict]:
+    """Stringify bigint and UUID fields so JSON serialisation is lossless."""
+    if not row:
+        return row
+    out = dict(row)
+    for c in _BIGINT_COLS:
+        if out.get(c) is not None:
+            out[c] = str(out[c])
+    for c in _UUID_COLS:
+        if out.get(c) is not None:
+            out[c] = str(out[c])
+    return out
+
 
 def _encode_cursor(created_at: str, gen_id: int) -> str:
     return base64.urlsafe_b64encode(json.dumps([created_at, gen_id]).encode()).decode()
@@ -62,20 +87,24 @@ class GeneratedMediaRepository:
             last = rows[limit - 1]
             next_cursor = _encode_cursor(str(last["created_at"]), int(last["id"]))
             rows = rows[:limit]
-        return {"items": rows, "next_cursor": next_cursor}
+        return {"items": [_normalize(r) for r in rows], "next_cursor": next_cursor}
 
     async def get(self, gen_id: int, scope_id: int) -> Optional[dict]:
-        return await db_engine.fetch_one(
-            f"SELECT {_COLS} FROM public.generated_media "
-            "WHERE id = :id AND scope_id = :scope_id",
-            {"id": gen_id, "scope_id": scope_id},
+        return _normalize(
+            await db_engine.fetch_one(
+                f"SELECT {_COLS} FROM public.generated_media "
+                "WHERE id = :id AND scope_id = :scope_id",
+                {"id": gen_id, "scope_id": scope_id},
+            )
         )
 
     async def get_by_id(self, gen_id: int) -> Optional[dict]:
         """Fetch a row by id without a scope filter (for public-serve endpoints)."""
-        return await db_engine.fetch_one(
-            f"SELECT {_COLS} FROM public.generated_media WHERE id = :id",
-            {"id": gen_id},
+        return _normalize(
+            await db_engine.fetch_one(
+                f"SELECT {_COLS} FROM public.generated_media WHERE id = :id",
+                {"id": gen_id},
+            )
         )
 
     async def delete(self, gen_id: int, scope_id: int) -> bool:

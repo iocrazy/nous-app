@@ -248,7 +248,12 @@ async def test_cover_404_when_file_missing_on_disk(monkeypatch, tmp_path, client
     """GET /{id}/cover returns 404 (file missing) when row exists but file is absent."""
 
     async def _fake_get_by_id(self, gen_id: int):
-        return {"id": gen_id, "file_path": "ghost.jpg", "mime": "image/jpeg"}
+        return {
+            "id": gen_id,
+            "file_path": "ghost.jpg",
+            "mime": "image/jpeg",
+            "media_kind": "image",
+        }
 
     fake_settings = types.SimpleNamespace(DOWNLOAD_PATH=str(tmp_path))
     monkeypatch.setattr(r.GeneratedMediaRepository, "get_by_id", _fake_get_by_id)
@@ -271,7 +276,12 @@ async def test_cover_happy_path_no_auth(monkeypatch, tmp_path):
     (tmp_path / file_name).write_bytes(file_content)
 
     async def _fake_get_by_id(self, gen_id: int):
-        return {"id": gen_id, "file_path": file_name, "mime": "image/jpeg"}
+        return {
+            "id": gen_id,
+            "file_path": file_name,
+            "mime": "image/jpeg",
+            "media_kind": "image",
+        }
 
     fake_settings = types.SimpleNamespace(DOWNLOAD_PATH=str(tmp_path))
 
@@ -288,3 +298,63 @@ async def test_cover_happy_path_no_auth(monkeypatch, tmp_path):
     assert resp.content == file_content
     assert "image/jpeg" in resp.headers.get("content-type", "")
     assert "public" in resp.headers.get("cache-control", "")
+
+
+# ---------------------------------------------------------------------------
+# I1 — /cover must reject non-image media (keep full video behind /file)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cover_404_for_non_image_media_kind(monkeypatch, tmp_path, client):
+    """GET /{id}/cover returns 404 when media_kind != 'image' (e.g. 'video').
+
+    Full-resolution video must stay behind the auth-gated /file endpoint.
+    """
+    file_name = "clip.mp4"
+    (tmp_path / file_name).write_bytes(b"fake mp4 bytes")
+
+    async def _fake_get_by_id(self, gen_id: int):
+        return {
+            "id": gen_id,
+            "file_path": file_name,
+            "mime": "video/mp4",
+            "media_kind": "video",
+        }
+
+    fake_settings = types.SimpleNamespace(DOWNLOAD_PATH=str(tmp_path))
+    monkeypatch.setattr(r.GeneratedMediaRepository, "get_by_id", _fake_get_by_id)
+    monkeypatch.setattr(r, "settings", fake_settings)
+
+    resp = await client.get("/api/v1/generated-media/77/cover")
+    assert resp.status_code == 404
+    assert resp.json()["error"] == "no cover"
+
+
+# ---------------------------------------------------------------------------
+# M7 — realpath traversal guard
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cover_404_for_path_traversal(monkeypatch, tmp_path, client):
+    """GET /{id}/cover returns 404 when file_path escapes DOWNLOAD_PATH.
+
+    A row with file_path='../../etc/passwd' must never serve the file —
+    the realpath guard must reject it with 404.
+    """
+
+    async def _fake_get_by_id(self, gen_id: int):
+        return {
+            "id": gen_id,
+            "file_path": "../../etc/passwd",
+            "mime": "text/plain",
+            "media_kind": "image",
+        }
+
+    fake_settings = types.SimpleNamespace(DOWNLOAD_PATH=str(tmp_path))
+    monkeypatch.setattr(r.GeneratedMediaRepository, "get_by_id", _fake_get_by_id)
+    monkeypatch.setattr(r, "settings", fake_settings)
+
+    resp = await client.get("/api/v1/generated-media/88/cover")
+    assert resp.status_code == 404
