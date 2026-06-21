@@ -19,7 +19,11 @@ _GLOBAL_EXCLUDE: list[str] = []
 # per-LLM-call batch size. Keeps cost/latency bounded; the feed catches up over
 # successive ticks.
 _SCORE_MAX_ITEMS = 60
-_SCORE_BATCH_SIZE = 15
+# Small batches keep each LLM call's JSON array short enough that qwen3-6-35b
+# finishes the response without hitting the output-token ceiling and returning
+# truncated JSON ("Unterminated string"). Larger batches dropped the
+# reason/ai_summary for most items. See topic_scorer._MAX_OUTPUT_TOKENS.
+_SCORE_BATCH_SIZE = 6
 
 
 async def run_topic_fetch_once(
