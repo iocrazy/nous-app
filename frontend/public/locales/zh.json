@@ -1946,6 +1946,8 @@
   },
   "projectAssets": {
     "chatUploads": "Chat Uploads",
+    "generations": "Generations",
+    "noGenerations": "No generations yet",
     "noCanvases": "暂无画布",
     "appearsInCanvases_one": "出现在 {{count}} 个画布",
     "appearsInCanvases_other": "出现在 {{count}} 个画布",
