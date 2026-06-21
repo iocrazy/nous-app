@@ -63,23 +63,85 @@ def test_extract_json_strips_fences():
     assert svc._extract_json('[{"i":1}]') == [{"i": 1}]
 
 
+class _FakeGovernanceConfigured:
+    model = "deepseek-chat"
+    api_key = "k"
+    api_key_present = True
+    base_url = "http://x"
+
+
+class _FakeGovernanceUnconfigured:
+    model = ""
+    api_key = ""
+    api_key_present = False
+    base_url = ""
+
+
+def _make_composed(model: str = "deepseek-chat"):
+    """Build a minimal composed-prompt stand-in with model_copy support."""
+
+    class _Composed:
+        pass
+
+    obj = _Composed()
+    obj.model = model  # type: ignore[attr-defined]
+
+    def _model_copy(*, update=None):
+        new_obj = _Composed()
+        new_obj.model = (update or {}).get("model", obj.model)  # type: ignore[attr-defined]
+        new_obj._model_copy = _model_copy  # type: ignore[attr-defined]
+        return new_obj
+
+    obj.model_copy = _model_copy  # type: ignore[attr-defined]
+    return obj
+
+
+def _patch_governance(monkeypatch, governance_obj):
+    async def _fake(module):
+        return governance_obj
+
+    monkeypatch.setattr(
+        "app.services.topics.topic_scorer.get_module_governance", _fake
+    )
+
+
+def _patch_adapter_and_runner(monkeypatch, runner_instance):
+    monkeypatch.setattr(
+        "app.services.topics.topic_scorer.get_adapter_for_user",
+        lambda m, cfg, s: object(),
+    )
+    monkeypatch.setattr(
+        "app.services.topics.topic_scorer.get_skill_repository", lambda: None
+    )
+    monkeypatch.setattr(
+        "app.services.topics.topic_scorer.SkillToolService", lambda repo: None
+    )
+    monkeypatch.setattr(
+        "app.services.topics.topic_scorer.AgentRunner",
+        lambda **_: runner_instance,
+    )
+
+
 @pytest.mark.asyncio
 async def test_score_items_happy_path(monkeypatch):
     svc = TopicScorerService()
 
-    class _Composed:
-        model = "qwen-max"
+    class _Runner:
+        async def run_turn(self, composed, user_messages):
+            return {
+                "content": '[{"i":0,"score":0.8,"category":"model","tags":["x"]}]'
+            }
+
+    composed_obj = _make_composed("deepseek-chat")
 
     class _Composer:
         async def compose(self, inp):
-            return _Composed()
+            return composed_obj
 
-    class _Runner:
-        async def run_turn(self, composed, user_messages):
-            return {"content": '[{"i":0,"score":0.8,"category":"model","tags":["x"]}]'}
-
+    _patch_governance(monkeypatch, _FakeGovernanceConfigured())
+    _patch_adapter_and_runner(monkeypatch, _Runner())
     monkeypatch.setattr(svc, "_build_composer", lambda: _Composer())
-    monkeypatch.setattr(svc, "_build_runner", lambda m: _Runner())
+
     out = await svc.score_items([{"i": 0, "title": "t", "content": "c"}])
     assert out[0]["score"] == 0.8
     assert out[0]["category"] == "model"
@@ -89,19 +151,44 @@ async def test_score_items_happy_path(monkeypatch):
 async def test_score_items_runner_error_returns_empty(monkeypatch):
     svc = TopicScorerService()
 
-    class _Composed:
-        model = ""
-
-    class _Composer:
-        async def compose(self, inp):
-            return _Composed()
-
     class _Runner:
         async def run_turn(self, composed, user_messages):
             return {"error": "boom", "content": ""}
 
+    composed_obj = _make_composed("deepseek-chat")
+
+    class _Composer:
+        async def compose(self, inp):
+            return composed_obj
+
+    _patch_governance(monkeypatch, _FakeGovernanceConfigured())
+    _patch_adapter_and_runner(monkeypatch, _Runner())
     monkeypatch.setattr(svc, "_build_composer", lambda: _Composer())
-    monkeypatch.setattr(svc, "_build_runner", lambda m: _Runner())
+
+    assert await svc.score_items([{"i": 0, "title": "t", "content": "c"}]) == {}
+
+
+@pytest.mark.asyncio
+async def test_score_items_skips_when_governance_unconfigured(monkeypatch):
+    """No model or api_key_present → skip scoring and return {} without hitting LLM."""
+    svc = TopicScorerService()
+    _patch_governance(monkeypatch, _FakeGovernanceUnconfigured())
+    result = await svc.score_items([{"i": 0, "title": "t", "content": "c"}])
+    assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_score_items_skips_when_model_empty_key_present(monkeypatch):
+    """api_key_present=True but model='' → still skip."""
+    svc = TopicScorerService()
+
+    class _Gov:
+        model = ""
+        api_key = "k"
+        api_key_present = True
+        base_url = "http://x"
+
+    _patch_governance(monkeypatch, _Gov())
     assert await svc.score_items([{"i": 0, "title": "t", "content": "c"}]) == {}
 
 

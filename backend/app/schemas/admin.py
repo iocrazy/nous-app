@@ -299,6 +299,7 @@ class AIGovernanceResponse(BaseModel):
     caption: TaskModuleGovernanceResponse = TaskModuleGovernanceResponse()
     classification: TaskModuleGovernanceResponse = TaskModuleGovernanceResponse()
     summarization: TaskModuleGovernanceResponse = TaskModuleGovernanceResponse()
+    topic_scorer: TaskModuleGovernanceResponse = TaskModuleGovernanceResponse()
 
 
 class ChatModuleGovernanceUpdate(BaseModel):
@@ -331,6 +332,7 @@ class AIGovernanceUpdate(BaseModel):
     caption: Optional[TaskModuleGovernanceUpdate] = None
     classification: Optional[TaskModuleGovernanceUpdate] = None
     summarization: Optional[TaskModuleGovernanceUpdate] = None
+    topic_scorer: Optional[TaskModuleGovernanceUpdate] = None
 
 
 # ============================================
