@@ -84,6 +84,34 @@ class HotspotsRepository:
         )
         return (result.data or [None])[0]
 
+    async def list_unscored(self, limit: int = 60) -> list[dict[str, Any]]:
+        """Most-recent hotspots with no AI score yet (score IS NULL)."""
+        client = await self._client()
+        result = (
+            await client.table(self.TABLE)
+            .select("id, source_label, title, content_original")
+            .is_("score", "null")
+            .order("captured_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return result.data or []
+
+    async def patch_enrichment(self, hotspot_id: str, enrichment: dict) -> None:
+        """Write AI enrichment (score/reason/ai_summary/category/tags). Skips None."""
+        patch = {
+            k: enrichment[k]
+            for k in ("score", "reason", "ai_summary", "category", "tags")
+            if enrichment.get(k) is not None
+        }
+        if not patch:
+            return
+        client = await self._client()
+        try:
+            await client.table(self.TABLE).update(patch).eq("id", hotspot_id).execute()
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"patch_enrichment failed for {hotspot_id}: {e}")
+
     async def distinct_dates(self, limit_days: int = 60) -> list[str]:
         client = await self._client()
         result = (

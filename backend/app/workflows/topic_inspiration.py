@@ -9,10 +9,17 @@ from app.repositories.hotspots_repository import HotspotsRepository
 from app.repositories.signal_sources_repository import SignalSourcesRepository
 from app.services.topics.adapters.registry import get_adapter
 from app.services.topics.keyword_filter import keyword_filter
+from app.services.topics.topic_scorer import TopicScorerService
 
 # Phase 1: no per-user interest yet -> global keep-all pre-filter.
 _GLOBAL_INCLUDE: list[str] = []
 _GLOBAL_EXCLUDE: list[str] = []
+
+# Phase 2 scoring bounds: how many unscored hotspots to enrich per tick, and the
+# per-LLM-call batch size. Keeps cost/latency bounded; the feed catches up over
+# successive ticks.
+_SCORE_MAX_ITEMS = 60
+_SCORE_BATCH_SIZE = 15
 
 
 async def run_topic_fetch_once(
@@ -49,7 +56,55 @@ async def run_topic_fetch_once(
     return summary
 
 
+async def score_unscored_once(
+    *,
+    hotspots_repo: HotspotsRepository | None = None,
+    scorer: TopicScorerService | None = None,
+    max_items: int = _SCORE_MAX_ITEMS,
+    batch_size: int = _SCORE_BATCH_SIZE,
+) -> dict:
+    """Enrich score-less hotspots via the topic-scorer agent, in batches.
+
+    Additive + isolated: a scoring failure never blocks fetching. Rows already
+    show raw data; they gain score/reason/ai_summary/category/tags as this runs.
+    """
+    hotspots_repo = hotspots_repo or HotspotsRepository()
+    scorer = scorer or TopicScorerService()
+    rows = await hotspots_repo.list_unscored(limit=max_items)
+    if not rows:
+        return {"unscored": 0, "scored": 0}
+    scored = 0
+    for start in range(0, len(rows), batch_size):
+        chunk = rows[start : start + batch_size]
+        items = [
+            {
+                "i": idx,
+                "source": r.get("source_label"),
+                "title": r.get("title"),
+                "content": r.get("content_original"),
+            }
+            for idx, r in enumerate(chunk)
+        ]
+        try:
+            enrich = await scorer.score_items(items)
+        except Exception as e:  # noqa: BLE001 — scoring is best-effort, never fatal
+            logger.warning(f"topic scoring batch failed: {e}")
+            continue
+        for idx, r in enumerate(chunk):
+            e = enrich.get(idx)
+            if e:
+                await hotspots_repo.patch_enrichment(str(r["id"]), e)
+                scored += 1
+    summary = {"unscored": len(rows), "scored": scored}
+    logger.info(f"topic_score done: {summary}")
+    return summary
+
+
 @DBOS.scheduled("*/30 * * * *")  # every 30 min
 @DBOS.workflow()
 async def topic_fetch_workflow(scheduled_time: datetime, actual_time: datetime) -> None:
     await run_topic_fetch_once()
+    try:
+        await score_unscored_once()
+    except Exception as e:  # noqa: BLE001 — never let scoring break the schedule
+        logger.warning(f"topic scoring pass failed: {e}")
