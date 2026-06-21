@@ -1,7 +1,7 @@
 # Plan: Worker Foundation — evidence-based liveness, multi-worker safety, scheduled-growth hardening
 
-Date: 2026-06-20
-Status: DRAFT (planning only — no code yet)
+Date: 2026-06-20 (updated 2026-06-21)
+Status: **P0 ✅ shipped (#802) · P1 ✅ shipped (#803, observe-watch) · P2+P3 merged → "HA enablement", DEFERRED until multi-worker · P4 deferred.** Single-worker prod is covered by P0+P1+#801; the rest pays off only at `--scale ≥2` (HA). See §4.
 Supersedes: `2026-06-20-unified-heartbeat.md` (that draft's dedicated-thread heartbeat + liveness-into-cancel are replaced here by activity-derived heartbeat + generation fencing)
 Related: #801 (zombie reaper, shipped), `reference_debug_dbos_zombie_downloads`, `bug_sweeper_wrongly_marks_recoverable_lost` (#492), `bug_worker_down_after_deploy`, `bug_cover_hang_cascade_and_autotag_scope` (#608), `bug_extract_audio_misleading_lost_message` (#668)
 Cross-pollination: patterns extracted from `openclaw` (lifecycleGeneration fencing, activity heartbeat, evidence-first orphan classifier) and `hermes-agent` (activity-evidence dual-threshold staleness, infra-vs-fault `completion_reason` enum, dynamic grace window, advance-before-dispatch).
@@ -57,8 +57,8 @@ The whole plan lives in making E2/E3 precise and evidence-backed, and in NEVER l
 ```
 
 ### Pillar A — evidence-based liveness
-- **Activity-derived heartbeat, NO dedicated thread.** Bump `task_tracking.heartbeat_at` as a side effect of the progress writes the workflow ALREADY makes (`update_progress`, step boundaries). A streaming download refreshes itself for free; only a genuinely silent task ages out. (openclaw `agent-events.ts:436` `lastActiveAt`; hermes activity counter.) This sidesteps the killer flaw of the prior draft: a dedicated heartbeat thread sharing the saturated Supavisor pool would false-stale exactly when the worker is busiest.
-- **Dual-threshold staleness.** Generous budget while inside a long step (download/transcode/cover), tight budget between steps. (hermes `delegate_tool.py` `_STALE_CYCLES_IN_TOOL=40` vs `_IDLE=15`.) Kills the #608/#668 "legit-long task reaped early" class.
+- **⚠️ CORRECTED 2026-06-21 — use the PROCESS heartbeat, NOT a per-task one.** The original idea (bump `task_tracking.heartbeat_at` inside `update_progress`, borrowed from openclaw/hermes) does NOT fit mediahub. Verified: `update_progress` is called at COARSE milestones only (ai_summary 25%→70%→100%, ai_transcription 40%→100%, soda download 20%→80%) and does NOT touch `heartbeat_at` — the long blocking step (whisper, ffmpeg, yt-dlp) runs minutes between milestones with no signal. Agent loops iterate frequently so a per-task activity heartbeat works for THEM; mediahub workflows are coarse, so a per-task heartbeat would false-stale mid-step and re-create #492. **The right liveness source is the P1 `worker_registry` PROCESS heartbeat**: a task is alive iff its OWNING worker's registry heartbeat is fresh, regardless of per-task silence. Uses what P1 already shipped, kills the false-stale problem (a long silent step is fine while the worker process is alive), and needs no per-task heartbeat. Consequence: per-task `task_tracking.heartbeat_at` is dropped from the design; "dual-threshold per-task staleness" is moot.
+- ~~**Dual-threshold staleness.**~~ DROPPED (see correction above) — there's no reliable per-task progress signal to threshold against. The per-task-type hard ceiling already serves as the "legit-long task" budget; the process heartbeat covers worker death.
 - **Detect ≠ act.** The sweeper FLAGS suspected-dead; a second evidence pass (DBOS status? boot-gen live? real file progressing?) decides. (hermes "heartbeat stops refreshing, lets a higher layer time out".)
 - **Infra-vs-fault reason enum.** `lost`/`worker_lost` (→ recover/retry, surface "interrupted") vs `failed` + decoded real error (→ fault). Propagate the real error, never overwrite with a generic "lost" string. (hermes `completion_reason: lost|exited`, mediahub #668.)
 
@@ -72,15 +72,16 @@ The whole plan lives in making E2/E3 precise and evidence-backed, and in NEVER l
 - **Dynamic grace window** for the data-driven `scheduled_master` (`user_schedules`): on a missed tick after downtime, "within half-period grace → catch up; beyond → fast-forward + skip" instead of either replaying a stale burst or dropping silently. (hermes `jobs.py:_compute_grace_seconds` 424-453.)
 - **Recovery-storm guard scales.** `_pre_launch_sweep_stale_scheduled` (cancels `sched-*` PENDING >3min) already exists; verify it stays correct as cron count grows, and that boot-grace covers a larger sched backlog drain.
 
-## 4. Phased rollout (risk-ordered: lowest-risk / highest-value first)
+## 4. Phased rollout (UPDATED 2026-06-21)
 
-| Phase | What | Risk to running workflows | Ship gate |
-|---|---|---|---|
-| **P0** Semantic correctness | Infra-drop → `lost`(retryable) not `failed`; #801 version-orphan reconcile uses `lost`; seed the reason split. Propagate real DBOS error on E1. | **zero** (relabel only, no new infra) | tiny PR |
-| **P1** Activity heartbeat (observe) | `heartbeat_at` bumped inside existing `update_progress`/step writes; `worker_registry` + per-process `executor_id` + `boot_generation` written; sweeper LOGS "would-flag" only. | **zero** (write + observe, no action) | shadow days |
-| **P2** Evidence verdict + dual-threshold | Replace timer-LOST with E1/E2/E3 logic + dual-threshold staleness + detect/act split. Behind `FEATURE_EVIDENCE_LIVENESS`. | low (E3 never cancels/fails; only marks interrupted) | flag |
-| **P3** Generation fencing → multi-worker | Sweeper treats dead-generation rows as E2 orphans (requeue). Validate `--scale 2` end-to-end (no double-exec). | medium (the scale test itself) | flag + staged scale test |
-| **P4** Scheduled hardening | Dynamic grace for `scheduled_master`; "@DBOS.scheduled only" lint; recovery-storm guard review. | low | per-item |
+| Phase | What | Status |
+|---|---|---|
+| **P0** Semantic correctness | Infra-drop (E2 version-orphan / E3 no-claim) → `lost`(retryable) not `failed`; E1 real ERROR stays `failed`+decoded. | ✅ **SHIPPED #802 v0.23.102** |
+| **P1** worker_registry process heartbeat (observe) | mig303 `worker_registry`(executor_id PK / boot_generation / heartbeat_at, RLS); refresh inside the 2-min health tick (no dedicated thread); LOG-only. | ✅ **SHIPPED #803 v0.23.103** (prod-verified, observe-watch ongoing) |
+| **P2+P3** (MERGED) → **"HA enablement"** | Process-heartbeat liveness + ownership stamping: per-process `executor_id` (`worker-<idx>`) + stamp `boot_generation` on claimed `task_tracking` rows; a task whose OWNING worker's registry heartbeat is stale (or whose generation is dead) is an E3/E2 orphan → recover/requeue, NEVER cancel-on-timer. Validate `--scale 2` (no double-exec). | ⬜ **DEFERRED until going multi-worker.** See merge rationale below. |
+| **P4** Scheduled hardening | Dynamic grace for `scheduled_master`; "@DBOS.scheduled only" lint; recovery-storm guard review. | ⬜ deferred (do alongside cron growth) |
+
+**Why P2 and P3 merged + deferred (2026-06-21):** the Pillar-A correction means liveness = "is the owning worker alive?", which REQUIRES knowing which worker owns each task = P3's `boot_generation`/`executor_id` stamp. So the verdict (P2) depends on the ownership stamp (P3) — they're one piece. And that piece only PAYS OFF at multi-worker: at single worker, if the worker dies nothing runs the sweeper anyway (it lives on that worker); it restarts, DBOS recovery reclaims its orphans, boot-grace skips reaping. The cross-worker detection ("worker-B notices worker-A died") is the whole value, and it's gated on `--scale ≥2`. Prod is single-worker today (uvicorn no `--workers`, no replicas), so P0+P1+#801 already cover the realistic single-worker cases. **Build P2+P3 as the HA-enablement project when you actually go `--scale 2` — not before.** It also still wants P1's shadow data (heartbeat reliable under load) first.
 
 Each phase is independently shippable and reverts via its flag (P2/P3) or a one-line relabel revert (P0). P1 is pure addition.
 
