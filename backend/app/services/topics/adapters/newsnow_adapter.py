@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import os
-
 import httpx
 
+from app.core.config import settings
 from app.services.topics.adapters.base import HotspotCandidate, SourceAdapter
 
 _OK_STATUS = {"success", "cache"}
@@ -11,9 +10,9 @@ _OK_STATUS = {"success", "cache"}
 
 class NewsNowAdapter(SourceAdapter):
     def __init__(self, api_url: str | None = None) -> None:
-        self.api_url = (
-            api_url or os.getenv("NEWSNOW_API_URL", "http://localhost:4000")
-        ).rstrip("/")
+        # NEWSNOW_API_URL comes from the bind-mounted /app/.env via pydantic
+        # Settings (NOT os.environ) — read it off `settings`, not os.getenv.
+        self.api_url = (api_url or settings.NEWSNOW_API_URL).rstrip("/")
 
     async def _get_json(self, url: str, timeout: float) -> dict:
         async with httpx.AsyncClient(follow_redirects=True) as client:
