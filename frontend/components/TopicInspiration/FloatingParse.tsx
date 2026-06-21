@@ -1,7 +1,7 @@
 // frontend/components/TopicInspiration/FloatingParse.tsx
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link2, X, Loader2 } from 'lucide-react';
+import { Eye, FileText, Link2, Loader2, Mic, X } from 'lucide-react';
 import { islandUI } from '../../utils/featureFlags';
 import { useToast } from '../Toast';
 import { detectParseMode } from './parseModeDetect';
@@ -12,6 +12,9 @@ import {
   downloadSodaTracks,
   type SodaPlaylistResult,
 } from '../../services/parserService';
+import { fetchAllTags, createTag } from '../../services/unifiedTagService';
+import { EagleTagPicker } from '../EagleTagPicker';
+import type { Tag } from '../../types';
 
 type Phase = 'collapsed' | 'input' | 'result';
 
@@ -24,6 +27,12 @@ interface ParseOutcome {
   playlist?: SodaPlaylistResult;
 }
 
+const AI_INTENTS = [
+  { name: 'Transcript', label: 'Transcript', Icon: Mic },
+  { name: 'Summary', label: 'Summary', Icon: FileText },
+  { name: 'Analyze', label: 'Analyze', Icon: Eye },
+] as const;
+
 export const FloatingParse: React.FC = () => {
   const { t } = useTranslation();
   const island = islandUI();
@@ -33,7 +42,36 @@ export const FloatingParse: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ParseOutcome | null>(null);
 
+  // Tag state
+  const [allTags, setAllTags] = useState<Tag[]>([]);
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+
   const detection = useMemo(() => detectParseMode(input), [input]);
+
+  // Load tags once on mount
+  useEffect(() => {
+    fetchAllTags()
+      .then(setAllTags)
+      .catch((err) => {
+        console.error('FloatingParse: failed to load tags', err);
+      });
+  }, []);
+
+  // --- AI intent helpers ---
+  const aiTagId = (name: string): string | undefined => {
+    const tag =
+      allTags.find((tg) => tg.name === name && tg.type === 'system') ??
+      allTags.find((tg) => tg.name === name);
+    return tag ? String(tag.id) : undefined;
+  };
+
+  const toggleAiIntent = (name: string) => {
+    const id = aiTagId(name);
+    if (!id) return;
+    setSelectedTagIds((prev) =>
+      prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id],
+    );
+  };
 
   // Unified parse: route by the detected mode so playlist / batch links don't
   // get mis-handled as a single link (which fails with "Track unavailable").
@@ -51,7 +89,11 @@ export const FloatingParse: React.FC = () => {
           playlist: pl,
         });
       } else if (detection.mode === 'batch') {
-        const res = await parseBatchLinks(urls, { video_bool: true, cover_bool: true });
+        const res = await parseBatchLinks(urls, {
+          video_bool: true,
+          cover_bool: true,
+          tag_ids: selectedTagIds,
+        });
         setResult({
           kind: 'batch',
           title: t('topic.batchParse', 'Batch'),
@@ -64,6 +106,7 @@ export const FloatingParse: React.FC = () => {
         const res = (await parseShareLink(text, {
           video_bool: true,
           cover_bool: true,
+          tag_ids: selectedTagIds,
         })) as { title?: string; videos?: Array<{ title?: string }> };
         setResult({
           kind: 'single',
@@ -109,6 +152,7 @@ export const FloatingParse: React.FC = () => {
     setPhase('collapsed');
     setResult(null);
     setInput('');
+    setSelectedTagIds([]);
   };
 
   if (phase === 'collapsed') {
@@ -152,6 +196,57 @@ export const FloatingParse: React.FC = () => {
             className="w-full bg-island-2 border border-line rounded-lg px-2.5 py-2 text-xs text-content-2 h-20 resize-none"
           />
           <div className="text-[11px] text-content-3 mt-1">{detection.label}</div>
+
+          {/* AI Processing + Tag Picker — hidden for playlist mode */}
+          {detection.mode !== 'playlist' && (
+            <>
+              {/* AI Processing toggles */}
+              <div className="mt-2">
+                <div className="text-[11px] text-content-3 mb-1">AI Processing</div>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {AI_INTENTS.map(({ name, label, Icon }) => {
+                    const id = aiTagId(name);
+                    const active = !!id && selectedTagIds.includes(id);
+                    return (
+                      <button
+                        key={name}
+                        disabled={!id}
+                        onClick={() => toggleAiIntent(name)}
+                        className={`flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-[11px] font-medium border transition-colors ${
+                          active
+                            ? 'bg-indigo-500/[0.12] text-[var(--ind-tx,#4338ca)] border-indigo-500/35'
+                            : 'bg-island-2 text-content-2 border-line'
+                        } disabled:opacity-40`}
+                      >
+                        <Icon size={12} />
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Tag picker */}
+              <div className="mt-2">
+                <EagleTagPicker
+                  selectedTagIds={selectedTagIds}
+                  onTagsChange={setSelectedTagIds}
+                  allTags={allTags}
+                  onCreate={async (name, color) => {
+                    try {
+                      const tag = await createTag({ name, color, type: 'user' });
+                      setAllTags((prev) => [...prev, tag]);
+                      return tag as Tag;
+                    } catch (err) {
+                      console.error('FloatingParse: failed to create tag', err);
+                      return null;
+                    }
+                  }}
+                />
+              </div>
+            </>
+          )}
+
           <button
             disabled={busy || detection.count === 0}
             onClick={onAnalyze}
