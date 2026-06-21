@@ -63,6 +63,7 @@ dependencies = [
     "filetype>=1.2.0",
     "pgvector>=0.4.2",
     "graphiti-core[falkordb]>=0.29.2",
+    "feedparser>=6.0.12",
 ]
 
 [project.optional-dependencies]

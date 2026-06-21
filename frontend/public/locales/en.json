@@ -33,7 +33,8 @@
     "sharedCollections": "Team Library",
     "newCollection": "New Collection",
     "dashboard": "Dashboard",
-    "settings": "Settings"
+    "settings": "Settings",
+    "topicInspiration": "Topic Inspiration"
   },
   "sidebar": {
     "personal": "Personal",
@@ -1981,5 +1982,25 @@
     "default": "default",
     "recentFailures": "{{failures}} of {{runs}} recent runs failed",
     "recentOk": "{{runs}} recent runs OK"
+  },
+  "topic": {
+    "title": "Topic Inspiration",
+    "subtitle": "AI-curated high-value topics and inspiration",
+    "currentHot": "Current Hotspots",
+    "generateScript": "Generate Script",
+    "parseDownload": "Parse & Download",
+    "addTag": "Tag",
+    "viewSource": "View Source",
+    "reason": "Why it matters",
+    "aiSummary": "AI Summary",
+    "source": "Source",
+    "score": "Score",
+    "scriptStarted": "Script generation started",
+    "downloadStarted": "Download dispatched",
+    "parseLink": "Parse Link",
+    "pasteHint": "Paste single / batch / playlist links",
+    "analyze": "Analyze",
+    "savedToResources": "Saved to Resources",
+    "saveToResources": "Save to Resources"
   }
 }

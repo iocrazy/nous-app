@@ -1,0 +1,33 @@
+import pytest
+
+from app.services.topics.adapters.newsnow_adapter import NewsNowAdapter
+
+
+@pytest.mark.asyncio
+async def test_newsnow_maps_items(monkeypatch):
+    async def fake_get_json(url, timeout):
+        assert "id=hackernews" in url
+        return {
+            "status": "success",
+            "items": [
+                {"id": "1", "title": "Item A", "url": "https://h.com/a"},
+                {"id": "2", "title": "Item B", "url": "https://h.com/b"},
+            ],
+        }
+
+    adapter = NewsNowAdapter(api_url="http://nn")
+    monkeypatch.setattr(adapter, "_get_json", fake_get_json)
+    out = await adapter.fetch({"name": "HN", "config": {"platform_id": "hackernews"}})
+    assert [c.title for c in out] == ["Item A", "Item B"]
+    assert out[0].source_label == "HN"
+
+
+@pytest.mark.asyncio
+async def test_newsnow_raises_on_bad_status(monkeypatch):
+    async def fake_get_json(url, timeout):
+        return {"status": "error", "items": []}
+
+    adapter = NewsNowAdapter(api_url="http://nn")
+    monkeypatch.setattr(adapter, "_get_json", fake_get_json)
+    with pytest.raises(ValueError):
+        await adapter.fetch({"name": "X", "config": {"platform_id": "x"}})

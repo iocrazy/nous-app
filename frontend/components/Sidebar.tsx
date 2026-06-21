@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
-  Search,
+  Lightbulb,
   Settings,
   FolderKanban,
   Layers,
@@ -443,7 +443,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <nav className="flex-1 flex flex-col gap-4">
         <SidebarSection label="" hideLabel>
           {isViewEnabled('parser') && (
-            <SidebarItem icon={Search} label={t('nav.linkParser')} active={currentView === 'parser'} onClick={() => handleNav('parser')} collapsed={collapsed} island={island} />
+            <SidebarItem icon={Lightbulb} label={t('nav.topicInspiration')} active={currentView === 'parser'} onClick={() => handleNav('parser')} collapsed={collapsed} island={island} />
           )}
           {isViewEnabled('resources') && (
             <SidebarItem icon={Layers} label={t('sidebar.resources')} active={currentView === 'resources'} onClick={() => handleNav('resources')} collapsed={collapsed} island={island} />
