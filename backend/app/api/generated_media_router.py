@@ -48,10 +48,13 @@ async def get_generation_file(gen_id: int, auth: AuthDep):
     row = await GeneratedMediaRepository().get(gen_id, await _scope(auth))
     if not row:
         raise HTTPException(status_code=404, detail="not found")
-    path = os.path.join(settings.DOWNLOAD_PATH, row["file_path"])
-    if not os.path.isfile(path):
+    base = os.path.realpath(settings.DOWNLOAD_PATH)
+    real = os.path.realpath(os.path.join(settings.DOWNLOAD_PATH, row["file_path"]))
+    if not (real == base or real.startswith(base + os.sep)):
+        raise HTTPException(status_code=404, detail="not found")
+    if not os.path.isfile(real):
         raise HTTPException(status_code=404, detail="file missing")
-    return FileResponse(path, media_type=row.get("mime") or "application/octet-stream")
+    return FileResponse(real, media_type=row.get("mime") or "application/octet-stream")
 
 
 @router.get("/{gen_id}")

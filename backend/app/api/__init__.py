@@ -20,6 +20,7 @@ from app.api.collections_router import router as collections_router
 from app.api.error_report_router import router as error_report_router
 from app.api.flows_router import router as flows_router
 from app.api.frontend_config_router import router as frontend_config_router
+from app.api.generated_media_router import router as generated_media_router
 from app.api.invites_router import router as invites_router
 from app.api.libraries_router import router as libraries_router
 from app.api.logs_router import router as logs_router
@@ -30,7 +31,6 @@ from app.api.media_router import router as media_router
 from app.api.notifications_router import router as notifications_router
 from app.api.payment_router import router as payment_router
 from app.api.points_router import router as points_router
-from app.api.generated_media_router import router as generated_media_router
 from app.api.project_assets_router import router as _project_assets_router
 from app.api.projects_router import router as projects_router
 from app.api.realtime_router import router as realtime_router

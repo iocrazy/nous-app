@@ -13,6 +13,7 @@ test_canvas_classic_node_route.py for canvases_router).
 from __future__ import annotations
 
 import sys
+import types
 
 import pytest
 import pytest_asyncio
@@ -152,3 +153,73 @@ async def test_delete_returns_deleted_bool(monkeypatch, client):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["data"]["deleted"] is True
+
+
+# ---------------------------------------------------------------------------
+# /file endpoint tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_file_404_when_not_in_scope(monkeypatch, client):
+    """GET /{id}/file returns 404 when repo.get returns None (row not in scope)."""
+
+    async def _fake_scope(uid: str) -> str:
+        return "99"
+
+    async def _fake_get(self, gen_id: int, scope_id: int):
+        return None
+
+    monkeypatch.setattr(r, "_resolve_personal_team_id", _fake_scope)
+    monkeypatch.setattr(r.GeneratedMediaRepository, "get", _fake_get)
+
+    resp = await client.get("/api/v1/generated-media/55/file")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_file_404_when_file_missing_on_disk(monkeypatch, tmp_path, client):
+    """GET /{id}/file returns 404 (file missing) when the row exists but the file
+    is absent from disk."""
+
+    async def _fake_scope(uid: str) -> str:
+        return "5"
+
+    async def _fake_get(self, gen_id: int, scope_id: int):
+        return {"id": gen_id, "file_path": "nonexistent_file.mp4", "mime": "video/mp4"}
+
+    # Patch settings so DOWNLOAD_PATH points to the temp dir (no file created).
+    fake_settings = types.SimpleNamespace(DOWNLOAD_PATH=str(tmp_path))
+    monkeypatch.setattr(r, "_resolve_personal_team_id", _fake_scope)
+    monkeypatch.setattr(r.GeneratedMediaRepository, "get", _fake_get)
+    monkeypatch.setattr(r, "settings", fake_settings)
+
+    resp = await client.get("/api/v1/generated-media/10/file")
+    assert resp.status_code == 404
+    assert resp.json()["error"] == "file missing"
+
+
+@pytest.mark.asyncio
+async def test_get_file_happy_path(monkeypatch, tmp_path, client):
+    """GET /{id}/file returns 200 and the file bytes when row is in scope and
+    the file exists on disk."""
+
+    file_name = "output.jpg"
+    file_content = b"\xff\xd8\xff\xe0JFIF fake jpeg bytes"
+    (tmp_path / file_name).write_bytes(file_content)
+
+    async def _fake_scope(uid: str) -> str:
+        return "7"
+
+    async def _fake_get(self, gen_id: int, scope_id: int):
+        return {"id": gen_id, "file_path": file_name, "mime": "image/jpeg"}
+
+    fake_settings = types.SimpleNamespace(DOWNLOAD_PATH=str(tmp_path))
+    monkeypatch.setattr(r, "_resolve_personal_team_id", _fake_scope)
+    monkeypatch.setattr(r.GeneratedMediaRepository, "get", _fake_get)
+    monkeypatch.setattr(r, "settings", fake_settings)
+
+    resp = await client.get("/api/v1/generated-media/20/file")
+    assert resp.status_code == 200, resp.text
+    assert resp.content == file_content
+    assert "image/jpeg" in resp.headers.get("content-type", "")
