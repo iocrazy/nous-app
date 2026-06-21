@@ -26,6 +26,52 @@ def test_current_executor_id_is_a_role_value():
     assert eid in {r.value for r in ProcessRole}
 
 
+# ── resolve_executor_id: HA per-replica identity (flag-gated) ───────────
+
+
+def test_resolve_executor_id_flag_off_is_role_name(monkeypatch):
+    from app.agent_framework.role import ProcessRole
+
+    monkeypatch.delenv("FEATURE_MULTI_WORKER_ID", raising=False)
+    monkeypatch.setenv("WORKER_REPLICA_INDEX", "3")  # ignored while flag off
+    assert wi.resolve_executor_id(ProcessRole.WORKER) == "worker"
+    assert wi.resolve_executor_id(ProcessRole.GATEWAY) == "gateway"
+    assert wi.resolve_executor_id(ProcessRole.COMBINED) == "combined"
+
+
+def test_resolve_executor_id_flag_on_worker_gets_replica(monkeypatch):
+    from app.agent_framework.role import ProcessRole
+
+    monkeypatch.setenv("FEATURE_MULTI_WORKER_ID", "true")
+    # Lone worker (no index env) → stable 'worker-0'.
+    monkeypatch.delenv("WORKER_REPLICA_INDEX", raising=False)
+    assert wi.resolve_executor_id(ProcessRole.WORKER) == "worker-0"
+    # Numbered replica.
+    monkeypatch.setenv("WORKER_REPLICA_INDEX", "1")
+    assert wi.resolve_executor_id(ProcessRole.WORKER) == "worker-1"
+
+
+def test_resolve_executor_id_flag_on_leaves_gateway_and_combined(monkeypatch):
+    from app.agent_framework.role import ProcessRole
+
+    monkeypatch.setenv("FEATURE_MULTI_WORKER_ID", "true")
+    monkeypatch.setenv("WORKER_REPLICA_INDEX", "2")
+    # Only the worker role is per-replica; gateway/combined are singletons.
+    assert wi.resolve_executor_id(ProcessRole.GATEWAY) == "gateway"
+    assert wi.resolve_executor_id(ProcessRole.COMBINED) == "combined"
+
+
+def test_multi_worker_enabled_tracks_flag(monkeypatch):
+    monkeypatch.delenv("FEATURE_MULTI_WORKER_ID", raising=False)
+    assert wi.multi_worker_enabled() is False
+    for on in ("1", "true", "yes", "on", "TRUE"):
+        monkeypatch.setenv("FEATURE_MULTI_WORKER_ID", on)
+        assert wi.multi_worker_enabled() is True
+    for off in ("0", "false", "no", ""):
+        monkeypatch.setenv("FEATURE_MULTI_WORKER_ID", off)
+        assert wi.multi_worker_enabled() is False
+
+
 class _FakeEngine:
     def __init__(self, *, fetch_rows=None, raise_on=None):
         self.executed: list[str] = []
