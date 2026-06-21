@@ -120,6 +120,79 @@ def _patch_adapter_and_runner(monkeypatch, runner_instance):
     )
 
 
+def _patch_nous(monkeypatch, *, allowed=False, models=None):
+    """Patch the Nous-provider resolution. Default: not allowed (skip Nous)."""
+
+    async def _allowed(module):
+        return allowed
+
+    monkeypatch.setattr(
+        "app.services.ai.governance.ai_governance.is_nous_allowed", _allowed
+    )
+    # Also patch the name imported into topic_scorer's namespace.
+    monkeypatch.setattr("app.services.topics.topic_scorer.is_nous_allowed", _allowed)
+
+    class _Repo:
+        async def list_enabled(self, type_filter=None):
+            return models or []
+
+        async def get_by_name(self, name):
+            for m in models or []:
+                if m["name"] == name:
+                    return m
+            return None
+
+    monkeypatch.setattr(
+        "app.repositories.nous_repository.get_nous_repository", lambda: _Repo()
+    )
+
+
+@pytest.mark.asyncio
+async def test_score_items_uses_nous_when_allowed(monkeypatch):
+    """Nous allowed + an enabled llm model → adapter built from Nous config."""
+    svc = TopicScorerService()
+
+    class _Runner:
+        async def run_turn(self, composed, user_messages):
+            return {
+                "content": '[{"i":0,"score":0.9,"category":"product","tags":["a"]}]'
+            }
+
+    class _Composer:
+        async def compose(self, inp):
+            return _make_composed("qwen3-6-35b")
+
+    monkeypatch.setattr(svc, "_build_composer", lambda: _Composer())
+    monkeypatch.setattr(
+        "app.services.topics.topic_scorer.OpenAICompatibleAdapter",
+        lambda **_: object(),
+    )
+    monkeypatch.setattr(
+        "app.services.topics.topic_scorer.get_skill_repository", lambda: None
+    )
+    monkeypatch.setattr(
+        "app.services.topics.topic_scorer.SkillToolService", lambda repo: None
+    )
+    monkeypatch.setattr(
+        "app.services.topics.topic_scorer.AgentRunner", lambda **_: _Runner()
+    )
+    _patch_nous(
+        monkeypatch,
+        allowed=True,
+        models=[
+            {
+                "name": "nous-qwen3-llm",
+                "actual_model": "qwen3-6-35b",
+                "base_url": "http://10.0.0.10:8000/v1",
+                "api_key": "k",
+            }
+        ],
+    )
+    out = await svc.score_items([{"i": 0, "title": "t", "content": "c"}])
+    assert out[0]["score"] == 0.9
+    assert out[0]["category"] == "product"
+
+
 @pytest.mark.asyncio
 async def test_score_items_happy_path(monkeypatch):
     svc = TopicScorerService()
@@ -134,6 +207,7 @@ async def test_score_items_happy_path(monkeypatch):
         async def compose(self, inp):
             return composed_obj
 
+    _patch_nous(monkeypatch)
     _patch_governance(monkeypatch, _FakeGovernanceConfigured())
     _patch_adapter_and_runner(monkeypatch, _Runner())
     monkeypatch.setattr(svc, "_build_composer", lambda: _Composer())
@@ -157,6 +231,7 @@ async def test_score_items_runner_error_returns_empty(monkeypatch):
         async def compose(self, inp):
             return composed_obj
 
+    _patch_nous(monkeypatch)
     _patch_governance(monkeypatch, _FakeGovernanceConfigured())
     _patch_adapter_and_runner(monkeypatch, _Runner())
     monkeypatch.setattr(svc, "_build_composer", lambda: _Composer())
@@ -168,6 +243,7 @@ async def test_score_items_runner_error_returns_empty(monkeypatch):
 async def test_score_items_skips_when_governance_unconfigured(monkeypatch):
     """No model or api_key_present → skip scoring and return {} without hitting LLM."""
     svc = TopicScorerService()
+    _patch_nous(monkeypatch)
     _patch_governance(monkeypatch, _FakeGovernanceUnconfigured())
     result = await svc.score_items([{"i": 0, "title": "t", "content": "c"}])
     assert result == {}
@@ -184,6 +260,7 @@ async def test_score_items_skips_when_model_empty_key_present(monkeypatch):
         api_key_present = True
         base_url = "http://x"
 
+    _patch_nous(monkeypatch)
     _patch_governance(monkeypatch, _Gov())
     assert await svc.score_items([{"i": 0, "title": "t", "content": "c"}]) == {}
 
