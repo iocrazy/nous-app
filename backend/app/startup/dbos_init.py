@@ -62,11 +62,17 @@ def init_dbos(app: FastAPI) -> None:
             logger.info("DBOS gateway: enqueue-only DBOSClient (no executor)")
             return
 
-        # Stable per-role executor id isolates the DBOS recovery path (which
-        # ignores listen_queues) so a gateway restart can't re-run the worker's
-        # in-flight workflows. Role name is stable across restarts; container
-        # hostname is NOT (it changes on recreate), so don't use it.
-        dbos_orchestrator.init_dbos(executor_id=role.value)
+        # executor_id isolates the DBOS recovery path (which ignores
+        # listen_queues) so one process can't re-run another's in-flight
+        # workflows. Default = role name ('gateway'/'worker'/'combined'), stable
+        # across restarts (NOT the container hostname, which changes on
+        # recreate). With FEATURE_MULTI_WORKER_ID on, the worker role resolves to
+        # a STABLE per-replica id ('worker-<WORKER_REPLICA_INDEX>') so two worker
+        # processes never share an id → no recovery double-execution. See
+        # worker_identity.resolve_executor_id + the worker-foundation plan.
+        from app.services.infra.worker_identity import resolve_executor_id
+
+        dbos_orchestrator.init_dbos(executor_id=resolve_executor_id(role))
         if dbos_orchestrator.is_enabled():
             from app import workflows  # noqa: F401 — registers @DBOS decorators
 

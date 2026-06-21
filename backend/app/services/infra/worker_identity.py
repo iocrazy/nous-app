@@ -32,12 +32,47 @@ def boot_generation() -> str:
     return _BOOT_GENERATION
 
 
+def _multi_worker_id_enabled() -> bool:
+    """HA enablement gate. OFF by default → single-worker behavior is byte-for-
+    byte unchanged. ON → workers get a stable PER-REPLICA executor_id so DBOS
+    recovery (keyed on executor_id) isolates each worker: a worker only recovers
+    its OWN in-flight workflows, never a sibling's → `--scale`/multi-service is
+    safe (no double-execution). Flip only after the 2-worker validation."""
+    return os.environ.get("FEATURE_MULTI_WORKER_ID", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def resolve_executor_id(role: Any) -> str:
+    """The DBOS executor_id for a process role.
+
+    gateway / combined → the role name (unchanged). worker → the role name
+    ('worker') by default; with HA enabled, a STABLE per-replica id
+    `worker-<WORKER_REPLICA_INDEX>` (index defaults to 0 for a lone worker).
+
+    Stable-per-replica is the key property: replica N restarts as 'worker-N' and
+    reclaims ONLY its own orphans (DBOS recovery filters by executor_id), while
+    replica M never touches them. A per-process uuid would break cross-restart
+    recovery; the shared bare 'worker' breaks multi-worker. This is the middle
+    that satisfies both."""
+    from app.agent_framework.role import ProcessRole
+
+    if role == ProcessRole.WORKER and _multi_worker_id_enabled():
+        idx = os.environ.get("WORKER_REPLICA_INDEX", "0").strip() or "0"
+        return f"worker-{idx}"
+    return role.value if hasattr(role, "value") else str(role)
+
+
 def current_executor_id() -> str:
-    """The DBOS executor_id this process runs under — the role name, matching
-    what `init_dbos(executor_id=role.value)` set (see dbos_orchestrator)."""
+    """The DBOS executor_id this process runs under — must match what
+    `init_dbos(executor_id=resolve_executor_id(role))` set so the
+    worker_registry row keys on the same id DBOS uses."""
     from app.agent_framework.role import role_from_env
 
-    return role_from_env().value
+    return resolve_executor_id(role_from_env())
 
 
 async def upsert_registry(db_engine: Any) -> bool:
