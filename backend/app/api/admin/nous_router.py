@@ -99,9 +99,40 @@ async def probe_nous_models(body: NousProbeRequest, auth: AdminAuthDep):
 
 @router.post("", response_model=NousModelResponse)
 async def create_nous_model(body: NousModelCreate, auth: AdminAuthDep):
-    """Create a new Nous model."""
+    """Create a new Nous model.
+
+    Provider-card UX: a blank ``api_key`` inherits the key (and app_id) from an
+    existing model on the same ``actual_provider`` + ``base_url`` — so the admin
+    enters the key once per provider and adds more models without re-typing it.
+    """
     repo = get_nous_repository()
-    row = await repo.create(body.model_dump())
+    data = body.model_dump()
+    if not (data.get("api_key") or "").strip():
+        base_url = data.get("base_url") or ""
+        rows = await repo.list_all()
+        sibling = next(
+            (
+                r
+                for r in rows
+                if r.get("actual_provider") == data.get("actual_provider")
+                and (r.get("base_url") or "") == base_url
+                and (r.get("api_key") or "").strip()
+            ),
+            None,
+        )
+        if not sibling:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "API key required — no existing model on this provider to "
+                    "inherit the key from."
+                ),
+            )
+        data["api_key"] = sibling["api_key"]
+        if not (data.get("app_id") or "") and sibling.get("app_id"):
+            data["app_id"] = sibling["app_id"]
+
+    row = await repo.create(data)
     if not row:
         raise HTTPException(status_code=500, detail="Failed to create model")
     logger.info(f"[Admin] Created Nous model: {body.name}")

@@ -18,7 +18,9 @@ class NousModelCreate(BaseModel):
     description: Optional[str] = None
     actual_provider: str
     actual_model: str
-    api_key: str
+    # Blank → inherit from an existing model on the same provider+base_url
+    # (provider-card UX: enter the key once, add more models without re-typing).
+    api_key: str = ""
     app_id: Optional[str] = None
     base_url: Optional[str] = None
     pricing_type: Literal["per_hour", "per_request", "per_token"] = "per_hour"
