@@ -251,6 +251,12 @@ services:
       - "4000:4000"
     environment:
       - PORT=4000
+      # China-hosted NAS: foreign hot-lists (github-trending etc.) are only
+      # reachable through the LAN proxy; domestic sources route fine too.
+      # The backend itself needs NO proxy — it only calls mediahub-newsnow.
+      - HTTP_PROXY=http://192.168.50.3:8888
+      - HTTPS_PROXY=http://192.168.50.3:8888
+      - NO_PROXY=localhost,127.0.0.1
 
   # MediaHub Admin Panel (ACR + Watchtower auto-update)
   mediahub-admin:
