@@ -46,7 +46,7 @@ import { trashResourceByPlatformId, updateResource } from '../services/resourceS
 import { createTag, addResourceTag } from '../services/unifiedTagService';
 import { getDownloadUrl, getMusicDownloadUrl } from '../services/dataService';
 import { downloadFile, downloadWithAuth } from '../utils/download';
-import { exportMediaAsZip } from '../utils/zipExport';
+import { useExportTasks } from '../contexts/ExportTaskContext';
 import { useAuth } from '../contexts/AuthContext';
 
 import { DownloadInfoPanel } from './DownloadsView/DownloadInfoPanel';
@@ -63,6 +63,7 @@ export const DownloadsView: React.FC = () => {
   const navigate = useNavigate();
   const { selectedTeamId } = useTeamContext();
   const { addToast } = useToast();
+  const exportTasks = useExportTasks();
   const { mediaToken } = useAuth();
 
   // ─── Library data (shared via context — avoids duplicate Supabase fetch) ───
@@ -602,22 +603,11 @@ export const DownloadsView: React.FC = () => {
       .filter((v): v is Video => !!v);
     if (vids.length === 0) return;
     // Package the selection into ONE zip in the browser (approach A: client
-    // memory, no server-side zipping). Per-item file resolved by media_type.
-    addToast(`Packaging ${vids.length} item(s) into a zip…`, 'info');
-    try {
-      const { ok, failed } = await exportMediaAsZip(vids);
-      if (ok === 0) {
-        addToast('Download failed — no files could be fetched', 'error');
-      } else if (failed > 0) {
-        addToast(`Downloaded ${ok} item(s) as zip · ${failed} failed`, 'info');
-      } else {
-        addToast(`Downloaded ${ok} item(s) as zip`, 'success');
-      }
-    } catch (err) {
-      console.error('[DownloadsView] batch zip export failed', err);
-      addToast('Download failed', 'error');
-    }
-  }, [library, selectedIds, addToast]);
+    // memory, no server-side zipping). Tracked as a Task Center entry so the
+    // user sees live progress + a record, not just a fleeting toast.
+    addToast(`Packaging ${vids.length} item(s) into a zip — see Task Center`, 'info');
+    void exportTasks.runZipExport(vids, `${vids.length} downloads · zip`);
+  }, [library, selectedIds, addToast, exportTasks]);
 
   const handleBatchShare = useCallback(() => {
     if (selectedIds.size !== 1) {

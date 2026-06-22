@@ -1193,7 +1193,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
         <a
           href={fileUrl}
           download
-          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-content-2 hover:text-content ${cHoverSurf} rounded-lg transition-colors`}
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-content ${cCtrlBg} ${cHoverSurf} rounded-lg transition-colors`}
         >
           <Download size={14} />
           <span>{t('resources.download')}</span>
@@ -1202,7 +1202,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
       <div className="relative">
         <button
           onClick={() => setShowMoreMenu(!showMoreMenu)}
-          className={`p-1.5 text-content-2 hover:text-content ${cHoverSurf} rounded-lg transition-colors`}
+          className={`p-1.5 text-content ${cCtrlBg} ${cHoverSurf} rounded-lg transition-colors`}
         >
           <MoreHorizontal size={16} />
         </button>
@@ -1734,7 +1734,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               <a
                 href={fileUrl}
                 download
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-content-2 hover:text-content ${cHoverSurf} rounded-lg transition-colors`}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-content ${cCtrlBg} ${cHoverSurf} rounded-lg transition-colors`}
               >
                 <Download size={14} />
                 <span>{t('resources.download')}</span>
@@ -1743,7 +1743,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             <div className="relative">
               <button
                 onClick={() => setShowMoreMenu(!showMoreMenu)}
-                className={`p-1.5 text-content-2 hover:text-content ${cHoverSurf} rounded-lg transition-colors`}
+                className={`p-1.5 text-content ${cCtrlBg} ${cHoverSurf} rounded-lg transition-colors`}
               >
                 <MoreHorizontal size={16} />
               </button>

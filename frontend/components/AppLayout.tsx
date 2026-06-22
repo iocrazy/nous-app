@@ -19,6 +19,7 @@ import { TopBar } from './TopBar';
 import { ToastProvider } from './Toast';
 import { ConfirmProvider } from './ConfirmDialog';
 import { UploadProvider } from '../contexts/UploadContext';
+import { ExportTaskProvider } from '../contexts/ExportTaskContext';
 import { TaskManagerProvider } from '../contexts/TaskManagerContext';
 import { UserProfileModal } from './UserProfileModal';
 import { MobileProfilePage } from './MobileProfilePage';
@@ -426,6 +427,7 @@ function AppLayoutInner() {
     <ConfirmProvider>
     <TaskManagerProvider>
     <UploadProvider>
+    <ExportTaskProvider>
     {/* overflow-x-CLIP (not hidden): clip horizontal overflow WITHOUT becoming a
         scroll container — `overflow-x:hidden` silently turns the y-axis into a
         scroll container, which breaks `position: sticky` for everything inside
@@ -586,6 +588,7 @@ function AppLayoutInner() {
         }}
       />
     </div>
+    </ExportTaskProvider>
     </UploadProvider>
     </TaskManagerProvider>
     </ConfirmProvider>
