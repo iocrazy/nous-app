@@ -7,6 +7,25 @@ from loguru import logger
 from app.db.supabase_client import get_async_supabase_admin
 from app.services.topics.adapters.base import HotspotCandidate, make_dedup_key
 
+# Columns the free-text search matches against (title + body + AI summary + feed).
+_SEARCH_COLUMNS = ("title", "content_original", "ai_summary", "source_label")
+
+
+def sanitize_search(raw: Optional[str]) -> str:
+    """Make a user term safe to embed in a PostgREST ``or_`` ilike filter.
+
+    Drops the ``,()`` characters that delimit PostgREST filter syntax and
+    escapes the ``%`` / ``_`` LIKE wildcards. Returns ``""`` when nothing
+    usable remains (caller then skips the filter). Capped to bound query size.
+    """
+    cleaned = (raw or "").strip()
+    if not cleaned:
+        return ""
+    for ch in (",", "(", ")"):
+        cleaned = cleaned.replace(ch, " ")
+    cleaned = cleaned.replace("%", r"\%").replace("_", r"\_")
+    return " ".join(cleaned.split())[:100]
+
 
 class HotspotsRepository:
     TABLE = "hotspots"
@@ -61,16 +80,23 @@ class HotspotsRepository:
         day: Optional[str],
         category: Optional[str],
         limit: int = 100,
+        q: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         client = await self._client()
-        q = client.table(self.TABLE).select("*")
+        query = client.table(self.TABLE).select("*")
         if day:
-            q = q.gte("captured_at", f"{day}T00:00:00Z").lte(
+            query = query.gte("captured_at", f"{day}T00:00:00Z").lte(
                 "captured_at", f"{day}T23:59:59Z"
             )
         if category and category != "all":
-            q = q.eq("category", category)
-        result = await q.order("captured_at", desc=True).limit(limit).execute()
+            query = query.eq("category", category)
+        term = sanitize_search(q)
+        if term:
+            like = f"%{term}%"
+            query = query.or_(
+                ",".join(f"{col}.ilike.{like}" for col in _SEARCH_COLUMNS)
+            )
+        result = await query.order("captured_at", desc=True).limit(limit).execute()
         return result.data or []
 
     async def get_by_id(self, hotspot_id: str) -> dict | None:

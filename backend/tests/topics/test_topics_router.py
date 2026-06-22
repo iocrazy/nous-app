@@ -7,8 +7,13 @@ from fastapi.testclient import TestClient
 def client(monkeypatch):
     from app.api import topics_router as tr
 
+    calls = {}
+
     class _FakeRepo:
-        async def list_for_date(self, day, category, limit=100):
+        async def list_for_date(self, day, category, limit=100, q=None):
+            calls["day"] = day
+            calls["category"] = category
+            calls["q"] = q
             return [
                 {
                     "id": "1",
@@ -65,7 +70,9 @@ def client(monkeypatch):
     app = FastAPI()
     app.dependency_overrides[tr.get_auth] = lambda: type("A", (), {"user_id": "u1"})()
     app.include_router(tr.router, prefix="/api/v1")
-    return TestClient(app)
+    tc = TestClient(app)
+    tc.calls = calls  # expose captured repo args to tests
+    return tc
 
 
 def test_list_hotspots(client):
@@ -74,6 +81,21 @@ def test_list_hotspots(client):
     body = r.json()
     assert body["success"] and body["count"] == 1
     assert body["hotspots"][0]["title"] == "Hello"
+
+
+def test_list_hotspots_passes_search_and_ignores_day(client):
+    r = client.get("/api/v1/topics?q=gpt&day=2026-06-20")
+    assert r.status_code == 200
+    # search spans all dates: day is dropped when q is present
+    assert client.calls["q"] == "gpt"
+    assert client.calls["day"] is None
+
+
+def test_list_hotspots_keeps_day_when_no_search(client):
+    r = client.get("/api/v1/topics?day=2026-06-20")
+    assert r.status_code == 200
+    assert client.calls["day"] == "2026-06-20"
+    assert client.calls["q"] is None
 
 
 def test_dates(client):

@@ -2014,6 +2014,9 @@
     "sourcesHealthy": "信源正常",
     "sourcesUnhealthy": "{{count}} 个信源异常",
     "sourceDisabled": "已禁用",
-    "lastOk": "上次成功"
+    "lastOk": "上次成功",
+    "searchPlaceholder": "搜索热点...",
+    "searchResults": "「{{query}}」的 {{count}} 条结果",
+    "dateDisabledWhenSearching": "搜索全部日期"
   }
 }

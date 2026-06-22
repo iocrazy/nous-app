@@ -2014,6 +2014,9 @@
     "sourcesHealthy": "Sources OK",
     "sourcesUnhealthy": "{{count}} sources down",
     "sourceDisabled": "Disabled",
-    "lastOk": "Last OK"
+    "lastOk": "Last OK",
+    "searchPlaceholder": "Search hotspots...",
+    "searchResults": "{{count}} results for \"{{query}}\"",
+    "dateDisabledWhenSearching": "Searching all dates"
   }
 }

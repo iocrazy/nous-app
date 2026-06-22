@@ -46,10 +46,14 @@ async def list_hotspots(
     auth: AuthDep,
     day: Optional[str] = Query(None, description="YYYY-MM-DD"),
     category: Optional[str] = Query(None),
+    q: Optional[str] = Query(None, description="free-text search over hotspots"),
     limit: int = Query(100, ge=1, le=300),
 ):
     repo = HotspotsRepository()
-    rows = await repo.list_for_date(day, category, limit=limit)
+    # When searching, span all dates — a topic is found regardless of which
+    # day it landed on. The day filter only applies to plain browsing.
+    effective_day = None if (q and q.strip()) else day
+    rows = await repo.list_for_date(effective_day, category, limit=limit, q=q)
     items = [_to_out(r) for r in rows]
     return HotspotListResponse(count=len(items), hotspots=items)
 
