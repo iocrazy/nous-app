@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   ShieldAlert,
   Upload as UploadIcon,
+  Download as DownloadIcon,
   Sparkles,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -29,6 +30,7 @@ import { useAgentRunTasks } from './TaskCenter/useAgentRunTasks';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { useUpload, formatSpeed as uploadFormatSpeed, formatFileSize as uploadFormatFileSize } from '../contexts/UploadContext';
+import { useExportTasks } from '../contexts/ExportTaskContext';
 import { useTaskManager, type UnifiedTask } from '../contexts/TaskManagerContext';
 
 // ---------------------------------------------------------------------------
@@ -137,6 +139,7 @@ const TaskCenterPanel: React.FC<{
   const navigate = useNavigate();
   const { tasks, cancelTask, retryTask, clearCompleted, isLoading } = useTaskManager();
   const upload = useUpload();
+  const exportTasks = useExportTasks();
   const [tab, setTab] = useState<TaskTab>('active');
 
   // Open a produced resource's detail page; RedirectToTeam injects the team.
@@ -145,6 +148,10 @@ const TaskCenterPanel: React.FC<{
     navigate(`/resources/file/${resourceId}`);
   };
   const uploadingItems = upload.items.filter(i => i.status === 'uploading');
+  // Client-side download/zip-export tasks (see ExportTaskContext). Shown in the
+  // panel like uploads; running ones count toward "running".
+  const exportItems = exportTasks.items;
+  const exportRunning = exportItems.filter((i) => i.status === 'running');
 
   // Agent runs (chat / issue / scheduled) come from agent_runs, not
   // task_tracking — merged in here so the Task Center is the one place to see
@@ -161,10 +168,14 @@ const TaskCenterPanel: React.FC<{
   // circles. Counts are in flow units — what the user calls "a task".
   const panelItems = groupTasksByFlow(allTasks);
   const flowCounts = summarizeFlowItems(panelItems);
-  const counts = { ...flowCounts, running: flowCounts.running + uploadingItems.length };
+  const counts = {
+    ...flowCounts,
+    running: flowCounts.running + uploadingItems.length + exportRunning.length,
+  };
   const completedCount = counts.completed + counts.failed;
   const activeTotal = counts.running + counts.queued;
-  const hasTasks = allTasks.length > 0 || uploadingItems.length > 0;
+  const hasTasks =
+    allTasks.length > 0 || uploadingItems.length > 0 || exportItems.length > 0;
 
   // Active tab: items with something processing sort above purely-queued.
   const hasProcessing = (i: PanelItem) =>
@@ -254,6 +265,38 @@ const TaskCenterPanel: React.FC<{
                   </div>
                 ))}
 
+                {/* Client-side zip exports (ExportTaskContext) — same row style
+                    as uploads, so a bulk download shows progress + a record. */}
+                {exportItems.map((item) => (
+                  <div key={item.id} className={`px-3 py-2.5 border-b ${island ? 'border-line' : 'border-ink-800/50'}`}>
+                    <div className="flex items-center gap-2.5">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${item.status === 'error' ? 'bg-red-500/20 text-red-400' : 'bg-amber-500/20 text-amber-500'}`}>
+                        <DownloadIcon size={14} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between">
+                          <span className={`text-xs ${island ? 'text-content-2' : 'text-ink-300'} truncate max-w-[180px]`}>{item.label}</span>
+                          <span className={`text-[10px] shrink-0 ml-2 ${item.status === 'error' ? 'text-red-400' : island ? 'text-content-3' : 'text-ink-500'}`}>
+                            {item.status === 'running' ? `${item.percent}%` : item.status === 'complete' ? 'Done' : 'Failed'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className={`text-[10px] ${island ? 'text-content-4' : 'text-ink-600'}`}>Zip export</span>
+                          <span className={`text-[10px] ${island ? 'text-content-4' : 'text-ink-600'}`}>
+                            {item.done}/{item.total}{item.failed > 0 ? ` · ${item.failed} failed` : ''}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className={`mt-1.5 h-1 ${island ? 'bg-island-2' : 'bg-ink-800'} rounded-full overflow-hidden`}>
+                      <div
+                        className={`h-full rounded-full transition-all duration-300 ${item.status === 'error' ? 'bg-red-500' : 'bg-amber-500'}`}
+                        style={{ width: `${Math.max(item.percent, 2)}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+
                 {/* Flow cards (step circles) + standalone tasks */}
                 <FlowTaskList
                   items={activeItems}
@@ -264,7 +307,7 @@ const TaskCenterPanel: React.FC<{
                   onOpenDetail={onOpenDetail}
                 />
 
-                {uploadingItems.length === 0 && activeItems.length === 0 && (
+                {uploadingItems.length === 0 && exportItems.length === 0 && activeItems.length === 0 && (
                   <div className={`flex flex-col items-center justify-center py-8 ${island ? 'text-content-3' : 'text-ink-500'}`}>
                     <CheckCircle2 size={24} className={`mb-2 ${island ? 'text-content-4' : 'text-ink-600'}`} />
                     <span className="text-xs">{t('topbar.noActiveTasks')}</span>
