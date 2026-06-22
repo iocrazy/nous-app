@@ -99,6 +99,24 @@ class HotspotsRepository:
         result = await query.order("captured_at", desc=True).limit(limit).execute()
         return result.data or []
 
+    async def list_by_ids(
+        self, hotspot_ids: list[str], limit: int = 100
+    ) -> list[dict[str, Any]]:
+        """Fetch specific hotspots (for the saved/hidden views, which span all
+        dates). Ordered newest-first. Empty id list short-circuits."""
+        if not hotspot_ids:
+            return []
+        client = await self._client()
+        result = (
+            await client.table(self.TABLE)
+            .select("*")
+            .in_("id", hotspot_ids)
+            .order("captured_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return result.data or []
+
     async def get_by_id(self, hotspot_id: str) -> dict | None:
         client = await self._client()
         result = (

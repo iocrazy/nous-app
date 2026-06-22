@@ -3,7 +3,14 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Lightbulb, Search, X } from 'lucide-react';
 import { islandUI } from '../utils/featureFlags';
-import { getHotspots, getHotspotDates, type Hotspot } from '../services/topicService';
+import {
+  getHotspots,
+  getHotspotDates,
+  setHotspotState,
+  type Hotspot,
+  type HotspotView,
+  type HotspotStatePatch,
+} from '../services/topicService';
 import { useToast } from '../components/Toast';
 import { Timeline } from '../components/TopicInspiration/Timeline';
 import { HotspotInfoPanel } from '../components/TopicInspiration/HotspotInfoPanel';
@@ -12,6 +19,7 @@ import { CurrentHotspots } from '../components/TopicInspiration/CurrentHotspots'
 import { SourceHealthBadge } from '../components/TopicInspiration/SourceHealthBadge';
 
 const CATEGORIES = ['all', 'model', 'product', 'industry', 'paper', 'tips'] as const;
+const VIEWS: HotspotView[] = ['all', 'saved', 'hidden'];
 const TOP_HOTSPOTS_COUNT = 5;
 
 export const TopicInspirationPage: React.FC = () => {
@@ -26,6 +34,8 @@ export const TopicInspirationPage: React.FC = () => {
   const [selected, setSelected] = useState<Hotspot | null>(null);
   const [queryInput, setQueryInput] = useState('');
   const [query, setQuery] = useState('');
+  const [view, setView] = useState<HotspotView>('all');
+  const [refreshKey, setRefreshKey] = useState(0);
   const searching = query.trim().length > 0;
 
   // Debounce the search box so we hit the backend at most once per pause,
@@ -43,7 +53,7 @@ export const TopicInspirationPage: React.FC = () => {
       setLoading(true);
       try {
         const [hs, ds] = await Promise.all([
-          getHotspots(day, category, query),
+          getHotspots(day, category, query, view),
           getHotspotDates(),
         ]);
         if (!alive) return;
@@ -58,7 +68,40 @@ export const TopicInspirationPage: React.FC = () => {
     return () => {
       alive = false;
     };
-  }, [day, category, query]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [day, category, query, view, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Optimistically apply a state patch, drop the card if it no longer belongs
+  // to the current view, persist, and revert (via refetch) on failure.
+  async function applyState(h: Hotspot, patch: HotspotStatePatch) {
+    setHotspots((prev) =>
+      prev.flatMap((item) => {
+        if (item.id !== h.id) return [item];
+        const next = { ...item, ...patch };
+        if (view === 'all' && next.is_hidden) return [];
+        if (view === 'saved' && next.is_saved === false) return [];
+        if (view === 'hidden' && next.is_hidden === false) return [];
+        return [next];
+      }),
+    );
+    setSelected((s) => (s && s.id === h.id ? { ...s, ...patch } : s));
+    try {
+      await setHotspotState(h.id, patch);
+    } catch (err) {
+      addToast(`Failed to update: ${(err as Error).message}`, 'error');
+      setRefreshKey((k) => k + 1); // revert to server truth
+    }
+  }
+
+  function handleSelect(h: Hotspot) {
+    setSelected(h);
+    if (!h.is_read) applyState(h, { is_read: true });
+  }
+
+  function switchView(v: HotspotView) {
+    setView(v);
+    setQueryInput('');
+    setQuery('');
+  }
 
   // Top N hotspots by score for the CurrentHotspots block
   const topByScore = useMemo<Hotspot[]>(
@@ -95,8 +138,33 @@ export const TopicInspirationPage: React.FC = () => {
       </div>
       <p className={`text-xs mt-1 ${cSub}`}>{t('topic.subtitle')}</p>
 
-      {/* Search box — server-side, debounced */}
-      <div className="mt-4 relative">
+      {/* View selector: All / Saved / Hidden */}
+      <div className="mt-4 flex items-center gap-1">
+        {VIEWS.map((v) => {
+          const active = view === v;
+          return (
+            <button
+              key={v}
+              onClick={() => switchView(v)}
+              className={`px-3 py-1 rounded-full text-xs font-medium capitalize transition-colors ${
+                active
+                  ? island
+                    ? 'bg-accent text-white'
+                    : 'bg-indigo-600 text-white'
+                  : island
+                  ? 'bg-island-2 text-content-3 hover:text-content'
+                  : 'bg-ink-800 text-ink-400 hover:text-ink-200'
+              }`}
+            >
+              {t(`topic.view_${v}`, v)}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Search box — server-side, debounced (only in the default "all" view) */}
+      {view === 'all' && (
+      <div className="mt-3 relative">
         <Search
           size={15}
           className={`absolute left-3 top-1/2 -translate-y-1/2 ${
@@ -126,8 +194,10 @@ export const TopicInspirationPage: React.FC = () => {
           </button>
         )}
       </div>
+      )}
 
-      {/* Controls row: category chips + date button */}
+      {/* Controls row: category chips + date button (browse view only) */}
+      {view === 'all' && (
       <div className="mt-4 flex flex-wrap items-center gap-2">
         {CATEGORIES.map((cat) => {
           const active = category === cat;
@@ -163,6 +233,7 @@ export const TopicInspirationPage: React.FC = () => {
           {day || 'Today'}
         </button>
       </div>
+      )}
 
       {/* Status / loading */}
       <div className={`mt-2 text-xs ${cSub}`}>
@@ -177,8 +248,8 @@ export const TopicInspirationPage: React.FC = () => {
           : `${hotspots.length} hotspots`}
       </div>
 
-      {/* Current Hotspots block — browse affordance; hidden while searching */}
-      {!loading && !searching && topByScore.length > 0 && (
+      {/* Current Hotspots block — browse affordance; only in the all view */}
+      {!loading && view === 'all' && !searching && topByScore.length > 0 && (
         <div className="mt-4">
           <CurrentHotspots items={topByScore} />
         </div>
@@ -189,12 +260,20 @@ export const TopicInspirationPage: React.FC = () => {
         {!loading && hotspots.length > 0 && (
           <Timeline
             hotspots={hotspots}
-            onSelect={setSelected}
+            onSelect={handleSelect}
             selectedId={selected?.id}
+            onToggleSave={(h) => applyState(h, { is_saved: !h.is_saved })}
+            onToggleHide={(h) => applyState(h, { is_hidden: !h.is_hidden })}
           />
         )}
         {!loading && hotspots.length === 0 && (
-          <p className={`text-sm ${cSub}`}>No hotspots found.</p>
+          <p className={`text-sm ${cSub}`}>
+            {view === 'saved'
+              ? t('topic.noSaved', 'No saved hotspots yet.')
+              : view === 'hidden'
+              ? t('topic.noHidden', 'Nothing hidden.')
+              : t('topic.noHotspots', 'No hotspots found.')}
+          </p>
         )}
       </div>
 

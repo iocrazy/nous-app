@@ -13,9 +13,17 @@ interface Props {
   hotspots: Hotspot[];
   onSelect: (h: Hotspot) => void;
   selectedId?: string;
+  onToggleSave?: (h: Hotspot) => void;
+  onToggleHide?: (h: Hotspot) => void;
 }
 
-export const Timeline: React.FC<Props> = ({ hotspots, onSelect, selectedId }) => {
+export const Timeline: React.FC<Props> = ({
+  hotspots,
+  onSelect,
+  selectedId,
+  onToggleSave,
+  onToggleHide,
+}) => {
   return (
     <div className="relative">
       {/* Vertical line: 2px, bg-line-strong, sitting at left:64px */}
@@ -49,6 +57,8 @@ export const Timeline: React.FC<Props> = ({ hotspots, onSelect, selectedId }) =>
               hotspot={h}
               onSelect={onSelect}
               selected={h.id === selectedId}
+              onToggleSave={onToggleSave}
+              onToggleHide={onToggleHide}
             />
           </div>
         </div>

@@ -1,5 +1,7 @@
 // frontend/components/TopicInspiration/HotspotCard.tsx
 import React from 'react';
+import { useTranslation } from 'react-i18next';
+import { Star, EyeOff } from 'lucide-react';
 import type { Hotspot } from '../../services/topicService';
 import { islandUI } from '../../utils/featureFlags';
 
@@ -7,11 +9,21 @@ interface Props {
   hotspot: Hotspot;
   onSelect: (h: Hotspot) => void;
   selected?: boolean;
+  onToggleSave?: (h: Hotspot) => void;
+  onToggleHide?: (h: Hotspot) => void;
 }
 
-export const HotspotCard: React.FC<Props> = ({ hotspot, onSelect, selected }) => {
+export const HotspotCard: React.FC<Props> = ({
+  hotspot,
+  onSelect,
+  selected,
+  onToggleSave,
+  onToggleHide,
+}) => {
+  const { t } = useTranslation();
   const island = islandUI();
   const isPick = typeof hotspot.score === 'number' && hotspot.score >= 0.8;
+  const read = !!hotspot.is_read;
 
   const bgClass = island ? 'bg-island' : 'bg-ink-900';
   const borderClass = selected
@@ -20,16 +32,30 @@ export const HotspotCard: React.FC<Props> = ({ hotspot, onSelect, selected }) =>
     ? 'border-line-strong hover:border-accent/40'
     : 'border-ink-800 hover:border-ink-600';
 
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onSelect(hotspot);
+    }
+  };
+
+  const iconBtn = `p-1 rounded-md transition-colors ${
+    island ? 'hover:bg-island-2 text-content-4' : 'hover:bg-ink-800 text-ink-500'
+  }`;
+
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={() => onSelect(hotspot)}
-      className={`w-full text-left rounded-[14px] border px-4 py-3.5 transition-colors shadow-sm ${bgClass} ${borderClass}`}
+      onKeyDown={onKeyDown}
+      className={`group w-full text-left rounded-[14px] border px-4 py-3.5 transition-colors shadow-sm cursor-pointer ${bgClass} ${borderClass} ${
+        read ? 'opacity-60' : ''
+      }`}
     >
-      {/* Header row: source (left) + pick badge + score badge (right) */}
+      {/* Header row: source (left) + pick badge + score + actions (right) */}
       <div className="flex items-center justify-between">
-        <span
-          className={`text-[12px] ${island ? 'text-content-4' : 'text-ink-500'}`}
-        >
+        <span className={`text-[12px] ${island ? 'text-content-4' : 'text-ink-500'}`}>
           {hotspot.source_label}
         </span>
         <span className="flex items-center gap-1.5">
@@ -42,7 +68,7 @@ export const HotspotCard: React.FC<Props> = ({ hotspot, onSelect, selected }) =>
                 border: '1px solid var(--amb-bd, rgba(245,158,11,.35))',
               }}
             >
-              精选
+              {t('topic.pick', 'Pick')}
             </span>
           )}
           {typeof hotspot.score === 'number' && (
@@ -52,6 +78,40 @@ export const HotspotCard: React.FC<Props> = ({ hotspot, onSelect, selected }) =>
             >
               {Math.round(hotspot.score * 100)}
             </span>
+          )}
+          {onToggleSave && (
+            <button
+              type="button"
+              aria-label={t('topic.save', 'Save')}
+              title={t('topic.save', 'Save')}
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleSave(hotspot);
+              }}
+              className={iconBtn}
+            >
+              <Star
+                size={15}
+                className={hotspot.is_saved ? 'text-amber-500' : ''}
+                fill={hotspot.is_saved ? 'currentColor' : 'none'}
+              />
+            </button>
+          )}
+          {onToggleHide && (
+            <button
+              type="button"
+              aria-label={hotspot.is_hidden ? t('topic.unhide', 'Unhide') : t('topic.hide', 'Hide')}
+              title={hotspot.is_hidden ? t('topic.unhide', 'Unhide') : t('topic.hide', 'Hide')}
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleHide(hotspot);
+              }}
+              className={`${iconBtn} ${
+                hotspot.is_hidden ? '' : 'opacity-0 group-hover:opacity-100 focus:opacity-100'
+              }`}
+            >
+              <EyeOff size={15} className={hotspot.is_hidden ? 'text-accent' : ''} />
+            </button>
           )}
         </span>
       </div>
@@ -65,7 +125,7 @@ export const HotspotCard: React.FC<Props> = ({ hotspot, onSelect, selected }) =>
         {hotspot.title}
       </h4>
 
-      {/* Summary (csum) */}
+      {/* Summary */}
       {(hotspot.ai_summary || hotspot.summary) && (
         <p
           className={`text-[13px] leading-relaxed ${
@@ -92,13 +152,13 @@ export const HotspotCard: React.FC<Props> = ({ hotspot, onSelect, selected }) =>
         </div>
       )}
 
-      {/* Reason callout with bold "推荐理由" label */}
+      {/* Reason callout */}
       {hotspot.reason && (
         <div className="topic-reason-callout mt-2.5 rounded-lg border-l-[3px] border-emerald-500 bg-emerald-500/[0.07] px-3 py-2 text-[12px] text-[#0f766e]">
-          <span className="font-bold block mb-0.5">推荐理由</span>
+          <span className="font-bold block mb-0.5">{t('topic.reason', 'Why it matters')}</span>
           {hotspot.reason}
         </div>
       )}
-    </button>
+    </div>
   );
 };

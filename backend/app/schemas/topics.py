@@ -20,12 +20,29 @@ class HotspotOut(BaseModel):
     media_url: Optional[str] = None
     cover_url: Optional[str] = None
     captured_at: Optional[str] = None
+    # Per-user state (merged from hotspot_user_state; all false when no row).
+    is_read: bool = False
+    is_saved: bool = False
+    is_hidden: bool = False
 
 
 class HotspotListResponse(BaseModel):
     success: bool = True
     count: int
     hotspots: list[HotspotOut]
+
+
+class HotspotStateRequest(BaseModel):
+    is_read: Optional[bool] = None
+    is_saved: Optional[bool] = None
+    is_hidden: Optional[bool] = None
+
+
+class HotspotStateResponse(BaseModel):
+    success: bool = True
+    is_read: bool = False
+    is_saved: bool = False
+    is_hidden: bool = False
 
 
 class DatesResponse(BaseModel):

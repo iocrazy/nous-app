@@ -17,6 +17,17 @@ export interface Hotspot {
   media_url?: string | null;
   cover_url?: string | null;
   captured_at?: string | null;
+  is_read?: boolean;
+  is_saved?: boolean;
+  is_hidden?: boolean;
+}
+
+export type HotspotView = 'all' | 'saved' | 'hidden';
+
+export interface HotspotStatePatch {
+  is_read?: boolean;
+  is_saved?: boolean;
+  is_hidden?: boolean;
 }
 
 const base = () => `${getApiUrl()}/api/v1/topics`;
@@ -33,8 +44,10 @@ export async function getHotspots(
   day?: string,
   category?: string,
   q?: string,
+  view: HotspotView = 'all',
 ): Promise<Hotspot[]> {
   const params = new URLSearchParams();
+  if (view !== 'all') params.set('view', view);
   // Server-side search: the query MUST reach the backend WHERE clause, never
   // filter client-side over an already-truncated page.
   const term = (q || '').trim();
@@ -43,6 +56,18 @@ export async function getHotspots(
   if (category && category !== 'all') params.set('category', category);
   const resp = await fetch(`${base()}?${params.toString()}`, { headers: await getAuthHeaders() });
   return (await jsonOrThrow(resp)).hotspots as Hotspot[];
+}
+
+export async function setHotspotState(
+  id: string,
+  patch: HotspotStatePatch,
+): Promise<HotspotStatePatch> {
+  const resp = await fetch(`${base()}/${id}/state`, {
+    method: 'PATCH',
+    headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  return jsonOrThrow(resp);
 }
 
 export async function getHotspotDates(): Promise<string[]> {
