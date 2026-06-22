@@ -41,6 +41,18 @@ from app.services.ai.runner.run_recorder import AgentPausedError, RunRecorder
 from app.services.ai.skills.skill_tool_service import SkillToolService  # noqa: F401
 
 
+def _media_tools_enabled() -> bool:
+    """Return True when FEATURE_AGENT_MEDIA_TOOLS env var is truthy (1/true/yes/on)."""
+    import os
+
+    return os.environ.get("FEATURE_AGENT_MEDIA_TOOLS", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
 class AILibraryChatService:
     """Session + chat operations bound to the AI Library framework.
 
@@ -695,6 +707,26 @@ class AILibraryChatService:
                 f"[chat] resource_ref: {len(resource_refs)} ref(s) wired; "
                 f"ResourceFetch tool registered"
             )
+
+        # Gated injection: GenerateImage + GenerateVideo tools (Plan-2 / genmedia).
+        # Default OFF — flip FEATURE_AGENT_MEDIA_TOOLS=1 in prod env to enable.
+        if _media_tools_enabled():
+            from app.services.ai.tools.generate_media_specs import (
+                generate_image_tool_spec,
+                generate_video_tool_spec,
+            )
+            from app.services.ai.tools.generate_media_tools import GenerateMediaTools
+
+            composed = composed.model_copy(
+                update={
+                    "tools": list(composed.tools or [])
+                    + [generate_image_tool_spec(), generate_video_tool_spec()]
+                }
+            )
+            _media_tools = GenerateMediaTools()
+            runner.generate_image_handler = _media_tools.generate_image
+            runner.generate_video_handler = _media_tools.generate_video
+            logger.info("[chat] GenerateImage + GenerateVideo tools registered")
 
         # Spec-2: issue-context turns expose FinishIssue so the agent can
         # declare its outcome (completed | needs_input | continue). The
