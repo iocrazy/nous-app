@@ -17,6 +17,27 @@ export function blendedScore(h: Pick<Hotspot, 'score' | 'heat'>): number {
   return SCORE_WEIGHT * score + HEAT_WEIGHT * heat;
 }
 
+// Below this blended score a SCORED item is treated as low-signal noise.
+export const LOW_SIGNAL_THRESHOLD = 0.3;
+
+// Split the feed into the main list and folded low-signal noise. An item is
+// noise ONLY if it has actually been scored (score is a number) and its blended
+// score is below the threshold — unscored items (pending the scorer, or no heat
+// yet) are NOT hidden, so we never bury fresh items we just haven't judged.
+export function partitionBySignal(
+  hotspots: Hotspot[],
+  threshold: number = LOW_SIGNAL_THRESHOLD,
+): { main: Hotspot[]; low: Hotspot[] } {
+  const main: Hotspot[] = [];
+  const low: Hotspot[] = [];
+  for (const h of hotspots) {
+    const scored = typeof h.score === 'number';
+    if (scored && blendedScore(h) < threshold) low.push(h);
+    else main.push(h);
+  }
+  return { main, low };
+}
+
 // Highest blended-rank hotspots first; ties broken by raw heat then score.
 export function topHotspots(hotspots: Hotspot[], n: number): Hotspot[] {
   return hotspots

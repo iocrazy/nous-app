@@ -2035,6 +2035,8 @@
     "original": "Original",
     "showMore": "Show more",
     "showLess": "Show less",
-    "bestRankHint": "Peak board position"
+    "bestRankHint": "Peak board position",
+    "showLowSignal": "Show {{count}} low-signal items",
+    "hideLowSignal": "Hide low-signal"
   }
 }
