@@ -80,7 +80,7 @@ class GenerateMediaTools:
             )
             return {
                 "ok": True,
-                "generated_media_id": row.get("id"),
+                "generated_media_id": (row or {}).get("id"),
                 "url": url,
                 "kind": "image",
             }
@@ -128,7 +128,7 @@ class GenerateMediaTools:
             )
             return {
                 "ok": True,
-                "generated_media_id": row.get("id"),
+                "generated_media_id": (row or {}).get("id"),
                 "url": url,
                 "kind": "video",
             }
