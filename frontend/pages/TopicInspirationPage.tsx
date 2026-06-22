@@ -17,7 +17,7 @@ import { HotspotInfoPanel } from '../components/TopicInspiration/HotspotInfoPane
 import { FloatingParse } from '../components/TopicInspiration/FloatingParse';
 import { CurrentHotspots } from '../components/TopicInspiration/CurrentHotspots';
 import { SourceHealthBadge } from '../components/TopicInspiration/SourceHealthBadge';
-import { topHotspots } from '../components/TopicInspiration/hotspotRanking';
+import { topHotspots, partitionBySignal } from '../components/TopicInspiration/hotspotRanking';
 
 const CATEGORIES = ['all', 'model', 'product', 'industry', 'paper', 'tips'] as const;
 const VIEWS: HotspotView[] = ['all', 'saved', 'hidden'];
@@ -37,6 +37,7 @@ export const TopicInspirationPage: React.FC = () => {
   const [query, setQuery] = useState('');
   const [view, setView] = useState<HotspotView>('all');
   const [refreshKey, setRefreshKey] = useState(0);
+  const [showLowSignal, setShowLowSignal] = useState(false);
   const searching = query.trim().length > 0;
 
   // Debounce the search box so we hit the backend at most once per pause,
@@ -109,6 +110,15 @@ export const TopicInspirationPage: React.FC = () => {
   const topByScore = useMemo<Hotspot[]>(
     () => topHotspots(hotspots, TOP_HOTSPOTS_COUNT),
     [hotspots],
+  );
+
+  // Low-signal noise reduction (browse view only): fold scored-but-low items.
+  const { main: mainHotspots, low: lowHotspots } = useMemo(
+    () =>
+      view === 'all' && !searching
+        ? partitionBySignal(hotspots)
+        : { main: hotspots, low: [] as Hotspot[] },
+    [hotspots, view, searching],
   );
 
   const cPrimary = island ? 'text-content' : 'text-ink-50';
@@ -257,13 +267,44 @@ export const TopicInspirationPage: React.FC = () => {
       <div className="mt-4">
         {!loading && hotspots.length > 0 && (
           <Timeline
-            hotspots={hotspots}
+            hotspots={mainHotspots}
             onSelect={handleSelect}
             selectedId={selected?.id}
             onToggleSave={(h) => applyState(h, { is_saved: !h.is_saved })}
             onToggleHide={(h) => applyState(h, { is_hidden: !h.is_hidden })}
           />
         )}
+
+        {/* Folded low-signal noise (scored-but-low). Browse view only. */}
+        {!loading && lowHotspots.length > 0 && (
+          <div className="mt-3">
+            <button
+              onClick={() => setShowLowSignal((v) => !v)}
+              className={`text-xs font-medium transition-colors ${
+                island ? 'text-content-3 hover:text-content' : 'text-ink-400 hover:text-ink-200'
+              }`}
+            >
+              {showLowSignal
+                ? t('topic.hideLowSignal', 'Hide low-signal')
+                : t('topic.showLowSignal', {
+                    count: lowHotspots.length,
+                    defaultValue: 'Show {{count}} low-signal items',
+                  })}
+            </button>
+            {showLowSignal && (
+              <div className="mt-3 opacity-70">
+                <Timeline
+                  hotspots={lowHotspots}
+                  onSelect={handleSelect}
+                  selectedId={selected?.id}
+                  onToggleSave={(h) => applyState(h, { is_saved: !h.is_saved })}
+                  onToggleHide={(h) => applyState(h, { is_hidden: !h.is_hidden })}
+                />
+              </div>
+            )}
+          </div>
+        )}
+
         {!loading && hotspots.length === 0 && (
           <p className={`text-sm ${cSub}`}>
             {view === 'saved'

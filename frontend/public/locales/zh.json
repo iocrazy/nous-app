@@ -2035,6 +2035,8 @@
     "original": "原文",
     "showMore": "展开",
     "showLess": "收起",
-    "bestRankHint": "榜单最高位次"
+    "bestRankHint": "榜单最高位次",
+    "showLowSignal": "显示 {{count}} 条低信号",
+    "hideLowSignal": "收起低信号"
   }
 }

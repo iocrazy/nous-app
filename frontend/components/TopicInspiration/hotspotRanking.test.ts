@@ -1,6 +1,6 @@
 // frontend/components/TopicInspiration/hotspotRanking.test.ts
 import { describe, it, expect } from 'vitest';
-import { blendedScore, topHotspots } from './hotspotRanking';
+import { blendedScore, topHotspots, partitionBySignal } from './hotspotRanking';
 import type { Hotspot } from '../../services/topicService';
 
 function h(p: Partial<Hotspot>): Hotspot {
@@ -35,5 +35,25 @@ describe('topHotspots', () => {
     ];
     const top = topHotspots(list, 2);
     expect(top.map((x) => x.id)).toEqual(['b', 'd']);
+  });
+});
+
+describe('partitionBySignal', () => {
+  it('folds scored-but-low items, keeps unscored visible', () => {
+    const list = [
+      h({ id: 'good', score: 0.8, heat: 0.4 }), // blended 0.6 -> main
+      h({ id: 'noise', score: 0.1, heat: 0.05 }), // blended ~0.075 -> low
+      h({ id: 'pending', score: null, heat: null }), // unscored -> main
+      h({ id: 'hot', score: 0.1, heat: 0.9 }), // blended 0.5 -> main (genuinely hot)
+    ];
+    const { main, low } = partitionBySignal(list);
+    expect(main.map((x) => x.id)).toEqual(['good', 'pending', 'hot']);
+    expect(low.map((x) => x.id)).toEqual(['noise']);
+  });
+
+  it('threshold is configurable', () => {
+    const list = [h({ id: 'x', score: 0.4, heat: 0.4 })]; // blended 0.4
+    expect(partitionBySignal(list, 0.5).low.map((x) => x.id)).toEqual(['x']);
+    expect(partitionBySignal(list, 0.3).low).toEqual([]);
   });
 });
