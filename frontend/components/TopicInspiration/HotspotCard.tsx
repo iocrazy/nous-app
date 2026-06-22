@@ -53,10 +53,24 @@ export const HotspotCard: React.FC<Props> = ({
         read ? 'opacity-60' : ''
       }`}
     >
-      {/* Header row: source (left) + pick badge + score + actions (right) */}
+      {/* Header row: source + board rank (left) + pick/score + actions (right) */}
       <div className="flex items-center justify-between">
-        <span className={`text-[12px] ${island ? 'text-content-4' : 'text-ink-500'}`}>
-          {hotspot.source_label}
+        <span className="flex items-center gap-1.5 min-w-0">
+          <span className={`text-[12px] truncate ${island ? 'text-content-4' : 'text-ink-500'}`}>
+            {hotspot.source_label}
+          </span>
+          {typeof hotspot.best_rank === 'number' && hotspot.best_rank <= 10 && (
+            <span
+              className="text-[10px] font-bold rounded px-1.5 py-0.5 shrink-0"
+              title={t('topic.bestRankHint', 'Peak board position')}
+              style={{
+                color: 'var(--amb-tx, #b45309)',
+                background: 'var(--amb-bg, rgba(245,158,11,.12))',
+              }}
+            >
+              #{hotspot.best_rank}
+            </span>
+          )}
         </span>
         <span className="flex items-center gap-1.5">
           {isPick && (

@@ -33,10 +33,15 @@ class NewsNowAdapter(SourceAdapter):
         items = data.get("items") or []
         label = source.get("name", platform_id)
         out: list[HotspotCandidate] = []
+        # newsnow returns an ordered leaderboard — list position IS the board
+        # rank. 1-based, counting only kept items so skipped (titleless)
+        # entries don't inflate later ranks.
+        rank = 0
         for it in items:
             title = (it.get("title") or "").strip()
             if not title:
                 continue
+            rank += 1
             out.append(
                 HotspotCandidate(
                     title=title,
@@ -47,6 +52,7 @@ class NewsNowAdapter(SourceAdapter):
                         else ""
                     ),
                     source_label=label,
+                    rank=rank,
                 )
             )
         if not out:
