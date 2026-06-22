@@ -122,15 +122,26 @@ export const FloatingParse: React.FC = () => {
     }
   };
 
-  const onDownloadPlaylist = async () => {
+  const onDownloadPlaylist = async (onlyNew = false) => {
     if (!result?.playlist) return;
+    // Skip tracks already in the user's library (resolve endpoint marked each
+    // track `downloaded`). "Download all" stays as an escape hatch so a deleted
+    // file can still be re-pulled (the download workflow re-checks the real
+    // file on disk and re-downloads when it's gone).
+    const source = onlyNew
+      ? result.playlist.tracks.filter((tr) => !tr.downloaded)
+      : result.playlist.tracks;
+    if (source.length === 0) {
+      addToast(t('topic.nothingNew', 'Nothing new to download'), 'info');
+      return;
+    }
     setBusy(true);
     try {
-      const items = result.playlist.tracks.map((tr) => ({
+      const items = source.map((tr) => ({
         id: tr.track_id,
         kind: tr.kind ?? ('track' as const),
       }));
-      const r = await downloadSodaTracks(items, result.playlist.title || undefined);
+      const r = await downloadSodaTracks(items, result.title || undefined);
       addToast(
         t('topic.playlistDispatched', '{{n}} tracks dispatched', { n: r.submitted }),
         'success',
@@ -264,17 +275,51 @@ export const FloatingParse: React.FC = () => {
           <div className="text-xs text-content-3">{result.detail}</div>
           {result.kind === 'playlist' ? (
             // Playlist: getSodaPlaylist only fetched the track list — the user
-            // dispatches the actual download here.
-            <button
-              disabled={busy || !result.playlist?.tracks.length}
-              onClick={onDownloadPlaylist}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold bg-amber-500/[0.12] text-[var(--amb-tx,#b45309)] border border-amber-500/35 disabled:opacity-50"
-            >
-              {busy ? <Loader2 size={14} className="animate-spin" /> : null}
-              {t('topic.downloadAll', 'Download all ({{n}})', {
-                n: result.playlist?.tracks.length ?? 0,
-              })}
-            </button>
+            // dispatches the actual download here. Already-owned tracks are
+            // skipped via "Download new"; "Download all" re-pulls everything.
+            (() => {
+              const total = result.playlist?.tracks.length ?? 0;
+              const owned =
+                result.playlist?.downloaded_count ??
+                result.playlist?.tracks.filter((tr) => tr.downloaded).length ??
+                0;
+              const fresh = result.playlist?.new_count ?? total - owned;
+              return (
+                <div className="space-y-1.5">
+                  {owned > 0 && (
+                    <div className="text-[11px] text-content-3">
+                      {t('topic.playlistDedup', '{{total}} tracks · {{owned}} in library · {{fresh}} new', {
+                        total,
+                        owned,
+                        fresh,
+                      })}
+                    </div>
+                  )}
+                  {fresh > 0 && (
+                    <button
+                      disabled={busy}
+                      onClick={() => onDownloadPlaylist(true)}
+                      className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold bg-amber-500/[0.12] text-[var(--amb-tx,#b45309)] border border-amber-500/35 disabled:opacity-50"
+                    >
+                      {busy ? <Loader2 size={14} className="animate-spin" /> : null}
+                      {t('topic.downloadNew', 'Download new ({{n}})', { n: fresh })}
+                    </button>
+                  )}
+                  <button
+                    disabled={busy || !total}
+                    onClick={() => onDownloadPlaylist(false)}
+                    className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 ${
+                      fresh > 0
+                        ? 'bg-island-2 text-content-2 border border-line'
+                        : 'bg-amber-500/[0.12] text-[var(--amb-tx,#b45309)] border border-amber-500/35'
+                    }`}
+                  >
+                    {busy && fresh === 0 ? <Loader2 size={14} className="animate-spin" /> : null}
+                    {t('topic.downloadAll', 'Download all ({{n}})', { n: total })}
+                  </button>
+                </div>
+              );
+            })()
           ) : (
             // single/batch already dispatched the download at parse time.
             <button
