@@ -37,16 +37,14 @@ class PromoteGeneratedMediaService:
             "video/mp4" if media_kind == "video" else "image/png"
         )
         src_abs = os.path.join(settings.DOWNLOAD_PATH, gen["file_path"])
+        if not os.path.isfile(src_abs):
+            raise ValueError("generation file missing")
         ext = os.path.splitext(gen["file_path"])[1] or (
             ".mp4" if media_kind == "video" else ".png"
         )
         filename = f"generated-{media_kind}{ext}"
-        size = os.path.getsize(src_abs) if os.path.isfile(src_abs) else 0
-        file_hash = (
-            await asyncio.to_thread(_sha256, src_abs)
-            if os.path.isfile(src_abs)
-            else None
-        )
+        size = os.path.getsize(src_abs)
+        file_hash = await asyncio.to_thread(_sha256, src_abs)
 
         # 1) resource row (source_type='generated' + provenance in metadata)
         resource = await self.res_repo.create_resource(
@@ -73,9 +71,9 @@ class PromoteGeneratedMediaService:
         # 2) copy file into resources layout
         rel = f"teams/{scope_id}/uploads/{resource_id}/v1/{filename}"
         dst_abs = os.path.join(settings.DOWNLOAD_PATH, rel)
-        if os.path.isfile(src_abs):
-            Path(dst_abs).parent.mkdir(parents=True, exist_ok=True)
-            await asyncio.to_thread(shutil.copy2, src_abs, dst_abs)
+        Path(dst_abs).parent.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(shutil.copy2, src_abs, dst_abs)
+        await self.res_repo.update_resource(resource_id, {"file_path": rel})
 
         # 3) version row
         await self.res_repo.create_version(
