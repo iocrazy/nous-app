@@ -15,6 +15,11 @@ import { type FlowItem, type PanelItem, flowDisplayTitle } from './flowGrouping'
 import { ActiveTaskCard } from './ActiveTaskCard';
 import { TaskCenterRow } from './TaskCenterRow';
 
+// Above this many steps, render a progress bar instead of per-step circles.
+// Normal chains are ~3-6 steps; a batch playlist can be 200+ (one circle each
+// is unreadable and grows unbounded).
+const COMPACT_RAIL_THRESHOLD = 12;
+
 /**
  * Compact flow card for the floating Task Center panel: one user submission
  * (parse → download → thumbnail / extract_audio / transcode / ai_*) renders
@@ -203,31 +208,64 @@ export const FlowStepCard: React.FC<FlowStepCardProps> = ({
               </div>
             </div>
 
-            {/* Step-circle rail */}
-            <div className="mt-1.5 flex items-center">
-              {flow.steps.map((step, i) => (
-                <React.Fragment key={step.id}>
-                  {i > 0 && (
-                    <span
-                      className={`h-px w-3 ${
-                        step.status === 'completed' || flow.steps[i - 1].status === 'completed'
-                          ? 'bg-ink-600'
-                          : 'bg-ink-800'
+            {/* Step display: a per-step circle rail for normal chains, but a
+                compact progress bar for large batches (e.g. a 226-track
+                playlist) — 200+ circles in a row is unreadable and unbounded. */}
+            {flow.steps.length > COMPACT_RAIL_THRESHOLD ? (
+              (() => {
+                const total = flow.steps.length;
+                const done = flow.steps.filter((s) => s.status === 'completed').length;
+                const failed = flow.steps.filter(
+                  (s) => s.status === 'failed' || s.status === 'cancelled',
+                ).length;
+                const pending = total - done - failed;
+                const pct = total ? Math.round(((done + failed) / total) * 100) : 0;
+                return (
+                  <div className="mt-1.5">
+                    <div className="h-1.5 rounded-full bg-ink-800 overflow-hidden flex">
+                      <div
+                        className="h-full bg-emerald-500 transition-all"
+                        style={{ width: `${total ? (done / total) * 100 : 0}%` }}
+                      />
+                      <div
+                        className="h-full bg-red-500/80 transition-all"
+                        style={{ width: `${total ? (failed / total) * 100 : 0}%` }}
+                      />
+                    </div>
+                    <div className="mt-1 text-[10px] text-ink-400">
+                      {done}/{total} done
+                      {failed > 0 ? ` · ${failed} failed` : ''}
+                      {pending > 0 ? ` · ${pending} pending` : ''} · {pct}%
+                    </div>
+                  </div>
+                );
+              })()
+            ) : (
+              <div className="mt-1.5 flex items-center">
+                {flow.steps.map((step, i) => (
+                  <React.Fragment key={step.id}>
+                    {i > 0 && (
+                      <span
+                        className={`h-px w-3 ${
+                          step.status === 'completed' || flow.steps[i - 1].status === 'completed'
+                            ? 'bg-ink-600'
+                            : 'bg-ink-800'
+                        }`}
+                      />
+                    )}
+                    <button
+                      onClick={() => toggleStep(step.id)}
+                      title={`${taskTypeLabel(step.task_type)} · ${step.status}`}
+                      className={`p-0.5 rounded-full transition-transform hover:scale-125 ${
+                        expandedId === step.id ? 'ring-1 ring-ink-500/60' : ''
                       }`}
-                    />
-                  )}
-                  <button
-                    onClick={() => toggleStep(step.id)}
-                    title={`${taskTypeLabel(step.task_type)} · ${step.status}`}
-                    className={`p-0.5 rounded-full transition-transform hover:scale-125 ${
-                      expandedId === step.id ? 'ring-1 ring-ink-500/60' : ''
-                    }`}
-                  >
-                    <StepCircle step={step} active={step.id === flow.current?.id} />
-                  </button>
-                </React.Fragment>
-              ))}
-            </div>
+                    >
+                      <StepCircle step={step} active={step.id === flow.current?.id} />
+                    </button>
+                  </React.Fragment>
+                ))}
+              </div>
+            )}
 
             <div className={`mt-1 text-[10px] truncate ${statusLine.tone}`}>{statusLine.text}</div>
           </div>
