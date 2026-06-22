@@ -113,3 +113,13 @@ class GeneratedMediaRepository:
             {"id": gen_id, "scope_id": scope_id},
         )
         return bool(n)
+
+    async def mark_promoted(self, gen_id: int, resource_id: int) -> Optional[dict]:
+        """Set promoted_resource_id (Tier-1 → Tier-2 link). Returns the row."""
+        return _normalize(
+            await db_engine.execute_returning_one(
+                f"UPDATE public.generated_media SET promoted_resource_id = :rid "
+                f"WHERE id = :id RETURNING {_COLS}",
+                {"id": gen_id, "rid": resource_id},
+            )
+        )
