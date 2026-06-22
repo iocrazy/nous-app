@@ -46,7 +46,7 @@ async def run_topic_fetch_once(
             rows = hotspots_repo.build_rows(
                 candidates, source_id=sid, category=src.get("category")
             )
-            written += await hotspots_repo.upsert_ignore(rows)
+            written += await hotspots_repo.upsert_with_heat(rows)
             await sources_repo.mark_health(sid, ok=True)
             ok += 1
         except (

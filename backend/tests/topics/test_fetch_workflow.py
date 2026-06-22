@@ -28,7 +28,7 @@ class _FakeHotspots:
     def build_rows(self, cands, *, source_id, category):
         return [{"dedup_key": c.title, "source_id": source_id} for c in cands]
 
-    async def upsert_ignore(self, rows):
+    async def upsert_with_heat(self, rows):
         self.written.extend(rows)
         return len(rows)
 

@@ -6,9 +6,12 @@ from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
 from app.services.topics.adapters.base import HotspotCandidate, make_dedup_key
+from app.services.topics.heat import compute_heat
 
 # Columns the free-text search matches against (title + body + AI summary + feed).
 _SEARCH_COLUMNS = ("title", "content_original", "ai_summary", "source_label")
+# Cap rank_timeline length so a long-lived item's history stays bounded.
+_MAX_TIMELINE = 20
 
 
 def sanitize_search(raw: Optional[str]) -> str:
@@ -42,6 +45,10 @@ class HotspotsRepository:
     ) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         for c in candidates:
+            captured = c.captured_at.isoformat() if c.captured_at else None
+            # Seed the timeline with this observation; merged across fetches by
+            # upsert_with_heat. rank may be None (unranked source).
+            point = {"rank": c.rank, "at": captured}
             rows.append(
                 {
                     "user_id": None,  # Phase 1: global
@@ -54,8 +61,10 @@ class HotspotsRepository:
                     "category": category,
                     "media_url": c.media_url,
                     "cover_url": c.cover_url,
-                    "captured_at": c.captured_at.isoformat() if c.captured_at else None,
+                    "captured_at": captured,
                     "dedup_key": make_dedup_key(source_id, url=c.url, title=c.title),
+                    "rank_timeline": [point],
+                    "heat": compute_heat([point]),
                 }
             )
         return rows
@@ -74,6 +83,57 @@ class HotspotsRepository:
         except Exception as e:  # noqa: BLE001
             logger.error(f"hotspots upsert failed: {e}")
             return 0
+
+    async def upsert_with_heat(self, rows: list[dict[str, Any]]) -> int:
+        """Ingest a fetch batch, accumulating heat over time.
+
+        For a row already seen (same dedup_key) we APPEND its new timeline point
+        to the stored history and recompute ``heat`` — never touching the
+        LLM enrichment (score/reason/ai_summary/category/tags) or first-seen
+        captured_at. New rows are inserted as-is. Returns the count of NEW rows.
+        """
+        if not rows:
+            return 0
+        client = await self._client()
+        keys = [r["dedup_key"] for r in rows]
+        try:
+            existing = (
+                await client.table(self.TABLE)
+                .select("id, dedup_key, rank_timeline")
+                .in_("dedup_key", keys)
+                .execute()
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"hotspots heat preload failed: {e}")
+            return 0
+
+        by_key = {str(r["dedup_key"]): r for r in (existing.data or [])}
+        new_rows: list[dict[str, Any]] = []
+        for row in rows:
+            prior = by_key.get(row["dedup_key"])
+            if not prior:
+                new_rows.append(row)
+                continue
+            # Append this observation to the stored history (bounded), recompute.
+            merged = (prior.get("rank_timeline") or [])[-(_MAX_TIMELINE - 1) :]
+            merged = merged + (row.get("rank_timeline") or [])
+            patch = {"rank_timeline": merged, "heat": compute_heat(merged)}
+            try:
+                await client.table(self.TABLE).update(patch).eq(
+                    "id", prior["id"]
+                ).execute()
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"hotspots heat update failed for {prior['id']}: {e}")
+
+        if new_rows:
+            try:
+                await client.table(self.TABLE).upsert(
+                    new_rows, on_conflict="dedup_key", ignore_duplicates=True
+                ).execute()
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"hotspots heat insert failed: {e}")
+                return 0
+        return len(new_rows)
 
     async def list_for_date(
         self,
