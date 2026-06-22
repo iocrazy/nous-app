@@ -13,6 +13,7 @@ import { islandUI } from '../../utils/featureFlags';
 
 export type ProjectAssetsSelection =
   | { kind: 'chat-uploads' }
+  | { kind: 'generations' }
   | { kind: 'canvas'; canvasId: string; canvasName: string };
 
 interface Props {
@@ -62,6 +63,18 @@ export const ProjectAssetsTree: React.FC<Props> = ({ selection, onSelect, chatUp
         <MessageSquare size={15} className="opacity-70 shrink-0" />
         <span className="flex-1 truncate text-left">{t('projectAssets.chatUploads')}</span>
         <span className={`text-xs ${island ? 'text-content-3' : 'text-ink-500'}`}>{chatUploadsCount}</span>
+      </button>
+
+      <button
+        onClick={() => onSelect({ kind: 'generations' })}
+        className={`flex items-center gap-2 w-full px-3 py-1.5 rounded-md ${
+          selection.kind === 'generations'
+            ? island ? 'bg-island-2 text-content-2' : 'bg-ink-800 text-ink-100'
+            : island ? 'text-content-2 hover:bg-island-2' : 'text-ink-300 hover:bg-ink-800/60'
+        }`}
+      >
+        <Sparkles size={15} className="opacity-70 shrink-0" />
+        <span className="flex-1 truncate text-left">{t('projectAssets.generations', 'Generations')}</span>
       </button>
 
       <div className={`mx-2 my-2 border-t ${island ? 'border-line' : 'border-ink-800/50'}`} />

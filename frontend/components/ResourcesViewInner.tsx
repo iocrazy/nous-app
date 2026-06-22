@@ -29,6 +29,7 @@ import { useFilterBarConfig } from '../hooks/useFilterBarConfig';
 import { ResourcesModals } from './ResourcesModals';
 import { ProjectAssetsTree, type ProjectAssetsSelection } from './resources/ProjectAssetsTree';
 import { fetchCanvasAssets, type CanvasAssetItem } from '../services/projectAssetsService';
+import { fetchGenerations, generatedMediaCoverUrl, generatedMediaFileUrl, type GenerationItem } from '../services/generatedMediaService';
 import type { Resource } from '../types';
 import {
   moveResourceItem,
@@ -477,6 +478,21 @@ export const ResourcesViewInner: React.FC = () => {
     return () => { cancelled = true; };
   }, [isProjectAssetsView, paSelection]);
 
+  // ─── Generations sub-view ─────────────────────────────────────────────
+  const [generationItems, setGenerationItems] = useState<GenerationItem[]>([]);
+  const [generationsLoading, setGenerationsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!isProjectAssetsView || paSelection.kind !== 'generations') return;
+    let cancelled = false;
+    setGenerationsLoading(true);
+    fetchGenerations()
+      .then((page) => { if (!cancelled) setGenerationItems(page.items); })
+      .catch((err) => { console.error('[ProjectAssets] generations load failed:', err); if (!cancelled) setGenerationItems([]); })
+      .finally(() => { if (!cancelled) setGenerationsLoading(false); });
+    return () => { cancelled = true; };
+  }, [isProjectAssetsView, paSelection]);
+
   // Adapter: Chat Uploads reuses tempSortedItems; a canvas selection adapts
   // CanvasAssetItem → ResourceItem so ResourceGrid can render it unchanged.
   const projectAssetsItems = useMemo<typeof tempSortedItems>(() => {
@@ -604,8 +620,47 @@ export const ResourcesViewInner: React.FC = () => {
               }}
               chatUploadsCount={tempSortedItems.length}
             />
-            <div className="flex-1 min-w-0">
-              {canvasAssetsLoading && paSelection.kind === 'canvas' ? (
+            <div className="flex-1 min-w-0 overflow-y-auto">
+              {paSelection.kind === 'generations' ? (
+                generationsLoading ? (
+                  <div className="p-6 text-ink-500">{t('common.loading')}</div>
+                ) : generationItems.length === 0 ? (
+                  <div className="p-6 text-ink-500">{t('projectAssets.noGenerations', 'No generations yet')}</div>
+                ) : (
+                  <div className="p-4">
+                    <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
+                      {generationItems.map((item) => (
+                        <div
+                          key={item.id}
+                          className="rounded-lg overflow-hidden border border-ink-800/40 bg-ink-900 hover:border-ink-600 transition-colors"
+                        >
+                          <div className="aspect-square bg-ink-800 flex items-center justify-center overflow-hidden">
+                            <img
+                              src={generatedMediaCoverUrl(item.id)}
+                              alt={item.prompt ?? item.media_kind}
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                            />
+                          </div>
+                          <div className="px-2 py-1.5 space-y-0.5">
+                            {item.prompt && (
+                              <p className="text-xs text-ink-300 truncate" title={item.prompt}>
+                                {item.prompt}
+                              </p>
+                            )}
+                            <p className="text-xs text-ink-500">
+                              {[item.model, item.provider].filter(Boolean).join(' · ')}
+                            </p>
+                            <p className="text-xs text-ink-600">
+                              {new Date(item.created_at).toLocaleDateString()}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              ) : canvasAssetsLoading && paSelection.kind === 'canvas' ? (
                 <div className="p-6 text-ink-500">{t('common.loading')}</div>
               ) : (
                 <ResourceGrid

@@ -25,9 +25,10 @@ distinguishes ok vs failed by the body).
 
 from __future__ import annotations
 
-import logging
 from typing import Any, List, Mapping, Optional
 from uuid import UUID
+
+from loguru import logger
 
 from app.schemas.canvas_run import CanvasPromptRunResult
 from app.services.canvas.classic_dispatch import (
@@ -36,8 +37,11 @@ from app.services.canvas.classic_dispatch import (
     ClassicDispatchError,
     resolve_classic_dispatch,
 )
-
-logger = logging.getLogger(__name__)
+from app.services.library.generated_media_service import (
+    GenerationOrigin,
+    register_generated_media,
+)
+from app.services.library.resources_service import _resolve_personal_team_id
 
 DEFAULT_MODEL = "qwen-plus"
 # nous-routed runs are always workflow nodes (comfy/image/video) that can run
@@ -236,7 +240,7 @@ class CanvasRunService:
         try:
             adapter = await self._get_adapter(model)
         except Exception as exc:
-            logger.exception("canvas run: adapter init failed for %s", model)
+            logger.exception("canvas run: adapter init failed for {}", model)
             return CanvasPromptRunResult(
                 ok=False,
                 text="",
@@ -249,7 +253,7 @@ class CanvasRunService:
         try:
             response = await adapter.call(composed, messages)
         except Exception as exc:
-            logger.exception("canvas run: adapter call failed for %s", model)
+            logger.exception("canvas run: adapter call failed for {}", model)
             return CanvasPromptRunResult(
                 ok=False, text="", error=f"adapter call failed: {exc}"
             )
@@ -270,6 +274,8 @@ class CanvasRunService:
         agent_id: Optional[str] = None,
         node_id: Optional[str] = None,
         project_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        canvas_id: Optional[int] = None,
     ) -> CanvasPromptRunResult:
         """Resolve a classic node to its route (provider vs op) and run it
         synchronously, returning the in-band ok/text/result/error envelope.
@@ -295,7 +301,7 @@ class CanvasRunService:
         try:
             dispatch = resolve_classic_dispatch(node_type, node)
         except ClassicDispatchError as exc:
-            logger.info("canvas classic dispatch rejected: %s", exc)
+            logger.info("canvas classic dispatch rejected: {}", exc)
             return CanvasPromptRunResult(ok=False, text="", error=str(exc))
 
         if dispatch.kind == "op":
@@ -305,12 +311,16 @@ class CanvasRunService:
                     body=body,
                     node_id=node_id,
                     project_id=project_id,
+                    user_id=user_id,
+                    canvas_id=canvas_id,
                 )
             if dispatch.op == OP_VIDEO_GEN:
                 return await self._run_video_gen(
                     node=node,
                     node_id=node_id,
                     project_id=project_id,
+                    user_id=user_id,
+                    canvas_id=canvas_id,
                 )
             # split op slots in here (next task).
             return CanvasPromptRunResult(
@@ -346,6 +356,8 @@ class CanvasRunService:
         body: str,
         node_id: Optional[str],
         project_id: Optional[str],
+        user_id: Optional[str] = None,
+        canvas_id: Optional[int] = None,
     ) -> CanvasPromptRunResult:
         """Run an image_gen node: prompt → image via ``generate_image``.
 
@@ -381,7 +393,7 @@ class CanvasRunService:
                 aspect_ratio=params["aspect_ratio"],
             )
         except Exception as exc:
-            logger.exception("canvas image_gen failed for node %s", node_id)
+            logger.exception("canvas image_gen failed for node {}", node_id)
             return CanvasPromptRunResult(
                 ok=False, text="", error=f"image generation failed: {exc}"
             )
@@ -394,6 +406,33 @@ class CanvasRunService:
                 text="",
                 error="image generation returned no image_url",
             )
+
+        # Best-effort capture into Tier-1 generated_media store.
+        # Failures here must NEVER affect the canvas run result.
+        if image_url and user_id:
+            try:
+                scope_id = int(await _resolve_personal_team_id(str(user_id)))
+                await register_generated_media(
+                    user_id=str(user_id),
+                    scope_id=scope_id,
+                    source_url=str(image_url),
+                    mime="image/png",
+                    origin=GenerationOrigin(
+                        kind="canvas_run",
+                        run_id=None,
+                        canvas_id=canvas_id,
+                        node_id=node_id,
+                        prompt=prompt,
+                        model=params.get("model"),
+                        provider=params.get("provider_name"),
+                        params=params,
+                        derivation_kind="image_gen",
+                    ),
+                )
+            except Exception:  # noqa: BLE001
+                logger.opt(exception=True).warning(
+                    "[genmedia] canvas image capture failed (non-fatal)"
+                )
 
         return CanvasPromptRunResult(
             ok=True,
@@ -412,6 +451,8 @@ class CanvasRunService:
         node: Optional[Mapping[str, Any]],
         node_id: Optional[str],
         project_id: Optional[str],
+        user_id: Optional[str] = None,
+        canvas_id: Optional[int] = None,
     ) -> CanvasPromptRunResult:
         """Run a video_gen node: source image + motion prompt → video via
         ``generate_video`` (the distinct video provider registry).
@@ -451,7 +492,7 @@ class CanvasRunService:
                 motion_intensity=params["motion_intensity"],
             )
         except Exception as exc:
-            logger.exception("canvas video_gen failed for node %s", node_id)
+            logger.exception("canvas video_gen failed for node {}", node_id)
             return CanvasPromptRunResult(
                 ok=False, text="", error=f"video generation failed: {exc}"
             )
@@ -464,6 +505,33 @@ class CanvasRunService:
                 text="",
                 error="video generation returned no video_url",
             )
+
+        # Best-effort capture into Tier-1 generated_media store.
+        # Failures here must NEVER affect the canvas run result.
+        if video_url and user_id:
+            try:
+                scope_id = int(await _resolve_personal_team_id(str(user_id)))
+                await register_generated_media(
+                    user_id=str(user_id),
+                    scope_id=scope_id,
+                    source_url=str(video_url),
+                    mime="video/mp4",
+                    origin=GenerationOrigin(
+                        kind="canvas_run",
+                        run_id=None,
+                        canvas_id=canvas_id,
+                        node_id=node_id,
+                        prompt=params.get("prompt"),
+                        model=params.get("model"),
+                        provider=params.get("provider_name"),
+                        params=params,
+                        derivation_kind="video_gen",
+                    ),
+                )
+            except Exception:  # noqa: BLE001
+                logger.opt(exception=True).warning(
+                    "[genmedia] canvas video capture failed (non-fatal)"
+                )
 
         return CanvasPromptRunResult(
             ok=True,
@@ -527,7 +595,7 @@ class CanvasRunService:
         except NousCenterNotConfigured as exc:
             return CanvasPromptRunResult(ok=False, text="", error=str(exc))
         except Exception as exc:
-            logger.exception("nous-center workflow %s failed", workflow_slug)
+            logger.exception("nous-center workflow {} failed", workflow_slug)
             return CanvasPromptRunResult(
                 ok=False, text="", error=f"nous-center call failed: {exc}"
             )

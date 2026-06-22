@@ -215,6 +215,8 @@ async def run_classic_node(
         agent_id=payload.agent_id,
         node_id=payload.node.id,
         project_id=project_id,
+        user_id=str(auth.user_id),
+        canvas_id=int(payload.canvas_id),
     )
     body = ClassicNodeRunResponse(
         ok=result.ok,
