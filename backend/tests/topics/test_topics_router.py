@@ -38,6 +38,13 @@ def client(monkeypatch):
             calls["list_by_ids"] = list(ids)
             return [_row(i, f"Saved {i}") for i in ids]
 
+        async def get_by_id(self, hotspot_id):
+            if calls.get("missing"):
+                return None
+            row = _row(hotspot_id, "Detail")
+            row["content_original"] = "full body text"
+            return row
+
         async def distinct_dates(self, limit_days=60):
             return ["2026-06-20", "2026-06-19"]
 
@@ -175,10 +182,32 @@ def test_list_hotspots_keeps_day_when_no_search(client):
     assert client.calls["q"] is None
 
 
+def test_get_hotspot_detail_includes_content(client):
+    client.calls["states"] = {"55": {"is_saved": True}}
+    r = client.get("/api/v1/topics/55")
+    assert r.status_code == 200
+    h = r.json()["hotspot"]
+    assert h["id"] == "55"
+    assert h["content_original"] == "full body text"
+    assert h["is_saved"] is True
+
+
+def test_get_hotspot_detail_404(client):
+    client.calls["missing"] = True
+    r = client.get("/api/v1/topics/999")
+    assert r.status_code == 404
+
+
 def test_dates(client):
     r = client.get("/api/v1/topics/dates")
     assert r.status_code == 200
     assert r.json()["dates"] == ["2026-06-20", "2026-06-19"]
+
+
+def test_list_does_not_leak_content(client):
+    # list rows omit the heavy content_original field
+    r = client.get("/api/v1/topics")
+    assert r.json()["hotspots"][0]["content_original"] is None
 
 
 def test_source_health(client):

@@ -17,6 +17,8 @@ export interface Hotspot {
   media_url?: string | null;
   cover_url?: string | null;
   captured_at?: string | null;
+  content_original?: string | null;
+  content_translated?: string | null;
   is_read?: boolean;
   is_saved?: boolean;
   is_hidden?: boolean;
@@ -56,6 +58,12 @@ export async function getHotspots(
   if (category && category !== 'all') params.set('category', category);
   const resp = await fetch(`${base()}?${params.toString()}`, { headers: await getAuthHeaders() });
   return (await jsonOrThrow(resp)).hotspots as Hotspot[];
+}
+
+// Full hotspot incl. original/translated body for the detail panel.
+export async function getHotspot(id: string): Promise<Hotspot> {
+  const resp = await fetch(`${base()}/${id}`, { headers: await getAuthHeaders() });
+  return (await jsonOrThrow(resp)).hotspot as Hotspot;
 }
 
 export async function setHotspotState(

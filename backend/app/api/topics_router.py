@@ -15,6 +15,7 @@ from app.repositories.hotspots_repository import HotspotsRepository
 from app.repositories.signal_sources_repository import SignalSourcesRepository
 from app.schemas.topics import (
     DatesResponse,
+    HotspotDetailResponse,
     HotspotListResponse,
     HotspotOut,
     HotspotStateRequest,
@@ -27,7 +28,9 @@ from app.services.storyboard.script.script_ai_service import ScriptAIService
 router = APIRouter(prefix="/topics")
 
 
-def _to_out(row: dict, state: Optional[dict] = None) -> HotspotOut:
+def _to_out(
+    row: dict, state: Optional[dict] = None, *, include_content: bool = False
+) -> HotspotOut:
     state = state or {}
     return HotspotOut(
         id=str(row.get("id")),
@@ -44,6 +47,9 @@ def _to_out(row: dict, state: Optional[dict] = None) -> HotspotOut:
         media_url=row.get("media_url"),
         cover_url=row.get("cover_url"),
         captured_at=row.get("captured_at"),
+        # content_* only in the detail view to keep the list payload light.
+        content_original=row.get("content_original") if include_content else None,
+        content_translated=(row.get("content_translated") if include_content else None),
         is_read=bool(state.get("is_read")),
         is_saved=bool(state.get("is_saved")),
         is_hidden=bool(state.get("is_hidden")),
@@ -127,6 +133,21 @@ async def source_health(auth: AuthDep):
     rows = await repo.list_all()
     sources = [_to_health_out(r) for r in rows]
     return SourceHealthResponse(count=len(sources), sources=sources)
+
+
+@router.get("/{hotspot_id}", response_model=HotspotDetailResponse)
+async def get_hotspot(hotspot_id: str, auth: AuthDep):
+    """Full hotspot for the detail panel: original/translated body + the
+    caller's read/saved/hidden state. Declared after the static GET routes so
+    ``/dates`` and ``/sources/health`` are not captured by ``{hotspot_id}``."""
+    repo = HotspotsRepository()
+    row = await repo.get_by_id(hotspot_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="hotspot not found")
+    state_repo = HotspotUserStateRepository()
+    states = await state_repo.get_states(auth.user_id, [hotspot_id])
+    out = _to_out(row, states.get(hotspot_id, {}), include_content=True)
+    return HotspotDetailResponse(hotspot=out)
 
 
 async def _generate_script_for(title: str, summary: str, user_id: str) -> list:

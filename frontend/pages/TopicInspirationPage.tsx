@@ -278,7 +278,11 @@ export const TopicInspirationPage: React.FC = () => {
       </div>
 
       {/* Right info island portal */}
-      <HotspotInfoPanel hotspot={selected} />
+      <HotspotInfoPanel
+        hotspot={selected}
+        onToggleSave={(h) => applyState(h, { is_saved: !h.is_saved })}
+        onToggleHide={(h) => applyState(h, { is_hidden: !h.is_hidden })}
+      />
 
       {/* Floating parse widget — bottom-right, 3 states */}
       <FloatingParse />
