@@ -9,24 +9,57 @@ function hhmm(iso?: string | null): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-export const Timeline: React.FC<{ hotspots: Hotspot[]; onSelect: (h: Hotspot) => void }> = ({
+interface Props {
+  hotspots: Hotspot[];
+  onSelect: (h: Hotspot) => void;
+  selectedId?: string;
+  onToggleSave?: (h: Hotspot) => void;
+  onToggleHide?: (h: Hotspot) => void;
+}
+
+export const Timeline: React.FC<Props> = ({
   hotspots,
   onSelect,
+  selectedId,
+  onToggleSave,
+  onToggleHide,
 }) => {
   return (
     <div className="relative">
-      <div className="absolute top-1 bottom-1 w-[2px] bg-line" style={{ left: 78 }} />
+      {/* Vertical line: 2px, bg-line-strong, sitting at left:64px */}
+      <div
+        className="absolute top-1.5 bottom-1.5 w-[2px] bg-line-strong"
+        style={{ left: 64 }}
+      />
+
       {hotspots.map((h) => (
-        <div key={h.id} className="flex items-start relative py-3.5 border-t border-line first:border-t-0">
-          <div className="w-[78px] shrink-0 text-right pr-[22px] relative">
-            <span className="font-bold text-[13px] text-content">{hhmm(h.captured_at)}</span>
-            <span
-              className="absolute top-[5px] w-[11px] h-[11px] rounded-full bg-accent border-2 border-island"
-              style={{ right: -5, boxShadow: '0 0 0 2px rgba(99,102,241,.18)' }}
-            />
+        <div key={h.id} className="flex items-start relative mb-3.5">
+          {/* Time rail: 64px, right-aligned text, pt-3.5 to vertically align with card top */}
+          <div className="w-[64px] shrink-0 text-right pr-5 pt-3.5">
+            <span className="font-bold text-[13px] text-content">
+              {hhmm(h.captured_at)}
+            </span>
           </div>
-          <div className="flex-1 min-w-0">
-            <HotspotCard hotspot={h} onSelect={onSelect} />
+
+          {/* Dot ON the line: 13px circle, bg-accent, 3px border in island bg color, z-2 */}
+          <span
+            className="absolute w-[13px] h-[13px] rounded-full bg-accent z-[2]"
+            style={{
+              left: 58,
+              top: 20,
+              border: '3px solid var(--island, #fff)',
+            }}
+          />
+
+          {/* Card: flex-1, ml-6 (24px) to the right of the line */}
+          <div className="flex-1 min-w-0 ml-6">
+            <HotspotCard
+              hotspot={h}
+              onSelect={onSelect}
+              selected={h.id === selectedId}
+              onToggleSave={onToggleSave}
+              onToggleHide={onToggleHide}
+            />
           </div>
         </div>
       ))}

@@ -2011,6 +2011,24 @@
     "parsed": "已解析",
     "downloadDispatched": "已派发下载 — 见 Task Center",
     "playlistDispatched": "已派发 {{n}} 首",
-    "downloadAll": "全部下载（{{n}}）"
+    "downloadAll": "全部下载（{{n}}）",
+    "sourceHealth": "信源健康",
+    "sourcesHealthy": "信源正常",
+    "sourcesUnhealthy": "{{count}} 个信源异常",
+    "sourceDisabled": "已禁用",
+    "lastOk": "上次成功",
+    "searchPlaceholder": "搜索热点...",
+    "searchResults": "「{{query}}」的 {{count}} 条结果",
+    "dateDisabledWhenSearching": "搜索全部日期",
+    "view_all": "全部",
+    "view_saved": "收藏",
+    "view_hidden": "已隐藏",
+    "pick": "精选",
+    "save": "收藏",
+    "hide": "隐藏",
+    "unhide": "取消隐藏",
+    "noSaved": "还没有收藏的热点。",
+    "noHidden": "没有隐藏的内容。",
+    "noHotspots": "未找到热点。"
   }
 }

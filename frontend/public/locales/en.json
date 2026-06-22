@@ -2011,6 +2011,24 @@
     "parsed": "Parsed",
     "downloadDispatched": "Download dispatched — see Task Center",
     "playlistDispatched": "{{n}} tracks dispatched",
-    "downloadAll": "Download all ({{n}})"
+    "downloadAll": "Download all ({{n}})",
+    "sourceHealth": "Source health",
+    "sourcesHealthy": "Sources OK",
+    "sourcesUnhealthy": "{{count}} sources down",
+    "sourceDisabled": "Disabled",
+    "lastOk": "Last OK",
+    "searchPlaceholder": "Search hotspots...",
+    "searchResults": "{{count}} results for \"{{query}}\"",
+    "dateDisabledWhenSearching": "Searching all dates",
+    "view_all": "All",
+    "view_saved": "Saved",
+    "view_hidden": "Hidden",
+    "pick": "Pick",
+    "save": "Save",
+    "hide": "Hide",
+    "unhide": "Unhide",
+    "noSaved": "No saved hotspots yet.",
+    "noHidden": "Nothing hidden.",
+    "noHotspots": "No hotspots found."
   }
 }

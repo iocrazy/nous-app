@@ -36,6 +36,22 @@ class SignalSourcesRepository:
         )
         return result.data or []
 
+    async def list_all(self) -> list[dict[str, Any]]:
+        """All sources (enabled + disabled) for the read-only health surface.
+
+        Ordered worst-health-first: 'dead' < 'degraded' < 'ok' sorts ascending,
+        so failing sources surface at the top; ties broken by name.
+        """
+        client = await self._client()
+        result = (
+            await client.table(self.TABLE)
+            .select("*")
+            .order("health")
+            .order("name")
+            .execute()
+        )
+        return result.data or []
+
     async def mark_health(
         self,
         source_id: str,

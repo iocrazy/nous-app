@@ -17,6 +17,17 @@ export interface Hotspot {
   media_url?: string | null;
   cover_url?: string | null;
   captured_at?: string | null;
+  is_read?: boolean;
+  is_saved?: boolean;
+  is_hidden?: boolean;
+}
+
+export type HotspotView = 'all' | 'saved' | 'hidden';
+
+export interface HotspotStatePatch {
+  is_read?: boolean;
+  is_saved?: boolean;
+  is_hidden?: boolean;
 }
 
 const base = () => `${getApiUrl()}/api/v1/topics`;
@@ -29,17 +40,59 @@ async function jsonOrThrow(resp: Response) {
   return resp.json();
 }
 
-export async function getHotspots(day?: string, category?: string): Promise<Hotspot[]> {
+export async function getHotspots(
+  day?: string,
+  category?: string,
+  q?: string,
+  view: HotspotView = 'all',
+): Promise<Hotspot[]> {
   const params = new URLSearchParams();
-  if (day) params.set('day', day);
+  if (view !== 'all') params.set('view', view);
+  // Server-side search: the query MUST reach the backend WHERE clause, never
+  // filter client-side over an already-truncated page.
+  const term = (q || '').trim();
+  if (term) params.set('q', term);
+  else if (day) params.set('day', day); // day only narrows plain browsing
   if (category && category !== 'all') params.set('category', category);
   const resp = await fetch(`${base()}?${params.toString()}`, { headers: await getAuthHeaders() });
   return (await jsonOrThrow(resp)).hotspots as Hotspot[];
 }
 
+export async function setHotspotState(
+  id: string,
+  patch: HotspotStatePatch,
+): Promise<HotspotStatePatch> {
+  const resp = await fetch(`${base()}/${id}/state`, {
+    method: 'PATCH',
+    headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  return jsonOrThrow(resp);
+}
+
 export async function getHotspotDates(): Promise<string[]> {
   const resp = await fetch(`${base()}/dates`, { headers: await getAuthHeaders() });
   return (await jsonOrThrow(resp)).dates as string[];
+}
+
+export type SourceHealthStatus = 'ok' | 'degraded' | 'dead';
+
+export interface SourceHealth {
+  id: string;
+  name: string;
+  kind: string;
+  category?: string | null;
+  enabled: boolean;
+  health: SourceHealthStatus;
+  consecutive_failures: number;
+  last_error?: string | null;
+  last_fetched_at?: string | null;
+  last_ok_at?: string | null;
+}
+
+export async function getSourceHealth(): Promise<SourceHealth[]> {
+  const resp = await fetch(`${base()}/sources/health`, { headers: await getAuthHeaders() });
+  return (await jsonOrThrow(resp)).sources as SourceHealth[];
 }
 
 // generate-script returns the script_ai outline (a list of chapter objects), not a string.
