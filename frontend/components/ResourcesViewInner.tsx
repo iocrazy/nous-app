@@ -29,7 +29,7 @@ import { useFilterBarConfig } from '../hooks/useFilterBarConfig';
 import { ResourcesModals } from './ResourcesModals';
 import { ProjectAssetsTree, type ProjectAssetsSelection } from './resources/ProjectAssetsTree';
 import { fetchCanvasAssets, type CanvasAssetItem } from '../services/projectAssetsService';
-import { fetchGenerations, generatedMediaCoverUrl, generatedMediaFileUrl, type GenerationItem } from '../services/generatedMediaService';
+import { fetchGenerations, generatedMediaCoverUrl, generatedMediaFileUrl, promoteGeneration, type GenerationItem } from '../services/generatedMediaService';
 import type { Resource } from '../types';
 import {
   moveResourceItem,
@@ -654,6 +654,21 @@ export const ResourcesViewInner: React.FC = () => {
                             <p className="text-xs text-ink-600">
                               {new Date(item.created_at).toLocaleDateString()}
                             </p>
+                            <button
+                              type="button"
+                              className="mt-1 w-full rounded px-2 py-0.5 text-xs font-medium bg-ink-700 hover:bg-ink-600 text-ink-200 hover:text-ink-100 transition-colors"
+                              onClick={async () => {
+                                try {
+                                  await promoteGeneration(item.id);
+                                  addToast(t('projectAssets.kept', 'Saved to library'), 'success');
+                                } catch (err) {
+                                  console.error('[Generations] promote failed:', err);
+                                  addToast(t('common.error', 'Something went wrong'), 'error');
+                                }
+                              }}
+                            >
+                              {t('projectAssets.keep', 'Keep')}
+                            </button>
                           </div>
                         </div>
                       ))}

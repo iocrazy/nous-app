@@ -1951,6 +1951,8 @@
     "noCanvases": "No canvases yet",
     "appearsInCanvases_one": "Appears in {{count}} canvas",
     "appearsInCanvases_other": "Appears in {{count}} canvases",
+    "keep": "Keep",
+    "kept": "Saved to library",
     "role": {
       "reference": "Reference",
       "output": "Output"

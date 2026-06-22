@@ -1,0 +1,87 @@
+"""Tests for generated_media_router — promote endpoint.
+
+Auth override pattern mirrors test_generated_media_router.py:
+  app.dependency_overrides[get_auth] = _fake_auth
+using get_auth from app.core.deps (the real dependency that AuthDep resolves).
+
+NOTE: app/api/__init__.py rebinds ``app.api.generated_media_router`` to the
+APIRouter instance, so ``import app.api.generated_media_router as r`` yields
+the router object. Use sys.modules to get the real module (same pattern as
+test_generated_media_router.py for generated_media_router).
+"""
+
+from __future__ import annotations
+
+import sys
+
+import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+
+# Import app.main first so __init__.py runs and populates sys.modules.
+from app.core.deps import AuthContext, get_auth
+from app.main import app
+
+# Must use sys.modules — __init__.py rebinds the attribute name to the APIRouter.
+r = sys.modules["app.api.generated_media_router"]
+
+FAKE_USER_ID = "00000000-0000-0000-0000-000000000042"
+
+
+async def _fake_auth() -> AuthContext:
+    return AuthContext(user_id=FAKE_USER_ID, auth_type="jwt")
+
+
+@pytest.fixture(autouse=True)
+def _override_auth():
+    app.dependency_overrides[get_auth] = _fake_auth
+    yield
+    app.dependency_overrides.pop(get_auth, None)
+
+
+@pytest_asyncio.fixture
+async def client() -> AsyncClient:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+
+
+@pytest.mark.asyncio
+async def test_promote_route_returns_resource_id(monkeypatch, client):
+    """POST /{gen_id}/promote resolves caller scope, calls the service, and
+    returns {data: {promoted_resource_id: str}}."""
+
+    async def _fake_scope(auth):
+        return 42
+
+    class _FakeSvc:
+        async def promote(self, *, gen_id, user_id, scope_id):
+            assert scope_id == 42
+            return {"id": 555}
+
+    monkeypatch.setattr(r, "_scope", _fake_scope)
+    monkeypatch.setattr(r, "PromoteGeneratedMediaService", lambda: _FakeSvc())
+
+    resp = await client.post("/api/v1/generated-media/7/promote")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["data"]["promoted_resource_id"] == "555"
+
+
+@pytest.mark.asyncio
+async def test_promote_route_404_when_not_in_scope(monkeypatch, client):
+    """POST /{gen_id}/promote returns 404 when the service raises ValueError
+    (generation not found in the caller's scope)."""
+
+    async def _fake_scope(auth):
+        return 99
+
+    class _FakeSvcNotFound:
+        async def promote(self, *, gen_id, user_id, scope_id):
+            raise ValueError("generation not found")
+
+    monkeypatch.setattr(r, "_scope", _fake_scope)
+    monkeypatch.setattr(r, "PromoteGeneratedMediaService", lambda: _FakeSvcNotFound())
+
+    resp = await client.post("/api/v1/generated-media/999/promote")
+    assert resp.status_code == 404
