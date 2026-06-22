@@ -42,7 +42,11 @@ class PromoteGeneratedMediaService:
         )
         filename = f"generated-{media_kind}{ext}"
         size = os.path.getsize(src_abs) if os.path.isfile(src_abs) else 0
-        file_hash = _sha256(src_abs) if os.path.isfile(src_abs) else None
+        file_hash = (
+            await asyncio.to_thread(_sha256, src_abs)
+            if os.path.isfile(src_abs)
+            else None
+        )
 
         # 1) resource row (source_type='generated' + provenance in metadata)
         resource = await self.res_repo.create_resource(

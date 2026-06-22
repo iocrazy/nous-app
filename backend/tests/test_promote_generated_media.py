@@ -73,6 +73,67 @@ async def test_promote_creates_resource_and_marks(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_promote_canvas_origin(monkeypatch, tmp_path):
+    import sys
+    import types
+
+    import app.services.library.promote_generated_media_service as svc_mod
+
+    # source file on disk (same setup as happy-path test)
+    src = tmp_path / "teams/42/generations/abc/media.png"
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_bytes(b"imgbytes")
+    monkeypatch.setattr(svc_mod.settings, "DOWNLOAD_PATH", str(tmp_path))
+
+    svc = svc_mod.PromoteGeneratedMediaService()
+
+    async def _get(gen_id, scope_id):
+        return _gen_row(canvas_id="99", node_id="n1")
+
+    async def _create_resource(data):
+        return {"id": 555}
+
+    async def _create_version(data):
+        return {"id": 1}
+
+    async def _create_item(data):
+        return {"id": 2}
+
+    async def _mark(gen_id, rid):
+        return _gen_row(promoted_resource_id=str(rid), canvas_id="99", node_id="n1")
+
+    monkeypatch.setattr(svc.gen_repo, "get", _get)
+    monkeypatch.setattr(svc.gen_repo, "mark_promoted", _mark)
+    monkeypatch.setattr(svc.res_repo, "create_resource", _create_resource)
+    monkeypatch.setattr(svc.res_repo, "create_version", _create_version)
+    monkeypatch.setattr(svc.res_repo, "create_resource_item", _create_item)
+
+    # capture canvas_resource_refs insert via a fake app.db.engine
+    db_calls = []
+
+    async def _execute_as_service_role(sql, params):
+        db_calls.append(params)
+
+    fake_engine = types.SimpleNamespace(
+        execute_as_service_role=_execute_as_service_role
+    )
+    fake_db_mod = types.ModuleType("app.db")
+    fake_db_mod.engine = fake_engine
+    monkeypatch.setitem(sys.modules, "app.db", fake_db_mod)
+
+    out = await svc.promote(gen_id=7, user_id="u-uuid", scope_id=42)
+
+    # resource created normally
+    assert out["id"] == 555
+
+    # canvas_resource_refs INSERT called exactly once with expected params
+    assert len(db_calls) == 1
+    assert db_calls[0]["cid"] == 99
+    assert db_calls[0]["rid"] == 555
+    assert db_calls[0]["nid"] == "n1"
+
+
+@pytest.mark.asyncio
 async def test_promote_idempotent(monkeypatch):
     import app.services.library.promote_generated_media_service as svc_mod
 
