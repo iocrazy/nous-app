@@ -60,3 +60,16 @@ export function generatedMediaFileUrl(id: string): string {
 export function generatedMediaCoverUrl(id: string): string {
   return `${getApiUrl()}/api/v1/generated-media/${id}/cover`;
 }
+
+/**
+ * Promotes a generated-media item to the library (creates a Resource row).
+ * Idempotent — re-calling returns the existing resource.
+ */
+export async function promoteGeneration(genId: string): Promise<{ promoted_resource_id: string }> {
+  const res = await fetch(`${getApiUrl()}/api/v1/generated-media/${genId}/promote`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()).data;
+}

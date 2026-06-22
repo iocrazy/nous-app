@@ -1951,6 +1951,8 @@
     "noCanvases": "暂无画布",
     "appearsInCanvases_one": "出现在 {{count}} 个画布",
     "appearsInCanvases_other": "出现在 {{count}} 个画布",
+    "keep": "保存",
+    "kept": "已保存到资源库",
     "role": {
       "reference": "参考图",
       "output": "生成结果"

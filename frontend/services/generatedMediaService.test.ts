@@ -67,3 +67,18 @@ describe('generatedMediaFileUrl', () => {
     expect(url).toContain('/api/v1/generated-media/5/file');
   });
 });
+
+import { promoteGeneration } from './generatedMediaService';
+
+describe('promoteGeneration', () => {
+  it('POSTs to the promote endpoint and unwraps data', async () => {
+    const json = { data: { promoted_resource_id: '555' } };
+    const spy = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(json) });
+    vi.stubGlobal('fetch', spy);
+    const out = await promoteGeneration('7');
+    expect(spy.mock.calls[0][0]).toContain('/api/v1/generated-media/7/promote');
+    expect(spy.mock.calls[0][1].method).toBe('POST');
+    expect(out.promoted_resource_id).toBe('555');
+    vi.unstubAllGlobals();
+  });
+});
