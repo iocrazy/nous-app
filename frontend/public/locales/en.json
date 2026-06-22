@@ -2027,6 +2027,9 @@
     "unhide": "Unhide",
     "noSaved": "No saved hotspots yet.",
     "noHidden": "Nothing hidden.",
-    "noHotspots": "No hotspots found."
+    "noHotspots": "No hotspots found.",
+    "original": "Original",
+    "showMore": "Show more",
+    "showLess": "Show less"
   }
 }

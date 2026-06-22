@@ -2027,6 +2027,9 @@
     "unhide": "取消隐藏",
     "noSaved": "还没有收藏的热点。",
     "noHidden": "没有隐藏的内容。",
-    "noHotspots": "未找到热点。"
+    "noHotspots": "未找到热点。",
+    "original": "原文",
+    "showMore": "展开",
+    "showLess": "收起"
   }
 }
