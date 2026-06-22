@@ -219,8 +219,22 @@ export const ShortcutsTagsPage: React.FC = () => {
         }),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: 'Failed' }));
-        throw new Error(err.detail || `Error ${res.status}`);
+        const err = await res.json().catch(() => ({} as { detail?: string }));
+        if (res.status === 409) {
+          // The English name collided with an existing tag — commonly a system
+          // tag whose Chinese alias differs (e.g. "康复" auto-translates to
+          // "Healing", which already exists as Healing/治愈). The Chinese name
+          // isn't the duplicate; the English one is. Tell the user plainly.
+          throw new Error(
+            lang === 'zh'
+              ? `标签已存在：英文名「${name}」已被占用（可能是系统内置标签）。请换个名字，或直接在上方搜索选择已有标签。`
+              : `Tag already exists: the name "${name}" is taken (possibly a built-in tag). Use a different name, or search and select the existing tag above.`,
+          );
+        }
+        throw new Error(
+          err.detail ||
+            (lang === 'zh' ? `创建失败（${res.status}）` : `Create failed (${res.status})`),
+        );
       }
       // Reload tags
       const fetchUrl = `${API_BASE}/api/v1/auth/temp-token/${token}/tags?enabled_only=true`;
@@ -238,7 +252,7 @@ export const ShortcutsTagsPage: React.FC = () => {
     } finally {
       setCreating(false);
     }
-  }, [newTagInput, translatedName, newTagGroupId, token]);
+  }, [newTagInput, translatedName, newTagGroupId, token, lang]);
 
   /** Get display label (may be Chinese), but always use English name for storage */
   const getStorageName = (tag: Tag) => tag.name;
