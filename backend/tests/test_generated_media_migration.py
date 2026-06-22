@@ -2,7 +2,7 @@ import re
 from pathlib import Path
 
 MIG = (
-    Path(__file__).resolve().parents[2] / "supabase/migrations/306_generated_media.sql"
+    Path(__file__).resolve().parents[2] / "supabase/migrations/307_generated_media.sql"
 )
 
 
