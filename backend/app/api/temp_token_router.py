@@ -169,12 +169,30 @@ async def create_tag_by_token(token: str, request: CreateTagRequest):
 
     repo = get_tags_repository()
 
-    # Check duplicate
+    # Check duplicate. Return WHICH tag conflicts so the picker can explain it:
+    # the English `name` (often an auto-translation) may collide with a built-in
+    # system tag whose Chinese alias differs (e.g. "康复" -> "Healing", which
+    # already exists as Healing/治愈). The Chinese name isn't the duplicate.
     existing = await repo.get_tag_by_name(request.name, data["user_id"])
     if existing:
+        ezh = existing.get("name_zh")
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Tag '{request.name}' already exists",
+            detail={
+                "code": "tag_name_conflict",
+                "message": (
+                    f"English name '{request.name}' already belongs to tag "
+                    f"'{existing.get('name')}'"
+                    + (f" ({ezh})" if ezh else "")
+                    + f" [{existing.get('type')}]"
+                ),
+                "attempted_name": request.name,
+                "conflict": {
+                    "name": existing.get("name"),
+                    "name_zh": ezh,
+                    "type": existing.get("type"),
+                },
+            },
         )
 
     created = await repo.create_tag(

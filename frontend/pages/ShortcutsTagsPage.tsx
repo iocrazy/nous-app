@@ -219,20 +219,44 @@ export const ShortcutsTagsPage: React.FC = () => {
         }),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({} as { detail?: string }));
+        const err = await res.json().catch(() => ({}) as { detail?: unknown });
+        const detail = err?.detail;
         if (res.status === 409) {
-          // The English name collided with an existing tag — commonly a system
-          // tag whose Chinese alias differs (e.g. "康复" auto-translates to
-          // "Healing", which already exists as Healing/治愈). The Chinese name
-          // isn't the duplicate; the English one is. Tell the user plainly.
+          // Backend names WHICH tag conflicts. The English name (often an
+          // auto-translation, e.g. 康复 -> "Healing") may collide with a
+          // built-in system tag whose Chinese alias differs (Healing/治愈).
+          // The Chinese name isn't the duplicate — surface the real conflict.
+          const conflict =
+            detail && typeof detail === 'object'
+              ? (detail as { conflict?: { name?: string; name_zh?: string; type?: string } })
+                  .conflict
+              : undefined;
+          if (conflict?.name) {
+            const existingLabel = conflict.name_zh
+              ? `${conflict.name_zh}（${conflict.name}）`
+              : conflict.name;
+            const kind =
+              conflict.type === 'system'
+                ? lang === 'zh'
+                  ? '系统内置标签'
+                  : 'a built-in tag'
+                : lang === 'zh'
+                  ? '已有标签'
+                  : 'an existing tag';
+            throw new Error(
+              lang === 'zh'
+                ? `英文名「${name}」已被${kind}「${existingLabel}」占用。换个英文名，或在上方搜索选择已有标签。`
+                : `The English name "${name}" is already used by ${kind} "${existingLabel}". Use a different English name, or search and select the existing tag above.`,
+            );
+          }
           throw new Error(
             lang === 'zh'
-              ? `标签已存在：英文名「${name}」已被占用（可能是系统内置标签）。请换个名字，或直接在上方搜索选择已有标签。`
-              : `Tag already exists: the name "${name}" is taken (possibly a built-in tag). Use a different name, or search and select the existing tag above.`,
+              ? `标签已存在：英文名「${name}」已被占用。请换个名字，或在上方搜索选择已有标签。`
+              : `Tag already exists: "${name}" is taken. Use a different name, or search and select the existing tag above.`,
           );
         }
         throw new Error(
-          err.detail ||
+          (typeof detail === 'string' && detail) ||
             (lang === 'zh' ? `创建失败（${res.status}）` : `Create failed (${res.status})`),
         );
       }
