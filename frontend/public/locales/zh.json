@@ -2017,6 +2017,16 @@
     "lastOk": "上次成功",
     "searchPlaceholder": "搜索热点...",
     "searchResults": "「{{query}}」的 {{count}} 条结果",
-    "dateDisabledWhenSearching": "搜索全部日期"
+    "dateDisabledWhenSearching": "搜索全部日期",
+    "view_all": "全部",
+    "view_saved": "收藏",
+    "view_hidden": "已隐藏",
+    "pick": "精选",
+    "save": "收藏",
+    "hide": "隐藏",
+    "unhide": "取消隐藏",
+    "noSaved": "还没有收藏的热点。",
+    "noHidden": "没有隐藏的内容。",
+    "noHotspots": "未找到热点。"
   }
 }

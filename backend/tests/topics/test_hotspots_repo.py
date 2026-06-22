@@ -53,6 +53,10 @@ class _FakeQuery:
     def eq(self, *a):
         return self
 
+    def in_(self, col, vals):
+        self.in_arg = (col, list(vals))
+        return self
+
     def or_(self, expr):
         self.or_arg = expr
         return self
@@ -90,6 +94,23 @@ async def test_list_for_date_applies_search_or_filter(monkeypatch):
     assert client.q.or_arg is not None
     for col in ("title", "content_original", "ai_summary", "source_label"):
         assert f"{col}.ilike.%gpt-5%" in client.q.or_arg
+
+
+@pytest.mark.asyncio
+async def test_list_by_ids_filters_in_and_short_circuits(monkeypatch):
+    repo = HotspotsRepository()
+    # empty id list never hits the client
+    assert await repo.list_by_ids([]) == []
+
+    client = _FakeClient([{"id": "7"}, {"id": "8"}])
+
+    async def _fake_client():
+        return client
+
+    monkeypatch.setattr(repo, "_client", _fake_client)
+    out = await repo.list_by_ids(["7", "8"])
+    assert [r["id"] for r in out] == ["7", "8"]
+    assert client.q.in_arg == ("id", ["7", "8"])
 
 
 @pytest.mark.asyncio
