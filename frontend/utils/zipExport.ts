@@ -31,7 +31,10 @@ export function downloadKind(mediaType?: string | null): ExportKind {
 
 /** Resolve an item to its download URL + filename inside the zip. */
 export function resolveExport(v: Video): { url: string; filename: string } {
-  const base = sanitize(v.title || v.platform_id || 'media');
+  // Filename = "Author - Title" (falls back to just Title when no author).
+  const titlePart = sanitize(v.title || v.platform_id || 'media');
+  const author = (v.author || '').trim();
+  const base = author ? `${sanitize(author)} - ${titlePart}` : titlePart;
   switch (downloadKind(v.media_type)) {
     case 'audio':
       return { url: getMusicDownloadUrl(v.platform_id), filename: `${base}.mp3` };
