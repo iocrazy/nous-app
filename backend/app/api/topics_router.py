@@ -24,6 +24,7 @@ from app.schemas.topics import (
     SourceHealthResponse,
 )
 from app.services.storyboard.script.script_ai_service import ScriptAIService
+from app.services.topics.heat import best_rank as _best_rank
 
 router = APIRouter(prefix="/topics")
 
@@ -47,6 +48,8 @@ def _to_out(
         media_url=row.get("media_url"),
         cover_url=row.get("cover_url"),
         captured_at=row.get("captured_at"),
+        heat=row.get("heat"),
+        best_rank=_best_rank(row.get("rank_timeline") or []),
         # content_* only in the detail view to keep the list payload light.
         content_original=row.get("content_original") if include_content else None,
         content_translated=(row.get("content_translated") if include_content else None),

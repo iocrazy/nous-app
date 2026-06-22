@@ -20,6 +20,10 @@ class HotspotOut(BaseModel):
     media_url: Optional[str] = None
     cover_url: Optional[str] = None
     captured_at: Optional[str] = None
+    # Objective popularity (0..1) from board rank + persistence, and the best
+    # board position ever held — for ranking and display.
+    heat: Optional[float] = None
+    best_rank: Optional[int] = None
     # Full original/translated body — only populated by the detail endpoint to
     # keep the list payload light.
     content_original: Optional[str] = None

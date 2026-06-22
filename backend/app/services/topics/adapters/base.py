@@ -16,6 +16,9 @@ class HotspotCandidate:
     captured_at: Optional[datetime] = None
     media_url: Optional[str] = None
     cover_url: Optional[str] = None
+    # 1-based board position for ranked sources (newsnow). None for unranked
+    # sources (RSS) — feeds heat's persistence-only fallback.
+    rank: Optional[int] = None
 
     def __post_init__(self) -> None:
         if self.captured_at is None:

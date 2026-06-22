@@ -25,6 +25,95 @@ def test_build_rows_carries_media_url():
     assert rows[0]["media_url"] == "https://m/v.mp4"
 
 
+def test_build_rows_seeds_rank_timeline_and_heat():
+    repo = HotspotsRepository()
+    cands = [HotspotCandidate(title="Top", url="u1", rank=1)]
+    rows = repo.build_rows(cands, source_id="1", category=None)
+    tl = rows[0]["rank_timeline"]
+    assert len(tl) == 1 and tl[0]["rank"] == 1
+    assert rows[0]["heat"] and rows[0]["heat"] > 0
+
+
+# --- upsert_with_heat ---------------------------------------------------------
+
+
+class _HeatQuery:
+    def __init__(self, existing, log):
+        self.existing, self.log = existing, log
+        self._mode = self._patch = self._new = self._eq = None
+
+    def select(self, *a):
+        self._mode = "select"
+        return self
+
+    def in_(self, col, vals):
+        return self
+
+    def update(self, patch):
+        self._mode, self._patch = "update", patch
+        return self
+
+    def eq(self, col, val):
+        self._eq = (col, val)
+        return self
+
+    def upsert(self, rows, on_conflict=None, ignore_duplicates=None):
+        self._mode, self._new = "upsert", rows
+        return self
+
+    async def execute(self):
+        if self._mode == "select":
+            return type("R", (), {"data": self.existing})()
+        if self._mode == "update":
+            self.log["updates"].append((self._eq, self._patch))
+            return type("R", (), {"data": []})()
+        self.log["inserts"].extend(self._new or [])
+        return type("R", (), {"data": self._new})()
+
+
+class _HeatClient:
+    def __init__(self, existing):
+        self.existing = existing
+        self.log = {"updates": [], "inserts": []}
+
+    def table(self, name):
+        return _HeatQuery(self.existing, self.log)
+
+
+@pytest.mark.asyncio
+async def test_upsert_with_heat_appends_for_existing(monkeypatch):
+    repo = HotspotsRepository()
+    # one row already seen (held rank 2 once), keyed by dedup_key "k1"
+    client = _HeatClient(
+        [{"id": "100", "dedup_key": "k1", "rank_timeline": [{"rank": 2, "at": "t0"}]}]
+    )
+
+    async def _fake_client():
+        return client
+
+    monkeypatch.setattr(repo, "_client", _fake_client)
+    rows = [
+        {"dedup_key": "k1", "rank_timeline": [{"rank": 1, "at": "t1"}], "heat": 0.9},
+        {"dedup_key": "k2", "rank_timeline": [{"rank": 5, "at": "t1"}], "heat": 0.6},
+    ]
+    new_count = await repo.upsert_with_heat(rows)
+    # k1 existed -> updated (timeline appended), k2 new -> inserted
+    assert new_count == 1
+    assert len(client.log["updates"]) == 1
+    (eq, patch) = client.log["updates"][0]
+    assert eq == ("id", "100")
+    # appended: prior point + new point
+    assert [p["rank"] for p in patch["rank_timeline"]] == [2, 1]
+    assert "heat" in patch
+    assert [r["dedup_key"] for r in client.log["inserts"]] == ["k2"]
+
+
+@pytest.mark.asyncio
+async def test_upsert_with_heat_empty_is_noop(monkeypatch):
+    repo = HotspotsRepository()
+    assert await repo.upsert_with_heat([]) == 0
+
+
 def test_sanitize_search_strips_delimiters_and_escapes_wildcards():
     assert sanitize_search("  hello  world  ") == "hello world"
     # PostgREST or_ delimiters become spaces

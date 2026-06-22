@@ -17,6 +17,7 @@ import { HotspotInfoPanel } from '../components/TopicInspiration/HotspotInfoPane
 import { FloatingParse } from '../components/TopicInspiration/FloatingParse';
 import { CurrentHotspots } from '../components/TopicInspiration/CurrentHotspots';
 import { SourceHealthBadge } from '../components/TopicInspiration/SourceHealthBadge';
+import { topHotspots } from '../components/TopicInspiration/hotspotRanking';
 
 const CATEGORIES = ['all', 'model', 'product', 'industry', 'paper', 'tips'] as const;
 const VIEWS: HotspotView[] = ['all', 'saved', 'hidden'];
@@ -103,13 +104,10 @@ export const TopicInspirationPage: React.FC = () => {
     setQuery('');
   }
 
-  // Top N hotspots by score for the CurrentHotspots block
+  // Current Hotspots = highest BLENDED rank (LLM relevance × objective heat),
+  // not raw LLM score — so genuinely viral items surface over LLM guesses.
   const topByScore = useMemo<Hotspot[]>(
-    () =>
-      hotspots
-        .filter((h) => typeof h.score === 'number' && h.score !== null)
-        .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
-        .slice(0, TOP_HOTSPOTS_COUNT),
+    () => topHotspots(hotspots, TOP_HOTSPOTS_COUNT),
     [hotspots],
   );
 

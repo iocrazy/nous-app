@@ -20,6 +20,8 @@ async def test_newsnow_maps_items(monkeypatch):
     out = await adapter.fetch({"name": "HN", "config": {"platform_id": "hackernews"}})
     assert [c.title for c in out] == ["Item A", "Item B"]
     assert out[0].source_label == "HN"
+    # list position becomes 1-based board rank for heat
+    assert [c.rank for c in out] == [1, 2]
 
 
 def test_newsnow_default_url_reads_settings(monkeypatch):

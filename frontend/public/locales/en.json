@@ -2032,6 +2032,7 @@
     "noHotspots": "No hotspots found.",
     "original": "Original",
     "showMore": "Show more",
-    "showLess": "Show less"
+    "showLess": "Show less",
+    "bestRankHint": "Peak board position"
   }
 }

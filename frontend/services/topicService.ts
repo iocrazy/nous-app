@@ -17,6 +17,8 @@ export interface Hotspot {
   media_url?: string | null;
   cover_url?: string | null;
   captured_at?: string | null;
+  heat?: number | null;
+  best_rank?: number | null;
   content_original?: string | null;
   content_translated?: string | null;
   is_read?: boolean;
