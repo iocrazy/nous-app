@@ -23,10 +23,18 @@ describe('resolveExport', () => {
   const mk = (over: Partial<Video>): Video =>
     ({ platform_id: 'p1', title: 'My Song', media_type: 'audio', ...over } as Video);
 
-  it('audio -> /music + .mp3', () => {
+  it('audio -> /music + .mp3 (no author → title only)', () => {
     const r = resolveExport(mk({}));
     expect(r.url).toContain('/media/download/p1/music');
     expect(r.filename).toBe('My Song.mp3');
+  });
+  it('prefixes "Author - " when author present', () => {
+    const r = resolveExport(mk({ author: 'Youzee Music' }));
+    expect(r.filename).toBe('Youzee Music - My Song.mp3');
+  });
+  it('video with author -> "Author - Title.mp4"', () => {
+    const r = resolveExport(mk({ author: '小咪', media_type: 'video' }));
+    expect(r.filename).toBe('小咪 - My Song.mp4');
   });
   it('video -> /download + .mp4', () => {
     const r = resolveExport(mk({ media_type: 'video' }));
