@@ -20,6 +20,9 @@ from fastapi.responses import FileResponse
 from app.core.config import settings
 from app.core.deps import AuthDep
 from app.repositories.generated_media_repository import GeneratedMediaRepository
+from app.services.library.promote_generated_media_service import (
+    PromoteGeneratedMediaService,
+)
 from app.services.library.resources_service import _resolve_personal_team_id
 
 router = APIRouter(prefix="/generated-media", tags=["generated-media"])
@@ -95,3 +98,15 @@ async def get_generation(gen_id: int, auth: AuthDep) -> dict:
 async def delete_generation(gen_id: int, auth: AuthDep) -> dict:
     ok = await GeneratedMediaRepository().delete(gen_id, await _scope(auth))
     return {"data": {"deleted": ok}}
+
+
+@router.post("/{gen_id}/promote")
+async def promote_generation(gen_id: int, auth: AuthDep) -> dict:
+    scope_id = await _scope(auth)
+    try:
+        resource = await PromoteGeneratedMediaService().promote(
+            gen_id=gen_id, user_id=str(auth.user_id), scope_id=scope_id
+        )
+    except ValueError:
+        raise HTTPException(status_code=404, detail="generation not found")
+    return {"data": {"promoted_resource_id": str(resource["id"])}}
