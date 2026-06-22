@@ -73,7 +73,14 @@ _DEFAULT_COMPACTOR = ContextCompactor()
 # issue-context turns, and its spec is only added to composed.tools there, so
 # regular chat turns never see or accept it.
 SUPPORTED_TOOLS: frozenset[str] = frozenset(
-    {"Skill", "Delegate", "ResourceFetch", "FinishIssue"}
+    {
+        "Skill",
+        "Delegate",
+        "ResourceFetch",
+        "FinishIssue",
+        "GenerateImage",
+        "GenerateVideo",
+    }
 )
 
 
@@ -192,6 +199,12 @@ class AgentRunner:
         # only for issue-context turns; None on regular chat turns so a stray
         # FinishIssue call returns a clear "not available" result.
         self.finish_issue_handler: Optional[Any] = None
+        # genmedia: per-request media generation handlers. Injected by the
+        # media generation service when the agent turn is allowed to generate
+        # images or video. None means generation is not configured for this
+        # turn — calls return a clear error instead of crashing.
+        self.generate_image_handler: Optional[Any] = None
+        self.generate_video_handler: Optional[Any] = None
 
     async def stream_turn(
         self,
@@ -568,6 +581,28 @@ class AgentRunner:
                             }
                 elif tool_name == "FinishIssue":
                     result = await self._dispatch_finish_issue(args)
+                elif tool_name == "GenerateImage":
+                    if self.generate_image_handler is None:
+                        result = {
+                            "ok": False,
+                            "error": "GenerateImage not configured",
+                        }
+                    else:
+                        result = await self.generate_image_handler(
+                            args,
+                            self._media_run_context(recorder, composed),
+                        )
+                elif tool_name == "GenerateVideo":
+                    if self.generate_video_handler is None:
+                        result = {
+                            "ok": False,
+                            "error": "GenerateVideo not configured",
+                        }
+                    else:
+                        result = await self.generate_video_handler(
+                            args,
+                            self._media_run_context(recorder, composed),
+                        )
                 elif is_mcp:
                     # G3: route to outbound MCP server. Mirrors run_turn
                     # error handling — transport errors → tool result
@@ -676,6 +711,22 @@ class AgentRunner:
         except Exception as fi_exc:  # noqa: BLE001
             logger.warning(f"[AgentRunner] FinishIssue handler raised: {fi_exc!r}")
             return {"error": f"FinishIssue failed: {fi_exc.__class__.__name__}"}
+
+    def _media_run_context(
+        self, recorder: Optional[RunRecorder], composed: "ComposedSystemPrompt"
+    ) -> dict:
+        """Build a run-context dict for media generation handlers.
+
+        Passed as the second argument to generate_image_handler /
+        generate_video_handler so those callables know which run, user,
+        team, and agent triggered the generation request.
+        """
+        return {
+            "run_id": recorder.run_id if recorder else None,
+            "user_id": str(recorder.user_id) if recorder else None,
+            "team_id": recorder.team_id if recorder else None,
+            "agent_id": str(composed.agent_id),
+        }
 
     async def _preflight_compact_and_budget(
         self,
@@ -1039,6 +1090,28 @@ class AgentRunner:
                             }
                 elif tool_name == "FinishIssue":
                     result = await self._dispatch_finish_issue(args)
+                elif tool_name == "GenerateImage":
+                    if self.generate_image_handler is None:
+                        result = {
+                            "ok": False,
+                            "error": "GenerateImage not configured",
+                        }
+                    else:
+                        result = await self.generate_image_handler(
+                            args,
+                            self._media_run_context(recorder, composed),
+                        )
+                elif tool_name == "GenerateVideo":
+                    if self.generate_video_handler is None:
+                        result = {
+                            "ok": False,
+                            "error": "GenerateVideo not configured",
+                        }
+                    else:
+                        result = await self.generate_video_handler(
+                            args,
+                            self._media_run_context(recorder, composed),
+                        )
                 elif is_mcp:
                     # Q5: route to outbound MCP server. Tool errors
                     # (server returned isError=true) come back as a
