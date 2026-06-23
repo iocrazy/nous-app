@@ -1,37 +1,52 @@
-"""Embedding generation service using OpenAI."""
+"""Embedding generation service — provider/model from system_settings.
 
-import os
+Config (base_url / api_key / model) comes from system_settings (the shared
+self-hosted qwen embedder, reused from ``graph_embedder_*``), loaded lazily
+on first use. No env reads. When unconfigured, embedding is disabled.
+"""
+
 from typing import List, Optional
 
 from loguru import logger
 from openai import AsyncOpenAI
 
+from app.services.ai.providers.embedding_config import get_embedding_config
+
 
 class EmbeddingService:
     """Service for generating text embeddings."""
 
-    def __init__(self):
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            logger.warning(
-                "OPENAI_API_KEY not set, embedding generation will be disabled"
-            )
-            self.client = None
-        else:
-            self.client = AsyncOpenAI(api_key=api_key)
+    def __init__(self) -> None:
+        self.client: Optional[AsyncOpenAI] = None
+        self.model: str = ""
+        self._loaded = False
 
-        self.model = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+    async def _ensure_client(self) -> None:
+        """Lazily resolve the embedder config from system_settings (once)."""
+        if self._loaded:
+            return
+        self._loaded = True
+        cfg = await get_embedding_config()
+        if cfg is None:
+            logger.warning(
+                "Embedding config not set in system_settings; "
+                "embedding generation will be disabled"
+            )
+            return
+        self.client = AsyncOpenAI(api_key=cfg.api_key, base_url=cfg.base_url)
+        self.model = cfg.model
 
     async def generate_embedding(self, text: str) -> Optional[List[float]]:
         """
-        Generate embedding vector for text.
+        Generate embedding vector for text using the platform embedder.
 
-        Returns 1536-dimensional vector for text-embedding-3-small.
-        Cost: ~$0.00002 per 1000 tokens
+        The vector dimension follows the configured model (e.g. 4096 for
+        qwen3-embedding-8b).
         """
+        await self._ensure_client()
         if not self.client:
             logger.warning(
-                "OpenAI client not initialized, skipping embedding generation"
+                "Embedding client not initialized, skipping embedding generation"
             )
             return None
 
