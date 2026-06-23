@@ -335,27 +335,33 @@ async def download_soda_playlist(
 
     plan = batch_plan(effective_items, flow_id=flow_id, user_id=auth.user_id)
 
+    # Pre-create every task_tracking row in ONE chunked bulk INSERT instead of
+    # N individual inserts. A 185-track playlist used to fire 185 inserts (each
+    # tripping the per-row flow-aggregate trigger -> 57014 statement-timeout
+    # contention on the shared flow row). With the statement-level trigger
+    # (migration 310) the bulk insert fires the aggregate once per chunk.
+    specs = [
+        {
+            "user_id": auth.user_id,
+            "task_type": "parse",
+            "title": f"Parse {entry['kwargs']['url'][:50]}",
+            "subtitle": "Initializing...",
+            "dbos_workflow_id": entry["workflow_id"],
+            "flow_id": flow_id,
+        }
+        for entry in plan
+    ]
+    try:
+        await mgr.create_many(specs)
+    except Exception as e:
+        # Non-fatal: enqueue still proceeds; the workflow self-heals the row on
+        # start. Don't let a pre-create hiccup abort the whole batch.
+        logger.warning(f"[Soda/Batch] bulk pre-create failed: {e}")
+
     submitted = 0
     for entry in plan:
         kwargs = entry["kwargs"]
         wf_id = entry["workflow_id"]
-        try:
-            await mgr.create(
-                user_id=auth.user_id,
-                task_type="parse",
-                title=f"Parse {kwargs['url'][:50]}",
-                subtitle="Initializing...",
-                dbos_workflow_id=wf_id,
-                flow_id=flow_id,
-            )
-        except Exception as e:
-            # Within the 30-s bucket the row may already exist — treat the
-            # unique-violation as an idempotent re-submit (same as single fetch).
-            if "duplicate key" in str(e).lower() or "23505" in str(e):
-                logger.info(f"[Soda/Batch] idempotent re-submit wf_id={wf_id[:32]}")
-            else:
-                logger.warning(f"[Soda/Batch] pre-create task failed: {e}")
-
         try:
             # Enqueue on the per-user partitioned parse queue so the user's
             # "max simultaneous downloads" cap bounds the playlist batch

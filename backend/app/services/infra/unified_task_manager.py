@@ -23,7 +23,7 @@ import asyncio
 import time
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
@@ -304,6 +304,43 @@ class UnifiedTaskManager:
         progress) so writing it here is route-C compliant.
         """
         client = await self._get_client()
+        row = self._build_row(
+            user_id=user_id,
+            task_type=task_type,
+            title=title,
+            resource_id=resource_id,
+            media_id=media_id,
+            group_id=group_id,
+            dbos_workflow_id=dbos_workflow_id,
+            total_bytes=total_bytes,
+            subtitle=subtitle,
+            metadata=metadata,
+            dedup_key=dedup_key,
+            flow_id=flow_id,
+        )
+
+        result = await client.table("task_tracking").insert(row).execute()
+        task_id = result.data[0]["dbos_workflow_id"]
+        logger.debug(f"[TaskManager] Created {task_type} task {task_id}: {title[:40]}")
+        return task_id
+
+    @staticmethod
+    def _build_row(
+        *,
+        user_id: str,
+        task_type: str,
+        title: str,
+        resource_id: Optional[str] = None,
+        media_id: Optional[str] = None,
+        group_id: Optional[str] = None,
+        dbos_workflow_id: Optional[str] = None,
+        total_bytes: Optional[int] = None,
+        subtitle: Optional[str] = None,
+        metadata: Optional[dict] = None,
+        dedup_key: Optional[str] = None,
+        flow_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Build a task_tracking INSERT row dict. Shared by create + create_many."""
         row: Dict[str, Any] = {
             "user_id": user_id,
             "task_type": task_type,
@@ -330,11 +367,67 @@ class UnifiedTaskManager:
             row["dedup_key"] = dedup_key
         if flow_id:
             row["flow_id"] = flow_id
+        return row
 
-        result = await client.table("task_tracking").insert(row).execute()
-        task_id = result.data[0]["dbos_workflow_id"]
-        logger.debug(f"[TaskManager] Created {task_type} task {task_id}: {title[:40]}")
-        return task_id
+    async def create_many(
+        self,
+        specs: List[Dict[str, Any]],
+        *,
+        chunk_size: int = 100,
+    ) -> List[str]:
+        """Bulk-create many task_tracking rows in CHUNKED batch INSERTs.
+
+        Each spec is the same kwargs dict ``create`` accepts (must include at
+        least ``user_id``, ``task_type``, ``title``). Returns the
+        ``dbos_workflow_id`` of every row that now exists (created or already
+        present).
+
+        Why batch: dispatching a big flow (e.g. a 185-track playlist) as 185
+        individual INSERTs bursts task_tracking writes — and, combined with the
+        per-row flow-aggregate trigger, caused 57014 statement-timeout
+        contention. One INSERT of N rows fires the (now statement-level)
+        aggregate trigger ONCE instead of N times (see migration 310).
+
+        Robustness: if a chunk's bulk INSERT fails (e.g. a partial-unique
+        violation from an idempotent re-submit), it falls back to per-row
+        inserts so one bad row never drops the whole chunk.
+        """
+        if not specs:
+            return []
+        client = await self._get_client()
+        rows = [self._build_row(**spec) for spec in specs]
+        created: List[str] = []
+        for i in range(0, len(rows), chunk_size):
+            chunk = rows[i : i + chunk_size]
+            try:
+                result = await client.table("task_tracking").insert(chunk).execute()
+                created.extend(
+                    r["dbos_workflow_id"]
+                    for r in (result.data or [])
+                    if r.get("dbos_workflow_id")
+                )
+            except Exception as bulk_err:
+                logger.warning(
+                    f"[TaskManager] bulk create chunk of {len(chunk)} failed "
+                    f"({bulk_err}); falling back to per-row"
+                )
+                for row in chunk:
+                    wf_id = row.get("dbos_workflow_id")
+                    try:
+                        r = await client.table("task_tracking").insert(row).execute()
+                        if r.data and r.data[0].get("dbos_workflow_id"):
+                            created.append(r.data[0]["dbos_workflow_id"])
+                    except Exception as row_err:
+                        msg = str(row_err).lower()
+                        if "duplicate key" in msg or "23505" in msg:
+                            # Idempotent re-submit — the row already exists.
+                            if wf_id:
+                                created.append(wf_id)
+                        else:
+                            logger.warning(
+                                f"[TaskManager] create_many row failed: {row_err}"
+                            )
+        return created
 
     # ── Lifecycle: create_flow ────────────────────────────────────────
 
