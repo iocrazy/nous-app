@@ -51,35 +51,28 @@ class TopicScorerService:
     async def _resolve_adapter(self):
         """Resolve (adapter, model) for the background scorer.
 
-        Priority: (1) the platform Nous provider's default enabled ``llm`` model
-        (when nous is allowed for this module), built as an OpenAI-compatible
-        adapter from its base_url/api_key/actual_model; (2) admin per-module
-        governance config. Returns ``(None, "")`` when neither is configured —
-        scoring is then skipped (additive, never crashes). NEVER reads env.
+        Priority: (1) **admin per-module governance** — an explicitly-configured
+        provider for this module wins, so the operator can point topic scoring at
+        any reachable platform (DeepSeek/OpenAI/DashScope/…) and instantly route
+        around an offline platform default; (2) the platform **Nous** provider's
+        default enabled ``llm`` model. Returns ``(None, "")`` when neither is
+        configured — scoring is then skipped (additive, never crashes).
+        NEVER reads env.
         """
-        # 1) Nous provider (platform LLM).
-        try:
-            if await is_nous_allowed("topic_scorer"):
-                from app.repositories.nous_repository import get_nous_repository
+        # 1) Admin per-module governance (explicit override — highest priority).
+        gov = await self._governance_adapter()
+        if gov is not None:
+            return gov
 
-                repo = get_nous_repository()
-                llms = await repo.list_enabled("llm")
-                if llms:
-                    full = await repo.get_by_name(llms[0]["name"])
-                    if full and full.get("base_url") and full.get("api_key"):
-                        adapter = OpenAICompatibleAdapter(
-                            api_url=full["base_url"],
-                            api_key=full["api_key"],
-                            default_model=full["actual_model"],
-                        )
-                        return adapter, full["actual_model"]
-        except Exception as e:  # noqa: BLE001 — fall through to governance
-            logger.warning(f"[topic-scorer] Nous resolution failed: {e}")
+        # 2) Platform Nous provider (default when no module override is set).
+        return await self._nous_adapter()
 
-        # 2) Admin per-module governance.
+    async def _governance_adapter(self):
+        """Adapter from admin per-module governance, or None when the module has
+        no configured model/key."""
         governance = await get_module_governance("topic_scorer")
         if not governance.model or not governance.api_key_present:
-            return None, ""
+            return None
         try:
             adapter = get_adapter_for_user(
                 governance.model,
@@ -98,6 +91,28 @@ class TopicScorerService:
                 default_model=governance.model,
             )
         return adapter, governance.model
+
+    async def _nous_adapter(self):
+        """Adapter from the platform Nous provider's default enabled ``llm``
+        model, or ``(None, "")`` when unavailable."""
+        try:
+            if await is_nous_allowed("topic_scorer"):
+                from app.repositories.nous_repository import get_nous_repository
+
+                repo = get_nous_repository()
+                llms = await repo.list_enabled("llm")
+                if llms:
+                    full = await repo.get_by_name(llms[0]["name"])
+                    if full and full.get("base_url") and full.get("api_key"):
+                        adapter = OpenAICompatibleAdapter(
+                            api_url=full["base_url"],
+                            api_key=full["api_key"],
+                            default_model=full["actual_model"],
+                        )
+                        return adapter, full["actual_model"]
+        except Exception as e:  # noqa: BLE001 — best-effort, skip on failure
+            logger.warning(f"[topic-scorer] Nous resolution failed: {e}")
+        return None, ""
 
     def _extract_json(self, text: str) -> Any:
         cleaned = (text or "").strip()

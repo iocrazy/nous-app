@@ -151,8 +151,9 @@ def _patch_nous(monkeypatch, *, allowed=False, models=None):
 
 
 @pytest.mark.asyncio
-async def test_score_items_uses_nous_when_allowed(monkeypatch):
-    """Nous allowed + an enabled llm model → adapter built from Nous config."""
+async def test_score_items_uses_nous_when_governance_unconfigured(monkeypatch):
+    """No module governance + Nous allowed with an enabled llm → Nous is used
+    (Nous is the fallback platform default)."""
     svc = TopicScorerService()
 
     class _Runner:
@@ -179,6 +180,7 @@ async def test_score_items_uses_nous_when_allowed(monkeypatch):
     monkeypatch.setattr(
         "app.services.topics.topic_scorer.AgentRunner", lambda **_: _Runner()
     )
+    _patch_governance(monkeypatch, _FakeGovernanceUnconfigured())
     _patch_nous(
         monkeypatch,
         allowed=True,
@@ -194,6 +196,45 @@ async def test_score_items_uses_nous_when_allowed(monkeypatch):
     out = await svc.score_items([{"i": 0, "title": "t", "content": "c"}])
     assert out[0]["score"] == 0.9
     assert out[0]["category"] == "product"
+
+
+@pytest.mark.asyncio
+async def test_governance_overrides_nous(monkeypatch):
+    """Explicit module governance WINS over the Nous platform default — this is
+    how the operator switches topic scoring to another reachable platform."""
+    svc = TopicScorerService()
+    seen = {}
+
+    class _Runner:
+        async def run_turn(self, composed, user_messages):
+            seen["model"] = composed.model
+            return {"content": '[{"i":0,"score":0.7,"category":"tips","tags":[]}]'}
+
+    class _Composer:
+        async def compose(self, inp):
+            return _make_composed("seed")
+
+    # Governance configured AND Nous also available — governance must win.
+    _patch_governance(monkeypatch, _FakeGovernanceConfigured())
+    _patch_nous(
+        monkeypatch,
+        allowed=True,
+        models=[
+            {
+                "name": "nous-qwen3-llm",
+                "actual_model": "qwen3-6-35b",
+                "base_url": "http://10.0.0.10:8000/v1",
+                "api_key": "k",
+            }
+        ],
+    )
+    _patch_adapter_and_runner(monkeypatch, _Runner())
+    monkeypatch.setattr(svc, "_build_composer", lambda: _Composer())
+
+    out = await svc.score_items([{"i": 0, "title": "t", "content": "c"}])
+    assert out[0]["score"] == 0.7
+    # composed.model set to governance model (deepseek-chat), NOT the qwen Nous model
+    assert seen["model"] == "deepseek-chat"
 
 
 @pytest.mark.asyncio
