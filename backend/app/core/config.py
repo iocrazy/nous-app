@@ -139,17 +139,6 @@ class Settings(BaseSettings):
         "write_scope()). NOTE: style_templates_router is a 301 redirect to "
         "/skills, so this repo has no live call sites today.",
     )
-    USE_ORM_TAG_PREFERENCES: bool = Field(
-        default=False,
-        description="Route TagPreferencesRepository through the SQLAlchemy 2.0 "
-        "ORM session layer (Batch L1 — replaces the supabase-py REST path for "
-        "the user_tag_preferences table). Strategy C is a no-op: the public "
-        "return shape is a fixed 3-key defaults-merged dict "
-        "(starred_tag_ids list / picker_settings dict / panel_size dict) with "
-        "no uuid / datetime / bigint output field; user_id is an input only. "
-        "Covers get_preferences read + upsert_preferences write (ON CONFLICT "
-        "user_id, commits via write_scope()).",
-    )
     USE_ORM_LIBRARIES: bool = Field(
         default=False,
         description="Route LibrariesRepository through the SQLAlchemy 2.0 ORM "

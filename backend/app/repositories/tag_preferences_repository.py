@@ -4,8 +4,8 @@ ORM 2.0 migration (Batch L1): ``TagPreferencesRepository`` is the legacy
 supabase-py REST implementation; ``TagPreferencesRepositoryOrm`` (in
 ``tag_preferences_repository_orm.py``) is the SQLAlchemy 2.0 ORM successor.
 Call sites go through ``get_tag_preferences_repository()`` (bottom of this file)
-which picks the ORM subclass when ``USE_ORM_TAG_PREFERENCES`` is on AND the
-engine is configured.
+which picks the ORM subclass when the SQLAlchemy engine is configured
+(SUPAVISOR_DATABASE_URL is set), otherwise falls back to the legacy path.
 """
 
 from __future__ import annotations
@@ -108,23 +108,20 @@ def get_tag_preferences_repository() -> (
 ):
     """Return the right TagPreferencesRepository implementation per env.
 
-    ORM when ``USE_ORM_TAG_PREFERENCES`` is set AND the SQLAlchemy engine is
-    configured; otherwise the legacy supabase-py REST path. A flag-on but
-    engine-missing deploy logs once and falls back to REST (never crashes).
+    ORM when the SQLAlchemy engine is configured (SUPAVISOR_DATABASE_URL set);
+    otherwise the legacy supabase-py REST path. An engine-missing deploy logs
+    once and falls back to REST (never crashes).
     """
-    from app.core.config import settings
+    from app.db import engine as db_engine
 
-    if settings.USE_ORM_TAG_PREFERENCES:
-        from app.db.engine import is_configured
-
-        if is_configured():
-            from app.repositories.tag_preferences_repository_orm import (
-                TagPreferencesRepositoryOrm,
-            )
-
-            return TagPreferencesRepositoryOrm()
-        logger.warning(
-            "USE_ORM_TAG_PREFERENCES=true but SUPAVISOR_DATABASE_URL is empty "
-            "— falling back to supabase-py path"
+    if db_engine.is_configured():
+        from app.repositories.tag_preferences_repository_orm import (
+            TagPreferencesRepositoryOrm,
         )
+
+        return TagPreferencesRepositoryOrm()
+    logger.warning(
+        "SUPAVISOR_DATABASE_URL is empty "
+        "— falling back to supabase-py path for tag_preferences"
+    )
     return TagPreferencesRepository()

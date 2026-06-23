@@ -175,14 +175,15 @@ async def test_upsert_idempotent_second_write(
     assert cnt == 1  # one row, not two
 
 
-# ─── Flag-off legacy parity ─────────────────────────────────────────────
+# ─── Factory routing (engine-presence parity) ──────────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    from app.core.config import settings
+async def test_factory_engine_not_configured_returns_rest(monkeypatch):
+    """When engine is NOT configured, factory returns the legacy REST repo."""
+    from app.db import engine as db_engine
     from app.repositories import tag_preferences_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_TAG_PREFERENCES", False)
+    monkeypatch.setattr(db_engine, "is_configured", lambda: False)
     repo = mod.get_tag_preferences_repository()
     assert type(repo) is mod.TagPreferencesRepository
     from app.repositories.tag_preferences_repository_orm import (
@@ -192,17 +193,14 @@ async def test_factory_off_returns_rest(monkeypatch):
     assert not isinstance(repo, TagPreferencesRepositoryOrm)
 
 
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    from app.core.config import settings
+async def test_factory_engine_configured_returns_orm(monkeypatch):
+    """When engine IS configured, factory returns the ORM repo."""
     from app.db import engine as db_engine
     from app.repositories import tag_preferences_repository as mod
     from app.repositories.tag_preferences_repository_orm import (
         TagPreferencesRepositoryOrm,
     )
 
-    monkeypatch.setattr(settings, "USE_ORM_TAG_PREFERENCES", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
+    monkeypatch.setattr(db_engine, "is_configured", lambda: True)
     repo = mod.get_tag_preferences_repository()
     assert isinstance(repo, TagPreferencesRepositoryOrm)
