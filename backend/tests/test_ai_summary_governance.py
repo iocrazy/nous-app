@@ -253,3 +253,47 @@ async def test_summarization_allowed_user_path_executes():
     # User's provider must be used.
     assert result["provider_key"] == "qwen"
     assert result["provider_config"]["api_key"] == "user-qwen-key"
+
+
+@pytest.mark.asyncio
+async def test_summarization_locked_to_catalog_model_uses_platform_config():
+    """Locked TO a platform-catalog model → base_url/key/model come from the
+    catalog (ungated); the blank manual api_key must NOT fail-closed."""
+    import app.workflows.ai_summary as summary_mod
+
+    governance = AIModuleGovernance(
+        allowed=False, base_url="", model="mediahub-doubao-pro", api_key=""
+    )
+    fake_row = {
+        "transcript": "T",
+        "pm_id": 1,
+        "title": "V",
+        "resource_id": 77,
+    }
+    with (
+        patch(
+            "app.services.ai.governance.ai_governance.get_module_governance",
+            new=AsyncMock(return_value=governance),
+        ),
+        patch(
+            "app.services.ai.providers.ai_provider_helpers.resolve_platform_model",
+            new=AsyncMock(
+                return_value=(
+                    "doubao",
+                    {
+                        "api_key": "cat-key",
+                        "base_url": "https://ark/v3",
+                        "model": "doubao-x",
+                        "app_id": "",
+                    },
+                    "doubao-x",
+                )
+            ),
+        ),
+        patch("app.db.engine.fetch_one", side_effect=[fake_row, None]),
+    ):
+        result = await summary_mod.load_summary_inputs(1, "user-1")
+
+    assert result["provider_key"] == "doubao"
+    assert result["provider_config"]["api_key"] == "cat-key"
+    assert result["provider_config"]["model"] == "doubao-x"

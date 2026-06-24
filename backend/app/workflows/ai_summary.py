@@ -47,6 +47,31 @@ async def load_summary_inputs(parsed_media_id: int, user_id: str) -> dict[str, A
 
     governance = await get_module_governance("summarization")
     if not governance.allowed:
+        # Admin may have locked summarization TO a platform-catalog model (picked
+        # via the governance dropdown). Resolve it ungated — base_url/key come
+        # from the catalog, so api_key_present (the manual field) is blank.
+        if governance.model:
+            from app.services.ai.providers.ai_provider_helpers import (
+                resolve_platform_model,
+            )
+
+            try:
+                platform = await resolve_platform_model(governance.model)
+            except RuntimeError:
+                platform = None
+            if platform is not None:
+                p_key, p_cfg, _p_model = platform
+                logger.info(
+                    f"[governance] summarization locked to platform model "
+                    f"{governance.model!r} → provider {p_key!r}"
+                )
+                return {
+                    "transcript": row["transcript"],
+                    "title": row.get("title") or "",
+                    "resource_id": str(row["resource_id"]),
+                    "provider_key": p_key,
+                    "provider_config": p_cfg,
+                }
         if not governance.api_key_present:
             logger.error(
                 "[governance] summarization is admin-locked but no admin api_key "

@@ -54,3 +54,51 @@ async def test_mark_transcript_completed_uses_media_id_column():
     assert "WHERE media_id = :pid" in cap["sql"]
     assert "transcript_status = 'completed'" in cap["sql"]
     assert cap["params"] == {"pid": 42}
+
+
+@pytest.mark.asyncio
+async def test_load_transcribe_inputs_locked_to_catalog_model():
+    """Locked TO a platform-catalog model → provider/key/app_id come from the
+    catalog (ungated); blank manual api_key must NOT fail-closed."""
+    from unittest.mock import AsyncMock
+
+    import app.workflows.ai_transcription as m
+    from app.services.ai.governance.ai_governance import AIModuleGovernance
+
+    media_row = {
+        "id": 1,
+        "download_path": "/tmp/audio.mp3",
+        "extract_audio_path": None,
+        "platform_id": "p",
+        "resource_id": 5,
+    }
+    gov = AIModuleGovernance(
+        allowed=False, base_url="", model="mediahub-volc-asr", api_key=""
+    )
+    with (
+        patch("app.db.engine.fetch_one", AsyncMock(return_value=media_row)),
+        patch(
+            "app.services.ai.governance.ai_governance.get_module_governance",
+            AsyncMock(return_value=gov),
+        ),
+        patch(
+            "app.services.ai.providers.ai_provider_helpers.resolve_platform_model",
+            AsyncMock(
+                return_value=(
+                    "volcengine",
+                    {
+                        "api_key": "cat-key",
+                        "base_url": "",
+                        "model": "seed-asr",
+                        "app_id": "the-app-id",
+                    },
+                    "seed-asr",
+                )
+            ),
+        ),
+    ):
+        out = await m.load_transcribe_inputs(1, "u")
+
+    assert out["provider_key"] == "volcengine"
+    assert out["provider_config"]["api_key"] == "cat-key"
+    assert out["provider_config"]["app_id"] == "the-app-id"

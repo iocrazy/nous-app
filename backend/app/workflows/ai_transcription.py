@@ -56,6 +56,33 @@ async def load_transcribe_inputs(parsed_media_id: int, user_id: str) -> dict[str
 
     governance = await get_module_governance("transcription")
     if not governance.allowed:
+        # Admin may have locked transcription TO a platform-catalog model (picked
+        # via the governance dropdown). Resolve it ungated — base_url/key/app_id
+        # come from the catalog, so api_key_present (the manual field) is blank.
+        if governance.model:
+            from app.services.ai.providers.ai_provider_helpers import (
+                resolve_platform_model,
+            )
+
+            try:
+                platform = await resolve_platform_model(governance.model)
+            except RuntimeError:
+                platform = None
+            if platform is not None:
+                p_key, p_cfg, _p_model = platform
+                logger.info(
+                    f"[governance] transcription locked to platform model "
+                    f"{governance.model!r} → provider {p_key!r}"
+                )
+                return {
+                    "audio_path": audio_path,
+                    "resource_id": str(media_row["resource_id"]),
+                    "platform_id": media_row["platform_id"],
+                    "provider_key": p_key,
+                    "provider_config": p_cfg,
+                    "language": "auto",
+                    "task_assignment": "",
+                }
         if not governance.api_key_present:
             logger.error(
                 "[governance] transcription is admin-locked but no admin api_key "
