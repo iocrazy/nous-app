@@ -28,6 +28,7 @@ import {
   IconThunderbolt,
   IconList,
   IconRobot,
+  IconStorage,
 } from '@arco-design/web-react/icon'
 import { useAuth } from '../auth/AuthProvider'
 import { ErrorBoundary } from '../components/ErrorBoundary'
@@ -40,7 +41,8 @@ const MenuItemGroup = Menu.ItemGroup
 const allMenuKeys = [
   '/', '/users', '/teams', '/media', '/transcode', '/tasks', '/tags', '/credits', '/ai',
   '/agent-telemetry', '/monitoring', '/search', '/audit-logs', '/logs', '/alerts',
-  '/api-keys', '/settings', '/transcode-config', '/deployment-logs',
+  '/api-keys', '/settings/ai-governance', '/settings/memory', '/settings',
+  '/transcode-config', '/deployment-logs',
 ]
 
 export function AdminLayout() {
@@ -119,6 +121,8 @@ export function AdminLayout() {
           <MenuItemGroup key="system" title="System">
             <MenuItem key="/api-keys"><IconLock />API Keys</MenuItem>
             <MenuItem key="/settings"><IconSettings />Settings</MenuItem>
+            <MenuItem key="/settings/ai-governance"><IconRobot />AI Governance</MenuItem>
+            <MenuItem key="/settings/memory"><IconStorage />Memory</MenuItem>
             <MenuItem key="/transcode-config"><IconThunderbolt />Transcode</MenuItem>
           </MenuItemGroup>
         </Menu>

@@ -10,8 +10,6 @@ import {
 } from '@arco-design/web-react'
 import { useSystemSettings, useUpdateSetting } from '../../api/endpoints/settings'
 import type { SystemSetting } from '../../api/endpoints/settings'
-import { MemorySettings } from './MemorySettings'
-import { AIGovernance } from './AIGovernance'
 
 const { Title } = Typography
 
@@ -153,9 +151,6 @@ export function Settings() {
           {renderRows(c.items)}
         </Card>
       ))}
-
-      <MemorySettings />
-      <AIGovernance />
     </div>
   )
 }
