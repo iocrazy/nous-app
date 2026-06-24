@@ -52,11 +52,11 @@ class TopicGroupRepository:
         exists. ``sim`` is cosine similarity (1 - cosine distance)."""
         return await db_engine.fetch_one(
             """
-            SELECT id::text AS id, 1 - (embedding <=> :vec::vector) AS sim
+            SELECT id::text AS id, 1 - (embedding <=> CAST(:vec AS vector)) AS sim
               FROM public.topic_groups
              WHERE embedding IS NOT NULL
                AND last_seen >= now() - make_interval(hours => :win)
-             ORDER BY embedding <=> :vec::vector
+             ORDER BY embedding <=> CAST(:vec AS vector)
              LIMIT 1
             """,
             {"vec": vec, "win": window_hours},
@@ -68,7 +68,7 @@ class TopicGroupRepository:
             """
             INSERT INTO public.topic_groups
                 (label, embedding, source_count, first_seen, last_seen)
-            VALUES (:label, :vec::vector, 1, now(), now())
+            VALUES (:label, CAST(:vec AS vector), 1, now(), now())
             RETURNING id::text
             """,
             {"label": (label or "")[:200], "vec": vec},
