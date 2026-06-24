@@ -16,6 +16,18 @@ import {
   type AIGovernanceModuleUpdate,
   type AIGovernanceUpdate,
 } from '../../api/endpoints/settings'
+import {
+  IconThunderbolt,
+  IconRobot,
+  IconStorage,
+  IconTags,
+  IconFile,
+  IconImage,
+  IconLanguage,
+  IconEye,
+  IconFire,
+  IconMessage,
+} from '@arco-design/web-react/icon'
 import { useAuth } from '../../auth/AuthProvider'
 
 // Catalog model type expected per governed module (filters the platform-model
@@ -26,6 +38,59 @@ const MODULE_CATALOG_TYPE: Record<string, string> = {
 }
 
 type CatalogModel = { name: string; display_name: string; type: string }
+
+// Per-section icon, mirroring the user app's section-header pattern so titles
+// read clearly above their content.
+const SECTION_ICON: Record<string, React.ReactNode> = {
+  chat: <IconMessage />,
+  transcription: <IconFile />,
+  translation: <IconLanguage />,
+  visual_analysis: <IconEye />,
+  caption: <IconImage />,
+  classification: <IconTags />,
+  summarization: <IconFile />,
+  topic_scorer: <IconFire />,
+  embedding: <IconStorage />,
+}
+
+/** Section header: icon chip + bold title + gray subtitle — clearly outranks
+ *  the field rows below it (Arco-styled twin of the user app's section head). */
+function SectionHeader({
+  icon,
+  title,
+  subtitle,
+}: {
+  icon: React.ReactNode
+  title: string
+  subtitle?: string
+}) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginTop: 24, marginBottom: 4 }}>
+      <div
+        style={{
+          flexShrink: 0,
+          width: 30,
+          height: 30,
+          borderRadius: 8,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'rgb(var(--primary-1))',
+          color: 'rgb(var(--primary-6))',
+          fontSize: 16,
+        }}
+      >
+        {icon}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 700, fontSize: 15, lineHeight: '20px' }}>{title}</div>
+        {subtitle && (
+          <div style={{ color: 'var(--color-text-3)', fontSize: 12, marginTop: 2 }}>{subtitle}</div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 /**
  * AI Config Governance panel. Controls whether users may configure each AI
@@ -302,7 +367,11 @@ export function AIGovernance() {
   return (
     <Card title="AI Config Governance" style={{ marginBottom: 20 }}>
       {/* ── Nous master control ─────────────────────────────────────────── */}
-      <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-2)' }}>MediaHub Platform (user-side)</div>
+      <SectionHeader
+        icon={<IconThunderbolt />}
+        title="MediaHub Platform (user-side)"
+        subtitle="Whether users may select platform-provided models at all."
+      />
       <Row
         label="Enable MediaHub models for users"
         hint="Master switch. OFF ⇒ no platform models surface anywhere. Default OFF — turn on only when you accept platform-key cost exposure."
@@ -316,7 +385,7 @@ export function AIGovernance() {
       <Divider />
 
       {/* ── Chat ────────────────────────────────────────────────────────── */}
-      <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-2)' }}>Chat</div>
+      <SectionHeader icon={SECTION_ICON.chat} title="Chat" subtitle="Chat / agent runtime." />
       <Row
         label="Allow user config"
         hint="Locked ⇒ uses platform provider keys for the agent's model. The agent prompt and model are unchanged."
@@ -342,8 +411,11 @@ export function AIGovernance() {
         return (
           <div key={key}>
             <Divider />
-            <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-2)' }}>{label}</div>
-            <div style={{ color: 'var(--color-text-3)', fontSize: 13, marginTop: 2, marginBottom: 0 }}>{hint}</div>
+            <SectionHeader
+              icon={SECTION_ICON[key] || <IconRobot />}
+              title={label}
+              subtitle={hint}
+            />
             {!platformOnly && (
               <>
                 <Row label="Allow user config">
