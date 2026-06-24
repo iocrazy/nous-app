@@ -275,9 +275,9 @@ export function AIGovernance() {
   return (
     <Card title="AI Config Governance" style={{ marginBottom: 20 }}>
       {/* ── Nous master control ─────────────────────────────────────────── */}
-      <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-2)' }}>Nous Platform (user-side)</div>
+      <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-2)' }}>MediaHub Platform (user-side)</div>
       <Row
-        label="Enable Nous for users"
+        label="Enable MediaHub models for users"
         hint="Master switch. OFF ⇒ no platform models surface anywhere. Default OFF — turn on only when you accept platform-key cost exposure."
       >
         <Switch
@@ -300,7 +300,7 @@ export function AIGovernance() {
           disabled={updateMutation.isPending}
         />
       </Row>
-      <Row label="Allow Nous models (chat)" hint="Only effective when the master switch is on.">
+      <Row label="Allow MediaHub models (chat)" hint="Only effective when the master switch is on.">
         <Switch
           checked={state.chat_nous_allowed}
           onChange={(checked) => setState((prev) => ({ ...prev, chat_nous_allowed: checked }))}
@@ -324,7 +324,7 @@ export function AIGovernance() {
                 disabled={updateMutation.isPending}
               />
             </Row>
-            <Row label="Allow Nous models" hint="Only effective when the master switch is on.">
+            <Row label="Allow MediaHub models" hint="Only effective when the master switch is on.">
               <Switch
                 checked={m.nous_allowed}
                 onChange={(checked) => setTaskField(key, 'nous_allowed', checked)}

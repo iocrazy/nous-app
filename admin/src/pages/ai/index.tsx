@@ -55,7 +55,7 @@ function guessType(model: string): string {
 }
 
 function sanitizeName(model: string): string {
-  return 'nous-' + model.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  return 'mediahub-' + model.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
 }
 
 export function AIModelsPage() {
@@ -253,7 +253,7 @@ export function AIModelsPage() {
   return (
     <div style={{ padding: '0 4px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <Title heading={5} style={{ margin: 0 }}>Nous AI Models</Title>
+        <Title heading={5} style={{ margin: 0 }}>MediaHub AI Models</Title>
         <Button type="primary" icon={<IconPlus />} onClick={openAddProvider}>Add Provider</Button>
       </div>
 
