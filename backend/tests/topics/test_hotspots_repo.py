@@ -146,6 +146,10 @@ class _FakeQuery:
         self.in_arg = (col, list(vals))
         return self
 
+    def is_(self, col, val):
+        self.is_arg = (col, val)
+        return self
+
     def or_(self, expr):
         self.or_arg = expr
         return self
@@ -154,6 +158,10 @@ class _FakeQuery:
         return self
 
     def limit(self, n):
+        return self
+
+    def update(self, patch):
+        self.update_arg = patch
         return self
 
     async def execute(self):
@@ -213,3 +221,38 @@ async def test_list_for_date_no_search_skips_or_filter(monkeypatch):
     monkeypatch.setattr(repo, "_client", _fake_client)
     await repo.list_for_date(None, None, q="   ")
     assert client.q.or_arg is None
+
+
+@pytest.mark.asyncio
+async def test_list_unembedded_filters_null_embedding(monkeypatch):
+    client = _FakeClient([{"id": "1", "title": "A"}])
+    repo = HotspotsRepository()
+
+    async def _fake_client():
+        return client
+
+    monkeypatch.setattr(repo, "_client", _fake_client)
+    out = await repo.list_unembedded(limit=10)
+    assert out and out[0]["id"] == "1"
+    assert client.q.is_arg == ("embedding", "null")
+
+
+@pytest.mark.asyncio
+async def test_patch_embedding_formats_pgvector_literal(monkeypatch):
+    client = _FakeClient([])
+    repo = HotspotsRepository()
+
+    async def _fake_client():
+        return client
+
+    monkeypatch.setattr(repo, "_client", _fake_client)
+    await repo.patch_embedding("42", [0.5, -1.0, 2.0])
+    # sent as a pgvector text literal "[...]" for PostgREST to cast
+    assert client.q.update_arg == {"embedding": "[0.5,-1.0,2.0]"}
+
+
+@pytest.mark.asyncio
+async def test_patch_embedding_empty_is_noop(monkeypatch):
+    repo = HotspotsRepository()
+    # no client call when vector empty
+    await repo.patch_embedding("1", [])
