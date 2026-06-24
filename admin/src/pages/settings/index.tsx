@@ -103,15 +103,37 @@ export function Settings() {
     )
   }
 
-  // graph_* keys are managed by the dedicated Memory panel below (masked api
-  // keys) — keep them out of the generic rows so they don't show raw + cluttered.
-  const generic = (settings || []).filter((s) => !s.key.startsWith('graph_'))
-  // Group settings: booleans first, then numbers, then strings
-  const boolSettings = generic.filter((s) => typeof s.value === 'boolean')
-  const numberSettings = generic.filter((s) => typeof s.value === 'number')
-  const stringSettings = generic.filter(
-    (s) => typeof s.value !== 'boolean' && typeof s.value !== 'number',
+  // These keys are owned by the dedicated panels rendered below — keep them out
+  // of the generic raw rows so they don't appear twice (overlap) + cluttered:
+  //   graph_*                      → Memory (Graphiti) panel
+  //   ai_module.* / nous.*         → AI Config Governance panel (lock + per-module
+  //                                  base_url/model/api_key, embedding included)
+  const HIDDEN_PREFIXES = ['graph_', 'ai_module.', 'nous.']
+  const generic = (settings || []).filter(
+    (s) => !HIDDEN_PREFIXES.some((p) => s.key.startsWith(p)),
   )
+  // Categorise by key DOMAIN (prefix) rather than by value type — type-grouping
+  // scattered related keys (e.g. transcode_*) across three cards. Each
+  // SettingRow already renders the right control for its value type. Unmatched
+  // keys fall into "General".
+  const DOMAIN_SECTIONS: ReadonlyArray<{ title: string; prefix: string }> = [
+    { title: 'Transcoding', prefix: 'transcode_' },
+  ]
+  const claimed = new Set<string>()
+  const domainCards = DOMAIN_SECTIONS.map((sec) => {
+    const items = generic.filter((s) => s.key.startsWith(sec.prefix))
+    items.forEach((s) => claimed.add(s.key))
+    return { title: sec.title, items }
+  }).filter((c) => c.items.length > 0)
+  const generalSettings = generic.filter((s) => !claimed.has(s.key))
+
+  const renderRows = (items: typeof generic) =>
+    items.map((s, i) => (
+      <div key={s.key}>
+        {i > 0 && <Divider style={{ margin: 0 }} />}
+        <SettingRow setting={s} onUpdate={handleUpdate} loading={updateMutation.isPending} />
+      </div>
+    ))
 
   return (
     <div>
@@ -120,34 +142,17 @@ export function Settings() {
       </Title>
 
       <Card title="General" style={{ marginBottom: 20 }}>
-        {stringSettings.map((s, i) => (
-          <div key={s.key}>
-            {i > 0 && <Divider style={{ margin: 0 }} />}
-            <SettingRow setting={s} onUpdate={handleUpdate} loading={updateMutation.isPending} />
-          </div>
-        ))}
-        {stringSettings.length === 0 && (
+        {renderRows(generalSettings)}
+        {generalSettings.length === 0 && (
           <div style={{ color: 'var(--color-text-3)', padding: '16px 0' }}>No general settings</div>
         )}
       </Card>
 
-      <Card title="Feature Toggles" style={{ marginBottom: 20 }}>
-        {boolSettings.map((s, i) => (
-          <div key={s.key}>
-            {i > 0 && <Divider style={{ margin: 0 }} />}
-            <SettingRow setting={s} onUpdate={handleUpdate} loading={updateMutation.isPending} />
-          </div>
-        ))}
-      </Card>
-
-      <Card title="Limits & Quotas" style={{ marginBottom: 20 }}>
-        {numberSettings.map((s, i) => (
-          <div key={s.key}>
-            {i > 0 && <Divider style={{ margin: 0 }} />}
-            <SettingRow setting={s} onUpdate={handleUpdate} loading={updateMutation.isPending} />
-          </div>
-        ))}
-      </Card>
+      {domainCards.map((c) => (
+        <Card key={c.title} title={c.title} style={{ marginBottom: 20 }}>
+          {renderRows(c.items)}
+        </Card>
+      ))}
 
       <MemorySettings />
       <AIGovernance />
