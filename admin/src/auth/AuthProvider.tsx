@@ -88,40 +88,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
-  const fetchProfile = useCallback(async (authUser: User): Promise<UserIdentity | null> => {
-    try {
-      const { data: profile, error } = await supabase
-        .from('user_profiles')
-        .select('username, avatar_url, role')
-        .eq('id', authUser.id)
-        .single()
-
-      if (error || !profile) return null
-
-      return {
-        id: authUser.id,
-        email: authUser.email || '',
-        name: profile.username || authUser.email || '',
-        avatar: profile.avatar_url || undefined,
-        role: profile.role,
-      }
-    } catch {
-      return null
-    }
-  }, [])
-
-  const loadIdentity = useCallback(async (authUser: User) => {
-    try {
-      const identity = await fetchProfile(authUser)
-      if (identity?.role === 'admin') {
-        setUser(identity)
-      } else {
+  // Identity is resolved via fetchProfileRaw (raw fetch), NOT the Supabase
+  // client: the client's .from() queries hang whenever the Web Locks API
+  // blocks (the same failure that froze login on a stuck spinner — the
+  // session was stored but the role check never resolved). Raw fetch is
+  // immune, so it needs the access token threaded in from the caller.
+  const loadIdentity = useCallback(
+    async (authUser: User, accessToken: string) => {
+      try {
+        const identity = await fetchProfileRaw(
+          authUser.id,
+          authUser.email || '',
+          accessToken,
+        )
+        if (identity?.role === 'admin') {
+          setUser(identity)
+        } else {
+          setUser(null)
+        }
+      } catch {
         setUser(null)
       }
-    } catch {
-      setUser(null)
-    }
-  }, [fetchProfile])
+    },
+    [],
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -146,7 +136,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (sessionResult?.user) {
         setSession(sessionResult)
-        await loadIdentity(sessionResult.user)
+        await loadIdentity(sessionResult.user, sessionResult.access_token)
       } else {
         // Fallback: read session from localStorage and use raw fetch
         // (Supabase client data queries also hang when Lock API blocks)
@@ -172,7 +162,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       async (_event, s) => {
         setSession(s)
         if (s?.user) {
-          await loadIdentity(s.user)
+          await loadIdentity(s.user, s.access_token)
         } else {
           setUser(null)
         }
@@ -191,8 +181,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) {
       return { error: error.message }
     }
+    if (!data.session) {
+      return { error: 'Sign-in returned no session' }
+    }
 
-    const profile = await fetchProfile(data.user)
+    // Raw fetch (NOT the Supabase client) for the admin-role check: after
+    // signInWithPassword fires onAuthStateChange, a concurrent client .from()
+    // query deadlocks on the Web Locks API and never resolves, leaving the
+    // Sign In button stuck on its spinner. Raw fetch sidesteps the lock.
+    const profile = await fetchProfileRaw(
+      data.user.id,
+      data.user.email || '',
+      data.session.access_token,
+    )
     if (profile?.role !== 'admin') {
       await supabase.auth.signOut()
       return { error: 'Access denied. Admin role required.' }
@@ -200,7 +201,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     setUser(profile)
     return {}
-  }, [fetchProfile])
+  }, [])
 
   const logout = useCallback(async () => {
     await supabase.auth.signOut()
