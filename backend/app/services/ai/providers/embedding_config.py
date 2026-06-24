@@ -28,6 +28,38 @@ class EmbeddingConfig:
     api_key: str
     model: str
     dimensions: int
+    # True for Volcengine Ark's multimodal embedding endpoint
+    # (/embeddings/multimodal): input is typed parts, vector nests at
+    # data.embedding (dict), NOT the OpenAI /v1/embeddings shape.
+    multimodal: bool = False
+
+
+def _is_multimodal(model: str, base_url: str) -> bool:
+    """Detect the Ark multimodal embedding shape from model/base_url."""
+    return "multimodal" in (base_url or "").lower() or "vision" in (model or "").lower()
+
+
+async def resolve_embedding_config() -> Optional["EmbeddingConfig"]:
+    """Resolve the active embedder, admin-module-config first.
+
+    Source of truth = the admin per-module governance ``ai_module.embedding.*``
+    (same as TopicEmbeddingService / the topic-scorer): when an admin has set a
+    base_url + model + api_key there, that wins. Falls back to the legacy
+    ``graph_embedder_*`` config otherwise. No env. Returns None when neither is
+    configured (embedding disabled).
+    """
+    from app.services.ai.governance.ai_governance import get_module_governance
+
+    gov = await get_module_governance("embedding")
+    if gov.base_url and gov.model and gov.api_key_present:
+        return EmbeddingConfig(
+            base_url=gov.base_url,
+            api_key=gov.api_key,
+            model=gov.model,
+            dimensions=0,
+            multimodal=_is_multimodal(gov.model, gov.base_url),
+        )
+    return await get_embedding_config()
 
 
 async def _read_settings() -> Dict[str, Any]:

@@ -6,8 +6,65 @@ import pytest
 
 from app.services.ai.providers.embedding_config import (
     EmbeddingConfig,
+    _is_multimodal,
     get_embedding_config,
+    resolve_embedding_config,
 )
+
+
+class _Gov:
+    def __init__(self, base_url="", model="", api_key=""):
+        self.base_url = base_url
+        self.model = model
+        self.api_key = api_key
+        self.api_key_present = bool(api_key.strip())
+
+
+def test_is_multimodal_detection() -> None:
+    assert _is_multimodal("doubao-embedding-vision-250615", "https://x/v3")
+    assert _is_multimodal("m", "https://x/api/v3/embeddings/multimodal")
+    assert not _is_multimodal("qwen3-embedding-8b", "http://10.0.0.10:8000/v1")
+
+
+@pytest.mark.asyncio
+async def test_resolve_prefers_admin_module_config() -> None:
+    gov = _Gov(
+        base_url="https://ark/api/v3/embeddings/multimodal",
+        model="doubao-embedding-vision-250615",
+        api_key="sk-doubao",
+    )
+    with patch(
+        "app.services.ai.governance.ai_governance.get_module_governance",
+        AsyncMock(return_value=gov),
+    ):
+        cfg = await resolve_embedding_config()
+    assert cfg.base_url == "https://ark/api/v3/embeddings/multimodal"
+    assert cfg.model == "doubao-embedding-vision-250615"
+    assert cfg.multimodal is True
+
+
+@pytest.mark.asyncio
+async def test_resolve_falls_back_to_graph_embedder() -> None:
+    with (
+        patch(
+            "app.services.ai.governance.ai_governance.get_module_governance",
+            AsyncMock(return_value=_Gov()),  # admin not configured
+        ),
+        patch(
+            "app.services.ai.providers.embedding_config.get_embedding_config",
+            AsyncMock(
+                return_value=EmbeddingConfig(
+                    base_url="http://10.0.0.10:8000/v1",
+                    api_key="k",
+                    model="qwen3-embedding-8b",
+                    dimensions=4096,
+                )
+            ),
+        ),
+    ):
+        cfg = await resolve_embedding_config()
+    assert cfg.model == "qwen3-embedding-8b"
+    assert cfg.multimodal is False
 
 
 @pytest.mark.asyncio
