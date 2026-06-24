@@ -49,8 +49,32 @@ async def resolve_embedding_config() -> Optional["EmbeddingConfig"]:
     configured (embedding disabled).
     """
     from app.services.ai.governance.ai_governance import get_module_governance
+    from app.services.ai.providers.ai_provider_helpers import resolve_platform_model
 
     gov = await get_module_governance("embedding")
+    model_name = (gov.model or "").strip()
+
+    # 1. Admin selected a platform-catalog model by name (e.g.
+    #    "mediahub-doubao-embedding-vision") → take base_url / key / model from
+    #    the catalog. Ungated (admin config). A disabled model degrades to the
+    #    manual / graph_embedder paths below.
+    if model_name:
+        try:
+            platform = await resolve_platform_model(model_name)
+        except RuntimeError:
+            platform = None
+        if platform is not None:
+            _provider, cfg, actual_model = platform
+            base = cfg.get("base_url") or ""
+            return EmbeddingConfig(
+                base_url=base,
+                api_key=cfg.get("api_key") or "",
+                model=actual_model,
+                dimensions=0,
+                multimodal=_is_multimodal(actual_model, base),
+            )
+
+    # 2. Manual admin config (base_url + model + api_key typed directly).
     if gov.base_url and gov.model and gov.api_key_present:
         return EmbeddingConfig(
             base_url=gov.base_url,
@@ -59,6 +83,8 @@ async def resolve_embedding_config() -> Optional["EmbeddingConfig"]:
             dimensions=0,
             multimodal=_is_multimodal(gov.model, gov.base_url),
         )
+
+    # 3. Legacy graph_embedder_* fallback.
     return await get_embedding_config()
 
 

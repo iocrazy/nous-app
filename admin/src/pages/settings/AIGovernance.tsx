@@ -8,6 +8,7 @@ import {
   Spin,
   Divider,
   Tag,
+  Select,
 } from '@arco-design/web-react'
 import {
   useAIGovernanceSettings,
@@ -15,6 +16,16 @@ import {
   type AIGovernanceModuleUpdate,
   type AIGovernanceUpdate,
 } from '../../api/endpoints/settings'
+import { useAuth } from '../../auth/AuthProvider'
+
+// Catalog model type expected per governed module (filters the platform-model
+// dropdown). LLM modules omitted → default 'llm'.
+const MODULE_CATALOG_TYPE: Record<string, string> = {
+  embedding: 'embedding',
+  transcription: 'asr',
+}
+
+type CatalogModel = { name: string; display_name: string; type: string }
 
 /**
  * AI Config Governance panel. Controls whether users may configure each AI
@@ -135,8 +146,24 @@ function defaultLocalState(): LocalState {
 export function AIGovernance() {
   const { data, isLoading } = useAIGovernanceSettings()
   const updateMutation = useUpdateAIGovernanceSettings()
+  const { session } = useAuth()
 
   const [state, setState] = useState<LocalState>(defaultLocalState())
+  const [catalog, setCatalog] = useState<CatalogModel[]>([])
+
+  // Load the platform-model catalog so a locked module can be assigned a model
+  // by selection (instead of hand-typing base_url/model/api_key).
+  useEffect(() => {
+    const token = session?.access_token
+    if (!token) return
+    const apiBase = import.meta.env.VITE_API_URL || ''
+    fetch(`${apiBase}/api/v1/admin/nous-models`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows) => setCatalog(Array.isArray(rows) ? rows : []))
+      .catch(() => setCatalog([]))
+  }, [session])
 
   // Hydrate local form from the masked GET (never includes raw keys).
   useEffect(() => {
@@ -335,43 +362,86 @@ export function AIGovernance() {
                 </Row>
               </>
             )}
-            {(platformOnly || !m.user_allowed) && (
-              <>
-                <Divider style={{ margin: 0 }} />
-                <Row
-                  label="Base URL"
-                  hint="Platform provider base URL (OpenAI-compatible). Required when locked."
-                >
-                  <Input
-                    value={m.base_url}
-                    onChange={(v) => setTaskField(key, 'base_url', v)}
-                    placeholder="https://.../v1"
-                    style={{ width: 260 }}
-                  />
-                </Row>
-                <Divider style={{ margin: 0 }} />
-                <Row label="Model">
-                  <Input
-                    value={m.model}
-                    onChange={(v) => setTaskField(key, 'model', v)}
-                    placeholder="e.g. Qwen/Qwen3-235B-A22B-Instruct-2507"
-                    style={{ width: 260 }}
-                  />
-                </Row>
-                <Divider style={{ margin: 0 }} />
-                <Row label="API key" hint="Write-only. Leave blank to keep the stored key.">
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end' }}>
-                    {keyTag(apiKeySet)}
-                    <Input.Password
-                      value={m.api_key}
-                      onChange={(v) => setTaskField(key, 'api_key', v)}
-                      placeholder={apiKeySet ? 'leave blank to keep' : 'set a key'}
-                      style={{ width: 200 }}
-                    />
-                  </div>
-                </Row>
-              </>
-            )}
+            {(platformOnly || !m.user_allowed) && (() => {
+              const catModels = catalog.filter(
+                (c) => c.type === (MODULE_CATALOG_TYPE[key] || 'llm'),
+              )
+              const catNames = new Set(catModels.map((c) => c.name))
+              // Catalog model selected ⇒ provider/key come from the catalog,
+              // so the manual fields are hidden. Otherwise show them (custom).
+              const usingCatalog = !!m.model && catNames.has(m.model)
+              const showManual = !usingCatalog
+              return (
+                <>
+                  <Divider style={{ margin: 0 }} />
+                  <Row
+                    label="Platform model"
+                    hint="Pick a model from the MediaHub catalog (provider + key come from it), or Custom to enter a provider manually."
+                  >
+                    <Select
+                      value={usingCatalog ? m.model : '__custom__'}
+                      onChange={(v) => {
+                        if (v === '__custom__') {
+                          setTaskField(key, 'model', '')
+                        } else {
+                          // Catalog model selected: store its name; the resolver
+                          // pulls base_url/key from the catalog — clear manual.
+                          setTaskField(key, 'model', v)
+                          setTaskField(key, 'base_url', '')
+                          setTaskField(key, 'api_key', '')
+                        }
+                      }}
+                      placeholder="Select a platform model"
+                      style={{ width: 280 }}
+                    >
+                      {catModels.map((c) => (
+                        <Select.Option key={c.name} value={c.name}>
+                          {c.display_name}
+                        </Select.Option>
+                      ))}
+                      <Select.Option value="__custom__">Custom endpoint…</Select.Option>
+                    </Select>
+                  </Row>
+                  {showManual && (
+                    <>
+                      <Divider style={{ margin: 0 }} />
+                      <Row
+                        label="Base URL"
+                        hint="Platform provider base URL (OpenAI-compatible). Required for a custom endpoint."
+                      >
+                        <Input
+                          value={m.base_url}
+                          onChange={(v) => setTaskField(key, 'base_url', v)}
+                          placeholder="https://.../v1"
+                          style={{ width: 260 }}
+                        />
+                      </Row>
+                      <Divider style={{ margin: 0 }} />
+                      <Row label="Model">
+                        <Input
+                          value={m.model}
+                          onChange={(v) => setTaskField(key, 'model', v)}
+                          placeholder="e.g. Qwen/Qwen3-235B-A22B-Instruct-2507"
+                          style={{ width: 260 }}
+                        />
+                      </Row>
+                      <Divider style={{ margin: 0 }} />
+                      <Row label="API key" hint="Write-only. Leave blank to keep the stored key.">
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end' }}>
+                          {keyTag(apiKeySet)}
+                          <Input.Password
+                            value={m.api_key}
+                            onChange={(v) => setTaskField(key, 'api_key', v)}
+                            placeholder={apiKeySet ? 'leave blank to keep' : 'set a key'}
+                            style={{ width: 200 }}
+                          />
+                        </div>
+                      </Row>
+                    </>
+                  )}
+                </>
+              )
+            })()}
           </div>
         )
       })}

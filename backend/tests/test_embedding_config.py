@@ -104,3 +104,35 @@ async def test_none_when_db_unavailable() -> None:
         AsyncMock(return_value={}),
     ):
         assert await get_embedding_config() is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_embedding_uses_catalog_model() -> None:
+    """When ai_module.embedding.model is a catalog name, resolve via the catalog
+    (ungated) — base_url/key/actual_model from the platform model."""
+    gov = _Gov(base_url="", model="mediahub-doubao-embedding-vision", api_key="")
+    with (
+        patch(
+            "app.services.ai.governance.ai_governance.get_module_governance",
+            AsyncMock(return_value=gov),
+        ),
+        patch(
+            "app.services.ai.providers.ai_provider_helpers.resolve_platform_model",
+            AsyncMock(
+                return_value=(
+                    "doubao",
+                    {
+                        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+                        "api_key": "k",
+                        "model": "doubao-embedding-vision-251215",
+                    },
+                    "doubao-embedding-vision-251215",
+                )
+            ),
+        ),
+    ):
+        cfg = await resolve_embedding_config()
+    assert cfg.base_url == "https://ark.cn-beijing.volces.com/api/v3"
+    assert cfg.model == "doubao-embedding-vision-251215"
+    assert cfg.api_key == "k"
+    assert cfg.multimodal is True

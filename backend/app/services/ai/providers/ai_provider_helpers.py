@@ -80,6 +80,39 @@ async def resolve_nous_model(
     return row["actual_provider"], provider_config, row["actual_model"]
 
 
+async def resolve_platform_model(
+    model_name: str,
+) -> Optional[Tuple[str, Dict[str, Any], str]]:
+    """Direct platform-catalog (``nous_models``) lookup, WITHOUT the user-facing
+    nous gate.
+
+    For ADMIN platform config: a module locked to / configured with a platform
+    model is an admin decision, not a user pick, so ``nous.user_enabled`` /
+    ``nous_allowed`` (which gate what USERS may pick) do not apply here.
+
+    Returns ``(actual_provider, {api_key, base_url, model, app_id}, actual_model)``
+    for an enabled catalog model; ``None`` when ``model_name`` isn't a catalog
+    model (an ordinary manual model string); raises when found-but-disabled.
+    """
+    from app.repositories.nous_repository import get_nous_repository
+
+    if not model_name:
+        return None
+    repo = get_nous_repository()
+    row = await repo.get_by_name(model_name)
+    if not row:
+        return None
+    if not row.get("is_enabled"):
+        raise RuntimeError(f"Platform model '{model_name}' is no longer available.")
+    provider_config: Dict[str, Any] = {
+        "api_key": row.get("api_key", ""),
+        "base_url": row.get("base_url") or "",
+        "model": row["actual_model"],
+        "app_id": row.get("app_id") or "",
+    }
+    return row["actual_provider"], provider_config, row["actual_model"]
+
+
 DEFAULT_ANALYZE_AGENT_SLUG = "analyze"
 DEFAULT_TRANSLATE_AGENT_SLUG = "translate"
 DEFAULT_CAPTION_AGENT_SLUG = "caption"
@@ -130,9 +163,10 @@ async def resolve_task_provider_config(
                 f"AI module '{task_key}' is admin-locked but no admin API key is "
                 "configured. Contact your platform administrator."
             )
-        # Admin may lock a module directly TO a platform Nous model name —
-        # run the shared nous lookup first.
-        nous = await resolve_nous_model(governance.model, task_key)
+        # Admin may lock a module directly TO a platform model name (selected
+        # from the catalog). Use the UNGATED lookup — this is admin config, not
+        # a user pick, so the user-facing nous switches don't apply.
+        nous = await resolve_platform_model(governance.model)
         if nous is not None:
             n_provider_key, n_provider_config, n_model = nous
             logger.info(
