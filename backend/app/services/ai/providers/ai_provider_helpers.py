@@ -172,6 +172,21 @@ async def resolve_task_provider_config(
     ).strip() or default_slug
     resolved_slug = assigned_slug
 
+    # The user may pick a platform model directly (value ``nous:<model>``) instead
+    # of an agent — mirrors the ASR task picker. Resolve it to the platform config
+    # and compose the module's DEFAULT agent prompt (default_slug). If the model is
+    # gone/disabled, degrade to the default agent rather than erroring the task.
+    if assigned_slug.startswith("nous:"):
+        try:
+            nous = await resolve_nous_model(assigned_slug[len("nous:") :], task_key)
+        except RuntimeError:
+            nous = None
+        if nous is not None:
+            n_provider_key, n_provider_config, n_model = nous
+            return n_provider_key, n_provider_config, n_model, default_slug
+        assigned_slug = default_slug
+        resolved_slug = default_slug
+
     agent_repo = get_agent_repository()
     agent = await agent_repo.get_by_slug(assigned_slug)
     if not agent and assigned_slug != default_slug:
