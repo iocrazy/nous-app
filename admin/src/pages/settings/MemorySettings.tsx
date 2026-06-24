@@ -10,6 +10,8 @@ import {
   Tag,
   Select,
 } from '@arco-design/web-react'
+import { IconStorage, IconRobot, IconCode } from '@arco-design/web-react/icon'
+import { SectionHeader } from './SectionHeader'
 import {
   useGraphMemorySettings,
   useUpdateGraphMemorySettings,
@@ -120,6 +122,11 @@ export function MemorySettings() {
 
   return (
     <Card title="Memory (Graphiti)" style={{ marginBottom: 20 }}>
+      <SectionHeader
+        icon={<IconStorage />}
+        title="Graph Backend (FalkorDB)"
+        subtitle="The knowledge-graph store that powers long-term memory."
+      />
       <Row label="Enabled" hint="Master gate. Needs a FalkorDB host + a running backend to take effect.">
         <Switch checked={enabled} onChange={setEnabled} disabled={updateMutation.isPending} />
       </Row>
@@ -137,7 +144,11 @@ export function MemorySettings() {
       </Row>
 
       <Divider />
-      <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-2)' }}>Extractor LLM (OpenAI-compatible)</div>
+      <SectionHeader
+        icon={<IconRobot />}
+        title="Extractor LLM"
+        subtitle="OpenAI-compatible LLM that extracts entities/edges into the graph."
+      />
       <Row label="Base URL">
         <Input value={exBaseUrl} onChange={setExBaseUrl} placeholder="https://.../v1" style={{ width: 260 }} />
       </Row>
@@ -169,7 +180,11 @@ export function MemorySettings() {
       </Row>
 
       <Divider />
-      <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-2)' }}>Embedder (shared memory embedder)</div>
+      <SectionHeader
+        icon={<IconCode />}
+        title="Embedder"
+        subtitle="Shared memory embedder (Graphiti + Honcho)."
+      />
       <div style={{ color: 'var(--color-text-3)', fontSize: 12, marginTop: 4, marginBottom: 4 }}>
         Used by Graphiti (live, via these settings) and Honcho (its container env is kept in
         sync with these values — see the memory-embedder runbook). Dimensions is shared by

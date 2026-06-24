@@ -8,8 +8,10 @@ import {
   Spin,
   Divider,
 } from '@arco-design/web-react'
+import { IconSettings, IconThunderbolt } from '@arco-design/web-react/icon'
 import { useSystemSettings, useUpdateSetting } from '../../api/endpoints/settings'
 import type { SystemSetting } from '../../api/endpoints/settings'
+import { SectionHeader } from './SectionHeader'
 
 const { Title } = Typography
 
@@ -114,14 +116,24 @@ export function Settings() {
   // scattered related keys (e.g. transcode_*) across three cards. Each
   // SettingRow already renders the right control for its value type. Unmatched
   // keys fall into "General".
-  const DOMAIN_SECTIONS: ReadonlyArray<{ title: string; prefix: string }> = [
-    { title: 'Transcoding', prefix: 'transcode_' },
+  const DOMAIN_SECTIONS: ReadonlyArray<{
+    title: string
+    prefix: string
+    subtitle: string
+    icon: React.ReactNode
+  }> = [
+    {
+      title: 'Transcoding',
+      prefix: 'transcode_',
+      subtitle: 'Video transcode encoder / preset / tiers.',
+      icon: <IconThunderbolt />,
+    },
   ]
   const claimed = new Set<string>()
   const domainCards = DOMAIN_SECTIONS.map((sec) => {
     const items = generic.filter((s) => s.key.startsWith(sec.prefix))
     items.forEach((s) => claimed.add(s.key))
-    return { title: sec.title, items }
+    return { ...sec, items }
   }).filter((c) => c.items.length > 0)
   const generalSettings = generic.filter((s) => !claimed.has(s.key))
 
@@ -139,18 +151,25 @@ export function Settings() {
         Settings
       </Title>
 
-      <Card title="General" style={{ marginBottom: 20 }}>
+      <Card style={{ marginBottom: 20 }}>
+        <SectionHeader
+          icon={<IconSettings />}
+          title="General"
+          subtitle="Miscellaneous platform settings."
+        />
         {renderRows(generalSettings)}
         {generalSettings.length === 0 && (
           <div style={{ color: 'var(--color-text-3)', padding: '16px 0' }}>No general settings</div>
         )}
-      </Card>
 
-      {domainCards.map((c) => (
-        <Card key={c.title} title={c.title} style={{ marginBottom: 20 }}>
-          {renderRows(c.items)}
-        </Card>
-      ))}
+        {domainCards.map((c) => (
+          <div key={c.title}>
+            <Divider />
+            <SectionHeader icon={c.icon} title={c.title} subtitle={c.subtitle} />
+            {renderRows(c.items)}
+          </div>
+        ))}
+      </Card>
     </div>
   )
 }
