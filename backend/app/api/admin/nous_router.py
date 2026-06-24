@@ -6,6 +6,7 @@ Admin API for managing Nous platform-provided AI models.
 
 from typing import List
 
+import httpx
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 
@@ -15,10 +16,12 @@ from app.schemas.ai import TestConnectionResponse
 from app.schemas.nous import (
     NousModelCreate,
     NousModelResponse,
+    NousModelTestResponse,
     NousModelUpdate,
     NousProbeRequest,
 )
 from app.services.ai.providers.ai_provider import AIProviderFactory
+from app.services.ai.providers.embedding_config import _is_multimodal
 
 router = APIRouter()
 
@@ -162,3 +165,108 @@ async def delete_nous_model(model_id: str, auth: AdminAuthDep):
         raise HTTPException(status_code=404, detail="Model not found")
     logger.info(f"[Admin] Deleted Nous model: {model_id}")
     return {"message": "Deleted"}
+
+
+async def _probe_nous_model(row: dict) -> dict:
+    """Real connectivity probe for one platform model, by type.
+
+    Unlike ``test_connection`` (which only lists ``/v1/models``), this performs
+    an actual minimal inference so account-level limits surface (e.g. a
+    Volcengine ``SetLimitExceeded`` 429 on a specific model). Never raises.
+    """
+    typ = (row.get("type") or "").strip()
+    model = (row.get("actual_model") or "").strip()
+    base = (row.get("base_url") or "").rstrip("/")
+    key = row.get("api_key") or ""
+    provider = (row.get("actual_provider") or "").strip()
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+
+    try:
+        if typ == "asr":
+            res = await AIProviderFactory.test_connection(
+                provider_key=provider,
+                config={
+                    "api_key": key,
+                    "app_id": row.get("app_id") or "",
+                    "base_url": base,
+                    "model": model,
+                },
+            )
+            return {
+                "ok": bool(res.get("success")),
+                "detail": "reachable" if res.get("success") else "",
+                "error": res.get("error"),
+                "dims": None,
+            }
+
+        if typ == "embedding":
+            if _is_multimodal(model, base):
+                url = (
+                    base
+                    if "embeddings/multimodal" in base
+                    else base + "/embeddings/multimodal"
+                )
+                payload = {"model": model, "input": [{"type": "text", "text": "ping"}]}
+            else:
+                url = base + "/embeddings"
+                payload = {"model": model, "input": "ping"}
+            async with httpx.AsyncClient(timeout=20.0) as c:
+                r = await c.post(url, headers=headers, json=payload)
+            if r.status_code != 200:
+                return {
+                    "ok": False,
+                    "detail": "",
+                    "error": f"HTTP {r.status_code}: {r.text[:160]}",
+                    "dims": None,
+                }
+            data = (r.json() or {}).get("data")
+            emb = None
+            if isinstance(data, dict):
+                emb = data.get("embedding")
+            elif isinstance(data, list) and data and isinstance(data[0], dict):
+                emb = data[0].get("embedding")
+            dims = len(emb) if isinstance(emb, list) else None
+            return {
+                "ok": dims is not None,
+                "detail": f"{dims} dims" if dims else "",
+                "error": None if dims else "no embedding vector in response",
+                "dims": dims,
+            }
+
+        # llm (and any chat-completions provider)
+        url = base + "/chat/completions"
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 8,
+        }
+        async with httpx.AsyncClient(timeout=20.0) as c:
+            r = await c.post(url, headers=headers, json=payload)
+        if r.status_code != 200:
+            return {
+                "ok": False,
+                "detail": "",
+                "error": f"HTTP {r.status_code}: {r.text[:160]}",
+                "dims": None,
+            }
+        ok = bool((r.json() or {}).get("choices"))
+        return {
+            "ok": ok,
+            "detail": "chat ok" if ok else "",
+            "error": None if ok else "no choices in response",
+            "dims": None,
+        }
+    except Exception as e:  # noqa: BLE001 — probe is best-effort
+        return {"ok": False, "detail": "", "error": str(e)[:200], "dims": None}
+
+
+@router.post("/{model_id}/test", response_model=NousModelTestResponse)
+async def test_nous_model(model_id: str, auth: AdminAuthDep):
+    """Run a real connectivity probe for one platform model (chat/embedding/asr)."""
+    repo = get_nous_repository()
+    rows = await repo.list_all()
+    row = next((r for r in rows if str(r.get("id")) == str(model_id)), None)
+    if not row:
+        raise HTTPException(status_code=404, detail="Model not found")
+    result = await _probe_nous_model(row)
+    return NousModelTestResponse(**result)

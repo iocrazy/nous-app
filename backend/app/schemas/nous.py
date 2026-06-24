@@ -94,3 +94,12 @@ class NousProbeRequest(BaseModel):
     base_url: Optional[str] = ""
     model: Optional[str] = ""
     name: Optional[str] = None
+
+
+class NousModelTestResponse(BaseModel):
+    """Result of a real per-model connectivity probe (chat / embedding / asr)."""
+
+    ok: bool
+    detail: str = ""
+    error: Optional[str] = None
+    dims: Optional[int] = None

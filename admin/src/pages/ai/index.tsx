@@ -73,6 +73,7 @@ export function AIModelsPage() {
   const [selectedModels, setSelectedModels] = useState<string[]>([])
   const [probeLoading, setProbeLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [testingId, setTestingId] = useState<string | null>(null)
   const [form] = Form.useForm()
 
   const apiBase = import.meta.env.VITE_API_URL || ''
@@ -246,6 +247,23 @@ export function AIModelsPage() {
     }
   }
 
+  const handleTestModel = async (m: NousModel) => {
+    setTestingId(m.id)
+    try {
+      const res = await fetch(`${apiBase}/api/v1/admin/nous-models/${m.id}/test`, { method: 'POST', headers })
+      const data = await res.json()
+      if (data.ok) {
+        Message.success(`${m.actual_model}: OK${data.detail ? ` — ${data.detail}` : ''}`)
+      } else {
+        Message.error(`${m.actual_model}: ${data.error || 'connectivity test failed'}`)
+      }
+    } catch {
+      Message.error(`${m.actual_model}: request failed`)
+    } finally {
+      setTestingId(null)
+    }
+  }
+
   const pickerOptions = fetchedModels
     .filter((m) => !existingModels.has(m))
     .map((m) => ({ label: `${m}  ·  ${guessType(m)}`, value: m }))
@@ -301,6 +319,14 @@ export function AIModelsPage() {
                       checked={m.is_enabled}
                       onChange={() => handleToggleEnabled(m)}
                     />
+                    <Button
+                      size="mini"
+                      type="text"
+                      loading={testingId === m.id}
+                      onClick={() => handleTestModel(m)}
+                    >
+                      Test
+                    </Button>
                     <Popconfirm title="Remove this model?" onOk={() => handleDeleteModel(m.id)}>
                       <Button icon={<IconDelete />} size="mini" status="danger" type="text" />
                     </Popconfirm>
