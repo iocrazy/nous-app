@@ -38,7 +38,7 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
   )
 }
 
-type TaskModuleKey = 'transcription' | 'translation' | 'visual_analysis' | 'caption' | 'classification' | 'summarization' | 'topic_scorer'
+type TaskModuleKey = 'transcription' | 'translation' | 'visual_analysis' | 'caption' | 'classification' | 'summarization' | 'topic_scorer' | 'embedding'
 
 interface TaskModuleLocalState {
   user_allowed: boolean
@@ -59,6 +59,7 @@ interface LocalState {
   classification: TaskModuleLocalState
   summarization: TaskModuleLocalState
   topic_scorer: TaskModuleLocalState
+  embedding: TaskModuleLocalState
 }
 
 const TASK_MODULES: ReadonlyArray<{ key: TaskModuleKey; label: string; hint: string }> = [
@@ -97,6 +98,11 @@ const TASK_MODULES: ReadonlyArray<{ key: TaskModuleKey; label: string; hint: str
     label: 'Topic Scorer',
     hint: 'Scores news hotspots for the Topic Inspiration feed (score/reason/summary).',
   },
+  {
+    key: 'embedding',
+    label: 'Embedding',
+    hint: 'Text/multimodal embedding provider for topic cross-source clustering. e.g. Volcengine Ark multimodal — base_url https://ark.cn-beijing.volces.com/api/v3/embeddings/multimodal, model doubao-embedding-vision-250615 (2048-dim).',
+  },
 ]
 
 const PLATFORM_MANAGED: ReadonlyArray<{ label: string; hint: string }> = [
@@ -122,6 +128,7 @@ function defaultLocalState(): LocalState {
     classification: defaultTaskState(),
     summarization: defaultTaskState(),
     topic_scorer: defaultTaskState(),
+    embedding: defaultTaskState(),
   }
 }
 
@@ -187,6 +194,13 @@ export function AIGovernance() {
         model: data.topic_scorer.model ?? '',
         api_key: '',
       },
+      embedding: {
+        user_allowed: data.embedding.user_allowed,
+        nous_allowed: data.embedding.nous_allowed,
+        base_url: data.embedding.base_url ?? '',
+        model: data.embedding.model ?? '',
+        api_key: '',
+      },
     })
   }, [data])
 
@@ -222,6 +236,7 @@ export function AIGovernance() {
       classification: taskUpdate(state.classification),
       summarization: taskUpdate(state.summarization),
       topic_scorer: taskUpdate(state.topic_scorer),
+      embedding: taskUpdate(state.embedding),
     }
 
     updateMutation.mutate(payload, {
@@ -237,6 +252,7 @@ export function AIGovernance() {
           classification: { ...prev.classification, api_key: '' },
           summarization: { ...prev.summarization, api_key: '' },
           topic_scorer: { ...prev.topic_scorer, api_key: '' },
+          embedding: { ...prev.embedding, api_key: '' },
         }))
       },
       onError: (err) => Message.error((err as Error).message || 'Failed to save'),

@@ -96,6 +96,7 @@ export interface AIGovernanceSettings {
   classification: AIGovernanceTaskSettings
   summarization: AIGovernanceTaskSettings
   topic_scorer: AIGovernanceTaskSettings
+  embedding: AIGovernanceTaskSettings
 }
 
 export interface AIGovernanceModuleUpdate {
@@ -117,6 +118,7 @@ export interface AIGovernanceUpdate {
   classification?: AIGovernanceModuleUpdate
   summarization?: AIGovernanceModuleUpdate
   topic_scorer?: AIGovernanceModuleUpdate
+  embedding?: AIGovernanceModuleUpdate
 }
 
 const AI_GOVERNANCE_URL = '/api/v1/admin/settings/ai-governance'
