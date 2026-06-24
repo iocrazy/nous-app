@@ -313,3 +313,93 @@ async def test_transcription_locked_no_key_fails_closed():
         ):
             with pytest.raises(RuntimeError, match="admin-locked"):
                 await trans_mod.load_transcribe_inputs(1, "user-1")
+
+
+# ---------------------------------------------------------------------------
+# T2-d: allowed module + user picks a platform model (value "nous:<model>")
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_user_picks_platform_model_for_llm_task():
+    """An allowed LLM task whose assignment is ``nous:<model>`` resolves to the
+    platform config and composes the module's default agent prompt."""
+    from app.services.ai.providers import ai_provider_helpers as helpers_mod
+
+    with (
+        patch(
+            "app.services.ai.governance.ai_governance.get_module_governance",
+            new=AsyncMock(return_value=_allowed_governance()),
+        ),
+        patch.object(
+            helpers_mod,
+            "get_ai_settings",
+            new=AsyncMock(
+                return_value={
+                    "task_assignment": {"summarization": "nous:mediahub-doubao-pro"}
+                }
+            ),
+        ),
+        patch.object(
+            helpers_mod,
+            "resolve_nous_model",
+            new=AsyncMock(
+                return_value=(
+                    "doubao",
+                    {"api_key": "k", "base_url": "u", "model": "doubao-x"},
+                    "doubao-x",
+                )
+            ),
+        ),
+    ):
+        result = await helpers_mod.resolve_task_provider_config(
+            user_id="u1", task_key="summarization", default_slug="summarize"
+        )
+
+    provider_key, provider_config, model, agent_slug = result
+    assert provider_key == "doubao"
+    assert model == "doubao-x"
+    assert provider_config["api_key"] == "k"
+    # Default agent prompt is composed alongside the platform model.
+    assert agent_slug == "summarize"
+
+
+@pytest.mark.asyncio
+async def test_platform_model_gone_falls_back_to_default_agent():
+    """If the picked platform model is disabled/missing, the task degrades to
+    the module's default agent instead of erroring."""
+    from app.services.ai.providers import ai_provider_helpers as helpers_mod
+
+    fake_repo = MagicMock()
+    fake_repo.get_by_slug = AsyncMock(return_value={"slug": "summarize", "model": ""})
+
+    with (
+        patch(
+            "app.services.ai.governance.ai_governance.get_module_governance",
+            new=AsyncMock(return_value=_allowed_governance()),
+        ),
+        patch.object(
+            helpers_mod,
+            "get_ai_settings",
+            new=AsyncMock(
+                return_value={"task_assignment": {"summarization": "nous:gone-model"}}
+            ),
+        ),
+        patch.object(
+            helpers_mod,
+            "resolve_nous_model",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "app.repositories.agent_repository.get_agent_repository",
+            return_value=fake_repo,
+        ),
+    ):
+        result = await helpers_mod.resolve_task_provider_config(
+            user_id="u1", task_key="summarization", default_slug="summarize"
+        )
+
+    # Fell back to the default agent (which here has no model → empty config).
+    _, _, _, agent_slug = result
+    assert agent_slug == "summarize"
+    fake_repo.get_by_slug.assert_awaited_with("summarize")

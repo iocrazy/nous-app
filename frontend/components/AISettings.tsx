@@ -720,7 +720,19 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
     const options = getAgentOptions();
     const systemOptions = options.filter((o) => o.group === 'system');
     const mineOptions = options.filter((o) => o.group === 'mine');
-    const knownSlugs = new Set(options.map((o) => o.value));
+    // Platform (MediaHub) LLM models are directly selectable per task — same as
+    // the ASR picker — gated by the admin master switch + per-module nous_allowed.
+    const nousAllowed =
+      governance.nous_enabled && (governance.nous_modules?.[taskKey] ?? true);
+    const nousLlmOptions = nousAllowed
+      ? nousModels
+          .filter((m) => m.type === 'llm')
+          .map((m) => ({ value: `nous:${m.name}`, label: `${m.display_name} (MediaHub)` }))
+      : [];
+    const knownSlugs = new Set([
+      ...options.map((o) => o.value),
+      ...nousLlmOptions.map((o) => o.value),
+    ]);
     const isLegacy = currentValue !== '' && !knownSlugs.has(currentValue);
 
     return (
@@ -746,6 +758,13 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
           {mineOptions.length > 0 && (
             <optgroup label="My Agents">
               {mineOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </optgroup>
+          )}
+          {nousLlmOptions.length > 0 && (
+            <optgroup label="MediaHub Platform">
+              {nousLlmOptions.map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </optgroup>
