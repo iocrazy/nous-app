@@ -71,6 +71,18 @@ export const HotspotCard: React.FC<Props> = ({
               #{hotspot.best_rank}
             </span>
           )}
+          {typeof hotspot.source_count === 'number' && hotspot.source_count > 1 && (
+            <span
+              className="text-[10px] font-bold rounded px-1.5 py-0.5 shrink-0"
+              title={t('topic.crossPlatformHint', 'Trending across multiple platforms')}
+              style={{
+                color: 'var(--ind-tx, #4338ca)',
+                background: 'var(--ind-bg, rgba(99,102,241,.12))',
+              }}
+            >
+              {t('topic.platforms', { count: hotspot.source_count, defaultValue: '{{count}} platforms' })}
+            </span>
+          )}
         </span>
         <span className="flex items-center gap-1.5">
           {isPick && (
