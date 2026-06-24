@@ -203,6 +203,13 @@ async def test_task_module_partial_config():
 # ---------------------------------------------------------------------------
 
 
+def test_embedding_is_a_governed_task_module():
+    """embedding is admin-governed (like topic_scorer) so the cross-source
+    clustering provider is centrally configured, never env."""
+    assert "embedding" in gov_mod.TASK_MODULES
+    assert "embedding" in gov_mod.ALL_MODULES
+
+
 def test_governance_dataclass_api_key_present_derived():
     """api_key_present is derived from api_key at construction time."""
     g_with_key = AIModuleGovernance(allowed=False, api_key="sk-test")

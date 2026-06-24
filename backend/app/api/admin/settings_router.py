@@ -186,6 +186,7 @@ _TASK_MODULE_NAMES = [
     "classification",
     "summarization",
     "topic_scorer",
+    "embedding",
 ]
 _ALL_MODULE_NAMES = ["chat"] + _TASK_MODULE_NAMES
 
@@ -281,6 +282,13 @@ async def _read_governance_settings() -> AIGovernanceResponse:
             base_url=get_str("ai_module.topic_scorer.base_url"),
             model=get_str("ai_module.topic_scorer.model"),
             api_key_set=bool(get_str("ai_module.topic_scorer.api_key")),
+        ),
+        embedding=TaskModuleGovernanceResponse(
+            user_allowed=get_bool("ai_module.embedding.user_allowed"),
+            nous_allowed=get_nous("embedding"),
+            base_url=get_str("ai_module.embedding.base_url"),
+            model=get_str("ai_module.embedding.model"),
+            api_key_set=bool(get_str("ai_module.embedding.api_key")),
         ),
     )
 

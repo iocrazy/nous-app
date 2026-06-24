@@ -4,8 +4,8 @@ Reads ``system_settings`` (service-role, via the SQLAlchemy engine) to
 determine whether end-users may configure a given AI module, and provides
 the admin-set fallback config when a module is locked.
 
-Seven governed modules
-----------------------
+Governed modules
+----------------
 chat            — chat agent turns (toggle only; platform keys used when locked)
 transcription   — Whisper / volcengine ASR
 translation     — LLM translate
@@ -13,6 +13,10 @@ visual_analysis — LLM visual/image analysis
 caption         — image captioning
 classification  — asset classification
 summarization   — LLM summary/rewrite of transcripts (summarize agent)
+topic_scorer    — background hotspot relevance scorer (no user-facing config)
+embedding       — text/multimodal embedding provider for topic clustering; a
+                  background system capability, admin-configured like topic_scorer
+                  (no user-facing agent-select)
 
 Data model (``system_settings`` keys, value = JSONB)
 ----------------------------------------------------
@@ -49,6 +53,7 @@ TASK_MODULES = frozenset(
         "classification",
         "summarization",
         "topic_scorer",
+        "embedding",
     }
 )
 CHAT_MODULE = "chat"
