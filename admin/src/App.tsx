@@ -13,6 +13,8 @@ import { PlaceholderPage } from './pages/placeholder'
 import { TagsPage } from './pages/tags'
 import { CreditsPage } from './pages/credits'
 import { Settings } from './pages/settings'
+import { AIGovernance } from './pages/settings/AIGovernance'
+import { MemorySettings } from './pages/settings/MemorySettings'
 import { RequestLogs } from './pages/request-logs'
 import { MonitoringDashboard } from './pages/monitoring'
 import { GlobalSearch } from './pages/search'
@@ -51,6 +53,8 @@ export default function App() {
               <Route path="/alerts" element={<Alerts />} />
               <Route path="/api-keys" element={<PlaceholderPage title="API Keys" />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/settings/ai-governance" element={<AIGovernance />} />
+              <Route path="/settings/memory" element={<MemorySettings />} />
               <Route path="/transcode-config" element={<TranscodeConfig />} />
               <Route path="/deployment-logs" element={<DeploymentLogsPage />} />
             </Route>
