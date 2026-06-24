@@ -7,7 +7,13 @@ from loguru import logger
 
 from app.repositories.hotspots_repository import HotspotsRepository
 from app.repositories.signal_sources_repository import SignalSourcesRepository
+from app.repositories.topic_groups_repository import TopicGroupRepository
 from app.services.topics.adapters.registry import get_adapter
+from app.services.topics.clustering import (
+    CLUSTER_MAX_ITEMS,
+    WINDOW_HOURS,
+    is_match,
+)
 from app.services.topics.embedding_service import TopicEmbeddingService
 from app.services.topics.keyword_filter import keyword_filter
 from app.services.topics.topic_scorer import TopicScorerService
@@ -62,6 +68,51 @@ async def embed_unembedded_once(
             embedded += 1
     summary = {"unembedded": len(rows), "embedded": embedded}
     logger.info(f"topic_embed done: {summary}")
+    return summary
+
+
+async def cluster_unassigned_once(
+    *,
+    repo: TopicGroupRepository | None = None,
+    window_hours: int = WINDOW_HOURS,
+    max_items: int = CLUSTER_MAX_ITEMS,
+) -> dict:
+    """Group embedded-but-unclustered hotspots by cosine similarity.
+
+    Each unclustered hotspot in the window joins the most-similar existing group
+    if similarity clears the threshold, else seeds a new group. Cross-source
+    membership (``source_count``) is what powers the "seen on N platforms"
+    signal + dedup. Additive + isolated: never blocks fetch/score/embed.
+    """
+    repo = repo or TopicGroupRepository()
+    rows = await repo.list_unclustered(window_hours=window_hours, limit=max_items)
+    if not rows:
+        return {"processed": 0, "clustered": 0, "new_groups": 0}
+    clustered = new_groups = 0
+    for r in rows:
+        vec = r.get("vec")
+        if not vec:
+            continue
+        try:
+            nearest = await repo.nearest_group(vec, window_hours=window_hours)
+            if nearest and is_match(nearest.get("sim")):
+                gid = nearest["id"]
+                await repo.assign_hotspot(r["id"], gid)
+                await repo.recompute_group(gid)
+                clustered += 1
+            else:
+                gid = await repo.create_group(label=r.get("title") or "", vec=vec)
+                if gid is not None:
+                    await repo.assign_hotspot(r["id"], gid)
+                    new_groups += 1
+        except Exception as e:  # noqa: BLE001 — per-item isolation
+            logger.warning(f"topic clustering item {r.get('id')} failed: {e}")
+    summary = {
+        "processed": len(rows),
+        "clustered": clustered,
+        "new_groups": new_groups,
+    }
+    logger.info(f"topic_cluster done: {summary}")
     return summary
 
 
@@ -155,3 +206,7 @@ async def topic_fetch_workflow(scheduled_time: datetime, actual_time: datetime) 
         await embed_unembedded_once()
     except Exception as e:  # noqa: BLE001 — never let embedding break the schedule
         logger.warning(f"topic embedding pass failed: {e}")
+    try:
+        await cluster_unassigned_once()
+    except Exception as e:  # noqa: BLE001 — never let clustering break the schedule
+        logger.warning(f"topic clustering pass failed: {e}")
