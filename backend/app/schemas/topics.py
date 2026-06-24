@@ -66,6 +66,17 @@ class DatesResponse(BaseModel):
     dates: list[str]
 
 
+class InterestRequest(BaseModel):
+    interest_text: str = ""
+
+
+class InterestResponse(BaseModel):
+    success: bool = True
+    interest_text: str = ""
+    # True once the interest has an embedding (the "For You" view needs it).
+    has_embedding: bool = False
+
+
 class SourceHealthOut(BaseModel):
     id: str
     name: str

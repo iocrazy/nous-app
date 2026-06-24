@@ -28,12 +28,17 @@ export interface Hotspot {
   is_hidden?: boolean;
 }
 
-export type HotspotView = 'all' | 'saved' | 'hidden';
+export type HotspotView = 'all' | 'foryou' | 'saved' | 'hidden';
 
 export interface HotspotStatePatch {
   is_read?: boolean;
   is_saved?: boolean;
   is_hidden?: boolean;
+}
+
+export interface TopicInterest {
+  interest_text: string;
+  has_embedding: boolean;
 }
 
 const base = () => `${getApiUrl()}/api/v1/topics`;
@@ -80,6 +85,22 @@ export async function setHotspotState(
     body: JSON.stringify(patch),
   });
   return jsonOrThrow(resp);
+}
+
+export async function getInterest(): Promise<TopicInterest> {
+  const resp = await fetch(`${base()}/interest`, { headers: await getAuthHeaders() });
+  const d = await jsonOrThrow(resp);
+  return { interest_text: d.interest_text || '', has_embedding: !!d.has_embedding };
+}
+
+export async function setInterest(interest_text: string): Promise<TopicInterest> {
+  const resp = await fetch(`${base()}/interest`, {
+    method: 'PUT',
+    headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ interest_text }),
+  });
+  const d = await jsonOrThrow(resp);
+  return { interest_text: d.interest_text || '', has_embedding: !!d.has_embedding };
 }
 
 export async function getHotspotDates(): Promise<string[]> {

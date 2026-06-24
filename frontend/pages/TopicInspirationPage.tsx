@@ -7,6 +7,8 @@ import {
   getHotspots,
   getHotspotDates,
   setHotspotState,
+  getInterest,
+  setInterest,
   type Hotspot,
   type HotspotView,
   type HotspotStatePatch,
@@ -20,7 +22,7 @@ import { SourceHealthBadge } from '../components/TopicInspiration/SourceHealthBa
 import { topHotspots, partitionBySignal } from '../components/TopicInspiration/hotspotRanking';
 
 const CATEGORIES = ['all', 'model', 'product', 'industry', 'paper', 'tips'] as const;
-const VIEWS: HotspotView[] = ['all', 'saved', 'hidden'];
+const VIEWS: HotspotView[] = ['all', 'foryou', 'saved', 'hidden'];
 const TOP_HOTSPOTS_COUNT = 5;
 
 export const TopicInspirationPage: React.FC = () => {
@@ -38,7 +40,46 @@ export const TopicInspirationPage: React.FC = () => {
   const [view, setView] = useState<HotspotView>('all');
   const [refreshKey, setRefreshKey] = useState(0);
   const [showLowSignal, setShowLowSignal] = useState(false);
+  const [interestInput, setInterestInput] = useState('');
+  const [interestSaved, setInterestSaved] = useState<string | null>(null);
+  const [interestSaving, setInterestSaving] = useState(false);
   const searching = query.trim().length > 0;
+
+  // Load the saved interest once (drives the For You editor + empty state).
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const it = await getInterest();
+        if (!alive) return;
+        setInterestInput(it.interest_text);
+        setInterestSaved(it.has_embedding ? it.interest_text : '');
+      } catch (err) {
+        console.error('load interest failed', err);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  async function saveInterest() {
+    setInterestSaving(true);
+    try {
+      const it = await setInterest(interestInput.trim());
+      setInterestSaved(it.has_embedding ? it.interest_text : '');
+      if (!it.has_embedding && it.interest_text) {
+        addToast(t('topic.interestNoEmbed', 'Saved, but embedding is unavailable'), 'info');
+      } else {
+        addToast(t('topic.interestSaved', 'Interests saved'), 'success');
+      }
+      if (view === 'foryou') setRefreshKey((k) => k + 1); // re-rank
+    } catch (err) {
+      addToast(`${(err as Error).message}`, 'error');
+    } finally {
+      setInterestSaving(false);
+    }
+  }
 
   // Debounce the search box so we hit the backend at most once per pause,
   // not on every keystroke.
@@ -204,6 +245,35 @@ export const TopicInspirationPage: React.FC = () => {
       </div>
       )}
 
+      {/* Interest editor — For You view only */}
+      {view === 'foryou' && (
+        <div className="mt-3 flex flex-col sm:flex-row gap-2">
+          <input
+            type="text"
+            value={interestInput}
+            onChange={(e) => setInterestInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') saveInterest();
+            }}
+            placeholder={t('topic.interestPlaceholder', 'Describe your interests, e.g. AI models, chips, startups')}
+            className={`flex-1 rounded-lg px-3 py-2 text-sm outline-none transition-colors ${
+              island
+                ? 'bg-island-2 border border-line-strong text-content placeholder:text-content-4 focus:border-accent/50'
+                : 'bg-ink-900 border border-ink-700 text-ink-100 placeholder:text-ink-500 focus:border-indigo-500/50'
+            }`}
+          />
+          <button
+            onClick={saveInterest}
+            disabled={interestSaving}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-40 ${
+              island ? 'bg-accent text-white' : 'bg-indigo-600 text-white'
+            }`}
+          >
+            {interestSaving ? t('common.loading', 'Loading...') : t('topic.saveInterest', 'Save')}
+          </button>
+        </div>
+      )}
+
       {/* Controls row: category chips + date button (browse view only) */}
       {view === 'all' && (
       <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -311,6 +381,10 @@ export const TopicInspirationPage: React.FC = () => {
               ? t('topic.noSaved', 'No saved hotspots yet.')
               : view === 'hidden'
               ? t('topic.noHidden', 'Nothing hidden.')
+              : view === 'foryou'
+              ? interestSaved
+                ? t('topic.noForYouYet', 'No matches yet — check back as more hotspots are analyzed.')
+                : t('topic.setInterestPrompt', 'Describe your interests above to get a personalized feed.')
               : t('topic.noHotspots', 'No hotspots found.')}
           </p>
         )}
