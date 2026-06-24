@@ -9,6 +9,17 @@ def test_to_int_coerces_snowflake_str():
     assert _to_int(123) == 123
 
 
+def test_sqlalchemy_binds_vec_with_cast_not_double_colon():
+    """Root cause of the clustering 'syntax error at or near :' bug: SQLAlchemy
+    text() does NOT register a bind param when it's immediately followed by the
+    :: cast operator, so :vec::vector reached Postgres unbound. CAST(:vec AS
+    vector) binds correctly. This guards the regression without a live DB."""
+    from sqlalchemy import text
+
+    assert "vec" in text("SELECT CAST(:vec AS vector)")._bindparams
+    assert "vec" not in text("SELECT :vec::vector")._bindparams
+
+
 @pytest.mark.asyncio
 async def test_nearest_group_passes_vec_and_window(monkeypatch):
     seen = {}
@@ -22,7 +33,10 @@ async def test_nearest_group_passes_vec_and_window(monkeypatch):
     out = await TopicGroupRepository().nearest_group("[0.1,0.2]", window_hours=48)
     assert out == {"id": "9", "sim": 0.9}
     assert seen["params"] == {"vec": "[0.1,0.2]", "win": 48}
-    assert "<=>" in seen["sql"] and "::vector" in seen["sql"]
+    # CAST(:vec AS vector), NOT :vec::vector — SQLAlchemy text() leaves a bind
+    # param unbound when it's immediately followed by the :: cast operator.
+    assert "<=>" in seen["sql"] and "CAST(:vec AS vector)" in seen["sql"]
+    assert ":vec::vector" not in seen["sql"]
 
 
 @pytest.mark.asyncio
