@@ -201,6 +201,33 @@ class HotspotsRepository:
         )
         return result.data or []
 
+    async def list_unembedded(self, limit: int = 40) -> list[dict[str, Any]]:
+        """Most-recent hotspots with no embedding yet (embedding IS NULL)."""
+        client = await self._client()
+        result = (
+            await client.table(self.TABLE)
+            .select("id, title, ai_summary, content_original")
+            .is_("embedding", "null")
+            .order("captured_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return result.data or []
+
+    async def patch_embedding(self, hotspot_id: str, embedding: list[float]) -> None:
+        """Store a hotspot's embedding vector. The vector is sent as a pgvector
+        text literal ``[v1,v2,...]`` which PostgREST casts to the vector column."""
+        if not embedding:
+            return
+        literal = "[" + ",".join(repr(float(x)) for x in embedding) + "]"
+        client = await self._client()
+        try:
+            await client.table(self.TABLE).update({"embedding": literal}).eq(
+                "id", hotspot_id
+            ).execute()
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"patch_embedding failed for {hotspot_id}: {e}")
+
     async def patch_enrichment(self, hotspot_id: str, enrichment: dict) -> None:
         """Write AI enrichment (score/reason/ai_summary/category/tags). Skips None."""
         patch = {

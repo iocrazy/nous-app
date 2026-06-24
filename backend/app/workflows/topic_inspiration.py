@@ -8,6 +8,7 @@ from loguru import logger
 from app.repositories.hotspots_repository import HotspotsRepository
 from app.repositories.signal_sources_repository import SignalSourcesRepository
 from app.services.topics.adapters.registry import get_adapter
+from app.services.topics.embedding_service import TopicEmbeddingService
 from app.services.topics.keyword_filter import keyword_filter
 from app.services.topics.topic_scorer import TopicScorerService
 
@@ -24,6 +25,44 @@ _SCORE_MAX_ITEMS = 60
 # truncated JSON ("Unterminated string"). Larger batches dropped the
 # reason/ai_summary for most items. See topic_scorer._MAX_OUTPUT_TOKENS.
 _SCORE_BATCH_SIZE = 6
+
+# Embedding pass bound: vectors per tick (one Ark call each). The feed catches
+# up over successive ticks; embeddings feed the Phase-3 cross-source clustering.
+_EMBED_MAX_ITEMS = 40
+
+
+def _embed_text(row: dict) -> str:
+    """Text to embed for a hotspot: title + AI summary (or raw content)."""
+    title = (row.get("title") or "").strip()
+    body = (row.get("ai_summary") or row.get("content_original") or "").strip()
+    return f"{title}\n{body}".strip() if body else title
+
+
+async def embed_unembedded_once(
+    *,
+    hotspots_repo: HotspotsRepository | None = None,
+    embedder: TopicEmbeddingService | None = None,
+    max_items: int = _EMBED_MAX_ITEMS,
+) -> dict:
+    """Compute + store embeddings for hotspots that lack one.
+
+    Additive + isolated: never blocks fetching/scoring. Skips silently when the
+    embedding provider isn't admin-configured (embed_text returns None).
+    """
+    hotspots_repo = hotspots_repo or HotspotsRepository()
+    embedder = embedder or TopicEmbeddingService()
+    rows = await hotspots_repo.list_unembedded(limit=max_items)
+    if not rows:
+        return {"unembedded": 0, "embedded": 0}
+    embedded = 0
+    for r in rows:
+        vec = await embedder.embed_text(_embed_text(r))
+        if vec:
+            await hotspots_repo.patch_embedding(str(r["id"]), vec)
+            embedded += 1
+    summary = {"unembedded": len(rows), "embedded": embedded}
+    logger.info(f"topic_embed done: {summary}")
+    return summary
 
 
 async def run_topic_fetch_once(
@@ -112,3 +151,7 @@ async def topic_fetch_workflow(scheduled_time: datetime, actual_time: datetime) 
         await score_unscored_once()
     except Exception as e:  # noqa: BLE001 — never let scoring break the schedule
         logger.warning(f"topic scoring pass failed: {e}")
+    try:
+        await embed_unembedded_once()
+    except Exception as e:  # noqa: BLE001 — never let embedding break the schedule
+        logger.warning(f"topic embedding pass failed: {e}")
