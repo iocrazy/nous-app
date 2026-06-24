@@ -143,7 +143,7 @@ class HotspotsRepository:
         q: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         client = await self._client()
-        query = client.table(self.TABLE).select("*")
+        query = client.table(self.TABLE).select("*, topic_groups(source_count)")
         if day:
             query = query.gte("captured_at", f"{day}T00:00:00Z").lte(
                 "captured_at", f"{day}T23:59:59Z"
@@ -169,7 +169,7 @@ class HotspotsRepository:
         client = await self._client()
         result = (
             await client.table(self.TABLE)
-            .select("*")
+            .select("*, topic_groups(source_count)")
             .in_("id", hotspot_ids)
             .order("captured_at", desc=True)
             .limit(limit)
@@ -181,7 +181,7 @@ class HotspotsRepository:
         client = await self._client()
         result = (
             await client.table(self.TABLE)
-            .select("*")
+            .select("*, topic_groups(source_count)")
             .eq("id", hotspot_id)
             .limit(1)
             .execute()

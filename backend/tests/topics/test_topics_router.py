@@ -223,3 +223,14 @@ def test_source_health(client):
     disabled = body["sources"][1]
     assert disabled["enabled"] is False
     assert disabled["last_error"] is None
+
+
+def test_to_out_extracts_source_count_from_embedded_group():
+    from app.api.topics_router import _to_out
+
+    # PostgREST embeds the group; >1 = cross-platform
+    out = _to_out({"id": "1", "title": "T", "topic_groups": {"source_count": 3}})
+    assert out.source_count == 3
+    # unclustered hotspot: embed is None -> source_count None
+    out2 = _to_out({"id": "2", "title": "T", "topic_groups": None})
+    assert out2.source_count is None

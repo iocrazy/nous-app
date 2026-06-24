@@ -19,6 +19,8 @@ export interface Hotspot {
   captured_at?: string | null;
   heat?: number | null;
   best_rank?: number | null;
+  /** Cross-source cluster size: distinct platforms this topic appears on. */
+  source_count?: number | null;
   content_original?: string | null;
   content_translated?: string | null;
   is_read?: boolean;

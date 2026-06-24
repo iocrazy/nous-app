@@ -24,6 +24,9 @@ class HotspotOut(BaseModel):
     # board position ever held — for ranking and display.
     heat: Optional[float] = None
     best_rank: Optional[int] = None
+    # Cross-source cluster size: how many distinct platforms this topic appears
+    # on (from its topic_group). >1 = "seen on N platforms" signal.
+    source_count: Optional[int] = None
     # Full original/translated body — only populated by the detail endpoint to
     # keep the list payload light.
     content_original: Optional[str] = None

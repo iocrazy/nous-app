@@ -2037,6 +2037,9 @@
     "showLess": "收起",
     "bestRankHint": "榜单最高位次",
     "showLowSignal": "显示 {{count}} 条低信号",
-    "hideLowSignal": "收起低信号"
+    "hideLowSignal": "收起低信号",
+    "platforms": "{{count}} 个平台",
+    "crossPlatformHint": "多平台同时热议",
+    "seenOnPlatforms": "出现在 {{count}} 个平台"
   }
 }

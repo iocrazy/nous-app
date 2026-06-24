@@ -229,6 +229,14 @@ export const HotspotInfoPanel: React.FC<Props> = ({
             {t('topic.score', 'Score')}: {Math.round(h.score * 100)}
           </div>
         )}
+        {typeof h.source_count === 'number' && h.source_count > 1 && (
+          <div className="text-[var(--ind-tx,#4338ca)] font-medium">
+            {t('topic.seenOnPlatforms', {
+              count: h.source_count,
+              defaultValue: 'Seen on {{count}} platforms',
+            })}
+          </div>
+        )}
         {h.captured_at && <div>{h.captured_at.slice(0, 16).replace('T', ' ')}</div>}
       </div>
     </div>,

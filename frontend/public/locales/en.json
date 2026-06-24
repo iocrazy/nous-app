@@ -2037,6 +2037,9 @@
     "showLess": "Show less",
     "bestRankHint": "Peak board position",
     "showLowSignal": "Show {{count}} low-signal items",
-    "hideLowSignal": "Hide low-signal"
+    "hideLowSignal": "Hide low-signal",
+    "platforms": "{{count}} platforms",
+    "crossPlatformHint": "Trending across multiple platforms",
+    "seenOnPlatforms": "Seen on {{count}} platforms"
   }
 }
