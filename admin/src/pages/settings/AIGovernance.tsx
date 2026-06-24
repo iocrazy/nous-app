@@ -300,38 +300,42 @@ export function AIGovernance() {
           disabled={updateMutation.isPending}
         />
       </Row>
-      <Row label="Allow MediaHub models (chat)" hint="Only effective when the master switch is on.">
-        <Switch
-          checked={state.chat_nous_allowed}
-          onChange={(checked) => setState((prev) => ({ ...prev, chat_nous_allowed: checked }))}
-          disabled={updateMutation.isPending || !state.nous_user_enabled}
-        />
-      </Row>
+      {/* "Allow MediaHub models (chat)" removed — chat resolves its model via
+          get_adapter_for_user, never resolve_nous_model("chat"), so the toggle
+          had no effect. */}
 
       {/* ── Task modules ─────────────────────────────────────────────────── */}
       {TASK_MODULES.map(({ key, label, hint }) => {
         const m = state[key]
         const apiKeySet = data?.[key]?.api_key_set ?? false
+        // Embedding is platform-infrastructure (no per-user BYOK path): its
+        // resolver ignores user_allowed/nous_allowed, so those toggles are
+        // meaningless for it — show only the provider config.
+        const platformOnly = key === 'embedding'
         return (
           <div key={key}>
             <Divider />
             <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-2)' }}>{label}</div>
             <div style={{ color: 'var(--color-text-3)', fontSize: 13, marginTop: 2, marginBottom: 0 }}>{hint}</div>
-            <Row label="Allow user config">
-              <Switch
-                checked={m.user_allowed}
-                onChange={(checked) => setTaskField(key, 'user_allowed', checked)}
-                disabled={updateMutation.isPending}
-              />
-            </Row>
-            <Row label="Allow MediaHub models" hint="Only effective when the master switch is on.">
-              <Switch
-                checked={m.nous_allowed}
-                onChange={(checked) => setTaskField(key, 'nous_allowed', checked)}
-                disabled={updateMutation.isPending || !state.nous_user_enabled}
-              />
-            </Row>
-            {!m.user_allowed && (
+            {!platformOnly && (
+              <>
+                <Row label="Allow user config">
+                  <Switch
+                    checked={m.user_allowed}
+                    onChange={(checked) => setTaskField(key, 'user_allowed', checked)}
+                    disabled={updateMutation.isPending}
+                  />
+                </Row>
+                <Row label="Allow MediaHub models" hint="Only effective when the master switch is on.">
+                  <Switch
+                    checked={m.nous_allowed}
+                    onChange={(checked) => setTaskField(key, 'nous_allowed', checked)}
+                    disabled={updateMutation.isPending || !state.nous_user_enabled}
+                  />
+                </Row>
+              </>
+            )}
+            {(platformOnly || !m.user_allowed) && (
               <>
                 <Divider style={{ margin: 0 }} />
                 <Row
