@@ -11,7 +11,7 @@ from app.services.ai.providers.embedding_service import EmbeddingService
 @pytest.mark.asyncio
 async def test_disabled_when_unconfigured_returns_none() -> None:
     with patch(
-        "app.services.ai.providers.embedding_service.get_embedding_config",
+        "app.services.ai.providers.embedding_service.resolve_embedding_config",
         AsyncMock(return_value=None),
     ):
         svc = EmbeddingService()
@@ -19,12 +19,13 @@ async def test_disabled_when_unconfigured_returns_none() -> None:
 
 
 @pytest.mark.asyncio
-async def test_uses_settings_config_and_model() -> None:
+async def test_uses_openai_shape_for_non_multimodal() -> None:
     cfg = EmbeddingConfig(
         base_url="http://10.0.0.10:8000/v1",
         api_key="sk-x",
         model="qwen3-embedding-8b",
         dimensions=4096,
+        multimodal=False,
     )
     fake_resp = MagicMock()
     fake_resp.data = [MagicMock(embedding=[0.1] * 4096)]
@@ -33,7 +34,7 @@ async def test_uses_settings_config_and_model() -> None:
 
     with (
         patch(
-            "app.services.ai.providers.embedding_service.get_embedding_config",
+            "app.services.ai.providers.embedding_service.resolve_embedding_config",
             AsyncMock(return_value=cfg),
         ),
         patch(
@@ -48,6 +49,62 @@ async def test_uses_settings_config_and_model() -> None:
     mk.assert_called_once_with(api_key="sk-x", base_url="http://10.0.0.10:8000/v1")
     _, kwargs = fake_client.embeddings.create.call_args
     assert kwargs["model"] == "qwen3-embedding-8b"
+
+
+@pytest.mark.asyncio
+async def test_multimodal_uses_ark_shape() -> None:
+    cfg = EmbeddingConfig(
+        base_url="https://ark.cn-beijing.volces.com/api/v3/embeddings/multimodal",
+        api_key="sk-doubao",
+        model="doubao-embedding-vision-250615",
+        dimensions=0,
+        multimodal=True,
+    )
+    posted = {}
+
+    class _Resp:
+        def raise_for_status(self):  # noqa: D401
+            return None
+
+        def json(self):
+            return {"data": {"embedding": [0.2] * 2048}}
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json, headers):
+            posted["url"] = url
+            posted["json"] = json
+            posted["headers"] = headers
+            return _Resp()
+
+    with (
+        patch(
+            "app.services.ai.providers.embedding_service.resolve_embedding_config",
+            AsyncMock(return_value=cfg),
+        ),
+        patch(
+            "app.services.ai.providers.embedding_service.httpx.AsyncClient",
+            _Client,
+        ),
+    ):
+        svc = EmbeddingService()
+        out = await svc.generate_embedding("hello")
+
+    assert out == [0.2] * 2048
+    assert posted["url"].endswith("/embeddings/multimodal")
+    assert posted["json"] == {
+        "model": "doubao-embedding-vision-250615",
+        "input": [{"type": "text", "text": "hello"}],
+    }
+    assert posted["headers"]["Authorization"] == "Bearer sk-doubao"
 
 
 @pytest.mark.asyncio
