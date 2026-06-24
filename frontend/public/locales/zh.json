@@ -2040,6 +2040,13 @@
     "hideLowSignal": "收起低信号",
     "platforms": "{{count}} 个平台",
     "crossPlatformHint": "多平台同时热议",
-    "seenOnPlatforms": "出现在 {{count}} 个平台"
+    "seenOnPlatforms": "出现在 {{count}} 个平台",
+    "view_foryou": "为你推荐",
+    "interestPlaceholder": "描述你的兴趣，例如 AI 大模型、芯片、创业",
+    "saveInterest": "保存",
+    "interestSaved": "兴趣已保存",
+    "interestNoEmbed": "已保存，但 embedding 暂不可用",
+    "setInterestPrompt": "在上方描述你的兴趣，获取个性化推荐。",
+    "noForYouYet": "暂无匹配 —— 随着更多热点被分析，稍后再来看。"
   }
 }

@@ -13,6 +13,9 @@ from app.repositories.hotspot_user_state_repository import (
 )
 from app.repositories.hotspots_repository import HotspotsRepository
 from app.repositories.signal_sources_repository import SignalSourcesRepository
+from app.repositories.user_topic_interest_repository import (
+    UserTopicInterestRepository,
+)
 from app.schemas.topics import (
     DatesResponse,
     HotspotDetailResponse,
@@ -20,10 +23,13 @@ from app.schemas.topics import (
     HotspotOut,
     HotspotStateRequest,
     HotspotStateResponse,
+    InterestRequest,
+    InterestResponse,
     SourceHealthOut,
     SourceHealthResponse,
 )
 from app.services.storyboard.script.script_ai_service import ScriptAIService
+from app.services.topics.embedding_service import TopicEmbeddingService
 from app.services.topics.heat import best_rank as _best_rank
 
 router = APIRouter(prefix="/topics")
@@ -76,7 +82,17 @@ async def list_hotspots(
     repo = HotspotsRepository()
     state_repo = HotspotUserStateRepository()
 
-    if view in ("saved", "hidden"):
+    if view == "foryou":
+        # Personalized: hotspots ranked by cosine similarity to the user's
+        # interest embedding. Rank ids via pgvector, then fetch (preserving the
+        # similarity order). Empty when no interest embedding / no embedded rows.
+        ranked = await UserTopicInterestRepository().rank_hotspot_ids(
+            auth.user_id, limit=limit
+        )
+        fetched = await repo.list_by_ids(ranked, limit=limit)
+        order = {rid: n for n, rid in enumerate(ranked)}
+        rows = sorted(fetched, key=lambda r: order.get(str(r.get("id")), 1 << 30))
+    elif view in ("saved", "hidden"):
         # These views span all dates: drive off the user's state table.
         flag = "is_saved" if view == "saved" else "is_hidden"
         ids = await state_repo.list_ids_where(auth.user_id, flag=flag)
@@ -91,11 +107,40 @@ async def list_hotspots(
     items: list[HotspotOut] = []
     for r in rows:
         st = states.get(str(r.get("id")), {})
-        # Default browsing/search hides the user's hidden items.
-        if view == "all" and st.get("is_hidden"):
+        # Browsing / search / For You hide the user's hidden items.
+        if view in ("all", "foryou") and st.get("is_hidden"):
             continue
         items.append(_to_out(r, st))
     return HotspotListResponse(count=len(items), hotspots=items)
+
+
+@router.get("/interest", response_model=InterestResponse)
+async def get_interest(auth: AuthDep):
+    """The caller's interest profile for the For You view."""
+    row = await UserTopicInterestRepository().get_interest(auth.user_id)
+    if not row:
+        return InterestResponse(interest_text="", has_embedding=False)
+    return InterestResponse(
+        interest_text=row.get("interest_text") or "",
+        has_embedding=bool(row.get("has_embedding")),
+    )
+
+
+@router.put("/interest", response_model=InterestResponse)
+async def set_interest(body: InterestRequest, auth: AuthDep):
+    """Save the caller's interest text and embed it (Volcengine, via the
+    admin-governed embedding provider). Stored embedding may be NULL when the
+    provider is unconfigured — the text is still saved; For You stays empty
+    until an embedding exists."""
+    text = (body.interest_text or "").strip()
+    vec = None
+    if text:
+        embedding = await TopicEmbeddingService().embed_text(text)
+        if embedding:
+            vec = "[" + ",".join(repr(float(x)) for x in embedding) + "]"
+    repo = UserTopicInterestRepository()
+    await repo.set_interest(auth.user_id, interest_text=text, vec=vec)
+    return InterestResponse(interest_text=text, has_embedding=vec is not None)
 
 
 @router.patch("/{hotspot_id}/state", response_model=HotspotStateResponse)

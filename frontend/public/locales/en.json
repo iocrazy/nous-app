@@ -2040,6 +2040,13 @@
     "hideLowSignal": "Hide low-signal",
     "platforms": "{{count}} platforms",
     "crossPlatformHint": "Trending across multiple platforms",
-    "seenOnPlatforms": "Seen on {{count}} platforms"
+    "seenOnPlatforms": "Seen on {{count}} platforms",
+    "view_foryou": "For You",
+    "interestPlaceholder": "Describe your interests, e.g. AI models, chips, startups",
+    "saveInterest": "Save",
+    "interestSaved": "Interests saved",
+    "interestNoEmbed": "Saved, but embedding is unavailable",
+    "setInterestPrompt": "Describe your interests above to get a personalized feed.",
+    "noForYouYet": "No matches yet — check back as more hotspots are analyzed."
   }
 }

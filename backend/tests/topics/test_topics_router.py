@@ -101,9 +101,25 @@ def client(monkeypatch):
                 },
             ]
 
+    class _FakeInterestRepo:
+        async def get_interest(self, user_id):
+            return calls.get("interest")  # None unless preset
+
+        async def set_interest(self, user_id, *, interest_text, vec):
+            calls["set_interest"] = {"text": interest_text, "vec": vec}
+
+        async def rank_hotspot_ids(self, user_id, *, window_hours=72, limit=100):
+            return calls.get("ranked", [])
+
+    class _FakeEmbedder:
+        async def embed_text(self, text):
+            return calls.get("embed_result", [0.1, 0.2])
+
     monkeypatch.setattr(tr, "HotspotsRepository", lambda: _FakeRepo())
     monkeypatch.setattr(tr, "SignalSourcesRepository", lambda: _FakeSourcesRepo())
     monkeypatch.setattr(tr, "HotspotUserStateRepository", lambda: _FakeStateRepo())
+    monkeypatch.setattr(tr, "UserTopicInterestRepository", lambda: _FakeInterestRepo())
+    monkeypatch.setattr(tr, "TopicEmbeddingService", lambda: _FakeEmbedder())
     app = FastAPI()
     app.dependency_overrides[tr.get_auth] = lambda: type("A", (), {"user_id": "u1"})()
     app.include_router(tr.router, prefix="/api/v1")
@@ -234,3 +250,51 @@ def test_to_out_extracts_source_count_from_embedded_group():
     # unclustered hotspot: embed is None -> source_count None
     out2 = _to_out({"id": "2", "title": "T", "topic_groups": None})
     assert out2.source_count is None
+
+
+def test_for_you_view_ranks_by_interest(client):
+    # interest repo returns ranked ids; list keeps that order
+    client.calls["ranked"] = ["2", "1"]
+    r = client.get("/api/v1/topics?view=foryou")
+    assert r.status_code == 200
+    ids = [h["id"] for h in r.json()["hotspots"]]
+    assert ids == ["2", "1"]
+    assert client.calls["list_by_ids"] == ["2", "1"]
+
+
+def test_for_you_empty_when_no_interest(client):
+    client.calls["ranked"] = []
+    r = client.get("/api/v1/topics?view=foryou")
+    assert r.status_code == 200 and r.json()["count"] == 0
+
+
+def test_get_interest_default_empty(client):
+    r = client.get("/api/v1/topics/interest")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["interest_text"] == "" and body["has_embedding"] is False
+
+
+def test_get_interest_returns_saved(client):
+    client.calls["interest"] = {"interest_text": "ai chips", "has_embedding": True}
+    r = client.get("/api/v1/topics/interest")
+    body = r.json()
+    assert body["interest_text"] == "ai chips" and body["has_embedding"] is True
+
+
+def test_put_interest_embeds_and_saves(client):
+    r = client.put("/api/v1/topics/interest", json={"interest_text": "AI 大模型"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["interest_text"] == "AI 大模型" and body["has_embedding"] is True
+    # embedded vector stored as a pgvector literal
+    assert client.calls["set_interest"]["text"] == "AI 大模型"
+    assert client.calls["set_interest"]["vec"] == "[0.1,0.2]"
+
+
+def test_put_interest_no_embedding_when_provider_unconfigured(client):
+    client.calls["embed_result"] = None  # provider unconfigured
+    r = client.put("/api/v1/topics/interest", json={"interest_text": "x"})
+    body = r.json()
+    assert body["has_embedding"] is False
+    assert client.calls["set_interest"]["vec"] is None
