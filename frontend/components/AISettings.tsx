@@ -689,7 +689,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
             : `${model.pricing_value} pts/1k tokens`;
       options.push({
         value: `nous:${model.name}`,
-        label: `${model.display_name} (Nous · ${pricingLabel})`,
+        label: `${model.display_name} (MediaHub · ${pricingLabel})`,
       });
     }
 
@@ -1382,7 +1382,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="font-medium text-ink-100">Nous (Platform)</span>
+                    <span className="font-medium text-ink-100">MediaHub (Platform)</span>
                     <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300">
                       Platform-managed
                     </span>

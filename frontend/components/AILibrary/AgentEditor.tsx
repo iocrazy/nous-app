@@ -779,7 +779,7 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   volcengine: 'Volcengine',
   ollama: 'Ollama',
   lmstudio: 'LM Studio',
-  nous: 'Nous (Platform)',
+  nous: 'MediaHub (Platform)',
 };
 
 /**
