@@ -197,3 +197,54 @@ async def test_transcription_nous_ref_routes_to_platform_config():
     # task_assignment is normalized to provider:model so the volcengine branch
     # picks the right ASR resource from the model part.
     assert result["task_assignment"] == "volcengine:seed-asr"
+
+
+# ── resolve_platform_model (ungated admin lookup) ──────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_resolve_platform_model_ignores_nous_gate():
+    """Ungated: returns the catalog config without consulting is_nous_allowed."""
+    from app.services.ai.providers import ai_provider_helpers as h
+
+    repo = MagicMock()
+    repo.get_by_name = AsyncMock(return_value=_enabled_row())
+    with patch(
+        "app.repositories.nous_repository.get_nous_repository", return_value=repo
+    ):
+        # is_nous_allowed patched to False — must NOT matter for the admin path.
+        with patch(
+            "app.services.ai.governance.ai_governance.is_nous_allowed",
+            new=AsyncMock(return_value=False),
+        ):
+            out = await h.resolve_platform_model("nous-llm")
+    provider, cfg, model = out
+    assert provider == "doubao"
+    assert cfg["api_key"] == "platform-key"
+    assert model == "doubao-pro-32k"
+
+
+@pytest.mark.asyncio
+async def test_resolve_platform_model_none_for_unknown_name():
+    from app.services.ai.providers import ai_provider_helpers as h
+
+    repo = MagicMock()
+    repo.get_by_name = AsyncMock(return_value=None)
+    with patch(
+        "app.repositories.nous_repository.get_nous_repository", return_value=repo
+    ):
+        assert await h.resolve_platform_model("gpt-4o") is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_platform_model_raises_when_disabled():
+    from app.services.ai.providers import ai_provider_helpers as h
+
+    row = {**_enabled_row(), "is_enabled": False}
+    repo = MagicMock()
+    repo.get_by_name = AsyncMock(return_value=row)
+    with patch(
+        "app.repositories.nous_repository.get_nous_repository", return_value=repo
+    ):
+        with pytest.raises(RuntimeError):
+            await h.resolve_platform_model("nous-llm")
