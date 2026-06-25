@@ -43,6 +43,9 @@ from app.services.topics.heat import best_rank as _best_rank
 
 router = APIRouter(prefix="/topics")
 
+# Score floor (0..1 LLM relevance) for the "Featured" curated view.
+FEATURED_MIN_SCORE = 0.6
+
 
 def _to_out(
     row: dict, state: Optional[dict] = None, *, include_content: bool = False
@@ -116,7 +119,19 @@ async def list_hotspots(
         picked = {s.strip() for s in source.split(",") if s.strip()}
         visible = [sid for sid in visible if sid in picked]
 
-    if view == "foryou":
+    if view == "featured":
+        # Curated high-value board: score floor + best-first, spanning all
+        # dates. Respects category/source/search filters but not the day window.
+        rows = await repo.list_for_date(
+            None,
+            category,
+            limit=limit,
+            q=q,
+            source_ids=visible,
+            min_score=FEATURED_MIN_SCORE,
+            order_score=True,
+        )
+    elif view == "foryou":
         # Personalized: hotspots ranked by cosine similarity to the user's
         # interest embedding. Rank ids via pgvector, then fetch (preserving the
         # similarity order). Empty when no interest embedding / no embedded rows.
@@ -143,8 +158,8 @@ async def list_hotspots(
     items: list[HotspotOut] = []
     for r in rows:
         st = states.get(str(r.get("id")), {})
-        # Browsing / search / For You hide the user's hidden items.
-        if view in ("all", "foryou") and st.get("is_hidden"):
+        # Browsing / search / For You / Featured hide the user's hidden items.
+        if view in ("all", "foryou", "featured") and st.get("is_hidden"):
             continue
         items.append(_to_out(r, st))
     return HotspotListResponse(count=len(items), hotspots=items)

@@ -142,9 +142,13 @@ class HotspotsRepository:
         limit: int = 100,
         q: Optional[str] = None,
         source_ids: Optional[list[str]] = None,
+        min_score: Optional[float] = None,
+        order_score: bool = False,
     ) -> list[dict[str, Any]]:
         # source_ids is the caller's visible-source allowlist (system + own,
         # minus hidden). None = no scoping; [] = nothing visible → empty feed.
+        # min_score / order_score drive the "Featured" view: a score floor +
+        # best-first ordering instead of the default chronological feed.
         if source_ids is not None and not source_ids:
             return []
         client = await self._client()
@@ -157,13 +161,16 @@ class HotspotsRepository:
             )
         if category and category != "all":
             query = query.eq("category", category)
+        if min_score is not None:
+            query = query.gte("score", min_score)
         term = sanitize_search(q)
         if term:
             like = f"%{term}%"
             query = query.or_(
                 ",".join(f"{col}.ilike.{like}" for col in _SEARCH_COLUMNS)
             )
-        result = await query.order("captured_at", desc=True).limit(limit).execute()
+        order_col = "score" if order_score else "captured_at"
+        result = await query.order(order_col, desc=True).limit(limit).execute()
         return result.data or []
 
     async def list_by_ids(

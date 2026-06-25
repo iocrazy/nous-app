@@ -2074,6 +2074,7 @@
     "crossPlatformHint": "多平台同时热议",
     "seenOnPlatforms": "出现在 {{count}} 个平台",
     "view_foryou": "为你推荐",
+    "view_featured": "精选",
     "interestPlaceholder": "描述你的兴趣，例如 AI 大模型、芯片、创业",
     "saveInterest": "保存",
     "interestSaved": "兴趣已保存",

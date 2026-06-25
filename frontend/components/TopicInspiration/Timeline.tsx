@@ -44,6 +44,10 @@ interface Props {
   selectedId?: string;
   onToggleSave?: (h: Hotspot) => void;
   onToggleHide?: (h: Hotspot) => void;
+  /** Group items under collapsible date headers (chronological views). Set
+   *  false for rank-ordered views (Featured, For You) where day headers would
+   *  jumble — items render flat in the given order. Default true. */
+  grouped?: boolean;
 }
 
 export const Timeline: React.FC<Props> = ({
@@ -52,13 +56,16 @@ export const Timeline: React.FC<Props> = ({
   selectedId,
   onToggleSave,
   onToggleHide,
+  grouped = true,
 }) => {
   const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   // Group hotspots into consecutive day buckets so the timeline shows which
-  // day each run of items belongs to (the feed can span multiple days).
+  // day each run of items belongs to (the feed can span multiple days). For
+  // rank-ordered views one synthetic bucket (no header) renders items flat.
   const groups = useMemo(() => {
+    if (!grouped) return [{ key: '__flat__', items: hotspots }];
     const out: { key: string; items: Hotspot[] }[] = [];
     for (const h of hotspots) {
       const k = dayKey(h.captured_at);
@@ -67,7 +74,7 @@ export const Timeline: React.FC<Props> = ({
       else out.push({ key: k, items: [h] });
     }
     return out;
-  }, [hotspots]);
+  }, [hotspots, grouped]);
 
   const toggle = (key: string) =>
     setCollapsed((prev) => {
@@ -86,15 +93,18 @@ export const Timeline: React.FC<Props> = ({
         const isCollapsed = collapsed.has(g.key);
         return (
           <div key={g.key}>
-            {/* Date section header — sits above the line, spans full width. */}
-            <button
-              onClick={() => toggle(g.key)}
-              className="relative z-[3] flex items-center gap-1 mb-2 mt-1 ml-[6px] text-[12px] font-bold text-content-2 hover:text-content"
-            >
-              {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-              <span>{dayLabel(g.key, t)}</span>
-              <span className="text-[11px] font-normal text-content-4">· {g.items.length}</span>
-            </button>
+            {/* Date section header — sits above the line, spans full width.
+                Hidden for the synthetic flat bucket (rank-ordered views). */}
+            {grouped && (
+              <button
+                onClick={() => toggle(g.key)}
+                className="relative z-[3] flex items-center gap-1 mb-2 mt-1 ml-[6px] text-[12px] font-bold text-content-2 hover:text-content"
+              >
+                {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                <span>{dayLabel(g.key, t)}</span>
+                <span className="text-[11px] font-normal text-content-4">· {g.items.length}</span>
+              </button>
+            )}
 
             {!isCollapsed &&
               g.items.map((h) => (
