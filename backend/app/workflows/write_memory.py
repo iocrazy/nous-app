@@ -18,6 +18,10 @@ from typing import Any, Optional
 from dbos import DBOS
 from loguru import logger
 
+from app.services.ai.memory import registry as memory_registry
+from app.services.ai.memory.memory_prefs import get_memory_prefs
+from app.services.ai.memory.provider import MemoryTurn
+
 _RECENT_TURNS_PER_CHANNEL = 10
 
 
@@ -90,11 +94,8 @@ async def _write_graph_episode(
     returns False; a missed episode degrades future recall, never the
     current chat.
     """
-    from app.services.ai.memory.graph_memory import get_graph_memory_service
-    from app.services.ai.memory.memory_prefs import get_memory_prefs
-
-    service = get_graph_memory_service()
-    if not service.config.enabled:
+    provider = await memory_registry.l3_provider()
+    if provider is None or not provider.enabled():
         return False
     # Honour the per-user "learn from my chats" toggle, same as the Honcho
     # write path. Disabling memory learning must stop EVERY durable layer —
@@ -104,14 +105,16 @@ async def _write_graph_episode(
     prefs = await get_memory_prefs(user_id)
     if not prefs.learn:
         return False
-    body = _build_turn_episode(user_msgs, asst_msgs)
-    if not body:
-        return False
-    return await service.add_chat_episode(
-        group_id=f"user-{user_id}",
-        name=f"chat-{session_id}-{run_id or iteration}",
-        body=body,
-        source_description="mediahub chat turn",
+    return await provider.record_turn(
+        MemoryTurn(
+            user_id=user_id,
+            agent_id="",
+            session_id=session_id,
+            run_id=run_id,
+            iteration=iteration,
+            user_msgs=user_msgs,
+            asst_msgs=asst_msgs,
+        )
     )
 
 
@@ -154,29 +157,24 @@ async def _write_honcho_turn(
     per-peer representations server-side, so re-sending the rolling
     window would duplicate every turn N times.
     """
-    from app.services.ai.memory.honcho_memory import get_honcho_memory_service
-    from app.services.ai.memory.memory_prefs import get_memory_prefs
-
-    service = get_honcho_memory_service()
-    if not service.config.enabled:
+    provider = await memory_registry.l2_provider()
+    if provider is None or not provider.enabled():
         return False
     # Per-user toggle (Claude-style "learn from my chats"). Checked after
     # the global flag so disabled deployments never pay the settings read.
     prefs = await get_memory_prefs(user_id)
     if not prefs.learn:
         return False
-    user_message = user_msgs[-1] if user_msgs else ""
-    assistant_message = asst_msgs[-1] if asst_msgs else ""
-    if not (user_message.strip() or assistant_message.strip()):
-        return False
-    workspace_id = await _resolve_team_workspace(session_id)
-    return await service.add_chat_turn(
-        user_id=user_id,
-        agent_id=agent_id,
-        session_id=session_id,
-        user_message=user_message,
-        assistant_message=assistant_message,
-        workspace_id=workspace_id,
+    return await provider.record_turn(
+        MemoryTurn(
+            user_id=user_id,
+            agent_id=agent_id,
+            session_id=session_id,
+            run_id=None,
+            iteration=0,
+            user_msgs=user_msgs,
+            asst_msgs=asst_msgs,
+        )
     )
 
 

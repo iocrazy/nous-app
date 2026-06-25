@@ -186,16 +186,16 @@ async def test_safe_recall_returns_none_when_flag_off(
 
 
 @pytest.mark.asyncio
-async def test_safe_recall_swallows_exceptions(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import app.services.ai.memory.honcho_memory as hm
+async def test_safe_recall_swallows_exceptions() -> None:
+    from unittest.mock import AsyncMock, patch
+
     from app.services.ai.chat import ai_library_chat_wiring as wiring
 
-    class _Boom:
-        async def get_user_representation(self, **kwargs):
-            raise RuntimeError("explode")
-
-    monkeypatch.setattr(hm, "get_honcho_memory_service", lambda: _Boom())
-    result = await wiring._safe_recall_honcho_context(user_id="u1", session_id=None)
+    provider = AsyncMock()
+    provider.is_operative = AsyncMock(side_effect=RuntimeError("boom"))
+    with patch(
+        "app.services.ai.chat.ai_library_chat_wiring.memory_registry.l2_provider",
+        new=AsyncMock(return_value=provider),
+    ):
+        result = await wiring._safe_recall_honcho_context(user_id="u1", session_id=None)
     assert result is None

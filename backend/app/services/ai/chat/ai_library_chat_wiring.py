@@ -31,6 +31,7 @@ from uuid import UUID
 
 from app.services.ai.adapters.factory import get_adapter_for_user
 from app.services.ai.llm.llm_fallback_chain import LLMFallbackChain
+from app.services.ai.memory import registry as memory_registry
 from app.services.ai.runner.agent_runner import AgentRunner
 from app.services.ai.skills.skill_tool_service import SkillToolService
 from app.services.infra.hooks import HookRegistry
@@ -482,8 +483,8 @@ async def _safe_recall_honcho_context(
         from app.services.ai.memory.honcho_memory import get_honcho_memory_service
         from app.services.ai.memory.memory_prefs import get_memory_prefs
 
-        service = get_honcho_memory_service()
-        if not service.config.operative():
+        provider = await memory_registry.l2_provider()
+        if provider is None or not await provider.is_operative():
             return None
         prefs = await get_memory_prefs(user_id)
         if not prefs.inject:
@@ -493,12 +494,15 @@ async def _safe_recall_honcho_context(
             from app.workflows.write_memory import _resolve_team_workspace
 
             workspace = await _resolve_team_workspace(str(session_id))
-        representation = await service.get_user_representation(
+        representation = await provider.get_context(
             user_id=user_id, workspace_id=workspace
         )
         # User-curated "About me" card outranks derived observations —
-        # it's the user's own words about themselves.
+        # it's the user's own words about themselves.  The card is
+        # Honcho-specific CRUD not yet part of the MemoryProvider
+        # interface (Phase 1 deferred); keep it on the raw service.
         card: Optional[list[str]] = None
+        service = get_honcho_memory_service()
         get_card = getattr(service, "get_peer_card", None)
         if get_card is not None:
             card = await get_card(user_id=user_id, workspace_id=workspace)
