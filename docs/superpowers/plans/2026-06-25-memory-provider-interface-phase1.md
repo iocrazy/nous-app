@@ -44,7 +44,7 @@
 - Produces:
   - `class MemoryLayer(str, Enum)` with members `L2 = "l2"`, `L3 = "l3"`.
   - `@dataclass(frozen=True) class MemoryTurn` with fields: `user_id: str`, `agent_id: str`, `session_id: str`, `run_id: Optional[str]`, `iteration: int`, `user_msgs: list[str]`, `asst_msgs: list[str]`.
-  - `class MemoryProvider(ABC)` with: `name: str` (abstract property), `layer: MemoryLayer` (abstract property), `def enabled(self) -> bool` (abstract, cheap sync global-flag gate), `async def is_operative(self) -> bool` (abstract, enabled + reachable), `async def record_turn(self, turn: MemoryTurn) -> bool` (abstract), `async def get_context(self, *, user_id: str, query: str = "", workspace_id: Optional[str] = None, group_ids: Optional[list[str]] = None) -> Optional[str]` (abstract).
+  - `class MemoryProvider(ABC)` with: `name: str` (abstract property), `layer: MemoryLayer` (abstract property), `def enabled(self) -> bool` (abstract, cheap sync global-flag gate), `async def is_operative(self) -> bool` (abstract, enabled + reachable), `async def record_turn(self, turn: MemoryTurn) -> bool` (abstract), `async def get_context(self, *, user_id: str, query: str = "", workspace_id: Optional[str] = None, group_ids: Optional[list[str]] = None) -> Optional[str]` (abstract), `async def reload(self) -> None` (abstract — drop cached client/config), `async def health(self) -> bool` (abstract — Phase 1 returns `is_operative()`).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -167,6 +167,17 @@ class MemoryProvider(ABC):
     ) -> Optional[str]:
         """Return a memory-context block to inject, or None."""
 
+    @abstractmethod
+    async def reload(self) -> None:
+        """Drop cached client/config so the NEXT call re-reads current config.
+        For in-process providers (Graphiti, future Mem0) this is how an admin
+        config change takes effect without a process restart. Never raises."""
+
+    @abstractmethod
+    async def health(self) -> bool:
+        """Liveness for the admin control plane's green/red dot. Phase 1 returns
+        is_operative(); later phases may do a real probe. Never raises."""
+
 
 __all__ = ["MemoryLayer", "MemoryTurn", "MemoryProvider"]
 ```
@@ -255,6 +266,19 @@ async def test_record_turn_returns_false_when_disabled():
         ok = await GraphitiProvider().record_turn(_turn())
     assert ok is False
     svc.add_chat_episode.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reload_clears_cached_config_and_health_uses_is_enabled():
+    svc = SimpleNamespace(config=SimpleNamespace(enabled=True), is_enabled=AsyncMock(return_value=True))
+    with patch(
+        "app.services.ai.memory.providers.graphiti_provider.get_graph_memory_service",
+        return_value=svc,
+    ):
+        prov = GraphitiProvider()
+        await prov.reload()
+        assert svc.config is None  # next call re-reads from_settings
+        assert await prov.health() is True
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -344,6 +368,18 @@ class GraphitiProvider(MemoryProvider):
             return None
         rendered = "\n".join(str(getattr(f, "fact", f)) for f in facts)
         return rendered or None
+
+    async def reload(self) -> None:
+        # In-process: drop the cached config so the next call re-reads
+        # GraphMemoryConfig.from_settings(). GraphMemoryService._ensure_config
+        # rebuilds when config is None.
+        try:
+            get_graph_memory_service().config = None  # type: ignore[assignment]
+        except Exception:  # noqa: BLE001
+            logger.warning("[graphiti_provider] reload failed")
+
+    async def health(self) -> bool:
+        return await self.is_operative()
 
 
 __all__ = ["GraphitiProvider"]
@@ -435,6 +471,24 @@ async def test_get_context_wraps_user_representation():
         out = await HonchoProvider().get_context(user_id="u1", workspace_id="team-42")
     assert out == "the user likes brevity"
     svc.get_user_representation.assert_awaited_once_with(user_id="u1", workspace_id="team-42")
+
+
+@pytest.mark.asyncio
+async def test_reload_closes_and_clears_client():
+    closed = {"v": False}
+
+    class _Client:
+        async def aclose(self):
+            closed["v"] = True
+
+    svc = SimpleNamespace(config=SimpleNamespace(enabled=True), client=_Client())
+    with patch(
+        "app.services.ai.memory.providers.honcho_provider.get_honcho_memory_service",
+        return_value=svc,
+    ):
+        await HonchoProvider().reload()
+    assert closed["v"] is True
+    assert svc.client is None
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -458,6 +512,8 @@ per-turn inject path's ``get_user_representation`` (NOT the slow dialectic
 from __future__ import annotations
 
 from typing import List, Optional
+
+from loguru import logger
 
 from app.services.ai.memory.honcho_memory import get_honcho_memory_service
 from app.services.ai.memory.provider import MemoryLayer, MemoryProvider, MemoryTurn
@@ -515,6 +571,24 @@ class HonchoProvider(MemoryProvider):
         return await get_honcho_memory_service().get_user_representation(
             user_id=user_id, workspace_id=workspace_id
         )
+
+    async def reload(self) -> None:
+        # Drop the cached httpx client so a changed connection (Phase 2: when
+        # base_url/workspace move to system_settings) takes effect on the next
+        # call. The HonchoMemoryService singleton lazily rebuilds its client.
+        try:
+            service = get_honcho_memory_service()
+            if getattr(service, "client", None) is not None:
+                try:
+                    await service.client.aclose()  # type: ignore[union-attr]
+                except Exception:  # noqa: BLE001
+                    pass
+                service.client = None  # type: ignore[assignment]
+        except Exception:  # noqa: BLE001
+            logger.warning("[honcho_provider] reload failed")
+
+    async def health(self) -> bool:
+        return await self.is_operative()
 
 
 __all__ = ["HonchoProvider"]
