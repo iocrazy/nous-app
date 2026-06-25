@@ -107,7 +107,6 @@ export function AdminLayout() {
             <MenuItem key="/tasks"><IconList />Tasks</MenuItem>
             <MenuItem key="/tags"><IconTags />Tags</MenuItem>
             <MenuItem key="/credits"><IconStar />Credits</MenuItem>
-            <MenuItem key="/ai"><IconRobot />AI Models</MenuItem>
             <MenuItem key="/agent-telemetry"><IconRobot />Agent Telemetry</MenuItem>
           </MenuItemGroup>
           <MenuItemGroup key="logs" title="Logs & Monitoring">
@@ -120,6 +119,7 @@ export function AdminLayout() {
           </MenuItemGroup>
           <MenuItemGroup key="system" title="System">
             <MenuItem key="/api-keys"><IconLock />API Keys</MenuItem>
+            <MenuItem key="/ai"><IconRobot />AI Models</MenuItem>
             <MenuItem key="/settings"><IconSettings />Settings</MenuItem>
             <MenuItem key="/settings/ai-governance"><IconRobot />AI Governance</MenuItem>
             <MenuItem key="/settings/memory"><IconStorage />Memory</MenuItem>

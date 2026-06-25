@@ -182,3 +182,81 @@ def test_from_env_still_works_for_default_factory():
     # Backward-compat: the dataclass default_factory path stays env-only.
     cfg = GraphMemoryConfig.from_env()
     assert isinstance(cfg, GraphMemoryConfig)
+
+
+@pytest.mark.asyncio
+async def test_catalog_model_name_resolves_to_catalog_config():
+    """When extractor/embedder model is a platform-catalog name, base_url / key /
+    actual model come from the catalog (ungated)."""
+    from unittest.mock import AsyncMock, patch
+
+    async def _fake_platform(name):
+        if name == "mediahub-deepseek-v4-pro":
+            return (
+                "deepseek",
+                {
+                    "base_url": "https://api.deepseek.com/v1",
+                    "api_key": "ext-k",
+                    "model": "deepseek-v4-pro",
+                },
+                "deepseek-v4-pro",
+            )
+        if name == "mediahub-doubao-embedding-vision":
+            return (
+                "doubao",
+                {
+                    "base_url": "https://ark/api/v3",
+                    "api_key": "emb-k",
+                    "model": "doubao-embedding-vision-251215",
+                },
+                "doubao-embedding-vision-251215",
+            )
+        return None
+
+    with patch(
+        "app.services.ai.providers.ai_provider_helpers.resolve_platform_model",
+        new=AsyncMock(side_effect=_fake_platform),
+    ):
+        cfg = await GraphMemoryConfig.from_settings(
+            reader=_reader(
+                {
+                    "graph_extractor_model": "mediahub-deepseek-v4-pro",
+                    "graph_extractor_base_url": "",
+                    "graph_extractor_api_key": "",
+                    "graph_embedder_model": "mediahub-doubao-embedding-vision",
+                    "graph_embedder_base_url": "",
+                    "graph_embedder_api_key": "",
+                }
+            ),
+            env={},
+        )
+
+    assert cfg.extractor_base_url == "https://api.deepseek.com/v1"
+    assert cfg.extractor_api_key == "ext-k"
+    assert cfg.extractor_model == "deepseek-v4-pro"
+    assert cfg.embedder_base_url == "https://ark/api/v3"
+    assert cfg.embedder_model == "doubao-embedding-vision-251215"
+
+
+@pytest.mark.asyncio
+async def test_manual_model_unchanged_when_not_in_catalog():
+    """A plain (non-catalog) model name keeps the manual base_url/key/model."""
+    from unittest.mock import AsyncMock, patch
+
+    with patch(
+        "app.services.ai.providers.ai_provider_helpers.resolve_platform_model",
+        new=AsyncMock(return_value=None),
+    ):
+        cfg = await GraphMemoryConfig.from_settings(
+            reader=_reader(
+                {
+                    "graph_extractor_model": "qwen3-6-35b",
+                    "graph_extractor_base_url": "http://10.0.0.10:8000/v1",
+                    "graph_extractor_api_key": "manual-k",
+                }
+            ),
+            env={},
+        )
+    assert cfg.extractor_model == "qwen3-6-35b"
+    assert cfg.extractor_base_url == "http://10.0.0.10:8000/v1"
+    assert cfg.extractor_api_key == "manual-k"
