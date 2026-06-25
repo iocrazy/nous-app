@@ -1,90 +1,134 @@
-# Task 4 Report: Router — role gate + preset carve-out + deep-merge + response enrich + audit
+# Task 4 Report: ChatPage Container
 
-## Changes Made
+## Overview
 
-### `backend/app/api/ai_library_router.py`
-1. **Imports added**: `ChatPermissionsOut` added to `from app.schemas.ai_library import (...)` block; `from app.services.ai.permissions.agent_chat_caps import agent_chat_caps` added.
-2. **`_is_team_owner(user_uuid, team_id) -> bool`** added after `_user_is_admin`: queries `team_members` for `role in ('owner', 'admin')`; fail-closed on any error.
-3. **`_can_edit_chat_permissions(agent_repo, agent, user_uuid) -> bool`** added: orchestrates agent-owner → team-owner → platform-admin chain, delegating platform-admin check to existing `_user_is_admin`.
-4. **`_with_chat_permissions(row) -> Dict`** added: calls `agent_chat_caps(row)` then injects `chat_permissions` dict from `ChatPermissionsOut.from_caps(caps).model_dump()`.
-5. **PATCH `/agents/{slug}` handler rewritten**:
-   - Extracts `updates` excluding `skill_ids` AND `chat_permissions`.
-   - Preset carve-out: blocks content+skill changes, allows chat-perm-only PATCHes.
-   - Role gate: checks `_can_edit_chat_permissions` before any chat_permissions write; 403 on failure.
-   - Deep-merge: `{**existing_profile, "chat": {**existing_chat, **new_perms}}` never clobbers unrelated keys.
-   - Audit log via `logger.info(...)` on every successful chat_permissions change.
-   - Response wrapped with `_with_chat_permissions`.
-6. **GET `/agents` list** loop now wraps each row with `_with_chat_permissions`.
-7. **GET `/agents/{slug}`** wraps result row with `_with_chat_permissions`.
-
-### `backend/tests/test_ai_library_agent_permissions.py`
-4 router tests appended (all imports moved to file top to satisfy flake8 E402):
-- `test_patch_chat_permissions_on_preset_merges_and_returns_perms` — happy path on preset: merge verified in storage, response carries resolved perms (review C1).
-- `test_patch_chat_permissions_denied_without_role` — `_can_edit_chat_permissions=False` → 403 (review H1).
-- `test_patch_content_field_on_preset_still_403` — content-only patch on preset → 403.
-- `test_patch_mixed_content_and_perms_on_preset_403` — mixed payload on preset → 403.
-
-## JSONB Encoding Verdict
-
-**Raw dict — no `json.dumps` needed.**
-
-Reasoning: `update_fields_versioned` calls `client.table(...).update(patch).eq(...).execute()` where `patch` is a plain Python dict. `supabase-py` uses `httpx` internally and serializes the entire request body as JSON before sending to PostgREST. PostgREST then interprets dict values as JSONB. This is the same pattern used for `frontmatter_json` (also a JSONB dict) in `SkillRepository`. No `json.dumps` wrapper is needed. No live DB was reachable for round-trip confirmation; verdict based on consistent existing usage across both repos.
-
-## Test Output
-
-```
-tests/test_ai_library_agent_permissions.py — 8 passed
-regression (tests/ -k ai_library) — 81 passed, 0 failures
-```
-
-## Regression Result
-
-81 passed, 4476 deselected — zero regressions in the full AI Library test suite.
-
-## Lint
-
-`black`, `isort`, `flake8` all clean on both changed files (0 errors).
-
-## Concerns
-
-- `_user_uuid` is set twice if both `chat_permissions` is present AND `updates` is non-empty — harmless redundancy since `_coerce_user_uuid` is deterministic, but could be extracted to a single `user_uuid = _coerce_user_uuid(auth.user_id)` at handler entry.
-- `_is_team_owner` does a `maybe_single()` query; if the user has multiple rows in `team_members` for the same team (shouldn't happen but not DB-constrained), only the first row is seen. Fail-closed in the ambiguous case, which is safe.
-- `_with_chat_permissions` is not applied to `create_agent` POST response (intentional — new agents have no capability_profile, so `agent_chat_caps` returns all-false defaults which match the `AgentOut.chat_permissions` field default).
+Created `frontend/pages/ChatPage.tsx` — the stateful container that wires together
+`chatService` (Task 1), the presentational components (Task 2), and
+`useChannelRealtime` (Task 3).
 
 ---
 
-## Review Findings Fix — commit fa29a69f
-
-### Changes Made
-
-#### `backend/app/api/ai_library_router.py`
-
-1. **Fix #1 (Important) — Fail-closed role gate**: Wrapped the final `await _user_is_admin(user_uuid)` call inside `_can_edit_chat_permissions` in `try/except Exception: return False`. The shared `_user_is_admin` helper is left untouched so the delete_skill admin gate and any other caller keeps raise-on-error behavior.
-
-2. **Fix #3 (Minor) — Loguru f-string**: Changed `logger.info("chat_permissions changed by %s on agent %s: %s", auth.user_id, agent["slug"], chat_audit)` → `logger.info(f"chat_permissions changed by {auth.user_id} on agent {agent['slug']}: {chat_audit}")`.
-
-3. **Fix #4 (Minor) — Deduplicate user_uuid**: Hoisted `user_uuid = _coerce_user_uuid(auth.user_id)` to immediately after `agent_uuid = UUID(str(agent["id"]))`, before either of the two previous assignment sites (the role gate block and the `if updates:` block). Removed both downstream assignments.
-
-#### `backend/tests/test_ai_library_agent_permissions.py`
-
-4. **Fix #2 (Important) — Unit tests for `_can_edit_chat_permissions`**: Added 5 `@pytest.mark.asyncio` tests that import and call the real `_can_edit_chat_permissions` function, monkeypatching only its two dependency calls:
-   - `test_can_edit_agent_owner_returns_true` — (a) caller IS agent owner → True, short-circuits without calling either dep.
-   - `test_can_edit_team_owner_returns_true` — (b) team owner → True, `_is_team_owner` called once, `_user_is_admin` not called.
-   - `test_can_edit_stranger_returns_false` — (c) both deps return False → False.
-   - `test_can_edit_platform_admin_returns_true` — (d) `_user_is_admin` returns True → True.
-   - `test_can_edit_admin_db_error_returns_false` — (e) `_user_is_admin` raises RuntimeError → False (validates fix #1).
-
-### Test Output
+## State Design
 
 ```
-tests/test_ai_library_agent_permissions.py  — 13 passed (8 original + 5 new)
-regression (tests/ -k ai_library)           — 86 passed, 0 failures
+channels: Channel[]          – sidebar list (mutable unread badge locally)
+activeId: string | null      – selected channel id
+messages: ChatMessage[]      – ascending (oldest → newest), for MessageList
+hasOlder: boolean            – whether API returned a full page of 30
+loadingOlder: boolean        – spinner on "Load older" button
+sending: boolean             – disables Composer while in-flight
+seenIds: useRef<Set<string>> – dedupe set (stable, no re-render cost)
+markReadTimer: useRef        – debounce handle for markRead calls
 ```
 
-### Lint
+All state updates use spread/immutable patterns (no mutation).
 
-`black`, `isort`, `flake8` all clean on both changed files (0 errors, 0 warnings).
+---
 
-### Concerns
+## Dedupe Approach
 
-None beyond what was already noted above.
+A `useRef<Set<string>>` holds the ids of all messages currently in local state.
+It is populated on initial channel load, and checked on every append path:
+
+- `sendMessage` → `appendMessage(sent)` → skip if id already present
+- `useChannelRealtime` callback → `appendMessage(m)` → skip if id already present
+- `handleLoadOlder` → filters the returned page before prepending
+
+This prevents the sender seeing their own message twice (sendMessage appends,
+then realtime delivers the same message to all subscribers including the sender).
+
+The Set is cleared on channel change (inside the `useEffect` on `activeId`), so
+stale ids from a previous channel cannot bleed into the new one.
+
+---
+
+## Mark-Read Debounce
+
+`scheduleMarkRead(channelId, lastSeq)` wraps `chatService.markRead` in an 800 ms
+debounce (via `useRef<timer>`). Called in two places:
+
+1. After initial `listMessages` resolves (messages loaded)
+2. Inside the `useChannelRealtime` callback (new message arrives while open)
+
+After the actual API call (fire-and-forget, failure is logged but not toasted),
+the channels state is updated immutably to zero the `unread` badge on that channel.
+
+The debounce timer is cleared on unmount via a cleanup `useEffect`.
+
+---
+
+## Data Flow
+
+```
+mount/teamChange → chatService.listChannels() → channels state, auto-select first
+activeId change  → chatService.listMessages(id) → reverse DESC→ASC → messages state
+                 → hasOlder = page.length === 30
+                 → scheduleMarkRead(id, lastSeq)
+
+handleLoadOlder  → chatService.listMessages(id, oldestSeq) → reverse → dedupe → prepend
+handleSend(text) → chatService.sendMessage(id, {text}) → appendMessage(sent)
+realtime insert  → appendMessage(m) → scheduleMarkRead(id, m.seq)
+```
+
+---
+
+## Layout
+
+Two-pane island layout inside a `flex h-full gap-3 p-3`:
+- Left: `ChatSidebar` at `w-[220px]` fixed width
+- Right: conversation island (`flex-1`) with header, `MessageList`, `Composer`
+- Right info panel: deferred (not rendered); can be added as third pane later
+
+Empty-channel state: renders a centered placeholder with `t('chat.noChannels')`.
+No-team-selected guard: matches MembersPage pattern exactly.
+
+---
+
+## i18n Keys Added
+
+Added to both `en.json` and `zh.json` under the `chat` namespace:
+`sidebarTitle`, `newChannel`, `searchPlaceholder`, `sectionGroups`, `sectionDMs`,
+`loadOlder`, `composerPlaceholder`, `composerHint`, `attachResource`, `attachMedia`,
+`mention`, `send`, `openInLibrary`, `download`, `noChannels`,
+`errorLoadChannels`, `errorLoadMessages`, `errorSend`.
+
+---
+
+## Router
+
+Added lazy-loaded `ChatPage` to `router.tsx`:
+- Team-scoped route: `team/:teamId/chat`
+- Legacy flat redirect: `chat` → `RedirectToTeam view="chat"`
+
+---
+
+## tsc / Build Result
+
+- Pre-existing error count: **86**
+- Post-change error count: **86** (zero new errors from ChatPage or chat components)
+- `npm run build`: **success** (built in ~5.6s)
+
+---
+
+## Concerns
+
+1. **`listChannels` is not filtered by team** — the service sends a bare
+   `GET /chat/channels` without a `team_id` query param. If the backend already
+   scopes by the authenticated user's current team this is fine; if not, the
+   sidebar may show channels from other teams. Needs backend verification.
+
+2. **`useChannelRealtime` fires outside focus** — the debounced markRead fires
+   whenever a message arrives, even if the browser tab is backgrounded. A
+   `document.visibilityState` check could prevent marking messages as read while
+   the user is not actually looking at the page.
+
+3. **No optimistic send** — per-spec, `sendMessage` is not optimistic. On slow
+   networks the UI will appear frozen until the POST resolves. The `sending` flag
+   disables the Composer as a UX signal, but a visual "pending" bubble was not
+   added (spec did not request it).
+
+4. **Channel switching mid-flight** — if the user switches channels before the
+   `listMessages` response arrives, a `cancelled` flag guard prevents the stale
+   result from overwriting state. However, the seenIds Set is cleared at
+   `useEffect` cleanup time (before the new channel's effect runs), so the
+   ordering is safe.

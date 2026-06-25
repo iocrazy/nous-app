@@ -1490,7 +1490,25 @@
       "pdf": "PDF",
       "noResults": "没有匹配 \"{{q}}\" 的资源",
       "hintKbd": "↑↓ 选择 · ↵ 插入 · Esc 取消"
-    }
+    },
+    "sidebarTitle": "频道",
+    "newChannel": "新建频道",
+    "searchPlaceholder": "搜索频道...",
+    "sectionGroups": "群组",
+    "sectionDMs": "私信",
+    "loadOlder": "加载更早消息",
+    "composerPlaceholder": "发送消息...",
+    "composerHint": "Enter 发送 · Shift+Enter 换行",
+    "attachResource": "附加资源",
+    "attachMedia": "附加媒体",
+    "mention": "提及成员",
+    "send": "发送",
+    "openInLibrary": "在库中打开",
+    "download": "下载",
+    "noChannels": "暂无频道，创建一个开始聊天",
+    "errorLoadChannels": "加载频道失败：{{error}}",
+    "errorLoadMessages": "加载消息失败：{{error}}",
+    "errorSend": "发送消息失败：{{error}}"
   },
   "mcp": {
     "title": "MCP Servers",

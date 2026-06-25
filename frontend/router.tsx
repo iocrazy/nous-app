@@ -73,6 +73,9 @@ const AILibraryLayout = lazyWithRetry(() =>
 const AILibraryIndex = lazyWithRetry(() =>
   import('./pages/AILibraryIndex').then(m => ({ default: m.AILibraryIndex })),
 );
+const ChatPage = lazyWithRetry(() =>
+  import('./pages/ChatPage').then(m => ({ default: m.ChatPage })),
+);
 
 function PageLoader() {
   return (
@@ -126,6 +129,7 @@ export const router = createBrowserRouter([
       { path: 'issues/:identifier', element: <RedirectToTeam view="issues" /> },
       { path: 'cleanup', element: <RedirectToTeam view="cleanup" /> },
       { path: 'shared', element: <RedirectToTeam view="shared" /> },
+      { path: 'chat', element: <RedirectToTeam view="chat" /> },
       { path: 'agents', element: <RedirectToTeam view="agents" /> },
       { path: 'agents/:slug', element: <RedirectToTeam view="agents" /> },
       { path: 'skills', element: <RedirectToTeam view="skills" /> },
@@ -198,6 +202,7 @@ export const router = createBrowserRouter([
             ],
           },
           { path: 'player/:displayId', element: <SuspenseWrap><DownloadDetailPage /></SuspenseWrap> },
+          { path: 'chat', element: <SuspenseWrap><ChatPage /></SuspenseWrap> },
           // Script & Storyboard editors handled by fullscreen routes below
         ],
       },

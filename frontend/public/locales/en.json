@@ -1490,7 +1490,25 @@
       "pdf": "PDF",
       "noResults": "No resources match \"{{q}}\"",
       "hintKbd": "↑↓ navigate · ↵ insert · Esc cancel"
-    }
+    },
+    "sidebarTitle": "Channels",
+    "newChannel": "New channel",
+    "searchPlaceholder": "Search channels...",
+    "sectionGroups": "Groups",
+    "sectionDMs": "Direct Messages",
+    "loadOlder": "Load older messages",
+    "composerPlaceholder": "Message...",
+    "composerHint": "Enter to send · Shift+Enter for new line",
+    "attachResource": "Attach resource",
+    "attachMedia": "Attach media",
+    "mention": "Mention someone",
+    "send": "Send",
+    "openInLibrary": "Open in Library",
+    "download": "Download",
+    "noChannels": "No channels yet — create one to get started",
+    "errorLoadChannels": "Failed to load channels: {{error}}",
+    "errorLoadMessages": "Failed to load messages: {{error}}",
+    "errorSend": "Failed to send message: {{error}}"
   },
   "mcp": {
     "title": "MCP Servers",
