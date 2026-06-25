@@ -25,16 +25,13 @@ function dayKey(iso?: string | null): string {
 
 function dayLabel(key: string, t: (k: string, f?: string) => string): string {
   if (key === 'unknown') return t('topic.undated', 'Undated');
-  const now = new Date();
-  const yesterday = new Date();
-  yesterday.setDate(now.getDate() - 1);
-  if (key === dayKeyOf(now)) return t('topic.today', 'Today');
-  if (key === dayKeyOf(yesterday)) return t('topic.yesterday', 'Yesterday');
+  // Always show the actual date (no "Today"/"Yesterday"), locale-formatted.
   const [y, m, d] = key.split('-').map(Number);
   return new Date(y, m - 1, d).toLocaleDateString(undefined, {
-    weekday: 'short',
+    year: 'numeric',
     month: 'short',
     day: 'numeric',
+    weekday: 'short',
   });
 }
 
