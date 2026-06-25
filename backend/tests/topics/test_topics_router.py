@@ -28,17 +28,22 @@ def client(monkeypatch):
         }
 
     class _FakeRepo:
-        async def list_for_date(self, day, category, limit=100, q=None):
+        async def list_for_date(
+            self, day, category, limit=100, q=None, source_ids=None
+        ):
             calls["day"] = day
             calls["category"] = category
             calls["q"] = q
+            calls["source_ids"] = source_ids
             return [_row("1", "Hello"), _row("2", "World")]
 
-        async def list_by_ids(self, ids, limit=100):
+        async def list_by_ids(self, ids, limit=100, source_ids=None):
             calls["list_by_ids"] = list(ids)
+            calls["source_ids"] = source_ids
             return [_row(i, f"Saved {i}") for i in ids]
 
-        async def get_by_id(self, hotspot_id):
+        async def get_by_id(self, hotspot_id, source_ids=None):
+            calls["detail_source_ids"] = source_ids
             if calls.get("missing"):
                 return None
             row = _row(hotspot_id, "Detail")
@@ -73,10 +78,12 @@ def client(monkeypatch):
             }
 
     class _FakeSourcesRepo:
-        async def list_all(self):
+        async def list_visible(self, user_id):
+            calls["visible_uid"] = user_id
             return [
                 {
                     "id": "10",
+                    "user_id": None,  # system source
                     "name": "Weibo Hot",
                     "kind": "newsnow",
                     "category": "industry",
@@ -89,6 +96,7 @@ def client(monkeypatch):
                 },
                 {
                     "id": "11",
+                    "user_id": "u1",  # caller's own source
                     "name": "Hacker News",
                     "kind": "rss",
                     "category": None,
@@ -100,6 +108,45 @@ def client(monkeypatch):
                     "last_ok_at": None,
                 },
             ]
+
+        async def feed_source_ids(self, user_id, hidden_ids):
+            rows = await self.list_visible(user_id)
+            return [r["id"] for r in rows if r["id"] not in set(hidden_ids)]
+
+        async def create_source(
+            self, *, user_id, kind, name, config, category, enabled=True
+        ):
+            calls["created"] = {
+                "user_id": user_id,
+                "kind": kind,
+                "name": name,
+                "config": config,
+                "category": category,
+            }
+            return {
+                "id": "99",
+                "user_id": user_id,
+                "name": name,
+                "kind": kind,
+                "category": category,
+                "enabled": enabled,
+                "health": "ok",
+                "consecutive_failures": 0,
+            }
+
+        async def delete_source(self, *, user_id, source_id):
+            calls["deleted"] = {"user_id": user_id, "source_id": source_id}
+            return source_id in calls.get("owned_ids", {"11", "99"})
+
+    class _FakeHiddenRepo:
+        async def list_hidden_ids(self, user_id):
+            return calls.get("hidden_ids", [])
+
+        async def hide(self, user_id, source_id):
+            calls["hidden"] = {"user_id": user_id, "source_id": source_id}
+
+        async def unhide(self, user_id, source_id):
+            calls.setdefault("unhidden", []).append(source_id)
 
     class _FakeInterestRepo:
         async def get_interest(self, user_id):
@@ -117,6 +164,7 @@ def client(monkeypatch):
 
     monkeypatch.setattr(tr, "HotspotsRepository", lambda: _FakeRepo())
     monkeypatch.setattr(tr, "SignalSourcesRepository", lambda: _FakeSourcesRepo())
+    monkeypatch.setattr(tr, "UserHiddenSourcesRepository", lambda: _FakeHiddenRepo())
     monkeypatch.setattr(tr, "HotspotUserStateRepository", lambda: _FakeStateRepo())
     monkeypatch.setattr(tr, "UserTopicInterestRepository", lambda: _FakeInterestRepo())
     monkeypatch.setattr(tr, "TopicEmbeddingService", lambda: _FakeEmbedder())
@@ -298,3 +346,82 @@ def test_put_interest_no_embedding_when_provider_unconfigured(client):
     body = r.json()
     assert body["has_embedding"] is False
     assert client.calls["set_interest"]["vec"] is None
+
+
+# ---- Source management (add / delete / hide) ----------------------------------
+
+
+def test_feed_scopes_to_visible_sources(client):
+    # list passes the caller's visible source ids (system + own) as the allowlist
+    client.get("/api/v1/topics")
+    assert client.calls["source_ids"] == ["10", "11"]
+
+
+def test_hidden_source_drops_out_of_feed_allowlist(client):
+    client.calls["hidden_ids"] = ["10"]
+    client.get("/api/v1/topics")
+    # hidden source 10 excluded; only own source 11 remains in the allowlist
+    assert client.calls["source_ids"] == ["11"]
+
+
+def test_source_health_marks_owner_and_hidden(client):
+    client.calls["hidden_ids"] = ["10"]
+    body = client.get("/api/v1/topics/sources/health").json()
+    by_id = {s["id"]: s for s in body["sources"]}
+    # system source: not owned, but hidden by this caller
+    assert by_id["10"]["is_owner"] is False and by_id["10"]["is_hidden"] is True
+    # own source: owned, not hidden
+    assert by_id["11"]["is_owner"] is True and by_id["11"]["is_hidden"] is False
+
+
+def test_create_source(client):
+    r = client.post(
+        "/api/v1/topics/sources",
+        json={"kind": "rss", "name": "My Feed", "config": {"url": "http://x"}},
+    )
+    assert r.status_code == 200
+    assert r.json()["source"]["name"] == "My Feed"
+    assert r.json()["source"]["is_owner"] is True
+    assert client.calls["created"]["user_id"] == "u1"
+    assert client.calls["created"]["config"] == {"url": "http://x"}
+
+
+def test_create_source_rejects_bad_kind(client):
+    r = client.post("/api/v1/topics/sources", json={"kind": "bogus", "name": "X"})
+    assert r.status_code == 422
+
+
+def test_create_source_requires_name(client):
+    r = client.post("/api/v1/topics/sources", json={"kind": "rss", "name": "  "})
+    assert r.status_code == 422
+
+
+def test_delete_own_source(client):
+    r = client.delete("/api/v1/topics/sources/11")
+    assert r.status_code == 200
+    assert client.calls["deleted"] == {"user_id": "u1", "source_id": "11"}
+    # stale hide row cleaned up on delete
+    assert "11" in client.calls.get("unhidden", [])
+
+
+def test_delete_source_404_when_not_owned(client):
+    client.calls["owned_ids"] = set()  # nothing owned → delete is a no-op
+    r = client.delete("/api/v1/topics/sources/10")
+    assert r.status_code == 404
+
+
+def test_hide_visible_source(client):
+    r = client.post("/api/v1/topics/sources/10/hide")
+    assert r.status_code == 200
+    assert client.calls["hidden"] == {"user_id": "u1", "source_id": "10"}
+
+
+def test_hide_404_when_source_not_visible(client):
+    r = client.post("/api/v1/topics/sources/777/hide")
+    assert r.status_code == 404
+
+
+def test_unhide_source(client):
+    r = client.delete("/api/v1/topics/sources/10/hide")
+    assert r.status_code == 200
+    assert "10" in client.calls.get("unhidden", [])
