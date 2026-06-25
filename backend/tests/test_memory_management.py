@@ -234,9 +234,13 @@ async def test_inject_disabled_skips_recall(
 async def test_inject_prepends_card(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from unittest.mock import AsyncMock
+
     import app.services.ai.memory.honcho_memory as hm
     from app.services.ai.chat import ai_library_chat_wiring as wiring
     from app.services.ai.memory.memory_prefs import MemoryPrefs
+
+    _REPRESENTATION = "## Explicit Observations\nlikes fast cuts"
 
     class _Svc:
         class config:
@@ -245,12 +249,26 @@ async def test_inject_prepends_card(
                 return True
 
         async def get_user_representation(self, **kwargs):
-            return "## Explicit Observations\nlikes fast cuts"
+            return _REPRESENTATION
 
         async def get_peer_card(self, **kwargs):
             return ["Prefers bilingual output"]
 
+    # CARD path: still routed through the hm.get_honcho_memory_service seam.
     monkeypatch.setattr(hm, "get_honcho_memory_service", lambda: _Svc())
+
+    # REPRESENTATION path: after the refactor this comes from
+    # memory_registry.l2_provider() → provider.get_context().  Patch the
+    # registry function on the module object that wiring already imported.
+    _mock_provider = AsyncMock()
+    _mock_provider.is_operative = AsyncMock(return_value=True)
+    _mock_provider.get_context = AsyncMock(return_value=_REPRESENTATION)
+    monkeypatch.setattr(
+        wiring.memory_registry,
+        "l2_provider",
+        AsyncMock(return_value=_mock_provider),
+    )
+
     from app.services.ai.memory import memory_prefs as prefs_mod
 
     async def _prefs(uid):
