@@ -23,6 +23,14 @@ describe('blendedScore', () => {
     const hot = blendedScore({ score: 0.6, heat: 0.9 });
     expect(hot).toBeGreaterThan(cold);
   });
+  it('cross-source confirmation adds a bounded bump, single-source unchanged', () => {
+    const base = blendedScore({ score: 0.6, heat: 0.6 }); // 0.6
+    expect(blendedScore({ score: 0.6, heat: 0.6, source_count: 1 })).toBe(base);
+    // 5 platforms → full cross factor → +0.10
+    expect(blendedScore({ score: 0.6, heat: 0.6, source_count: 5 })).toBeCloseTo(0.7);
+    // clamps at 1.0
+    expect(blendedScore({ score: 1, heat: 1, source_count: 9 })).toBe(1);
+  });
 });
 
 describe('topHotspots', () => {
