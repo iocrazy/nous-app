@@ -108,3 +108,65 @@ async def test_probe_blank_key_falls_back_to_stored_key():
     assert captured["config"]["api_key"] == "stored-secret"
     assert captured["config"]["app_id"] == "stored-app"
     repo.get_by_name.assert_awaited_once_with("nous-qwen3-llm")
+
+
+@pytest.mark.asyncio
+async def test_test_endpoint_persists_result():
+    """POST /{id}/test persists the probe result (status/detail/tested_at) so the
+    admin's status dot survives navigation, and echoes tested_at back."""
+    from app.api.admin.nous_router import test_nous_model
+
+    row = {"id": "42", "type": "llm", "actual_model": "deepseek-chat"}
+    repo = MagicMock()
+    repo.list_all = AsyncMock(return_value=[row])
+    repo.record_test_result = AsyncMock(
+        return_value={"last_tested_at": "2026-06-25T03:00:00+00:00"}
+    )
+
+    with patch("app.api.admin.nous_router.get_nous_repository", return_value=repo):
+        with patch(
+            "app.api.admin.nous_router._probe_nous_model",
+            new=AsyncMock(
+                return_value={
+                    "ok": True,
+                    "detail": "chat ok",
+                    "error": None,
+                    "dims": None,
+                }
+            ),
+        ):
+            resp = await test_nous_model("42", MagicMock())
+
+    assert resp.ok is True
+    assert resp.tested_at == "2026-06-25T03:00:00+00:00"
+    repo.record_test_result.assert_awaited_once_with("42", "ok", "chat ok")
+
+
+@pytest.mark.asyncio
+async def test_test_endpoint_persists_failure_detail():
+    """On failure the error text is persisted as the detail (status='fail')."""
+    from app.api.admin.nous_router import test_nous_model
+
+    row = {"id": "7", "type": "embedding", "actual_model": "bad-embed"}
+    repo = MagicMock()
+    repo.list_all = AsyncMock(return_value=[row])
+    repo.record_test_result = AsyncMock(
+        return_value={"last_tested_at": "2026-06-25T03:01:00+00:00"}
+    )
+
+    with patch("app.api.admin.nous_router.get_nous_repository", return_value=repo):
+        with patch(
+            "app.api.admin.nous_router._probe_nous_model",
+            new=AsyncMock(
+                return_value={
+                    "ok": False,
+                    "detail": "",
+                    "error": "HTTP 401: bad key",
+                    "dims": None,
+                }
+            ),
+        ):
+            resp = await test_nous_model("7", MagicMock())
+
+    assert resp.ok is False
+    repo.record_test_result.assert_awaited_once_with("7", "fail", "HTTP 401: bad key")

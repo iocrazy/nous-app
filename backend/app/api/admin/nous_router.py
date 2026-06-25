@@ -52,6 +52,11 @@ def _to_response(row: dict) -> NousModelResponse:
         sort_order=row["sort_order"],
         created_at=str(row.get("created_at", "")),
         updated_at=str(row.get("updated_at", "")),
+        last_test_status=row.get("last_test_status"),
+        last_test_detail=row.get("last_test_detail"),
+        last_tested_at=(
+            str(row["last_tested_at"]) if row.get("last_tested_at") else None
+        ),
     )
 
 
@@ -262,11 +267,22 @@ async def _probe_nous_model(row: dict) -> dict:
 
 @router.post("/{model_id}/test", response_model=NousModelTestResponse)
 async def test_nous_model(model_id: str, auth: AdminAuthDep):
-    """Run a real connectivity probe for one platform model (chat/embedding/asr)."""
+    """Run a real connectivity probe for one platform model (chat/embedding/asr).
+
+    The result is persisted on the row (last_test_status / detail / tested_at)
+    so the admin's status dot + "last tested" hint survive navigation.
+    """
     repo = get_nous_repository()
     rows = await repo.list_all()
     row = next((r for r in rows if str(r.get("id")) == str(model_id)), None)
     if not row:
         raise HTTPException(status_code=404, detail="Model not found")
     result = await _probe_nous_model(row)
-    return NousModelTestResponse(**result)
+
+    status = "ok" if result.get("ok") else "fail"
+    detail = result.get("detail") or (result.get("error") or "")
+    saved = await repo.record_test_result(model_id, status, detail[:200])
+    tested_at = (
+        str(saved["last_tested_at"]) if saved and saved.get("last_tested_at") else None
+    )
+    return NousModelTestResponse(**result, tested_at=tested_at)

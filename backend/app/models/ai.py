@@ -432,6 +432,10 @@ class NousModels(Base):
             "pricing_type = ANY (ARRAY['per_hour'::text, 'per_request'::text, 'per_token'::text])",
             name="nous_models_pricing_type_check",
         ),
+        CheckConstraint(
+            "last_test_status IS NULL OR last_test_status IN ('ok', 'fail')",
+            name="nous_models_last_test_status_check",
+        ),
         PrimaryKeyConstraint("id", name="nous_models_pkey"),
         UniqueConstraint("name", name="nous_models_name_key"),
         {"schema": "public"},
@@ -467,6 +471,11 @@ class NousModels(Base):
     app_id: Mapped[Optional[str]] = mapped_column(Text)
     base_url: Mapped[Optional[str]] = mapped_column(Text)
     description: Mapped[Optional[str]] = mapped_column(Text)
+    # Last connectivity-test result (persisted by the admin "Test" probe so the
+    # status dot + last-tested time survive navigation). See migration 317.
+    last_test_status: Mapped[Optional[str]] = mapped_column(Text)
+    last_test_detail: Mapped[Optional[str]] = mapped_column(Text)
+    last_tested_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True))
 
 
 class Skills(Base):

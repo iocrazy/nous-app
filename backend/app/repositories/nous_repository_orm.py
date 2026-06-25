@@ -211,6 +211,28 @@ class NousRepositoryOrm(NousRepository):
             logger.error(f"Failed to update nous model {model_id}: {e}")
             return None
 
+    async def record_test_result(
+        self, model_id: str, status: str, detail: str
+    ) -> Optional[Dict[str, Any]]:
+        """Persist last connectivity-test result; leaves updated_at untouched."""
+        try:
+            async with write_scope() as session:
+                result = await session.execute(
+                    update(NousModels)
+                    .where(NousModels.id == int(model_id))
+                    .values(
+                        last_test_status=status,
+                        last_test_detail=detail,
+                        last_tested_at=func.now(),
+                    )
+                    .returning(NousModels)
+                )
+                row = result.scalars().first()
+                return _row(row) if row else None
+        except Exception as e:
+            logger.error(f"Failed to record test result for {model_id}: {e}")
+            return None
+
     async def delete(self, model_id: str) -> bool:
         try:
             async with write_scope() as session:

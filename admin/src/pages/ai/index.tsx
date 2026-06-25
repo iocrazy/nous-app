@@ -26,6 +26,10 @@ interface NousModel {
   sort_order: number
   created_at: string
   updated_at: string
+  // Persisted connectivity-test result (survives navigation). NULL = untested.
+  last_test_status?: 'ok' | 'fail' | null
+  last_test_detail?: string | null
+  last_tested_at?: string | null
 }
 
 // A provider card groups every model that shares the same provider + base URL
@@ -58,13 +62,49 @@ function sanitizeName(model: string): string {
   return 'mediahub-' + model.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
 }
 
-// Connectivity dot from the last Test: green = reachable, red = failed, gray = untested.
-function StatusDot({ status }: { status?: 'ok' | 'fail' }) {
+// Human "5m ago" from an ISO timestamp (empty string when never tested).
+function timeAgo(iso?: string | null): string {
+  if (!iso) return ''
+  const t = Date.parse(iso)
+  if (Number.isNaN(t)) return ''
+  const s = Math.max(0, Math.floor((Date.now() - t) / 1000))
+  if (s < 60) return 'just now'
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ago`
+  return `${Math.floor(h / 24)}d ago`
+}
+
+// Provider health = aggregate of its models' persisted results: any fail → red,
+// else any ok → green, else gray (untested).
+function aggregateStatus(models: NousModel[]): 'ok' | 'fail' | undefined {
+  if (models.some((m) => m.last_test_status === 'fail')) return 'fail'
+  if (models.some((m) => m.last_test_status === 'ok')) return 'ok'
+  return undefined
+}
+
+// Connectivity dot from the LAST persisted Test: green = reachable, red =
+// failed, gray = untested. Tooltip carries the detail + when it was tested.
+function StatusDot({
+  status,
+  detail,
+  at,
+}: {
+  status?: 'ok' | 'fail' | null
+  detail?: string | null
+  at?: string | null
+}) {
   const color =
     status === 'ok' ? '#00b42a' : status === 'fail' ? '#f53f3f' : 'var(--color-fill-3)'
+  const label = status === 'ok' ? 'Reachable' : status === 'fail' ? 'Failed' : 'Not tested'
+  const ago = timeAgo(at)
+  const title = [label, detail || undefined, ago ? `tested ${ago}` : undefined]
+    .filter(Boolean)
+    .join(' · ')
   return (
     <span
-      title={status === 'ok' ? 'Reachable' : status === 'fail' ? 'Failed' : 'Not tested'}
+      title={title}
       style={{
         display: 'inline-block',
         width: 8,
@@ -94,9 +134,6 @@ export function AIModelsPage() {
   const [saving, setSaving] = useState(false)
   const [testingId, setTestingId] = useState<string | null>(null)
   const [testingProvider, setTestingProvider] = useState<string | null>(null)
-  // Connectivity status from the last Test, by model id / by provider key.
-  const [modelStatus, setModelStatus] = useState<Record<string, 'ok' | 'fail'>>({})
-  const [providerStatus, setProviderStatus] = useState<Record<string, 'ok' | 'fail'>>({})
   const [form] = Form.useForm()
 
   const apiBase = import.meta.env.VITE_API_URL || ''
@@ -157,34 +194,58 @@ export function AIModelsPage() {
     setModalVisible(true)
   }
 
-  // Provider-level connectivity test, directly on the card (not the Add-Models
-  // modal). Reuses probe-models; inherits the stored key via the first model's name.
+  // Probe one model and persist + reflect the result. Returns ok. Shared by
+  // the per-model Test and the provider "Test all" button.
+  const runModelTest = async (m: NousModel): Promise<boolean> => {
+    try {
+      const res = await fetch(`${apiBase}/api/v1/admin/nous-models/${m.id}/test`, {
+        method: 'POST',
+        headers,
+      })
+      const data = await res.json()
+      const status: 'ok' | 'fail' = data.ok ? 'ok' : 'fail'
+      const detail = data.ok ? data.detail || 'ok' : data.error || 'failed'
+      // The backend persisted this; mirror it into the row so the dot + "tested
+      // Xm ago" update instantly (and stay correct after the next list fetch).
+      setModels((prev) =>
+        prev.map((x) =>
+          x.id === m.id
+            ? {
+                ...x,
+                last_test_status: status,
+                last_test_detail: detail,
+                last_tested_at: data.tested_at || new Date().toISOString(),
+              }
+            : x,
+        ),
+      )
+      return data.ok
+    } catch {
+      setModels((prev) =>
+        prev.map((x) =>
+          x.id === m.id
+            ? { ...x, last_test_status: 'fail', last_test_detail: 'request failed', last_tested_at: new Date().toISOString() }
+            : x,
+        ),
+      )
+      return false
+    }
+  }
+
+  // Provider-level test, directly on the card: probe EVERY model in the
+  // provider (sequentially) and persist each, so the provider dot (aggregate)
+  // and per-model dots all reflect a real check.
   const handleTestProvider = async (g: ProviderGroup) => {
     const k = `${g.provider}|${g.base_url}`
     setTestingProvider(k)
+    let ok = 0
     try {
-      const res = await fetch(`${apiBase}/api/v1/admin/nous-models/probe-models`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          provider_key: g.provider,
-          base_url: g.base_url,
-          api_key: '',
-          name: g.models[0]?.name,
-        }),
-      })
-      const data = await res.json().catch(() => ({}))
-      const ok = res.ok && data.success
-      setProviderStatus((prev) => ({ ...prev, [k]: ok ? 'ok' : 'fail' }))
-      if (ok) {
-        const n = Array.isArray(data.models) ? data.models.length : 0
-        Message.success(`${g.provider}: reachable${n ? ` — ${n} models` : ''}`)
-      } else {
-        Message.error(`${g.provider}: ${data.error || 'connection failed'}`)
+      for (const m of g.models) {
+        if (await runModelTest(m)) ok += 1
       }
-    } catch {
-      setProviderStatus((prev) => ({ ...prev, [k]: 'fail' }))
-      Message.error(`${g.provider}: request failed`)
+      const total = g.models.length
+      if (ok === total) Message.success(`${g.provider}: all ${total} models reachable`)
+      else Message.warning(`${g.provider}: ${ok}/${total} models reachable`)
     } finally {
       setTestingProvider(null)
     }
@@ -306,17 +367,9 @@ export function AIModelsPage() {
   const handleTestModel = async (m: NousModel) => {
     setTestingId(m.id)
     try {
-      const res = await fetch(`${apiBase}/api/v1/admin/nous-models/${m.id}/test`, { method: 'POST', headers })
-      const data = await res.json()
-      setModelStatus((prev) => ({ ...prev, [m.id]: data.ok ? 'ok' : 'fail' }))
-      if (data.ok) {
-        Message.success(`${m.actual_model}: OK${data.detail ? ` — ${data.detail}` : ''}`)
-      } else {
-        Message.error(`${m.actual_model}: ${data.error || 'connectivity test failed'}`)
-      }
-    } catch {
-      setModelStatus((prev) => ({ ...prev, [m.id]: 'fail' }))
-      Message.error(`${m.actual_model}: request failed`)
+      const ok = await runModelTest(m)
+      if (ok) Message.success(`${m.actual_model}: OK`)
+      else Message.error(`${m.actual_model}: connectivity test failed`)
     } finally {
       setTestingId(null)
     }
@@ -348,7 +401,7 @@ export function AIModelsPage() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
                 <div>
                   <div style={{ fontWeight: 600, fontSize: 15, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <StatusDot status={providerStatus[`${g.provider}|${g.base_url}`]} />
+                    <StatusDot status={aggregateStatus(g.models)} />
                     {g.provider}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--color-text-3)', fontFamily: 'monospace' }}>
@@ -358,6 +411,20 @@ export function AIModelsPage() {
                     Key&nbsp;
                     <span style={{ fontFamily: 'monospace' }}>{'••••' + (g.api_key_masked || '').slice(-4)}</span>
                   </div>
+                  {(() => {
+                    // Most-recent test across the provider's models.
+                    const latest = g.models
+                      .map((m) => m.last_tested_at)
+                      .filter(Boolean)
+                      .sort()
+                      .pop()
+                    const ago = timeAgo(latest)
+                    return ago ? (
+                      <div style={{ fontSize: 12, color: 'var(--color-text-3)', marginTop: 2 }}>
+                        Last tested {ago}
+                      </div>
+                    ) : null
+                  })()}
                 </div>
                 <Space>
                   <Button
@@ -382,7 +449,11 @@ export function AIModelsPage() {
                       padding: '4px 8px', opacity: m.is_enabled ? 1 : 0.5,
                     }}
                   >
-                    <StatusDot status={modelStatus[m.id]} />
+                    <StatusDot
+                      status={m.last_test_status}
+                      detail={m.last_test_detail}
+                      at={m.last_tested_at}
+                    />
                     <Tag color={TYPE_COLORS[m.type] || 'gray'} size="small">{m.type}</Tag>
                     <span style={{ fontSize: 13, fontFamily: 'monospace' }}>{m.actual_model}</span>
                     <Switch
