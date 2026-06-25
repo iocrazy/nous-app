@@ -66,6 +66,11 @@ class NousModelResponse(BaseModel):
     sort_order: int
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    # Last connectivity-test result (persisted; drives the status dot + the
+    # "last tested" hint across navigation). NULL = never tested.
+    last_test_status: Optional[str] = None
+    last_test_detail: Optional[str] = None
+    last_tested_at: Optional[str] = None
 
 
 class NousModelPublic(BaseModel):
@@ -103,3 +108,6 @@ class NousModelTestResponse(BaseModel):
     detail: str = ""
     error: Optional[str] = None
     dims: Optional[int] = None
+    # ISO timestamp the result was persisted at (lets the UI show "tested just
+    # now" without re-fetching the whole list).
+    tested_at: Optional[str] = None

@@ -117,6 +117,34 @@ class NousRepository:
             logger.error(f"Failed to update nous model {model_id}: {e}")
             return None
 
+    async def record_test_result(
+        self, model_id: str, status: str, detail: str
+    ) -> Optional[Dict[str, Any]]:
+        """Persist the last connectivity-test result on the row.
+
+        Distinct from ``update``: writes only the last_test_* columns + a
+        server-side ``last_tested_at``, leaving ``updated_at`` untouched (a
+        connectivity probe is not an edit).
+        """
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE)
+                .update(
+                    {
+                        "last_test_status": status,
+                        "last_test_detail": detail,
+                        "last_tested_at": "now()",
+                    }
+                )
+                .eq("id", model_id)
+                .execute()
+            )
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Failed to record test result for {model_id}: {e}")
+            return None
+
     async def delete(self, model_id: str) -> bool:
         """Delete a Nous model."""
         try:
