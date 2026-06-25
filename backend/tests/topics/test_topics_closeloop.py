@@ -20,8 +20,8 @@ def client(monkeypatch):
             return None  # unknown id -> 404
 
     class _Sources:
-        async def feed_source_ids(self, user_id, hidden_ids):
-            return ["s1"]
+        async def list_visible(self, user_id):
+            return [{"id": "s1", "user_id": None}]
 
     class _Hidden:
         async def list_hidden_ids(self, user_id):
