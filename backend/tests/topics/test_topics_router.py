@@ -89,7 +89,7 @@ def client(monkeypatch):
     class _FakeSourcesRepo:
         async def list_visible(self, user_id):
             calls["visible_uid"] = user_id
-            return [
+            rows = [
                 {
                     "id": "10",
                     "user_id": None,  # system source
@@ -109,7 +109,7 @@ def client(monkeypatch):
                     "name": "Hacker News",
                     "kind": "rss",
                     "category": None,
-                    "enabled": False,
+                    "enabled": True,
                     "health": "ok",
                     "consecutive_failures": 0,
                     "last_error": None,
@@ -118,9 +118,31 @@ def client(monkeypatch):
                 },
             ]
 
+            if calls.get("with_disabled"):
+                rows.append(
+                    {
+                        "id": "12",
+                        "user_id": None,
+                        "name": "Off Source",
+                        "kind": "rss",
+                        "category": None,
+                        "enabled": False,  # admin-disabled
+                        "health": "ok",
+                        "consecutive_failures": 0,
+                        "last_error": None,
+                        "last_fetched_at": None,
+                        "last_ok_at": None,
+                    }
+                )
+            return rows
+
         async def feed_source_ids(self, user_id, hidden_ids):
             rows = await self.list_visible(user_id)
-            return [r["id"] for r in rows if r["id"] not in set(hidden_ids)]
+            return [
+                r["id"]
+                for r in rows
+                if r.get("enabled", True) and r["id"] not in set(hidden_ids)
+            ]
 
         async def create_source(
             self, *, user_id, kind, name, config, category, enabled=True
@@ -293,9 +315,9 @@ def test_source_health(client):
     assert dead["health"] == "dead"
     assert dead["consecutive_failures"] == 5
     assert dead["last_error"] == "timeout"
-    disabled = body["sources"][1]
-    assert disabled["enabled"] is False
-    assert disabled["last_error"] is None
+    own = body["sources"][1]
+    assert own["enabled"] is True
+    assert own["last_error"] is None
 
 
 def test_to_out_extracts_source_count_from_embedded_group():
@@ -393,6 +415,14 @@ def test_hidden_source_drops_out_of_feed_allowlist(client):
     client.get("/api/v1/topics")
     # hidden source 10 excluded; only own source 11 remains in the allowlist
     assert client.calls["source_ids"] == ["11"]
+
+
+def test_admin_disabled_source_excluded_from_feed(client):
+    # an admin-disabled (enabled=false) source's hotspots drop out of the feed
+    client.calls["with_disabled"] = True
+    client.get("/api/v1/topics")
+    assert "12" not in client.calls["source_ids"]
+    assert client.calls["source_ids"] == ["10", "11"]
 
 
 def test_source_param_narrows_to_picked(client):

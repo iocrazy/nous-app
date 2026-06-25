@@ -15,6 +15,7 @@ import { CreditsPage } from './pages/credits'
 import { Settings } from './pages/settings'
 import { AIGovernance } from './pages/settings/AIGovernance'
 import { TopicScoring } from './pages/settings/TopicScoring'
+import { SignalSources } from './pages/settings/SignalSources'
 import { MemorySettings } from './pages/settings/MemorySettings'
 import { RequestLogs } from './pages/request-logs'
 import { MonitoringDashboard } from './pages/monitoring'
@@ -64,6 +65,7 @@ export default function App() {
               <Route path="/settings" element={<Settings />} />
               <Route path="/settings/ai-governance" element={<AIGovernance />} />
               <Route path="/settings/topic-scoring" element={<TopicScoring />} />
+              <Route path="/settings/signal-sources" element={<SignalSources />} />
               <Route path="/settings/memory" element={<MemorySettings />} />
               <Route path="/transcode-config" element={<TranscodeConfig />} />
               <Route path="/deployment-logs" element={<DeploymentLogsPage />} />

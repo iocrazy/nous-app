@@ -41,7 +41,7 @@ const MenuItemGroup = Menu.ItemGroup
 const allMenuKeys = [
   '/', '/users', '/teams', '/media', '/transcode', '/tasks', '/tags', '/credits', '/ai',
   '/agent-telemetry', '/monitoring', '/search', '/audit-logs', '/logs', '/alerts',
-  '/api-keys', '/settings/ai-governance', '/settings/topic-scoring', '/settings/memory', '/settings',
+  '/api-keys', '/settings/ai-governance', '/settings/topic-scoring', '/settings/signal-sources', '/settings/memory', '/settings',
   '/transcode-config', '/deployment-logs',
 ]
 
@@ -123,6 +123,7 @@ export function AdminLayout() {
             <MenuItem key="/settings"><IconSettings />Settings</MenuItem>
             <MenuItem key="/settings/ai-governance"><IconRobot />AI Governance</MenuItem>
             <MenuItem key="/settings/topic-scoring"><IconThunderbolt />Topic Scoring</MenuItem>
+            <MenuItem key="/settings/signal-sources"><IconStorage />Signal Sources</MenuItem>
             <MenuItem key="/settings/memory"><IconStorage />Memory</MenuItem>
             <MenuItem key="/transcode-config"><IconThunderbolt />Transcode</MenuItem>
           </MenuItemGroup>
