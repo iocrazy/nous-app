@@ -12,6 +12,8 @@ export interface Hotspot {
   ai_summary?: string | null;
   reason?: string | null;
   score?: number | null;
+  /** Raw per-dimension scores (0..1) behind `score` — detail view only. */
+  score_dims?: Record<string, number> | null;
   tags: string[];
   category?: string | null;
   media_url?: string | null;
