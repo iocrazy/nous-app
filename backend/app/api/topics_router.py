@@ -40,11 +40,9 @@ from app.schemas.topics import (
 from app.services.storyboard.script.script_ai_service import ScriptAIService
 from app.services.topics.embedding_service import TopicEmbeddingService
 from app.services.topics.heat import best_rank as _best_rank
+from app.services.topics.scoring import load_scoring_config
 
 router = APIRouter(prefix="/topics")
-
-# Score floor (0..1 LLM relevance) for the "Featured" curated view.
-FEATURED_MIN_SCORE = 0.6
 
 
 def _to_out(
@@ -122,13 +120,15 @@ async def list_hotspots(
     if view == "featured":
         # Curated high-value board: score floor + best-first, spanning all
         # dates. Respects category/source/search filters but not the day window.
+        # The floor is admin-tunable (system_settings), code default otherwise.
+        cfg = await load_scoring_config()
         rows = await repo.list_for_date(
             None,
             category,
             limit=limit,
             q=q,
             source_ids=visible,
-            min_score=FEATURED_MIN_SCORE,
+            min_score=cfg.featured_min_score,
             order_score=True,
         )
     elif view == "foryou":

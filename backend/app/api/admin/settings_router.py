@@ -16,8 +16,15 @@ from app.schemas.admin import (
     SystemSettingResponse,
     SystemSettingUpdate,
     TaskModuleGovernanceResponse,
+    TopicScoringConfigResponse,
 )
 from app.services.ai.memory.graph_memory import STRUCTURED_OUTPUT_MODES
+from app.services.topics.scoring import (
+    SCORING_CONFIG_KEY,
+    config_payload,
+    load_scoring_config,
+    merge_scoring_config,
+)
 from app.utils.admin_helpers import create_audit_log
 
 router = APIRouter()
@@ -58,6 +65,35 @@ def _to_response(row: dict) -> SystemSettingResponse:
         updated_at=row["updated_at"],
         updated_by=row.get("updated_by"),
     )
+
+
+@router.get("/topics-scoring", response_model=TopicScoringConfigResponse)
+async def get_topics_scoring_config(auth: AdminAuthDep):
+    """Current hotspot scoring knobs (admin-tuned, merged over code defaults)."""
+    cfg = await load_scoring_config()
+    return TopicScoringConfigResponse(**config_payload(cfg))
+
+
+@router.put("/topics-scoring", response_model=TopicScoringConfigResponse)
+async def update_topics_scoring_config(
+    body: TopicScoringConfigResponse,
+    auth: AdminAuthDep,
+):
+    """Persist scoring knobs to ``system_settings['topics.scoring']``. The body
+    is validated/clamped through the same merge as reads, so a malformed weight
+    can't poison the scorer."""
+    validated = merge_scoring_config(body.model_dump())
+    payload = config_payload(validated)
+    repo = get_system_settings_repository()
+    await repo.upsert_setting(SCORING_CONFIG_KEY, payload, auth.user_id)
+    await create_audit_log(
+        admin_id=auth.user_id,
+        action="update_topics_scoring_config",
+        target_type="system_setting",
+        target_id=SCORING_CONFIG_KEY,
+        details={"value": payload},
+    )
+    return TopicScoringConfigResponse(**payload)
 
 
 @router.get("", response_model=list[SystemSettingResponse])
