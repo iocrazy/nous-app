@@ -37,22 +37,28 @@ class GraphitiProvider(MemoryProvider):
             return False
 
     async def record_turn(self, turn: MemoryTurn) -> bool:
-        from app.workflows.write_memory import (  # lazy: avoids circular import (Task 5)
-            _build_turn_episode,
-        )
+        try:
+            from app.workflows.write_memory import (  # lazy: avoids circular import (Task 5)
+                _build_turn_episode,
+            )
 
-        service = get_graph_memory_service()
-        if not service.config.enabled:
+            service = get_graph_memory_service()
+            if not service.config.enabled:
+                return False
+            body = _build_turn_episode(turn.user_msgs, turn.asst_msgs)
+            if not body:
+                return False
+            return await service.add_chat_episode(
+                group_id=f"user-{turn.user_id}",
+                name=f"chat-{turn.session_id}-{turn.run_id or turn.iteration}",
+                body=body,
+                source_description="mediahub chat turn",
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "[graphiti_provider] record_turn failed (user=%s)", turn.user_id
+            )
             return False
-        body = _build_turn_episode(turn.user_msgs, turn.asst_msgs)
-        if not body:
-            return False
-        return await service.add_chat_episode(
-            group_id=f"user-{turn.user_id}",
-            name=f"chat-{turn.session_id}-{turn.run_id or turn.iteration}",
-            body=body,
-            source_description="mediahub chat turn",
-        )
 
     async def get_context(
         self,
@@ -75,15 +81,19 @@ class GraphitiProvider(MemoryProvider):
         return rendered or None
 
     async def reload(self) -> None:
-        # In-process: drop the cached config so the next call re-reads
-        # GraphMemoryConfig.from_settings(). GraphMemoryService._ensure_config
-        # rebuilds when _config_loaded is False AND graphiti is None (line 357).
-        # We reset BOTH config and _config_loaded: config=None satisfies the test
-        # assertion; _config_loaded=False is the real prod rebuild trigger.
+        # Drop the cached graphiti client AND the config-loaded flag so the next
+        # async call re-reads GraphMemoryConfig.from_settings() and rebuilds the
+        # client. Resetting only _config_loaded is not enough: _ensure_config
+        # short-circuits on `self.graphiti is not None` first (graph_memory.py
+        # line 357), so an already-connected service would keep stale config.
+        # config is NOT cleared: enabled() / record_turn() read service.config
+        # synchronously (no await) and would NPE on None. The last-known config
+        # is safe because _ensure_config (called inside add_chat_episode/search)
+        # refreshes it on the next async op.
         try:
             svc = get_graph_memory_service()
-            svc.config = None  # type: ignore[assignment]
-            svc._config_loaded = False  # type: ignore[attr-defined]  # real rebuild gate
+            svc.graphiti = None  # type: ignore[assignment]  # force client rebuild
+            svc._config_loaded = False  # type: ignore[attr-defined]  # force config re-read
         except Exception:  # noqa: BLE001
             logger.warning("[graphiti_provider] reload failed")
 
