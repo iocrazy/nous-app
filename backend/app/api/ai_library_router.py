@@ -56,6 +56,7 @@ from app.schemas.ai_library import (
     AgentCreate,
     AgentOut,
     AgentUpdate,
+    ChatPermissionsOut,
     SkillCreate,
     SkillFileOut,
     SkillFileUpsert,
@@ -71,6 +72,7 @@ from app.schemas.ai_library_chat import (
     SessionWithMessages,
 )
 from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
+from app.services.ai.permissions.agent_chat_caps import agent_chat_caps
 from app.services.ai.runner.seed_loader import SeedLoader
 
 router = APIRouter(prefix="/ai-library", tags=["AI Library"])
@@ -322,7 +324,9 @@ async def list_agents(request: Request, auth: AuthDep) -> List[Dict[str, Any]]:
             logger.warning(f"[ai-library] skipping agent with bad id: {exc}")
             continue
         skill_ids = await agent_repo.get_skill_ids(agent_uuid)
-        enriched_with_skills.append({**row, "skill_ids": skill_ids})
+        enriched_with_skills.append(
+            _with_chat_permissions({**row, "skill_ids": skill_ids})
+        )
     return await _enrich_agents_with_scope_names(enriched_with_skills)
 
 
@@ -343,7 +347,9 @@ async def get_agent(slug: str, auth: AuthDep) -> Dict[str, Any]:
             status_code=status.HTTP_404_NOT_FOUND, detail="agent not found"
         )
     agent_uuid = UUID(str(agent["id"]))
-    agent = {**agent, "skill_ids": await agent_repo.get_skill_ids(agent_uuid)}
+    agent = _with_chat_permissions(
+        {**agent, "skill_ids": await agent_repo.get_skill_ids(agent_uuid)}
+    )
     enriched = await _enrich_agents_with_scope_names([agent])
     return enriched[0]
 
@@ -470,7 +476,9 @@ async def update_agent(
 ) -> Dict[str, Any]:
     """Patch an agent's mutable fields and optionally replace its skill bindings.
 
-    Phase 1 policy: system-preset agents are read-only (403).
+    Phase 1 carve-out (CHAT-PERM-15): system-preset agents remain read-only for
+    content and skill edits, but chat_permissions ARE editable (governance, not
+    content). Role-gate applies to chat_permissions edits (CHAT-PERM-19/review H1).
     """
     agent_repo, _ = _repos()
     agent = await agent_repo.get_by_slug(slug)
@@ -478,24 +486,56 @@ async def update_agent(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="agent not found"
         )
-    if agent.get("is_system_preset"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="system preset agents are read-only in phase 1",
-        )
 
     agent_uuid = UUID(str(agent["id"]))
-    # skill_ids is handled separately; strip from the field-level update.
-    updates = payload.model_dump(exclude_none=True, exclude={"skill_ids"})
-    # Budget "unlimited" convention: 0 from the client means "clear the cap"
-    # — rewrite to explicit None so the DB stores NULL and the sweeper's
-    # ``is not None`` check keeps treating it as uncapped. The frontend
-    # can't reach "set to NULL" through the PATCH body because
-    # exclude_none=True drops nulls; this 0→None bridge keeps the wire
-    # format simple without regressing the rest of the endpoint.
+    # Content fields (everything except skill bindings and chat permissions).
+    updates = payload.model_dump(
+        exclude_none=True, exclude={"skill_ids", "chat_permissions"}
+    )
+
+    # System-preset carve-out (CHAT-PERM-15): presets stay read-only for content
+    # and skill edits, but chat permissions ARE editable (governance, not
+    # content). So reject only when a content/skill change is attempted.
+    is_preset = bool(agent.get("is_system_preset"))
+    content_change = bool(updates) or payload.skill_ids is not None
+    if is_preset and content_change:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="system preset agents are read-only except chat permissions",
+        )
+
+    # Role gate for chat-permission edits (CHAT-PERM-19 / review H1). The legacy
+    # endpoint had NO role check — any logged-in user could PATCH any agent. We
+    # only gate the new chat_permissions write here (content edits keep their
+    # existing preset-only policy). Grant if: caller owns the agent, OR is owner
+    # of the agent's scope team, OR (for presets / platform-scope) is a platform
+    # admin.
+    if payload.chat_permissions is not None:
+        user_uuid = _coerce_user_uuid(auth.user_id)
+        if not await _can_edit_chat_permissions(agent_repo, agent, user_uuid):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="not allowed to change this agent's chat permissions",
+            )
+
+    # Budget "unlimited" convention: 0 from the client means "clear the cap".
     for budget_field in ("monthly_token_budget", "monthly_cost_cents_budget"):
         if updates.get(budget_field) == 0:
             updates[budget_field] = None
+
+    # Deep-merge chat permissions into capability_profile.chat — never clobber
+    # the existing Phase 4.5 keys (CHAT-PERM-01, lesson: user_settings clobber).
+    chat_audit: dict | None = None
+    if payload.chat_permissions is not None:
+        existing_profile = agent.get("capability_profile")
+        if not isinstance(existing_profile, dict):
+            existing_profile = {}
+        before_chat = dict(existing_profile.get("chat") or {})
+        existing_chat = dict(before_chat)
+        existing_chat.update(payload.chat_permissions.model_dump(exclude_none=True))
+        updates["capability_profile"] = {**existing_profile, "chat": existing_chat}
+        chat_audit = {"before": before_chat, "after": existing_chat}
+
     if updates:
         user_uuid = _coerce_user_uuid(auth.user_id)
         await agent_repo.update_fields_versioned(
@@ -504,13 +544,24 @@ async def update_agent(
     if payload.skill_ids is not None:
         await agent_repo.update_skill_bindings(agent_uuid, payload.skill_ids)
 
+    # Audit the grant/change, not just denials (CHAT-PERM-21 / review M3).
+    if chat_audit is not None:
+        logger.info(
+            "chat_permissions changed by %s on agent %s: %s",
+            auth.user_id,
+            agent["slug"],
+            chat_audit,
+        )
+
     refreshed = await agent_repo.get_by_slug(slug)
     if refreshed is None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="agent disappeared after update",
         )
-    row = {**refreshed, "skill_ids": await agent_repo.get_skill_ids(agent_uuid)}
+    row = _with_chat_permissions(
+        {**refreshed, "skill_ids": await agent_repo.get_skill_ids(agent_uuid)}
+    )
     enriched = await _enrich_agents_with_scope_names([row])
     return enriched[0]
 
@@ -896,6 +947,54 @@ async def _user_is_admin(user_id: UUID) -> bool:
     if not result or not result.data:
         return False
     return result.data.get("role") == "admin"
+
+
+async def _is_team_owner(user_uuid, team_id) -> bool:
+    """Return True iff user has role 'owner' or 'admin' in team_members for team_id.
+
+    Fail closed (False) on any error or missing data.
+    """
+    try:
+        client = await get_async_supabase_admin()
+        result = (
+            await client.table("team_members")
+            .select("role")
+            .eq("team_id", team_id)
+            .eq("user_id", str(user_uuid))
+            .maybe_single()
+            .execute()
+        )
+        if not result or not result.data:
+            return False
+        return result.data.get("role") in ("owner", "admin")
+    except Exception:
+        return False
+
+
+async def _can_edit_chat_permissions(
+    agent_repo, agent: Dict[str, Any], user_uuid
+) -> bool:
+    """CHAT-PERM-19: who may edit an agent's chat permissions.
+
+    - Agent owner (user-scoped agent) → allowed.
+    - Owner of the agent's scope team → allowed.
+    - Platform admin → allowed (covers system presets / platform-scope agents).
+    """
+    owner_id = agent.get("user_id")
+    if owner_id is not None and str(owner_id) == str(user_uuid):
+        return True
+    team_id = agent.get("team_id")
+    if team_id is not None and await _is_team_owner(user_uuid, team_id):
+        return True
+    return await _user_is_admin(user_uuid)
+
+
+def _with_chat_permissions(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Inject the resolved (fail-closed) chat perms so AgentOut.chat_permissions
+    reflects storage. AgentOut has no capability_profile field, so without this
+    the response would always serialize the all-false default."""
+    caps = agent_chat_caps(row)
+    return {**row, "chat_permissions": ChatPermissionsOut.from_caps(caps).model_dump()}
 
 
 @router.delete(
