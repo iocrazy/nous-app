@@ -531,7 +531,8 @@ async def update_agent(
         existing_profile = agent.get("capability_profile")
         if not isinstance(existing_profile, dict):
             existing_profile = {}
-        before_chat = dict(existing_profile.get("chat") or {})
+        raw_chat = existing_profile.get("chat")
+        before_chat = dict(raw_chat) if isinstance(raw_chat, dict) else {}
         existing_chat = dict(before_chat)
         existing_chat.update(payload.chat_permissions.model_dump(exclude_none=True))
         updates["capability_profile"] = {**existing_profile, "chat": existing_chat}
@@ -964,7 +965,10 @@ async def _is_team_owner(user_uuid, team_id) -> bool:
         if not result or not result.data:
             return False
         return result.data.get("role") in ("owner", "admin")
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            f"_is_team_owner check failed for user={user_uuid} team={team_id}, denying: {exc}"
+        )
         return False
 
 
@@ -990,7 +994,10 @@ async def _can_edit_chat_permissions(
     # delete_skill admin gate).
     try:
         return await _user_is_admin(user_uuid)
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            f"_user_is_admin check failed for user={user_uuid}, denying: {exc}"
+        )
         return False
 
 

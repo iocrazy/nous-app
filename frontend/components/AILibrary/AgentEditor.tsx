@@ -125,6 +125,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
   const [allSkills, setAllSkills] = useState<AILibrarySkill[] | null>(null);
   const [skillsLoading, setSkillsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [permSaving, setPermSaving] = useState(false);
   const [resuming, setResuming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [forkModalOpen, setForkModalOpen] = useState(false);
@@ -695,8 +696,10 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
           <div className="mt-4 flex justify-end">
             <button
               type="button"
+              disabled={permSaving}
               className="rounded-lg btn-tint-indigo px-4 py-2 text-sm font-medium"
               onClick={async () => {
+                setPermSaving(true);
                 try {
                   const updated = await aiLibraryService.updateAgentChatPermissions(
                     agent.slug,
@@ -714,10 +717,12 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
                     t('aiLibrary.agents.saveError', { error: friendlyError(err) }),
                     'error',
                   );
+                } finally {
+                  setPermSaving(false);
                 }
               }}
             >
-              {t('common.save', 'Save')}
+              {permSaving ? t('common.saving') : t('common.save', 'Save')}
             </button>
           </div>
         </div>
