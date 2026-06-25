@@ -12,7 +12,13 @@ from app.repositories.hotspot_user_state_repository import (
     HotspotUserStateRepository,
 )
 from app.repositories.hotspots_repository import HotspotsRepository
-from app.repositories.signal_sources_repository import SignalSourcesRepository
+from app.repositories.signal_sources_repository import (
+    ALLOWED_KINDS,
+    SignalSourcesRepository,
+)
+from app.repositories.user_hidden_sources_repository import (
+    UserHiddenSourcesRepository,
+)
 from app.repositories.user_topic_interest_repository import (
     UserTopicInterestRepository,
 )
@@ -25,8 +31,10 @@ from app.schemas.topics import (
     HotspotStateResponse,
     InterestRequest,
     InterestResponse,
+    SourceCreateRequest,
     SourceHealthOut,
     SourceHealthResponse,
+    SourceMutationResponse,
 )
 from app.services.storyboard.script.script_ai_service import ScriptAIService
 from app.services.topics.embedding_service import TopicEmbeddingService
@@ -70,17 +78,26 @@ def _to_out(
     )
 
 
+async def _visible_source_ids(user_id: str) -> list[str]:
+    """The caller's feed allowlist: system + own sources, minus the ones they've
+    hidden. Every feed read scopes ``source_id IN (...)`` to this set, so a
+    deleted/other-user/hidden source's hotspots never surface."""
+    hidden = await UserHiddenSourcesRepository().list_hidden_ids(user_id)
+    return await SignalSourcesRepository().feed_source_ids(user_id, hidden)
+
+
 @router.get("", response_model=HotspotListResponse)
 async def list_hotspots(
     auth: AuthDep,
     day: Optional[str] = Query(None, description="YYYY-MM-DD"),
     category: Optional[str] = Query(None),
     q: Optional[str] = Query(None, description="free-text search over hotspots"),
-    view: str = Query("all", description="all | saved | hidden"),
+    view: str = Query("all", description="all | saved | hidden | foryou"),
     limit: int = Query(100, ge=1, le=300),
 ):
     repo = HotspotsRepository()
     state_repo = HotspotUserStateRepository()
+    visible = await _visible_source_ids(auth.user_id)
 
     if view == "foryou":
         # Personalized: hotspots ranked by cosine similarity to the user's
@@ -89,19 +106,21 @@ async def list_hotspots(
         ranked = await UserTopicInterestRepository().rank_hotspot_ids(
             auth.user_id, limit=limit
         )
-        fetched = await repo.list_by_ids(ranked, limit=limit)
+        fetched = await repo.list_by_ids(ranked, limit=limit, source_ids=visible)
         order = {rid: n for n, rid in enumerate(ranked)}
         rows = sorted(fetched, key=lambda r: order.get(str(r.get("id")), 1 << 30))
     elif view in ("saved", "hidden"):
         # These views span all dates: drive off the user's state table.
         flag = "is_saved" if view == "saved" else "is_hidden"
         ids = await state_repo.list_ids_where(auth.user_id, flag=flag)
-        rows = await repo.list_by_ids(ids, limit=limit)
+        rows = await repo.list_by_ids(ids, limit=limit, source_ids=visible)
     else:
         # When searching, span all dates — a topic is found regardless of which
         # day it landed on. The day filter only applies to plain browsing.
         effective_day = None if (q and q.strip()) else day
-        rows = await repo.list_for_date(effective_day, category, limit=limit, q=q)
+        rows = await repo.list_for_date(
+            effective_day, category, limit=limit, q=q, source_ids=visible
+        )
 
     states = await state_repo.get_states(auth.user_id, [str(r.get("id")) for r in rows])
     items: list[HotspotOut] = []
@@ -163,7 +182,9 @@ async def hotspot_dates(auth: AuthDep, limit_days: int = Query(60, ge=1, le=180)
     return DatesResponse(dates=await repo.distinct_dates(limit_days))
 
 
-def _to_health_out(row: dict) -> SourceHealthOut:
+def _to_health_out(
+    row: dict, *, is_owner: bool = False, is_hidden: bool = False
+) -> SourceHealthOut:
     return SourceHealthOut(
         id=str(row.get("id")),
         name=row.get("name") or "",
@@ -175,17 +196,92 @@ def _to_health_out(row: dict) -> SourceHealthOut:
         last_error=row.get("last_error"),
         last_fetched_at=row.get("last_fetched_at"),
         last_ok_at=row.get("last_ok_at"),
+        is_owner=is_owner,
+        is_hidden=is_hidden,
     )
 
 
 @router.get("/sources/health", response_model=SourceHealthResponse)
 async def source_health(auth: AuthDep):
-    """Read-only health of all signal sources (worst-first). Surfaces which
-    feeds have gone degraded/dead so a maintainer can react. No mutation."""
+    """The caller's manageable signal sources (worst-health-first): system
+    sources + their own. Each row carries ``is_owner`` (deletable) and
+    ``is_hidden`` (closed from this user's feed). Other users' private sources
+    are not listed."""
     repo = SignalSourcesRepository()
-    rows = await repo.list_all()
-    sources = [_to_health_out(r) for r in rows]
+    rows = await repo.list_visible(auth.user_id)
+    hidden = set(await UserHiddenSourcesRepository().list_hidden_ids(auth.user_id))
+    sources = [
+        _to_health_out(
+            r,
+            is_owner=str(r.get("user_id")) == auth.user_id,
+            is_hidden=str(r.get("id")) in hidden,
+        )
+        for r in rows
+    ]
     return SourceHealthResponse(count=len(sources), sources=sources)
+
+
+@router.post("/sources", response_model=SourceMutationResponse)
+async def create_source(body: SourceCreateRequest, auth: AuthDep):
+    """Add a user-owned signal source. It starts collecting on the next fetch
+    cycle; its hotspots are private to this caller (scoped by the feed's
+    source-id filter — other clients never see them)."""
+    kind = (body.kind or "").strip()
+    name = (body.name or "").strip()
+    if kind not in ALLOWED_KINDS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"kind must be one of {', '.join(ALLOWED_KINDS)}",
+        )
+    if not name:
+        raise HTTPException(status_code=422, detail="name is required")
+    if not isinstance(body.config, dict):
+        raise HTTPException(status_code=422, detail="config must be an object")
+    row = await SignalSourcesRepository().create_source(
+        user_id=auth.user_id,
+        kind=kind,
+        name=name,
+        config=body.config,
+        category=(body.category or None),
+    )
+    return SourceMutationResponse(source=_to_health_out(row, is_owner=True))
+
+
+@router.delete("/sources/{source_id}", response_model=SourceMutationResponse)
+async def delete_source(source_id: str, auth: AuthDep):
+    """Delete a source the caller OWNS (stops collection; its hotspots drop out
+    of the feed). System sources can't be deleted — only hidden (use
+    ``POST /sources/{id}/hide``). 404 when not found or not owned."""
+    deleted = await SignalSourcesRepository().delete_source(
+        user_id=auth.user_id, source_id=source_id
+    )
+    if not deleted:
+        raise HTTPException(
+            status_code=404, detail="source not found or not owned by you"
+        )
+    # Clean up any stale hide row so it doesn't dangle after the source is gone.
+    await UserHiddenSourcesRepository().unhide(auth.user_id, source_id)
+    return SourceMutationResponse(source=None)
+
+
+@router.post("/sources/{source_id}/hide", response_model=SourceMutationResponse)
+async def hide_source(source_id: str, auth: AuthDep):
+    """Close a source for THIS caller: exclude its hotspots from their feed. The
+    source keeps collecting globally; other clients are unaffected. Works on any
+    source the caller can see (system or own). 404 when not visible to them."""
+    repo = SignalSourcesRepository()
+    visible = {str(r.get("id")) for r in await repo.list_visible(auth.user_id)}
+    if source_id not in visible:
+        raise HTTPException(status_code=404, detail="source not found")
+    await UserHiddenSourcesRepository().hide(auth.user_id, source_id)
+    return SourceMutationResponse(source=None)
+
+
+@router.delete("/sources/{source_id}/hide", response_model=SourceMutationResponse)
+async def unhide_source(source_id: str, auth: AuthDep):
+    """Re-open a previously closed source for this caller (idempotent)."""
+    await UserHiddenSourcesRepository().unhide(auth.user_id, source_id)
+    return SourceMutationResponse(source=None)
 
 
 @router.get("/{hotspot_id}", response_model=HotspotDetailResponse)
@@ -194,7 +290,8 @@ async def get_hotspot(hotspot_id: str, auth: AuthDep):
     caller's read/saved/hidden state. Declared after the static GET routes so
     ``/dates`` and ``/sources/health`` are not captured by ``{hotspot_id}``."""
     repo = HotspotsRepository()
-    row = await repo.get_by_id(hotspot_id)
+    visible = await _visible_source_ids(auth.user_id)
+    row = await repo.get_by_id(hotspot_id, source_ids=visible)
     if not row:
         raise HTTPException(status_code=404, detail="hotspot not found")
     state_repo = HotspotUserStateRepository()
@@ -214,7 +311,8 @@ async def _generate_script_for(title: str, summary: str, user_id: str) -> list:
 @router.post("/{hotspot_id}/generate-script")
 async def generate_script(hotspot_id: str, auth: AuthDep):
     repo = HotspotsRepository()
-    row = await repo.get_by_id(hotspot_id)
+    visible = await _visible_source_ids(auth.user_id)
+    row = await repo.get_by_id(hotspot_id, source_ids=visible)
     if not row:
         raise HTTPException(status_code=404, detail="hotspot not found")
     script = await _generate_script_for(

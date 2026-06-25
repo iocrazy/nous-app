@@ -88,9 +88,26 @@ class SourceHealthOut(BaseModel):
     last_error: Optional[str] = None
     last_fetched_at: Optional[str] = None
     last_ok_at: Optional[str] = None
+    # is_owner: this caller created the source (can delete it). System sources
+    # (user_id NULL) are is_owner=False — deletable by nobody, only hidable.
+    is_owner: bool = False
+    # is_hidden: this caller has "closed" the source (excluded from their feed).
+    is_hidden: bool = False
 
 
 class SourceHealthResponse(BaseModel):
     success: bool = True
     count: int
     sources: list[SourceHealthOut]
+
+
+class SourceCreateRequest(BaseModel):
+    kind: str  # newsnow | rss | http_api | custom
+    name: str
+    category: Optional[str] = None
+    config: dict = {}
+
+
+class SourceMutationResponse(BaseModel):
+    success: bool = True
+    source: Optional[SourceHealthOut] = None

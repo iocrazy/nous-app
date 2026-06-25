@@ -23,6 +23,10 @@ def compute_health(*, prev_failures: int, ok: bool, dead_threshold: int = 3) -> 
     }
 
 
+# Source kinds permitted by the signal_sources CHECK constraint (migration 304).
+ALLOWED_KINDS = ("newsnow", "rss", "http_api", "custom")
+
+
 class SignalSourcesRepository:
     TABLE = "signal_sources"
 
@@ -51,6 +55,80 @@ class SignalSourcesRepository:
             .execute()
         )
         return result.data or []
+
+    async def list_visible(self, user_id: str) -> list[dict[str, Any]]:
+        """Sources this user may see/manage: system sources (user_id IS NULL)
+        plus their own. Other users' private sources are excluded. Ordered
+        worst-health-first, then by name."""
+        client = await self._client()
+        result = (
+            await client.table(self.TABLE)
+            .select("*")
+            .or_(f"user_id.is.null,user_id.eq.{user_id}")
+            .order("health")
+            .order("name")
+            .execute()
+        )
+        return result.data or []
+
+    async def feed_source_ids(self, user_id: str, hidden_ids: list[str]) -> list[str]:
+        """Source ids whose hotspots belong in this user's feed: visible
+        (system + own) minus the ones they've hidden. The feed query filters
+        ``source_id IN (...)`` on this set, so a deleted/other-user/hidden
+        source's hotspots never surface."""
+        hidden = set(hidden_ids)
+        rows = await self.list_visible(user_id)
+        return [str(r["id"]) for r in rows if str(r["id"]) not in hidden]
+
+    async def get_source(self, source_id: str) -> dict | None:
+        """A single source by id (any owner) — for ownership/existence checks."""
+        client = await self._client()
+        result = (
+            await client.table(self.TABLE)
+            .select("*")
+            .eq("id", source_id)
+            .limit(1)
+            .execute()
+        )
+        return (result.data or [None])[0]
+
+    async def create_source(
+        self,
+        *,
+        user_id: str,
+        kind: str,
+        name: str,
+        config: dict[str, Any],
+        category: Optional[str],
+        enabled: bool = True,
+    ) -> dict[str, Any]:
+        """Insert a user-owned source. Its hotspots are scoped to this user via
+        the feed's source-id filter (other clients never see them)."""
+        client = await self._client()
+        row = {
+            "user_id": user_id,
+            "kind": kind,
+            "name": name,
+            "config": config or {},
+            "category": category,
+            "enabled": enabled,
+        }
+        result = await client.table(self.TABLE).insert(row).execute()
+        return (result.data or [row])[0]
+
+    async def delete_source(self, *, user_id: str, source_id: str) -> bool:
+        """Delete a source the user OWNS (stops collection). Returns False when
+        nothing was deleted (not found, or not owned by this user — the
+        ``user_id`` predicate makes deleting others'/system sources a no-op)."""
+        client = await self._client()
+        result = (
+            await client.table(self.TABLE)
+            .delete()
+            .eq("id", source_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        return bool(result.data)
 
     async def mark_health(
         self,

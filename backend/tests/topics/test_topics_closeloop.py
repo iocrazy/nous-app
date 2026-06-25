@@ -8,7 +8,7 @@ def client(monkeypatch):
     from app.api import topics_router as tr
 
     class _Repo:
-        async def get_by_id(self, hid):
+        async def get_by_id(self, hid, source_ids=None):
             if hid == "news1":
                 return {
                     "id": "news1",
@@ -19,7 +19,17 @@ def client(monkeypatch):
                 }
             return None  # unknown id -> 404
 
+    class _Sources:
+        async def feed_source_ids(self, user_id, hidden_ids):
+            return ["s1"]
+
+    class _Hidden:
+        async def list_hidden_ids(self, user_id):
+            return []
+
     monkeypatch.setattr(tr, "HotspotsRepository", lambda: _Repo())
+    monkeypatch.setattr(tr, "SignalSourcesRepository", lambda: _Sources())
+    monkeypatch.setattr(tr, "UserHiddenSourcesRepository", lambda: _Hidden())
 
     async def fake_script(title, summary, user_id):
         return [{"title": "Chapter 1", "summary": "..."}]
