@@ -170,3 +170,35 @@ export function useUpdateGraphMemorySettings() {
     },
   })
 }
+
+// ── Topic Scoring config ──────────────────────────────────────────────────
+export interface TopicScoringConfig {
+  dim_weights: Record<string, number>
+  tier_weights: Record<string, number>
+  featured_min_score: number
+}
+
+const TOPIC_SCORING_URL = '/api/v1/admin/settings/topics-scoring'
+
+export function useTopicScoringConfig() {
+  return useQuery({
+    queryKey: ['settings', 'topics-scoring'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<TopicScoringConfig>(TOPIC_SCORING_URL)
+      return data
+    },
+  })
+}
+
+export function useUpdateTopicScoringConfig() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (update: TopicScoringConfig) => {
+      const { data } = await apiClient.put<TopicScoringConfig>(TOPIC_SCORING_URL, update)
+      return data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings', 'topics-scoring'] })
+    },
+  })
+}

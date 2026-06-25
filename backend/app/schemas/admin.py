@@ -1,7 +1,7 @@
 """Admin API schemas for requests and responses."""
 
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -699,3 +699,16 @@ class AdminTeamCreditsDetailResponse(BaseModel):
     storage_used_bytes: int = 0
     member_count: int = 0
     recent_transactions: List[AdminCreditTransactionResponse] = []
+
+
+class TopicScoringConfigResponse(BaseModel):
+    """Admin-tunable hotspot scoring knobs (system_settings['topics.scoring']).
+
+    dim_weights: per-dimension weight (novelty/impact/credibility/actionability/
+    shareability). tier_weights: source-credibility-tier multipliers, keyed by
+    tier as a string ("1"/"2"/"3"). featured_min_score: the Featured-board floor.
+    """
+
+    dim_weights: Dict[str, float]
+    tier_weights: Dict[str, float]
+    featured_min_score: float

@@ -16,7 +16,7 @@ from app.services.topics.clustering import (
 )
 from app.services.topics.embedding_service import TopicEmbeddingService
 from app.services.topics.keyword_filter import relevance_filter
-from app.services.topics.scoring import compute_quality
+from app.services.topics.scoring import compute_quality, load_scoring_config
 from app.services.topics.topic_scorer import TopicScorerService
 
 # Phase 2 scoring bounds: how many unscored hotspots to enrich per tick, and the
@@ -178,6 +178,7 @@ async def score_unscored_once(
     if not rows:
         return {"unscored": 0, "scored": 0}
     tiers = await sources_repo.tier_map()
+    cfg = await load_scoring_config()  # admin-tuned weights, else code defaults
     scored = 0
     for start in range(0, len(rows), batch_size):
         chunk = rows[start : start + batch_size]
@@ -201,7 +202,12 @@ async def score_unscored_once(
                 continue
             tier = tiers.get(str(r.get("source_id")), 2)
             patch = {
-                "score": compute_quality(e["dims"], tier),
+                "score": compute_quality(
+                    e["dims"],
+                    tier,
+                    weights=cfg.dim_weights,
+                    tier_weights=cfg.tier_weights,
+                ),
                 "score_dims": e["dims"],
                 "reason": e.get("reason"),
                 "ai_summary": e.get("ai_summary"),

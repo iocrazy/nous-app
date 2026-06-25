@@ -14,7 +14,10 @@ published it is handled here by tier weight.
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Optional
+
+from loguru import logger
 
 # The dimensions the LLM scores (each 0..1). Weights sum to 1.0.
 DIM_WEIGHTS: dict[str, float] = {
@@ -33,6 +36,11 @@ DIM_KEYS = tuple(DIM_WEIGHTS.keys())
 TIER_WEIGHTS: dict[int, float] = {1: 1.0, 2: 0.92, 3: 0.82}
 DEFAULT_TIER = 2
 
+# Featured-board score floor (code default; admin-tunable via system_settings).
+DEFAULT_FEATURED_MIN_SCORE = 0.6
+# system_settings key holding the admin-tuned scoring config (jsonb).
+SCORING_CONFIG_KEY = "topics.scoring"
+
 
 def _clamp01(v: Any) -> float:
     """Coerce to float in [0,1]; non-numeric / missing → 0.0."""
@@ -42,24 +50,110 @@ def _clamp01(v: Any) -> float:
         return 0.0
 
 
-def tier_weight(tier: Any) -> float:
+def tier_weight(tier: Any, tier_weights: dict[int, float] | None = None) -> float:
+    tw = tier_weights or TIER_WEIGHTS
     try:
-        return TIER_WEIGHTS.get(int(tier), TIER_WEIGHTS[DEFAULT_TIER])
+        return tw.get(int(tier), tw.get(DEFAULT_TIER, TIER_WEIGHTS[DEFAULT_TIER]))
     except (TypeError, ValueError):
-        return TIER_WEIGHTS[DEFAULT_TIER]
+        return tw.get(DEFAULT_TIER, TIER_WEIGHTS[DEFAULT_TIER])
 
 
-def compute_quality(dims: dict[str, Any] | None, tier: Any = DEFAULT_TIER) -> float:
+def compute_quality(
+    dims: dict[str, Any] | None,
+    tier: Any = DEFAULT_TIER,
+    *,
+    weights: dict[str, float] | None = None,
+    tier_weights: dict[int, float] | None = None,
+) -> float:
     """Weighted-dimension composite × source-tier prior, clamped to [0,1].
 
-    Missing/garbage dimensions count as 0 (defensive — never raises). Returns
-    0.0 when ``dims`` is empty/None so an item with no usable judgment stays low
-    rather than accidentally high.
+    ``weights`` / ``tier_weights`` override the code defaults (admin-tuned config
+    flows in here). Missing/garbage dimensions count as 0 (defensive — never
+    raises). Returns 0.0 when ``dims`` is empty/None so an item with no usable
+    judgment stays low rather than accidentally high.
     """
     if not isinstance(dims, dict) or not dims:
         return 0.0
-    base = sum(DIM_WEIGHTS[k] * _clamp01(dims.get(k)) for k in DIM_KEYS)
-    return round(_clamp01(base * tier_weight(tier)), 4)
+    w = weights or DIM_WEIGHTS
+    base = sum(w.get(k, DIM_WEIGHTS[k]) * _clamp01(dims.get(k)) for k in DIM_KEYS)
+    return round(_clamp01(base * tier_weight(tier, tier_weights)), 4)
+
+
+@dataclass(frozen=True)
+class ScoringConfig:
+    """Resolved scoring knobs — code defaults merged with admin overrides."""
+
+    dim_weights: dict[str, float]
+    tier_weights: dict[int, float]
+    featured_min_score: float
+
+
+def default_scoring_config() -> ScoringConfig:
+    return ScoringConfig(
+        dim_weights=dict(DIM_WEIGHTS),
+        tier_weights=dict(TIER_WEIGHTS),
+        featured_min_score=DEFAULT_FEATURED_MIN_SCORE,
+    )
+
+
+def merge_scoring_config(raw: Any) -> ScoringConfig:
+    """Merge an admin-stored jsonb blob over code defaults, validating every
+    field (clamped floats, known keys only). Never raises; bad input → defaults
+    for that field. Tier-weight JSON keys are strings → coerced to int."""
+    if not isinstance(raw, dict):
+        return default_scoring_config()
+    raw_dw = raw.get("dim_weights") if isinstance(raw.get("dim_weights"), dict) else {}
+    raw_tw = (
+        raw.get("tier_weights") if isinstance(raw.get("tier_weights"), dict) else {}
+    )
+    dim_weights = {
+        k: (
+            max(0.0, float(raw_dw[k]))
+            if isinstance(raw_dw.get(k), (int, float))
+            else DIM_WEIGHTS[k]
+        )
+        for k in DIM_KEYS
+    }
+    tier_weights: dict[int, float] = {}
+    for t in (1, 2, 3):
+        v = raw_tw.get(str(t), raw_tw.get(t))
+        tier_weights[t] = (
+            _clamp01(v) if isinstance(v, (int, float)) else TIER_WEIGHTS[t]
+        )
+    fms = raw.get("featured_min_score")
+    featured = (
+        _clamp01(fms) if isinstance(fms, (int, float)) else DEFAULT_FEATURED_MIN_SCORE
+    )
+    return ScoringConfig(dim_weights, tier_weights, featured)
+
+
+async def load_scoring_config() -> ScoringConfig:
+    """Admin-tuned scoring config from ``system_settings['topics.scoring']``,
+    merged over code defaults. Service-role engine read (bypasses RLS). Never
+    raises — any failure / missing key returns the code defaults."""
+    try:
+        from app.db import engine as db_engine
+
+        if not db_engine.is_configured():
+            return default_scoring_config()
+        raw = await db_engine.fetch_val(
+            "SELECT value FROM public.system_settings WHERE key = :k",
+            {"k": SCORING_CONFIG_KEY},
+        )
+        return merge_scoring_config(raw)
+    except Exception:  # noqa: BLE001
+        logger.warning("[scoring] config read failed — using code defaults")
+        return default_scoring_config()
+
+
+def config_payload(cfg: Optional[ScoringConfig] = None) -> dict[str, Any]:
+    """Serialize a config to the admin GET/PUT jsonb shape (tier keys as str)."""
+    c = cfg or default_scoring_config()
+    return {
+        "dim_weights": c.dim_weights,
+        "tier_weights": {str(t): w for t, w in c.tier_weights.items()},
+        "featured_min_score": c.featured_min_score,
+    }
 
 
 def normalize_dims(raw: Any) -> dict[str, float] | None:
