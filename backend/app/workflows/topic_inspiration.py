@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 from dbos import DBOS
@@ -121,30 +122,55 @@ async def run_topic_fetch_once(
     sources_repo = sources_repo or SignalSourcesRepository()
     hotspots_repo = hotspots_repo or HotspotsRepository()
     sources = await sources_repo.list_enabled()
-    ok = failed = written = dropped = 0
+
+    # Dedup the EXPENSIVE upstream fetch by (kind, config): N users subscribing
+    # to the same platform_id / feed url hit the upstream ONCE per cycle, not N
+    # times. This caps NAS + upstream load at O(distinct sources) instead of
+    # O(total sources) and removes the anti-scraping amplification. Per-source
+    # work (tier-specific L0 filter, per-user hotspot rows, health) stays per
+    # source — only the network fetch is shared.
+    groups: dict[tuple[str, str], list[dict]] = {}
     for src in sources:
-        sid = str(src["id"])
+        key = (src["kind"], json.dumps(src.get("config") or {}, sort_keys=True))
+        groups.setdefault(key, []).append(src)
+
+    ok = failed = written = dropped = upstream = 0
+    for (kind, _cfg), group in groups.items():
         try:
-            adapter = get_adapter(src["kind"])
-            fetched = await adapter.fetch(src)
-            # L0 pre-filter: noisy tier-3 sources must clear the AI-relevance
-            # gate before scoring; curated sources pass through.
-            candidates = relevance_filter(fetched, tier=int(src.get("tier") or 2))
-            dropped += len(fetched) - len(candidates)
-            rows = hotspots_repo.build_rows(
-                candidates, source_id=sid, category=src.get("category")
+            fetched = await get_adapter(kind).fetch(group[0])  # one upstream call
+            upstream += 1
+        except Exception as e:  # noqa: BLE001 — shared upstream: whole group fails
+            for src in group:
+                await sources_repo.mark_health(str(src["id"]), ok=False, error=str(e))
+                failed += 1
+            logger.warning(
+                f"topic source group ({kind}, {group[0].get('name')}) failed: {e}"
             )
-            written += await hotspots_repo.upsert_with_heat(rows)
-            await sources_repo.mark_health(sid, ok=True)
-            ok += 1
-        except (
-            Exception
-        ) as e:  # noqa: BLE001 — per-source isolation, never break the batch
-            logger.warning(f"topic source {sid} ({src.get('name')}) failed: {e}")
-            await sources_repo.mark_health(sid, ok=False, error=str(e))
-            failed += 1
+            continue
+        for src in group:
+            sid = str(src["id"])
+            try:
+                # L0 pre-filter is tier-specific, so it runs per source.
+                candidates = relevance_filter(fetched, tier=int(src.get("tier") or 2))
+                dropped += len(fetched) - len(candidates)
+                rows = hotspots_repo.build_rows(
+                    candidates,
+                    source_id=sid,
+                    category=src.get("category"),
+                    source_label=src.get("name"),
+                )
+                written += await hotspots_repo.upsert_with_heat(rows)
+                await sources_repo.mark_health(sid, ok=True)
+                ok += 1
+            except Exception as e:  # noqa: BLE001 — per-source isolation
+                logger.warning(f"topic source {sid} ({src.get('name')}) failed: {e}")
+                await sources_repo.mark_health(sid, ok=False, error=str(e))
+                failed += 1
+
     summary = {
         "sources": len(sources),
+        "groups": len(groups),  # distinct (kind, config) = upstream fetch count
+        "upstream_fetches": upstream,
         "ok": ok,
         "failed": failed,
         "written": written,
