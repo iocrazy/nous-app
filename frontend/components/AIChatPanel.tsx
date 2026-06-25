@@ -22,7 +22,7 @@ import type { Editor } from '@tiptap/core';
 import { aiLibraryService } from '../services/aiLibraryService';
 import type {
   AILibraryAgent,
-  ChatMessage,
+  AIChatMessage,
   ChatSession,
   ChatToolCall,
   ResourceRefAttachment,
@@ -66,7 +66,7 @@ function formatTimestamp(isoString?: string | null): string {
  * rows (pre Step B) just won't have the field. Returns [] for any shape
  * we don't recognise so the renderer can drop in unconditionally.
  */
-function extractToolCalls(msg: ChatMessage): ChatToolCall[] {
+function extractToolCalls(msg: AIChatMessage): ChatToolCall[] {
   const meta = msg.metadata_json;
   if (!meta || typeof meta !== 'object') return [];
   const raw = (meta as Record<string, unknown>).tool_calls;
@@ -85,7 +85,7 @@ function extractToolCalls(msg: ChatMessage): ChatToolCall[] {
  * await_approval; absent on the common ran-to-completion turn.
  */
 function extractAwaitingApproval(
-  msg: ChatMessage,
+  msg: AIChatMessage,
 ): { approvalId: string | null; reason: string; hook?: string } | undefined {
   const meta = msg.metadata_json;
   if (!meta || typeof meta !== 'object') return undefined;
@@ -118,7 +118,7 @@ export function AIChatPanel({
   const [agents, setAgents] = useState<AILibraryAgent[]>([]);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<AIChatMessage[]>([]);
   const [selectedAgentSlug, setSelectedAgentSlug] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -362,7 +362,7 @@ export function AIChatPanel({
 
       // Optimistic user bubble — replaced by the authoritative row after
       // the server responds and we reload the message list.
-      const tempUser: ChatMessage = {
+      const tempUser: AIChatMessage = {
         id: `tmp-user-${Date.now()}`,
         session_id: activeSessionId,
         role: 'user',

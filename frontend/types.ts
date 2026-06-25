@@ -1342,7 +1342,7 @@ export interface UsageAggregate {
 
 export type ChatMessageRole = 'user' | 'assistant' | 'system';
 
-export interface ChatMessage {
+export interface AIChatMessage {
   id: string; // UUID
   session_id: string;
   role: ChatMessageRole;
@@ -1372,7 +1372,7 @@ export interface ChatSession {
 }
 
 export interface ChatSessionWithMessages extends ChatSession {
-  messages: ChatMessage[];
+  messages: AIChatMessage[];
 }
 
 export interface CreateChatSessionPayload {
@@ -1502,7 +1502,7 @@ export interface ChatToolCall {
 }
 
 export interface ChatResponse {
-  message: ChatMessage;
+  message: AIChatMessage;
   usage: { prompt_tokens?: number; completion_tokens?: number };
   run_id?: string | null;
   tool_calls?: ChatToolCall[];
@@ -1536,3 +1536,29 @@ export type ResourceSearchResponse = {
   counts: { all: number; video: number; image: number; doc: number; audio: number; pdf: number };
   next_cursor: string | null;
 };
+
+export interface Channel {
+  id: string;
+  team_id: string;
+  type: 'dm' | 'group' | 'public';
+  history_mode: 'shared' | 'joined';
+  name: string | null;
+  topic: string | null;
+  last_message_seq: string;
+  unread: number;
+  created_at: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  channel_id: string;
+  seq: string;
+  sender_id: string | null;
+  sender_type: 'user' | 'agent';
+  content_type: 'text' | 'media_card' | 'task_card' | 'system';
+  body: Record<string, unknown>;
+  reply_to_id: string | null;
+  edited_at: string | null;
+  deleted_at: string | null;
+  created_at: string;
+}
