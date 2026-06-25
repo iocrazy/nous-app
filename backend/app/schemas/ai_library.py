@@ -3,12 +3,49 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
 # ---------- Agents ----------
+
+
+class ChatPermissionsIn(BaseModel):
+    """Partial chat-permission patch merged into capability_profile.chat.
+
+    All fields optional so the client can toggle one at a time. ``None`` means
+    "leave unchanged"; absent in storage means denied (see agent_chat_caps).
+    """
+
+    enabled: Optional[bool] = None
+    read_team_resources: Optional[bool] = None
+    auto_broadcast: Optional[bool] = None
+    allowed_team_ids: Optional[list[int]] = None
+
+
+class ChatPermissionsOut(BaseModel):
+    """Read shape exposed on AgentOut — the resolved (fail-closed) chat caps.
+
+    Built from agent_chat_caps so the wire value matches enforcement exactly.
+    We expose ONLY chat perms, never the raw capability_profile (which holds
+    internal gating like tool_blacklist).
+    """
+
+    enabled: bool = False
+    read_team_resources: bool = False
+    auto_broadcast: bool = False
+    allowed_team_ids: list[int] = Field(default_factory=list)
+
+    @classmethod
+    def from_caps(cls, caps: Any) -> ChatPermissionsOut:
+        """Build from a ChatCaps instance (duck-typed to avoid circular import)."""
+        return cls(
+            enabled=caps.enabled,
+            read_team_resources=caps.read_team_resources,
+            auto_broadcast=caps.auto_broadcast,
+            allowed_team_ids=list(caps.allowed_team_ids),
+        )
 
 
 class AgentBase(BaseModel):
@@ -53,6 +90,10 @@ class AgentOut(AgentBase):
     # Run limits (mig 286, paperclip P4). NULL = unlimited.
     timeout_sec: Optional[int] = None
     max_concurrent_runs: Optional[int] = None
+    # Team Chat PHASE-0: resolved (fail-closed) chat capabilities. Populated by
+    # the router from agent_chat_caps(row); defaults to all-false so clients
+    # never have to guess. NOT the raw capability_profile (no internal-gating leak).
+    chat_permissions: ChatPermissionsOut = Field(default_factory=ChatPermissionsOut)
 
 
 class AgentUpdate(BaseModel):
@@ -79,6 +120,10 @@ class AgentUpdate(BaseModel):
     # Run limits (mig 286). 0/None timeout = no cap; concurrency >= 1.
     timeout_sec: Optional[int] = Field(default=None, ge=0)
     max_concurrent_runs: Optional[int] = Field(default=None, ge=1)
+    # Team Chat PHASE-0: merged into capability_profile.chat by the router
+    # (deep-merge, never clobbers the Phase 4.5 keys). Allowed even on
+    # system-preset agents (permissions are governance, not content).
+    chat_permissions: Optional[ChatPermissionsIn] = None
 
 
 class AgentCreate(BaseModel):
