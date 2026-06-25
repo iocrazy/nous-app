@@ -134,6 +134,11 @@ export function AIModelsPage() {
   const [saving, setSaving] = useState(false)
   const [testingId, setTestingId] = useState<string | null>(null)
   const [testingProvider, setTestingProvider] = useState<string | null>(null)
+  // Provider Test progress (done/total), so the card shows "Testing 2/3"
+  // instead of an opaque spinner. Keyed by provider key.
+  const [testProgress, setTestProgress] = useState<
+    Record<string, { done: number; total: number }>
+  >({})
   const [form] = Form.useForm()
 
   const apiBase = import.meta.env.VITE_API_URL || ''
@@ -233,21 +238,38 @@ export function AIModelsPage() {
   }
 
   // Provider-level test, directly on the card: probe EVERY model in the
-  // provider (sequentially) and persist each, so the provider dot (aggregate)
-  // and per-model dots all reflect a real check.
+  // provider and persist each, so the provider dot (aggregate) and per-model
+  // dots all reflect a real check. Runs the probes CONCURRENTLY — total time is
+  // the slowest single model, not the sum (sequential made a 3-model card spin
+  // for the sum of three real inference calls).
   const handleTestProvider = async (g: ProviderGroup) => {
     const k = `${g.provider}|${g.base_url}`
+    const total = g.models.length
     setTestingProvider(k)
-    let ok = 0
+    setTestProgress((p) => ({ ...p, [k]: { done: 0, total } }))
     try {
-      for (const m of g.models) {
-        if (await runModelTest(m)) ok += 1
-      }
-      const total = g.models.length
+      const results = await Promise.all(
+        g.models.map((m) =>
+          runModelTest(m).then((r) => {
+            // Bump the completed count as each concurrent probe resolves.
+            setTestProgress((p) => ({
+              ...p,
+              [k]: { done: (p[k]?.done ?? 0) + 1, total },
+            }))
+            return r
+          }),
+        ),
+      )
+      const ok = results.filter(Boolean).length
       if (ok === total) Message.success(`${g.provider}: all ${total} models reachable`)
       else Message.warning(`${g.provider}: ${ok}/${total} models reachable`)
     } finally {
       setTestingProvider(null)
+      setTestProgress((p) => {
+        const next = { ...p }
+        delete next[k]
+        return next
+      })
     }
   }
 
@@ -427,13 +449,19 @@ export function AIModelsPage() {
                   })()}
                 </div>
                 <Space>
-                  <Button
-                    size="small"
-                    loading={testingProvider === `${g.provider}|${g.base_url}`}
-                    onClick={() => handleTestProvider(g)}
-                  >
-                    Test
-                  </Button>
+                  {(() => {
+                    const k = `${g.provider}|${g.base_url}`
+                    const prog = testProgress[k]
+                    return (
+                      <Button
+                        size="small"
+                        loading={testingProvider === k}
+                        onClick={() => handleTestProvider(g)}
+                      >
+                        {prog ? `Testing ${prog.done}/${prog.total}` : 'Test'}
+                      </Button>
+                    )
+                  })()}
                   <Button size="small" icon={<IconPlus />} onClick={() => openAddModels(g)}>Add Models</Button>
                 </Space>
               </div>
