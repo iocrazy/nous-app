@@ -39,8 +39,8 @@
 | CHAT-ARCH-01 | **分两层**：第一层"人的群聊"（新建 `channels`/`channel_members`/`channel_messages`）；第二层"agent 作为频道参与者"（@agent → 复用 `AgentRunner` → 回写一条 message） | 与现有 `agent_runs vs task_tracking 决定不合并` 先例一致 | ☐ |
 | CHAT-ARCH-02 | **不**扩展现有单用户 `ai_sessions` 成群聊。agent 在频道里每次回话仍起一个 `ai_session`/`agent_run` 做记录，与人群聊表解耦 | `ai_sessions.user_id` 是单 owner（`backend/app/models/ai.py:267`） | ☐ |
 | CHAT-ARCH-03 | 复用现有 agent 运行时（实测 85% 可复用）：`AgentRunner.stream_turn`（已支持 SSE）、`RunRecorder`、Hook 链（Pre/PostToolUse）、`resource_fetch` 工具 | `backend/app/services/ai/runner/agent_runner.py:209` | ☐ |
-| CHAT-ARCH-04 | 后端分层遵循 Router→Service→Repository；新增 `chat_router.py` / `chat_service.py` / `chat_repository.py` | CLAUDE.md 分层规范 | ☐ |
-| CHAT-ARCH-05 | 所有新表主键用 `generate_snowflake_id()`（BIGINT），与全库一致 | `migrations/050_snowflake_id_infrastructure.sql:21` | ☐ |
+| CHAT-ARCH-04 | 后端分层遵循 Router→Service→Repository；新增 `chat_router.py` / `chat_service.py` / `chat_repository.py` | CLAUDE.md 分层规范 | ☑ |
+| CHAT-ARCH-05 | 所有新表主键用 `generate_snowflake_id()`（BIGINT），与全库一致 | `migrations/050_snowflake_id_infrastructure.sql:21` | ☑ |
 
 ---
 
@@ -48,16 +48,16 @@
 
 | ID | 表/字段 | 设计要点 | 来源 | 状态 |
 |----|---------|---------|------|------|
-| CHAT-DATA-01 | `channels(id snowflake PK, team_id, type, history_mode, last_message_seq int default 0, name, topic, created_by, is_archived, created_at)` | 频道主表 | Mattermost `channel.go:27` | ☐ |
-| CHAT-DATA-02 | `channels.type ∈ {dm, group, public}`（采群模型，见 CHAT-GOAL-06）：`group`=成员制群（主力，含原 private 语义）；`dm`=单聊；`public`=可选 team 可发现频道 | 飞书群模型 | MM `O/P/D/G`、RC `c/p/d/l` | ☐ |
-| CHAT-DATA-03 | `channels.history_mode ∈ {shared, joined}`，**与 type 正交**、建频道时定死、事后不可改。**默认 `shared`**（决策 CHAT-OPEN-01，先服务小团队） | "加入规则"与"历史可见性"是两个独立维度 | Matrix `join_rules`×`history_visibility` | ☐ |
-| CHAT-DATA-04 | `channel_members(channel_id, user_id, last_read_seq int default 0, mention_count int default 0, roles text[], open bool, notify_level, joined_at, PK(channel_id,user_id))` | **Subscription 模式**：一行 = 成员关系 + 未读 + 房内角色 | Rocket.Chat `ISubscription.ts:11-83` | ☐ |
-| CHAT-DATA-05 | 索引：`channel_members(user_id, open)`（列我的侧栏）；`channel_messages(channel_id, seq)` UNIQUE（排序/分页/补洞） | 高效 keyset | RC `Subscriptions.ts:44`、MM `post_store.go:670` | ☐ |
-| CHAT-DATA-06 | `channel_messages(id snowflake PK, channel_id, seq int, sender_id, sender_type {user,agent}, content_type, body jsonb, reply_to_id, from_bot_agent_id, edited_at, deleted_at, created_at)` | 消息表 | MM Post `post.go:127` | ☐ |
-| CHAT-DATA-07 | **每会话自增 `seq`** 为权威顺序（非全局）：`UPDATE channels SET last_message_seq=last_message_seq+1 RETURNING` 与 insert 同事务（行锁，不依赖 Redis） | seq 同时驱动排序/未读/补洞 | Tinode/OpenIM per-channel seq | ☐ |
-| CHAT-DATA-08 | `agent_channels(agent_id, channel_id, added_by, created_at, PK(agent_id,channel_id))`：agent 入驻频道白名单 | "成员资格 = 数据边界" | MM outgoing webhook `ChannelId` 约束 | ☐ |
-| CHAT-DATA-09 | `content_type ∈ {text, media_card, task_card, system}`；`media_card`/`task_card` 的 `body` 用统一卡片 schema（见 CHAT-MSG-06） | 富消息 | MM `message_attachment.go:20` | ☐ |
-| CHAT-DATA-10 | DM 用 `type='dm'` + 固定 2 成员复用同一套表/policy，**不单开 DM 表** | 复用 | RC subscription 统一模型 | ☐ |
+| CHAT-DATA-01 | `channels(id snowflake PK, team_id, type, history_mode, last_message_seq int default 0, name, topic, created_by, is_archived, created_at)` | 频道主表 | Mattermost `channel.go:27` | ☑ |
+| CHAT-DATA-02 | `channels.type ∈ {dm, group, public}`（采群模型，见 CHAT-GOAL-06）：`group`=成员制群（主力，含原 private 语义）；`dm`=单聊；`public`=可选 team 可发现频道 | 飞书群模型 | MM `O/P/D/G`、RC `c/p/d/l` | ☑ |
+| CHAT-DATA-03 | `channels.history_mode ∈ {shared, joined}`，**与 type 正交**、建频道时定死、事后不可改。**默认 `shared`**（决策 CHAT-OPEN-01，先服务小团队） | "加入规则"与"历史可见性"是两个独立维度 | Matrix `join_rules`×`history_visibility` | ☑ |
+| CHAT-DATA-04 | `channel_members(channel_id, user_id, last_read_seq int default 0, mention_count int default 0, roles text[], open bool, notify_level, joined_at, PK(channel_id,user_id))` | **Subscription 模式**：一行 = 成员关系 + 未读 + 房内角色 | Rocket.Chat `ISubscription.ts:11-83` | ☑ |
+| CHAT-DATA-05 | 索引：`channel_members(user_id, open)`（列我的侧栏）；`channel_messages(channel_id, seq)` UNIQUE（排序/分页/补洞） | 高效 keyset | RC `Subscriptions.ts:44`、MM `post_store.go:670` | ☑ |
+| CHAT-DATA-06 | `channel_messages(id snowflake PK, channel_id, seq int, sender_id, sender_type {user,agent}, content_type, body jsonb, reply_to_id, from_bot_agent_id, edited_at, deleted_at, created_at)` | 消息表 | MM Post `post.go:127` | ☑ |
+| CHAT-DATA-07 | **每会话自增 `seq`** 为权威顺序（非全局）：`UPDATE channels SET last_message_seq=last_message_seq+1 RETURNING` 与 insert 同事务（行锁，不依赖 Redis） | seq 同时驱动排序/未读/补洞 | Tinode/OpenIM per-channel seq | ☑ |
+| CHAT-DATA-08 | `agent_channels(agent_id, channel_id, added_by, created_at, PK(agent_id,channel_id))`：agent 入驻频道白名单 | "成员资格 = 数据边界" | MM outgoing webhook `ChannelId` 约束 | ☑ |
+| CHAT-DATA-09 | `content_type ∈ {text, media_card, task_card, system}`；`media_card`/`task_card` 的 `body` 用统一卡片 schema（见 CHAT-MSG-06） | 富消息 | MM `message_attachment.go:20` | ☑ |
+| CHAT-DATA-10 | DM 用 `type='dm'` + 固定 2 成员复用同一套表/policy，**不单开 DM 表** | 复用 | RC subscription 统一模型 | ☑ |
 
 ---
 
@@ -65,14 +65,14 @@
 
 | ID | 规则 | 来源/依据 | 状态 |
 |----|------|----------|------|
-| CHAT-SEC-01 | 三表全开 RLS。辅助函数 `is_channel_member(uid,cid) → bool`（`SECURITY DEFINER STABLE`，内部直读 `channel_members` 绕过其 RLS）避免 policy 递归 | 现有 `get_user_team_ids` 范式（`migrations/010`） | ☐ |
-| CHAT-SEC-02 | `channels` SELECT policy：`type='public'` 同 team 成员可见；`group/dm` 仅 `is_channel_member()` 为真者可见。**成员制群连"存在/名字"都不暴露给非成员**（飞书群默认行为） | 防 Rocket.Chat #3196 式 private 群泄露 | ☐ |
-| CHAT-SEC-03 | `channel_members` SELECT policy：只允许同频道成员看到成员行，禁止任意 `SELECT *` 全表 | RC canAccessRoom 三层防御 | ☐ |
-| CHAT-SEC-04 | `channel_messages` SELECT policy（最关键）：`is_channel_member(auth.uid(),channel_id) AND (history_mode='shared' OR created_at >= 成员 joined_at)` | history_mode 落地；joined 模式只看加入后 | ☐ |
-| CHAT-SEC-05 | RLS 子查询用 `(SELECT auth.uid())` 包裹，让 Postgres 作 initplan 求值一次而非每行 | Supabase 官方性能建议 | ☐ |
-| CHAT-SEC-06 | `joined_at` 一旦写入不随意 UPDATE（会改变 joined 模式下可见历史窗口） | Matrix #13968 历史撤销难教训 | ☐ |
-| CHAT-SEC-07 | service_role 仅用于写系统表（task_tracking 镜像、agent 元数据），**绝不用 service_role 读用户素材** | — | ☐ |
-| CHAT-SEC-08 | 历史授权一旦给出难撤销：踢人后客户端缓存需主动失效（RLS 只管新查询） | Matrix #13968 | ☐ |
+| CHAT-SEC-01 | 三表全开 RLS。辅助函数 `is_channel_member(uid,cid) → bool`（`SECURITY DEFINER STABLE`，内部直读 `channel_members` 绕过其 RLS）避免 policy 递归 | 现有 `get_user_team_ids` 范式（`migrations/010`） | ☑ |
+| CHAT-SEC-02 | `channels` SELECT policy：`type='public'` 同 team 成员可见；`group/dm` 仅 `is_channel_member()` 为真者可见。**成员制群连"存在/名字"都不暴露给非成员**（飞书群默认行为） | 防 Rocket.Chat #3196 式 private 群泄露 | ☑ |
+| CHAT-SEC-03 | `channel_members` SELECT policy：只允许同频道成员看到成员行，禁止任意 `SELECT *` 全表 | RC canAccessRoom 三层防御 | ☑ |
+| CHAT-SEC-04 | `channel_messages` SELECT policy（最关键）：`is_channel_member(auth.uid(),channel_id) AND (history_mode='shared' OR created_at >= 成员 joined_at)` | history_mode 落地；joined 模式只看加入后 | ☑ |
+| CHAT-SEC-05 | RLS 子查询用 `(SELECT auth.uid())` 包裹，让 Postgres 作 initplan 求值一次而非每行 | Supabase 官方性能建议 | ☑ |
+| CHAT-SEC-06 | `joined_at` 一旦写入不随意 UPDATE（会改变 joined 模式下可见历史窗口） | Matrix #13968 历史撤销难教训 | ☑ |
+| CHAT-SEC-07 | service_role 仅用于写系统表（task_tracking 镜像、agent 元数据），**绝不用 service_role 读用户素材** | — | ☑ |
+| CHAT-SEC-08 | 历史授权一旦给出难撤销：踢人后客户端缓存需主动失效（RLS 只管新查询） | Matrix #13968 | ☑ |
 
 ### 3.1 AI Agent 授权（SEC-AGENT）— 最容易出洞，单列
 
@@ -138,11 +138,11 @@
 
 | ID | 规则 | 来源/依据 | 状态 |
 |----|------|----------|------|
-| CHAT-UNREAD-01 | **读扩散**：每成员只存 `last_read_seq`，未读数 = `channels.last_message_seq − channel_members.last_read_seq`（读时纯整数运算） | 避开 Rocket.Chat 写扩散规模炸弹 | ☐ |
-| CHAT-UNREAD-02 | **禁止**每条消息给全频道成员写扩散 +1（1000 人 = 1000 次写/条） | RC `Subscriptions.ts:537` 反例 | ☐ |
+| CHAT-UNREAD-01 | **读扩散**：每成员只存 `last_read_seq`，未读数 = `channels.last_message_seq − channel_members.last_read_seq`（读时纯整数运算） | 避开 Rocket.Chat 写扩散规模炸弹 | ☑ |
+| CHAT-UNREAD-02 | **禁止**每条消息给全频道成员写扩散 +1（1000 人 = 1000 次写/条） | RC `Subscriptions.ts:537` 反例 | ☑ |
 | CHAT-UNREAD-03 | **@提及例外**：仅给被 @ 的少数成员写扩散 `mention_count += 1`（小集合，便宜） | RC `incUserMentionsAndUnread…:1561` | ☐ |
-| CHAT-UNREAD-04 | 标记已读 = 客户端 debounce 后 PATCH 自己的 `last_read_seq`（别每条消息都写） | MM typing/已读节流思路 | ☐ |
-| CHAT-UNREAD-05 | 侧栏总未读/红点用一个 view 聚合，O(成员数) 而非 O(消息数) | — | ☐ |
+| CHAT-UNREAD-04 | 标记已读 = 客户端 debounce 后 PATCH 自己的 `last_read_seq`（别每条消息都写） | MM typing/已读节流思路 | ☑ |
+| CHAT-UNREAD-05 | 侧栏总未读/红点用一个 view 聚合，O(成员数) 而非 O(消息数) | — | ☑ |
 
 ---
 
@@ -150,8 +150,8 @@
 
 | ID | 规则 | 来源/依据 | 状态 |
 |----|------|----------|------|
-| CHAT-RT-01 | `channel_messages` 加入 `supabase_realtime` publication + `REPLICA IDENTITY FULL`，前端订阅 `postgres_changes` | 现有 `task_tracking` 范式（`migrations/180,210`） | ☐ |
-| CHAT-RT-02 | **依赖 Realtime 受 RLS 约束**（已验证）：无权订阅者收不到 private 频道事件，不自建应用层 fan-out | `migrations/064` task_tracking RLS + Realtime 链路 | ☐ |
+| CHAT-RT-01 | `channel_messages` 加入 `supabase_realtime` publication + `REPLICA IDENTITY FULL`，前端订阅 `postgres_changes` | 现有 `task_tracking` 范式（`migrations/180,210`） | ☑ |
+| CHAT-RT-02 | **依赖 Realtime 受 RLS 约束**（已验证）：无权订阅者收不到 private 频道事件，不自建应用层 fan-out | `migrations/064` task_tracking RLS + Realtime 链路 | ☑ |
 | CHAT-RT-03 | **typing / 在线状态走 `realtime.broadcast()` 内存事件，不落库**（高频，落库撑爆 replication） | MM typing `user.go:2823` 不落库 | ☐ |
 | CHAT-RT-04 | 前端订阅自己的 `channel_members` 行获取未读变化；重连后按 seq range 拉缺口补洞 | seq 补洞 | ☐ |
 | CHAT-RT-05 | 前端订阅模式复用 `TaskManagerContext` 的 channel/subscribe 写法 | `frontend/contexts/TaskManagerContext.tsx:595` | ☐ |
@@ -162,11 +162,11 @@
 
 | ID | 规则 | 来源/依据 | 状态 |
 |----|------|----------|------|
-| CHAT-MSG-01 | 排序按 `seq DESC`（权威顺序）；keyset 分页 `seq < cursor`，**禁 OFFSET** | MM keyset `post_store.go:1609` | ☐ |
-| CHAT-MSG-02 | 同毫秒不乱序：seq 本身单调；若回退到 created_at 排序须带 `id` tie-breaker | MM `OrderBy CreateAt DESC, Id DESC` | ☐ |
-| CHAT-MSG-03 | 编辑：软更新，置 `edited_at`，Realtime 推 UPDATE 通知 | MM EditAt / RC editedAt | ☐ |
-| CHAT-MSG-04 | 删除：软删，置 `deleted_at`，前端渲染"已删除"占位 | MM DeleteAt 软删 | ☐ |
-| CHAT-MSG-05 | 线程回复：`reply_to_id` 指向被回复消息（第一版只做"引用单条"，不做完整 thread 树） | MM `RootId` | ☐ |
+| CHAT-MSG-01 | 排序按 `seq DESC`（权威顺序）；keyset 分页 `seq < cursor`，**禁 OFFSET** | MM keyset `post_store.go:1609` | ☑ |
+| CHAT-MSG-02 | 同毫秒不乱序：seq 本身单调；若回退到 created_at 排序须带 `id` tie-breaker | MM `OrderBy CreateAt DESC, Id DESC` | ☑ |
+| CHAT-MSG-03 | 编辑：软更新，置 `edited_at`，Realtime 推 UPDATE 通知 | MM EditAt / RC editedAt | ◑ (软删/edited 列就绪，endpoint 延后) |
+| CHAT-MSG-04 | 删除：软删，置 `deleted_at`，前端渲染"已删除"占位 | MM DeleteAt 软删 | ◑ (deleted_at 列+list 过滤就绪，delete endpoint 延后) |
+| CHAT-MSG-05 | 线程回复：`reply_to_id` 指向被回复消息（第一版只做"引用单条"，不做完整 thread 树） | MM `RootId` | ◑ (reply_to_id 列就绪，同频道校验+UI 延后) |
 | CHAT-MSG-06 | **统一卡片 schema**（`body jsonb`）：`{title, title_link, text, color, image_url, thumb_url, fields:[{title,value,short}], actions:[], footer, ts}` | MM `message_attachment.go:20` / RC attachments | ☐ |
 | CHAT-MSG-07 | 交互按钮回调上下文（cookie/context）**只存服务端，客户端剥离**；点击走独立 endpoint | MM `integration_action.go:121` 安全做法 | ⊘ 本版延后（决策 OPEN-03） |
 | CHAT-MSG-08 | 素材卡片 = 把一个 resource 渲染成 `media_card`（缩略图 + 文件名 + 大小 + 打开链接） | CHAT-GOAL-01 融合点 | ☐ |
