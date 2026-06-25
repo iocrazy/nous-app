@@ -29,12 +29,21 @@ def client(monkeypatch):
 
     class _FakeRepo:
         async def list_for_date(
-            self, day, category, limit=100, q=None, source_ids=None
+            self,
+            day,
+            category,
+            limit=100,
+            q=None,
+            source_ids=None,
+            min_score=None,
+            order_score=False,
         ):
             calls["day"] = day
             calls["category"] = category
             calls["q"] = q
             calls["source_ids"] = source_ids
+            calls["min_score"] = min_score
+            calls["order_score"] = order_score
             return [_row("1", "Hello"), _row("2", "World")]
 
         async def list_by_ids(self, ids, limit=100, source_ids=None):
@@ -308,6 +317,15 @@ def test_for_you_view_ranks_by_interest(client):
     ids = [h["id"] for h in r.json()["hotspots"]]
     assert ids == ["2", "1"]
     assert client.calls["list_by_ids"] == ["2", "1"]
+
+
+def test_featured_view_applies_score_floor_and_ranks(client):
+    r = client.get("/api/v1/topics?view=featured")
+    assert r.status_code == 200
+    # featured spans all dates, applies a score floor, and orders by score
+    assert client.calls["day"] is None
+    assert client.calls["min_score"] == 0.6
+    assert client.calls["order_score"] is True
 
 
 def test_for_you_empty_when_no_interest(client):

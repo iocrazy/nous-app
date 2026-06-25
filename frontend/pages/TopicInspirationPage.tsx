@@ -285,6 +285,7 @@ export const TopicInspirationPage: React.FC = () => {
             selectedId={selected?.id}
             onToggleSave={(h) => applyState(h, { is_saved: !h.is_saved })}
             onToggleHide={(h) => applyState(h, { is_hidden: !h.is_hidden })}
+            grouped={view !== 'featured' && view !== 'foryou'}
           />
         )}
 

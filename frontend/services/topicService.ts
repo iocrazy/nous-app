@@ -28,7 +28,7 @@ export interface Hotspot {
   is_hidden?: boolean;
 }
 
-export type HotspotView = 'all' | 'foryou' | 'saved' | 'hidden';
+export type HotspotView = 'all' | 'featured' | 'foryou' | 'saved' | 'hidden';
 
 export interface HotspotStatePatch {
   is_read?: boolean;

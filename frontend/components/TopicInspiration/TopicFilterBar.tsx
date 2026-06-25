@@ -17,7 +17,7 @@ import {
 } from '../../services/topicService';
 
 const CATEGORIES = ['all', 'model', 'product', 'industry', 'paper', 'tips'] as const;
-const VIEWS: HotspotView[] = ['all', 'foryou', 'saved', 'hidden'];
+const VIEWS: HotspotView[] = ['all', 'featured', 'foryou', 'saved', 'hidden'];
 
 const HEALTH_DOT: Record<SourceHealthStatus, string> = {
   ok: '#10b981',

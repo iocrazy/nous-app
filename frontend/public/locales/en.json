@@ -2074,6 +2074,7 @@
     "crossPlatformHint": "Trending across multiple platforms",
     "seenOnPlatforms": "Seen on {{count}} platforms",
     "view_foryou": "For You",
+    "view_featured": "Featured",
     "interestPlaceholder": "Describe your interests, e.g. AI models, chips, startups",
     "saveInterest": "Save",
     "interestSaved": "Interests saved",
