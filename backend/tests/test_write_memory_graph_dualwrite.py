@@ -27,8 +27,13 @@ class RecordingService(GraphMemoryService):
 @pytest.fixture
 def service(monkeypatch: pytest.MonkeyPatch) -> RecordingService:
     svc = RecordingService()
+    # Re-pointed to graphiti_provider's own binding after Task 5 routing refactor:
+    # _write_graph_episode now calls memory_registry.l3_provider() → GraphitiProvider,
+    # which imports get_graph_memory_service at module level from graphiti_provider.py.
+    # Patching the graph_memory module no longer intercepts it; patch the provider's
+    # namespace instead so GraphitiProvider.enabled() + record_turn() see RecordingService.
     monkeypatch.setattr(
-        "app.services.ai.memory.graph_memory.get_graph_memory_service",
+        "app.services.ai.memory.providers.graphiti_provider.get_graph_memory_service",
         lambda: svc,
     )
     return svc
@@ -114,8 +119,10 @@ async def test_disabled_flag_skips_entirely(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     svc = RecordingService(enabled=False)
+    # Same re-pointing as the service fixture: patch graphiti_provider's namespace
+    # so GraphitiProvider.enabled() reads enabled=False from RecordingService.
     monkeypatch.setattr(
-        "app.services.ai.memory.graph_memory.get_graph_memory_service",
+        "app.services.ai.memory.providers.graphiti_provider.get_graph_memory_service",
         lambda: svc,
     )
     ok = await _write_graph_episode(
@@ -155,7 +162,10 @@ async def test_learn_pref_off_skips_graph_write(
     async def _prefs(_uid: str) -> MemoryPrefs:
         return MemoryPrefs(learn=False, inject=True)
 
-    monkeypatch.setattr("app.services.ai.memory.memory_prefs.get_memory_prefs", _prefs)
+    # Re-pointed to write_memory's module-level binding: Task 5 adds
+    # `from ... import get_memory_prefs` at module level so the call site
+    # is now write_memory.get_memory_prefs, not the memory_prefs module attr.
+    monkeypatch.setattr("app.workflows.write_memory.get_memory_prefs", _prefs)
     ok = await _write_graph_episode(
         user_id="42",
         session_id="777",
@@ -179,7 +189,8 @@ async def test_learn_pref_on_allows_graph_write(
     async def _prefs(_uid: str) -> MemoryPrefs:
         return MemoryPrefs(learn=True, inject=True)
 
-    monkeypatch.setattr("app.services.ai.memory.memory_prefs.get_memory_prefs", _prefs)
+    # Same re-pointing as test_learn_pref_off_skips_graph_write.
+    monkeypatch.setattr("app.workflows.write_memory.get_memory_prefs", _prefs)
     ok = await _write_graph_episode(
         user_id="42",
         session_id="777",

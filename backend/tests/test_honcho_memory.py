@@ -212,8 +212,13 @@ async def test_workflow_helper_posts_latest_pair(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     svc = RecordingService()
+    # Re-pointed to honcho_provider's own binding after Task 5 routing refactor:
+    # _write_honcho_turn now calls memory_registry.l2_provider() → HonchoProvider,
+    # which imports get_honcho_memory_service at module level from honcho_provider.py.
+    # Patching honcho_memory module no longer intercepts it; patch the provider's
+    # namespace so HonchoProvider.enabled() + record_turn() see RecordingService.
     monkeypatch.setattr(
-        "app.services.ai.memory.honcho_memory.get_honcho_memory_service",
+        "app.services.ai.memory.providers.honcho_provider.get_honcho_memory_service",
         lambda: svc,
     )
     ok = await _write_honcho_turn(
@@ -242,8 +247,10 @@ async def test_workflow_helper_disabled_flag_skips(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     svc = RecordingService(enabled=False)
+    # Same re-pointing as test_workflow_helper_posts_latest_pair: patch
+    # honcho_provider's namespace so HonchoProvider.enabled() reads enabled=False.
     monkeypatch.setattr(
-        "app.services.ai.memory.honcho_memory.get_honcho_memory_service",
+        "app.services.ai.memory.providers.honcho_provider.get_honcho_memory_service",
         lambda: svc,
     )
     ok = await _write_honcho_turn(
@@ -318,8 +325,12 @@ async def test_workflow_resolves_team_workspace(
     from app.workflows import write_memory as wm
 
     svc = RecordingService()
+    # Re-pointed to honcho_provider's namespace (same reason as posts_latest_pair).
+    # _resolve_team_workspace on wm still works: honcho_provider._resolve_team_workspace
+    # uses a lazy proxy that imports write_memory._resolve_team_workspace at call time,
+    # so patching wm._resolve_team_workspace is still effective.
     monkeypatch.setattr(
-        "app.services.ai.memory.honcho_memory.get_honcho_memory_service",
+        "app.services.ai.memory.providers.honcho_provider.get_honcho_memory_service",
         lambda: svc,
     )
 
