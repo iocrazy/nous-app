@@ -221,7 +221,7 @@ class HotspotsRepository:
         client = await self._client()
         result = (
             await client.table(self.TABLE)
-            .select("id, source_label, title, content_original")
+            .select("id, source_id, source_label, title, content_original")
             .is_("score", "null")
             .order("captured_at", desc=True)
             .limit(limit)
@@ -257,10 +257,12 @@ class HotspotsRepository:
             logger.error(f"patch_embedding failed for {hotspot_id}: {e}")
 
     async def patch_enrichment(self, hotspot_id: str, enrichment: dict) -> None:
-        """Write AI enrichment (score/reason/ai_summary/category/tags). Skips None."""
+        """Write AI enrichment (score/reason/ai_summary/category/tags/score_dims).
+        Skips None. ``score`` is the code-computed composite; ``score_dims`` holds
+        the raw per-dimension scores for later calibration."""
         patch = {
             k: enrichment[k]
-            for k in ("score", "reason", "ai_summary", "category", "tags")
+            for k in ("score", "reason", "ai_summary", "category", "tags", "score_dims")
             if enrichment.get(k) is not None
         }
         if not patch:

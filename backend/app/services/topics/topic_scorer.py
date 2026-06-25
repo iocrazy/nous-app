@@ -30,6 +30,7 @@ from app.services.ai.governance.ai_governance import (
 from app.services.ai.prompts.prompt_composer import ComposerInput, PromptComposer
 from app.services.ai.runner.agent_runner import AgentRunner
 from app.services.ai.skills.skill_tool_service import SkillToolService
+from app.services.topics.scoring import normalize_dims
 
 AGENT_SLUG = "topic-scorer"
 _VALID_CATEGORIES = {"model", "product", "industry", "paper", "tips"}
@@ -138,10 +139,13 @@ class TopicScorerService:
         return json.dumps(slim, ensure_ascii=False)
 
     def normalize_result(self, raw: Any) -> dict[int, dict]:
-        """Parse agent output into ``{i: {score,reason,ai_summary,category,tags}}``.
+        """Parse agent output into ``{i: {dims,confidence,reason,ai_summary,
+        category,tags}}``.
 
-        Defensive: coerces/clamps score, validates category, caps tags, and
-        silently drops malformed objects. Never raises.
+        The agent emits raw per-dimension scores ONLY — the composite ``score``
+        is computed in code (see ``scoring.compute_quality``) with the source
+        tier, which the agent doesn't see. Defensive: validates dims/category,
+        caps tags, drops malformed objects. Never raises.
         """
         out: dict[int, dict] = {}
         if not isinstance(raw, list):
@@ -153,10 +157,11 @@ class TopicScorerService:
                 idx = int(obj["i"])
             except (TypeError, ValueError):
                 continue
+            dims = normalize_dims(obj.get("dims"))
             try:
-                score = max(0.0, min(1.0, float(obj.get("score"))))
+                confidence = max(0.0, min(1.0, float(obj.get("confidence"))))
             except (TypeError, ValueError):
-                score = None
+                confidence = None
             cat = obj.get("category")
             cat = cat if cat in _VALID_CATEGORIES else None
             tags_raw = obj.get("tags")
@@ -166,7 +171,8 @@ class TopicScorerService:
                 else []
             )
             out[idx] = {
-                "score": score,
+                "dims": dims,
+                "confidence": confidence,
                 "reason": (
                     (str(obj.get("reason")).strip() or None)
                     if obj.get("reason")

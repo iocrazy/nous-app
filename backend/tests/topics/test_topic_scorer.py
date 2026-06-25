@@ -10,7 +10,8 @@ def test_normalize_result_clamps_and_validates():
     raw = [
         {
             "i": 0,
-            "score": 1.5,  # clamp -> 1.0
+            "dims": {"impact": 1.5, "novelty": -1},  # clamp -> 1.0 / 0.0
+            "confidence": 1.4,  # clamp -> 1.0
             "reason": "  好东西  ",
             "ai_summary": "摘要",
             "category": "model",
@@ -18,17 +19,20 @@ def test_normalize_result_clamps_and_validates():
         },
         {
             "i": 1,
-            "score": "not-a-number",  # -> None
+            "dims": "not-an-object",  # -> None
+            "confidence": "x",  # -> None
             "category": "bogus",  # invalid -> None
             "tags": "notalist",  # -> []
         },
     ]
     out = svc.normalize_result(raw)
-    assert out[0]["score"] == 1.0
+    assert out[0]["dims"] == {"impact": 1.0, "novelty": 0.0}
+    assert out[0]["confidence"] == 1.0
     assert out[0]["reason"] == "好东西"  # trimmed
     assert out[0]["category"] == "model"
     assert len(out[0]["tags"]) == 8
-    assert out[1]["score"] is None
+    assert out[1]["dims"] is None
+    assert out[1]["confidence"] is None
     assert out[1]["category"] is None
     assert out[1]["tags"] == []
 
@@ -36,10 +40,10 @@ def test_normalize_result_clamps_and_validates():
 def test_normalize_result_drops_malformed():
     svc = TopicScorerService()
     out = svc.normalize_result(
-        ["nope", {"no_index": 1}, {"i": "x"}, {"i": 3, "score": 0.5}]
+        ["nope", {"no_index": 1}, {"i": "x"}, {"i": 3, "dims": {"impact": 0.5}}]
     )
     assert list(out.keys()) == [3]
-    assert out[3]["score"] == 0.5
+    assert out[3]["dims"] == {"impact": 0.5}
 
 
 def test_normalize_result_non_list():
@@ -159,7 +163,7 @@ async def test_score_items_uses_nous_when_governance_unconfigured(monkeypatch):
     class _Runner:
         async def run_turn(self, composed, user_messages):
             return {
-                "content": '[{"i":0,"score":0.9,"category":"product","tags":["a"]}]'
+                "content": '[{"i":0,"dims":{"impact":0.9},"category":"product","tags":["a"]}]'
             }
 
     class _Composer:
@@ -194,7 +198,7 @@ async def test_score_items_uses_nous_when_governance_unconfigured(monkeypatch):
         ],
     )
     out = await svc.score_items([{"i": 0, "title": "t", "content": "c"}])
-    assert out[0]["score"] == 0.9
+    assert out[0]["dims"] == {"impact": 0.9}
     assert out[0]["category"] == "product"
 
 
@@ -208,7 +212,9 @@ async def test_governance_overrides_nous(monkeypatch):
     class _Runner:
         async def run_turn(self, composed, user_messages):
             seen["model"] = composed.model
-            return {"content": '[{"i":0,"score":0.7,"category":"tips","tags":[]}]'}
+            return {
+                "content": '[{"i":0,"dims":{"impact":0.7},"category":"tips","tags":[]}]'
+            }
 
     class _Composer:
         async def compose(self, inp):
@@ -232,7 +238,7 @@ async def test_governance_overrides_nous(monkeypatch):
     monkeypatch.setattr(svc, "_build_composer", lambda: _Composer())
 
     out = await svc.score_items([{"i": 0, "title": "t", "content": "c"}])
-    assert out[0]["score"] == 0.7
+    assert out[0]["category"] == "tips"
     # composed.model set to governance model (deepseek-chat), NOT the qwen Nous model
     assert seen["model"] == "deepseek-chat"
 
@@ -243,7 +249,9 @@ async def test_score_items_happy_path(monkeypatch):
 
     class _Runner:
         async def run_turn(self, composed, user_messages):
-            return {"content": '[{"i":0,"score":0.8,"category":"model","tags":["x"]}]'}
+            return {
+                "content": '[{"i":0,"dims":{"impact":0.8},"category":"model","tags":["x"]}]'
+            }
 
     composed_obj = _make_composed("deepseek-chat")
 
@@ -257,7 +265,7 @@ async def test_score_items_happy_path(monkeypatch):
     monkeypatch.setattr(svc, "_build_composer", lambda: _Composer())
 
     out = await svc.score_items([{"i": 0, "title": "t", "content": "c"}])
-    assert out[0]["score"] == 0.8
+    assert out[0]["dims"] == {"impact": 0.8}
     assert out[0]["category"] == "model"
 
 

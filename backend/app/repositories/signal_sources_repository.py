@@ -33,6 +33,13 @@ class SignalSourcesRepository:
     async def _client(self):
         return await get_async_supabase_admin()
 
+    async def tier_map(self) -> dict[str, int]:
+        """``{source_id(str): tier}`` for every source — the credibility prior
+        the code scorer multiplies in. Missing/NULL tier defaults to 2."""
+        client = await self._client()
+        result = await client.table(self.TABLE).select("id, tier").execute()
+        return {str(r["id"]): int(r.get("tier") or 2) for r in (result.data or [])}
+
     async def list_enabled(self) -> list[dict[str, Any]]:
         client = await self._client()
         result = (

@@ -16,6 +16,7 @@ from app.services.topics.clustering import (
 )
 from app.services.topics.embedding_service import TopicEmbeddingService
 from app.services.topics.keyword_filter import keyword_filter
+from app.services.topics.scoring import compute_quality
 from app.services.topics.topic_scorer import TopicScorerService
 
 # Phase 1: no per-user interest yet -> global keep-all pre-filter.
@@ -154,19 +155,26 @@ async def score_unscored_once(
     *,
     hotspots_repo: HotspotsRepository | None = None,
     scorer: TopicScorerService | None = None,
+    sources_repo: SignalSourcesRepository | None = None,
     max_items: int = _SCORE_MAX_ITEMS,
     batch_size: int = _SCORE_BATCH_SIZE,
 ) -> dict:
-    """Enrich score-less hotspots via the topic-scorer agent, in batches.
+    """Enrich score-less hotspots, in batches.
 
-    Additive + isolated: a scoring failure never blocks fetching. Rows already
-    show raw data; they gain score/reason/ai_summary/category/tags as this runs.
+    Two-layer scoring (Phase 1): the agent emits raw per-dimension scores; CODE
+    computes the composite ``score`` here via ``compute_quality(dims, tier)`` —
+    the source tier is a credibility prior the agent never sees, so source fame
+    can't inflate a weak item. Raw dims are persisted (``score_dims``) for a
+    later calibration layer. Additive + isolated: a scoring failure never blocks
+    fetching.
     """
     hotspots_repo = hotspots_repo or HotspotsRepository()
     scorer = scorer or TopicScorerService()
+    sources_repo = sources_repo or SignalSourcesRepository()
     rows = await hotspots_repo.list_unscored(limit=max_items)
     if not rows:
         return {"unscored": 0, "scored": 0}
+    tiers = await sources_repo.tier_map()
     scored = 0
     for start in range(0, len(rows), batch_size):
         chunk = rows[start : start + batch_size]
@@ -186,9 +194,19 @@ async def score_unscored_once(
             continue
         for idx, r in enumerate(chunk):
             e = enrich.get(idx)
-            if e:
-                await hotspots_repo.patch_enrichment(str(r["id"]), e)
-                scored += 1
+            if not e or not e.get("dims"):
+                continue
+            tier = tiers.get(str(r.get("source_id")), 2)
+            patch = {
+                "score": compute_quality(e["dims"], tier),
+                "score_dims": e["dims"],
+                "reason": e.get("reason"),
+                "ai_summary": e.get("ai_summary"),
+                "category": e.get("category"),
+                "tags": e.get("tags"),
+            }
+            await hotspots_repo.patch_enrichment(str(r["id"]), patch)
+            scored += 1
     summary = {"unscored": len(rows), "scored": scored}
     logger.info(f"topic_score done: {summary}")
     return summary
