@@ -42,7 +42,11 @@ class HotspotsRepository:
         *,
         source_id: str,
         category: Optional[str],
+        source_label: Optional[str] = None,
     ) -> list[dict[str, Any]]:
+        # source_label override: when one upstream fetch is shared across several
+        # source rows (dedup by kind+config), each row stamps ITS OWN name here
+        # instead of the representative's (which the adapter baked into c).
         rows: list[dict[str, Any]] = []
         for c in candidates:
             captured = c.captured_at.isoformat() if c.captured_at else None
@@ -53,7 +57,7 @@ class HotspotsRepository:
                 {
                     "user_id": None,  # Phase 1: global
                     "source_id": source_id,
-                    "source_label": c.source_label,
+                    "source_label": source_label or c.source_label,
                     "title": c.title,
                     "url": c.url,
                     "origin_url": c.origin_url,
