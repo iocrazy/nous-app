@@ -71,6 +71,11 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
   )
 }
 
+const SLOT_META: Record<string, { label: string; providers: string[] }> = {
+  l2: { label: 'L2 · User Model', providers: ['honcho', 'none'] },
+  l3: { label: 'L3 · Knowledge Graph', providers: ['graphiti', 'none'] },
+}
+
 export function MemorySettings() {
   const { data, isLoading } = useGraphMemorySettings()
   const updateMutation = useUpdateGraphMemorySettings()
@@ -79,11 +84,6 @@ export function MemorySettings() {
   const { data: control } = useMemoryControl()
   const setSlot = useSetMemorySlot()
   const reloadSlot = useReloadMemorySlot()
-
-  const SLOT_META: Record<string, { label: string; providers: string[] }> = {
-    l2: { label: 'L2 · User Model', providers: ['honcho', 'none'] },
-    l3: { label: 'L3 · Knowledge Graph', providers: ['graphiti', 'none'] },
-  }
   const [catalog, setCatalog] = useState<CatalogModel[]>([])
 
   // Load the platform-model catalog so the extractor/embedder can be assigned by
