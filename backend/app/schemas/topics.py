@@ -27,6 +27,10 @@ class HotspotOut(BaseModel):
     # Cross-source cluster size: how many distinct platforms this topic appears
     # on (from its topic_group). >1 = "seen on N platforms" signal.
     source_count: Optional[int] = None
+    # Raw per-dimension scores (novelty/impact/credibility/actionability/
+    # shareability, 0..1) the LLM rated — the breakdown behind ``score``. Only
+    # on the detail endpoint (transparency into why an item scored what it did).
+    score_dims: Optional[dict] = None
     # Full original/translated body — only populated by the detail endpoint to
     # keep the list payload light.
     content_original: Optional[str] = None

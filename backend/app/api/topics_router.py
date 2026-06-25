@@ -71,7 +71,8 @@ def _to_out(
         heat=row.get("heat"),
         best_rank=_best_rank(row.get("rank_timeline") or []),
         source_count=source_count,
-        # content_* only in the detail view to keep the list payload light.
+        # score_dims + content_* only in the detail view (keep the list light).
+        score_dims=(row.get("score_dims") if include_content else None),
         content_original=row.get("content_original") if include_content else None,
         content_translated=(row.get("content_translated") if include_content else None),
         is_read=bool(state.get("is_read")),

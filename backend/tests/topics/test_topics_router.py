@@ -309,6 +309,19 @@ def test_to_out_extracts_source_count_from_embedded_group():
     assert out2.source_count is None
 
 
+def test_to_out_exposes_score_dims_only_in_detail():
+    from app.api.topics_router import _to_out
+
+    row = {"id": "1", "title": "T", "score_dims": {"impact": 0.8, "novelty": 0.6}}
+    # list view (include_content=False) keeps the payload light → no dims
+    assert _to_out(row).score_dims is None
+    # detail view surfaces the breakdown
+    assert _to_out(row, include_content=True).score_dims == {
+        "impact": 0.8,
+        "novelty": 0.6,
+    }
+
+
 def test_for_you_view_ranks_by_interest(client):
     # interest repo returns ranked ids; list keeps that order
     client.calls["ranked"] = ["2", "1"]
