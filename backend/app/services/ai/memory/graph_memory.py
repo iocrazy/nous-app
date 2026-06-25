@@ -125,6 +125,32 @@ async def _default_settings_reader(key: str) -> Optional[str]:
         return None
 
 
+async def _apply_catalog(
+    base_url: str, api_key: str, model: str
+) -> tuple[str, str, str]:
+    """If ``model`` is a platform-catalog (nous_models) name, return the
+    catalog's ``(base_url, api_key, actual_model)``; otherwise return the manual
+    values unchanged. Ungated (admin config). Never raises."""
+    if not model:
+        return base_url, api_key, model
+    try:
+        from app.services.ai.providers.ai_provider_helpers import (
+            resolve_platform_model,
+        )
+
+        platform = await resolve_platform_model(model)
+    except Exception:  # noqa: BLE001 — defensive; fall back to manual
+        platform = None
+    if platform is not None:
+        _provider, cfg, actual = platform
+        return (
+            cfg.get("base_url") or base_url,
+            cfg.get("api_key") or api_key,
+            actual,
+        )
+    return base_url, api_key, model
+
+
 @dataclass(frozen=True)
 class GraphMemoryConfig:
     enabled: bool = False
@@ -209,18 +235,32 @@ class GraphMemoryConfig:
                 dimensions = DEFAULT_EMBEDDER_DIMENSIONS
         except ValueError:
             dimensions = DEFAULT_EMBEDDER_DIMENSIONS
+        # If the extractor / embedder "model" is a platform-catalog name (picked
+        # from the MediaHub AI Models catalog), take its base_url / key / actual
+        # model from the catalog instead of the manual fields. Ungated (admin
+        # config). Manual values remain the fallback for a custom endpoint.
+        ext_base, ext_key, ext_model = await _apply_catalog(
+            await resolve("extractor_base_url"),
+            await resolve("extractor_api_key"),
+            await resolve("extractor_model"),
+        )
+        emb_base, emb_key, emb_model = await _apply_catalog(
+            await resolve("embedder_base_url"),
+            await resolve("embedder_api_key"),
+            await resolve("embedder_model"),
+        )
         return cls(
             enabled=enabled,
             falkordb_host=host,
             falkordb_port=port,
             falkordb_database=database,
-            extractor_base_url=await resolve("extractor_base_url"),
-            extractor_api_key=await resolve("extractor_api_key"),
-            extractor_model=await resolve("extractor_model"),
+            extractor_base_url=ext_base,
+            extractor_api_key=ext_key,
+            extractor_model=ext_model,
             extractor_structured_output_mode=mode,
-            embedder_base_url=await resolve("embedder_base_url"),
-            embedder_api_key=await resolve("embedder_api_key"),
-            embedder_model=await resolve("embedder_model"),
+            embedder_base_url=emb_base,
+            embedder_api_key=emb_key,
+            embedder_model=emb_model,
             embedder_dimensions=dimensions,
         )
 

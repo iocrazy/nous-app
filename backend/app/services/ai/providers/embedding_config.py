@@ -109,11 +109,27 @@ async def _read_settings() -> Dict[str, Any]:
 
 
 async def get_embedding_config() -> Optional[EmbeddingConfig]:
-    """Resolve the platform embedding config, or None when unconfigured."""
+    """Resolve the platform embedding config (graph_embedder_*), or None."""
     s = await _read_settings()
     base_url = str(s.get("graph_embedder_base_url") or "").strip()
     api_key = str(s.get("graph_embedder_api_key") or "").strip()
     model = str(s.get("graph_embedder_model") or "").strip()
+    # graph_embedder_model may be a platform-catalog name → take base_url/key/
+    # actual model from the catalog (a catalog pick clears the manual base_url).
+    if model:
+        try:
+            from app.services.ai.providers.ai_provider_helpers import (
+                resolve_platform_model,
+            )
+
+            platform = await resolve_platform_model(model)
+        except Exception:  # noqa: BLE001 — fall back to manual graph_embedder_*
+            platform = None
+        if platform is not None:
+            _provider, cfg, actual = platform
+            base_url = (cfg.get("base_url") or base_url).strip()
+            api_key = (cfg.get("api_key") or api_key).strip()
+            model = actual
     if not base_url or not api_key or not model:
         return None
     try:
