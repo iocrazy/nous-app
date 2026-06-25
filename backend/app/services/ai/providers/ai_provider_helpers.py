@@ -117,6 +117,7 @@ DEFAULT_ANALYZE_AGENT_SLUG = "analyze"
 DEFAULT_TRANSLATE_AGENT_SLUG = "translate"
 DEFAULT_CAPTION_AGENT_SLUG = "caption"
 DEFAULT_CLASSIFY_AGENT_SLUG = "classify"
+DEFAULT_SCRIPT_AGENT_SLUG = "script_ai"
 
 
 async def resolve_task_provider_config(
@@ -314,6 +315,18 @@ async def resolve_translate_provider_config(
     """
     return await resolve_task_provider_config(
         user_id, "translation", DEFAULT_TRANSLATE_AGENT_SLUG
+    )
+
+
+async def resolve_script_provider_config(
+    user_id: Optional[str],
+) -> Tuple[str, Dict[str, Any], str, str]:
+    """Resolve the script-generation agent slug + model + user's BYO provider
+    config. Honors ``task_assignment.script_generation`` (an AI Library agent
+    slug), defaulting to the built-in ``script_ai`` agent. Same return shape as
+    the other resolvers: ``(provider_key, provider_config, model, slug)``."""
+    return await resolve_task_provider_config(
+        user_id, "script_generation", DEFAULT_SCRIPT_AGENT_SLUG
     )
 
 

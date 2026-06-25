@@ -37,6 +37,9 @@ from app.schemas.topics import (
     SourceHealthResponse,
     SourceMutationResponse,
 )
+from app.services.ai.providers.ai_provider_helpers import (
+    resolve_script_provider_config,
+)
 from app.services.storyboard.script.script_ai_service import ScriptAIService
 from app.services.topics.embedding_service import TopicEmbeddingService
 from app.services.topics.heat import best_rank as _best_rank
@@ -339,10 +342,25 @@ async def get_hotspot(hotspot_id: str, auth: AuthDep):
     return HotspotDetailResponse(hotspot=out)
 
 
-async def _generate_script_for(title: str, summary: str, user_id: str) -> list:
-    """Reuse the existing script_ai agent. Real signature (verified):
-    ScriptAIService(user_id=...).generate_outline(premise) -> List[Dict[str,str]]."""
-    svc = ScriptAIService(user_id=user_id)
+async def _generate_script_for(
+    title: str,
+    summary: str,
+    user_id: str,
+    *,
+    agent_slug: Optional[str] = None,
+    provider_key: Optional[str] = None,
+    provider_config: Optional[dict] = None,
+) -> list:
+    """Run the resolved script-generation agent (governed via task_assignment —
+    the user picks the agent/model in Settings → AI → Storyboard → Script;
+    defaults to the script_ai system agent). Its model AND skills come from the
+    chosen agent — nothing hardcoded."""
+    svc = ScriptAIService(
+        user_id=user_id,
+        agent_slug=agent_slug,
+        provider_key=provider_key,
+        provider_config=provider_config,
+    )
     premise = f"Topic: {title}\n\nContext: {summary or ''}"
     return await svc.generate_outline(premise)
 
@@ -354,9 +372,18 @@ async def generate_script(hotspot_id: str, auth: AuthDep):
     row = await repo.get_by_id(hotspot_id, source_ids=visible)
     if not row:
         raise HTTPException(status_code=404, detail="hotspot not found")
+    # Resolve the user-assigned script agent (task_assignment.script_generation,
+    # default script_ai) + their BYO provider config — governed like every other
+    # AI task, not hardcoded.
+    provider_key, provider_config, _model, agent_slug = (
+        await resolve_script_provider_config(auth.user_id)
+    )
     script = await _generate_script_for(
         row.get("title") or "",
         row.get("ai_summary") or row.get("summary") or "",
         auth.user_id,
+        agent_slug=agent_slug,
+        provider_key=provider_key,
+        provider_config=provider_config,
     )
     return {"success": True, "script": script}

@@ -62,7 +62,14 @@ class ScriptAIService:
 
     AGENT_SLUG: str = AGENT_SLUG
 
-    def __init__(self, user_id: Optional[Any] = None) -> None:
+    def __init__(
+        self,
+        user_id: Optional[Any] = None,
+        *,
+        agent_slug: Optional[str] = None,
+        provider_key: Optional[str] = None,
+        provider_config: Optional[dict] = None,
+    ) -> None:
         # Retained for backwards compat with legacy smoke tests that
         # inspect ``.model``. The actual model per turn comes from the
         # agent row via :class:`PromptComposer`.
@@ -70,6 +77,14 @@ class ScriptAIService:
         # Optional user_id enables RunRecorder telemetry on each _run_agent
         # call. When None, telemetry is skipped (legacy / smoke-test path).
         self._user_id = user_id
+        # Governed callers (e.g. the topic Generate Script) pass the agent slug
+        # resolved from task_assignment so the user-selected agent — its model
+        # AND skills — drives generation; plus the user's BYO provider config so
+        # the adapter uses their key. Default = the built-in script_ai agent
+        # (instance attr shadows the class default).
+        self.AGENT_SLUG = agent_slug or AGENT_SLUG
+        self._provider_key = provider_key
+        self._provider_config = provider_config
 
     # ------------------------------------------------------------------
     # Shared plumbing — composer / runner wiring
@@ -84,7 +99,16 @@ class ScriptAIService:
         # Phase 1 compat. The model is threaded in from ComposedSystemPrompt
         # (composer.compose() pulls it from the ai_agents row), not read from
         # global settings, so agents can declare their own provider in DB.
-        adapter = get_adapter(model, settings)
+        # When a governed caller supplied the user's BYO provider config, build
+        # the adapter with their key (parity with translate/caption services).
+        if self._provider_key and self._provider_config and model:
+            from app.services.ai.adapters.factory import get_adapter_for_user
+
+            adapter = get_adapter_for_user(
+                model, {self._provider_key: self._provider_config}, settings
+            )
+        else:
+            adapter = get_adapter(model, settings)
         return AgentRunner(
             adapter=adapter, skill_tool=SkillToolService(get_skill_repository())
         )
