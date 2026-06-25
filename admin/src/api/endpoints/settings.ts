@@ -171,6 +171,54 @@ export function useUpdateGraphMemorySettings() {
   })
 }
 
+// ── Memory Control Plane — provider slot routing + health + hot-reload ────
+
+const MEMORY_CONTROL_URL = '/api/v1/admin/settings/memory'
+
+export interface MemorySlotStatus {
+  slot: string
+  provider: string
+  health: boolean
+}
+
+export interface MemoryControl {
+  slots: MemorySlotStatus[]
+}
+
+export function useMemoryControl() {
+  return useQuery({
+    queryKey: ['settings', 'memory-control'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<MemoryControl>(`${MEMORY_CONTROL_URL}/control`)
+      return data
+    },
+  })
+}
+
+export function useSetMemorySlot() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (vars: { slot: string; provider: string }) => {
+      const { data } = await apiClient.put<MemoryControl>(`${MEMORY_CONTROL_URL}/slot`, vars)
+      return data
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['settings', 'memory-control'] }),
+  })
+}
+
+export function useReloadMemorySlot() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (slot: string) => {
+      const { data } = await apiClient.post<{ ok: boolean; reloaded: string | null }>(
+        `${MEMORY_CONTROL_URL}/${slot}/reload`,
+      )
+      return data
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['settings', 'memory-control'] }),
+  })
+}
+
 // ── Topic Scoring config ──────────────────────────────────────────────────
 export interface TopicScoringConfig {
   dim_weights: Record<string, number>

@@ -1,7 +1,7 @@
 """Admin API schemas for requests and responses."""
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -712,3 +712,30 @@ class TopicScoringConfigResponse(BaseModel):
     dim_weights: Dict[str, float]
     tier_weights: Dict[str, float]
     featured_min_score: float
+
+
+# ============================================
+# Memory Control-Plane Schemas (Phase 2a)
+# ============================================
+
+
+class MemorySlotStatus(BaseModel):
+    """One memory slot's current provider + liveness (Phase 2a control plane)."""
+
+    slot: str  # "l2" | "l3"
+    provider: str  # active provider name, or "none" when the slot is disabled
+    health: bool
+
+
+class MemoryControlResponse(BaseModel):
+    slots: list[MemorySlotStatus]
+
+
+class MemorySlotUpdate(BaseModel):
+    slot: Literal["l2", "l3"]
+    provider: str  # validated against the slot's allowed set in the endpoint
+
+
+class MemoryReloadResponse(BaseModel):
+    ok: bool
+    reloaded: Optional[str] = None  # provider name reloaded, None when slot disabled

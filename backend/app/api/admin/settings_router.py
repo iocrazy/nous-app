@@ -13,11 +13,16 @@ from app.schemas.admin import (
     ChatModuleGovernanceResponse,
     GraphMemorySettingsResponse,
     GraphMemorySettingsUpdate,
+    MemoryControlResponse,
+    MemoryReloadResponse,
+    MemorySlotStatus,
+    MemorySlotUpdate,
     SystemSettingResponse,
     SystemSettingUpdate,
     TaskModuleGovernanceResponse,
     TopicScoringConfigResponse,
 )
+from app.services.ai.memory import registry as memory_registry
 from app.services.ai.memory.graph_memory import STRUCTURED_OUTPUT_MODES
 from app.services.topics.scoring import (
     SCORING_CONFIG_KEY,
@@ -440,3 +445,68 @@ async def update_setting(
 
     logger.info(f"Setting '{key}' updated by admin {auth.user_id}")
     return _to_response(updated)
+
+
+# ── Memory Control-Plane (Phase 2a) ──────────────────────────────────────────
+
+# Phase 1 providers only — Mem0/Hindsight (Phase 3) extend these sets.
+_VALID_SLOT_PROVIDERS: dict[str, set[str]] = {
+    "l2": {"honcho", "none"},
+    "l3": {"graphiti", "none"},
+}
+
+
+async def _build_memory_control() -> MemoryControlResponse:
+    l2 = await memory_registry.l2_provider()
+    l3 = await memory_registry.l3_provider()
+    slots = []
+    for slot, provider in (("l2", l2), ("l3", l3)):
+        slots.append(
+            MemorySlotStatus(
+                slot=slot,
+                provider=provider.name if provider else "none",
+                health=(await provider.health()) if provider else False,
+            )
+        )
+    return MemoryControlResponse(slots=slots)
+
+
+@router.get("/memory/control", response_model=MemoryControlResponse)
+async def get_memory_control(auth: AdminAuthDep):
+    """List each memory slot's active provider + liveness."""
+    return await _build_memory_control()
+
+
+@router.put("/memory/slot", response_model=MemoryControlResponse)
+async def set_memory_slot(update: MemorySlotUpdate, auth: AdminAuthDep):
+    """Switch a slot's provider (writes memory.<slot>_provider). Returns the
+    refreshed control snapshot."""
+    allowed = _VALID_SLOT_PROVIDERS.get(update.slot, set())
+    if update.provider not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"provider '{update.provider}' not valid for slot '{update.slot}' "
+            f"(allowed: {sorted(allowed)})",
+        )
+    repo = get_system_settings_repository()
+    await repo.upsert_setting(
+        f"memory.{update.slot}_provider", update.provider, auth.user_id
+    )
+    logger.info(f"[Admin] memory slot {update.slot} -> {update.provider}")
+    return await _build_memory_control()
+
+
+@router.post("/memory/{slot}/reload", response_model=MemoryReloadResponse)
+async def reload_memory_slot(slot: str, auth: AdminAuthDep):
+    """Drop the slot provider's cached client/config so the next call re-reads
+    settings — applies a config edit without a backend restart."""
+    if slot not in ("l2", "l3"):
+        raise HTTPException(status_code=400, detail="slot must be 'l2' or 'l3'")
+    provider = await (
+        memory_registry.l2_provider() if slot == "l2" else memory_registry.l3_provider()
+    )
+    if provider is None:
+        return MemoryReloadResponse(ok=False, reloaded=None)
+    await provider.reload()
+    logger.info(f"[Admin] reloaded memory slot {slot} ({provider.name})")
+    return MemoryReloadResponse(ok=True, reloaded=provider.name)
