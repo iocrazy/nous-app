@@ -58,6 +58,25 @@ function sanitizeName(model: string): string {
   return 'mediahub-' + model.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
 }
 
+// Connectivity dot from the last Test: green = reachable, red = failed, gray = untested.
+function StatusDot({ status }: { status?: 'ok' | 'fail' }) {
+  const color =
+    status === 'ok' ? '#00b42a' : status === 'fail' ? '#f53f3f' : 'var(--color-fill-3)'
+  return (
+    <span
+      title={status === 'ok' ? 'Reachable' : status === 'fail' ? 'Failed' : 'Not tested'}
+      style={{
+        display: 'inline-block',
+        width: 8,
+        height: 8,
+        borderRadius: '50%',
+        background: color,
+        flexShrink: 0,
+      }}
+    />
+  )
+}
+
 export function AIModelsPage() {
   const { session } = useAuth()
   const token = session?.access_token
@@ -75,6 +94,9 @@ export function AIModelsPage() {
   const [saving, setSaving] = useState(false)
   const [testingId, setTestingId] = useState<string | null>(null)
   const [testingProvider, setTestingProvider] = useState<string | null>(null)
+  // Connectivity status from the last Test, by model id / by provider key.
+  const [modelStatus, setModelStatus] = useState<Record<string, 'ok' | 'fail'>>({})
+  const [providerStatus, setProviderStatus] = useState<Record<string, 'ok' | 'fail'>>({})
   const [form] = Form.useForm()
 
   const apiBase = import.meta.env.VITE_API_URL || ''
@@ -152,13 +174,16 @@ export function AIModelsPage() {
         }),
       })
       const data = await res.json().catch(() => ({}))
-      if (res.ok && data.success) {
+      const ok = res.ok && data.success
+      setProviderStatus((prev) => ({ ...prev, [k]: ok ? 'ok' : 'fail' }))
+      if (ok) {
         const n = Array.isArray(data.models) ? data.models.length : 0
         Message.success(`${g.provider}: reachable${n ? ` — ${n} models` : ''}`)
       } else {
         Message.error(`${g.provider}: ${data.error || 'connection failed'}`)
       }
     } catch {
+      setProviderStatus((prev) => ({ ...prev, [k]: 'fail' }))
       Message.error(`${g.provider}: request failed`)
     } finally {
       setTestingProvider(null)
@@ -283,12 +308,14 @@ export function AIModelsPage() {
     try {
       const res = await fetch(`${apiBase}/api/v1/admin/nous-models/${m.id}/test`, { method: 'POST', headers })
       const data = await res.json()
+      setModelStatus((prev) => ({ ...prev, [m.id]: data.ok ? 'ok' : 'fail' }))
       if (data.ok) {
         Message.success(`${m.actual_model}: OK${data.detail ? ` — ${data.detail}` : ''}`)
       } else {
         Message.error(`${m.actual_model}: ${data.error || 'connectivity test failed'}`)
       }
     } catch {
+      setModelStatus((prev) => ({ ...prev, [m.id]: 'fail' }))
       Message.error(`${m.actual_model}: request failed`)
     } finally {
       setTestingId(null)
@@ -320,7 +347,10 @@ export function AIModelsPage() {
             <Card key={`${g.provider}|${g.base_url}`}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
                 <div>
-                  <div style={{ fontWeight: 600, fontSize: 15 }}>{g.provider}</div>
+                  <div style={{ fontWeight: 600, fontSize: 15, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <StatusDot status={providerStatus[`${g.provider}|${g.base_url}`]} />
+                    {g.provider}
+                  </div>
                   <div style={{ fontSize: 12, color: 'var(--color-text-3)', fontFamily: 'monospace' }}>
                     {g.base_url || '(provider default base URL)'}
                   </div>
@@ -352,6 +382,7 @@ export function AIModelsPage() {
                       padding: '4px 8px', opacity: m.is_enabled ? 1 : 0.5,
                     }}
                   >
+                    <StatusDot status={modelStatus[m.id]} />
                     <Tag color={TYPE_COLORS[m.type] || 'gray'} size="small">{m.type}</Tag>
                     <span style={{ fontSize: 13, fontFamily: 'monospace' }}>{m.actual_model}</span>
                     <Switch
