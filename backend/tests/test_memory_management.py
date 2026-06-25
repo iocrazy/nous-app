@@ -206,25 +206,34 @@ class TestMemoryPrefs:
 async def test_inject_disabled_skips_recall(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import app.services.ai.memory.honcho_memory as hm
+    from unittest.mock import AsyncMock
+
     from app.services.ai.chat import ai_library_chat_wiring as wiring
+    from app.services.ai.memory import memory_prefs as prefs_mod
     from app.services.ai.memory.memory_prefs import MemoryPrefs
 
-    class _Svc:
-        class config:
-            @staticmethod
-            def operative() -> bool:
-                return True
+    # Mock L2 provider: is_operative=True so we pass the operative gate and
+    # genuinely exercise the inject=False short-circuit.  get_context raises
+    # to prove it is never reached when inject is off.
+    # Re-pointed: patching hm.get_honcho_memory_service did not intercept
+    # HonchoProvider.is_operative() (which reads from honcho_provider's own
+    # binding), so the old test passed via operative=False rather than inject=False.
+    mock_provider = AsyncMock()
+    mock_provider.is_operative = AsyncMock(return_value=True)
+    mock_provider.get_context = AsyncMock(
+        side_effect=AssertionError("must not fetch when inject disabled")
+    )
+    monkeypatch.setattr(
+        wiring.memory_registry,
+        "l2_provider",
+        AsyncMock(return_value=mock_provider),
+    )
 
-        async def get_user_representation(self, **kwargs):  # pragma: no cover
-            raise AssertionError("must not fetch when inject disabled")
-
-    monkeypatch.setattr(hm, "get_honcho_memory_service", lambda: _Svc())
-    from app.services.ai.memory import memory_prefs as prefs_mod
-
-    async def _prefs(uid):
+    async def _prefs(uid: str) -> MemoryPrefs:
         return MemoryPrefs(learn=True, inject=False)
 
+    # _safe_recall_honcho_context imports get_memory_prefs locally from the
+    # memory_prefs module, so patching the module attribute intercepts it.
     monkeypatch.setattr(prefs_mod, "get_memory_prefs", _prefs)
     result = await wiring._safe_recall_honcho_context(user_id=_USER, session_id=None)
     assert result is None
@@ -286,7 +295,6 @@ async def test_inject_prepends_card(
 async def test_learn_disabled_skips_honcho_write(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import app.services.ai.memory.honcho_memory as hm
     from app.services.ai.memory.memory_prefs import MemoryPrefs
     from app.workflows import write_memory as wm
 
@@ -297,13 +305,21 @@ async def test_learn_disabled_skips_honcho_write(
         async def add_chat_turn(self, **kwargs):  # pragma: no cover
             raise AssertionError("must not write when learn disabled")
 
-    monkeypatch.setattr(hm, "get_honcho_memory_service", lambda: _Svc())
-    from app.services.ai.memory import memory_prefs as prefs_mod
+    # Re-pointed to the provider's own module-level binding: HonchoProvider.enabled()
+    # reads get_honcho_memory_service() from honcho_provider's namespace, not
+    # honcho_memory's.  Patching honcho_provider ensures enabled()=True so the
+    # function proceeds past the global-disabled gate to the learn gate.
+    monkeypatch.setattr(
+        "app.services.ai.memory.providers.honcho_provider.get_honcho_memory_service",
+        lambda: _Svc(),
+    )
 
-    async def _prefs(uid):
+    async def _prefs(uid: str) -> MemoryPrefs:
         return MemoryPrefs(learn=False, inject=True)
 
-    monkeypatch.setattr(prefs_mod, "get_memory_prefs", _prefs)
+    # Re-pointed: write_memory imports get_memory_prefs at module level so the
+    # live seam is wm.get_memory_prefs, not the memory_prefs module attribute.
+    monkeypatch.setattr(wm, "get_memory_prefs", _prefs)
     written = await wm._write_honcho_turn(
         user_id=_USER,
         agent_id="a1",
