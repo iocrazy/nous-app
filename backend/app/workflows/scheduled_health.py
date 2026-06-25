@@ -151,3 +151,50 @@ async def health_check_workflow(
     result = await health_check_step()
     if result["status"] != "healthy":
         logger.warning(f"[health_check] degraded: {result['checks']}")
+
+
+@DBOS.step()
+async def probe_nous_models_step() -> dict[str, Any]:
+    """Probe every ENABLED admin-configured platform (Nous) model and persist
+    the result, so the admin's connectivity dots stay fresh without anyone
+    clicking Test.
+
+    Reuses the exact probe (``probe_nous_model``) the manual admin Test endpoint
+    runs, and the same persistence (``repo.record_test_result``) — no duplicated
+    logic, no new table, no new scheduler. Each probe is a tiny ping
+    (max_tokens=8 for chat); a failure is recorded, never raised.
+    """
+    from app.repositories.nous_repository import get_nous_repository
+    from app.services.ai.nous_health import probe_nous_model
+
+    repo = get_nous_repository()
+    rows = await repo.list_all()
+    enabled = [r for r in rows if r.get("is_enabled")]
+
+    ok = 0
+    for row in enabled:
+        result = await probe_nous_model(row)
+        status = "ok" if result.get("ok") else "fail"
+        detail = result.get("detail") or (result.get("error") or "")
+        await repo.record_test_result(str(row.get("id")), status, detail[:200])
+        if result.get("ok"):
+            ok += 1
+
+    return {"total": len(enabled), "ok": ok, "failed": len(enabled) - ok}
+
+
+@DBOS.scheduled("0 */6 * * *")  # every 6 hours
+@DBOS.workflow()
+async def nous_model_health_workflow(
+    scheduled_time: datetime, actual_time: datetime
+) -> None:
+    summary = await probe_nous_models_step()
+    if summary["failed"]:
+        logger.warning(
+            f"[nous_model_health] {summary['failed']}/{summary['total']} "
+            f"platform models unreachable"
+        )
+    else:
+        logger.info(
+            f"[nous_model_health] all {summary['total']} platform models reachable"
+        )
