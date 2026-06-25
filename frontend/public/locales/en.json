@@ -1676,7 +1676,8 @@
         "skills": "Skills",
         "runs": "Runs",
         "versions": "Versions",
-        "routines": "Routines"
+        "routines": "Routines",
+        "permissions": "Permissions"
       },
       "loadErrorPrefix": "Failed to load agent",
       "listLoadError": "Failed to load agents",
@@ -1913,6 +1914,16 @@
     },
     "workforce": {
       "runningNow": "Running now"
+    },
+    "permissions": {
+      "tab": "Permissions",
+      "intro": "Control whether this agent can participate in Team Chat. All permissions are off by default — an agent cannot enter groups or read team files until granted here.",
+      "enableChat": "Enable chat",
+      "enableChatDesc": "Allow this agent to be added to groups and summoned with @mention.",
+      "readTeamFiles": "Read team files",
+      "readTeamFilesDesc": "Allow the agent to read resources of the group's team when summoned.",
+      "autoBroadcast": "Auto-broadcast",
+      "autoBroadcastDesc": "Allow the agent to post automatic updates (e.g. task completion) to its groups."
     }
   },
   "aiUsage": {

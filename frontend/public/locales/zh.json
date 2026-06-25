@@ -1676,7 +1676,8 @@
         "skills": "技能",
         "runs": "运行记录",
         "versions": "版本",
-        "routines": "例行任务"
+        "routines": "例行任务",
+        "permissions": "权限"
       },
       "loadErrorPrefix": "加载智能体失败",
       "listLoadError": "加载智能体列表失败",
@@ -1913,6 +1914,16 @@
     },
     "workforce": {
       "runningNow": "运行中"
+    },
+    "permissions": {
+      "tab": "权限",
+      "intro": "控制此 Agent 是否能参与团队聊天。所有权限默认关闭——未在此授权前，Agent 无法进群或读取团队文件。",
+      "enableChat": "启用聊天",
+      "enableChatDesc": "允许此 Agent 被加入群组并通过 @ 召唤。",
+      "readTeamFiles": "读取团队文件",
+      "readTeamFilesDesc": "允许 Agent 在被召唤时读取所在群组团队的素材。",
+      "autoBroadcast": "主动播报",
+      "autoBroadcastDesc": "允许 Agent 向所在群组发送自动更新（如任务完成）。"
     }
   },
   "aiUsage": {
