@@ -121,11 +121,52 @@ export interface SourceHealth {
   last_error?: string | null;
   last_fetched_at?: string | null;
   last_ok_at?: string | null;
+  /** This caller created the source — they can delete it. */
+  is_owner: boolean;
+  /** This caller has closed the source (excluded from their feed). */
+  is_hidden: boolean;
+}
+
+export type SourceKind = 'newsnow' | 'rss' | 'http_api' | 'custom';
+
+export interface NewSourcePayload {
+  kind: SourceKind;
+  name: string;
+  category?: string | null;
+  config?: Record<string, unknown>;
 }
 
 export async function getSourceHealth(): Promise<SourceHealth[]> {
   const resp = await fetch(`${base()}/sources/health`, { headers: await getAuthHeaders() });
   return (await jsonOrThrow(resp)).sources as SourceHealth[];
+}
+
+// Add a user-owned source. Its hotspots are private to the caller.
+export async function addSource(payload: NewSourcePayload): Promise<SourceHealth | null> {
+  const resp = await fetch(`${base()}/sources`, {
+    method: 'POST',
+    headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return ((await jsonOrThrow(resp)).source ?? null) as SourceHealth | null;
+}
+
+// Delete a source the caller OWNS (stops collection). System sources reject (404).
+export async function deleteSource(id: string): Promise<void> {
+  const resp = await fetch(`${base()}/sources/${id}`, {
+    method: 'DELETE',
+    headers: await getAuthHeaders(),
+  });
+  await jsonOrThrow(resp);
+}
+
+// Close (hide=true) or re-open (hide=false) a source for this caller only.
+export async function setSourceHidden(id: string, hide: boolean): Promise<void> {
+  const resp = await fetch(`${base()}/sources/${id}/hide`, {
+    method: hide ? 'POST' : 'DELETE',
+    headers: await getAuthHeaders(),
+  });
+  await jsonOrThrow(resp);
 }
 
 // generate-script returns the script_ai outline (a list of chapter objects), not a string.
