@@ -17,7 +17,7 @@ from app.schemas.chat import (
 )
 from app.services.chat_service import get_chat_service
 
-router = APIRouter(prefix="/chat", tags=["chat"])
+router = APIRouter(prefix="/chat", tags=["Chat"])
 
 
 @router.get("/channels", response_model=list[ChannelOut])
@@ -29,14 +29,17 @@ async def list_my_channels(auth: AuthDep):
 @router.post("/channels", response_model=ChannelOut)
 async def create_channel(payload: ChannelCreate, auth: AuthDep):
     svc = get_chat_service()
-    ch = await svc.create_channel(
-        user_id=auth.user_id,
-        team_id=payload.team_id,
-        type=payload.type,
-        name=payload.name,
-        history_mode=payload.history_mode,
-        member_ids=payload.member_ids,
-    )
+    try:
+        ch = await svc.create_channel(
+            user_id=auth.user_id,
+            team_id=payload.team_id,
+            type=payload.type,
+            name=payload.name,
+            history_mode=payload.history_mode,
+            member_ids=payload.member_ids,
+        )
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
     return {**ch, "unread": 0}
 
 

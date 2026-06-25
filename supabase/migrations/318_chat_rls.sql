@@ -3,7 +3,9 @@
 
 -- SECURITY DEFINER helpers (mirror get_user_team_ids style) avoid RLS recursion.
 CREATE OR REPLACE FUNCTION public.is_channel_member(p_user UUID, p_channel BIGINT)
-RETURNS BOOLEAN LANGUAGE SQL SECURITY DEFINER STABLE AS $$
+RETURNS BOOLEAN LANGUAGE SQL SECURITY DEFINER STABLE
+SET search_path = public, pg_temp
+AS $$
   SELECT EXISTS (
     SELECT 1 FROM public.channel_members
     WHERE channel_id = p_channel AND user_id = p_user
@@ -12,7 +14,9 @@ $$;
 GRANT EXECUTE ON FUNCTION public.is_channel_member(UUID, BIGINT) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.channel_member_joined_at(p_user UUID, p_channel BIGINT)
-RETURNS TIMESTAMPTZ LANGUAGE SQL SECURITY DEFINER STABLE AS $$
+RETURNS TIMESTAMPTZ LANGUAGE SQL SECURITY DEFINER STABLE
+SET search_path = public, pg_temp
+AS $$
   SELECT joined_at FROM public.channel_members
   WHERE channel_id = p_channel AND user_id = p_user;
 $$;

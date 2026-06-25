@@ -101,6 +101,19 @@ class ChatRepository:
         )
         return bool(v)
 
+    async def is_team_member(self, *, team_id: int, user_id: str) -> bool:
+        result = await db_engine.fetch_val(
+            "SELECT EXISTS(SELECT 1 FROM team_members WHERE team_id = :tid AND user_id = :uid)",
+            {"tid": _bigint(team_id), "uid": user_id},
+        )
+        return bool(result)
+
+    async def channel_team_id(self, *, channel_id: int) -> int | None:
+        return await db_engine.fetch_val(
+            "SELECT team_id FROM channels WHERE id = :cid",
+            {"cid": _bigint(channel_id)},
+        )
+
     async def get_my_channels(self, user_id: str) -> list[dict[str, Any]]:
         rows = await db_engine.fetch_all(
             """
@@ -172,6 +185,16 @@ class ChatRepository:
                 .mappings()
                 .one()
             )
+            # advance sender's read cursor so own messages never show as unread
+            if sender_type == "user" and sender_id is not None:
+                await conn.execute(
+                    text(
+                        "UPDATE public.channel_members"
+                        " SET last_read_seq = :seq"
+                        " WHERE channel_id = :cid AND user_id = :sender"
+                    ),
+                    {"seq": seq, "cid": _bigint(channel_id), "sender": sender_id},
+                )
             return dict(row)
 
     async def list_messages(

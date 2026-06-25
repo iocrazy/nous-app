@@ -21,6 +21,8 @@ class ChatService:
         history_mode: str,
         member_ids: list[str],
     ) -> dict[str, Any]:
+        if not await self._repo.is_team_member(team_id=team_id, user_id=user_id):
+            raise PermissionError("not a member of this team")
         return await self._repo.create_channel(
             creator_id=user_id,
             team_id=team_id,
@@ -37,6 +39,11 @@ class ChatService:
         self, *, channel_id: int, user_id: str, user_ids: list[str]
     ) -> int:
         await self._require_member(channel_id, user_id)
+        team_id = await self._repo.channel_team_id(channel_id=channel_id)
+        if team_id is not None:
+            for target in user_ids:
+                if not await self._repo.is_team_member(team_id=team_id, user_id=target):
+                    raise PermissionError("target user not in this team")
         return await self._repo.add_members(channel_id=channel_id, user_ids=user_ids)
 
     async def post_message(
