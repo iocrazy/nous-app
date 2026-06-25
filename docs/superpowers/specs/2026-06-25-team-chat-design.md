@@ -153,8 +153,8 @@
 | CHAT-RT-01 | `channel_messages` 加入 `supabase_realtime` publication + `REPLICA IDENTITY FULL`，前端订阅 `postgres_changes` | 现有 `task_tracking` 范式（`migrations/180,210`） | ☑ |
 | CHAT-RT-02 | **依赖 Realtime 受 RLS 约束**（已验证）：无权订阅者收不到 private 频道事件，不自建应用层 fan-out | `migrations/064` task_tracking RLS + Realtime 链路 | ☑ |
 | CHAT-RT-03 | **typing / 在线状态走 `realtime.broadcast()` 内存事件，不落库**（高频，落库撑爆 replication） | MM typing `user.go:2823` 不落库 | ☐ |
-| CHAT-RT-04 | 前端订阅自己的 `channel_members` 行获取未读变化；重连后按 seq range 拉缺口补洞 | seq 补洞 | ☐ |
-| CHAT-RT-05 | 前端订阅模式复用 `TaskManagerContext` 的 channel/subscribe 写法 | `frontend/contexts/TaskManagerContext.tsx:595` | ☐ |
+| CHAT-RT-04 | 前端订阅自己的 `channel_members` 行获取未读变化；重连后按 seq range 拉缺口补洞 | seq 补洞 | ◑ (消息 Realtime 订阅+补 mark-read 已做；member-row 未读订阅/重连补洞延后) |
+| CHAT-RT-05 | 前端订阅模式复用 `TaskManagerContext` 的 channel/subscribe 写法 | `frontend/contexts/TaskManagerContext.tsx:595` | ☑ |
 
 ---
 
@@ -191,11 +191,11 @@
 
 | ID | 规则 | 来源/依据 | 状态 |
 |----|------|----------|------|
-| CHAT-UI-01 | 全英文 UI + i18n（en/zh），命名遵循 Title Case / camelCase key / kebab-case 文件 | CLAUDE.md UI 规范 | ☐ |
-| CHAT-UI-02 | 频道侧栏样式与现有资源库/项目侧栏统一 | feedback_sidebar_consistency | ☐ |
-| CHAT-UI-03 | 遵循岛式 UI 铁律：零 emoji、导航不消失、密度不减、新代码禁 zinc | project_island_redesign | ☐ |
-| CHAT-UI-04 | 组件 ≤400 行典型，按 feature 组织（channel-list / message-list / composer / message-card） | 全局 coding-style | ☐ |
-| CHAT-UI-05 | Toast 用 `useToast()`；BIGINT 经 `bigIntSafeFetch` | CLAUDE.md Key Patterns | ☐ |
+| CHAT-UI-01 | 全英文 UI + i18n（en/zh），命名遵循 Title Case / camelCase key / kebab-case 文件 | CLAUDE.md UI 规范 | ☑ |
+| CHAT-UI-02 | 频道侧栏样式与现有资源库/项目侧栏统一 | feedback_sidebar_consistency | ☑ |
+| CHAT-UI-03 | 遵循岛式 UI 铁律：零 emoji、导航不消失、密度不减、新代码禁 zinc | project_island_redesign | ☑ |
+| CHAT-UI-04 | 组件 ≤400 行典型，按 feature 组织（channel-list / message-list / composer / message-card） | 全局 coding-style | ☑ |
+| CHAT-UI-05 | Toast 用 `useToast()`；BIGINT 经 `bigIntSafeFetch` | CLAUDE.md Key Patterns | ☑ |
 
 ---
 
