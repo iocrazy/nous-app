@@ -15,6 +15,7 @@ from app.api.ai_router import router as ai_pipeline_router
 from app.api.ai_settings_router import router as ai_settings_router
 from app.api.api_key_router import router as api_key_router
 from app.api.canvases_router import router as canvases_router
+from app.api.chat_router import router as chat_router
 from app.api.cleanup_router import router as cleanup_router
 from app.api.collections_router import router as collections_router
 from app.api.error_report_router import router as error_report_router
@@ -137,6 +138,8 @@ api_router.include_router(router=task_manager_router, tags=["Task Manager"])
 api_router.include_router(router=flows_router)
 
 api_router.include_router(router=teams_router, tags=["Teams"])
+
+api_router.include_router(router=chat_router, tags=["Chat"])
 
 # DBOS orchestrator health + introspection (PR-D2.2)
 from app.api.dbos_router import router as dbos_router  # noqa: E402
