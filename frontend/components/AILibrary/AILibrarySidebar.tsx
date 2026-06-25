@@ -190,7 +190,9 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
                   ? t('sidebar.agentPausedManual', 'Paused by admin')
                   : null;
 
-                const trailing = isRunning ? (
+                const isChatEnabled = agent.chat_permissions?.enabled;
+
+                const statusTrailing = isRunning ? (
                   <span
                     className="relative flex h-2 w-2 flex-shrink-0"
                     title={t('sidebar.agentRunning', 'Running...')}
@@ -212,6 +214,15 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
                     aria-label={pausedTitle ?? undefined}
                   />
                 ) : null;
+
+                const trailing: React.ReactNode = isChatEnabled ? (
+                  <div className="flex items-center gap-1">
+                    <span className="rounded px-1.5 py-0.5 text-[10px] font-medium text-indigo-300 bg-indigo-500/15">
+                      {t('aiLibrary.permissions.tab')}
+                    </span>
+                    {statusTrailing}
+                  </div>
+                ) : statusTrailing;
 
                 return (
                   <NavItem
