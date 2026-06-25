@@ -57,7 +57,7 @@ class ChatRepository:
                     text(
                         """
                         INSERT INTO public.channel_members (channel_id, user_id, roles)
-                        VALUES (:cid, :uid, :roles)
+                        VALUES (:cid, :uid, CAST(:roles AS text[]))
                         ON CONFLICT (channel_id, user_id) DO NOTHING
                         """
                     ),
