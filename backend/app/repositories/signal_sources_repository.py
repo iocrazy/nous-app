@@ -25,6 +25,10 @@ def compute_health(*, prev_failures: int, ok: bool, dead_threshold: int = 3) -> 
 
 # Source kinds permitted by the signal_sources CHECK constraint (migration 304).
 ALLOWED_KINDS = ("newsnow", "rss", "http_api", "custom")
+# Kinds that actually have a working adapter (registry.get_adapter). http_api /
+# custom are reserved in the DB CHECK but unimplemented — creating one yields a
+# source that fails every fetch, so source-creation is restricted to these.
+IMPLEMENTED_KINDS = ("newsnow", "rss")
 
 
 class SignalSourcesRepository:
@@ -123,6 +127,30 @@ class SignalSourcesRepository:
             "config": config or {},
             "category": category,
             "enabled": enabled,
+        }
+        result = await client.table(self.TABLE).insert(row).execute()
+        return (result.data or [row])[0]
+
+    async def admin_create_source(
+        self,
+        *,
+        kind: str,
+        name: str,
+        config: dict[str, Any],
+        category: Optional[str] = None,
+        tier: int = 2,
+    ) -> dict[str, Any]:
+        """Create a SYSTEM source (user_id NULL → visible to everyone). Distinct
+        from create_source, which makes a user-private source. Admin-only."""
+        client = await self._client()
+        row = {
+            "user_id": None,
+            "kind": kind,
+            "name": name,
+            "config": config or {},
+            "category": category,
+            "enabled": True,
+            "tier": int(tier),
         }
         result = await client.table(self.TABLE).insert(row).execute()
         return (result.data or [row])[0]
