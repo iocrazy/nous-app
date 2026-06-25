@@ -65,13 +65,22 @@ export const CurrentHotspots: React.FC<{ items: Hotspot[] }> = ({ items }) => {
               </span>
             </span>
 
-            {/* Source + time meta */}
+            {/* Multi-source heat: how many platforms carry this topic + when.
+                Falls back to the single source label when it's on just one. */}
             <span
               className={`text-[11px] shrink-0 ml-3 ${
                 island ? 'text-content-4' : 'text-ink-500'
               }`}
             >
-              {[item.source_label, relativeTime(item.captured_at)]
+              {[
+                item.source_count && item.source_count > 1
+                  ? t('topic.sourcesCount', {
+                      count: item.source_count,
+                      defaultValue: '{{count}} sources',
+                    })
+                  : item.source_label,
+                relativeTime(item.captured_at),
+              ]
                 .filter(Boolean)
                 .join(' · ')}
             </span>
