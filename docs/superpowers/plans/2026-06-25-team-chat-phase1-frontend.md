@@ -153,7 +153,7 @@ export const chatService = {
 
 Key behaviors to implement (the rest is styling copied from the mockup):
 - `ChatSidebar`: sections by `channel.type` (Groups = group/public, Direct Messages = dm). Each row shows name (or a DM peer label fallback), and an unread badge (`channel.unread > 0`) — indigo badge.
-- `MessageBubble`: `sender_type==='agent'` → amber avatar + `AGENT` tag; `content_type==='media_card'` → card from `message.body` (`{title, image_url, fields:[{k,v}], ...}`); else `message.body.text` as plain text.
+- `MessageBubble`: `sender_type==='agent'` → amber avatar + `AGENT` tag; `content_type==='media_card'` → card from `message.body` (`{title, image_url, fields:[{title,value}], ...}`); else `message.body.text` as plain text.
 - `MessageList`: a top "Load older" button shown when `hasOlder` (calls `onLoadOlder`), messages rendered oldest→newest, auto-scroll to bottom on new last message.
 - `Composer`: textarea + send button; Enter sends, Shift+Enter newline; calls `onSend(text)` and clears; `disabled` disables input + button.
 
