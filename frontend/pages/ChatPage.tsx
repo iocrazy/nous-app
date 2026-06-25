@@ -102,10 +102,11 @@ export function ChatPage(): React.ReactElement {
       .then((list) => {
         if (cancelled) return;
         // Filter to only channels belonging to the currently selected team
-        setChannels(list.filter(c => c.team_id === selectedTeamId));
+        const filtered = list.filter(c => c.team_id === selectedTeamId);
+        setChannels(filtered);
         // Auto-select first channel
-        if (list.length > 0) {
-          setActiveId(list[0].id);
+        if (filtered.length > 0) {
+          setActiveId(filtered[0].id);
         } else {
           setActiveId(null);
           setMessages([]);
