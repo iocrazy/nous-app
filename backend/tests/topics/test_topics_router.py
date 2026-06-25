@@ -364,6 +364,18 @@ def test_hidden_source_drops_out_of_feed_allowlist(client):
     assert client.calls["source_ids"] == ["11"]
 
 
+def test_source_param_narrows_to_picked(client):
+    client.get("/api/v1/topics?source=11")
+    # only the picked source (intersected with visible) reaches the query
+    assert client.calls["source_ids"] == ["11"]
+
+
+def test_source_param_intersects_with_visibility(client):
+    # a picked id outside the visible allowlist is dropped → empty feed
+    client.get("/api/v1/topics?source=999")
+    assert client.calls["source_ids"] == []
+
+
 def test_source_health_marks_owner_and_hidden(client):
     client.calls["hidden_ids"] = ["10"]
     body = client.get("/api/v1/topics/sources/health").json()

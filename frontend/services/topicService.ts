@@ -56,6 +56,7 @@ export async function getHotspots(
   category?: string,
   q?: string,
   view: HotspotView = 'all',
+  sources?: string[],
 ): Promise<Hotspot[]> {
   const params = new URLSearchParams();
   if (view !== 'all') params.set('view', view);
@@ -65,6 +66,9 @@ export async function getHotspots(
   if (term) params.set('q', term);
   else if (day) params.set('day', day); // day only narrows plain browsing
   if (category && category !== 'all') params.set('category', category);
+  // Source filter: narrow the feed to picked sources (intersected server-side
+  // with the caller's visible allowlist). Empty/undefined = all visible.
+  if (sources && sources.length > 0) params.set('source', sources.join(','));
   const resp = await fetch(`${base()}?${params.toString()}`, { headers: await getAuthHeaders() });
   return (await jsonOrThrow(resp)).hotspots as Hotspot[];
 }

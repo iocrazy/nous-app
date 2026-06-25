@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -81,9 +82,17 @@ def _to_out(
 async def _visible_source_ids(user_id: str) -> list[str]:
     """The caller's feed allowlist: system + own sources, minus the ones they've
     hidden. Every feed read scopes ``source_id IN (...)`` to this set, so a
-    deleted/other-user/hidden source's hotspots never surface."""
-    hidden = await UserHiddenSourcesRepository().list_hidden_ids(user_id)
-    return await SignalSourcesRepository().feed_source_ids(user_id, hidden)
+    deleted/other-user/hidden source's hotspots never surface.
+
+    The two lookups (hidden ids + visible sources) are independent, so we fire
+    them concurrently — one round-trip of latency instead of two before the
+    main feed query runs."""
+    hidden, sources = await asyncio.gather(
+        UserHiddenSourcesRepository().list_hidden_ids(user_id),
+        SignalSourcesRepository().list_visible(user_id),
+    )
+    hidden_set = set(hidden)
+    return [str(s["id"]) for s in sources if str(s["id"]) not in hidden_set]
 
 
 @router.get("", response_model=HotspotListResponse)
@@ -93,11 +102,19 @@ async def list_hotspots(
     category: Optional[str] = Query(None),
     q: Optional[str] = Query(None, description="free-text search over hotspots"),
     view: str = Query("all", description="all | saved | hidden | foryou"),
+    source: Optional[str] = Query(
+        None, description="comma-separated source ids to narrow the feed to"
+    ),
     limit: int = Query(100, ge=1, le=300),
 ):
     repo = HotspotsRepository()
     state_repo = HotspotUserStateRepository()
     visible = await _visible_source_ids(auth.user_id)
+    if source:
+        # Narrow the feed to the user-picked sources, intersected with what
+        # they're allowed to see (a picked id outside the allowlist is dropped).
+        picked = {s.strip() for s in source.split(",") if s.strip()}
+        visible = [sid for sid in visible if sid in picked]
 
     if view == "foryou":
         # Personalized: hotspots ranked by cosine similarity to the user's

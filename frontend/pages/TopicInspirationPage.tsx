@@ -19,10 +19,9 @@ import { HotspotInfoPanel } from '../components/TopicInspiration/HotspotInfoPane
 import { FloatingParse } from '../components/TopicInspiration/FloatingParse';
 import { CurrentHotspots } from '../components/TopicInspiration/CurrentHotspots';
 import { SourceHealthBadge } from '../components/TopicInspiration/SourceHealthBadge';
+import { TopicFilterBar } from '../components/TopicInspiration/TopicFilterBar';
 import { topHotspots, partitionBySignal } from '../components/TopicInspiration/hotspotRanking';
 
-const CATEGORIES = ['all', 'model', 'product', 'industry', 'paper', 'tips'] as const;
-const VIEWS: HotspotView[] = ['all', 'foryou', 'saved', 'hidden'];
 const TOP_HOTSPOTS_COUNT = 5;
 
 export const TopicInspirationPage: React.FC = () => {
@@ -33,6 +32,7 @@ export const TopicInspirationPage: React.FC = () => {
   const [dates, setDates] = useState<string[]>([]);
   const [day, setDay] = useState<string | undefined>(undefined);
   const [category, setCategory] = useState<string>('all');
+  const [selectedSources, setSelectedSources] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<Hotspot | null>(null);
   const [queryInput, setQueryInput] = useState('');
@@ -96,7 +96,7 @@ export const TopicInspirationPage: React.FC = () => {
       setLoading(true);
       try {
         const [hs, ds] = await Promise.all([
-          getHotspots(day, category, query, view),
+          getHotspots(day, category, query, view, selectedSources),
           getHotspotDates(),
         ]);
         if (!alive) return;
@@ -111,7 +111,7 @@ export const TopicInspirationPage: React.FC = () => {
     return () => {
       alive = false;
     };
-  }, [day, category, query, view, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [day, category, query, view, selectedSources, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Optimistically apply a state patch, drop the card if it no longer belongs
   // to the current view, persist, and revert (via refetch) on failure.
@@ -165,16 +165,6 @@ export const TopicInspirationPage: React.FC = () => {
   const cPrimary = island ? 'text-content' : 'text-ink-50';
   const cSub = island ? 'text-content-3' : 'text-ink-400';
 
-  function cycleDay() {
-    if (dates.length === 0) return;
-    if (!day) {
-      setDay(dates[0]);
-    } else {
-      const idx = dates.indexOf(day);
-      setDay(idx < 0 || idx >= dates.length - 1 ? undefined : dates[idx + 1]);
-    }
-  }
-
   return (
     <div className="max-w-[1180px] mx-auto px-6 py-6">
       {/* Page header */}
@@ -187,33 +177,9 @@ export const TopicInspirationPage: React.FC = () => {
       </div>
       <p className={`text-xs mt-1 ${cSub}`}>{t('topic.subtitle')}</p>
 
-      {/* View selector: All / Saved / Hidden */}
-      <div className="mt-4 flex items-center gap-1">
-        {VIEWS.map((v) => {
-          const active = view === v;
-          return (
-            <button
-              key={v}
-              onClick={() => switchView(v)}
-              className={`px-3 py-1 rounded-full text-xs font-medium capitalize transition-colors ${
-                active
-                  ? island
-                    ? 'bg-accent text-white'
-                    : 'bg-indigo-600 text-white'
-                  : island
-                  ? 'bg-island-2 text-content-3 hover:text-content'
-                  : 'bg-ink-800 text-ink-400 hover:text-ink-200'
-              }`}
-            >
-              {t(`topic.view_${v}`, v)}
-            </button>
-          );
-        })}
-      </div>
-
       {/* Search box — server-side, debounced (only in the default "all" view) */}
       {view === 'all' && (
-      <div className="mt-3 relative">
+      <div className="mt-4 relative">
         <Search
           size={15}
           className={`absolute left-3 top-1/2 -translate-y-1/2 ${
@@ -245,6 +211,22 @@ export const TopicInspirationPage: React.FC = () => {
       </div>
       )}
 
+      {/* Resources-style dropdown filter bar: View / Category / Source / Date */}
+      <div className="mt-4">
+        <TopicFilterBar
+          view={view}
+          onView={switchView}
+          category={category}
+          onCategory={setCategory}
+          selectedSources={selectedSources}
+          onSources={setSelectedSources}
+          day={day}
+          dates={dates}
+          onDay={setDay}
+          searching={searching}
+        />
+      </div>
+
       {/* Interest editor — For You view only */}
       {view === 'foryou' && (
         <div className="mt-3 flex flex-col sm:flex-row gap-2">
@@ -272,45 +254,6 @@ export const TopicInspirationPage: React.FC = () => {
             {interestSaving ? t('common.loading', 'Loading...') : t('topic.saveInterest', 'Save')}
           </button>
         </div>
-      )}
-
-      {/* Controls row: category chips + date button (browse view only) */}
-      {view === 'all' && (
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        {CATEGORIES.map((cat) => {
-          const active = category === cat;
-          return (
-            <button
-              key={cat}
-              onClick={() => setCategory(cat)}
-              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors capitalize ${
-                active
-                  ? island
-                    ? 'bg-accent text-white'
-                    : 'bg-indigo-600 text-white'
-                  : island
-                  ? 'bg-island-2 text-content-3 hover:text-content'
-                  : 'bg-ink-800 text-ink-400 hover:text-ink-200'
-              }`}
-            >
-              {cat}
-            </button>
-          );
-        })}
-
-        <button
-          onClick={cycleDay}
-          disabled={searching}
-          title={searching ? t('topic.dateDisabledWhenSearching', 'Searching all dates') : undefined}
-          className={`ml-auto px-3 py-1 rounded-full text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-            island
-              ? 'bg-island-2 border border-line-strong text-content-2 hover:text-content'
-              : 'bg-ink-800 border border-ink-700 text-ink-300 hover:text-ink-100'
-          }`}
-        >
-          {day || 'Today'}
-        </button>
-      </div>
       )}
 
       {/* Status / loading */}
