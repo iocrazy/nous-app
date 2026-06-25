@@ -10,7 +10,7 @@ import {
   Tag,
   Select,
 } from '@arco-design/web-react'
-import { IconStorage, IconRobot, IconCode } from '@arco-design/web-react/icon'
+import { IconStorage, IconRobot, IconCode, IconSync, IconApps } from '@arco-design/web-react/icon'
 import { SectionHeader } from './SectionHeader'
 import { useAuth } from '../../auth/AuthProvider'
 
@@ -46,6 +46,9 @@ import {
   useGraphMemorySettings,
   useUpdateGraphMemorySettings,
   type GraphMemorySettingsUpdate,
+  useMemoryControl,
+  useSetMemorySlot,
+  useReloadMemorySlot,
 } from '../../api/endpoints/settings'
 
 /**
@@ -72,6 +75,15 @@ export function MemorySettings() {
   const { data, isLoading } = useGraphMemorySettings()
   const updateMutation = useUpdateGraphMemorySettings()
   const { session } = useAuth()
+
+  const { data: control } = useMemoryControl()
+  const setSlot = useSetMemorySlot()
+  const reloadSlot = useReloadMemorySlot()
+
+  const SLOT_META: Record<string, { label: string; providers: string[] }> = {
+    l2: { label: 'L2 · User Model', providers: ['honcho', 'none'] },
+    l3: { label: 'L3 · Knowledge Graph', providers: ['graphiti', 'none'] },
+  }
   const [catalog, setCatalog] = useState<CatalogModel[]>([])
 
   // Load the platform-model catalog so the extractor/embedder can be assigned by
@@ -343,6 +355,69 @@ export function MemorySettings() {
           status={dimInvalid ? 'error' : undefined}
         />
       </Row>
+
+      <Divider />
+      <SectionHeader
+        icon={<IconApps />}
+        title="Provider Slots"
+        subtitle="Choose the backend for each memory layer, see its health, and reload it after a config change (no backend restart)."
+      />
+      {(control?.slots ?? []).map((s) => {
+        const meta = SLOT_META[s.slot] ?? { label: s.slot, providers: [s.provider] }
+        return (
+          <div
+            key={s.slot}
+            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 0' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span
+                title={s.health ? 'Healthy' : 'Unreachable / disabled'}
+                style={{
+                  display: 'inline-block', width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                  background: s.health ? '#00b42a' : '#f53f3f',
+                }}
+              />
+              <span style={{ fontWeight: 500, fontSize: 14 }}>{meta.label}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Select
+                value={s.provider}
+                style={{ width: 160 }}
+                onChange={(provider: string) =>
+                  setSlot.mutate(
+                    { slot: s.slot, provider },
+                    {
+                      onSuccess: () => Message.success(`${meta.label} → ${provider}`),
+                      onError: (e: unknown) => Message.error((e as Error)?.message || 'Failed to switch provider'),
+                    },
+                  )
+                }
+              >
+                {meta.providers.map((p) => (
+                  <Select.Option key={p} value={p}>{p}</Select.Option>
+                ))}
+              </Select>
+              <Button
+                size="small"
+                icon={<IconSync />}
+                loading={reloadSlot.isPending}
+                disabled={s.provider === 'none'}
+                onClick={() =>
+                  reloadSlot.mutate(s.slot, {
+                    onSuccess: (r) =>
+                      r.ok
+                        ? Message.success(`Reloaded ${r.reloaded}`)
+                        : Message.warning('Slot disabled — nothing to reload'),
+                    onError: (e: unknown) => Message.error((e as Error)?.message || 'Reload failed'),
+                  })
+                }
+              >
+                Reload
+              </Button>
+            </div>
+          </div>
+        )
+      })}
 
       <Divider />
       <div style={{ textAlign: 'right' }}>
