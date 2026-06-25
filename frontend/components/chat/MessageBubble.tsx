@@ -1,128 +1,172 @@
-import React, { useCallback } from 'react';
+/**
+ * MessageBubble — a single message row in the Team Chat stream.
+ *
+ * Rendering rules:
+ *   - sender_type === 'agent'    → amber gradient avatar + "AGENT" tag
+ *   - content_type === 'media_card' → media card from message.body
+ *   - otherwise                 → plain text from message.body.text
+ *
+ * Purely presentational — no data fetching.
+ */
+
+import React from 'react';
 import { useTranslation } from 'react-i18next';
-import DOMPurify from 'dompurify';
-import { Copy, Check } from 'lucide-react';
+import { ExternalLink, Download } from 'lucide-react';
+import type { ChatMessage } from '../../types';
 
-import type { ChatToolCall } from '../../types';
-import { ApprovalCard, type AwaitingApproval } from './ApprovalCard';
-import { SubTaskList } from './SubTaskCard';
+// ── helpers ──────────────────────────────────────────────────────────────────
 
-export interface MessageBubbleProps {
-  role: 'user' | 'assistant';
-  content: string;
-  agentName?: string;
-  tokens?: number;
-  onApply?: () => void;
-  onCopy?: () => void;
-  timestamp?: string;
-  /**
-   * Sub-task dispatches the LLM made for this assistant turn. Rendered
-   * as collapsible cards above the prose body. Ignored on user bubbles.
-   */
-  toolCalls?: ChatToolCall[];
-  /**
-   * Plan Mode (Phase 4.5): the turn paused on a hook's await_approval.
-   * Renders an inline Approve/Reject card above the prose body.
-   */
-  awaitingApproval?: AwaitingApproval;
+function fmtTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return '';
+  }
 }
 
-export function MessageBubble({
-  role,
-  content,
-  agentName,
-  tokens,
-  onApply,
-  onCopy,
-  timestamp,
-  toolCalls,
-  awaitingApproval,
-}: MessageBubbleProps): React.ReactElement {
+/** Derive two-letter initials from sender_id (UUID/snowflake) or a name. */
+function initials(senderId: string | null): string {
+  if (!senderId) return '?';
+  // If it looks like a UUID or snowflake, fall back to first 2 chars
+  return senderId.slice(0, 2).toUpperCase();
+}
+
+// ── Media card sub-component ─────────────────────────────────────────────────
+
+interface MediaCardBody {
+  title?: string;
+  image_url?: string;
+  fields?: { title: string; value: string }[];
+}
+
+function MediaCard({ body }: { body: MediaCardBody }): React.ReactElement {
   const { t } = useTranslation();
-  const [copied, setCopied] = React.useState(false);
-
-  const handleCopy = useCallback(() => {
-    const plain = content.replace(/<[^>]+>/g, '');
-    navigator.clipboard.writeText(plain).catch(() => {});
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-    onCopy?.();
-  }, [content, onCopy]);
-
-  if (role === 'user') {
-    return (
-      <div className="flex justify-end mb-3">
-        <div className="max-w-[75%] px-3 py-2 rounded-xl bg-indigo-600/20 text-ink-200 text-sm leading-relaxed">
-          <p className="whitespace-pre-wrap break-words">{content}</p>
-          {timestamp && (
-            <p className="mt-1 text-[10px] text-ink-500 text-right">{timestamp}</p>
-          )}
-        </div>
-      </div>
-    );
-  }
+  const hasThumb = Boolean(body.image_url);
 
   return (
-    <div className="flex justify-start mb-3">
-      <div className="max-w-[85%] rounded-xl bg-ink-800 text-ink-200 text-sm leading-relaxed overflow-hidden">
-        {agentName && (
-          <div className="px-3 pt-2 pb-1">
-            <span className="text-[10px] text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded font-medium">
-              {agentName}
-            </span>
+    <div className="mt-2 max-w-[420px] bg-[#1d1d22] border border-white/[.12] rounded-[12px] overflow-hidden">
+      {/* Thumbnail */}
+      <div className="h-[150px] bg-gradient-to-br from-slate-800 to-slate-900 relative grid place-items-center">
+        {hasThumb ? (
+          <img
+            src={body.image_url}
+            alt={body.title ?? ''}
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+        ) : (
+          /* Placeholder play button */
+          <div className="w-[46px] h-[46px] rounded-full bg-black/55 border border-white/50 grid place-items-center text-white">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" stroke="none">
+              <polygon points="6 3 20 12 6 21 6 3" />
+            </svg>
           </div>
         )}
+      </div>
 
-        <SubTaskList calls={toolCalls ?? []} />
-
-        {awaitingApproval && <ApprovalCard approval={awaitingApproval} />}
-
-        <div
-          className="px-3 py-2 prose prose-invert prose-sm max-w-none"
-          // eslint-disable-next-line react/no-danger
-          dangerouslySetInnerHTML={{
-            __html: DOMPurify.sanitize(content, {
-              ALLOWED_TAGS: ['h1', 'h2', 'h3', 'h4', 'p', 'strong', 'em', 'code', 'pre',
-                             'hr', 'br', 'ul', 'ol', 'li', 'blockquote', 'a', 'span'],
-              ALLOWED_ATTR: ['href', 'target', 'rel', 'class'],
-              // Only permit http(s) and mailto: URLs. Blocks javascript:, data:, vbscript:,
-              // etc. in href/src attributes to prevent XSS from LLM-generated links.
-              ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i,
-            }),
-          }}
-        />
-
-        <div className="flex items-center gap-3 px-3 pb-2 pt-1 border-t border-ink-700/50">
-          {tokens !== undefined && (
-            <span className="text-[10px] text-ink-600">{tokens} tokens</span>
-          )}
-          <div className="flex items-center gap-2 ml-auto">
-            {onApply && (
-              <button
-                type="button"
-                onClick={onApply}
-                className="text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors"
-              >
-                Apply
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={handleCopy}
-              className="flex items-center gap-0.5 text-[10px] text-ink-500 hover:text-ink-400 transition-colors"
-            >
-              {copied ? (
-                <Check size={10} className="text-green-400" />
-              ) : (
-                <Copy size={10} />
-              )}
-              {copied ? t('chat.copied') : t('chat.copy')}
-            </button>
+      {/* Body */}
+      <div className="px-[13px] py-[11px]">
+        {body.title && (
+          <div className="text-[13.5px] font-semibold text-[#e7e7ea] whitespace-nowrap overflow-hidden text-ellipsis">
+            {body.title}
           </div>
+        )}
+        {body.fields && body.fields.length > 0 && (
+          <div className="flex gap-4 mt-[7px]">
+            {body.fields.map((f) => (
+              <div key={f.title} className="flex flex-col">
+                <span className="text-[10px] uppercase tracking-[0.06em] text-[#74747e]">
+                  {f.title}
+                </span>
+                <span className="text-[12.5px] text-[#a3a3ad] mt-px">
+                  {f.value}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Footer actions */}
+      <div className="flex gap-2 px-[13px] pb-3">
+        <button
+          type="button"
+          className="flex items-center gap-[6px] text-[12px] px-[11px] py-[5px] rounded-[9px] bg-indigo-500/[.12] border border-indigo-500/[.35] text-indigo-300 transition-colors hover:bg-indigo-500/[.2]"
+        >
+          <ExternalLink size={13} />
+          {t('chat.openInLibrary')}
+        </button>
+        <button
+          type="button"
+          className="flex items-center gap-[6px] text-[12px] px-[11px] py-[5px] rounded-[9px] bg-[#17171b] border border-white/[.065] text-[#a3a3ad] transition-colors hover:text-[#e7e7ea] hover:bg-[#1d1d22]"
+        >
+          <Download size={13} />
+          {t('chat.download')}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+
+export interface MessageBubbleProps {
+  message: ChatMessage;
+}
+
+export function MessageBubble({ message }: MessageBubbleProps): React.ReactElement {
+  const isAgent = message.sender_type === 'agent';
+  const isMediaCard = message.content_type === 'media_card';
+
+  const avatarClass = isAgent
+    ? 'bg-gradient-to-br from-amber-400 to-amber-500 text-[#1a1505]'
+    : 'bg-gradient-to-br from-slate-500 to-slate-400 text-white';
+
+  // Derive display name: body may carry a sender_name hint; fall back to id
+  const displayName =
+    typeof message.body.sender_name === 'string'
+      ? message.body.sender_name
+      : (message.sender_id ?? 'Unknown');
+
+  return (
+    <div className="flex gap-[11px]">
+      {/* Avatar */}
+      <div
+        className={[
+          'w-[34px] h-[34px] rounded-[10px] flex-shrink-0 text-[12px] grid place-items-center font-semibold',
+          avatarClass,
+        ].join(' ')}
+        aria-hidden="true"
+      >
+        {initials(message.sender_id)}
+      </div>
+
+      {/* Body */}
+      <div className="flex-1 min-w-0">
+        {/* Meta row */}
+        <div className="flex items-center gap-2 mb-[3px]">
+          <span className="text-[13.5px] font-[650] text-[#e7e7ea]">
+            {displayName}
+          </span>
+          {isAgent && (
+            <span className="text-[10px] font-semibold text-amber-400 bg-amber-400/10 px-[6px] py-[1.5px] rounded-[5px] tracking-[0.02em]">
+              AGENT
+            </span>
+          )}
+          <span className="text-[10.5px] text-[#74747e]">
+            {fmtTime(message.created_at)}
+          </span>
         </div>
 
-        {timestamp && (
-          <p className="px-3 pb-1 text-[10px] text-ink-600">{timestamp}</p>
+        {/* Content */}
+        {isMediaCard ? (
+          <MediaCard body={message.body as MediaCardBody} />
+        ) : (
+          <p className="text-[14px] text-[#e7e7ea] leading-[1.55] whitespace-pre-wrap break-words">
+            {String(message.body.text ?? '')}
+          </p>
         )}
       </div>
     </div>

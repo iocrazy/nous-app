@@ -30,7 +30,7 @@ import type {
 } from '../types';
 import { AgentSelector } from './AgentSelector';
 import { SessionList, type SessionItem } from './SessionList';
-import { MessageBubble } from './chat/MessageBubble';
+import { MessageBubble } from './chat/AIChatBubble';
 import { TypingIndicator } from './chat/TypingIndicator';
 import { ChatInput } from './chat/ChatInput';
 import { CommitmentsPanel } from './CommitmentsPanel';
