@@ -1508,7 +1508,10 @@
     "noChannels": "No channels yet — create one to get started",
     "errorLoadChannels": "Failed to load channels: {{error}}",
     "errorLoadMessages": "Failed to load messages: {{error}}",
-    "errorSend": "Failed to send message: {{error}}"
+    "errorSend": "Failed to send message: {{error}}",
+    "title": "Team Chat",
+    "noTeam": "No team selected",
+    "selectTeam": "Select a team to use Team Chat"
   },
   "mcp": {
     "title": "MCP Servers",

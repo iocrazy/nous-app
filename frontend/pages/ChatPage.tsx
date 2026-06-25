@@ -29,13 +29,6 @@ import { Composer } from '../components/chat/Composer';
 
 import type { Channel, ChatMessage } from '../types';
 
-// ── helpers ──────────────────────────────────────────────────────────────────
-
-/** Snowflake seq comparison — convert to Number only for ordering. */
-function minSeq(a: string, b: string): string {
-  return Number(a) < Number(b) ? a : b;
-}
-
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function ChatPage(): React.ReactElement {
@@ -57,6 +50,15 @@ export function ChatPage(): React.ReactElement {
    * Stable across renders via useRef; updated mutably (no re-render needed).
    */
   const seenIds = useRef<Set<string>>(new Set());
+
+  /**
+   * Tracks the current activeId in a ref so async callbacks can detect
+   * stale loads after the user switches channels.
+   */
+  const activeIdRef = useRef(activeId);
+  useEffect(() => {
+    activeIdRef.current = activeId;
+  }, [activeId]);
 
   // ── Mark-read debounce ────────────────────────────────────────────────────
 
@@ -99,7 +101,8 @@ export function ChatPage(): React.ReactElement {
       .listChannels()
       .then((list) => {
         if (cancelled) return;
-        setChannels(list);
+        // Filter to only channels belonging to the currently selected team
+        setChannels(list.filter(c => c.team_id === selectedTeamId));
         // Auto-select first channel
         if (list.length > 0) {
           setActiveId(list[0].id);
@@ -166,6 +169,10 @@ export function ChatPage(): React.ReactElement {
   const handleLoadOlder = useCallback(() => {
     if (!activeId || loadingOlder || messages.length === 0) return;
 
+    // Snapshot the channel this load is for — used to discard stale results
+    // if the user switches channels before the fetch resolves.
+    const loadingForId = activeId;
+
     // Oldest seq in current state (first element, ascending order)
     const oldestSeq = messages[0].seq;
 
@@ -174,6 +181,9 @@ export function ChatPage(): React.ReactElement {
     chatService
       .listMessages(activeId, oldestSeq, 30)
       .then((page) => {
+        // Bail early if the user switched channels while this fetch was in flight
+        if (activeIdRef.current !== loadingForId) return;
+
         // API returns newest-first; reverse to ascending then prepend
         const ascending = [...page].reverse();
 
@@ -250,8 +260,8 @@ export function ChatPage(): React.ReactElement {
   if (!selectedTeamId || !currentTeam) {
     return (
       <div className="flex flex-col items-center justify-center h-64 text-ink-500">
-        <p className="text-lg font-medium text-ink-400">No team selected</p>
-        <p className="text-sm mt-1">Select a team to use Team Chat</p>
+        <p className="text-lg font-medium text-ink-400">{t('chat.noTeam')}</p>
+        <p className="text-sm mt-1">{t('chat.selectTeam')}</p>
       </div>
     );
   }

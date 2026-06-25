@@ -1508,7 +1508,10 @@
     "noChannels": "暂无频道，创建一个开始聊天",
     "errorLoadChannels": "加载频道失败：{{error}}",
     "errorLoadMessages": "加载消息失败：{{error}}",
-    "errorSend": "发送消息失败：{{error}}"
+    "errorSend": "发送消息失败：{{error}}",
+    "title": "团队聊天",
+    "noTeam": "未选择团队",
+    "selectTeam": "请先选择一个团队以使用团队聊天"
   },
   "mcp": {
     "title": "MCP Servers",
