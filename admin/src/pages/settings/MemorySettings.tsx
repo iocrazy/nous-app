@@ -14,7 +14,34 @@ import { IconStorage, IconRobot, IconCode } from '@arco-design/web-react/icon'
 import { SectionHeader } from './SectionHeader'
 import { useAuth } from '../../auth/AuthProvider'
 
-type CatalogModel = { name: string; display_name: string; type: string }
+type CatalogModel = {
+  name: string
+  display_name: string
+  type: string
+  actual_model?: string
+  base_url?: string
+}
+
+// Resolve a stored extractor/embedder config to a catalog entry. The dropdown
+// options key off the catalog `name` (e.g. "nous-qwen3-llm"), but a config can
+// store the RAW model string (`actual_model`, e.g. "qwen3-6-35b") — matching
+// only by name then wrongly falls back to "Custom endpoint…". Match by name
+// first, then by actual_model (preferring the same base_url).
+function matchCatalogModel(
+  list: CatalogModel[],
+  model: string,
+  baseUrl: string,
+): CatalogModel | undefined {
+  if (!model) return undefined
+  const norm = (s?: string) => (s || '').replace(/\/+$/, '')
+  const byName = list.find((c) => c.name === model)
+  if (byName) return byName
+  const byModelAndUrl = list.find(
+    (c) => c.actual_model === model && norm(c.base_url) === norm(baseUrl),
+  )
+  if (byModelAndUrl) return byModelAndUrl
+  return list.find((c) => c.actual_model === model)
+}
 import {
   useGraphMemorySettings,
   useUpdateGraphMemorySettings,
@@ -170,8 +197,8 @@ export function MemorySettings() {
       />
       {(() => {
         const llm = catalog.filter((c) => c.type === 'llm')
-        const names = new Set(llm.map((c) => c.name))
-        const usingCatalog = !!exModel && names.has(exModel)
+        const matched = matchCatalogModel(llm, exModel, exBaseUrl)
+        const usingCatalog = !!matched
         return (
           <>
             <Row
@@ -179,7 +206,7 @@ export function MemorySettings() {
               hint="Pick an LLM from the MediaHub catalog (provider + key come from it), or Custom to enter a provider manually."
             >
               <Select
-                value={usingCatalog ? exModel : '__custom__'}
+                value={matched ? matched.name : '__custom__'}
                 onChange={(v) => {
                   if (v === '__custom__') setExModel('')
                   else {
@@ -249,8 +276,8 @@ export function MemorySettings() {
       </div>
       {(() => {
         const emb = catalog.filter((c) => c.type === 'embedding')
-        const names = new Set(emb.map((c) => c.name))
-        const usingCatalog = !!emModel && names.has(emModel)
+        const matched = matchCatalogModel(emb, emModel, emBaseUrl)
+        const usingCatalog = !!matched
         return (
           <>
             <Row
@@ -258,7 +285,7 @@ export function MemorySettings() {
               hint="Pick an embedding model from the MediaHub catalog (provider + key come from it), or Custom to enter a provider manually."
             >
               <Select
-                value={usingCatalog ? emModel : '__custom__'}
+                value={matched ? matched.name : '__custom__'}
                 onChange={(v) => {
                   if (v === '__custom__') setEmModel('')
                   else {
