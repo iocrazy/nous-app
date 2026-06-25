@@ -74,6 +74,7 @@ export function AIModelsPage() {
   const [probeLoading, setProbeLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [testingId, setTestingId] = useState<string | null>(null)
+  const [testingProvider, setTestingProvider] = useState<string | null>(null)
   const [form] = Form.useForm()
 
   const apiBase = import.meta.env.VITE_API_URL || ''
@@ -132,6 +133,36 @@ export function AIModelsPage() {
       app_id: group.app_id || '',
     })
     setModalVisible(true)
+  }
+
+  // Provider-level connectivity test, directly on the card (not the Add-Models
+  // modal). Reuses probe-models; inherits the stored key via the first model's name.
+  const handleTestProvider = async (g: ProviderGroup) => {
+    const k = `${g.provider}|${g.base_url}`
+    setTestingProvider(k)
+    try {
+      const res = await fetch(`${apiBase}/api/v1/admin/nous-models/probe-models`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          provider_key: g.provider,
+          base_url: g.base_url,
+          api_key: '',
+          name: g.models[0]?.name,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.success) {
+        const n = Array.isArray(data.models) ? data.models.length : 0
+        Message.success(`${g.provider}: reachable${n ? ` — ${n} models` : ''}`)
+      } else {
+        Message.error(`${g.provider}: ${data.error || 'connection failed'}`)
+      }
+    } catch {
+      Message.error(`${g.provider}: request failed`)
+    } finally {
+      setTestingProvider(null)
+    }
   }
 
   const handleProbe = async () => {
@@ -298,7 +329,16 @@ export function AIModelsPage() {
                     <span style={{ fontFamily: 'monospace' }}>{'••••' + (g.api_key_masked || '').slice(-4)}</span>
                   </div>
                 </div>
-                <Button size="small" icon={<IconPlus />} onClick={() => openAddModels(g)}>Add Models</Button>
+                <Space>
+                  <Button
+                    size="small"
+                    loading={testingProvider === `${g.provider}|${g.base_url}`}
+                    onClick={() => handleTestProvider(g)}
+                  >
+                    Test
+                  </Button>
+                  <Button size="small" icon={<IconPlus />} onClick={() => openAddModels(g)}>Add Models</Button>
+                </Space>
               </div>
 
               <Text style={{ fontSize: 12, color: 'var(--color-text-3)' }}>Enabled Models</Text>
