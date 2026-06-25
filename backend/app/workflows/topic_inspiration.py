@@ -15,13 +15,9 @@ from app.services.topics.clustering import (
     is_match,
 )
 from app.services.topics.embedding_service import TopicEmbeddingService
-from app.services.topics.keyword_filter import keyword_filter
+from app.services.topics.keyword_filter import relevance_filter
 from app.services.topics.scoring import compute_quality
 from app.services.topics.topic_scorer import TopicScorerService
-
-# Phase 1: no per-user interest yet -> global keep-all pre-filter.
-_GLOBAL_INCLUDE: list[str] = []
-_GLOBAL_EXCLUDE: list[str] = []
 
 # Phase 2 scoring bounds: how many unscored hotspots to enrich per tick, and the
 # per-LLM-call batch size. Keeps cost/latency bounded; the feed catches up over
@@ -125,15 +121,16 @@ async def run_topic_fetch_once(
     sources_repo = sources_repo or SignalSourcesRepository()
     hotspots_repo = hotspots_repo or HotspotsRepository()
     sources = await sources_repo.list_enabled()
-    ok = failed = written = 0
+    ok = failed = written = dropped = 0
     for src in sources:
         sid = str(src["id"])
         try:
             adapter = get_adapter(src["kind"])
-            candidates = await adapter.fetch(src)
-            candidates = keyword_filter(
-                candidates, include=_GLOBAL_INCLUDE, exclude=_GLOBAL_EXCLUDE
-            )
+            fetched = await adapter.fetch(src)
+            # L0 pre-filter: noisy tier-3 sources must clear the AI-relevance
+            # gate before scoring; curated sources pass through.
+            candidates = relevance_filter(fetched, tier=int(src.get("tier") or 2))
+            dropped += len(fetched) - len(candidates)
             rows = hotspots_repo.build_rows(
                 candidates, source_id=sid, category=src.get("category")
             )
@@ -146,7 +143,13 @@ async def run_topic_fetch_once(
             logger.warning(f"topic source {sid} ({src.get('name')}) failed: {e}")
             await sources_repo.mark_health(sid, ok=False, error=str(e))
             failed += 1
-    summary = {"sources": len(sources), "ok": ok, "failed": failed, "written": written}
+    summary = {
+        "sources": len(sources),
+        "ok": ok,
+        "failed": failed,
+        "written": written,
+        "prefiltered": dropped,  # items the L0 AI-relevance gate dropped
+    }
     logger.info(f"topic_fetch done: {summary}")
     return summary
 
