@@ -17,6 +17,7 @@ from .table_preferences_router import router as table_preferences_router
 from .tags_router import router as tags_router
 from .tasks_router import router as tasks_router
 from .teams_router import router as teams_router
+from .topic_sources_router import router as topic_sources_router
 from .transcode_router import router as transcode_router
 from .users_router import router as users_router
 from .videos_router import router as videos_router
@@ -71,7 +72,7 @@ async def admin_health():
     try:
         from app.db import get_async_supabase
 
-        anon_client = await get_async_supabase()
+        await get_async_supabase()  # probe: verify the anon client initializes
         checks["supabase_anon"] = "ok"
     except Exception as e:
         checks["supabase_anon"] = f"error: {type(e).__name__}: {e}"
@@ -103,6 +104,9 @@ admin_router.include_router(
     transcode_router, prefix="/transcode", tags=["Admin - Transcode"]
 )
 admin_router.include_router(tasks_router, prefix="/tasks", tags=["Admin - Tasks"])
+admin_router.include_router(
+    topic_sources_router, prefix="/topics/sources", tags=["Admin - Topic Sources"]
+)
 admin_router.include_router(
     table_preferences_router,
     prefix="/table-preferences",

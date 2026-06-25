@@ -94,7 +94,13 @@ async def _visible_source_ids(user_id: str) -> list[str]:
         SignalSourcesRepository().list_visible(user_id),
     )
     hidden_set = set(hidden)
-    return [str(s["id"]) for s in sources if str(s["id"]) not in hidden_set]
+    # Exclude admin-disabled (enabled=false) sources too — disabling a source
+    # stops collection AND drops its existing hotspots from every user's feed.
+    return [
+        str(s["id"])
+        for s in sources
+        if s.get("enabled", True) and str(s["id"]) not in hidden_set
+    ]
 
 
 @router.get("", response_model=HotspotListResponse)

@@ -79,13 +79,17 @@ class SignalSourcesRepository:
         return result.data or []
 
     async def feed_source_ids(self, user_id: str, hidden_ids: list[str]) -> list[str]:
-        """Source ids whose hotspots belong in this user's feed: visible
+        """Source ids whose hotspots belong in this user's feed: ENABLED visible
         (system + own) minus the ones they've hidden. The feed query filters
-        ``source_id IN (...)`` on this set, so a deleted/other-user/hidden
-        source's hotspots never surface."""
+        ``source_id IN (...)`` on this set, so a deleted/disabled (admin-closed)/
+        other-user/hidden source's hotspots never surface."""
         hidden = set(hidden_ids)
         rows = await self.list_visible(user_id)
-        return [str(r["id"]) for r in rows if str(r["id"]) not in hidden]
+        return [
+            str(r["id"])
+            for r in rows
+            if r.get("enabled", True) and str(r["id"]) not in hidden
+        ]
 
     async def get_source(self, source_id: str) -> dict | None:
         """A single source by id (any owner) — for ownership/existence checks."""
@@ -122,6 +126,30 @@ class SignalSourcesRepository:
         }
         result = await client.table(self.TABLE).insert(row).execute()
         return (result.data or [row])[0]
+
+    async def admin_update(
+        self,
+        source_id: str,
+        *,
+        enabled: Optional[bool] = None,
+        tier: Optional[int] = None,
+    ) -> dict | None:
+        """Admin-set a source's ``enabled`` (global on/off — disabling stops
+        collection AND drops it from every feed) and/or ``tier`` (credibility
+        prior). No ownership restriction — admin acts on any source. Returns the
+        updated row, or the existing row when nothing changed."""
+        patch: dict[str, Any] = {}
+        if enabled is not None:
+            patch["enabled"] = bool(enabled)
+        if tier is not None:
+            patch["tier"] = int(tier)
+        if not patch:
+            return await self.get_source(source_id)
+        client = await self._client()
+        result = (
+            await client.table(self.TABLE).update(patch).eq("id", source_id).execute()
+        )
+        return (result.data or [None])[0]
 
     async def delete_source(self, *, user_id: str, source_id: str) -> bool:
         """Delete a source the user OWNS (stops collection). Returns False when
