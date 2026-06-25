@@ -14,6 +14,7 @@
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
 import type {
+  AgentChatPermissions,
   AgentDashboard,
   AgentRunDetail,
   AgentRunEvent,
@@ -92,6 +93,13 @@ export const aiLibraryService = {
       body: JSON.stringify(updates),
     });
     return handle<AILibraryAgent>(resp);
+  },
+
+  async updateAgentChatPermissions(
+    slug: string,
+    perms: AgentChatPermissions,
+  ): Promise<AILibraryAgent> {
+    return this.updateAgent(slug, { chat_permissions: perms } as Partial<AILibraryAgent>);
   },
 
   async createAgent(payload: CreateAgentPayload): Promise<AILibraryAgent> {

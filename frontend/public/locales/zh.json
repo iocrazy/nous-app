@@ -1490,7 +1490,28 @@
       "pdf": "PDF",
       "noResults": "没有匹配 \"{{q}}\" 的资源",
       "hintKbd": "↑↓ 选择 · ↵ 插入 · Esc 取消"
-    }
+    },
+    "sidebarTitle": "频道",
+    "newChannel": "新建频道",
+    "searchPlaceholder": "搜索频道...",
+    "sectionGroups": "群组",
+    "sectionDMs": "私信",
+    "loadOlder": "加载更早消息",
+    "composerPlaceholder": "发送消息...",
+    "composerHint": "Enter 发送 · Shift+Enter 换行",
+    "attachResource": "附加资源",
+    "attachMedia": "附加媒体",
+    "mention": "提及成员",
+    "send": "发送",
+    "openInLibrary": "在库中打开",
+    "download": "下载",
+    "noChannels": "暂无频道，创建一个开始聊天",
+    "errorLoadChannels": "加载频道失败：{{error}}",
+    "errorLoadMessages": "加载消息失败：{{error}}",
+    "errorSend": "发送消息失败：{{error}}",
+    "title": "团队聊天",
+    "noTeam": "未选择团队",
+    "selectTeam": "请先选择一个团队以使用团队聊天"
   },
   "mcp": {
     "title": "MCP Servers",
@@ -1676,7 +1697,8 @@
         "skills": "技能",
         "runs": "运行记录",
         "versions": "版本",
-        "routines": "例行任务"
+        "routines": "例行任务",
+        "permissions": "权限"
       },
       "loadErrorPrefix": "加载智能体失败",
       "listLoadError": "加载智能体列表失败",
@@ -1913,6 +1935,16 @@
     },
     "workforce": {
       "runningNow": "运行中"
+    },
+    "permissions": {
+      "tab": "权限",
+      "intro": "控制此 Agent 是否能参与团队聊天。所有权限默认关闭——未在此授权前，Agent 无法进群或读取团队文件。",
+      "enableChat": "启用聊天",
+      "enableChatDesc": "允许此 Agent 被加入群组并通过 @ 召唤。",
+      "readTeamFiles": "读取团队文件",
+      "readTeamFilesDesc": "允许 Agent 在被召唤时读取所在群组团队的素材。",
+      "autoBroadcast": "主动播报",
+      "autoBroadcastDesc": "允许 Agent 向所在群组发送自动更新（如任务完成）。"
     }
   },
   "aiUsage": {

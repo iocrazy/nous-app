@@ -10,6 +10,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
+  AgentChatPermissions,
   AILibraryAgent,
   AILibrarySkill,
   AISettings as AISettingsType,
@@ -37,12 +38,14 @@ import { AgentActionBar } from './AgentActionBar';
 import { AgentRunsSplit } from './AgentRunsSplit';
 import { AgentRoutinesTab } from './AgentRoutinesTab';
 import { VersionHistoryPanel } from './VersionHistoryPanel';
+import PermissionsSection from './PermissionsSection';
 
 type SubTab =
   | 'dashboard'
   | 'overview'
   | 'files'
   | 'skills'
+  | 'permissions'
   | 'runs'
   | 'routines'
   | 'versions';
@@ -117,10 +120,12 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
   const [agent, setAgent] = useState<AILibraryAgent | null>(null);
   const [sub, setSub] = useState<SubTab>('dashboard');
   const [draft, setDraft] = useState<Partial<AILibraryAgent>>({});
+  const [permDraft, setPermDraft] = useState<AgentChatPermissions>(() => ({}));
   const [localSkillIds, setLocalSkillIds] = useState<number[]>([]);
   const [allSkills, setAllSkills] = useState<AILibrarySkill[] | null>(null);
   const [skillsLoading, setSkillsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [permSaving, setPermSaving] = useState(false);
   const [resuming, setResuming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [forkModalOpen, setForkModalOpen] = useState(false);
@@ -140,6 +145,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
         setAgent(a);
         setDraft(buildDraft(a));
         setLocalSkillIds(a.skill_ids);
+        setPermDraft(a.chat_permissions ?? {});
       })
       .catch((err) => {
         if (cancelled) return;
@@ -366,6 +372,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
     'overview',
     'files',
     'skills',
+    'permissions',
     'runs',
     'routines',
     'versions',
@@ -681,6 +688,44 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
           onRemove={removeSkill}
           onMove={moveSkill}
         />
+      )}
+
+      {sub === 'permissions' && (
+        <div>
+          <PermissionsSection value={permDraft} onChange={setPermDraft} />
+          <div className="mt-4 flex justify-end">
+            <button
+              type="button"
+              disabled={permSaving}
+              className="rounded-lg btn-tint-indigo px-4 py-2 text-sm font-medium"
+              onClick={async () => {
+                setPermSaving(true);
+                try {
+                  const updated = await aiLibraryService.updateAgentChatPermissions(
+                    agent.slug,
+                    permDraft,
+                  );
+                  setAgent(updated);
+                  setPermDraft(updated.chat_permissions ?? {});
+                  addToast(
+                    t('aiLibrary.agents.saved', 'Agent saved'),
+                    'success',
+                  );
+                } catch (err) {
+                  console.error('[AgentEditor] updateAgentChatPermissions failed:', err);
+                  addToast(
+                    t('aiLibrary.agents.saveError', { error: friendlyError(err) }),
+                    'error',
+                  );
+                } finally {
+                  setPermSaving(false);
+                }
+              }}
+            >
+              {permSaving ? t('common.saving') : t('common.save', 'Save')}
+            </button>
+          </div>
+        </div>
       )}
 
       {sub === 'runs' && <AgentRunsSplit slug={slug} />}

@@ -379,6 +379,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             )}
             <SidebarItem icon={ListTodo} label={t('sidebar.todolist')} active={currentView === 'todolist'} onClick={() => handleNav('todolist')} collapsed={collapsed} island={island} />
             <SidebarItem icon={Share2} label={t('sidebar.shared')} active={currentView === 'shared'} onClick={() => handleNav('shared')} collapsed={collapsed} island={island} />
+            <SidebarItem icon={MessageSquare} label={t('chat.title')} active={currentView === 'chat'} onClick={() => handleNav('chat')} collapsed={collapsed} island={island} />
             <SidebarItem
               icon={Sparkles}
               label={t('sidebar.aiLibrary', 'AI Library')}

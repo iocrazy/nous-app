@@ -142,7 +142,7 @@ export interface SummaryData {
 // Keep backward compatibility alias
 export type DouyinBase = ParsedMedia;
 
-export type ViewState = 'parser' | 'dashboard' | 'settings' | 'cleanup' | 'points' | 'mediatrack' | 'resources' | 'members' | 'billing' | 'todolist' | 'shared' | 'agents' | 'skills' | 'ailibrary';
+export type ViewState = 'parser' | 'dashboard' | 'settings' | 'cleanup' | 'points' | 'mediatrack' | 'resources' | 'members' | 'billing' | 'todolist' | 'shared' | 'agents' | 'skills' | 'ailibrary' | 'chat';
 
 export interface ApiKey {
   id: number;
@@ -1015,6 +1015,13 @@ export interface ProjectSummary {
 // these are small serial-like values well below 2^53, so `number` is safe.
 // `ai_agents.id` and `skill_files.id` are UUID strings.
 
+export interface AgentChatPermissions {
+  enabled?: boolean;
+  read_team_resources?: boolean;
+  auto_broadcast?: boolean;
+  allowed_team_ids?: number[];
+}
+
 export interface AILibraryAgent {
   id: string;
   slug: string;
@@ -1047,6 +1054,10 @@ export interface AILibraryAgent {
   monthly_cost_cents_budget?: number | null;
   /** 'budget' when sweeper detects over-spend, 'manual' when admin pauses. */
   paused_reason?: 'budget' | 'manual' | null;
+  // Team Chat PHASE-0: resolved chat caps, served by AgentOut.chat_permissions
+  // (review C1 — capability_profile itself is NOT exposed on the wire).
+  // Always present from the API (defaults all-false); optional here for forward-compat.
+  chat_permissions?: AgentChatPermissions;
 }
 
 /**
@@ -1331,7 +1342,7 @@ export interface UsageAggregate {
 
 export type ChatMessageRole = 'user' | 'assistant' | 'system';
 
-export interface ChatMessage {
+export interface AIChatMessage {
   id: string; // UUID
   session_id: string;
   role: ChatMessageRole;
@@ -1361,7 +1372,7 @@ export interface ChatSession {
 }
 
 export interface ChatSessionWithMessages extends ChatSession {
-  messages: ChatMessage[];
+  messages: AIChatMessage[];
 }
 
 export interface CreateChatSessionPayload {
@@ -1491,7 +1502,7 @@ export interface ChatToolCall {
 }
 
 export interface ChatResponse {
-  message: ChatMessage;
+  message: AIChatMessage;
   usage: { prompt_tokens?: number; completion_tokens?: number };
   run_id?: string | null;
   tool_calls?: ChatToolCall[];
@@ -1525,3 +1536,29 @@ export type ResourceSearchResponse = {
   counts: { all: number; video: number; image: number; doc: number; audio: number; pdf: number };
   next_cursor: string | null;
 };
+
+export interface Channel {
+  id: string;
+  team_id: string;
+  type: 'dm' | 'group' | 'public';
+  history_mode: 'shared' | 'joined';
+  name: string | null;
+  topic: string | null;
+  last_message_seq: string;
+  unread: number;
+  created_at: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  channel_id: string;
+  seq: string;
+  sender_id: string | null;
+  sender_type: 'user' | 'agent';
+  content_type: 'text' | 'media_card' | 'task_card' | 'system';
+  body: Record<string, unknown>;
+  reply_to_id: string | null;
+  edited_at: string | null;
+  deleted_at: string | null;
+  created_at: string;
+}

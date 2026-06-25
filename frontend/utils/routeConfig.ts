@@ -23,6 +23,7 @@ export const VIEW_PATH_MAP: Record<ViewState, string> = {
   agents: '/agents',
   skills: '/skills',
   ailibrary: '/ai-library/agents',
+  chat: '/chat',
 };
 
 /**
@@ -54,6 +55,7 @@ export function pathnameToView(pathname: string): ViewState {
   if (stripped.startsWith('/ai-library')) return 'ailibrary';
   if (stripped.startsWith('/agents')) return 'agents';
   if (stripped.startsWith('/skills')) return 'skills';
+  if (stripped.startsWith('/chat')) return 'chat';
 
   return 'parser';
 }

@@ -1490,7 +1490,28 @@
       "pdf": "PDF",
       "noResults": "No resources match \"{{q}}\"",
       "hintKbd": "↑↓ navigate · ↵ insert · Esc cancel"
-    }
+    },
+    "sidebarTitle": "Channels",
+    "newChannel": "New channel",
+    "searchPlaceholder": "Search channels...",
+    "sectionGroups": "Groups",
+    "sectionDMs": "Direct Messages",
+    "loadOlder": "Load older messages",
+    "composerPlaceholder": "Message...",
+    "composerHint": "Enter to send · Shift+Enter for new line",
+    "attachResource": "Attach resource",
+    "attachMedia": "Attach media",
+    "mention": "Mention someone",
+    "send": "Send",
+    "openInLibrary": "Open in Library",
+    "download": "Download",
+    "noChannels": "No channels yet — create one to get started",
+    "errorLoadChannels": "Failed to load channels: {{error}}",
+    "errorLoadMessages": "Failed to load messages: {{error}}",
+    "errorSend": "Failed to send message: {{error}}",
+    "title": "Team Chat",
+    "noTeam": "No team selected",
+    "selectTeam": "Select a team to use Team Chat"
   },
   "mcp": {
     "title": "MCP Servers",
@@ -1676,7 +1697,8 @@
         "skills": "Skills",
         "runs": "Runs",
         "versions": "Versions",
-        "routines": "Routines"
+        "routines": "Routines",
+        "permissions": "Permissions"
       },
       "loadErrorPrefix": "Failed to load agent",
       "listLoadError": "Failed to load agents",
@@ -1913,6 +1935,16 @@
     },
     "workforce": {
       "runningNow": "Running now"
+    },
+    "permissions": {
+      "tab": "Permissions",
+      "intro": "Control whether this agent can participate in Team Chat. All permissions are off by default — an agent cannot enter groups or read team files until granted here.",
+      "enableChat": "Enable chat",
+      "enableChatDesc": "Allow this agent to be added to groups and summoned with @mention.",
+      "readTeamFiles": "Read team files",
+      "readTeamFilesDesc": "Allow the agent to read resources of the group's team when summoned.",
+      "autoBroadcast": "Auto-broadcast",
+      "autoBroadcastDesc": "Allow the agent to post automatic updates (e.g. task completion) to its groups."
     }
   },
   "aiUsage": {
