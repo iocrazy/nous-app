@@ -26,7 +26,10 @@ function SettingRow({
 }) {
   const { key, value, description } = setting
 
-  const isBool = typeof value === 'boolean'
+  // Treat a JSONB bool OR a "true"/"false" string as a boolean toggle (some
+  // settings were seeded as strings). Toggling writes back a real bool.
+  const isBool = typeof value === 'boolean' || value === 'true' || value === 'false'
+  const boolChecked = value === true || value === 'true'
   const isNumber = typeof value === 'number'
 
   return (
@@ -40,7 +43,7 @@ function SettingRow({
       <div style={{ marginLeft: 24, minWidth: 200, textAlign: 'right' }}>
         {isBool && (
           <Switch
-            checked={value}
+            checked={boolChecked}
             disabled={loading}
             onChange={(checked) => onUpdate(key, checked)}
           />

@@ -51,7 +51,15 @@ export default function App() {
               <Route path="/audit-logs" element={<AuditLogList />} />
               <Route path="/logs" element={<RequestLogs />} />
               <Route path="/alerts" element={<Alerts />} />
-              <Route path="/api-keys" element={<PlaceholderPage title="API Keys" />} />
+              <Route
+                path="/api-keys"
+                element={
+                  <PlaceholderPage
+                    title="API Keys"
+                    description="Planned: admin oversight of users' programmatic API keys — the access tokens (with scopes, max 10/user) that call the MediaHub API for external integrations and automations (backend api_key_router already exists; this page will list / revoke them). Not AI provider keys — those live in System → AI Models."
+                  />
+                }
+              />
               <Route path="/settings" element={<Settings />} />
               <Route path="/settings/ai-governance" element={<AIGovernance />} />
               <Route path="/settings/memory" element={<MemorySettings />} />
