@@ -233,16 +233,16 @@ export function AIModelsPage() {
   }
 
   // Provider-level test, directly on the card: probe EVERY model in the
-  // provider (sequentially) and persist each, so the provider dot (aggregate)
-  // and per-model dots all reflect a real check.
+  // provider and persist each, so the provider dot (aggregate) and per-model
+  // dots all reflect a real check. Runs the probes CONCURRENTLY — total time is
+  // the slowest single model, not the sum (sequential made a 3-model card spin
+  // for the sum of three real inference calls).
   const handleTestProvider = async (g: ProviderGroup) => {
     const k = `${g.provider}|${g.base_url}`
     setTestingProvider(k)
-    let ok = 0
     try {
-      for (const m of g.models) {
-        if (await runModelTest(m)) ok += 1
-      }
+      const results = await Promise.all(g.models.map((m) => runModelTest(m)))
+      const ok = results.filter(Boolean).length
       const total = g.models.length
       if (ok === total) Message.success(`${g.provider}: all ${total} models reachable`)
       else Message.warning(`${g.provider}: ${ok}/${total} models reachable`)
