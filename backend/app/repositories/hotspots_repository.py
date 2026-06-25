@@ -141,51 +141,79 @@ class HotspotsRepository:
         category: Optional[str],
         limit: int = 100,
         q: Optional[str] = None,
+        source_ids: Optional[list[str]] = None,
+        min_score: Optional[float] = None,
+        order_score: bool = False,
     ) -> list[dict[str, Any]]:
+        # source_ids is the caller's visible-source allowlist (system + own,
+        # minus hidden). None = no scoping; [] = nothing visible → empty feed.
+        # min_score / order_score drive the "Featured" view: a score floor +
+        # best-first ordering instead of the default chronological feed.
+        if source_ids is not None and not source_ids:
+            return []
         client = await self._client()
         query = client.table(self.TABLE).select("*, topic_groups(source_count)")
+        if source_ids is not None:
+            query = query.in_("source_id", source_ids)
         if day:
             query = query.gte("captured_at", f"{day}T00:00:00Z").lte(
                 "captured_at", f"{day}T23:59:59Z"
             )
         if category and category != "all":
             query = query.eq("category", category)
+        if min_score is not None:
+            query = query.gte("score", min_score)
         term = sanitize_search(q)
         if term:
             like = f"%{term}%"
             query = query.or_(
                 ",".join(f"{col}.ilike.{like}" for col in _SEARCH_COLUMNS)
             )
-        result = await query.order("captured_at", desc=True).limit(limit).execute()
+        order_col = "score" if order_score else "captured_at"
+        result = await query.order(order_col, desc=True).limit(limit).execute()
         return result.data or []
 
     async def list_by_ids(
-        self, hotspot_ids: list[str], limit: int = 100
+        self,
+        hotspot_ids: list[str],
+        limit: int = 100,
+        source_ids: Optional[list[str]] = None,
     ) -> list[dict[str, Any]]:
-        """Fetch specific hotspots (for the saved/hidden views, which span all
-        dates). Ordered newest-first. Empty id list short-circuits."""
+        """Fetch specific hotspots (for the saved/hidden/For You views, which
+        span all dates). Ordered newest-first. Empty id list short-circuits.
+        ``source_ids`` (when given) restricts to the caller's visible sources."""
         if not hotspot_ids:
             return []
+        if source_ids is not None and not source_ids:
+            return []
         client = await self._client()
-        result = (
-            await client.table(self.TABLE)
+        query = (
+            client.table(self.TABLE)
             .select("*, topic_groups(source_count)")
             .in_("id", hotspot_ids)
-            .order("captured_at", desc=True)
-            .limit(limit)
-            .execute()
         )
+        if source_ids is not None:
+            query = query.in_("source_id", source_ids)
+        result = await query.order("captured_at", desc=True).limit(limit).execute()
         return result.data or []
 
-    async def get_by_id(self, hotspot_id: str) -> dict | None:
+    async def get_by_id(
+        self, hotspot_id: str, source_ids: Optional[list[str]] = None
+    ) -> dict | None:
+        """A single hotspot. ``source_ids`` (when given) restricts to the
+        caller's visible sources, so one user can't open another's private
+        hotspot by id."""
+        if source_ids is not None and not source_ids:
+            return None
         client = await self._client()
-        result = (
-            await client.table(self.TABLE)
+        query = (
+            client.table(self.TABLE)
             .select("*, topic_groups(source_count)")
             .eq("id", hotspot_id)
-            .limit(1)
-            .execute()
         )
+        if source_ids is not None:
+            query = query.in_("source_id", source_ids)
+        result = await query.limit(1).execute()
         return (result.data or [None])[0]
 
     async def list_unscored(self, limit: int = 60) -> list[dict[str, Any]]:
@@ -193,7 +221,7 @@ class HotspotsRepository:
         client = await self._client()
         result = (
             await client.table(self.TABLE)
-            .select("id, source_label, title, content_original")
+            .select("id, source_id, source_label, title, content_original")
             .is_("score", "null")
             .order("captured_at", desc=True)
             .limit(limit)
@@ -229,10 +257,12 @@ class HotspotsRepository:
             logger.error(f"patch_embedding failed for {hotspot_id}: {e}")
 
     async def patch_enrichment(self, hotspot_id: str, enrichment: dict) -> None:
-        """Write AI enrichment (score/reason/ai_summary/category/tags). Skips None."""
+        """Write AI enrichment (score/reason/ai_summary/category/tags/score_dims).
+        Skips None. ``score`` is the code-computed composite; ``score_dims`` holds
+        the raw per-dimension scores for later calibration."""
         patch = {
             k: enrichment[k]
-            for k in ("score", "reason", "ai_summary", "category", "tags")
+            for k in ("score", "reason", "ai_summary", "category", "tags", "score_dims")
             if enrichment.get(k) is not None
         }
         if not patch:

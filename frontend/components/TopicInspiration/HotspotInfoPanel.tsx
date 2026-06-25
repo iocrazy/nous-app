@@ -14,6 +14,15 @@ import {
 
 const CONTENT_PREVIEW_CHARS = 400;
 
+// Display order for the score breakdown (the LLM-rated dimensions).
+const DIM_ORDER = [
+  'novelty',
+  'impact',
+  'credibility',
+  'actionability',
+  'shareability',
+] as const;
+
 interface Props {
   hotspot: Hotspot | null;
   onToggleSave?: (h: Hotspot) => void;
@@ -227,6 +236,29 @@ export const HotspotInfoPanel: React.FC<Props> = ({
         {typeof h.score === 'number' && (
           <div>
             {t('topic.score', 'Score')}: {Math.round(h.score * 100)}
+          </div>
+        )}
+        {h.score_dims && Object.keys(h.score_dims).length > 0 && (
+          <div className="pt-1 space-y-1">
+            {DIM_ORDER.filter((d) => typeof h.score_dims?.[d] === 'number').map((d) => {
+              const v = Math.max(0, Math.min(1, h.score_dims![d]));
+              return (
+                <div key={d} className="flex items-center gap-2">
+                  <span className="w-[84px] shrink-0 text-content-4">
+                    {t(`topic.dim_${d}`, d)}
+                  </span>
+                  <span className="flex-1 h-1.5 rounded-full bg-island-2 overflow-hidden">
+                    <span
+                      className="block h-full rounded-full bg-accent"
+                      style={{ width: `${Math.round(v * 100)}%` }}
+                    />
+                  </span>
+                  <span className="w-[28px] text-right tabular-nums">
+                    {Math.round(v * 100)}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         )}
         {typeof h.source_count === 'number' && h.source_count > 1 && (

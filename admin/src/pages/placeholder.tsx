@@ -1,9 +1,20 @@
+import type { ReactNode } from 'react'
 import { Card, Empty } from '@arco-design/web-react'
 
-export function PlaceholderPage({ title }: { title: string }) {
+export function PlaceholderPage({
+  title,
+  description,
+}: {
+  title: string
+  description?: ReactNode
+}) {
   return (
     <Card title={title}>
-      <Empty description="This page will be implemented in a future phase." />
+      <Empty
+        description={
+          description ?? 'This page will be implemented in a future phase.'
+        }
+      />
     </Card>
   )
 }

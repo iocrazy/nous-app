@@ -12,6 +12,36 @@ import {
 } from '@arco-design/web-react'
 import { IconStorage, IconRobot, IconCode } from '@arco-design/web-react/icon'
 import { SectionHeader } from './SectionHeader'
+import { useAuth } from '../../auth/AuthProvider'
+
+type CatalogModel = {
+  name: string
+  display_name: string
+  type: string
+  actual_model?: string
+  base_url?: string
+}
+
+// Resolve a stored extractor/embedder config to a catalog entry. The dropdown
+// options key off the catalog `name` (e.g. "nous-qwen3-llm"), but a config can
+// store the RAW model string (`actual_model`, e.g. "qwen3-6-35b") — matching
+// only by name then wrongly falls back to "Custom endpoint…". Match by name
+// first, then by actual_model (preferring the same base_url).
+function matchCatalogModel(
+  list: CatalogModel[],
+  model: string,
+  baseUrl: string,
+): CatalogModel | undefined {
+  if (!model) return undefined
+  const norm = (s?: string) => (s || '').replace(/\/+$/, '')
+  const byName = list.find((c) => c.name === model)
+  if (byName) return byName
+  const byModelAndUrl = list.find(
+    (c) => c.actual_model === model && norm(c.base_url) === norm(baseUrl),
+  )
+  if (byModelAndUrl) return byModelAndUrl
+  return list.find((c) => c.actual_model === model)
+}
 import {
   useGraphMemorySettings,
   useUpdateGraphMemorySettings,
@@ -41,6 +71,22 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
 export function MemorySettings() {
   const { data, isLoading } = useGraphMemorySettings()
   const updateMutation = useUpdateGraphMemorySettings()
+  const { session } = useAuth()
+  const [catalog, setCatalog] = useState<CatalogModel[]>([])
+
+  // Load the platform-model catalog so the extractor/embedder can be assigned by
+  // selection (instead of hand-typing base_url/model/api_key).
+  useEffect(() => {
+    const token = session?.access_token
+    if (!token) return
+    const apiBase = import.meta.env.VITE_API_URL || ''
+    fetch(`${apiBase}/api/v1/admin/nous-models`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows) => setCatalog(Array.isArray(rows) ? rows : []))
+      .catch(() => setCatalog([]))
+  }, [session])
 
   const [enabled, setEnabled] = useState(false)
   const [host, setHost] = useState('')
@@ -149,13 +195,62 @@ export function MemorySettings() {
         title="Extractor LLM"
         subtitle="OpenAI-compatible LLM that extracts entities/edges into the graph."
       />
-      <Row label="Base URL">
-        <Input value={exBaseUrl} onChange={setExBaseUrl} placeholder="https://.../v1" style={{ width: 260 }} />
-      </Row>
-      <Divider style={{ margin: 0 }} />
-      <Row label="Model">
-        <Input value={exModel} onChange={setExModel} placeholder="e.g. Qwen/Qwen3-235B-A22B-Instruct-2507" style={{ width: 260 }} />
-      </Row>
+      {(() => {
+        const llm = catalog.filter((c) => c.type === 'llm')
+        const matched = matchCatalogModel(llm, exModel, exBaseUrl)
+        const usingCatalog = !!matched
+        return (
+          <>
+            <Row
+              label="Platform model"
+              hint="Pick an LLM from the MediaHub catalog (provider + key come from it), or Custom to enter a provider manually."
+            >
+              <Select
+                value={matched ? matched.name : '__custom__'}
+                onChange={(v) => {
+                  if (v === '__custom__') setExModel('')
+                  else {
+                    setExModel(v)
+                    setExBaseUrl('')
+                    setExKey('')
+                  }
+                }}
+                placeholder="Select a platform model"
+                style={{ width: 280 }}
+              >
+                {llm.map((c) => (
+                  <Select.Option key={c.name} value={c.name}>{c.display_name}</Select.Option>
+                ))}
+                <Select.Option value="__custom__">Custom endpoint…</Select.Option>
+              </Select>
+            </Row>
+            {!usingCatalog && (
+              <>
+                <Divider style={{ margin: 0 }} />
+                <Row label="Base URL">
+                  <Input value={exBaseUrl} onChange={setExBaseUrl} placeholder="https://.../v1" style={{ width: 260 }} />
+                </Row>
+                <Divider style={{ margin: 0 }} />
+                <Row label="Model">
+                  <Input value={exModel} onChange={setExModel} placeholder="e.g. Qwen/Qwen3-235B-A22B-Instruct-2507" style={{ width: 260 }} />
+                </Row>
+                <Divider style={{ margin: 0 }} />
+                <Row label="API key" hint="Must support structured output (chat completions).">
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end' }}>
+                    {keyTag(data?.extractor_api_key_set ?? false)}
+                    <Input.Password
+                      value={exKey}
+                      onChange={setExKey}
+                      placeholder={data?.extractor_api_key_set ? 'leave blank to keep' : 'set a key'}
+                      style={{ width: 200 }}
+                    />
+                  </div>
+                </Row>
+              </>
+            )}
+          </>
+        )
+      })()}
       <Divider style={{ margin: 0 }} />
       <Row
         label="Structured output"
@@ -165,18 +260,6 @@ export function MemorySettings() {
           <Select.Option value="json_object">json_object (default)</Select.Option>
           <Select.Option value="json_schema">json_schema</Select.Option>
         </Select>
-      </Row>
-      <Divider style={{ margin: 0 }} />
-      <Row label="API key" hint="Must support structured output (chat completions).">
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end' }}>
-          {keyTag(data?.extractor_api_key_set ?? false)}
-          <Input.Password
-            value={exKey}
-            onChange={setExKey}
-            placeholder={data?.extractor_api_key_set ? 'leave blank to keep' : 'set a key'}
-            style={{ width: 200 }}
-          />
-        </div>
       </Row>
 
       <Divider />
@@ -191,17 +274,66 @@ export function MemorySettings() {
         both; capped at {DIM_MAX} (Qwen3-Embedding-8B native width). Graphiti runs on FalkorDB
         and Honcho on LanceDB, so 4096 is indexable on both.
       </div>
-      <Row label="Base URL" hint="Optional — defaults to the extractor/env config when blank.">
-        <Input value={emBaseUrl} onChange={setEmBaseUrl} placeholder="https://.../v1" style={{ width: 260 }} />
-      </Row>
-      <Divider style={{ margin: 0 }} />
-      <Row label="Model">
-        <Input value={emModel} onChange={setEmModel} placeholder="e.g. Qwen/Qwen3-Embedding-4B" style={{ width: 260 }} />
-      </Row>
+      {(() => {
+        const emb = catalog.filter((c) => c.type === 'embedding')
+        const matched = matchCatalogModel(emb, emModel, emBaseUrl)
+        const usingCatalog = !!matched
+        return (
+          <>
+            <Row
+              label="Platform model"
+              hint="Pick an embedding model from the MediaHub catalog (provider + key come from it), or Custom to enter a provider manually."
+            >
+              <Select
+                value={matched ? matched.name : '__custom__'}
+                onChange={(v) => {
+                  if (v === '__custom__') setEmModel('')
+                  else {
+                    setEmModel(v)
+                    setEmBaseUrl('')
+                    setEmKey('')
+                  }
+                }}
+                placeholder="Select a platform model"
+                style={{ width: 280 }}
+              >
+                {emb.map((c) => (
+                  <Select.Option key={c.name} value={c.name}>{c.display_name}</Select.Option>
+                ))}
+                <Select.Option value="__custom__">Custom endpoint…</Select.Option>
+              </Select>
+            </Row>
+            {!usingCatalog && (
+              <>
+                <Divider style={{ margin: 0 }} />
+                <Row label="Base URL" hint="Optional — defaults to the extractor/env config when blank.">
+                  <Input value={emBaseUrl} onChange={setEmBaseUrl} placeholder="https://.../v1" style={{ width: 260 }} />
+                </Row>
+                <Divider style={{ margin: 0 }} />
+                <Row label="Model">
+                  <Input value={emModel} onChange={setEmModel} placeholder="e.g. Qwen/Qwen3-Embedding-4B" style={{ width: 260 }} />
+                </Row>
+                <Divider style={{ margin: 0 }} />
+                <Row label="API key">
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end' }}>
+                    {keyTag(data?.embedder_api_key_set ?? false)}
+                    <Input.Password
+                      value={emKey}
+                      onChange={setEmKey}
+                      placeholder={data?.embedder_api_key_set ? 'leave blank to keep' : 'set a key'}
+                      style={{ width: 200 }}
+                    />
+                  </div>
+                </Row>
+              </>
+            )}
+          </>
+        )
+      })()}
       <Divider style={{ margin: 0 }} />
       <Row
         label="Dimensions"
-        hint={`Embedding output width; sizes the vector index. 1536 = Qwen3-Embedding-4B, 4096 = Qwen3-Embedding-8B. Max ${DIM_MAX}.`}
+        hint={`Embedding output width; sizes the vector index. 1536 = Qwen3-Embedding-4B, 4096 = Qwen3-Embedding-8B, 2048 = doubao-embedding-vision. Max ${DIM_MAX}.`}
       >
         <Input
           value={emDim}
@@ -210,18 +342,6 @@ export function MemorySettings() {
           style={{ width: 260 }}
           status={dimInvalid ? 'error' : undefined}
         />
-      </Row>
-      <Divider style={{ margin: 0 }} />
-      <Row label="API key">
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end' }}>
-          {keyTag(data?.embedder_api_key_set ?? false)}
-          <Input.Password
-            value={emKey}
-            onChange={setEmKey}
-            placeholder={data?.embedder_api_key_set ? 'leave blank to keep' : 'set a key'}
-            style={{ width: 200 }}
-          />
-        </div>
       </Row>
 
       <Divider />

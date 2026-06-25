@@ -27,6 +27,10 @@ class HotspotOut(BaseModel):
     # Cross-source cluster size: how many distinct platforms this topic appears
     # on (from its topic_group). >1 = "seen on N platforms" signal.
     source_count: Optional[int] = None
+    # Raw per-dimension scores (novelty/impact/credibility/actionability/
+    # shareability, 0..1) the LLM rated — the breakdown behind ``score``. Only
+    # on the detail endpoint (transparency into why an item scored what it did).
+    score_dims: Optional[dict] = None
     # Full original/translated body — only populated by the detail endpoint to
     # keep the list payload light.
     content_original: Optional[str] = None
@@ -88,9 +92,26 @@ class SourceHealthOut(BaseModel):
     last_error: Optional[str] = None
     last_fetched_at: Optional[str] = None
     last_ok_at: Optional[str] = None
+    # is_owner: this caller created the source (can delete it). System sources
+    # (user_id NULL) are is_owner=False — deletable by nobody, only hidable.
+    is_owner: bool = False
+    # is_hidden: this caller has "closed" the source (excluded from their feed).
+    is_hidden: bool = False
 
 
 class SourceHealthResponse(BaseModel):
     success: bool = True
     count: int
     sources: list[SourceHealthOut]
+
+
+class SourceCreateRequest(BaseModel):
+    kind: str  # newsnow | rss | http_api | custom
+    name: str
+    category: Optional[str] = None
+    config: dict = {}
+
+
+class SourceMutationResponse(BaseModel):
+    success: bool = True
+    source: Optional[SourceHealthOut] = None

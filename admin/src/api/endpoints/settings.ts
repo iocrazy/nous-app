@@ -170,3 +170,88 @@ export function useUpdateGraphMemorySettings() {
     },
   })
 }
+
+// ── Topic Scoring config ──────────────────────────────────────────────────
+export interface TopicScoringConfig {
+  dim_weights: Record<string, number>
+  tier_weights: Record<string, number>
+  featured_min_score: number
+}
+
+const TOPIC_SCORING_URL = '/api/v1/admin/settings/topics-scoring'
+
+export function useTopicScoringConfig() {
+  return useQuery({
+    queryKey: ['settings', 'topics-scoring'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<TopicScoringConfig>(TOPIC_SCORING_URL)
+      return data
+    },
+  })
+}
+
+export function useUpdateTopicScoringConfig() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (update: TopicScoringConfig) => {
+      const { data } = await apiClient.put<TopicScoringConfig>(TOPIC_SCORING_URL, update)
+      return data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings', 'topics-scoring'] })
+    },
+  })
+}
+
+// ── Signal Sources (admin global enable/disable + tier) ───────────────────
+export interface AdminSource {
+  id: string
+  name: string
+  kind: string
+  category: string | null
+  enabled: boolean
+  tier: number
+  health: string
+  consecutive_failures: number
+  last_error: string | null
+  last_ok_at: string | null
+  is_system: boolean
+}
+
+const ADMIN_SOURCES_URL = '/api/v1/admin/topics/sources'
+
+export function useAdminSources() {
+  return useQuery({
+    queryKey: ['admin', 'signal-sources'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<{ count: number; sources: AdminSource[] }>(
+        ADMIN_SOURCES_URL,
+      )
+      return data.sources
+    },
+  })
+}
+
+export function useUpdateAdminSource() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      id,
+      enabled,
+      tier,
+    }: {
+      id: string
+      enabled?: boolean
+      tier?: number
+    }) => {
+      const { data } = await apiClient.patch<AdminSource>(`${ADMIN_SOURCES_URL}/${id}`, {
+        enabled,
+        tier,
+      })
+      return data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'signal-sources'] })
+    },
+  })
+}

@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.api.admin.nous_router import _probe_nous_model
+from app.services.ai.nous_health import probe_nous_model as _probe_nous_model
 
 
 class _Resp:
@@ -38,7 +38,7 @@ class _Client:
 
 def _patch(resp):
     _Client._resp = resp
-    return patch("app.api.admin.nous_router.httpx.AsyncClient", _Client)
+    return patch("app.services.ai.nous_health.httpx.AsyncClient", _Client)
 
 
 @pytest.mark.asyncio
@@ -110,7 +110,7 @@ async def test_asr_delegates_to_test_connection() -> None:
         "api_key": "k",
     }
     with patch(
-        "app.api.admin.nous_router.AIProviderFactory.test_connection",
+        "app.services.ai.nous_health.AIProviderFactory.test_connection",
         AsyncMock(
             return_value={"success": True, "models": ["seed-asr"], "error": None}
         ),
@@ -128,7 +128,7 @@ async def test_exception_is_caught() -> None:
         "api_key": "k",
     }
     with patch(
-        "app.api.admin.nous_router.httpx.AsyncClient",
+        "app.services.ai.nous_health.httpx.AsyncClient",
         side_effect=RuntimeError("boom"),
     ):
         out = await _probe_nous_model(row)

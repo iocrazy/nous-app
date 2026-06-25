@@ -41,7 +41,7 @@ const MenuItemGroup = Menu.ItemGroup
 const allMenuKeys = [
   '/', '/users', '/teams', '/media', '/transcode', '/tasks', '/tags', '/credits', '/ai',
   '/agent-telemetry', '/monitoring', '/search', '/audit-logs', '/logs', '/alerts',
-  '/api-keys', '/settings/ai-governance', '/settings/memory', '/settings',
+  '/api-keys', '/settings/ai-governance', '/settings/topic-scoring', '/settings/signal-sources', '/settings/memory', '/settings',
   '/transcode-config', '/deployment-logs',
 ]
 
@@ -107,7 +107,6 @@ export function AdminLayout() {
             <MenuItem key="/tasks"><IconList />Tasks</MenuItem>
             <MenuItem key="/tags"><IconTags />Tags</MenuItem>
             <MenuItem key="/credits"><IconStar />Credits</MenuItem>
-            <MenuItem key="/ai"><IconRobot />AI Models</MenuItem>
             <MenuItem key="/agent-telemetry"><IconRobot />Agent Telemetry</MenuItem>
           </MenuItemGroup>
           <MenuItemGroup key="logs" title="Logs & Monitoring">
@@ -120,8 +119,11 @@ export function AdminLayout() {
           </MenuItemGroup>
           <MenuItemGroup key="system" title="System">
             <MenuItem key="/api-keys"><IconLock />API Keys</MenuItem>
+            <MenuItem key="/ai"><IconRobot />AI Models</MenuItem>
             <MenuItem key="/settings"><IconSettings />Settings</MenuItem>
             <MenuItem key="/settings/ai-governance"><IconRobot />AI Governance</MenuItem>
+            <MenuItem key="/settings/topic-scoring"><IconThunderbolt />Topic Scoring</MenuItem>
+            <MenuItem key="/settings/signal-sources"><IconStorage />Signal Sources</MenuItem>
             <MenuItem key="/settings/memory"><IconStorage />Memory</MenuItem>
             <MenuItem key="/transcode-config"><IconThunderbolt />Transcode</MenuItem>
           </MenuItemGroup>
