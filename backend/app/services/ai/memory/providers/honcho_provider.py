@@ -69,7 +69,7 @@ class HonchoProvider(MemoryProvider):
             )
         except Exception:  # noqa: BLE001
             logger.exception(
-                "[honcho_provider] record_turn failed (user=%s)", turn.user_id
+                f"[honcho_provider] record_turn failed (user={turn.user_id})"
             )
             return False
 
@@ -86,7 +86,7 @@ class HonchoProvider(MemoryProvider):
                 user_id=user_id, workspace_id=workspace_id
             )
         except Exception:  # noqa: BLE001
-            logger.exception("[honcho_provider] get_context failed (user=%s)", user_id)
+            logger.exception(f"[honcho_provider] get_context failed (user={user_id})")
             return None
 
     async def reload(self) -> None:

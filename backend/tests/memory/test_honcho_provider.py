@@ -121,3 +121,28 @@ async def test_is_operative_delegates_to_operative():
     ):
         result = await HonchoProvider().is_operative()
     assert result is True
+
+
+@pytest.mark.asyncio
+async def test_record_turn_returns_false_when_messages_blank():
+    svc = SimpleNamespace(
+        config=SimpleNamespace(enabled=True),
+        add_chat_turn=AsyncMock(),
+    )
+    turn = MemoryTurn(
+        user_id="u1",
+        agent_id="a1",
+        session_id="s1",
+        run_id=None,
+        iteration=0,
+        user_msgs=[],
+        asst_msgs=[],
+    )
+    with patch(
+        "app.services.ai.memory.providers.honcho_provider.get_honcho_memory_service",
+        return_value=svc,
+    ):
+        ok = await HonchoProvider().record_turn(turn)
+
+    assert ok is False
+    svc.add_chat_turn.assert_not_awaited()

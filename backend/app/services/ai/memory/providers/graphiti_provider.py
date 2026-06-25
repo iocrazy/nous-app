@@ -56,7 +56,7 @@ class GraphitiProvider(MemoryProvider):
             )
         except Exception:  # noqa: BLE001
             logger.exception(
-                "[graphiti_provider] record_turn failed (user=%s)", turn.user_id
+                f"[graphiti_provider] record_turn failed (user={turn.user_id})"
             )
             return False
 
@@ -73,7 +73,7 @@ class GraphitiProvider(MemoryProvider):
                 query, group_ids=group_ids or [], limit=10
             )
         except Exception:  # noqa: BLE001
-            logger.exception("[graphiti_provider] search failed (user=%s)", user_id)
+            logger.exception(f"[graphiti_provider] search failed (user={user_id})")
             return None
         if not facts:
             return None
