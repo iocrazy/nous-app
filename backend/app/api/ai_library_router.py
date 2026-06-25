@@ -488,6 +488,8 @@ async def update_agent(
         )
 
     agent_uuid = UUID(str(agent["id"]))
+    # Single coercion shared by both the role gate and the write path below.
+    user_uuid = _coerce_user_uuid(auth.user_id)
     # Content fields (everything except skill bindings and chat permissions).
     updates = payload.model_dump(
         exclude_none=True, exclude={"skill_ids", "chat_permissions"}
@@ -511,7 +513,6 @@ async def update_agent(
     # of the agent's scope team, OR (for presets / platform-scope) is a platform
     # admin.
     if payload.chat_permissions is not None:
-        user_uuid = _coerce_user_uuid(auth.user_id)
         if not await _can_edit_chat_permissions(agent_repo, agent, user_uuid):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -537,7 +538,6 @@ async def update_agent(
         chat_audit = {"before": before_chat, "after": existing_chat}
 
     if updates:
-        user_uuid = _coerce_user_uuid(auth.user_id)
         await agent_repo.update_fields_versioned(
             agent_uuid, updates, created_by=user_uuid
         )
@@ -547,10 +547,7 @@ async def update_agent(
     # Audit the grant/change, not just denials (CHAT-PERM-21 / review M3).
     if chat_audit is not None:
         logger.info(
-            "chat_permissions changed by %s on agent %s: %s",
-            auth.user_id,
-            agent["slug"],
-            chat_audit,
+            f"chat_permissions changed by {auth.user_id} on agent {agent['slug']}: {chat_audit}"
         )
 
     refreshed = await agent_repo.get_by_slug(slug)
@@ -986,7 +983,15 @@ async def _can_edit_chat_permissions(
     team_id = agent.get("team_id")
     if team_id is not None and await _is_team_owner(user_uuid, team_id):
         return True
-    return await _user_is_admin(user_uuid)
+    # Fail-closed: a transient DB error on user_profiles must not surface as
+    # a 500. Only _user_is_admin is wrapped here; _is_team_owner already has
+    # its own try/except. The shared _user_is_admin helper keeps its
+    # raise-on-error semantics for callers that want propagation (e.g. the
+    # delete_skill admin gate).
+    try:
+        return await _user_is_admin(user_uuid)
+    except Exception:
+        return False
 
 
 def _with_chat_permissions(row: Dict[str, Any]) -> Dict[str, Any]:

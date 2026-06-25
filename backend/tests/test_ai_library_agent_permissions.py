@@ -5,11 +5,13 @@ from __future__ import annotations
 from typing import Any, Dict
 from unittest.mock import AsyncMock
 from unittest.mock import patch as _patch
+from uuid import UUID as _UUID
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.api.ai_library_router import router
+from app.api.ai_library_router import _can_edit_chat_permissions, router
 from app.schemas.ai_library import AgentUpdate, ChatPermissionsIn
 
 
@@ -169,3 +171,140 @@ def test_patch_mixed_content_and_perms_on_preset_403():
             json={"name": "X", "chat_permissions": {"enabled": True}},
         )
     assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Unit tests for _can_edit_chat_permissions composition logic (Fix #2)
+# ---------------------------------------------------------------------------
+
+_CALLER_ID = _UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+_OTHER_ID = _UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+_TEAM_ID = 42
+
+
+def _user_agent(owner_id=_CALLER_ID) -> Dict[str, Any]:
+    """Agent owned by a specific user (no team)."""
+    return {
+        "id": "22222222-2222-2222-2222-222222222222",
+        "slug": "my-agent",
+        "user_id": str(owner_id),
+        "team_id": None,
+        "is_system_preset": False,
+    }
+
+
+def _team_agent(owner_id=_OTHER_ID, team_id=_TEAM_ID) -> Dict[str, Any]:
+    """Agent scoped to a team, owned by someone else."""
+    return {
+        "id": "33333333-3333-3333-3333-333333333333",
+        "slug": "team-agent",
+        "user_id": str(owner_id),
+        "team_id": team_id,
+        "is_system_preset": False,
+    }
+
+
+def _preset_agent_dict() -> Dict[str, Any]:
+    """System-preset agent (no user_id, no team)."""
+    return {
+        "id": "44444444-4444-4444-4444-444444444444",
+        "slug": "preset-agent",
+        "user_id": None,
+        "team_id": None,
+        "is_system_preset": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_can_edit_agent_owner_returns_true():
+    """(a) caller IS the agent owner → True (no team/admin lookup needed)."""
+    agent = _user_agent(owner_id=_CALLER_ID)
+    with (
+        _patch(
+            "app.api.ai_library_router._is_team_owner",
+            new=AsyncMock(return_value=False),
+        ) as mock_team,
+        _patch(
+            "app.api.ai_library_router._user_is_admin",
+            new=AsyncMock(return_value=False),
+        ) as mock_admin,
+    ):
+        result = await _can_edit_chat_permissions(None, agent, _CALLER_ID)
+    assert result is True
+    # Short-circuit: neither dependency should have been called
+    mock_team.assert_not_called()
+    mock_admin.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_can_edit_team_owner_returns_true():
+    """(b) caller is team owner/admin (owner check fails, _is_team_owner → True) → True."""
+    agent = _team_agent()
+    with (
+        _patch(
+            "app.api.ai_library_router._is_team_owner",
+            new=AsyncMock(return_value=True),
+        ) as mock_team,
+        _patch(
+            "app.api.ai_library_router._user_is_admin",
+            new=AsyncMock(return_value=False),
+        ) as mock_admin,
+    ):
+        result = await _can_edit_chat_permissions(None, agent, _CALLER_ID)
+    assert result is True
+    mock_team.assert_called_once_with(_CALLER_ID, _TEAM_ID)
+    mock_admin.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_can_edit_stranger_returns_false():
+    """(c) stranger: owner check fails, _is_team_owner → False, _user_is_admin → False → False."""
+    agent = _team_agent()
+    with (
+        _patch(
+            "app.api.ai_library_router._is_team_owner",
+            new=AsyncMock(return_value=False),
+        ),
+        _patch(
+            "app.api.ai_library_router._user_is_admin",
+            new=AsyncMock(return_value=False),
+        ),
+    ):
+        result = await _can_edit_chat_permissions(None, agent, _CALLER_ID)
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_can_edit_platform_admin_returns_true():
+    """(d) platform admin: owner+team False, _user_is_admin → True → True."""
+    agent = _preset_agent_dict()
+    with (
+        _patch(
+            "app.api.ai_library_router._is_team_owner",
+            new=AsyncMock(return_value=False),
+        ),
+        _patch(
+            "app.api.ai_library_router._user_is_admin",
+            new=AsyncMock(return_value=True),
+        ),
+    ):
+        result = await _can_edit_chat_permissions(None, agent, _CALLER_ID)
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_can_edit_admin_db_error_returns_false():
+    """(e) _user_is_admin raises → function returns False (fail-closed wrap from fix #1)."""
+    agent = _preset_agent_dict()
+    with (
+        _patch(
+            "app.api.ai_library_router._is_team_owner",
+            new=AsyncMock(return_value=False),
+        ),
+        _patch(
+            "app.api.ai_library_router._user_is_admin",
+            new=AsyncMock(side_effect=RuntimeError("DB connection timeout")),
+        ),
+    ):
+        result = await _can_edit_chat_permissions(None, agent, _CALLER_ID)
+    assert result is False
