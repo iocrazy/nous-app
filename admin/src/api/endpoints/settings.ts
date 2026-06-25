@@ -255,3 +255,22 @@ export function useUpdateAdminSource() {
     },
   })
 }
+
+export function useCreateAdminSource() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: {
+      kind: string
+      name: string
+      config: Record<string, unknown>
+      category?: string | null
+      tier?: number
+    }) => {
+      const { data } = await apiClient.post<AdminSource>(ADMIN_SOURCES_URL, body)
+      return data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'signal-sources'] })
+    },
+  })
+}
