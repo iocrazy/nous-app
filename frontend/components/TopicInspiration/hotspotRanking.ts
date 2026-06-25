@@ -8,13 +8,32 @@ import type { Hotspot } from '../../services/topicService';
 const SCORE_WEIGHT = 0.5;
 const HEAT_WEIGHT = 0.5;
 
-export function blendedScore(h: Pick<Hotspot, 'score' | 'heat'>): number {
+// Cross-source confirmation is a HARD signal: a topic independently reported on
+// many platforms is more real than one LLM call's opinion (borrowed from
+// TrendRadar's cross-platform frequency factor). It only ADDS — never penalizes
+// single-source items — so the base score/heat blend is unchanged when a topic
+// sits on one platform. Saturates at ~5 platforms.
+const CROSS_WEIGHT = 0.1;
+
+function crossSourceFactor(sourceCount?: number | null): number {
+  if (typeof sourceCount !== 'number' || sourceCount <= 1) return 0;
+  return Math.min(1, (sourceCount - 1) / 4); // 2 plats→0.25 … 5+ plats→1.0
+}
+
+export function blendedScore(
+  h: Pick<Hotspot, 'score' | 'heat' | 'source_count'>,
+): number {
   const score = typeof h.score === 'number' ? h.score : null;
   const heat = typeof h.heat === 'number' ? h.heat : null;
   if (score === null && heat === null) return 0;
-  if (score === null) return heat as number;
-  if (heat === null) return score;
-  return SCORE_WEIGHT * score + HEAT_WEIGHT * heat;
+  const base =
+    score === null
+      ? (heat as number)
+      : heat === null
+        ? score
+        : SCORE_WEIGHT * score + HEAT_WEIGHT * heat;
+  // Additive cross-source bump, clamped so the result stays in 0..1.
+  return Math.min(1, base + CROSS_WEIGHT * crossSourceFactor(h.source_count));
 }
 
 // Below this blended score a SCORED item is treated as low-signal noise.
