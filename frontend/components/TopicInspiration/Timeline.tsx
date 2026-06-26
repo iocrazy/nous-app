@@ -100,15 +100,17 @@ export const Timeline: React.FC<Props> = ({
             {!isCollapsed &&
               g.items.map((h) => (
                 <div key={h.id} className="flex items-start relative mb-3.5">
-                  {/* Time rail: 64px, right-aligned, pt-3.5 to align with card top */}
+                  {/* Time rail: 64px, right-aligned, pt-3.5 (=card py-3.5) so the
+                      time sits on the card's first content line. */}
                   <div className="w-[64px] shrink-0 text-right pr-5 pt-3.5">
                     <span className="font-bold text-[13px] text-content">{hhmm(h.captured_at)}</span>
                   </div>
 
-                  {/* Dot ON the line: 13px circle, bg-accent, 3px border in island bg */}
+                  {/* Dot ON the line — its center aligns with the time text /
+                      card top line (top:15 → center ~21px ≈ the time's row). */}
                   <span
                     className="absolute w-[13px] h-[13px] rounded-full bg-accent z-[2]"
-                    style={{ left: 58, top: 20, border: '3px solid var(--island, #fff)' }}
+                    style={{ left: 58, top: 15, border: '3px solid var(--island, #fff)' }}
                   />
 
                   {/* Card: flex-1, ml-6 (24px) to the right of the line */}
