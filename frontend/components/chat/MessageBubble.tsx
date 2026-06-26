@@ -138,6 +138,7 @@ export function MessageBubble({
 
   const isAgent = message.sender_type === 'agent';
   const isMediaCard = message.content_type === 'media_card';
+  const isText = message.content_type === 'text';
   const isOwn = message.sender_type === 'user' && message.sender_id === currentUserId;
   const isDeleted = !!message.deleted_at;
 
@@ -228,14 +229,16 @@ export function MessageBubble({
           {/* Hover action buttons — own non-deleted messages only */}
           {isOwn && !isDeleted && (
             <div className="ml-auto flex gap-[4px] opacity-0 group-hover:opacity-100 transition-opacity">
-              <button
-                type="button"
-                onClick={handleEditClick}
-                title={t('chat.edit')}
-                className="p-[5px] rounded-[7px] bg-[#1d1d22] border border-white/[.12] text-[#74747e] hover:text-[#e7e7ea] hover:bg-[#252529] transition-colors"
-              >
-                <Pencil size={12} />
-              </button>
+              {isText && (
+                <button
+                  type="button"
+                  onClick={handleEditClick}
+                  title={t('chat.edit')}
+                  className="p-[5px] rounded-[7px] bg-[#1d1d22] border border-white/[.12] text-[#74747e] hover:text-[#e7e7ea] hover:bg-[#252529] transition-colors"
+                >
+                  <Pencil size={12} />
+                </button>
+              )}
               <button
                 type="button"
                 onClick={handleDeleteClick}

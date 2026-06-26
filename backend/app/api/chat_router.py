@@ -167,6 +167,12 @@ async def edit_message(
     channel_id: int, message_id: int, payload: MessageEdit, auth: AuthDep
 ):
     svc = get_chat_service()
+    text = payload.body.get("text")
+    if not isinstance(text, str) or not text.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="text required",
+        )
     try:
         row = await svc.edit_message(
             channel_id=channel_id,
