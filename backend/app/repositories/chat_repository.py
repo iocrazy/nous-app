@@ -306,23 +306,25 @@ class ChatRepository:
     async def increment_mentions(self, *, channel_id: int, user_ids: list[str]) -> None:
         """Bump mention_count by 1 for only the @-mentioned channel members.
 
-        Uses ``ANY(CAST(:uids AS uuid[]))`` to update all mentioned members in
-        a single statement.  Note: asyncpg receives the Python list of strings
-        as ``text[]``; the explicit ``CAST(... AS uuid[])`` instructs PostgreSQL
-        to coerce it before the equality check.  This is safe for small fanout
-        lists (typical @-mention sets).
+        Uses per-user UPDATE statements in a transaction to avoid asyncpg array-bind
+        risks (DataError in some Supavisor environments with empty-array handling).
+        Each mentioned member is updated once; transaction ensures atomicity.
         """
         if not user_ids:
             return
-        await db_engine.execute(
-            """
-            UPDATE public.channel_members
-               SET mention_count = mention_count + 1
-             WHERE channel_id = :cid
-               AND user_id = ANY(CAST(:uids AS uuid[]))
-            """,
-            {"cid": _bigint(channel_id), "uids": user_ids},
-        )
+        eng = db_engine.get_engine()
+        async with eng.begin() as conn:
+            for uid in user_ids:
+                await conn.execute(
+                    text(
+                        """
+                        UPDATE public.channel_members
+                           SET mention_count = mention_count + 1
+                         WHERE channel_id = :cid AND user_id = :uid
+                        """
+                    ),
+                    {"cid": _bigint(channel_id), "uid": uid},
+                )
 
     # ── Channel lookup ──────────────────────────────────────────────────────
 
