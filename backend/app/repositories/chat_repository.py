@@ -235,6 +235,108 @@ class ChatRepository:
             {"cid": _bigint(channel_id), "uid": user_id, "seq": last_read_seq},
         )
 
+    # ── Agent membership ────────────────────────────────────────────────────
+
+    async def add_agent_to_channel(
+        self, *, channel_id: int, agent_id: str, added_by: str
+    ) -> None:
+        """Insert (agent_id, channel_id) into agent_channels; idempotent."""
+        await db_engine.execute(
+            """
+            INSERT INTO public.agent_channels (agent_id, channel_id, added_by)
+            VALUES (:agent_id, :cid, :added_by)
+            ON CONFLICT (agent_id, channel_id) DO NOTHING
+            """,
+            {
+                "agent_id": agent_id,
+                "cid": _bigint(channel_id),
+                "added_by": added_by,
+            },
+        )
+
+    async def is_agent_in_channel(self, *, channel_id: int, agent_id: str) -> bool:
+        v = await db_engine.fetch_val(
+            """
+            SELECT EXISTS (
+              SELECT 1 FROM public.agent_channels
+              WHERE channel_id = :cid AND agent_id = :agent_id
+            )
+            """,
+            {"cid": _bigint(channel_id), "agent_id": agent_id},
+        )
+        return bool(v)
+
+    async def list_channel_agent_ids(self, *, channel_id: int) -> list[str]:
+        rows = await db_engine.fetch_all(
+            """
+            SELECT agent_id
+              FROM public.agent_channels
+             WHERE channel_id = :cid
+            """,
+            {"cid": _bigint(channel_id)},
+        )
+        return [str(r["agent_id"]) for r in rows]
+
+    # ── Turn context ────────────────────────────────────────────────────────
+
+    async def recent_messages(
+        self, *, channel_id: int, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        """Return the newest *limit* non-deleted messages in ascending seq order.
+
+        Internally fetches DESC then reverses in Python so the caller always
+        sees messages oldest-first (chronological), as expected by the agent
+        turn context builder.
+        """
+        rows = await db_engine.fetch_all(
+            """
+            SELECT id, channel_id, seq, sender_id, sender_type, content_type, body,
+                   reply_to_id, from_bot_agent_id, created_at
+              FROM public.channel_messages
+             WHERE channel_id = :cid AND deleted_at IS NULL
+             ORDER BY seq DESC
+             LIMIT :limit
+            """,
+            {"cid": _bigint(channel_id), "limit": limit},
+        )
+        return [dict(r) for r in reversed(rows)]
+
+    # ── Mention fanout (UNREAD-03) ──────────────────────────────────────────
+
+    async def increment_mentions(self, *, channel_id: int, user_ids: list[str]) -> None:
+        """Bump mention_count by 1 for only the @-mentioned channel members.
+
+        Uses ``ANY(CAST(:uids AS uuid[]))`` to update all mentioned members in
+        a single statement.  Note: asyncpg receives the Python list of strings
+        as ``text[]``; the explicit ``CAST(... AS uuid[])`` instructs PostgreSQL
+        to coerce it before the equality check.  This is safe for small fanout
+        lists (typical @-mention sets).
+        """
+        if not user_ids:
+            return
+        await db_engine.execute(
+            """
+            UPDATE public.channel_members
+               SET mention_count = mention_count + 1
+             WHERE channel_id = :cid
+               AND user_id = ANY(CAST(:uids AS uuid[]))
+            """,
+            {"cid": _bigint(channel_id), "uids": user_ids},
+        )
+
+    # ── Channel lookup ──────────────────────────────────────────────────────
+
+    async def get_channel(self, *, channel_id: int) -> Optional[dict[str, Any]]:
+        """Return id, team_id, type, history_mode, last_message_seq or None."""
+        return await db_engine.fetch_one(
+            """
+            SELECT id, team_id, type, history_mode, last_message_seq
+              FROM public.channels
+             WHERE id = :cid
+            """,
+            {"cid": _bigint(channel_id)},
+        )
+
 
 _repo: Optional[ChatRepository] = None
 
