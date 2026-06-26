@@ -19,6 +19,12 @@ export interface MessageListProps {
   onLoadOlder: () => void;
   hasOlder: boolean;
   loadingOlder: boolean;
+  /** The authenticated user's id — consumed by Task 5 (MessageBubble) to gate edit/delete actions. */
+  currentUserId?: string | null;
+  /** Called by Task 5 when the user saves an edited message. */
+  onEdit?: (messageId: string, text: string) => void;
+  /** Called by Task 5 when the user soft-deletes a message. */
+  onDelete?: (messageId: string) => void;
 }
 
 export function MessageList({
@@ -26,6 +32,9 @@ export function MessageList({
   onLoadOlder,
   hasOlder,
   loadingOlder,
+  currentUserId: _currentUserId,
+  onEdit: _onEdit,
+  onDelete: _onDelete,
 }: MessageListProps): React.ReactElement {
   const { t } = useTranslation();
   const bottomRef = useRef<HTMLDivElement>(null);
