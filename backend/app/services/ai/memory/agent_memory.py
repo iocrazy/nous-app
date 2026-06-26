@@ -41,19 +41,19 @@ async def recall(ctx: MemoryContext, query: str, *, limit: int = 5) -> List[Memo
             team_ids=list(ctx.team_ids),
             limit=limit,
         )
+        return [
+            MemoryHit(
+                id=int(r["id"]),
+                title=str(r.get("title") or ""),
+                body_md=str(r.get("body_md") or ""),
+                kind=str(r.get("kind") or "fact"),
+                score=float(r.get("score") or 0.0),
+            )
+            for r in rows
+        ]
     except Exception:  # noqa: BLE001 — recall must never break a chat turn
         logger.warning(f"[agent_memory] recall failed for user={ctx.user_id}")
         return []
-    return [
-        MemoryHit(
-            id=int(r["id"]),
-            title=str(r.get("title") or ""),
-            body_md=str(r.get("body_md") or ""),
-            kind=str(r.get("kind") or "fact"),
-            score=float(r.get("score") or 0.0),
-        )
-        for r in rows
-    ]
 
 
 __all__ = ["MemoryContext", "MemoryHit", "recall"]
