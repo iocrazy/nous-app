@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Optional
+import logging
+from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
 
 from app.core.deps import AuthDep
 from app.schemas.chat import (
+    AgentAdd,
     ChannelCreate,
     ChannelOut,
     MarkReadIn,
@@ -17,7 +19,29 @@ from app.schemas.chat import (
 )
 from app.services.chat_service import get_chat_service
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/chat", tags=["Chat"])
+
+
+async def _summon_runner(
+    channel_id: int,
+    user_id: str,
+    message: dict[str, Any],
+) -> None:
+    """Background task: dispatch agent summons after a human message is posted.
+
+    Must NEVER raise — swallows all exceptions and logs them instead so the
+    background-task failure is never surfaced in the HTTP response.
+    """
+    try:
+        await get_chat_service().dispatch_summons(
+            channel_id=channel_id,
+            summoner_user_id=user_id,
+            message=message,
+        )
+    except Exception as exc:
+        logger.error(f"[chat] summon dispatch failed: {exc}")
 
 
 @router.get("/channels", response_model=list[ChannelOut])
@@ -80,11 +104,29 @@ async def list_messages(
         )
 
 
-@router.post("/channels/{channel_id}/messages", response_model=MessageOut)
-async def post_message(channel_id: int, payload: MessageCreate, auth: AuthDep):
+@router.post("/channels/{channel_id}/agents")
+async def add_agent(channel_id: int, payload: AgentAdd, auth: AuthDep):
     svc = get_chat_service()
     try:
-        return await svc.post_message(
+        return await svc.add_agent(
+            channel_id=channel_id,
+            user_id=auth.user_id,
+            agent_slug=payload.agent_slug,
+        )
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.post("/channels/{channel_id}/messages", response_model=MessageOut)
+async def post_message(
+    channel_id: int,
+    payload: MessageCreate,
+    auth: AuthDep,
+    background_tasks: BackgroundTasks,
+):
+    svc = get_chat_service()
+    try:
+        msg = await svc.post_message(
             channel_id=channel_id,
             user_id=auth.user_id,
             content_type=payload.content_type,
@@ -95,6 +137,8 @@ async def post_message(channel_id: int, payload: MessageCreate, auth: AuthDep):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="not a member"
         )
+    background_tasks.add_task(_summon_runner, channel_id, auth.user_id, msg)
+    return msg
 
 
 @router.post("/channels/{channel_id}/read")

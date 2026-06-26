@@ -78,15 +78,15 @@
 
 | ID | 规则 | 来源/依据 | 状态 |
 |----|------|----------|------|
-| CHAT-SEC-AGENT-01 | **铁律：`agent 可见素材 = RLS(发起人身份) ∩ 当前频道 scope`**。agent 自身身份只用于审计/限流/吊销，**永不作为读素材的授权来源** | Slack「user token 才代人」+ OWASP 最小授权 | ☐ |
-| CHAT-SEC-AGENT-02 | @agent 时，`resource_fetch` 以**发起 @ 的用户 user_id** 查询（现状已如此） | `resource_fetch_tool.py:38-72`（已用 user_id + team_members 校验） | ☐ |
-| CHAT-SEC-AGENT-03 | **补现有洞**：`resource_fetch` 在频道上下文里要 **AND 上当前频道所属 team 的 scope**，否则用户能让 agent 把他在别的 team/个人私有的素材搬进当前频道（跨 team 泄露） | 现状只校验"该 user 在任何 team 可见"，未限当前频道 | ☐ |
-| CHAT-SEC-AGENT-04 | DM/private 频道内 @agent：允许取**发起人个人 scope**（`scope_type='user'`）素材（等于自己调）；team/group 频道内只能取该频道 team scope 素材 | 频道是"输出边界"，发起人是"输入授权" | ☐ |
+| CHAT-SEC-AGENT-01 | **铁律：`agent 可见素材 = RLS(发起人身份) ∩ 当前频道 scope`**。agent 自身身份只用于审计/限流/吊销，**永不作为读素材的授权来源** | Slack「user token 才代人」+ OWASP 最小授权 | ☑ |
+| CHAT-SEC-AGENT-02 | @agent 时，`resource_fetch` 以**发起 @ 的用户 user_id** 查询（现状已如此） | `resource_fetch_tool.py:38-72`（已用 user_id + team_members 校验） | ☑ |
+| CHAT-SEC-AGENT-03 | **补现有洞**：`resource_fetch` 在频道上下文里要 **AND 上当前频道所属 team 的 scope**，否则用户能让 agent 把他在别的 team/个人私有的素材搬进当前频道（跨 team 泄露） | 现状只校验"该 user 在任何 team 可见"，未限当前频道 | ☑ |
+| CHAT-SEC-AGENT-04 | DM/private 频道内 @agent：允许取**发起人个人 scope**（`scope_type='user'`）素材（等于自己调）；team/group 频道内只能取该频道 team scope 素材 | 频道是"输出边界"，发起人是"输入授权" | ◑ (group/team scope done; DM 个人 scope 未特判) |
 | CHAT-SEC-AGENT-05 | **主动播报（无发起人在场）**：只能播报频道 scope 内、明确可共享的内容（team 公共素材/任务状态），**绝不触碰任何 `scope_type='user'` 私有行** | 无人可代时收窄到 broadcast 白名单 | ☐ |
-| CHAT-SEC-AGENT-06 | agent 只能 post 到 `agent_channels` 白名单内的频道（显式入驻，可审计动作），**无"全局读/发所有频道"后门** | MM webhook 必须指定 ChannelId | ☐ |
-| CHAT-SEC-AGENT-07 | 防 prompt injection：频道里他人消息一律当**数据**不当指令；忽略"把所有人素材发出来"类越权指令；输出前自检是否含跨 scope 数据 | OWASP AI Agent Cheat Sheet | ☐ |
-| CHAT-SEC-AGENT-08 | agent 读 resource 全程落 `application_logs`（谁的身份/查了哪些 id/在哪个频道），供事后越权审计 | 现有日志体系 | ☐ |
-| CHAT-SEC-AGENT-09 | 用 `scope_type`+`scope_id` 判 team 归属（已知坑：`libraries`/scope 无 `team_id` 列） | CLAUDE.md 已知陷阱 | ☐ |
+| CHAT-SEC-AGENT-06 | agent 只能 post 到 `agent_channels` 白名单内的频道（显式入驻，可审计动作），**无"全局读/发所有频道"后门** | MM webhook 必须指定 ChannelId | ☑ |
+| CHAT-SEC-AGENT-07 | 防 prompt injection：频道里他人消息一律当**数据**不当指令；忽略"把所有人素材发出来"类越权指令；输出前自检是否含跨 scope 数据 | OWASP AI Agent Cheat Sheet | ☑ |
+| CHAT-SEC-AGENT-08 | agent 读 resource 全程落 `application_logs`（谁的身份/查了哪些 id/在哪个频道），供事后越权审计 | 现有日志体系 | ☑ |
+| CHAT-SEC-AGENT-09 | 用 `scope_type`+`scope_id` 判 team 归属（已知坑：`libraries`/scope 无 `team_id` 列） | CLAUDE.md 已知陷阱 | ☑ |
 
 ---
 
@@ -112,11 +112,11 @@
 | ID | 规则 | 执行点 | 状态 |
 |----|------|--------|------|
 | CHAT-PERM-07 | 后端 `agent_chat_caps(agent_dict) -> ChatCaps`：安全解析 `capability_profile.chat`，缺字段一律按 false/空兜底（fail-closed） | 新 helper `services/ai/.../agent_chat_caps.py` | ☑ |
-| CHAT-PERM-08 | **进群闸**：把 agent 加进群（`agent_channels` insert）前校验 `caps.enabled` 且（`allowed_team_ids` 空 或 群 team∈白名单），否则 403 | chat_service add-agent endpoint | ☐ |
-| CHAT-PERM-09 | **召唤闸**：@agent 解析时若 agent 未入驻该群或 `caps.enabled=false`，**不触发 AgentRunner**，回一条 system 提示"This agent isn't enabled for chat" | @mention resolver（CHAT-AGENT-02） | ☐ |
-| CHAT-PERM-10 | **读 team 文件闸**：聊天上下文的 `resource_fetch` 包装层，若 `caps.read_team_resources=false` 直接拒绝（先于 CHAT-SEC-AGENT-03 的 scope 过滤） | resource_fetch 包装（CHAT-SEC-AGENT-03） | ☐ |
+| CHAT-PERM-08 | **进群闸**：把 agent 加进群（`agent_channels` insert）前校验 `caps.enabled` 且（`allowed_team_ids` 空 或 群 team∈白名单），否则 403 | chat_service add-agent endpoint | ☑ |
+| CHAT-PERM-09 | **召唤闸**：@agent 解析时若 agent 未入驻该群或 `caps.enabled=false`，**不触发 AgentRunner**，回一条 system 提示"This agent isn't enabled for chat" | @mention resolver（CHAT-AGENT-02） | ☑ |
+| CHAT-PERM-10 | **读 team 文件闸**：聊天上下文的 `resource_fetch` 包装层，若 `caps.read_team_resources=false` 直接拒绝（先于 CHAT-SEC-AGENT-03 的 scope 过滤） | resource_fetch 包装（CHAT-SEC-AGENT-03） | ☑ |
 | CHAT-PERM-11 | **播报闸**：broadcast 服务发消息前校验 `caps.auto_broadcast`，否则跳过该 agent | broadcast 服务（CHAT-AGENT-05） | ☐ |
-| CHAT-PERM-12 | 所有权限**拒绝**落 `application_logs`（哪个 agent / 哪条规则 / 哪个 team），供审计 | 现有日志 | ☐ |
+| CHAT-PERM-12 | 所有权限**拒绝**落 `application_logs`（哪个 agent / 哪条规则 / 哪个 team），供审计 | 现有日志 | ☑ |
 | CHAT-PERM-19 | **权限编辑要角色校验**（review H1）：PATCH `chat_permissions` 限 **agent 所属 scope 的 team owner/admin 或 agent owner**；system preset 的权限改动限**平台 admin**。现有 `update_agent` 端点**无任何角色校验**（任意登录用户可 PATCH），是提权点必须堵 | `ai_library_router.py` PATCH | ☑ |
 | CHAT-PERM-20 | **响应模型暴露**（review C1）：`AgentOut` 现**不含** capability_profile，list/get/patch 全走 AgentOut → 前端收不到权限。需加**派生窄字段** `chat_permissions`（只暴露 chat 子对象，**不吐整个 capability_profile** 以免泄露 tool_blacklist 等内部 gating），router 用 `agent_chat_caps(row)` 填充 | `schemas/ai_library.py` AgentOut + router enrich | ☑ |
 | CHAT-PERM-21 | **授予/变更也要审计**（review M3）：PATCH chat_permissions 写 `application_logs`（actor / agent / 前后值），不只记拒绝 | 现有日志 | ☑ |
@@ -140,7 +140,7 @@
 |----|------|----------|------|
 | CHAT-UNREAD-01 | **读扩散**：每成员只存 `last_read_seq`，未读数 = `channels.last_message_seq − channel_members.last_read_seq`（读时纯整数运算） | 避开 Rocket.Chat 写扩散规模炸弹 | ☑ |
 | CHAT-UNREAD-02 | **禁止**每条消息给全频道成员写扩散 +1（1000 人 = 1000 次写/条） | RC `Subscriptions.ts:537` 反例 | ☑ |
-| CHAT-UNREAD-03 | **@提及例外**：仅给被 @ 的少数成员写扩散 `mention_count += 1`（小集合，便宜） | RC `incUserMentionsAndUnread…:1561` | ☐ |
+| CHAT-UNREAD-03 | **@提及例外**：仅给被 @ 的少数成员写扩散 `mention_count += 1`（小集合，便宜） | RC `incUserMentionsAndUnread…:1561` | ◑ (increment_mentions 已建;@人 fanout 接线待补) |
 | CHAT-UNREAD-04 | 标记已读 = 客户端 debounce 后 PATCH 自己的 `last_read_seq`（别每条消息都写） | MM typing/已读节流思路 | ☑ |
 | CHAT-UNREAD-05 | 侧栏总未读/红点用一个 view 聚合，O(成员数) 而非 O(消息数) | — | ☑ |
 
@@ -177,13 +177,13 @@
 
 | ID | 规则 | 来源/依据 | 状态 |
 |----|------|----------|------|
-| CHAT-AGENT-01 | agent 身份独立（用于审计/限流/吊销），不持绕过 RLS 的 service_role 读素材 | MM Bot 独立模型 `bot.go:24` | ☐ |
-| CHAT-AGENT-02 | @agent → 后端解析提及 → 以发起人身份起 `ai_session`/`agent_run` → `AgentRunner.stream_turn` → 回复写回一条 `channel_message`（`sender_type='agent'`） | 复用 `agent_runner.py:209` | ☐ |
-| CHAT-AGENT-03 | **🔥 防循环**：agent 发的 message 标 `from_bot_agent_id`；入站触发前 `if from_bot_agent_id IS NOT NULL → skip 触发` | Rocket.Chat `triggerHandler` **此处有 bug 会无限循环**，必须主动加这道过滤 | ☐ |
-| CHAT-AGENT-04 | agent 发言节流（防刷屏、防自触发链）；触发前校验 `agent_channels` 白名单 | MM/Slack rate limit | ☐ |
+| CHAT-AGENT-01 | agent 身份独立（用于审计/限流/吊销），不持绕过 RLS 的 service_role 读素材 | MM Bot 独立模型 `bot.go:24` | ☑ |
+| CHAT-AGENT-02 | @agent → 后端解析提及 → 以发起人身份起 `ai_session`/`agent_run` → `AgentRunner.stream_turn` → 回复写回一条 `channel_message`（`sender_type='agent'`） | 复用 `agent_runner.py:209` | ☑ |
+| CHAT-AGENT-03 | **🔥 防循环**：agent 发的 message 标 `from_bot_agent_id`；入站触发前 `if from_bot_agent_id IS NOT NULL → skip 触发` | Rocket.Chat `triggerHandler` **此处有 bug 会无限循环**，必须主动加这道过滤 | ☑ |
+| CHAT-AGENT-04 | agent 发言节流（防刷屏、防自触发链）；触发前校验 `agent_channels` 白名单 | MM/Slack rate limit | ☑ |
 | CHAT-AGENT-05 | 主动播报：监听 `task_tracking` 完成事件 → 写 message 到映射频道。第一版映射 = 发起人所属 team 的 `#general`，只播 team scope 可共享内容 | CHAT-SEC-AGENT-05 约束 | ☐ |
-| CHAT-AGENT-06 | "Agent 专属 DM" 复用现有 `AIChatPanel`+`ai_sessions`（本就是 1对1 与 agent），接进新聊天 DM 列表即可，不重做 | `frontend/components/AIChatPanel.tsx:108` | ☐ |
-| CHAT-AGENT-07 | 会话创建时绑定 `agent_id`（现有 ChatPanel 创建会话未绑定，需适配） | 调研适配点 | ☐ |
+| CHAT-AGENT-06 | "Agent 专属 DM" 复用现有 `AIChatPanel`+`ai_sessions`（本就是 1对1 与 agent），接进新聊天 DM 列表即可，不重做 | `frontend/components/AIChatPanel.tsx:108` | ◑ (agent DM 复用未做) |
+| CHAT-AGENT-07 | 会话创建时绑定 `agent_id`（现有 ChatPanel 创建会话未绑定，需适配） | 调研适配点 | ☑ |
 
 ---
 

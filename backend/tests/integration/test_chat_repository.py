@@ -169,3 +169,56 @@ async def test_list_messages_keyset_desc(chat_team_and_user):
     assert [m["seq"] for m in page] == [3, 2]
     page2 = await repo.list_messages(channel_id=ch["id"], before_seq=2, limit=2)
     assert [m["seq"] for m in page2] == [1]
+
+
+# ─── from_bot_agent_id in returned dict ────────────────────────────────
+
+
+async def test_send_message_returns_from_bot_agent_id_user(chat_team_and_user):
+    """Verify that user messages return from_bot_agent_id=None in the dict."""
+    repo = get_chat_repository()
+    team_id, uid = chat_team_and_user
+    ch = await repo.create_channel(
+        creator_id=uid,
+        team_id=team_id,
+        type="group",
+        name="T4",
+        history_mode="shared",
+        member_ids=[],
+    )
+    m = await repo.send_message(
+        channel_id=ch["id"],
+        sender_id=uid,
+        sender_type="user",
+        content_type="text",
+        body={"text": "user message"},
+        reply_to_id=None,
+    )
+    assert "from_bot_agent_id" in m
+    assert m["from_bot_agent_id"] is None
+
+
+async def test_send_message_returns_from_bot_agent_id_agent(chat_team_and_user):
+    """Verify that agent messages return from_bot_agent_id set in the dict."""
+    repo = get_chat_repository()
+    team_id, uid = chat_team_and_user
+    ch = await repo.create_channel(
+        creator_id=uid,
+        team_id=team_id,
+        type="group",
+        name="T5",
+        history_mode="shared",
+        member_ids=[],
+    )
+    agent_id = "agent-uuid-test"
+    m = await repo.send_message(
+        channel_id=ch["id"],
+        sender_id=None,
+        sender_type="agent",
+        content_type="text",
+        body={"text": "agent reply"},
+        reply_to_id=None,
+        from_bot_agent_id=agent_id,
+    )
+    assert "from_bot_agent_id" in m
+    assert m["from_bot_agent_id"] == agent_id

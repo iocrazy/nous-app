@@ -36,7 +36,12 @@ def _contained_doc_path(fp: str) -> Optional[Path]:
 
 
 async def _fetch_dispatch(
-    *, resource_id: str, mode: str | None, args: dict | None, user_id: str
+    *,
+    resource_id: str,
+    mode: str | None,
+    args: dict | None,
+    user_id: str,
+    team_id: int | None = None,
 ) -> dict[str, Any]:
     """Per-kind dispatch. Raises PermissionError if the user can't read
     the resource at fetch time (defends against scope drift between
@@ -48,11 +53,21 @@ async def _fetch_dispatch(
       - audio:   transcript (default)
       - doc:     excerpt (default; first 4000 chars) / full (64k char cap)
       - pdf:     not yet implemented in v1
+
+    ``team_id`` (CHAT-SEC-AGENT-03): when set, additionally constrains the
+    query to resources whose ``ri.scope_id`` equals the channel's team.
+    ``team_id=None`` preserves the existing behaviour for the ai_library path.
     """
     from app.db import engine as db_engine
 
+    params: dict = {"rid": resource_id, "uid": user_id}
+    team_clause = ""
+    if team_id is not None:
+        team_clause = "\n           AND ri.scope_id::text = :tid::text"
+        params["tid"] = int(team_id)
+
     rows = await db_engine.fetch_all(
-        """
+        f"""
         SELECT r.id::text, r.mime_type AS mime, r.filename AS name,
                r.file_path, r.description AS brief
           FROM public.resources r
@@ -63,10 +78,10 @@ async def _fetch_dispatch(
            -- personal scope is a single-member team containing the user.
            AND ri.scope_id::text IN (
                  SELECT team_id::text FROM public.team_members WHERE user_id=:uid
-               )
+               ){team_clause}
          LIMIT 1
         """,
-        {"rid": resource_id, "uid": user_id},
+        params,
     )
     if not rows:
         raise PermissionError(f"resource {resource_id} not accessible to {user_id}")
@@ -193,6 +208,7 @@ async def resource_fetch(
     user_id: str,
     available_refs: set[str],
     request_cache: dict,
+    team_id: Optional[int] = None,
 ) -> dict[str, Any]:
     """Public entry point — the runtime registers this as the tool callable.
 
@@ -200,6 +216,10 @@ async def resource_fetch(
     ``<available_resources>`` for this turn. Calling the tool with an id
     outside that set returns an error — agents must reference what the
     user gave them, not arbitrary ids.
+
+    ``team_id`` (CHAT-SEC-AGENT-03): when set, limits access to resources
+    belonging to the given channel team (``ri.scope_id = team_id``). Callers
+    that do not pass this arg get the original membership-only check.
     """
     rid = str(resource_id)
     if rid not in available_refs:
@@ -208,7 +228,7 @@ async def resource_fetch(
     args_hash = hashlib.sha1(
         json.dumps(args or {}, sort_keys=True).encode("utf-8")
     ).hexdigest()[:8]
-    cache_key = (rid, mode or "_default_", args_hash)
+    cache_key = (rid, mode or "_default_", args_hash, team_id)
     if cache_key in request_cache:
         return request_cache[cache_key]
 
@@ -218,6 +238,7 @@ async def resource_fetch(
             mode=mode,
             args=args,
             user_id=user_id,
+            team_id=team_id,
         )
     except PermissionError as exc:
         logger.info(f"[resource_fetch] permission denied: {exc!r}")

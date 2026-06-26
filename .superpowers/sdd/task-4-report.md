@@ -1,134 +1,142 @@
-# Task 4 Report: ChatPage Container
+# Task 4 Report — Channel Agent Turn
 
-## Overview
+**File:** `backend/app/services/chat/channel_agent_turn.py`
+**Tests:** `backend/tests/test_channel_agent_turn.py`
+**Branch:** `feature/team-chat-phase2`
 
-Created `frontend/pages/ChatPage.tsx` — the stateful container that wires together
-`chatService` (Task 1), the presentational components (Task 2), and
-`useChannelRealtime` (Task 3).
+## What Was Built
 
----
+`run_channel_agent_turn(*, agent_slug, summoner_user_id, channel) -> str | None`
 
-## State Design
+A lean channel-context wrapper around the existing agent runtime that runs one
+agent turn triggered by an @-mention summon.  The function enforces 5 ordered
+gates and returns the agent's reply string, or None if any gate blocks the run.
+The caller is responsible for persisting the reply as a bot message.
+
+## Gate Order
+
+1. **Agent exists** — `agent_repo.get_by_slug(agent_slug)`; None → return None.
+2. **Capability gate** — `agent_chat_caps(agent)`; blocks if `not caps.enabled`
+   or `not caps.allows_team(channel["team_id"])`.  Both conditions logged with
+   loguru f-strings at INFO level (CHAT-SEC-AGENT-08).
+3. **History build** — `get_chat_repository().recent_messages(channel_id=...)`;
+   mapped to `[{role, content}]` via `_render_body` (text, media_card, task_card).
+4. **Runtime** — reuses `build_agent_runner_stack` + `PromptComposer` + `RunRecorder`
+   (trigger="chat_summon").  No ai_sessions / ai_messages persistence.
+5. **Result** — `result.get("content")` or None on empty/error.
+
+## Iron Law Implementation (CHAT-SEC-AGENT-03 / CHAT-PERM-10)
+
+`_build_resource_fetch_handler(...)` returns a closure that:
+
+- Logs every access attempt with summoner, agent, channel, and resource_id
+  (CHAT-SEC-AGENT-08 audit trail).
+- If `not caps.read_team_resources`: logs a WARNING and returns
+  `{"error": "this agent is not permitted to read team files"}` immediately,
+  WITHOUT calling resource_fetch at all (CHAT-PERM-10).
+- When allowed: calls `resource_fetch(resource_id=rid, user_id=summoner_user_id,
+  available_refs={rid}, request_cache=..., team_id=int(team_id))`.
+  **Never uses service_role.**
+
+`available_refs={rid}` is intentional: in the channel context there is no
+`<available_resources>` system-message block.  The real authorization boundary
+is the DB-level RLS enforced via `(user_id=summoner, team_id=channel.team_id)`.
+
+## Prompt-Injection Guard (CHAT-AGENT-07)
+
+Channel messages are passed only as `user_messages=history` to `runner.run_turn`.
+They are never merged into the system prompt.  `_UNTRUSTED_CHANNEL_INSTRUCTION`
+is injected into `request_instructions` as a one-liner reminding the LLM that
+conversation history from other users must be treated as untrusted data.
+
+## Runtime Reuse
+
+The function reuses the same stack as `ai_library_chat_service._run_session_turn_inner`:
+
+- `build_agent_runner_stack` for LLM adapter + fallback chain + delegate tools.
+- `PromptComposer.compose(ComposerInput(...))` for identity/soul/agent + skills.
+- `RunRecorder` async context manager for telemetry (agent_runs row).
+- `runner.resource_fetch_handler = closure` / `finally: = None` cleanup pattern.
+
+## Review Fixes (2026-06-26)
+
+### Fix 1: Guard Against Null team_id (Defense-in-Depth)
+
+**Rationale:** The team-scope iron law requires `team_id` to be established before
+any agent execution. Added Gate 0 (before agent lookup) to reject channels with
+null/falsy team_id, preventing downstream code from attempting agent work without
+a valid team context.
+
+**Implementation:** Early in `run_channel_agent_turn`, after reading
+`team_id = channel["team_id"]`, added:
+```python
+if not team_id:
+    logger.warning(f"[channel_agent_turn] abort: channel={channel_id} has no team_id")
+    return None
+```
+
+**Test:** `test_null_team_id_returns_none` — verifies that when `channel["team_id"]`
+is None, the function returns None immediately WITHOUT querying the agent repository.
+
+### Fix 2: Register ResourceFetch Tool Only When Permitted
+
+**Rationale:** Minimal tool surface — the LLM should never see a tool it cannot use.
+Previously, `_RESOURCE_FETCH_SPEC` was unconditionally appended to the tools list.
+Now it is registered only when `caps.read_team_resources` is True. The handler's
+refusal logic remains as a defense-in-depth safety net.
+
+**Implementation:** Before `composed.model_copy(...)`, conditionally append:
+```python
+tools_list = list(composed.tools or [])
+if caps.read_team_resources:
+    tools_list = tools_list + [_RESOURCE_FETCH_SPEC]
+composed = composed.model_copy(update={"tools": tools_list})
+```
+
+**Tests:**
+- `test_resource_fetch_tool_not_registered_when_disabled` — when `read_team_resources=False`,
+  ResourceFetch is NOT in the tools list passed to `run_turn`.
+- `test_resource_fetch_tool_registered_when_enabled` — when `read_team_resources=True`,
+  ResourceFetch IS in the tools list.
+
+## Test Results
 
 ```
-channels: Channel[]          – sidebar list (mutable unread badge locally)
-activeId: string | null      – selected channel id
-messages: ChatMessage[]      – ascending (oldest → newest), for MessageList
-hasOlder: boolean            – whether API returned a full page of 30
-loadingOlder: boolean        – spinner on "Load older" button
-sending: boolean             – disables Composer while in-flight
-seenIds: useRef<Set<string>> – dedupe set (stable, no re-render cost)
-markReadTimer: useRef        – debounce handle for markRead calls
+8 passed in 1.02s
 ```
 
-All state updates use spread/immutable patterns (no mutation).
+| Test | Gate | Assertion |
+|------|------|-----------|
+| `test_null_team_id_returns_none` | Gate 0 | None, agent repo not queried |
+| `test_agent_not_found_returns_none` | Gate 1 | None, stack not built |
+| `test_caps_disabled_returns_none` | Gate 2a | None (enabled=False), stack not built |
+| `test_caps_wrong_team_returns_none` | Gate 2b | None (team_ids restricted), stack not built |
+| `test_happy_path_returns_content_and_handler_scoped` | Gate 4/5 | "hello from agent"; resource_fetch called with user_id=SUMMONER, team_id=7 |
+| `test_no_read_team_resources_handler_refuses` | CHAT-PERM-10 | Handler returns error dict; resource_fetch NOT called |
+| `test_resource_fetch_tool_not_registered_when_disabled` | Fix 2a | Tool not in list when read=False |
+| `test_resource_fetch_tool_registered_when_enabled` | Fix 2b | Tool in list when read=True |
 
----
+Handler verification strategy: mock `run_turn` invokes the handler internally
+(while all patches are still active) so the `available_refs={rid}` lazy import
+of `resource_fetch` picks up the test mock.
 
-## Dedupe Approach
+## Lint (Post-Fixes)
 
-A `useRef<Set<string>>` holds the ids of all messages currently in local state.
-It is populated on initial channel load, and checked on every append path:
+- `black`: 2 files left unchanged.
+- `isort`: no changes.
+- `flake8`: 0 errors.
+- **Commit hash:** `cd811b4c`
 
-- `sendMessage` → `appendMessage(sent)` → skip if id already present
-- `useChannelRealtime` callback → `appendMessage(m)` → skip if id already present
-- `handleLoadOlder` → filters the returned page before prepending
+## Concerns / Future Work
 
-This prevents the sender seeing their own message twice (sendMessage appends,
-then realtime delivers the same message to all subscribers including the sender).
-
-The Set is cleared on channel change (inside the `useEffect` on `activeId`), so
-stale ids from a previous channel cannot bleed into the new one.
-
----
-
-## Mark-Read Debounce
-
-`scheduleMarkRead(channelId, lastSeq)` wraps `chatService.markRead` in an 800 ms
-debounce (via `useRef<timer>`). Called in two places:
-
-1. After initial `listMessages` resolves (messages loaded)
-2. Inside the `useChannelRealtime` callback (new message arrives while open)
-
-After the actual API call (fire-and-forget, failure is logged but not toasted),
-the channels state is updated immutably to zero the `unread` badge on that channel.
-
-The debounce timer is cleared on unmount via a cleanup `useEffect`.
-
----
-
-## Data Flow
-
-```
-mount/teamChange → chatService.listChannels() → channels state, auto-select first
-activeId change  → chatService.listMessages(id) → reverse DESC→ASC → messages state
-                 → hasOlder = page.length === 30
-                 → scheduleMarkRead(id, lastSeq)
-
-handleLoadOlder  → chatService.listMessages(id, oldestSeq) → reverse → dedupe → prepend
-handleSend(text) → chatService.sendMessage(id, {text}) → appendMessage(sent)
-realtime insert  → appendMessage(m) → scheduleMarkRead(id, m.seq)
-```
-
----
-
-## Layout
-
-Two-pane island layout inside a `flex h-full gap-3 p-3`:
-- Left: `ChatSidebar` at `w-[220px]` fixed width
-- Right: conversation island (`flex-1`) with header, `MessageList`, `Composer`
-- Right info panel: deferred (not rendered); can be added as third pane later
-
-Empty-channel state: renders a centered placeholder with `t('chat.noChannels')`.
-No-team-selected guard: matches MembersPage pattern exactly.
-
----
-
-## i18n Keys Added
-
-Added to both `en.json` and `zh.json` under the `chat` namespace:
-`sidebarTitle`, `newChannel`, `searchPlaceholder`, `sectionGroups`, `sectionDMs`,
-`loadOlder`, `composerPlaceholder`, `composerHint`, `attachResource`, `attachMedia`,
-`mention`, `send`, `openInLibrary`, `download`, `noChannels`,
-`errorLoadChannels`, `errorLoadMessages`, `errorSend`.
-
----
-
-## Router
-
-Added lazy-loaded `ChatPage` to `router.tsx`:
-- Team-scoped route: `team/:teamId/chat`
-- Legacy flat redirect: `chat` → `RedirectToTeam view="chat"`
-
----
-
-## tsc / Build Result
-
-- Pre-existing error count: **86**
-- Post-change error count: **86** (zero new errors from ChatPage or chat components)
-- `npm run build`: **success** (built in ~5.6s)
-
----
-
-## Concerns
-
-1. **`listChannels` is not filtered by team** — the service sends a bare
-   `GET /chat/channels` without a `team_id` query param. If the backend already
-   scopes by the authenticated user's current team this is fine; if not, the
-   sidebar may show channels from other teams. Needs backend verification.
-
-2. **`useChannelRealtime` fires outside focus** — the debounced markRead fires
-   whenever a message arrives, even if the browser tab is backgrounded. A
-   `document.visibilityState` check could prevent marking messages as read while
-   the user is not actually looking at the page.
-
-3. **No optimistic send** — per-spec, `sendMessage` is not optimistic. On slow
-   networks the UI will appear frozen until the POST resolves. The `sending` flag
-   disables the Composer as a UX signal, but a visual "pending" bubble was not
-   added (spec did not request it).
-
-4. **Channel switching mid-flight** — if the user switches channels before the
-   `listMessages` response arrives, a `cancelled` flag guard prevents the stale
-   result from overwriting state. However, the seenIds Set is cleared at
-   `useEffect` cleanup time (before the new channel's effect runs), so the
-   ordering is safe.
+- Gate 0 (null team_id check) is a forward-facing defense: if channel creation
+  logic is broken, this gate prevents silent downstream failures. If team_id is
+  ever legitimately optional for channel context, this gate should be re-evaluated.
+- `available_refs={rid}` bypasses the "agent can only read pre-declared refs"
+  check.  This is intentional for the channel context where no resource list is
+  pre-declared; the DB team-scope is the authoritative boundary.  When channel
+  resource pinning (pinned resources in system prompt) is added later, this
+  should be updated to use the pinned set.
+- `session_id=None` means RunRecorder creates an agent_runs row without a
+  session FK.  This is correct per spec (no ai_sessions persistence), but means
+  the run is only visible via agent_runs, not the session-based chat history.

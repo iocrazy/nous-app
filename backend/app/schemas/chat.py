@@ -57,3 +57,7 @@ class MessageOut(BaseModel):
 
 class MarkReadIn(BaseModel):
     last_read_seq: int
+
+
+class AgentAdd(BaseModel):
+    agent_slug: str
