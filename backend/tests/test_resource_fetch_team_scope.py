@@ -80,6 +80,13 @@ async def test_fetch_dispatch_team_scope_sql_includes_team_filter(monkeypatch):
     assert (
         captured_params[0].get("tid") == 42
     ), "params must contain tid=42 when team_id=42"
+    # Verify the membership subquery is still present (not replaced by team filter)
+    assert (
+        "user_id=:uid" in captured_sql[0]
+    ), "SQL must contain user_id=:uid membership check"
+    assert (
+        "team_members" in captured_sql[0]
+    ), "SQL must contain team_members subquery for membership validation"
 
 
 # ---------------------------------------------------------------------------

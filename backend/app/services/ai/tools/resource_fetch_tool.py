@@ -228,7 +228,7 @@ async def resource_fetch(
     args_hash = hashlib.sha1(
         json.dumps(args or {}, sort_keys=True).encode("utf-8")
     ).hexdigest()[:8]
-    cache_key = (rid, mode or "_default_", args_hash)
+    cache_key = (rid, mode or "_default_", args_hash, team_id)
     if cache_key in request_cache:
         return request_cache[cache_key]
 
