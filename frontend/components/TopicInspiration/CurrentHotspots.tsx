@@ -66,24 +66,51 @@ export const CurrentHotspots: React.FC<{ items: Hotspot[] }> = ({ items }) => {
             </span>
 
             {/* Multi-source heat: how many platforms carry this topic + when.
-                Falls back to the single source label when it's on just one. */}
-            <span
-              className={`text-[11px] shrink-0 ml-3 ${
-                island ? 'text-content-4' : 'text-ink-500'
-              }`}
-            >
-              {[
-                item.source_count && item.source_count > 1
-                  ? t('topic.sourcesCount', {
-                      count: item.source_count,
-                      defaultValue: '{{count}} sources',
-                    })
-                  : item.source_label,
-                relativeTime(item.captured_at),
-              ]
-                .filter(Boolean)
-                .join(' · ')}
-            </span>
+                Falls back to the single source label when it's on just one.
+                When multi-source, the count is hoverable and reveals WHICH
+                platforms (the member source labels). */}
+            {(() => {
+              const isMulti = !!(item.source_count && item.source_count > 1);
+              const names = item.source_names ?? [];
+              const showTip = isMulti && names.length > 0;
+              const left = isMulti
+                ? t('topic.sourcesCount', {
+                    count: item.source_count as number,
+                    defaultValue: '{{count}} sources',
+                  })
+                : item.source_label;
+              const time = relativeTime(item.captured_at);
+              return (
+                <span
+                  className={`text-[11px] shrink-0 ml-3 flex items-center gap-1 ${
+                    island ? 'text-content-4' : 'text-ink-500'
+                  }`}
+                >
+                  <span className={showTip ? 'relative group/src cursor-help' : undefined}>
+                    <span
+                      className={
+                        showTip ? 'underline decoration-dotted underline-offset-2' : undefined
+                      }
+                    >
+                      {left}
+                    </span>
+                    {showTip && (
+                      <span
+                        className="pointer-events-none absolute right-0 top-full mt-1 z-30 hidden group-hover/src:block whitespace-nowrap rounded-lg border border-line px-2.5 py-1.5 text-left text-[11px] text-content shadow-lg"
+                        style={{ background: 'var(--island, #fff)' }}
+                      >
+                        {names.map((n) => (
+                          <span key={n} className="block leading-relaxed">
+                            {n}
+                          </span>
+                        ))}
+                      </span>
+                    )}
+                  </span>
+                  {time && <span>· {time}</span>}
+                </span>
+              );
+            })()}
           </div>
         ))}
       </div>

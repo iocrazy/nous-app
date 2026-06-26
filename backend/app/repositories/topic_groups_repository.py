@@ -82,9 +82,11 @@ class TopicGroupRepository:
         )
 
     async def recompute_group(self, group_id: Any) -> None:
-        """Refresh a group's cross-source count + recency after a new member.
-        The centroid stays the seed member's vector (tight threshold makes drift
-        unnecessary)."""
+        """Refresh a group's cross-source count, member source labels, and
+        recency after a new member. The centroid stays the seed member's vector
+        (tight threshold makes drift unnecessary). ``source_labels`` is the same
+        aggregate as ``source_count`` over the same members — it powers the feed
+        tooltip that shows WHICH platforms a cross-source topic appears on."""
         gid = _to_int(group_id)
         await db_engine.execute(
             """
@@ -93,6 +95,13 @@ class TopicGroupRepository:
                     SELECT count(DISTINCT source_id)
                       FROM public.hotspots WHERE topic_group_id = :g
                 ),
+                source_labels = COALESCE((
+                    SELECT array_agg(DISTINCT source_label ORDER BY source_label)
+                      FROM public.hotspots
+                     WHERE topic_group_id = :g
+                       AND source_label IS NOT NULL
+                       AND source_label <> ''
+                ), '{}'),
                 last_seen = now()
             WHERE id = :g
             """,

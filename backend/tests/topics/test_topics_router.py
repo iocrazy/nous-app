@@ -324,11 +324,23 @@ def test_to_out_extracts_source_count_from_embedded_group():
     from app.api.topics_router import _to_out
 
     # PostgREST embeds the group; >1 = cross-platform
-    out = _to_out({"id": "1", "title": "T", "topic_groups": {"source_count": 3}})
+    out = _to_out(
+        {
+            "id": "1",
+            "title": "T",
+            "topic_groups": {
+                "source_count": 3,
+                "source_labels": ["Hacker News", "微博热搜", "X"],
+            },
+        }
+    )
     assert out.source_count == 3
-    # unclustered hotspot: embed is None -> source_count None
+    # member labels surface as source_names for the hover tooltip
+    assert out.source_names == ["Hacker News", "微博热搜", "X"]
+    # unclustered hotspot: embed is None -> source_count None, names empty
     out2 = _to_out({"id": "2", "title": "T", "topic_groups": None})
     assert out2.source_count is None
+    assert out2.source_names == []
 
 
 def test_to_out_exposes_score_dims_only_in_detail():

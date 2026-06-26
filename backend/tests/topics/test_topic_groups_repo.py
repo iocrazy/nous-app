@@ -78,3 +78,7 @@ async def test_recompute_group_updates_source_count(monkeypatch):
     await TopicGroupRepository().recompute_group("42")
     assert seen["params"] == {"g": 42}
     assert "count(DISTINCT source_id)" in seen["sql"]
+    # also persists the distinct member source labels (for the "which
+    # platforms" feed tooltip) in the same aggregate pass.
+    assert "source_labels" in seen["sql"]
+    assert "array_agg(DISTINCT source_label" in seen["sql"]

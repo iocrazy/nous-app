@@ -156,7 +156,9 @@ class HotspotsRepository:
         if source_ids is not None and not source_ids:
             return []
         client = await self._client()
-        query = client.table(self.TABLE).select("*, topic_groups(source_count)")
+        query = client.table(self.TABLE).select(
+            "*, topic_groups(source_count, source_labels)"
+        )
         if source_ids is not None:
             query = query.in_("source_id", source_ids)
         if day:
@@ -193,7 +195,7 @@ class HotspotsRepository:
         client = await self._client()
         query = (
             client.table(self.TABLE)
-            .select("*, topic_groups(source_count)")
+            .select("*, topic_groups(source_count, source_labels)")
             .in_("id", hotspot_ids)
         )
         if source_ids is not None:
@@ -212,7 +214,7 @@ class HotspotsRepository:
         client = await self._client()
         query = (
             client.table(self.TABLE)
-            .select("*, topic_groups(source_count)")
+            .select("*, topic_groups(source_count, source_labels)")
             .eq("id", hotspot_id)
         )
         if source_ids is not None:
