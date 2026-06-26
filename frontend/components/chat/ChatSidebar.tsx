@@ -29,6 +29,7 @@ function ChannelRow({
   isActive: boolean;
   onSelect: (id: string) => void;
 }): React.ReactElement {
+  const { t } = useTranslation();
   const label = channel.name ?? channel.id;
 
   const activeClass = isActive
@@ -77,6 +78,16 @@ function ChannelRow({
       {channel.unread > 0 && (
         <span className="text-[10.5px] font-[650] min-w-[18px] h-[18px] px-[5px] rounded-[9px] grid place-items-center bg-indigo-500 text-white">
           {channel.unread}
+        </span>
+      )}
+
+      {/* Mention badge — amber pill, visually distinct from the neutral unread dot */}
+      {channel.mentions > 0 && (
+        <span
+          className="text-[10.5px] font-[650] min-w-[18px] h-[18px] px-[5px] rounded-[9px] grid place-items-center bg-amber-400/15 text-amber-400"
+          title={t('chat.mentionsBadgeTitle', { count: channel.mentions })}
+        >
+          @{channel.mentions}
         </span>
       )}
     </div>

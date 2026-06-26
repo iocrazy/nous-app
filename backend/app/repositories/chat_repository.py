@@ -119,7 +119,8 @@ class ChatRepository:
             """
             SELECT c.id, c.team_id, c.type, c.history_mode, c.name, c.topic,
                    c.last_message_seq, c.created_at,
-                   GREATEST(c.last_message_seq - cm.last_read_seq, 0) AS unread
+                   GREATEST(c.last_message_seq - cm.last_read_seq, 0) AS unread,
+                   cm.mention_count AS mention_count
               FROM public.channel_members cm
               JOIN public.channels c ON c.id = cm.channel_id
              WHERE cm.user_id = :uid AND c.is_archived = false AND cm.open = true
@@ -128,6 +129,14 @@ class ChatRepository:
             {"uid": user_id},
         )
         return [dict(r) for r in rows]
+
+    async def list_member_ids(self, channel_id: int) -> list[str]:
+        """Return the user_id of every member of *channel_id* as plain strings."""
+        rows = await db_engine.fetch_all(
+            "SELECT user_id FROM channel_members WHERE channel_id = :cid",
+            {"cid": _bigint(channel_id)},
+        )
+        return [str(r["user_id"]) for r in rows]
 
     async def send_message(
         self,

@@ -24,7 +24,10 @@ import { useTeamContext } from '../contexts/TeamContext';
 import { useToast } from '../components/Toast';
 import { chatService } from '../services/chatService';
 import { getResourceCoverUrl } from '../services/resourceService';
+import { fetchTeamMembers } from '../services/teamService';
+import { aiLibraryService } from '../services/aiLibraryService';
 import { useChannelRealtime } from '../hooks/useChannelRealtime';
+import { useMentionBadges } from '../hooks/useMentionBadges';
 import { ChatSidebar } from '../components/chat/ChatSidebar';
 import { MessageList } from '../components/chat/MessageList';
 import { Composer } from '../components/chat/Composer';
@@ -51,6 +54,11 @@ export function ChatPage(): React.ReactElement {
   const [sending, setSending] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
+
+  /** People that can be @-mentioned in the Composer (current team members, excluding self). */
+  const [membersForComposer, setMembersForComposer] = useState<{ user_id: string; label: string }[]>([]);
+  /** Chat-enabled agents that can be @-summoned in the Composer. */
+  const [agentsForComposer, setAgentsForComposer] = useState<{ slug: string; label: string }[]>([]);
 
   /**
    * Dedupe set — tracks ids of messages already in local state.
@@ -86,10 +94,11 @@ export function ChatPage(): React.ReactElement {
           // Mark-read failures are non-critical; log silently
           console.error('[ChatPage] markRead failed', err);
         });
-        // Zero unread badge locally (immutable update)
+        // Zero unread + mention badges locally (immutable update).
+        // Mark-read resets mention_count server-side; mirror that locally.
         setChannels((prev) =>
           prev.map((ch) =>
-            ch.id === channelId ? { ...ch, unread: 0 } : ch,
+            ch.id === channelId ? { ...ch, unread: 0, mentions: 0 } : ch,
           ),
         );
       }, 800);
@@ -137,6 +146,45 @@ export function ChatPage(): React.ReactElement {
       cancelled = true;
     };
   }, [selectedTeamId, addToast, t]);
+
+  // ── Fetch member + agent lists for @-mention autocomplete ────────────────
+
+  useEffect(() => {
+    if (!selectedTeamId) {
+      setMembersForComposer([]);
+      setAgentsForComposer([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    Promise.all([
+      fetchTeamMembers(selectedTeamId),
+      aiLibraryService.listAgents(),
+    ])
+      .then(([teamMembers, allAgents]) => {
+        if (cancelled) return;
+        // Exclude the current user from the @-people list
+        setMembersForComposer(
+          teamMembers
+            .filter((m) => m.user_id !== currentUserId)
+            .map((m) => ({ user_id: m.user_id, label: m.name ?? m.email ?? m.user_id })),
+        );
+        setAgentsForComposer(
+          allAgents
+            .filter((a) => a.chat_permissions?.enabled === true)
+            .map((a) => ({ slug: a.slug, label: a.name ?? a.slug })),
+        );
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        console.error('[ChatPage] failed to load mention candidates', err);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedTeamId, currentUserId]);
 
   // ── Load messages when active channel changes ─────────────────────────────
 
@@ -290,16 +338,31 @@ export function ChatPage(): React.ReactElement {
     updateMessage,
   );
 
+  // ── Live mention badge updates ─────────────────────────────────────────────
+
+  useMentionBadges(currentUserId, (channelId, mentionCount) => {
+    setChannels((prev) =>
+      prev.map((ch) =>
+        ch.id === channelId ? { ...ch, mentions: mentionCount } : ch,
+      ),
+    );
+  });
+
   // ── Send message ──────────────────────────────────────────────────────────
 
   const handleSend = useCallback(
-    (text: string) => {
+    (text: string, mentionUserIds: string[]) => {
       if (!activeId || sending) return;
 
       setSending(true);
 
+      const body: Record<string, unknown> = { text };
+      if (mentionUserIds.length > 0) {
+        body.mention_user_ids = mentionUserIds;
+      }
+
       chatService
-        .sendMessage(activeId, { text })
+        .sendMessage(activeId, body)
         .then((sent) => {
           appendMessage(sent);
         })
@@ -443,6 +506,8 @@ export function ChatPage(): React.ReactElement {
                   ? t('chat.composerPlaceholder')
                   : undefined
               }
+              members={membersForComposer}
+              agents={agentsForComposer}
             />
           </>
         )}

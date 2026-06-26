@@ -28,6 +28,7 @@ class ChannelOut(BaseModel):
     topic: Optional[str] = None
     last_message_seq: int = 0
     unread: int = 0
+    mention_count: int = 0
     created_at: datetime
 
 

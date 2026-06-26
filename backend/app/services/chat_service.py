@@ -73,7 +73,7 @@ class ChatService:
         reply_to_id: Optional[int],
     ) -> dict[str, Any]:
         await self._require_member(channel_id, user_id)
-        return await self._repo.send_message(
+        msg = await self._repo.send_message(
             channel_id=channel_id,
             sender_id=user_id,
             sender_type="user",
@@ -81,6 +81,27 @@ class ChatService:
             body=body,
             reply_to_id=reply_to_id,
         )
+        if content_type == "text":
+            try:
+                raw = body.get("mention_user_ids")
+                if isinstance(raw, list) and raw:
+                    ids = [str(x) for x in raw if isinstance(x, str)]
+                    if ids:
+                        members = await self._repo.list_member_ids(channel_id)
+                        targets = [
+                            u
+                            for u in dict.fromkeys(ids)
+                            if u in members and u != user_id
+                        ]
+                        if targets:
+                            await self._repo.increment_mentions(
+                                channel_id=channel_id, user_ids=targets
+                            )
+            except Exception as exc:
+                logger.warning(
+                    f"[post_message] mention fan-out failed: channel={channel_id} error={exc!r}"
+                )
+        return msg
 
     async def get_messages(
         self, *, channel_id: int, user_id: str, before_seq: Optional[int], limit: int
