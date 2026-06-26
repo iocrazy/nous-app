@@ -322,3 +322,37 @@ export function useCreateAdminSource() {
     },
   })
 }
+
+// ── Honcho (L2) connection ─────────────────────────────────────────────────
+
+const HONCHO_CONN_URL = '/api/v1/admin/settings/memory/honcho-connection'
+
+export interface HonchoConnection {
+  enabled: boolean
+  base_url: string
+  workspace_id: string
+}
+
+export function useHonchoConnection() {
+  return useQuery({
+    queryKey: ['settings', 'honcho-connection'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<HonchoConnection>(HONCHO_CONN_URL)
+      return data
+    },
+  })
+}
+
+export function useUpdateHonchoConnection() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (update: Partial<HonchoConnection>) => {
+      const { data } = await apiClient.put<HonchoConnection>(HONCHO_CONN_URL, update)
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['settings', 'honcho-connection'] })
+      qc.invalidateQueries({ queryKey: ['settings', 'memory-control'] })
+    },
+  })
+}
