@@ -1543,7 +1543,13 @@
       "sendError": "Failed to send media card",
       "type": "Type",
       "size": "Size",
-      "untitled": "Media"
+      "untitled": "Media",
+      "typeVideo": "Video",
+      "typeImage": "Image",
+      "typeAudio": "Audio",
+      "typePdf": "PDF",
+      "typeText": "Text",
+      "typeFile": "File"
     }
   },
   "mcp": {

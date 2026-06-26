@@ -35,14 +35,14 @@ function formatFileSize(bytes: number | null | undefined): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
-function getTypeLabel(mimeType: string | null | undefined): string {
-  if (!mimeType) return 'File';
-  if (mimeType.startsWith('video/')) return 'Video';
-  if (mimeType.startsWith('image/')) return 'Image';
-  if (mimeType.startsWith('audio/')) return 'Audio';
-  if (mimeType.includes('pdf')) return 'PDF';
-  if (mimeType.startsWith('text/')) return 'Text';
-  return 'File';
+function getTypeKey(mimeType: string | null | undefined): string {
+  if (!mimeType) return 'typeFile';
+  if (mimeType.startsWith('video/')) return 'typeVideo';
+  if (mimeType.startsWith('image/')) return 'typeImage';
+  if (mimeType.startsWith('audio/')) return 'typeAudio';
+  if (mimeType.includes('pdf')) return 'typePdf';
+  if (mimeType.startsWith('text/')) return 'typeText';
+  return 'typeFile';
 }
 
 function getTypeIcon(mimeType: string | null | undefined): React.ReactElement {
@@ -220,7 +220,7 @@ export default function ResourcePicker({ open, teamId, onClose, onSelect }: Prop
             <div className="grid grid-cols-3 gap-[10px] mt-[4px]">
               {items.map((item) => {
                 const resource = item.resource;
-                const filename = resource?.filename ?? 'Untitled';
+                const filename = resource?.filename ?? t('chat.mediaCard.untitled');
                 const mimeType = resource?.mime_type ?? null;
                 const fileSize = resource?.file_size_bytes ?? null;
                 const thumbnailSrc = buildThumbnailSrc(item);
@@ -262,7 +262,7 @@ export default function ResourcePicker({ open, teamId, onClose, onSelect }: Prop
                       </p>
                       <div className="flex items-center gap-[5px] text-[11px] text-[#74747e]">
                         {getTypeIcon(mimeType)}
-                        <span>{getTypeLabel(mimeType)}</span>
+                        <span>{t(`chat.mediaCard.${getTypeKey(mimeType)}`)}</span>
                         {fileSize ? (
                           <>
                             <span className="opacity-40">·</span>

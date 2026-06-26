@@ -1543,7 +1543,13 @@
       "sendError": "发送素材卡片失败",
       "type": "类型",
       "size": "大小",
-      "untitled": "素材"
+      "untitled": "素材",
+      "typeVideo": "视频",
+      "typeImage": "图片",
+      "typeAudio": "音频",
+      "typePdf": "PDF",
+      "typeText": "文本",
+      "typeFile": "文件"
     }
   },
   "mcp": {
