@@ -6,6 +6,7 @@ import logging
 from typing import Any, Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
+from pydantic import BaseModel
 
 from app.core.deps import AuthDep
 from app.schemas.chat import (
@@ -22,6 +23,10 @@ from app.services.chat_service import get_chat_service
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
+
+
+class MessageEdit(BaseModel):
+    body: dict[str, Any]
 
 
 async def _summon_runner(
@@ -155,3 +160,42 @@ async def mark_read(channel_id: int, payload: MarkReadIn, auth: AuthDep):
             status_code=status.HTTP_403_FORBIDDEN, detail="not a member"
         )
     return {"ok": True}
+
+
+@router.patch("/channels/{channel_id}/messages/{message_id}", response_model=MessageOut)
+async def edit_message(
+    channel_id: int, message_id: int, payload: MessageEdit, auth: AuthDep
+):
+    svc = get_chat_service()
+    text = payload.body.get("text")
+    if not isinstance(text, str) or not text.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="text required",
+        )
+    try:
+        row = await svc.edit_message(
+            channel_id=channel_id,
+            user_id=auth.user_id,
+            message_id=message_id,
+            body=payload.body,
+        )
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    return row
+
+
+@router.delete(
+    "/channels/{channel_id}/messages/{message_id}", response_model=MessageOut
+)
+async def delete_message(channel_id: int, message_id: int, auth: AuthDep):
+    svc = get_chat_service()
+    try:
+        row = await svc.delete_message(
+            channel_id=channel_id,
+            user_id=auth.user_id,
+            message_id=message_id,
+        )
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    return row

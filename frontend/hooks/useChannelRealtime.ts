@@ -5,9 +5,13 @@ import type { ChatMessage } from '../types';
 export function useChannelRealtime(
   channelId: string | null,
   onInsert: (m: ChatMessage) => void,
+  onUpdate?: (m: ChatMessage) => void,
 ) {
   const cbRef = useRef(onInsert);
   cbRef.current = onInsert;
+
+  const updateCbRef = useRef(onUpdate);
+  updateCbRef.current = onUpdate;
 
   useEffect(() => {
     if (!channelId) return;
@@ -20,6 +24,11 @@ export function useChannelRealtime(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'channel_messages', filter: `channel_id=eq.${channelId}` },
         (payload) => cbRef.current(payload.new as ChatMessage),
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'channel_messages', filter: `channel_id=eq.${channelId}` },
+        (payload) => updateCbRef.current?.(payload.new as ChatMessage),
       )
       .subscribe();
 

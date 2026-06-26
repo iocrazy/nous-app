@@ -124,6 +124,42 @@ class ChatService:
         )
         return {"added": True, "agent_id": str(agent["id"])}
 
+    async def edit_message(
+        self,
+        *,
+        channel_id: int,
+        user_id: str,
+        message_id: int,
+        body: dict[str, Any],
+    ) -> dict[str, Any]:
+        await self._require_member(channel_id, user_id)
+        row = await self._repo.edit_message(
+            channel_id=channel_id,
+            message_id=message_id,
+            sender_id=user_id,
+            body=body,
+        )
+        if row is None:
+            raise PermissionError("message not found or not editable")
+        return row
+
+    async def delete_message(
+        self,
+        *,
+        channel_id: int,
+        user_id: str,
+        message_id: int,
+    ) -> dict[str, Any]:
+        await self._require_member(channel_id, user_id)
+        row = await self._repo.soft_delete_message(
+            channel_id=channel_id,
+            message_id=message_id,
+            sender_id=user_id,
+        )
+        if row is None:
+            raise PermissionError("message not found or not deletable")
+        return row
+
     async def dispatch_summons(
         self,
         *,

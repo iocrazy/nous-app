@@ -19,6 +19,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { MessageSquare } from 'lucide-react';
 
+import { useAuth } from '../contexts/AuthContext';
 import { useTeamContext } from '../contexts/TeamContext';
 import { useToast } from '../components/Toast';
 import { chatService } from '../services/chatService';
@@ -38,6 +39,7 @@ export function ChatPage(): React.ReactElement {
   const { t } = useTranslation();
   const { selectedTeamId, currentTeam } = useTeamContext();
   const { addToast } = useToast();
+  const { currentUserId } = useAuth();
 
   // ── State ──────────────────────────────────────────────────────────────────
 
@@ -61,6 +63,13 @@ export function ChatPage(): React.ReactElement {
    * stale loads after the user switches channels.
    */
   const activeIdRef = useRef(activeId);
+
+  /**
+   * Stable ref to messages — lets edit/delete handlers read the current list
+   * without capturing a stale closure (avoids adding messages to useCallback deps).
+   */
+  const messagesRef = useRef<ChatMessage[]>([]);
+  messagesRef.current = messages;
   useEffect(() => {
     activeIdRef.current = activeId;
   }, [activeId]);
@@ -220,16 +229,66 @@ export function ChatPage(): React.ReactElement {
     setMessages((prev) => [...prev, m]);
   }, []);
 
+  // ── Update message in-place (for realtime UPDATEs + optimistic edit/delete) ─
+
+  const updateMessage = useCallback((m: ChatMessage) => {
+    setMessages((prev) => prev.map((x) => (x.id === m.id ? m : x)));
+  }, []);
+
+  // ── Edit/delete handlers ──────────────────────────────────────────────────
+
+  const handleEditMessage = useCallback(
+    async (messageId: string, text: string) => {
+      if (!activeIdRef.current) return;
+      // Merge with original body so non-text keys (e.g. sender_name) are preserved
+      const original = messagesRef.current.find((x) => x.id === messageId);
+      const originalBody = original?.body ?? {};
+      try {
+        const updated = await chatService.editMessage(
+          activeIdRef.current,
+          messageId,
+          { ...originalBody, text },
+        );
+        updateMessage(updated);
+      } catch (err) {
+        console.error(err);
+        addToast(t('chat.editError'), 'error');
+      }
+    },
+    [updateMessage, addToast, t],
+  );
+
+  const handleDeleteMessage = useCallback(
+    async (messageId: string) => {
+      if (!activeIdRef.current) return;
+      try {
+        const updated = await chatService.deleteMessage(
+          activeIdRef.current,
+          messageId,
+        );
+        updateMessage(updated);
+      } catch (err) {
+        console.error(err);
+        addToast(t('chat.deleteError'), 'error');
+      }
+    },
+    [updateMessage, addToast, t],
+  );
+
   // ── Realtime subscription ─────────────────────────────────────────────────
 
-  useChannelRealtime(activeId, (m) => {
-    appendMessage(m);
+  useChannelRealtime(
+    activeId,
+    (m) => {
+      appendMessage(m);
 
-    // Schedule mark-read when a new realtime message arrives
-    if (activeId) {
-      scheduleMarkRead(activeId, m.seq);
-    }
-  });
+      // Schedule mark-read when a new realtime message arrives
+      if (activeId) {
+        scheduleMarkRead(activeId, m.seq);
+      }
+    },
+    updateMessage,
+  );
 
   // ── Send message ──────────────────────────────────────────────────────────
 
@@ -371,6 +430,9 @@ export function ChatPage(): React.ReactElement {
               onLoadOlder={handleLoadOlder}
               hasOlder={hasOlder}
               loadingOlder={loadingOlder}
+              currentUserId={currentUserId}
+              onEdit={handleEditMessage}
+              onDelete={handleDeleteMessage}
             />
             <Composer
               onSend={handleSend}

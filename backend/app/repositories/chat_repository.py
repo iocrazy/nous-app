@@ -326,6 +326,70 @@ class ChatRepository:
                     {"cid": _bigint(channel_id), "uid": uid},
                 )
 
+    # ── Edit / soft-delete ──────────────────────────────────────────────────
+
+    async def edit_message(
+        self,
+        channel_id: int,
+        message_id: int,
+        sender_id: str,
+        body: dict[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        """UPDATE body + edited_at on a user's own text message.
+
+        Ownership gate: sender_id = :sender_id AND sender_type = 'user'
+        State guards:   content_type = 'text' AND deleted_at IS NULL
+        Returns the updated row dict, or None when no row matched the gate.
+        """
+        row = await db_engine.execute_returning_one(
+            """
+            UPDATE public.channel_messages
+               SET body = CAST(:body AS jsonb), edited_at = now()
+             WHERE id = :mid AND channel_id = :cid
+               AND sender_id = :sender_id AND sender_type = 'user'
+               AND content_type = 'text' AND deleted_at IS NULL
+            RETURNING id, channel_id, seq, sender_id, sender_type, content_type,
+                      body, reply_to_id, from_bot_agent_id, edited_at, deleted_at, created_at
+            """,
+            {
+                "body": json.dumps(body),
+                "mid": _bigint(message_id),
+                "cid": _bigint(channel_id),
+                "sender_id": sender_id,
+            },
+        )
+        return dict(row) if row else None
+
+    async def soft_delete_message(
+        self,
+        channel_id: int,
+        message_id: int,
+        sender_id: str,
+    ) -> Optional[dict[str, Any]]:
+        """SET deleted_at = now() on a user's own message (any content_type).
+
+        Ownership gate: sender_id = :sender_id AND sender_type = 'user'
+        State guard:    deleted_at IS NULL  (idempotent no-op if already deleted)
+        Returns the updated row dict, or None when no row matched the gate.
+        """
+        row = await db_engine.execute_returning_one(
+            """
+            UPDATE public.channel_messages
+               SET deleted_at = now()
+             WHERE id = :mid AND channel_id = :cid
+               AND sender_id = :sender_id AND sender_type = 'user'
+               AND deleted_at IS NULL
+            RETURNING id, channel_id, seq, sender_id, sender_type, content_type,
+                      body, reply_to_id, from_bot_agent_id, edited_at, deleted_at, created_at
+            """,
+            {
+                "mid": _bigint(message_id),
+                "cid": _bigint(channel_id),
+                "sender_id": sender_id,
+            },
+        )
+        return dict(row) if row else None
+
     # ── Channel lookup ──────────────────────────────────────────────────────
 
     async def get_channel(self, *, channel_id: int) -> Optional[dict[str, Any]]:
