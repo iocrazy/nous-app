@@ -18,6 +18,9 @@ export interface ChatSidebarProps {
   activeId: string;
   onSelect: (id: string) => void;
   onNew?: () => void;
+  agents?: { slug: string; label: string }[];
+  activeAgentDm?: string | null;
+  onSelectAgentDm?: (slug: string) => void;
 }
 
 function ChannelRow({
@@ -94,11 +97,55 @@ function ChannelRow({
   );
 }
 
+function AgentDmRow({
+  slug,
+  label,
+  isActive,
+  onSelect,
+}: {
+  slug: string;
+  label: string;
+  isActive: boolean;
+  onSelect: (slug: string) => void;
+}): React.ReactElement {
+  const activeClass = isActive
+    ? 'bg-indigo-500/[0.18] text-indigo-300 font-[550]'
+    : 'text-[#a3a3ad] hover:bg-[#17171b] hover:text-[#e7e7ea]';
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onSelect(slug)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') onSelect(slug);
+      }}
+      className={[
+        'flex items-center gap-[9px] px-2 py-[7px] rounded-[9px] cursor-pointer mb-px transition-colors',
+        activeClass,
+      ].join(' ')}
+    >
+      {/* Amber agent avatar — initial letter in amber circle */}
+      <span className="w-[18px] h-[18px] rounded-full flex-shrink-0 bg-amber-400/20 border border-amber-400/30 text-[9px] grid place-items-center text-amber-400 font-semibold">
+        {label.slice(0, 1).toUpperCase()}
+      </span>
+
+      {/* Agent label */}
+      <span className="flex-1 text-[13.5px] whitespace-nowrap overflow-hidden text-ellipsis">
+        {label}
+      </span>
+    </div>
+  );
+}
+
 export function ChatSidebar({
   channels,
   activeId,
   onSelect,
   onNew,
+  agents = [],
+  activeAgentDm = null,
+  onSelectAgentDm,
 }: ChatSidebarProps): React.ReactElement {
   const { t } = useTranslation();
 
@@ -153,8 +200,8 @@ export function ChatSidebar({
           </>
         )}
 
-        {/* Direct Messages section */}
-        {dms.length > 0 && (
+        {/* Direct Messages section — human DMs + agent DM rows */}
+        {(dms.length > 0 || agents.length > 0) && (
           <>
             <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#6b6b75] pt-3 pb-[5px] px-[6px]">
               {t('chat.sectionDMs')}
@@ -167,6 +214,24 @@ export function ChatSidebar({
                 onSelect={onSelect}
               />
             ))}
+            {agents.length > 0 && (
+              <>
+                {dms.length > 0 && (
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#6b6b75] pt-2 pb-[5px] px-[6px]">
+                    {t('chat.agentDm.section')}
+                  </div>
+                )}
+                {agents.map((agent) => (
+                  <AgentDmRow
+                    key={agent.slug}
+                    slug={agent.slug}
+                    label={agent.label}
+                    isActive={activeAgentDm === agent.slug}
+                    onSelect={onSelectAgentDm ?? (() => {})}
+                  />
+                ))}
+              </>
+            )}
           </>
         )}
       </div>

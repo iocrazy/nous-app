@@ -44,12 +44,17 @@ import { useComposerPaste } from '../hooks/useComposerPaste';
 import { useResourceSearch } from '../hooks/useResourceSearch';
 
 export interface AIChatPanelProps {
-  /** String form of the project's BIGINT id, for display + session tagging. */
-  projectId: string;
+  /** String form of the project's BIGINT id, for display + session tagging.
+   *  Optional when agentSlug is provided (agent-scoped mode, no project filter). */
+  projectId?: string;
   contextType?: 'script' | 'storyboard';
   contextId?: string;
   onApplyContent?: (content: string) => void;
   onClose?: () => void;
+  /** When provided, locks the panel to this agent (hides the AgentSelector) and
+   *  scopes sessions to the agent only (no project filter). Existing callers that
+   *  pass projectId but not agentSlug are completely unaffected. */
+  agentSlug?: string;
 }
 
 function formatTimestamp(isoString?: string | null): string {
@@ -100,7 +105,8 @@ function extractAwaitingApproval(
 }
 
 /** Coerce the string project id to a BIGINT-compatible number when possible. */
-function parseProjectId(projectId: string): number | undefined {
+function parseProjectId(projectId: string | undefined): number | undefined {
+  if (!projectId) return undefined;
   const n = Number(projectId);
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
@@ -111,6 +117,7 @@ export function AIChatPanel({
   contextId,
   onApplyContent,
   onClose,
+  agentSlug,
 }: AIChatPanelProps): React.ReactElement {
   const { t } = useTranslation();
   const { addToast } = useToast();
@@ -120,6 +127,13 @@ export function AIChatPanel({
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<AIChatMessage[]>([]);
   const [selectedAgentSlug, setSelectedAgentSlug] = useState<string | null>(null);
+
+  // Agent-scoped mode: when agentSlug prop is provided the panel locks to that
+  // agent (no selector) and scopes sessions without a project filter. When absent,
+  // the user-selected agent drives everything — identical to the existing behavior.
+  const lockedAgent = agentSlug ?? null;
+  const effectiveAgentSlug = lockedAgent ?? selectedAgentSlug;
+
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   // O3: plan-mode toggle. 'auto' = normal execute; 'prompt_user' = LLM
@@ -206,7 +220,7 @@ export function AIChatPanel({
   });
   // Block send while any pasted/dropped file is still uploading — otherwise
   // hitting Enter mid-upload silently drops the in-flight chips.
-  const composerDisabled = sending || !activeSessionId || !selectedAgentSlug || uploading;
+  const composerDisabled = sending || !activeSessionId || !effectiveAgentSlug || uploading;
   const { rootProps: dropzoneRootProps, isDragActive } = useComposerDropzone({
     onFiles: handleFiles,
     disabled: composerDisabled,
@@ -236,7 +250,9 @@ export function AIChatPanel({
         // disabled ones visually, but chat requires an executable agent.
         const enabled = list.filter((a) => a.enabled);
         setAgents(enabled);
-        if (enabled.length > 0) {
+        // Only auto-select the first agent when NOT in locked-agent mode.
+        // When lockedAgent is set, effectiveAgentSlug = lockedAgent already.
+        if (enabled.length > 0 && !lockedAgent) {
           setSelectedAgentSlug((prev) => prev ?? enabled[0].slug);
         }
       } catch (err) {
@@ -250,17 +266,20 @@ export function AIChatPanel({
     };
   }, []);
 
-  // When the selected agent changes, (re)load that agent's sessions for
-  // this project. If there are none, auto-create one so the input isn't
-  // permanently disabled on first open.
+  // When the effective agent changes, (re)load that agent's sessions. In
+  // locked-agent mode the project filter is omitted so the user sees all their
+  // personal sessions with that agent; in the normal project-scoped mode the
+  // existing behaviour (filtered by project) is preserved.
+  // If there are no sessions, auto-create one so the input isn't permanently
+  // disabled on first open.
   useEffect(() => {
-    if (!selectedAgentSlug) return;
+    if (!effectiveAgentSlug) return;
     let cancelled = false;
     void (async () => {
       try {
         const list = await aiLibraryService.listChatSessions(
-          selectedAgentSlug,
-          numericProjectId,
+          effectiveAgentSlug,
+          lockedAgent ? undefined : numericProjectId,
         );
         if (cancelled) return;
         setSessions(list);
@@ -268,14 +287,17 @@ export function AIChatPanel({
           setActiveSessionId(list[0].id);
           await loadSessionMessages(list[0].id, () => cancelled);
         } else {
+          const sessionPayload = lockedAgent
+            ? { title: t('chat.newConversation', 'New conversation') }
+            : {
+                title: t('chat.newConversation', 'New conversation'),
+                project_id: numericProjectId,
+                context_type: contextType,
+                context_id: contextId,
+              };
           const created = await aiLibraryService.createChatSession(
-            selectedAgentSlug,
-            {
-              title: t('chat.newConversation', 'New conversation'),
-              project_id: numericProjectId,
-              context_type: contextType,
-              context_id: contextId,
-            },
+            effectiveAgentSlug,
+            sessionPayload,
           );
           if (cancelled) return;
           setSessions([created]);
@@ -290,7 +312,7 @@ export function AIChatPanel({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedAgentSlug, numericProjectId]);
+  }, [effectiveAgentSlug, numericProjectId]);
 
   async function loadSessionMessages(
     sessionId: string,
@@ -312,16 +334,19 @@ export function AIChatPanel({
   }, []);
 
   const handleNewSession = useCallback(async () => {
-    if (!selectedAgentSlug) return;
+    if (!effectiveAgentSlug) return;
     try {
+      const sessionPayload = lockedAgent
+        ? { title: t('chat.newConversation', 'New conversation') }
+        : {
+            title: t('chat.newConversation', 'New conversation'),
+            project_id: numericProjectId,
+            context_type: contextType,
+            context_id: contextId,
+          };
       const created = await aiLibraryService.createChatSession(
-        selectedAgentSlug,
-        {
-          title: t('chat.newConversation', 'New conversation'),
-          project_id: numericProjectId,
-          context_type: contextType,
-          context_id: contextId,
-        },
+        effectiveAgentSlug,
+        sessionPayload,
       );
       setSessions((prev) => [created, ...prev]);
       setActiveSessionId(created.id);
@@ -331,7 +356,7 @@ export function AIChatPanel({
       const msg = err instanceof Error ? err.message : String(err);
       addToast(`Failed to create session: ${msg}`, 'error');
     }
-  }, [selectedAgentSlug, numericProjectId, contextType, contextId, t, addToast]);
+  }, [effectiveAgentSlug, lockedAgent, numericProjectId, contextType, contextId, t, addToast]);
 
   const handleDeleteSession = useCallback(
     async (sessionId: string) => {
@@ -411,9 +436,9 @@ export function AIChatPanel({
       }
 
       // Update the session list ordering so this session bubbles to top.
-      if (selectedAgentSlug) {
+      if (effectiveAgentSlug) {
         void aiLibraryService
-          .listChatSessions(selectedAgentSlug, numericProjectId)
+          .listChatSessions(effectiveAgentSlug, lockedAgent ? undefined : numericProjectId)
           .then(setSessions)
           .catch((err) => console.error('[AIChatPanel] refresh sessions failed:', err));
       }
@@ -421,7 +446,7 @@ export function AIChatPanel({
     // C3 fix: include planMode + stagedAttachments so the closure
     // doesn't capture stale values when the user changes mode or
     // adds/removes attachments between renders.
-    [activeSessionId, sending, selectedAgentSlug, numericProjectId,
+    [activeSessionId, sending, effectiveAgentSlug, lockedAgent, numericProjectId,
      addToast, planMode, stagedAttachments],
   );
 
@@ -463,11 +488,13 @@ export function AIChatPanel({
       <div className="flex items-center gap-2 px-3 py-2 border-b border-ink-800 flex-shrink-0">
         <span className="text-sm font-medium text-ink-200 flex-1">AI Chat</span>
 
-        <AgentSelector
-          agents={agentOptions}
-          selectedId={selectedAgentSlug}
-          onSelect={setSelectedAgentSlug}
-        />
+        {!lockedAgent && (
+          <AgentSelector
+            agents={agentOptions}
+            selectedId={selectedAgentSlug}
+            onSelect={setSelectedAgentSlug}
+          />
+        )}
 
         <button
           type="button"
@@ -563,7 +590,7 @@ export function AIChatPanel({
       <div {...dropzoneRootProps} className="relative">
         {/* B: Attachment chip strip — only render when staged or actively
             uploading. The picker button itself lives next to ChatInput. */}
-        {activeSessionId && selectedAgentSlug && stagedAttachments.length > 0 && (
+        {activeSessionId && effectiveAgentSlug && stagedAttachments.length > 0 && (
           <div className="flex items-center gap-2 px-3 py-1.5 border-t border-ink-800 bg-ink-900/30">
             <ChatAttachmentPicker
               attachments={stagedAttachments}
@@ -574,7 +601,7 @@ export function AIChatPanel({
         )}
 
         {/* O3: PlanMode toggle bar */}
-        {activeSessionId && selectedAgentSlug && (
+        {activeSessionId && effectiveAgentSlug && (
           <div className="flex items-center gap-2 px-3 py-1.5 border-t border-ink-800 text-xs text-ink-400 bg-ink-900/50">
             <span className="font-medium text-ink-500">{t('chat.planMode.label')}</span>
             {(['auto', 'prompt_user', 'dry_run'] as const).map((m) => (
@@ -624,7 +651,7 @@ export function AIChatPanel({
 
         {/* Chat input + B: attachment picker (when no staged chips above) */}
         <div className="flex items-end gap-1 bg-ink-900 border-t border-ink-700/50">
-          {activeSessionId && selectedAgentSlug && stagedAttachments.length === 0 && (
+          {activeSessionId && effectiveAgentSlug && stagedAttachments.length === 0 && (
             <div className="pl-2 pb-2">
               <ChatAttachmentPicker
                 attachments={[]}
@@ -637,9 +664,9 @@ export function AIChatPanel({
             <ChatInput
               onSend={handleSend}
               onPaste={composerOnPaste}
-              disabled={sending || !activeSessionId || !selectedAgentSlug}
+              disabled={sending || !activeSessionId || !effectiveAgentSlug}
               placeholder={
-                !selectedAgentSlug
+                !effectiveAgentSlug
                   ? t('chat.placeholderNoAgent', 'Select an agent to start')
                   : !activeSessionId
                     ? t('chat.placeholderNoSession', 'Create a session first')
