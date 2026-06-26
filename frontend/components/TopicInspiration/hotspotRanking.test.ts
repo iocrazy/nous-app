@@ -44,6 +44,14 @@ describe('topHotspots', () => {
     const top = topHotspots(list, 2);
     expect(top.map((x) => x.id)).toEqual(['b', 'd']);
   });
+  it('multi-source topics lead even with a lower blended score', () => {
+    const list = [
+      h({ id: 'single', score: 0.9, heat: 0.9 }), // blended 0.9, 1 source
+      h({ id: 'multi', score: 0.5, heat: 0.5, source_count: 2 }), // ~0.625
+    ];
+    // cross-source confirmed item floats to the top of Current Hotspots
+    expect(topHotspots(list, 2).map((x) => x.id)).toEqual(['multi', 'single']);
+  });
 });
 
 describe('partitionBySignal', () => {

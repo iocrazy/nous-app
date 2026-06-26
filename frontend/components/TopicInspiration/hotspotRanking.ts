@@ -58,14 +58,22 @@ export function partitionBySignal(
 }
 
 // Highest blended-rank hotspots first; ties broken by raw heat then score.
+// "Current Hotspots" is the cross-source / broadly-trending block, so topics
+// confirmed on more than one platform (source_count > 1) lead it — a single
+// outlet's high-scored pick shouldn't outrank a topic the whole web is running.
+// Single-source items fill the remaining slots (the block is never empty while
+// clustering is still sparse), each tier ordered by blended score.
 export function topHotspots(hotspots: Hotspot[], n: number): Hotspot[] {
-  return hotspots
-    .filter((h) => typeof h.score === 'number' || typeof h.heat === 'number')
-    .slice()
-    .sort((a, b) => {
-      const d = blendedScore(b) - blendedScore(a);
-      if (d !== 0) return d;
-      return (b.heat ?? 0) - (a.heat ?? 0);
-    })
-    .slice(0, n);
+  const scored = hotspots.filter(
+    (h) => typeof h.score === 'number' || typeof h.heat === 'number',
+  );
+  const byBlended = (a: Hotspot, b: Hotspot) => {
+    const d = blendedScore(b) - blendedScore(a);
+    if (d !== 0) return d;
+    return (b.heat ?? 0) - (a.heat ?? 0);
+  };
+  const isMulti = (h: Hotspot) => (h.source_count ?? 0) > 1;
+  const multi = scored.filter(isMulti).sort(byBlended);
+  const single = scored.filter((h) => !isMulti(h)).sort(byBlended);
+  return [...multi, ...single].slice(0, n);
 }
