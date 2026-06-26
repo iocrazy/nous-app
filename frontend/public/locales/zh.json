@@ -1543,6 +1543,12 @@
       "createError": "创建群组失败",
       "agentAddFailed": "添加智能体 {{name}} 失败"
     },
+    "typing": {
+      "one": "{{name}} 正在输入…",
+      "two": "{{a}} 和 {{b}} 正在输入…",
+      "many": "多人正在输入…",
+      "online": "{{count}} 人在线"
+    },
     "mentionsBadgeTitle": "{{count}} 条提及",
     "mediaCard": {
       "title": "添加素材",
