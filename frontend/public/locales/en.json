@@ -1566,6 +1566,9 @@
       "typePdf": "PDF",
       "typeText": "Text",
       "typeFile": "File"
+    },
+    "agentDm": {
+      "section": "Agents"
     }
   },
   "mcp": {

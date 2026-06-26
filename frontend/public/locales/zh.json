@@ -1566,6 +1566,9 @@
       "typePdf": "PDF",
       "typeText": "文本",
       "typeFile": "文件"
+    },
+    "agentDm": {
+      "section": "智能体"
     }
   },
   "mcp": {
