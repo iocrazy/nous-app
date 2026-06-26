@@ -29,6 +29,7 @@ import { aiLibraryService } from '../services/aiLibraryService';
 import { useChannelRealtime } from '../hooks/useChannelRealtime';
 import { useChannelPresence } from '../hooks/useChannelPresence';
 import { useMentionBadges } from '../hooks/useMentionBadges';
+import { AIChatPanel } from '../components/AIChatPanel';
 import { ChatSidebar } from '../components/chat/ChatSidebar';
 import { MessageList } from '../components/chat/MessageList';
 import { Composer } from '../components/chat/Composer';
@@ -63,6 +64,13 @@ export function ChatPage(): React.ReactElement {
   const [sending, setSending] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
+
+  /**
+   * When non-null, the user has opened a DM with an agent (by slug).
+   * Mutually exclusive with activeId: selecting an agent-DM sets activeId=null,
+   * selecting a channel sets activeAgentDm=null.
+   */
+  const [activeAgentDm, setActiveAgentDm] = useState<string | null>(null);
 
   /** People that can be @-mentioned in the Composer (current team members, excluding self). */
   const [membersForComposer, setMembersForComposer] = useState<{ user_id: string; label: string }[]>([]);
@@ -509,6 +517,7 @@ export function ChatPage(): React.ReactElement {
 
   const handleSelectChannel = useCallback((id: string) => {
     setActiveId(id);
+    setActiveAgentDm(null);
   }, []);
 
   // ── Guard: no team selected ───────────────────────────────────────────────
@@ -537,66 +546,83 @@ export function ChatPage(): React.ReactElement {
           activeId={activeId ?? ''}
           onSelect={handleSelectChannel}
           onNew={() => setShowCreate(true)}
+          agents={agentsForComposer}
+          activeAgentDm={activeAgentDm}
+          onSelectAgentDm={(slug) => {
+            setActiveAgentDm(slug);
+            setActiveId(null);
+          }}
         />
       </div>
 
       {/* ── Conversation island ── */}
       <div className="flex-1 flex flex-col h-full bg-[#15151a] border border-white/[.12] rounded-[18px] overflow-hidden min-w-0">
-        {/* Header */}
-        <div className="flex items-center gap-[10px] px-[18px] py-[13px] border-b border-white/[.08] flex-shrink-0">
-          <MessageSquare size={15} className="text-[#74747e] flex-shrink-0" />
-          <span className="text-[15px] font-[650] tracking-[-0.01em] text-[#e7e7ea] whitespace-nowrap overflow-hidden text-ellipsis">
-            {activeChannel?.name ?? activeChannel?.id ?? t('chat.noChannels')}
-          </span>
-          {activeChannel?.topic && (
-            <>
-              <span className="text-[#4a4a52] text-[13px]">·</span>
-              <span className="text-[12.5px] text-[#74747e] whitespace-nowrap overflow-hidden text-ellipsis">
-                {activeChannel.topic}
-              </span>
-            </>
-          )}
-          {activeChannel && onlineUserIds.length > 0 && (
-            <div className="ml-auto flex items-center gap-[5px] flex-shrink-0">
-              <span className="w-[6px] h-[6px] rounded-full bg-emerald-400 flex-shrink-0" />
-              <span className="text-[11.5px] text-[#74747e]">
-                {t('chat.typing.online', { count: onlineUserIds.length })}
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* Body: message list or empty state */}
-        {channels.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-6">
-            <MessageSquare size={36} className="text-[#4a4a52]" />
-            <p className="text-[14px] text-[#74747e]">{t('chat.noChannels')}</p>
-          </div>
+        {activeAgentDm !== null ? (
+          /* ── Agent DM view: render AIChatPanel locked to the selected agent ── */
+          <AIChatPanel
+            agentSlug={activeAgentDm}
+            onClose={() => setActiveAgentDm(null)}
+          />
         ) : (
+          /* ── Channel view ── */
           <>
-            <MessageList
-              messages={messages}
-              onLoadOlder={handleLoadOlder}
-              hasOlder={hasOlder}
-              loadingOlder={loadingOlder}
-              currentUserId={currentUserId}
-              onEdit={handleEditMessage}
-              onDelete={handleDeleteMessage}
-            />
-            <TypingIndicator names={typingUsers.map((u) => u.name)} />
-            <Composer
-              onSend={handleSend}
-              onAttachMedia={() => setShowPicker(true)}
-              onTyping={sendTyping}
-              disabled={sending || !activeId}
-              placeholder={
-                activeChannel
-                  ? t('chat.composerPlaceholder')
-                  : undefined
-              }
-              members={membersForComposer}
-              agents={agentsForComposer}
-            />
+            {/* Header */}
+            <div className="flex items-center gap-[10px] px-[18px] py-[13px] border-b border-white/[.08] flex-shrink-0">
+              <MessageSquare size={15} className="text-[#74747e] flex-shrink-0" />
+              <span className="text-[15px] font-[650] tracking-[-0.01em] text-[#e7e7ea] whitespace-nowrap overflow-hidden text-ellipsis">
+                {activeChannel?.name ?? activeChannel?.id ?? t('chat.noChannels')}
+              </span>
+              {activeChannel?.topic && (
+                <>
+                  <span className="text-[#4a4a52] text-[13px]">·</span>
+                  <span className="text-[12.5px] text-[#74747e] whitespace-nowrap overflow-hidden text-ellipsis">
+                    {activeChannel.topic}
+                  </span>
+                </>
+              )}
+              {activeChannel && onlineUserIds.length > 0 && (
+                <div className="ml-auto flex items-center gap-[5px] flex-shrink-0">
+                  <span className="w-[6px] h-[6px] rounded-full bg-emerald-400 flex-shrink-0" />
+                  <span className="text-[11.5px] text-[#74747e]">
+                    {t('chat.typing.online', { count: onlineUserIds.length })}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Body: message list or empty state */}
+            {channels.length === 0 || !activeId ? (
+              <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-6">
+                <MessageSquare size={36} className="text-[#4a4a52]" />
+                <p className="text-[14px] text-[#74747e]">{t('chat.noChannels')}</p>
+              </div>
+            ) : (
+              <>
+                <MessageList
+                  messages={messages}
+                  onLoadOlder={handleLoadOlder}
+                  hasOlder={hasOlder}
+                  loadingOlder={loadingOlder}
+                  currentUserId={currentUserId}
+                  onEdit={handleEditMessage}
+                  onDelete={handleDeleteMessage}
+                />
+                <TypingIndicator names={typingUsers.map((u) => u.name)} />
+                <Composer
+                  onSend={handleSend}
+                  onAttachMedia={() => setShowPicker(true)}
+                  onTyping={sendTyping}
+                  disabled={sending || !activeId}
+                  placeholder={
+                    activeChannel
+                      ? t('chat.composerPlaceholder')
+                      : undefined
+                  }
+                  members={membersForComposer}
+                  agents={agentsForComposer}
+                />
+              </>
+            )}
           </>
         )}
       </div>
