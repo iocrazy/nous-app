@@ -345,5 +345,60 @@ async def test_score_items_skips_when_model_empty_key_present(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_score_items_fails_over_to_next_model(monkeypatch):
+    """First model is unreachable (connection error) → scorer fails over to the
+    next enabled Nous model instead of silently returning nothing."""
+    svc = TopicScorerService()
+
+    class _Runner:
+        async def run_turn(self, composed, user_messages):
+            if composed.model == "offline-model":
+                raise RuntimeError("All connection attempts failed")
+            return {
+                "content": '[{"i":0,"dims":{"impact":0.7},"category":"model","tags":[]}]'
+            }
+
+    class _Composer:
+        async def compose(self, inp):
+            return _make_composed("seed")
+
+    _patch_governance(monkeypatch, _FakeGovernanceUnconfigured())
+    _patch_nous(
+        monkeypatch,
+        allowed=True,
+        models=[
+            {
+                "name": "off",
+                "actual_model": "offline-model",
+                "base_url": "http://x",
+                "api_key": "k",
+            },
+            {
+                "name": "on",
+                "actual_model": "online-model",
+                "base_url": "http://y",
+                "api_key": "k",
+            },
+        ],
+    )
+    monkeypatch.setattr(
+        "app.services.topics.topic_scorer.OpenAICompatibleAdapter", lambda **_: object()
+    )
+    monkeypatch.setattr(
+        "app.services.topics.topic_scorer.get_skill_repository", lambda: None
+    )
+    monkeypatch.setattr(
+        "app.services.topics.topic_scorer.SkillToolService", lambda repo: None
+    )
+    monkeypatch.setattr(
+        "app.services.topics.topic_scorer.AgentRunner", lambda **_: _Runner()
+    )
+    monkeypatch.setattr(svc, "_build_composer", lambda: _Composer())
+
+    out = await svc.score_items([{"i": 0, "title": "t", "content": "c"}])
+    assert out[0]["dims"] == {"impact": 0.7}  # the reachable model answered
+
+
+@pytest.mark.asyncio
 async def test_score_items_empty_input():
     assert await TopicScorerService().score_items([]) == {}
