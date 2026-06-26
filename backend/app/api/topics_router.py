@@ -52,10 +52,16 @@ def _to_out(
     row: dict, state: Optional[dict] = None, *, include_content: bool = False
 ) -> HotspotOut:
     state = state or {}
-    # PostgREST embeds the related group as {"topic_groups": {"source_count": N}}
-    # (or None when the hotspot isn't clustered yet).
+    # PostgREST embeds the related group as
+    # {"topic_groups": {"source_count": N, "source_labels": [...]}} (or None
+    # when the hotspot isn't clustered yet).
     group = row.get("topic_groups") or {}
     source_count = group.get("source_count") if isinstance(group, dict) else None
+    source_names = (
+        [str(s) for s in (group.get("source_labels") or [])]
+        if isinstance(group, dict)
+        else []
+    )
     return HotspotOut(
         id=str(row.get("id")),
         title=row.get("title") or "",
@@ -74,6 +80,7 @@ def _to_out(
         heat=row.get("heat"),
         best_rank=_best_rank(row.get("rank_timeline") or []),
         source_count=source_count,
+        source_names=source_names,
         # score_dims + content_* only in the detail view (keep the list light).
         score_dims=(row.get("score_dims") if include_content else None),
         content_original=row.get("content_original") if include_content else None,

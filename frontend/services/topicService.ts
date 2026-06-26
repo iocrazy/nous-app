@@ -23,6 +23,9 @@ export interface Hotspot {
   best_rank?: number | null;
   /** Cross-source cluster size: distinct platforms this topic appears on. */
   source_count?: number | null;
+  /** The distinct member source labels behind source_count — for the
+   *  "which platforms" hover tooltip. */
+  source_names?: string[] | null;
   content_original?: string | null;
   content_translated?: string | null;
   is_read?: boolean;

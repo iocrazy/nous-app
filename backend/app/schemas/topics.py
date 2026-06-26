@@ -27,6 +27,10 @@ class HotspotOut(BaseModel):
     # Cross-source cluster size: how many distinct platforms this topic appears
     # on (from its topic_group). >1 = "seen on N platforms" signal.
     source_count: Optional[int] = None
+    # The distinct member source labels behind source_count (e.g. ["Hacker News
+    # 热门", "微博热搜"]) — powers the "which platforms" hover tooltip. Empty
+    # when the topic isn't clustered or sits on a single source.
+    source_names: list[str] = []
     # Raw per-dimension scores (novelty/impact/credibility/actionability/
     # shareability, 0..1) the LLM rated — the breakdown behind ``score``. Only
     # on the detail endpoint (transparency into why an item scored what it did).
