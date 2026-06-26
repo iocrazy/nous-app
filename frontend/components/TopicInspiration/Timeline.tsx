@@ -25,14 +25,8 @@ function dayKey(iso?: string | null): string {
 
 function dayLabel(key: string, t: (k: string, f?: string) => string): string {
   if (key === 'unknown') return t('topic.undated', 'Undated');
-  // Always show the actual date (no "Today"/"Yesterday"), locale-formatted.
-  const [y, m, d] = key.split('-').map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    weekday: 'short',
-  });
+  // YYYY-MM-DD (the grouping key) → YYYY/MM/DD.
+  return key.replace(/-/g, '/');
 }
 
 interface Props {
