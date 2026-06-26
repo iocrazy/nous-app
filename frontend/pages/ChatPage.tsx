@@ -26,6 +26,7 @@ import { useChannelRealtime } from '../hooks/useChannelRealtime';
 import { ChatSidebar } from '../components/chat/ChatSidebar';
 import { MessageList } from '../components/chat/MessageList';
 import { Composer } from '../components/chat/Composer';
+import CreateGroupModal from '../components/chat/CreateGroupModal';
 
 import type { Channel, ChatMessage } from '../types';
 
@@ -44,6 +45,7 @@ export function ChatPage(): React.ReactElement {
   const [hasOlder, setHasOlder] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [sending, setSending] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
 
   /**
    * Dedupe set — tracks ids of messages already in local state.
@@ -281,6 +283,7 @@ export function ChatPage(): React.ReactElement {
           channels={channels}
           activeId={activeId ?? ''}
           onSelect={handleSelectChannel}
+          onNew={() => setShowCreate(true)}
         />
       </div>
 
@@ -328,6 +331,18 @@ export function ChatPage(): React.ReactElement {
           </>
         )}
       </div>
+      {selectedTeamId && (
+        <CreateGroupModal
+          teamId={selectedTeamId}
+          open={showCreate}
+          onClose={() => setShowCreate(false)}
+          onCreated={(ch) => {
+            setShowCreate(false);
+            setChannels((prev) => [ch, ...prev]);
+            setActiveId(ch.id);
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -1511,7 +1511,29 @@
     "errorSend": "Failed to send message: {{error}}",
     "title": "Team Chat",
     "noTeam": "No team selected",
-    "selectTeam": "Select a team to use Team Chat"
+    "selectTeam": "Select a team to use Team Chat",
+    "createGroup": {
+      "title": "New group",
+      "loading": "Loading...",
+      "nameLabel": "Group name",
+      "namePlaceholder": "e.g. design, marketing...",
+      "visibility": "Visibility",
+      "private": "Private",
+      "privateDesc": "Invite-only — only added members can see and post",
+      "public": "Public",
+      "publicDesc": "Anyone on the team can find and join",
+      "members": "Members",
+      "noMembers": "No team members found",
+      "agents": "Agents",
+      "noAgents": "No chat-enabled agents",
+      "cancel": "Cancel",
+      "create": "Create group",
+      "creating": "Creating...",
+      "created": "Group created",
+      "loadError": "Failed to load team data",
+      "createError": "Failed to create group",
+      "agentAddFailed": "Failed to add agent {{name}}"
+    }
   },
   "mcp": {
     "title": "MCP Servers",
