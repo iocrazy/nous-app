@@ -1533,6 +1533,23 @@
       "loadError": "Failed to load team data",
       "createError": "Failed to create group",
       "agentAddFailed": "Failed to add agent {{name}}"
+    },
+    "mediaCard": {
+      "title": "Attach media",
+      "search": "Search resources…",
+      "empty": "No resources",
+      "loading": "Loading…",
+      "loadError": "Failed to load resources",
+      "sendError": "Failed to send media card",
+      "type": "Type",
+      "size": "Size",
+      "untitled": "Media",
+      "typeVideo": "Video",
+      "typeImage": "Image",
+      "typeAudio": "Audio",
+      "typePdf": "PDF",
+      "typeText": "Text",
+      "typeFile": "File"
     }
   },
   "mcp": {
