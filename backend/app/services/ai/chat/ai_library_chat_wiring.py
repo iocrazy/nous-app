@@ -173,6 +173,11 @@ async def build_agent_runner_stack(
     _mem_ctx = _MemCtx(
         user_id=str(user_id),
         team_ids=(),
+        # project_id: _resolve_session_project runs concurrently inside the
+        # gather below (via _safe_recall_graph_facts) — not available here
+        # without an extra sequential pre-gather query.  Project-scoped recall
+        # lands in Phase B when the resolved value can be shared cleanly.
+        project_id=None,
         agent_id=agent.get("id"),
         session_id=_sid,
     )

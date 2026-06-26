@@ -587,6 +587,7 @@ class AILibraryChatService:
                     request_instructions=request_instructions,
                     graph_facts=stack.graph_facts,
                     user_context=stack.user_context,
+                    agent_memory_facts=stack.agent_memory_facts,
                 )
             )
 
