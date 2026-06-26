@@ -36,6 +36,13 @@ import ResourcePicker from '../components/chat/ResourcePicker';
 
 import type { Channel, ChatMessage, ResourceItem } from '../types';
 
+// ── Seq compare helper ────────────────────────────────────────────────────────
+// seq is a Snowflake string — must use BigInt, never numeric > (precision) or
+// string > (lexical). Returns false on parse error so non-numeric seqs are safe.
+const seqGt = (a: string, b: string): boolean => {
+  try { return BigInt(a) > BigInt(b); } catch { return false; }
+};
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function ChatPage(): React.ReactElement {
@@ -81,6 +88,9 @@ export function ChatPage(): React.ReactElement {
   useEffect(() => {
     activeIdRef.current = activeId;
   }, [activeId]);
+
+  /** In-flight guard for gapFill — prevents concurrent gap-fill runs. */
+  const gapFillInFlight = useRef(false);
 
   // ── Mark-read debounce ────────────────────────────────────────────────────
 
@@ -283,6 +293,63 @@ export function ChatPage(): React.ReactElement {
     setMessages((prev) => prev.map((x) => (x.id === m.id ? m : x)));
   }, []);
 
+  // ── Gap-fill: forward-paginate missed messages after reconnect/focus/online ──
+  //
+  // Strategy: listMessages returns DESC (newest→oldest). We start from the latest
+  // (cursor = undefined), collect messages with seq > lastSeq, and page backward
+  // (cursor = oldestInBatch) until we reach known territory or hit the 5-page cap.
+  // Finally sort ascending and push through appendMessage (dedup via seenIds).
+
+  const gapFill = useCallback(async () => {
+    const channelId = activeIdRef.current;
+    if (!channelId || gapFillInFlight.current) return;
+    const list = messagesRef.current; // ascending (oldest → newest)
+    const lastSeq = list.length ? list[list.length - 1].seq : '0';
+    gapFillInFlight.current = true;
+    try {
+      let cursor: string | undefined = undefined; // start from latest
+      const fresh: ChatMessage[] = [];
+      for (let page = 0; page < 5; page++) {
+        const batch = await chatService.listMessages(channelId, cursor, 30); // DESC
+        if (channelId !== activeIdRef.current) return; // channel switched mid-fetch
+        if (!batch.length) break;
+        // batch is newest→oldest; collect those strictly newer than lastSeq
+        const newer = batch.filter((m) => seqGt(m.seq, lastSeq));
+        fresh.push(...newer);
+        const oldestInBatch = batch[batch.length - 1].seq;
+        if (!seqGt(oldestInBatch, lastSeq)) break; // reached known territory
+        cursor = oldestInBatch; // page further back toward lastSeq
+        if (page === 4 && seqGt(oldestInBatch, lastSeq)) {
+          console.warn('[chat] gapFill: gap exceeds 150 messages; reload to see the rest');
+        }
+      }
+      if (fresh.length) {
+        // Sort ascending so appendMessage inserts in the right order
+        fresh.sort((a, b) => (seqGt(a.seq, b.seq) ? 1 : -1));
+        for (const m of fresh) appendMessage(m);
+        const maxSeq = fresh[fresh.length - 1].seq;
+        scheduleMarkRead(channelId, maxSeq);
+      }
+    } catch (err) {
+      console.error('[chat] gapFill failed', err);
+    } finally {
+      gapFillInFlight.current = false;
+    }
+  }, [appendMessage, scheduleMarkRead]);
+
+  // ── Wire online + visibility events to gapFill ────────────────────────────
+
+  useEffect(() => {
+    const onOnline = () => { void gapFill(); };
+    const onVisible = () => { if (document.visibilityState === 'visible') void gapFill(); };
+    window.addEventListener('online', onOnline);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [gapFill]);
+
   // ── Edit/delete handlers ──────────────────────────────────────────────────
 
   const handleEditMessage = useCallback(
@@ -336,6 +403,7 @@ export function ChatPage(): React.ReactElement {
       }
     },
     updateMessage,
+    gapFill,
   );
 
   // ── Live mention badge updates ─────────────────────────────────────────────
