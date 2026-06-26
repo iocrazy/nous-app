@@ -49,24 +49,29 @@ class TopicScorerService:
     def _build_composer(self) -> PromptComposer:
         return PromptComposer(get_agent_repository(), get_skill_repository())
 
-    async def _resolve_adapter(self):
-        """Resolve (adapter, model) for the background scorer.
+    async def _resolve_candidates(self):
+        """Ordered ``[(adapter, model), …]`` the scorer tries in turn (failover).
 
-        Priority: (1) **admin per-module governance** — an explicitly-configured
-        provider for this module wins, so the operator can point topic scoring at
-        any reachable platform (DeepSeek/OpenAI/DashScope/…) and instantly route
-        around an offline platform default; (2) the platform **Nous** provider's
-        default enabled ``llm`` model. Returns ``(None, "")`` when neither is
-        configured — scoring is then skipped (additive, never crashes).
-        NEVER reads env.
+        Order: (1) admin per-module governance model (explicit override wins);
+        (2) EVERY enabled platform Nous ``llm`` model. score_items walks this
+        list and uses the first that answers, so one offline endpoint (e.g. a
+        self-hosted box on ZeroTier) can't silently kill scoring while reachable
+        providers (DeepSeek / Doubao / …) sit unused. Deduped by model, order
+        preserved. Empty when nothing is configured. NEVER reads env.
         """
-        # 1) Admin per-module governance (explicit override — highest priority).
+        out: list = []
         gov = await self._governance_adapter()
         if gov is not None:
-            return gov
-
-        # 2) Platform Nous provider (default when no module override is set).
-        return await self._nous_adapter()
+            out.append(gov)
+        out.extend(await self._nous_candidates())
+        seen: set[str] = set()
+        deduped: list = []
+        for adapter, model in out:
+            if model in seen:
+                continue
+            seen.add(model)
+            deduped.append((adapter, model))
+        return deduped
 
     async def _governance_adapter(self):
         """Adapter from admin per-module governance, or None when the module has
@@ -93,27 +98,33 @@ class TopicScorerService:
             )
         return adapter, governance.model
 
-    async def _nous_adapter(self):
-        """Adapter from the platform Nous provider's default enabled ``llm``
-        model, or ``(None, "")`` when unavailable."""
+    async def _nous_candidates(self) -> list:
+        """``[(adapter, model), …]`` for EVERY enabled platform Nous ``llm``
+        model (not just the first) — the failover pool. Empty when Nous is
+        disabled for this module or no enabled model resolves."""
+        cands: list = []
         try:
-            if await is_nous_allowed("topic_scorer"):
-                from app.repositories.nous_repository import get_nous_repository
+            if not await is_nous_allowed("topic_scorer"):
+                return cands
+            from app.repositories.nous_repository import get_nous_repository
 
-                repo = get_nous_repository()
-                llms = await repo.list_enabled("llm")
-                if llms:
-                    full = await repo.get_by_name(llms[0]["name"])
-                    if full and full.get("base_url") and full.get("api_key"):
-                        adapter = OpenAICompatibleAdapter(
-                            api_url=full["base_url"],
-                            api_key=full["api_key"],
-                            default_model=full["actual_model"],
+            repo = get_nous_repository()
+            for m in await repo.list_enabled("llm"):
+                full = await repo.get_by_name(m["name"])
+                if full and full.get("base_url") and full.get("api_key"):
+                    cands.append(
+                        (
+                            OpenAICompatibleAdapter(
+                                api_url=full["base_url"],
+                                api_key=full["api_key"],
+                                default_model=full["actual_model"],
+                            ),
+                            full["actual_model"],
                         )
-                        return adapter, full["actual_model"]
+                    )
         except Exception as e:  # noqa: BLE001 — best-effort, skip on failure
             logger.warning(f"[topic-scorer] Nous resolution failed: {e}")
-        return None, ""
+        return cands
 
     def _extract_json(self, text: str) -> Any:
         cleaned = (text or "").strip()
@@ -195,23 +206,18 @@ class TopicScorerService:
         if not items:
             return {}
 
-        # Resolve the LLM. Background system agents (no user) get their model
-        # from the platform's Nous provider first, then admin per-module
-        # governance. NEVER env.
-        adapter, model = await self._resolve_adapter()
-        if adapter is None:
+        # Resolve the LLM candidates (governance model, then every enabled Nous
+        # llm) and try them in order — failover. NEVER env.
+        candidates = await self._resolve_candidates()
+        if not candidates:
             logger.warning(
                 "[topic-scorer] no platform LLM available (Nous off / no enabled "
                 "llm model, and no admin governance config); skipping scoring"
             )
             return {}
 
-        runner = AgentRunner(
-            adapter=adapter, skill_tool=SkillToolService(get_skill_repository())
-        )
-
         composer = self._build_composer()
-        composed = await composer.compose(
+        composed_base = await composer.compose(
             ComposerInput(
                 agent_slug=AGENT_SLUG,
                 request_instructions=(
@@ -220,17 +226,37 @@ class TopicScorerService:
                 ),
             )
         )
-        composed = composed.model_copy(
-            update={"model": model, "max_tokens": _MAX_OUTPUT_TOKENS}
-        )
         user_messages = [{"role": "user", "content": self.build_user_payload(items)}]
-        result = await runner.run_turn(composed, user_messages=user_messages)
-        if result.get("error"):
-            logger.warning(f"[topic-scorer] runner error: {result.get('error')}")
-            return {}
-        try:
-            parsed = self._extract_json(result.get("content", "") or "")
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"[topic-scorer] JSON parse failed: {e}")
-            return {}
-        return self.normalize_result(parsed)
+
+        for adapter, model in candidates:
+            runner = AgentRunner(
+                adapter=adapter, skill_tool=SkillToolService(get_skill_repository())
+            )
+            composed = composed_base.model_copy(
+                update={"model": model, "max_tokens": _MAX_OUTPUT_TOKENS}
+            )
+            try:
+                result = await runner.run_turn(composed, user_messages=user_messages)
+            except Exception as e:  # noqa: BLE001 — try the next candidate
+                logger.warning(f"[topic-scorer] model {model} unreachable: {e}")
+                continue
+            if result.get("error"):
+                logger.warning(
+                    f"[topic-scorer] model {model} error: {result.get('error')}"
+                )
+                continue
+            try:
+                parsed = self._extract_json(result.get("content", "") or "")
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"[topic-scorer] model {model} JSON parse failed: {e}")
+                continue
+            return self.normalize_result(parsed)
+
+        # Every candidate failed — surface loudly (ERROR is alert/health-visible,
+        # so an offline LLM can't silently kill scoring for days unnoticed).
+        logger.error(
+            "[topic-scorer] topic scoring DOWN: all %d LLM candidate(s) failed "
+            "(check provider reachability / admin governance config)",
+            len(candidates),
+        )
+        return {}
