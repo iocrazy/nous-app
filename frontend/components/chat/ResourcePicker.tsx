@@ -210,7 +210,7 @@ export default function ResourcePicker({ open, teamId, onClose, onSelect }: Prop
         <div className="flex-1 overflow-y-auto px-5 pb-5 min-h-0">
           {loading ? (
             <div className="py-10 text-center text-[13px] text-[#74747e]">
-              Loading…
+              {t('chat.mediaCard.loading')}
             </div>
           ) : items.length === 0 ? (
             <div className="py-10 text-center text-[13px] text-[#74747e]">

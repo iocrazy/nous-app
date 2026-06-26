@@ -22,13 +22,15 @@ import { MessageSquare } from 'lucide-react';
 import { useTeamContext } from '../contexts/TeamContext';
 import { useToast } from '../components/Toast';
 import { chatService } from '../services/chatService';
+import { getResourceCoverUrl } from '../services/resourceService';
 import { useChannelRealtime } from '../hooks/useChannelRealtime';
 import { ChatSidebar } from '../components/chat/ChatSidebar';
 import { MessageList } from '../components/chat/MessageList';
 import { Composer } from '../components/chat/Composer';
 import CreateGroupModal from '../components/chat/CreateGroupModal';
+import ResourcePicker from '../components/chat/ResourcePicker';
 
-import type { Channel, ChatMessage } from '../types';
+import type { Channel, ChatMessage, ResourceItem } from '../types';
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -46,6 +48,7 @@ export function ChatPage(): React.ReactElement {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [sending, setSending] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [showPicker, setShowPicker] = useState(false);
 
   /**
    * Dedupe set — tracks ids of messages already in local state.
@@ -252,6 +255,56 @@ export function ChatPage(): React.ReactElement {
     [activeId, sending, appendMessage, addToast, t],
   );
 
+  // ── Send media card ───────────────────────────────────────────────────────
+
+  const handleSendMedia = useCallback(
+    (item: ResourceItem) => {
+      if (!activeId) return;
+
+      const r = item.resource;
+      const isImage = r?.mime_type?.startsWith('image/') ?? false;
+      const imageUrl =
+        r?.id && (r.thumbnail_path || r.cover_image_path || r.media_id || isImage)
+          ? getResourceCoverUrl(String(r.id))
+          : undefined;
+
+      const sizeValue = (() => {
+        const bytes = r?.file_size_bytes;
+        if (!bytes) return '';
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1_048_576) return `${(bytes / 1024).toFixed(1)} KB`;
+        if (bytes < 1_073_741_824) return `${(bytes / 1_048_576).toFixed(1)} MB`;
+        return `${(bytes / 1_073_741_824).toFixed(1)} GB`;
+      })();
+
+      const body: Record<string, unknown> = {
+        resource_id: String(item.resource_id),
+        title: r?.filename ?? t('chat.mediaCard.untitled'),
+        image_url: imageUrl,
+        fields: [
+          { title: t('chat.mediaCard.type'), value: r?.mime_type ?? '' },
+          { title: t('chat.mediaCard.size'), value: sizeValue },
+        ].filter((f) => f.value),
+      };
+
+      setSending(true);
+
+      chatService
+        .sendMessage(activeId, body, 'media_card')
+        .then((sent) => {
+          appendMessage(sent);
+        })
+        .catch((err: unknown) => {
+          console.error('[ChatPage] sendMedia failed', err);
+          addToast(t('chat.mediaCard.sendError'), 'error');
+        })
+        .finally(() => {
+          setSending(false);
+        });
+    },
+    [activeId, appendMessage, addToast, t],
+  );
+
   // ── Channel selection ─────────────────────────────────────────────────────
 
   const handleSelectChannel = useCallback((id: string) => {
@@ -321,6 +374,7 @@ export function ChatPage(): React.ReactElement {
             />
             <Composer
               onSend={handleSend}
+              onAttachMedia={() => setShowPicker(true)}
               disabled={sending || !activeId}
               placeholder={
                 activeChannel
@@ -341,6 +395,14 @@ export function ChatPage(): React.ReactElement {
             setChannels((prev) => [ch, ...prev]);
             setActiveId(ch.id);
           }}
+        />
+      )}
+      {activeId && selectedTeamId && (
+        <ResourcePicker
+          open={showPicker}
+          teamId={selectedTeamId}
+          onClose={() => setShowPicker(false)}
+          onSelect={handleSendMedia}
         />
       )}
     </div>

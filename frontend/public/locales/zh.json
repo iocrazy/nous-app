@@ -1533,6 +1533,17 @@
       "loadError": "加载团队数据失败",
       "createError": "创建群组失败",
       "agentAddFailed": "添加智能体 {{name}} 失败"
+    },
+    "mediaCard": {
+      "title": "添加素材",
+      "search": "搜索素材…",
+      "empty": "暂无素材",
+      "loading": "加载中…",
+      "loadError": "加载资源失败",
+      "sendError": "发送素材卡片失败",
+      "type": "类型",
+      "size": "大小",
+      "untitled": "素材"
     }
   },
   "mcp": {
