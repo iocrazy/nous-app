@@ -167,9 +167,9 @@
 | CHAT-MSG-03 | 编辑：软更新，置 `edited_at`，Realtime 推 UPDATE 通知 | MM EditAt / RC editedAt | ◑ (软删/edited 列就绪，endpoint 延后) |
 | CHAT-MSG-04 | 删除：软删，置 `deleted_at`，前端渲染"已删除"占位 | MM DeleteAt 软删 | ◑ (deleted_at 列+list 过滤就绪，delete endpoint 延后) |
 | CHAT-MSG-05 | 线程回复：`reply_to_id` 指向被回复消息（第一版只做"引用单条"，不做完整 thread 树） | MM `RootId` | ◑ (reply_to_id 列就绪，同频道校验+UI 延后) |
-| CHAT-MSG-06 | **统一卡片 schema**（`body jsonb`）：`{title, title_link, text, color, image_url, thumb_url, fields:[{title,value,short}], actions:[], footer, ts}` | MM `message_attachment.go:20` / RC attachments | ☐ |
+| CHAT-MSG-06 | **统一卡片 schema**（`body jsonb`）：`{title, title_link, text, color, image_url, thumb_url, fields:[{title,value,short}], actions:[], footer, ts}` | MM `message_attachment.go:20` / RC attachments | ☑ #890（MessageBubble 渲染 title/image_url/fields；actions 留待 MSG-07） |
 | CHAT-MSG-07 | 交互按钮回调上下文（cookie/context）**只存服务端，客户端剥离**；点击走独立 endpoint | MM `integration_action.go:121` 安全做法 | ⊘ 本版延后（决策 OPEN-03） |
-| CHAT-MSG-08 | 素材卡片 = 把一个 resource 渲染成 `media_card`（缩略图 + 文件名 + 大小 + 打开链接） | CHAT-GOAL-01 融合点 | ☐ |
+| CHAT-MSG-08 | 素材卡片 = 把一个 resource 渲染成 `media_card`（缩略图 + 文件名 + 大小 + 打开链接） | CHAT-GOAL-01 融合点 | ☑ #890（ResourcePicker → media_card 缩略图/类型/大小；"打开链接" 随 MSG-07 延后） |
 
 ---
 
