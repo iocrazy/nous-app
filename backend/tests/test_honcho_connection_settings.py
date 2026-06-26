@@ -69,3 +69,54 @@ async def test_ensure_config_loads_once():
         await svc._ensure_config()  # second call is a no-op
     assert svc.config is loaded
     assert m.await_count == 1
+
+
+# ── Task 2: Admin endpoints ───────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_get_honcho_connection_returns_effective_config():
+    from unittest.mock import MagicMock
+
+    from app.api.admin.settings_router import get_honcho_connection
+    from app.services.ai.memory.honcho_memory import HonchoMemoryConfig
+
+    cfg = HonchoMemoryConfig(enabled=True, base_url="http://h:1", workspace_id="w")
+    with patch.object(
+        HonchoMemoryConfig, "from_settings", new=AsyncMock(return_value=cfg)
+    ):
+        resp = await get_honcho_connection(MagicMock())
+    assert (
+        resp.enabled is True
+        and resp.base_url == "http://h:1"
+        and resp.workspace_id == "w"
+    )
+
+
+@pytest.mark.asyncio
+async def test_put_honcho_connection_upserts_only_provided_fields():
+    from unittest.mock import MagicMock
+
+    from app.api.admin.settings_router import put_honcho_connection
+    from app.schemas.admin import HonchoConnectionUpdate
+    from app.services.ai.memory.honcho_memory import HonchoMemoryConfig
+
+    repo = MagicMock()
+    repo.upsert_setting = AsyncMock(return_value={})
+    auth = MagicMock()
+    auth.user_id = "admin-1"
+    cfg = HonchoMemoryConfig(enabled=False, base_url="http://h:2", workspace_id="w2")
+    with (
+        patch(
+            "app.api.admin.settings_router.get_system_settings_repository",
+            return_value=repo,
+        ),
+        patch.object(
+            HonchoMemoryConfig, "from_settings", new=AsyncMock(return_value=cfg)
+        ),
+    ):
+        await put_honcho_connection(HonchoConnectionUpdate(base_url="http://h:2"), auth)
+    # only base_url provided → only that key upserted
+    repo.upsert_setting.assert_awaited_once_with(
+        "honcho_base_url", "http://h:2", "admin-1"
+    )

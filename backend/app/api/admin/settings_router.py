@@ -13,6 +13,8 @@ from app.schemas.admin import (
     ChatModuleGovernanceResponse,
     GraphMemorySettingsResponse,
     GraphMemorySettingsUpdate,
+    HonchoConnectionResponse,
+    HonchoConnectionUpdate,
     MemoryControlResponse,
     MemoryReloadResponse,
     MemorySlotStatus,
@@ -24,6 +26,7 @@ from app.schemas.admin import (
 )
 from app.services.ai.memory import registry as memory_registry
 from app.services.ai.memory.graph_memory import STRUCTURED_OUTPUT_MODES
+from app.services.ai.memory.honcho_memory import HonchoMemoryConfig
 from app.services.topics.scoring import (
     SCORING_CONFIG_KEY,
     config_payload,
@@ -510,3 +513,43 @@ async def reload_memory_slot(slot: str, auth: AdminAuthDep):
     await provider.reload()
     logger.info(f"[Admin] reloaded memory slot {slot} ({provider.name})")
     return MemoryReloadResponse(ok=True, reloaded=provider.name)
+
+
+# ── Honcho Connection Config (Phase 2b) ──────────────────────────────────────
+
+# Maps HonchoConnectionUpdate fields → system_settings keys (mirrors
+# _HONCHO_SETTINGS_MAP in honcho_memory.py; the DB-key half only).
+_HONCHO_CONN_KEY = {
+    "enabled": "honcho_memory_enabled",
+    "base_url": "honcho_base_url",
+    "workspace_id": "honcho_workspace_id",
+}
+
+
+@router.get("/memory/honcho-connection", response_model=HonchoConnectionResponse)
+async def get_honcho_connection(auth: AdminAuthDep):
+    """Effective Honcho connection config (settings with env fallback)."""
+    cfg = await HonchoMemoryConfig.from_settings()
+    return HonchoConnectionResponse(
+        enabled=cfg.enabled, base_url=cfg.base_url, workspace_id=cfg.workspace_id
+    )
+
+
+@router.put("/memory/honcho-connection", response_model=HonchoConnectionResponse)
+async def put_honcho_connection(update: HonchoConnectionUpdate, auth: AdminAuthDep):
+    """Upsert the provided connection fields; returns the refreshed effective
+    config. Click L2 Reload (Provider Slots) to apply to the live service."""
+    repo = get_system_settings_repository()
+    fields = update.model_dump(exclude_unset=True)
+    for field_name, value in fields.items():
+        key = _HONCHO_CONN_KEY[field_name]
+        # store enabled as the string "true"/"false" (settings values are text)
+        stored = (
+            ("true" if value else "false") if field_name == "enabled" else str(value)
+        )
+        await repo.upsert_setting(key, stored, auth.user_id)
+    logger.info(f"[Admin] honcho connection updated: {sorted(fields)}")
+    cfg = await HonchoMemoryConfig.from_settings()
+    return HonchoConnectionResponse(
+        enabled=cfg.enabled, base_url=cfg.base_url, workspace_id=cfg.workspace_id
+    )
