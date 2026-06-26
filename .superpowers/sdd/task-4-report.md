@@ -1,79 +1,37 @@
-# Task 4 Report — ChatPage: wire edit/delete handlers + realtime UPDATE + current user
+# Task 4 Report: ChatPage wiring + live sidebar mention badge + i18n
 
-**Files modified:**
-- `frontend/pages/ChatPage.tsx`
-- `frontend/components/chat/MessageList.tsx`
-- `frontend/public/locales/en.json`
-- `frontend/public/locales/zh.json`
+## Step 1 — Member + agent sources
+- Added `membersForComposer` and `agentsForComposer` state to `ChatPage`.
+- Added `useEffect` (deps: `[selectedTeamId, currentUserId]`) that calls `fetchTeamMembers(selectedTeamId)` and `aiLibraryService.listAgents()` in parallel (exact same calls as `CreateGroupModal` uses).
+- Members mapped to `{ user_id, label: name ?? email ?? user_id }`, filtered to exclude `user_id === currentUserId`.
+- Agents filtered to `chat_permissions?.enabled === true`, mapped to `{ slug, label: name ?? slug }`.
+- Both arrays passed to `<Composer members={membersForComposer} agents={agentsForComposer} />`.
 
-## currentUserId — existing pattern reused
+## Step 2 — Send handler updated to 2-arg form
+- `handleSend(text, mentionUserIds)` now accepts the second arg from `Composer`.
+- Body starts as `{ text }` and conditionally adds `mention_user_ids: mentionUserIds` when array is non-empty.
+- Existing `appendMessage` / `sending` / error-toast path unchanged.
 
-`useAuth()` from `contexts/AuthContext` exposes `currentUserId: string | null` directly
-from context state (set once on auth session load — no async call needed in ChatPage).
-This is the same pattern used by `MembersPage`, `SettingsPage`, `ProjectsPage`, and
-`TodolistPage`. One line at the top of `ChatPage`:
+## Step 3 — `useMentionBadges` hook
+- Created `frontend/hooks/useMentionBadges.ts`.
+- Signature: `(userId: string | null, onChange: (channelId: string, mentionCount: number) => void): void`.
+- Mirrors `useChannelRealtime` exactly: stable `cbRef`, null-guard on `userId` and `getSupabaseClient()`, single `channel` subscription to `postgres_changes` UPDATE on `public.channel_members` filtered `user_id=eq.${userId}`, cleanup via `supabase.removeChannel`.
 
-```ts
-const { currentUserId } = useAuth();
-```
+## Step 4 — Badge state wired in ChatPage
+- `useMentionBadges(currentUserId, (channelId, mentionCount) => setChannels(...))` installed after `useChannelRealtime` call.
+- `scheduleMarkRead` success branch now sets `{ ...ch, unread: 0, mentions: 0 }` (previously only `unread: 0`), mirroring the server-side reset on mark-read.
 
-## updateMessage helper
+## Step 5 — Sidebar mention badge
+- `ChannelRow` in `ChatSidebar.tsx` now calls `useTranslation()`.
+- When `channel.mentions > 0`, renders an amber pill (`bg-amber-400/15 text-amber-400`) showing `@{channel.mentions}`, placed after the neutral indigo unread count badge.
+- `title` attribute uses `t('chat.mentionsBadgeTitle', { count: channel.mentions })` for accessibility.
 
-```ts
-const updateMessage = useCallback((m: ChatMessage) => {
-  setMessages((prev) => prev.map((x) => (x.id === m.id ? m : x)));
-}, []);
-```
+## Step 6 — i18n
+- `en.json`: added `"chat.mentionsBadgeTitle": "{{count}} mentions"`.
+- `zh.json`: added `"chat.mentionsBadgeTitle": "{{count}} 条提及"`.
+- Both files validated with `python3 -m json.tool`: valid.
 
-Passed as `onUpdate` (3rd arg) to `useChannelRealtime`. The existing INSERT inline
-callback (`appendMessage` + `scheduleMarkRead`) is preserved as the 2nd arg.
-
-## messagesRef pattern
-
-To let `handleEditMessage` read the current messages list without adding `messages`
-to its `useCallback` deps (which would recreate the callback on every new message),
-a stable mutable ref is maintained:
-
-```ts
-const messagesRef = useRef<ChatMessage[]>([]);
-messagesRef.current = messages;  // updated every render, no re-render cost
-```
-
-## Edit/delete handlers
-
-`handleEditMessage` looks up the original message via `messagesRef` and merges body
-keys so `sender_name` (or any other non-text field) is not lost in the PUT:
-
-```ts
-const original = messagesRef.current.find((x) => x.id === messageId);
-const originalBody = original?.body ?? {};
-const updated = await chatService.editMessage(
-  activeIdRef.current, messageId, { ...originalBody, text },
-);
-```
-
-Both handlers follow the same pattern: guard on `activeIdRef.current`, call service,
-call `updateMessage(updated)` on success, or `console.error` + `addToast` on error.
-
-## MessageListProps — optional additions (Task 5 preparation)
-
-Three optional props added to `MessageListProps` and prefixed with `_` in the
-destructure to make ESLint/tsc happy (unused until Task 5 wires them into bubbles):
-
-```ts
-currentUserId?: string | null;
-onEdit?: (messageId: string, text: string) => void;
-onDelete?: (messageId: string) => void;
-```
-
-## i18n keys added
-
-`chat.editError` / `chat.deleteError` added to both `en.json` and `zh.json` (keys
-referenced in handlers; Task 5 will add the remaining `chat.edit`, `chat.delete`,
-`chat.edited`, etc.).
-
-## tsc / build result
-
-- `npx tsc --noEmit`: 0 errors in changed files (pre-existing errors in unrelated
-  files — canvasStore, LibraryTable, etc. — unchanged from branch baseline).
-- `npm run build`: ✓ built in 6.43s, no new errors.
+## Verification
+- `npx tsc --noEmit`: zero errors in changed files (ChatPage, ChatSidebar, useMentionBadges); pre-existing errors in unrelated files unchanged.
+- `npm run build`: ✓ built in 11.42s — clean build.
+- JSON parse check: both locale files valid.

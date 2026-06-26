@@ -1543,6 +1543,7 @@
       "createError": "创建群组失败",
       "agentAddFailed": "添加智能体 {{name}} 失败"
     },
+    "mentionsBadgeTitle": "{{count}} 条提及",
     "mediaCard": {
       "title": "添加素材",
       "search": "搜索素材…",

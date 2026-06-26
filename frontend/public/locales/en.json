@@ -1543,6 +1543,7 @@
       "createError": "Failed to create group",
       "agentAddFailed": "Failed to add agent {{name}}"
     },
+    "mentionsBadgeTitle": "{{count}} mentions",
     "mediaCard": {
       "title": "Attach media",
       "search": "Search resources…",
