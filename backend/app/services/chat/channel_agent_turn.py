@@ -156,6 +156,7 @@ async def run_channel_agent_turn(
     Does NOT persist ai_sessions / ai_messages — the caller writes the reply.
 
     Gates (in order):
+    0. Channel must have a valid team_id (defense-in-depth).
     1. Agent must exist.
     2. caps.enabled AND caps.allows_team(channel["team_id"]).
     3. Build message history from channel.
@@ -164,6 +165,13 @@ async def run_channel_agent_turn(
     """
     channel_id = channel["id"]
     team_id = channel["team_id"]
+
+    # Gate 0 — defense-in-depth: team_id must not be null.
+    if not team_id:
+        logger.warning(
+            f"[channel_agent_turn] abort: channel={channel_id} has no team_id"
+        )
+        return None
 
     # Gate 1 — agent must exist.
     agent_repo = get_agent_repository()
@@ -237,10 +245,12 @@ async def run_channel_agent_turn(
         agent_slug=agent_slug,
         request_cache=_request_cache,
     )
-    # Expose the ResourceFetch tool in the tool list.
-    composed = composed.model_copy(
-        update={"tools": list(composed.tools or []) + [_RESOURCE_FETCH_SPEC]}
-    )
+    # Expose the ResourceFetch tool in the tool list only when permitted.
+    # (The handler will refuse if invoked without read_team_resources.)
+    tools_list = list(composed.tools or [])
+    if caps.read_team_resources:
+        tools_list = tools_list + [_RESOURCE_FETCH_SPEC]
+    composed = composed.model_copy(update={"tools": tools_list})
 
     model = composed.model or ""
     try:

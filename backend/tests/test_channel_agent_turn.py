@@ -78,7 +78,14 @@ def _make_composed() -> MagicMock:
 
     # model_copy must return an object with the same agent_id / model so that
     # UUID(summoner_user_id) calls inside RunRecorder still see a UUID.
-    composed.model_copy = lambda **_kw: composed
+    # Also, when update={"tools": ...} is provided, apply it.
+    def _model_copy(**kw: object) -> MagicMock:
+        update = kw.get("update", {})
+        if "tools" in update:
+            composed.tools = update["tools"]
+        return composed
+
+    composed.model_copy = _model_copy
     return composed
 
 
@@ -101,6 +108,30 @@ def _make_composer(composed: MagicMock) -> MagicMock:
 # ─── Patch targets (all module-level imports in channel_agent_turn) ────────────
 
 _MOD = "app.services.chat.channel_agent_turn"
+
+
+# ─── Test 0: null team_id → None ─────────────────────────────────────────────
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_null_team_id_returns_none() -> None:
+    """Gate 0: channel["team_id"] is None → function returns None immediately.
+
+    Defense-in-depth: team_id must not be null (gate check before agent lookup).
+    The agent repository must NOT be queried.
+    """
+    with patch(f"{_MOD}.get_agent_repository") as mock_repo_fn:
+        from app.services.chat.channel_agent_turn import run_channel_agent_turn
+
+        result = await run_channel_agent_turn(
+            agent_slug=AGENT_SLUG,
+            summoner_user_id=SUMMONER,
+            channel={"id": 42, "team_id": None},
+        )
+
+    assert result is None
+    mock_repo_fn.assert_not_called()
 
 
 # ─── Test 1: agent not found → None ───────────────────────────────────────────
@@ -348,3 +379,129 @@ async def test_no_read_team_resources_handler_refuses() -> None:
     assert (
         resource_fetch_calls == []
     ), "resource_fetch must NOT be called when read_team_resources=False"
+
+
+# ─── Test 6: ResourceFetch tool not registered when read_team_resources=False ───
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_resource_fetch_tool_not_registered_when_disabled() -> None:
+    """Fix 2: when read_team_resources=False, ResourceFetch tool must NOT be registered.
+
+    This is minimal tool surface — the LLM should never see a tool it can't use.
+    The handler's refusal logic is defense-in-depth and remains in place.
+    """
+    mock_repo = MagicMock()
+    mock_repo.get_by_slug = AsyncMock(return_value=_make_agent())
+
+    mock_chat_repo = MagicMock()
+    mock_chat_repo.recent_messages = AsyncMock(return_value=[])
+
+    runner = _make_runner()
+
+    async def _fake_run_turn(
+        composed: object,
+        *,
+        user_messages: object,
+        recorder: object,
+    ) -> dict:
+        # Capture the tools list as seen by run_turn
+        assert composed.tools is not None
+        tools_names = [t.get("function", {}).get("name") for t in composed.tools]
+        # ResourceFetch should NOT be in the tools list when read_team_resources=False
+        assert (
+            "ResourceFetch" not in tools_names
+        ), "ResourceFetch must not be registered when read_team_resources=False"
+        return {"content": "reply without resource access"}
+
+    runner.run_turn = _fake_run_turn
+
+    fake_stack = _make_stack(runner)
+    fake_composed = _make_composed()
+    fake_composed.tools = []  # Start with empty tools list
+    no_read_caps = _make_caps(enabled=True, read=False)
+
+    with (
+        patch(f"{_MOD}.get_agent_repository", return_value=mock_repo),
+        patch(f"{_MOD}.agent_chat_caps", return_value=no_read_caps),
+        patch(f"{_MOD}.get_chat_repository", return_value=mock_chat_repo),
+        patch(f"{_MOD}.get_skill_repository", return_value=MagicMock()),
+        patch(
+            f"{_MOD}.build_agent_runner_stack",
+            AsyncMock(return_value=fake_stack),
+        ),
+        patch(f"{_MOD}.PromptComposer", _make_composer(fake_composed)),
+        patch(f"{_MOD}.RunRecorder", return_value=_make_recorder_cm()),
+        patch(f"{_MOD}.provider_key_for_model", return_value="qwen"),
+    ):
+        from app.services.chat.channel_agent_turn import run_channel_agent_turn
+
+        result = await run_channel_agent_turn(
+            agent_slug=AGENT_SLUG,
+            summoner_user_id=SUMMONER,
+            channel=CHANNEL,
+        )
+
+    assert result == "reply without resource access"
+
+
+# ─── Test 7: ResourceFetch tool IS registered when read_team_resources=True ────
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_resource_fetch_tool_registered_when_enabled() -> None:
+    """Verify: when read_team_resources=True, ResourceFetch tool IS registered."""
+    mock_repo = MagicMock()
+    mock_repo.get_by_slug = AsyncMock(return_value=_make_agent())
+
+    mock_chat_repo = MagicMock()
+    mock_chat_repo.recent_messages = AsyncMock(return_value=[])
+
+    runner = _make_runner()
+
+    async def _fake_run_turn(
+        composed: object,
+        *,
+        user_messages: object,
+        recorder: object,
+    ) -> dict:
+        # Capture the tools list as seen by run_turn
+        assert composed.tools is not None
+        tools_names = [t.get("function", {}).get("name") for t in composed.tools]
+        # ResourceFetch SHOULD be in the tools list when read_team_resources=True
+        assert (
+            "ResourceFetch" in tools_names
+        ), "ResourceFetch must be registered when read_team_resources=True"
+        return {"content": "reply with resource access"}
+
+    runner.run_turn = _fake_run_turn
+
+    fake_stack = _make_stack(runner)
+    fake_composed = _make_composed()
+    fake_composed.tools = []  # Start with empty tools list
+    read_caps = _make_caps(enabled=True, read=True)
+
+    with (
+        patch(f"{_MOD}.get_agent_repository", return_value=mock_repo),
+        patch(f"{_MOD}.agent_chat_caps", return_value=read_caps),
+        patch(f"{_MOD}.get_chat_repository", return_value=mock_chat_repo),
+        patch(f"{_MOD}.get_skill_repository", return_value=MagicMock()),
+        patch(
+            f"{_MOD}.build_agent_runner_stack",
+            AsyncMock(return_value=fake_stack),
+        ),
+        patch(f"{_MOD}.PromptComposer", _make_composer(fake_composed)),
+        patch(f"{_MOD}.RunRecorder", return_value=_make_recorder_cm()),
+        patch(f"{_MOD}.provider_key_for_model", return_value="qwen"),
+    ):
+        from app.services.chat.channel_agent_turn import run_channel_agent_turn
+
+        result = await run_channel_agent_turn(
+            agent_slug=AGENT_SLUG,
+            summoner_user_id=SUMMONER,
+            channel=CHANNEL,
+        )
+
+    assert result == "reply with resource access"
