@@ -560,6 +560,7 @@ export function ChatPage(): React.ReactElement {
         {activeAgentDm !== null ? (
           /* ── Agent DM view: render AIChatPanel locked to the selected agent ── */
           <AIChatPanel
+            key={activeAgentDm}
             agentSlug={activeAgentDm}
             onClose={() => setActiveAgentDm(null)}
           />
@@ -635,6 +636,7 @@ export function ChatPage(): React.ReactElement {
             setShowCreate(false);
             setChannels((prev) => [ch, ...prev]);
             setActiveId(ch.id);
+            setActiveAgentDm(null);
           }}
         />
       )}
