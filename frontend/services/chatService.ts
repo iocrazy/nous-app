@@ -60,4 +60,10 @@ export const chatService = {
       method: 'POST',
       body: JSON.stringify({ last_read_seq: Number(lastReadSeq) }),
     }),
+
+  addAgent: (channelId: string, agentSlug: string) =>
+    req<{ added: boolean; agent_id?: string }>(`/chat/channels/${channelId}/agents`, {
+      method: 'POST',
+      body: JSON.stringify({ agent_slug: agentSlug }),
+    }),
 };
