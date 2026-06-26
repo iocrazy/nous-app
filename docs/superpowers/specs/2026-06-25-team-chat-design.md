@@ -140,7 +140,7 @@
 |----|------|----------|------|
 | CHAT-UNREAD-01 | **读扩散**：每成员只存 `last_read_seq`，未读数 = `channels.last_message_seq − channel_members.last_read_seq`（读时纯整数运算） | 避开 Rocket.Chat 写扩散规模炸弹 | ☑ |
 | CHAT-UNREAD-02 | **禁止**每条消息给全频道成员写扩散 +1（1000 人 = 1000 次写/条） | RC `Subscriptions.ts:537` 反例 | ☑ |
-| CHAT-UNREAD-03 | **@提及例外**：仅给被 @ 的少数成员写扩散 `mention_count += 1`（小集合，便宜） | RC `incUserMentionsAndUnread…:1561` | ◑ (increment_mentions 已建;@人 fanout 接线待补) |
+| CHAT-UNREAD-03 | **@提及例外**：仅给被 @ 的少数成员写扩散 `mention_count += 1`（小集合，便宜） | RC `incUserMentionsAndUnread…:1561` | ☑ #895（post_message fan-out 成员过滤+排除自己；sidebar amber badge；channel_members realtime） |
 | CHAT-UNREAD-04 | 标记已读 = 客户端 debounce 后 PATCH 自己的 `last_read_seq`（别每条消息都写） | MM typing/已读节流思路 | ☑ |
 | CHAT-UNREAD-05 | 侧栏总未读/红点用一个 view 聚合，O(成员数) 而非 O(消息数) | — | ☑ |
 
@@ -152,8 +152,8 @@
 |----|------|----------|------|
 | CHAT-RT-01 | `channel_messages` 加入 `supabase_realtime` publication + `REPLICA IDENTITY FULL`，前端订阅 `postgres_changes` | 现有 `task_tracking` 范式（`migrations/180,210`） | ☑ |
 | CHAT-RT-02 | **依赖 Realtime 受 RLS 约束**（已验证）：无权订阅者收不到 private 频道事件，不自建应用层 fan-out | `migrations/064` task_tracking RLS + Realtime 链路 | ☑ |
-| CHAT-RT-03 | **typing / 在线状态走 `realtime.broadcast()` 内存事件，不落库**（高频，落库撑爆 replication） | MM typing `user.go:2823` 不落库 | ☐ |
-| CHAT-RT-04 | 前端订阅自己的 `channel_members` 行获取未读变化；重连后按 seq range 拉缺口补洞 | seq 补洞 | ◑ (消息 Realtime 订阅+补 mark-read 已做；member-row 未读订阅/重连补洞延后) |
+| CHAT-RT-03 | **typing / 在线状态走 `realtime.broadcast()` 内存事件，不落库**（高频，落库撑爆 replication） | MM typing `user.go:2823` 不落库 | ☑ #897（useChannelPresence: presence 在线数 + typing broadcast 4s 自过期，独立 channel，不落库） |
+| CHAT-RT-04 | 前端订阅自己的 `channel_members` 行获取未读变化；重连后按 seq range 拉缺口补洞 | seq 补洞 | ☑ #895+#896（mention badge 走 channel_members 订阅；reconnect/online/focus 触发 gapFill 前向补拉 BigInt seq） |
 | CHAT-RT-05 | 前端订阅模式复用 `TaskManagerContext` 的 channel/subscribe 写法 | `frontend/contexts/TaskManagerContext.tsx:595` | ☑ |
 
 ---
@@ -164,8 +164,8 @@
 |----|------|----------|------|
 | CHAT-MSG-01 | 排序按 `seq DESC`（权威顺序）；keyset 分页 `seq < cursor`，**禁 OFFSET** | MM keyset `post_store.go:1609` | ☑ |
 | CHAT-MSG-02 | 同毫秒不乱序：seq 本身单调；若回退到 created_at 排序须带 `id` tie-breaker | MM `OrderBy CreateAt DESC, Id DESC` | ☑ |
-| CHAT-MSG-03 | 编辑：软更新，置 `edited_at`，Realtime 推 UPDATE 通知 | MM EditAt / RC editedAt | ◑ (软删/edited 列就绪，endpoint 延后) |
-| CHAT-MSG-04 | 删除：软删，置 `deleted_at`，前端渲染"已删除"占位 | MM DeleteAt 软删 | ◑ (deleted_at 列+list 过滤就绪，delete endpoint 延后) |
+| CHAT-MSG-03 | 编辑：软更新，置 `edited_at`，Realtime 推 UPDATE 通知 | MM EditAt / RC editedAt | ☑ #893（PATCH endpoint owner-gated + edited_at；Realtime UPDATE 订阅；inline edit + (edited) 标记） |
+| CHAT-MSG-04 | 删除：软删，置 `deleted_at`，前端渲染"已删除"占位 | MM DeleteAt 软删 | ☑ #893（DELETE endpoint 软删 owner-gated；tombstone 占位；Realtime 实时） |
 | CHAT-MSG-05 | 线程回复：`reply_to_id` 指向被回复消息（第一版只做"引用单条"，不做完整 thread 树） | MM `RootId` | ◑ (reply_to_id 列就绪，同频道校验+UI 延后) |
 | CHAT-MSG-06 | **统一卡片 schema**（`body jsonb`）：`{title, title_link, text, color, image_url, thumb_url, fields:[{title,value,short}], actions:[], footer, ts}` | MM `message_attachment.go:20` / RC attachments | ☑ #890（MessageBubble 渲染 title/image_url/fields；actions 留待 MSG-07） |
 | CHAT-MSG-07 | 交互按钮回调上下文（cookie/context）**只存服务端，客户端剥离**；点击走独立 endpoint | MM `integration_action.go:121` 安全做法 | ⊘ 本版延后（决策 OPEN-03） |
