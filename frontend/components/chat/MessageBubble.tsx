@@ -5,13 +5,17 @@
  *   - sender_type === 'agent'    → amber gradient avatar + "AGENT" tag
  *   - content_type === 'media_card' → media card from message.body
  *   - otherwise                 → plain text from message.body.text
+ *   - isDeleted (deleted_at set) → tombstone (muted italic); no edit/delete actions
+ *
+ * Owner gate: edit + delete actions only shown when isOwn && !isDeleted.
+ * Inline edit: Enter saves, Shift+Enter inserts newline, Esc cancels.
  *
  * Purely presentational — no data fetching.
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ExternalLink, Download } from 'lucide-react';
+import { ExternalLink, Download, Pencil, Trash2 } from 'lucide-react';
 import type { ChatMessage } from '../../types';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -114,11 +118,28 @@ function MediaCard({ body }: { body: MediaCardBody }): React.ReactElement {
 
 export interface MessageBubbleProps {
   message: ChatMessage;
+  /** Authenticated user id — gates edit/delete actions to own messages. */
+  currentUserId?: string | null;
+  /** Called when the user saves an edited draft. */
+  onEdit?: (id: string, text: string) => void;
+  /** Called when the user confirms a soft-delete. */
+  onDelete?: (id: string) => void;
 }
 
-export function MessageBubble({ message }: MessageBubbleProps): React.ReactElement {
+export function MessageBubble({
+  message,
+  currentUserId,
+  onEdit,
+  onDelete,
+}: MessageBubbleProps): React.ReactElement {
+  const { t } = useTranslation();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+
   const isAgent = message.sender_type === 'agent';
   const isMediaCard = message.content_type === 'media_card';
+  const isOwn = message.sender_type === 'user' && message.sender_id === currentUserId;
+  const isDeleted = !!message.deleted_at;
 
   const avatarClass = isAgent
     ? 'bg-gradient-to-br from-amber-400 to-amber-500 text-[#1a1505]'
@@ -130,8 +151,48 @@ export function MessageBubble({ message }: MessageBubbleProps): React.ReactEleme
       ? message.body.sender_name
       : (message.sender_id ?? 'Unknown');
 
+  // ── event handlers ──────────────────────────────────────────────────────
+
+  function handleEditClick() {
+    setDraft(String(message.body.text ?? ''));
+    setEditing(true);
+  }
+
+  function handleSave() {
+    const trimmed = draft.trim();
+    const original = String(message.body.text ?? '');
+    if (trimmed && trimmed !== original) {
+      onEdit?.(message.id, trimmed);
+    }
+    setEditing(false);
+    setDraft('');
+  }
+
+  function handleCancel() {
+    setEditing(false);
+    setDraft('');
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSave();
+    } else if (e.key === 'Escape') {
+      handleCancel();
+    }
+    // Shift+Enter: default newline behavior (no override needed)
+  }
+
+  function handleDeleteClick() {
+    if (window.confirm(t('chat.confirmDelete'))) {
+      onDelete?.(message.id);
+    }
+  }
+
+  // ── render ──────────────────────────────────────────────────────────────
+
   return (
-    <div className="flex gap-[11px]">
+    <div className="flex gap-[11px] group">
       {/* Avatar */}
       <div
         className={[
@@ -158,10 +219,70 @@ export function MessageBubble({ message }: MessageBubbleProps): React.ReactEleme
           <span className="text-[10.5px] text-[#74747e]">
             {fmtTime(message.created_at)}
           </span>
+          {message.edited_at && !isDeleted && (
+            <span className="text-[10.5px] text-[#74747e]">
+              {'·'} {t('chat.edited')}
+            </span>
+          )}
+
+          {/* Hover action buttons — own non-deleted messages only */}
+          {isOwn && !isDeleted && (
+            <div className="ml-auto flex gap-[4px] opacity-0 group-hover:opacity-100 transition-opacity">
+              <button
+                type="button"
+                onClick={handleEditClick}
+                title={t('chat.edit')}
+                className="p-[5px] rounded-[7px] bg-[#1d1d22] border border-white/[.12] text-[#74747e] hover:text-[#e7e7ea] hover:bg-[#252529] transition-colors"
+              >
+                <Pencil size={12} />
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteClick}
+                title={t('chat.delete')}
+                className="p-[5px] rounded-[7px] bg-[#1d1d22] border border-white/[.12] text-[#74747e] hover:text-red-400 hover:bg-red-500/[.1] transition-colors"
+              >
+                <Trash2 size={12} />
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Content */}
-        {isMediaCard ? (
+        {isDeleted ? (
+          /* Tombstone: replace body with muted italic line */
+          <p className="text-[13px] text-[#74747e] italic">
+            {t('chat.deleted')}
+          </p>
+        ) : editing ? (
+          /* Inline edit mode */
+          <div className="flex flex-col gap-[8px]">
+            <textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={handleKeyDown}
+              autoFocus
+              rows={3}
+              className="w-full bg-[#1d1d22] border border-white/[.12] rounded-[9px] text-[14px] text-[#e7e7ea] px-[10px] py-[8px] resize-none leading-[1.55] focus:outline-none focus:border-white/[.25] transition-colors"
+            />
+            <div className="flex gap-[6px]">
+              <button
+                type="button"
+                onClick={handleSave}
+                className="text-[12px] px-[10px] py-[4px] rounded-[7px] bg-indigo-500/[.18] border border-indigo-500/[.4] text-indigo-300 hover:bg-indigo-500/[.28] transition-colors"
+              >
+                {t('chat.save')}
+              </button>
+              <button
+                type="button"
+                onClick={handleCancel}
+                className="text-[12px] px-[10px] py-[4px] rounded-[7px] bg-[#17171b] border border-white/[.065] text-[#74747e] hover:text-[#e7e7ea] transition-colors"
+              >
+                {t('chat.cancel')}
+              </button>
+            </div>
+          </div>
+        ) : isMediaCard ? (
           <MediaCard body={message.body as MediaCardBody} />
         ) : (
           <p className="text-[14px] text-[#e7e7ea] leading-[1.55] whitespace-pre-wrap break-words">

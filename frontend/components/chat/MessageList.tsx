@@ -32,9 +32,9 @@ export function MessageList({
   onLoadOlder,
   hasOlder,
   loadingOlder,
-  currentUserId: _currentUserId,
-  onEdit: _onEdit,
-  onDelete: _onDelete,
+  currentUserId,
+  onEdit,
+  onDelete,
 }: MessageListProps): React.ReactElement {
   const { t } = useTranslation();
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -69,7 +69,13 @@ export function MessageList({
 
       {/* Messages — oldest first */}
       {messages.map((msg) => (
-        <MessageBubble key={msg.id} message={msg} />
+        <MessageBubble
+          key={msg.id}
+          message={msg}
+          currentUserId={currentUserId}
+          onEdit={onEdit}
+          onDelete={onDelete}
+        />
       ))}
 
       {/* Scroll anchor */}
