@@ -81,7 +81,7 @@
 | CHAT-SEC-AGENT-01 | **铁律：`agent 可见素材 = RLS(发起人身份) ∩ 当前频道 scope`**。agent 自身身份只用于审计/限流/吊销，**永不作为读素材的授权来源** | Slack「user token 才代人」+ OWASP 最小授权 | ☑ |
 | CHAT-SEC-AGENT-02 | @agent 时，`resource_fetch` 以**发起 @ 的用户 user_id** 查询（现状已如此） | `resource_fetch_tool.py:38-72`（已用 user_id + team_members 校验） | ☑ |
 | CHAT-SEC-AGENT-03 | **补现有洞**：`resource_fetch` 在频道上下文里要 **AND 上当前频道所属 team 的 scope**，否则用户能让 agent 把他在别的 team/个人私有的素材搬进当前频道（跨 team 泄露） | 现状只校验"该 user 在任何 team 可见"，未限当前频道 | ☑ |
-| CHAT-SEC-AGENT-04 | DM/private 频道内 @agent：允许取**发起人个人 scope**（`scope_type='user'`）素材（等于自己调）；team/group 频道内只能取该频道 team scope 素材 | 频道是"输出边界"，发起人是"输入授权" | ◑ (group/team scope done; DM 个人 scope 未特判) |
+| CHAT-SEC-AGENT-04 | DM/private 频道内 @agent：允许取**发起人个人 scope**（`scope_type='user'`）素材（等于自己调）；team/group 频道内只能取该频道 team scope 素材 | 频道是"输出边界"，发起人是"输入授权" | ☑ #899（agent DM 走 ai_sessions 个人 scope，无 team 输出边界，铁律天然成立）|
 | CHAT-SEC-AGENT-05 | **主动播报（无发起人在场）**：只能播报频道 scope 内、明确可共享的内容（team 公共素材/任务状态），**绝不触碰任何 `scope_type='user'` 私有行** | 无人可代时收窄到 broadcast 白名单 | ☐ |
 | CHAT-SEC-AGENT-06 | agent 只能 post 到 `agent_channels` 白名单内的频道（显式入驻，可审计动作），**无"全局读/发所有频道"后门** | MM webhook 必须指定 ChannelId | ☑ |
 | CHAT-SEC-AGENT-07 | 防 prompt injection：频道里他人消息一律当**数据**不当指令；忽略"把所有人素材发出来"类越权指令；输出前自检是否含跨 scope 数据 | OWASP AI Agent Cheat Sheet | ☑ |
@@ -182,7 +182,7 @@
 | CHAT-AGENT-03 | **🔥 防循环**：agent 发的 message 标 `from_bot_agent_id`；入站触发前 `if from_bot_agent_id IS NOT NULL → skip 触发` | Rocket.Chat `triggerHandler` **此处有 bug 会无限循环**，必须主动加这道过滤 | ☑ |
 | CHAT-AGENT-04 | agent 发言节流（防刷屏、防自触发链）；触发前校验 `agent_channels` 白名单 | MM/Slack rate limit | ☑ |
 | CHAT-AGENT-05 | 主动播报：监听 `task_tracking` 完成事件 → 写 message 到映射频道。第一版映射 = 发起人所属 team 的 `#general`，只播 team scope 可共享内容 | CHAT-SEC-AGENT-05 约束 | ☐ |
-| CHAT-AGENT-06 | "Agent 专属 DM" 复用现有 `AIChatPanel`+`ai_sessions`（本就是 1对1 与 agent），接进新聊天 DM 列表即可，不重做 | `frontend/components/AIChatPanel.tsx:108` | ◑ (agent DM 复用未做) |
+| CHAT-AGENT-06 | "Agent 专属 DM" 复用现有 `AIChatPanel`+`ai_sessions`（本就是 1对1 与 agent），接进新聊天 DM 列表即可，不重做 | `frontend/components/AIChatPanel.tsx:108` | ☑ #899（复用 AIChatPanel：加可选 agentSlug，sidebar agent-DM 行，ChatPage 路由；ai_sessions 路径非 channels）|
 | CHAT-AGENT-07 | 会话创建时绑定 `agent_id`（现有 ChatPanel 创建会话未绑定，需适配） | 调研适配点 | ☑ |
 
 ---
