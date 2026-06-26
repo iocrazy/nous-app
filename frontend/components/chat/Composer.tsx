@@ -16,12 +16,14 @@ import { Paperclip, Image, AtSign, Send } from 'lucide-react';
 
 export interface ComposerProps {
   onSend: (text: string) => void;
+  onAttachMedia?: () => void;
   disabled?: boolean;
   placeholder?: string;
 }
 
 export function Composer({
   onSend,
+  onAttachMedia,
   disabled = false,
   placeholder,
 }: ComposerProps): React.ReactElement {
@@ -89,6 +91,7 @@ export function Composer({
           <button
             type="button"
             disabled={disabled}
+            onClick={onAttachMedia}
             title={t('chat.attachMedia')}
             className="w-[30px] h-[30px] rounded-[8px] grid place-items-center text-[#74747e] hover:text-[#e7e7ea] hover:bg-[#17171b] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
