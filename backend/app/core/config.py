@@ -1017,6 +1017,18 @@ class Settings(BaseSettings):
     )
 
     # ============================================
+    # Feature flags — optional capabilities (default off; flip via .env)
+    # ============================================
+    FEATURE_AGENT_MEMORY: bool = Field(
+        default=False,
+        description="Enable scoped agent-memory recall on the chat hot path "
+        "(Phase A). When off (default) _safe_recall_agent_memory returns [] "
+        "immediately — prompt output is unchanged (behavior-neutral). Flip "
+        "true once the agent_memories table is populated and recall quality "
+        "is validated in production.",
+    )
+
+    # ============================================
     # 下载设置
     # ============================================
     # Docker 部署时使用默认值 /app/downloads（容器内路径）

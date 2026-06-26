@@ -25,10 +25,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Optional
 from uuid import UUID
 
+from app.core.config import settings
 from app.services.ai.adapters.factory import get_adapter_for_user
 from app.services.ai.llm.llm_fallback_chain import LLMFallbackChain
 from app.services.ai.memory import registry as memory_registry
@@ -104,6 +105,9 @@ class AgentRunnerStack:
     # Phase 4 L2: Honcho working representation of the user (flag-gated;
     # None when FEATURE_HONCHO_MEMORY is off or the peer has no model yet).
     user_context: Optional[str] = None
+    # Phase A: agent-memory recall results (flag-gated on FEATURE_AGENT_MEMORY;
+    # [] when off — behavior-neutral until the flag is flipped in prod).
+    agent_memory_facts: list[str] = field(default_factory=list)
 
 
 async def build_agent_runner_stack(
@@ -150,14 +154,36 @@ async def build_agent_runner_stack(
     budget_cents = agent.get("budget_per_run_cents")
 
     # ── 1. Memory recall (best-effort, concurrent, hard wall-clock budget) ──
-    # The two recalls are independent (neither consumes the other's output) and
-    # each is internally exception-safe (degrades to []/None), so we gather them
-    # concurrently. graph = FalkorDB search (3s inner cap); honcho = HTTP
-    # user-model. The whole step is additionally bounded by
-    # MEMORY_RECALL_BUDGET_S so cold-start setup (outside the inner timeouts)
-    # can never stall the turn — on budget overrun we proceed with no memory.
+    # The recalls are independent and each exception-safe (degrades to []/None),
+    # so we gather them concurrently. graph = FalkorDB search (3s inner cap);
+    # honcho = HTTP user-model; agent-memory = DB ranked recall (flag-gated,
+    # returns [] immediately when FEATURE_AGENT_MEMORY is off). The whole step
+    # is additionally bounded by MEMORY_RECALL_BUDGET_S so cold-start setup
+    # (outside the inner timeouts) can never stall the turn.
+    from app.services.ai.memory.agent_memory import MemoryContext as _MemCtx
+
+    # Build MemoryContext for agent-memory recall. team_ids deferred to Phase B
+    # (empty tuple for Phase A). session_id is a Snowflake BIGINT str from
+    # ai_sessions; UUID strings (test fixtures) safely resolve to None.
+    _sid: Optional[int] = None
     try:
-        graph_facts, honcho_context = await asyncio.wait_for(
+        _sid = int(str(session_id)) if session_id is not None else None
+    except (TypeError, ValueError):
+        pass
+    _mem_ctx = _MemCtx(
+        user_id=str(user_id),
+        team_ids=(),
+        # project_id: _resolve_session_project runs concurrently inside the
+        # gather below (via _safe_recall_graph_facts) — not available here
+        # without an extra sequential pre-gather query.  Project-scoped recall
+        # lands in Phase B when the resolved value can be shared cleanly.
+        project_id=None,
+        agent_id=agent.get("id"),
+        session_id=_sid,
+    )
+
+    try:
+        graph_facts, honcho_context, agent_memory_facts = await asyncio.wait_for(
             asyncio.gather(
                 _safe_recall_graph_facts(
                     user_id=user_id, user_query=user_query, session_id=session_id
@@ -165,6 +191,7 @@ async def build_agent_runner_stack(
                 _safe_recall_honcho_context(
                     user_id=str(user_id), session_id=session_id
                 ),
+                _safe_recall_agent_memory(_mem_ctx, user_query),
             ),
             timeout=MEMORY_RECALL_BUDGET_S,
         )
@@ -173,7 +200,7 @@ async def build_agent_runner_stack(
             "[memory] recall exceeded %.1fs budget; proceeding without memory",
             MEMORY_RECALL_BUDGET_S,
         )
-        graph_facts, honcho_context = [], None
+        graph_facts, honcho_context, agent_memory_facts = [], None, []
 
     # ── 2. HookRegistry per-turn ────────────────────────────────────
     registry = HookRegistry()
@@ -423,6 +450,7 @@ async def build_agent_runner_stack(
         primary_model=primary_model,
         fallback_chain_active=bool(fallback_models),
         user_context=honcho_context,
+        agent_memory_facts=agent_memory_facts,
     )
 
 
@@ -517,6 +545,27 @@ async def _safe_recall_honcho_context(
     except Exception:  # noqa: BLE001
         logger.exception("[l2] honcho context recall failed; degrading to none")
         return None
+
+
+async def _safe_recall_agent_memory(
+    ctx: Any,
+    query: str,
+) -> list[str]:
+    """Flag-gated agent-memory recall → rendered fact strings.
+
+    Off by default (FEATURE_AGENT_MEMORY=False); returns [] on disabled /
+    failure — a memory miss must never break a chat turn.
+    """
+    if not settings.FEATURE_AGENT_MEMORY:
+        return []
+    try:
+        from app.services.ai.memory.agent_memory import recall
+
+        hits = await recall(ctx, query, limit=5)
+        return [f"{h.kind}: {h.title} — {h.body_md}".strip() for h in hits]
+    except Exception:  # noqa: BLE001
+        logger.warning("[agent_memory] recall failed; degrading to []")
+        return []
 
 
 async def _resolve_session_project(session_id: Optional[str]) -> Optional[str]:

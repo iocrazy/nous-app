@@ -33,6 +33,7 @@ from app.models.agents import (  # noqa: F401
     AgentWorkers,
 )
 from app.models.ai import (  # noqa: F401
+    AgentMemory,
     AiAgents,
     AiAgentVersions,
     AiMessages,
@@ -174,6 +175,7 @@ __all__ = [
     "AgentTasks",
     "AgentWorkers",
     # ai
+    "AgentMemory",
     "AiAgentVersions",
     "AiAgents",
     "AiMessages",
