@@ -1511,7 +1511,29 @@
     "errorSend": "发送消息失败：{{error}}",
     "title": "团队聊天",
     "noTeam": "未选择团队",
-    "selectTeam": "请先选择一个团队以使用团队聊天"
+    "selectTeam": "请先选择一个团队以使用团队聊天",
+    "createGroup": {
+      "title": "新建群组",
+      "loading": "加载中...",
+      "nameLabel": "群组名称",
+      "namePlaceholder": "如：设计、市场...",
+      "visibility": "可见性",
+      "private": "私密",
+      "privateDesc": "仅受邀成员可见并发言",
+      "public": "公开",
+      "publicDesc": "团队内任何人均可找到并加入",
+      "members": "成员",
+      "noMembers": "未找到团队成员",
+      "agents": "智能体",
+      "noAgents": "暂无已启用聊天权限的智能体",
+      "cancel": "取消",
+      "create": "创建群组",
+      "creating": "创建中...",
+      "created": "群组已创建",
+      "loadError": "加载团队数据失败",
+      "createError": "创建群组失败",
+      "agentAddFailed": "添加智能体 {{name}} 失败"
+    }
   },
   "mcp": {
     "title": "MCP Servers",

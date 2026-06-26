@@ -17,6 +17,7 @@ export interface ChatSidebarProps {
   channels: Channel[];
   activeId: string;
   onSelect: (id: string) => void;
+  onNew?: () => void;
 }
 
 function ChannelRow({
@@ -86,6 +87,7 @@ export function ChatSidebar({
   channels,
   activeId,
   onSelect,
+  onNew,
 }: ChatSidebarProps): React.ReactElement {
   const { t } = useTranslation();
 
@@ -104,6 +106,7 @@ export function ChatSidebar({
         <button
           type="button"
           title={t('chat.newChannel')}
+          onClick={onNew}
           className="w-[26px] h-[26px] rounded-[7px] grid place-items-center text-[#74747e] hover:text-[#e7e7ea] hover:bg-[#17171b] border border-transparent transition-colors"
         >
           <Plus size={14} />
