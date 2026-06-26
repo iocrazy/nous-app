@@ -27,10 +27,12 @@ import { getResourceCoverUrl } from '../services/resourceService';
 import { fetchTeamMembers } from '../services/teamService';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { useChannelRealtime } from '../hooks/useChannelRealtime';
+import { useChannelPresence } from '../hooks/useChannelPresence';
 import { useMentionBadges } from '../hooks/useMentionBadges';
 import { ChatSidebar } from '../components/chat/ChatSidebar';
 import { MessageList } from '../components/chat/MessageList';
 import { Composer } from '../components/chat/Composer';
+import { TypingIndicator } from '../components/chat/TypingIndicator';
 import CreateGroupModal from '../components/chat/CreateGroupModal';
 import ResourcePicker from '../components/chat/ResourcePicker';
 
@@ -49,7 +51,7 @@ export function ChatPage(): React.ReactElement {
   const { t } = useTranslation();
   const { selectedTeamId, currentTeam } = useTeamContext();
   const { addToast } = useToast();
-  const { currentUserId } = useAuth();
+  const { currentUserId, userProfile } = useAuth();
 
   // ── State ──────────────────────────────────────────────────────────────────
 
@@ -406,6 +408,14 @@ export function ChatPage(): React.ReactElement {
     gapFill,
   );
 
+  // ── Presence + typing ─────────────────────────────────────────────────────
+
+  const me = currentUserId
+    ? { user_id: currentUserId, name: userProfile.name ?? currentUserId }
+    : null;
+
+  const { onlineUserIds, typingUsers, sendTyping } = useChannelPresence(activeId, me);
+
   // ── Live mention badge updates ─────────────────────────────────────────────
 
   useMentionBadges(currentUserId, (channelId, mentionCount) => {
@@ -546,6 +556,14 @@ export function ChatPage(): React.ReactElement {
               </span>
             </>
           )}
+          {activeChannel && onlineUserIds.length > 0 && (
+            <div className="ml-auto flex items-center gap-[5px] flex-shrink-0">
+              <span className="w-[6px] h-[6px] rounded-full bg-emerald-400 flex-shrink-0" />
+              <span className="text-[11.5px] text-[#74747e]">
+                {t('chat.typing.online', { count: onlineUserIds.length })}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Body: message list or empty state */}
@@ -565,9 +583,11 @@ export function ChatPage(): React.ReactElement {
               onEdit={handleEditMessage}
               onDelete={handleDeleteMessage}
             />
+            <TypingIndicator names={typingUsers.map((u) => u.name)} />
             <Composer
               onSend={handleSend}
               onAttachMedia={() => setShowPicker(true)}
+              onTyping={sendTyping}
               disabled={sending || !activeId}
               placeholder={
                 activeChannel

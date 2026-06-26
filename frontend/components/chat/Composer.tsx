@@ -25,6 +25,8 @@ import { MentionDropdown, type MentionCandidate } from './MentionDropdown';
 export interface ComposerProps {
   onSend: (text: string, mentionUserIds: string[]) => void;
   onAttachMedia?: () => void;
+  /** Called on each input change when content is non-empty. Hook-side throttling applies. */
+  onTyping?: () => void;
   disabled?: boolean;
   placeholder?: string;
   members?: { user_id: string; label: string }[];
@@ -57,6 +59,7 @@ function _detectMention(
 export function Composer({
   onSend,
   onAttachMedia,
+  onTyping,
   disabled = false,
   placeholder,
   members = [],
@@ -188,6 +191,10 @@ export function Composer({
       // Auto-grow up to ~5 lines
       el.style.height = 'auto';
       el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+      // Signal typing only when there is actual content (don't broadcast on clear)
+      if (el.value) {
+        onTyping?.();
+      }
       // Detect active @-token
       const cursor = el.selectionStart ?? el.value.length;
       const detected = _detectMention(el.value, cursor);
@@ -198,7 +205,7 @@ export function Composer({
         setMentionQuery(null);
       }
     },
-    [],
+    [onTyping],
   );
 
   // ── @ toolbar button ───────────────────────────────────────────────────────

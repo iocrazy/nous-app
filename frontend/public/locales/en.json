@@ -1543,6 +1543,12 @@
       "createError": "Failed to create group",
       "agentAddFailed": "Failed to add agent {{name}}"
     },
+    "typing": {
+      "one": "{{name}} is typing…",
+      "two": "{{a}} and {{b}} are typing…",
+      "many": "Several people are typing…",
+      "online": "{{count}} online"
+    },
     "mentionsBadgeTitle": "{{count}} mentions",
     "mediaCard": {
       "title": "Attach media",

@@ -512,7 +512,7 @@ export function AIChatPanel({
       <div className="flex-1 overflow-y-auto px-3 py-3 min-h-0">
         {loading ? (
           <div className="flex items-center justify-center h-full">
-            <TypingIndicator />
+            <TypingIndicator show />
           </div>
         ) : !hasMessages ? (
           <EmptyState onSuggest={handleSuggest} />
@@ -548,7 +548,7 @@ export function AIChatPanel({
             {sending && (
               <div className="flex justify-start mb-3">
                 <div className="max-w-[85%] rounded-xl bg-ink-800 text-ink-200 text-sm leading-relaxed overflow-hidden">
-                  <TypingIndicator />
+                  <TypingIndicator show />
                 </div>
               </div>
             )}
