@@ -7,11 +7,12 @@ test_generated_media_register.py.
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.repositories.chat_repository import ChatRepository
+from app.services.chat_service import ChatService
 
 _REPO = ChatRepository()
 
@@ -204,3 +205,152 @@ async def test_soft_delete_message_bigint_coercion():
     assert isinstance(params["mid"], int), "message_id must be coerced to int"
     assert params["cid"] == int(_CHAN_ID_STR)
     assert params["mid"] == int(_MSG_ID_STR)
+
+
+# ─── Service-level tests: ChatService.edit_message + delete_message ───────────
+
+_SVC_CHAN_ID = 111
+_SVC_MSG_ID = 222
+_SVC_USER_ID = "user-svc-test"
+_SVC_BODY = {"text": "edited text"}
+_SVC_ROW = {
+    "id": _SVC_MSG_ID,
+    "channel_id": _SVC_CHAN_ID,
+    "seq": 5,
+    "sender_id": _SVC_USER_ID,
+    "sender_type": "user",
+    "content_type": "text",
+    "body": _SVC_BODY,
+    "reply_to_id": None,
+    "from_bot_agent_id": None,
+    "edited_at": "2026-06-26T00:00:00",
+    "deleted_at": None,
+    "created_at": "2026-06-25T23:00:00",
+}
+
+
+def _make_mock_repo(
+    is_member: bool,
+    edit_result=None,
+    delete_result=None,
+) -> MagicMock:
+    repo = MagicMock()
+    repo.is_member = AsyncMock(return_value=is_member)
+    repo.edit_message = AsyncMock(return_value=edit_result)
+    repo.soft_delete_message = AsyncMock(return_value=delete_result)
+    return repo
+
+
+# ── edit_message ──────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_svc_edit_message_non_member_raises_permission_error():
+    """edit_message must call _require_member first; raises PermissionError when
+    the caller is not a channel member, and must NOT call the repo method."""
+    repo = _make_mock_repo(is_member=False)
+    svc = ChatService(repo=repo)
+
+    with pytest.raises(PermissionError):
+        await svc.edit_message(
+            channel_id=_SVC_CHAN_ID,
+            user_id=_SVC_USER_ID,
+            message_id=_SVC_MSG_ID,
+            body=_SVC_BODY,
+        )
+
+    repo.edit_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_svc_edit_message_repo_none_raises_permission_error():
+    """When repo.edit_message returns None (not owner / not text / deleted),
+    edit_message must raise PermissionError without leaking which case applies."""
+    repo = _make_mock_repo(is_member=True, edit_result=None)
+    svc = ChatService(repo=repo)
+
+    with pytest.raises(PermissionError):
+        await svc.edit_message(
+            channel_id=_SVC_CHAN_ID,
+            user_id=_SVC_USER_ID,
+            message_id=_SVC_MSG_ID,
+            body=_SVC_BODY,
+        )
+
+
+@pytest.mark.asyncio
+async def test_svc_edit_message_success_returns_row():
+    """edit_message returns the row dict on success."""
+    repo = _make_mock_repo(is_member=True, edit_result=_SVC_ROW)
+    svc = ChatService(repo=repo)
+
+    result = await svc.edit_message(
+        channel_id=_SVC_CHAN_ID,
+        user_id=_SVC_USER_ID,
+        message_id=_SVC_MSG_ID,
+        body=_SVC_BODY,
+    )
+
+    assert result == _SVC_ROW
+    repo.edit_message.assert_awaited_once_with(
+        channel_id=_SVC_CHAN_ID,
+        message_id=_SVC_MSG_ID,
+        sender_id=_SVC_USER_ID,
+        body=_SVC_BODY,
+    )
+
+
+# ── delete_message ────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_svc_delete_message_non_member_raises_permission_error():
+    """delete_message must call _require_member first; raises PermissionError
+    when the caller is not a channel member and must NOT call the repo method."""
+    repo = _make_mock_repo(is_member=False)
+    svc = ChatService(repo=repo)
+
+    with pytest.raises(PermissionError):
+        await svc.delete_message(
+            channel_id=_SVC_CHAN_ID,
+            user_id=_SVC_USER_ID,
+            message_id=_SVC_MSG_ID,
+        )
+
+    repo.soft_delete_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_svc_delete_message_repo_none_raises_permission_error():
+    """When repo.soft_delete_message returns None (not owner or already deleted),
+    delete_message must raise PermissionError without leaking which case applies."""
+    repo = _make_mock_repo(is_member=True, delete_result=None)
+    svc = ChatService(repo=repo)
+
+    with pytest.raises(PermissionError):
+        await svc.delete_message(
+            channel_id=_SVC_CHAN_ID,
+            user_id=_SVC_USER_ID,
+            message_id=_SVC_MSG_ID,
+        )
+
+
+@pytest.mark.asyncio
+async def test_svc_delete_message_success_returns_row():
+    """delete_message returns the row dict (with deleted_at set) on success."""
+    deleted_row = {**_SVC_ROW, "deleted_at": "2026-06-26T01:00:00"}
+    repo = _make_mock_repo(is_member=True, delete_result=deleted_row)
+    svc = ChatService(repo=repo)
+
+    result = await svc.delete_message(
+        channel_id=_SVC_CHAN_ID,
+        user_id=_SVC_USER_ID,
+        message_id=_SVC_MSG_ID,
+    )
+
+    assert result == deleted_row
+    repo.soft_delete_message.assert_awaited_once_with(
+        channel_id=_SVC_CHAN_ID,
+        message_id=_SVC_MSG_ID,
+        sender_id=_SVC_USER_ID,
+    )
