@@ -478,6 +478,75 @@ class NousModels(Base):
     last_tested_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True))
 
 
+class AgentMemory(Base):
+    __tablename__ = "agent_memory"
+    __table_args__ = (
+        CheckConstraint(
+            "scope = ANY (ARRAY['session','user','agent_user','project','team']::text[])",
+            name="agent_memory_scope_check",
+        ),
+        CheckConstraint(
+            "visibility = ANY (ARRAY['private','shared']::text[])",
+            name="agent_memory_visibility_check",
+        ),
+        CheckConstraint(
+            "kind = ANY (ARRAY['fact','decision','preference','procedure']::text[])",
+            name="agent_memory_kind_check",
+        ),
+        CheckConstraint(
+            "status = ANY (ARRAY['active','archived','superseded']::text[])",
+            name="agent_memory_status_check",
+        ),
+        PrimaryKeyConstraint("id", name="agent_memory_pkey"),
+        Index("idx_agent_memory_owner", "owner_user_id", "status"),
+        Index("idx_agent_memory_agent", "agent_id"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")
+    )
+    scope: Mapped[str] = mapped_column(Text, nullable=False)
+    owner_user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    team_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    project_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    agent_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid)
+    session_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    visibility: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'private'::text")
+    )
+    kind: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'fact'::text")
+    )
+    title: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''::text")
+    )
+    body_md: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''::text")
+    )
+    when_to_use: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''::text")
+    )
+    fingerprint: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''::text")
+    )
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'active'::text")
+    )
+    reinforcement_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    last_recalled_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(True)
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+
+
 class Skills(Base):
     __tablename__ = "skills"
     __table_args__ = (
