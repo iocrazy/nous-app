@@ -25,7 +25,9 @@ CREATE TABLE IF NOT EXISTS public.agent_memory (
     search_tsv tsvector GENERATED ALWAYS AS (
         setweight(to_tsvector('english', coalesce(title, '') || ' ' || coalesce(when_to_use, '')), 'A')
         || setweight(to_tsvector('english', coalesce(body_md, '')), 'B')
-    ) STORED
+    ) STORED,
+    CONSTRAINT agent_memory_shared_requires_team_id
+        CHECK (visibility = 'private' OR team_id IS NOT NULL)
 );
 
 CREATE INDEX IF NOT EXISTS idx_agent_memory_search ON public.agent_memory USING gin (search_tsv);

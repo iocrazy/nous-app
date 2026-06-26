@@ -497,6 +497,10 @@ class AgentMemory(Base):
             "status = ANY (ARRAY['active','archived','superseded']::text[])",
             name="agent_memory_status_check",
         ),
+        CheckConstraint(
+            "visibility = 'private' OR team_id IS NOT NULL",
+            name="agent_memory_shared_requires_team_id",
+        ),
         PrimaryKeyConstraint("id", name="agent_memory_pkey"),
         Index("idx_agent_memory_owner", "owner_user_id", "status"),
         Index("idx_agent_memory_agent", "agent_id"),
