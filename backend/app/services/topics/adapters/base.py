@@ -28,22 +28,25 @@ class HotspotCandidate:
 
 
 def make_dedup_key(source_id: str, *, url: Optional[str], title: str) -> str:
-    """Stable dedup key. Prefer normalized url; fall back to (source_id, title).
+    """Stable per-source dedup key: ``<source_id>:<sha1(title)>``.
 
-    When a URL is present the key is a SHA1 of the normalized URL so two
-    different titles pointing at the same URL collapse into one candidate.
-
-    When no URL is available the key is ``<source_id>:<sha1(title)>`` — the
-    literal source_id prefix makes the key human-readable and ensures keys from
-    different sources never collide even if titles match.
+    Keyed on (source_id, title), NOT url. Hot-list items (Weibo/Douyin/…) carry
+    URLs that drift between fetches (search links with changing params), so a
+    url-based key spawned a NEW row for the same headline every cycle — visible
+    duplicates AND broken heat accumulation (the same topic never merged, so its
+    on-board persistence never counted). Title is the stable identity for a
+    hot-list entry; keying on it collapses the same headline into one row that
+    MERGES across fetches (heat accumulates). Cross-source duplicates (the same
+    news on two platforms) are intentionally separate rows here — clustering
+    (topic_groups / source_count) handles that signal. Falls back to a url hash
+    only when there's no title.
     """
+    norm_title = title.strip().lower()
+    if norm_title:
+        title_hash = hashlib.sha1(norm_title.encode("utf-8")).hexdigest()  # nosec
+        return f"{source_id}:{title_hash}"
     basis = (url or "").strip().lower().rstrip("/")
-    if basis:
-        return hashlib.sha1(basis.encode("utf-8")).hexdigest()  # nosec - non-crypto
-    title_hash = hashlib.sha1(
-        title.strip().lower().encode("utf-8")
-    ).hexdigest()  # nosec
-    return f"{source_id}:{title_hash}"
+    return hashlib.sha1(basis.encode("utf-8")).hexdigest()  # nosec - non-crypto
 
 
 class SourceAdapter:
