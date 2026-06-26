@@ -43,7 +43,7 @@ def _make_repo(**overrides) -> AsyncMock:
     repo.is_member.return_value = True
     repo.get_channel.return_value = _CHANNEL
     repo.list_channel_agent_ids.return_value = [_AGENT_ID]
-    repo.send_message.return_value = {"id": 1, "seq": 2}
+    repo.send_message.return_value = {"id": 1, "seq": 2, "from_bot_agent_id": None}
     repo.add_agent_to_channel.return_value = None
     for k, v in overrides.items():
         setattr(repo, k, v)

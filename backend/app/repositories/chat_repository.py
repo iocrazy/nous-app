@@ -167,7 +167,7 @@ class ChatRepository:
                           (:cid, :seq, :sender, :stype, :ctype, CAST(:body AS jsonb),
                            :reply, :bot)
                         RETURNING id, channel_id, seq, sender_id, sender_type, content_type,
-                                  body, reply_to_id, edited_at, deleted_at, created_at
+                                  body, reply_to_id, from_bot_agent_id, edited_at, deleted_at, created_at
                         """
                         ),
                         {

@@ -58,32 +58,80 @@ The function reuses the same stack as `ai_library_chat_service._run_session_turn
 - `RunRecorder` async context manager for telemetry (agent_runs row).
 - `runner.resource_fetch_handler = closure` / `finally: = None` cleanup pattern.
 
+## Review Fixes (2026-06-26)
+
+### Fix 1: Guard Against Null team_id (Defense-in-Depth)
+
+**Rationale:** The team-scope iron law requires `team_id` to be established before
+any agent execution. Added Gate 0 (before agent lookup) to reject channels with
+null/falsy team_id, preventing downstream code from attempting agent work without
+a valid team context.
+
+**Implementation:** Early in `run_channel_agent_turn`, after reading
+`team_id = channel["team_id"]`, added:
+```python
+if not team_id:
+    logger.warning(f"[channel_agent_turn] abort: channel={channel_id} has no team_id")
+    return None
+```
+
+**Test:** `test_null_team_id_returns_none` — verifies that when `channel["team_id"]`
+is None, the function returns None immediately WITHOUT querying the agent repository.
+
+### Fix 2: Register ResourceFetch Tool Only When Permitted
+
+**Rationale:** Minimal tool surface — the LLM should never see a tool it cannot use.
+Previously, `_RESOURCE_FETCH_SPEC` was unconditionally appended to the tools list.
+Now it is registered only when `caps.read_team_resources` is True. The handler's
+refusal logic remains as a defense-in-depth safety net.
+
+**Implementation:** Before `composed.model_copy(...)`, conditionally append:
+```python
+tools_list = list(composed.tools or [])
+if caps.read_team_resources:
+    tools_list = tools_list + [_RESOURCE_FETCH_SPEC]
+composed = composed.model_copy(update={"tools": tools_list})
+```
+
+**Tests:**
+- `test_resource_fetch_tool_not_registered_when_disabled` — when `read_team_resources=False`,
+  ResourceFetch is NOT in the tools list passed to `run_turn`.
+- `test_resource_fetch_tool_registered_when_enabled` — when `read_team_resources=True`,
+  ResourceFetch IS in the tools list.
+
 ## Test Results
 
 ```
-5 passed in 1.01s
+8 passed in 1.02s
 ```
 
 | Test | Gate | Assertion |
 |------|------|-----------|
+| `test_null_team_id_returns_none` | Gate 0 | None, agent repo not queried |
 | `test_agent_not_found_returns_none` | Gate 1 | None, stack not built |
 | `test_caps_disabled_returns_none` | Gate 2a | None (enabled=False), stack not built |
 | `test_caps_wrong_team_returns_none` | Gate 2b | None (team_ids restricted), stack not built |
 | `test_happy_path_returns_content_and_handler_scoped` | Gate 4/5 | "hello from agent"; resource_fetch called with user_id=SUMMONER, team_id=7 |
 | `test_no_read_team_resources_handler_refuses` | CHAT-PERM-10 | Handler returns error dict; resource_fetch NOT called |
+| `test_resource_fetch_tool_not_registered_when_disabled` | Fix 2a | Tool not in list when read=False |
+| `test_resource_fetch_tool_registered_when_enabled` | Fix 2b | Tool in list when read=True |
 
 Handler verification strategy: mock `run_turn` invokes the handler internally
 (while all patches are still active) so the `available_refs={rid}` lazy import
 of `resource_fetch` picks up the test mock.
 
-## Lint
+## Lint (Post-Fixes)
 
-- `black`: 1 file reformatted (test file, cosmetic trailing whitespace), 1 unchanged.
+- `black`: 2 files left unchanged.
 - `isort`: no changes.
 - `flake8`: 0 errors.
+- **Commit hash:** `cd811b4c`
 
 ## Concerns / Future Work
 
+- Gate 0 (null team_id check) is a forward-facing defense: if channel creation
+  logic is broken, this gate prevents silent downstream failures. If team_id is
+  ever legitimately optional for channel context, this gate should be re-evaluated.
 - `available_refs={rid}` bypasses the "agent can only read pre-declared refs"
   check.  This is intentional for the channel context where no resource list is
   pre-declared; the DB team-scope is the authoritative boundary.  When channel

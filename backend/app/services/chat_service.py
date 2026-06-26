@@ -137,7 +137,7 @@ class ChatService:
         Returns slugs of agents that successfully replied.
         """
         # Anti-loop guard — MUST be the very first check, before any I/O.
-        if message.get("from_bot_agent_id"):
+        if message.get("from_bot_agent_id") is not None:
             return []
 
         channel = await self._repo.get_channel(channel_id=channel_id)
