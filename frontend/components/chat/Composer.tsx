@@ -123,10 +123,13 @@ export function Composer({
     const text = el.value.trim();
     if (!text) return;
 
-    // Keep only ids whose @<label> text is still present in the message
+    // Keep only ids whose @<label> token is still present in the message.
+    // Require a word boundary after the label so "@Alice" does not match
+    // "@Alice Smith" (prefix collision between e.g. "Alice" and "Alice Smith").
     const mentionUserIds: string[] = [];
     for (const [id, label] of mentionMapRef.current.entries()) {
-      if (text.includes(`@${label}`)) {
+      const esc = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (new RegExp(`@${esc}(?:\\s|$)`).test(text)) {
         mentionUserIds.push(id);
       }
     }
@@ -212,6 +215,9 @@ export function Composer({
     el.value = before + insertion + after;
     const newCursor = cursor + insertion.length;
     el.setSelectionRange(newCursor, newCursor);
+    // Recalc height — direct value mutation does not fire the input event
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
     // Trigger mention detection
     setMentionQuery('');
     setActiveIndex(0);
