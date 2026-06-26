@@ -739,3 +739,15 @@ class MemorySlotUpdate(BaseModel):
 class MemoryReloadResponse(BaseModel):
     ok: bool
     reloaded: Optional[str] = None  # provider name reloaded, None when slot disabled
+
+
+class HonchoConnectionResponse(BaseModel):
+    enabled: bool
+    base_url: str
+    workspace_id: str
+
+
+class HonchoConnectionUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    base_url: Optional[str] = None
+    workspace_id: Optional[str] = None

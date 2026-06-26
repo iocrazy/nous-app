@@ -45,6 +45,31 @@ _REQUEST_TIMEOUT_S = 10.0
 # already-exists race on older builds.
 _OK_STATUSES = {200, 201, 409}
 
+# system_settings key (admin-set, DB) → env-var fallback. Lets the Honcho
+# gate + connection config be configured from an admin UI instead of
+# editing prod compose env (which Watchtower does not reload).
+_HONCHO_SETTINGS_MAP: dict[str, tuple[str, str]] = {
+    "enabled": ("honcho_memory_enabled", "FEATURE_HONCHO_MEMORY"),
+    "base_url": ("honcho_base_url", "HONCHO_BASE_URL"),
+    "workspace_id": ("honcho_workspace_id", "HONCHO_WORKSPACE_ID"),
+}
+
+
+async def _honcho_settings_reader(key: str) -> Optional[str]:
+    """Read one system_settings value (service-role engine). None on miss/error."""
+    try:
+        from app.db import engine as db_engine
+
+        if not db_engine.is_configured():
+            return None
+        value = await db_engine.fetch_val(
+            "SELECT value FROM public.system_settings WHERE key = :k", {"k": key}
+        )
+        return None if value is None else str(value)
+    except Exception:  # noqa: BLE001 — settings read must never raise
+        logger.warning(f"[honcho] system_settings read failed: {key}")
+        return None
+
 
 @dataclass(frozen=True)
 class HonchoMemoryConfig:
@@ -61,6 +86,31 @@ class HonchoMemoryConfig:
             or DEFAULT_WORKSPACE,
         )
 
+    @classmethod
+    async def from_settings(cls, *, reader=None, env=None) -> "HonchoMemoryConfig":
+        """Resolve from system_settings with per-field env fallback (DB > env >
+        default). Behaviour-neutral when the honcho_* keys are absent: every
+        field falls back to the same env var from_env() reads. Never raises."""
+        read = reader if reader is not None else _honcho_settings_reader
+        environ = env if env is not None else os.environ
+
+        async def resolve(field_key: str, default: str = "") -> str:
+            db_key, env_key = _HONCHO_SETTINGS_MAP[field_key]
+            try:
+                db_val = await read(db_key)
+            except Exception:  # noqa: BLE001
+                logger.warning(f"[honcho] settings read failed: {db_key}")
+                db_val = None
+            if db_val is not None and str(db_val).strip():
+                return str(db_val).strip()
+            env_val = environ.get(env_key)
+            return env_val.strip() if isinstance(env_val, str) else default
+
+        enabled = (await resolve("enabled")).lower() in _TRUTHY
+        base_url = (await resolve("base_url")).rstrip("/")
+        workspace_id = (await resolve("workspace_id")) or DEFAULT_WORKSPACE
+        return cls(enabled=enabled, base_url=base_url, workspace_id=workspace_id)
+
     def operative(self) -> bool:
         """True when the flag is on AND a server address exists."""
         return self.enabled and bool(self.base_url)
@@ -75,6 +125,10 @@ class HonchoMemoryService:
     # Get-or-create calls already made this process — Honcho treats the
     # POSTs as idempotent, this just trims 3 round-trips per turn.
     _ensured: set[str] = field(default_factory=set)
+    # Whether config has been (re)loaded from system_settings. The env-sourced
+    # default_factory keeps construction cheap; the DB load happens once on
+    # first real async use via _ensure_config.
+    _config_loaded: bool = False
 
     def _get_client(self) -> Optional[httpx.AsyncClient]:
         if self.client is not None:
@@ -85,6 +139,18 @@ class HonchoMemoryService:
             base_url=self.config.base_url, timeout=_REQUEST_TIMEOUT_S
         )
         return self.client
+
+    async def _ensure_config(self) -> None:
+        """Swap the env-default config for the DB-sourced one on first use.
+        Skipped when a client is injected (tests set their own config) or after
+        the first load. Never raises — a failed settings load keeps env config."""
+        if self.client is not None or self._config_loaded:
+            return
+        self._config_loaded = True  # set first: no retry-storm, no double-load
+        try:
+            self.config = await HonchoMemoryConfig.from_settings()
+        except Exception:  # noqa: BLE001
+            logger.warning("[honcho] from_settings failed; keeping env config")
 
     async def _post_ok(self, client: httpx.AsyncClient, path: str, json: dict) -> bool:
         response = await client.post(path, json=json)
@@ -125,6 +191,7 @@ class HonchoMemoryService:
         path passes ``team-{team_id}`` when the session carries team
         context (canvas plan: Workspace=team), else the deployment
         default applies."""
+        await self._ensure_config()
         client = self._get_client()
         if client is None:
             return False
@@ -184,6 +251,7 @@ class HonchoMemoryService:
         any failure, when disabled, or when the peer has no
         observations yet.
         """
+        await self._ensure_config()
         client = self._get_client()
         if client is None:
             return None
@@ -228,6 +296,7 @@ class HonchoMemoryService:
         in Honcho's server-side filter semantics can never leak another
         peer's observations into the management panel.
         """
+        await self._ensure_config()
         client = self._get_client()
         if client is None:
             return []
@@ -264,6 +333,7 @@ class HonchoMemoryService:
         self, *, conclusion_id: str, workspace_id: Optional[str] = None
     ) -> Optional[dict]:
         """Single observation by id; None when missing or on failure."""
+        await self._ensure_config()
         client = self._get_client()
         if client is None:
             return None
@@ -286,6 +356,7 @@ class HonchoMemoryService:
         """Delete one observation. Caller is responsible for the
         ownership check (router verifies observed_id == the requesting
         user's peer before calling)."""
+        await self._ensure_config()
         client = self._get_client()
         if client is None:
             return False
@@ -310,6 +381,7 @@ class HonchoMemoryService:
         self, *, user_id: str, workspace_id: Optional[str] = None
     ) -> Optional[list[str]]:
         """User-curated "About me" card lines; None when unset/failed."""
+        await self._ensure_config()
         client = self._get_client()
         if client is None:
             return None
@@ -334,6 +406,7 @@ class HonchoMemoryService:
         workspace_id: Optional[str] = None,
     ) -> bool:
         """Replace the "About me" card. Empty list clears it."""
+        await self._ensure_config()
         client = self._get_client()
         if client is None:
             return False
@@ -355,6 +428,7 @@ class HonchoMemoryService:
         observations + clear the card. Raw chat messages are retained
         (deleting memory ≠ deleting chat history). Returns the number
         of observations deleted."""
+        await self._ensure_config()
         conclusions = await self.list_conclusions(
             user_id=user_id, workspace_id=workspace_id, limit=1000
         )
@@ -374,6 +448,7 @@ class HonchoMemoryService:
         """Dialectic query about ``user_id``. None on any failure —
         including while the server lacks an embedding provider (its
         search_memory tool errors out server-side)."""
+        await self._ensure_config()
         client = self._get_client()
         if client is None or not query.strip():
             return None

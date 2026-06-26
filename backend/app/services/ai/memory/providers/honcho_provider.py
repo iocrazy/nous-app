@@ -90,9 +90,9 @@ class HonchoProvider(MemoryProvider):
             return None
 
     async def reload(self) -> None:
-        # Drop the cached httpx client so a changed connection (Phase 2: when
-        # base_url/workspace move to system_settings) takes effect on the next
-        # call. The HonchoMemoryService singleton lazily rebuilds its client.
+        # Drop the cached httpx client AND the config-loaded flag so the next
+        # call re-reads HonchoMemoryConfig.from_settings() and reconnects with
+        # the new base_url. (Phase 2b: connection config now lives in settings.)
         try:
             service = get_honcho_memory_service()
             if getattr(service, "client", None) is not None:
@@ -101,6 +101,7 @@ class HonchoProvider(MemoryProvider):
                 except Exception:  # noqa: BLE001
                     pass
                 service.client = None  # type: ignore[assignment]
+            service._config_loaded = False  # type: ignore[attr-defined]
         except Exception:  # noqa: BLE001
             logger.warning("[honcho_provider] reload failed")
 

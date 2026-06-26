@@ -49,6 +49,8 @@ import {
   useMemoryControl,
   useSetMemorySlot,
   useReloadMemorySlot,
+  useHonchoConnection,
+  useUpdateHonchoConnection,
 } from '../../api/endpoints/settings'
 
 /**
@@ -85,6 +87,19 @@ export function MemorySettings() {
   const setSlot = useSetMemorySlot()
   const reloadSlot = useReloadMemorySlot()
   const [catalog, setCatalog] = useState<CatalogModel[]>([])
+
+  const { data: honcho } = useHonchoConnection()
+  const updateHoncho = useUpdateHonchoConnection()
+  const [hcEnabled, setHcEnabled] = useState(false)
+  const [hcBaseUrl, setHcBaseUrl] = useState('')
+  const [hcWorkspace, setHcWorkspace] = useState('')
+
+  useEffect(() => {
+    if (!honcho) return
+    setHcEnabled(honcho.enabled)
+    setHcBaseUrl(honcho.base_url)
+    setHcWorkspace(honcho.workspace_id)
+  }, [honcho])
 
   // Load the platform-model catalog so the extractor/embedder can be assigned by
   // selection (instead of hand-typing base_url/model/api_key).
@@ -418,6 +433,41 @@ export function MemorySettings() {
           </div>
         )
       })}
+
+      <Divider />
+      <SectionHeader
+        icon={<IconRobot />}
+        title="Honcho (L2) connection"
+        subtitle="How MediaHub reaches the Honcho service. After saving, click L2 Reload above to apply. (Honcho's own embedding/LLM live in its container — env-managed on the NAS.)"
+      />
+      <Row label="Enabled" hint="Master toggle for the L2 user-model layer.">
+        <Switch checked={hcEnabled} onChange={setHcEnabled} disabled={updateHoncho.isPending} />
+      </Row>
+      <Divider style={{ margin: 0 }} />
+      <Row label="Base URL" hint="e.g. http://192.168.50.9:18000">
+        <Input value={hcBaseUrl} onChange={setHcBaseUrl} placeholder="http://…:18000" style={{ width: 260 }} />
+      </Row>
+      <Divider style={{ margin: 0 }} />
+      <Row label="Workspace">
+        <Input value={hcWorkspace} onChange={setHcWorkspace} placeholder="mediahub" style={{ width: 260 }} />
+      </Row>
+      <div style={{ textAlign: 'right', paddingTop: 12 }}>
+        <Button
+          type="primary"
+          loading={updateHoncho.isPending}
+          onClick={() =>
+            updateHoncho.mutate(
+              { enabled: hcEnabled, base_url: hcBaseUrl.trim(), workspace_id: hcWorkspace.trim() },
+              {
+                onSuccess: () => Message.success('Honcho connection saved — click L2 Reload to apply'),
+                onError: (e: unknown) => Message.error((e as Error)?.message || 'Failed to save'),
+              },
+            )
+          }
+        >
+          Save Honcho connection
+        </Button>
+      </div>
 
       <Divider />
       <div style={{ textAlign: 'right' }}>
