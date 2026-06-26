@@ -1546,6 +1546,7 @@ export interface Channel {
   topic: string | null;
   last_message_seq: string;
   unread: number;
+  mentions: number;
   created_at: string;
 }
 

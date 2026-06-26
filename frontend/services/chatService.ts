@@ -20,16 +20,21 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return resp.json() as Promise<T>;
 }
 
-export const chatService = {
-  listChannels: () => req<Channel[]>('/chat/channels'),
+type ChannelRow = Omit<Channel, 'mentions'> & { mention_count?: number; mentions?: number };
+const toChannel = (r: ChannelRow): Channel => ({ ...r, mentions: r.mention_count ?? r.mentions ?? 0 });
 
-  createChannel: (p: {
+export const chatService = {
+  listChannels: async (): Promise<Channel[]> =>
+    (await req<ChannelRow[]>('/chat/channels')).map(toChannel),
+
+  createChannel: async (p: {
     type: 'group' | 'dm' | 'public';
     team_id: string;
     name?: string | null;
     history_mode?: 'shared' | 'joined';
     member_ids?: string[];
-  }) => req<Channel>('/chat/channels', { method: 'POST', body: JSON.stringify(p) }),
+  }): Promise<Channel> =>
+    toChannel(await req<ChannelRow>('/chat/channels', { method: 'POST', body: JSON.stringify(p) })),
 
   addMembers: (channelId: string, userIds: string[]) =>
     req<{ added: number }>(`/chat/channels/${channelId}/members`, {
