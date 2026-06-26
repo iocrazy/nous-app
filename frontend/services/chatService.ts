@@ -61,6 +61,17 @@ export const chatService = {
       body: JSON.stringify({ last_read_seq: Number(lastReadSeq) }),
     }),
 
+  editMessage: (channelId: string, messageId: string, body: Record<string, unknown>) =>
+    req<ChatMessage>(`/chat/channels/${channelId}/messages/${messageId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ body }),
+    }),
+
+  deleteMessage: (channelId: string, messageId: string) =>
+    req<ChatMessage>(`/chat/channels/${channelId}/messages/${messageId}`, {
+      method: 'DELETE',
+    }),
+
   addAgent: (channelId: string, agentSlug: string) =>
     req<{ added: boolean; agent_id?: string }>(`/chat/channels/${channelId}/agents`, {
       method: 'POST',
