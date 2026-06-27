@@ -53,6 +53,16 @@ class _EmptyResult:
         return None
 
 
+class _ScalarResult:
+    """Fake result whose .scalar() returns a fixed value (e.g. True/False)."""
+
+    def __init__(self, value):
+        self._value = value
+
+    def scalar(self):
+        return self._value
+
+
 class _MappingResult:
     def __init__(self, rows):
         self._rows = rows
@@ -136,12 +146,13 @@ async def test_insert_proposal_returns_false_on_error():
 
 @pytest.mark.asyncio
 async def test_approve_proposal_success_issues_both_updates():
-    """approve_proposal: pending select returns a row → both UPDATEs executed."""
+    """approve_proposal: pending select returns a row + membership confirmed → both UPDATEs executed."""
     from app.repositories.agent_memory_promotion_repository import approve_proposal
 
-    # First execute: SELECT FOR UPDATE returns the pending proposal row.
-    # Second execute: UPDATE agent_memory.
-    # Third execute: UPDATE agent_memory_promotions.
+    # Call 0: SELECT FOR UPDATE returns the pending proposal row.
+    # Call 1: membership EXISTS check returns True (owner is still a member).
+    # Call 2: UPDATE agent_memory.
+    # Call 3: UPDATE agent_memory_promotions.
     pending_row = {
         "id": 42,
         "memory_id": 111,
@@ -151,10 +162,16 @@ async def test_approve_proposal_success_issues_both_updates():
         "status": "pending",
     }
     select_result = _MappingResult([pending_row])
+    membership_result = _ScalarResult(True)  # owner IS still a member
     update_memory_result = _EmptyResult()
     update_promotion_result = _EmptyResult()
 
-    session = _Session(select_result, update_memory_result, update_promotion_result)
+    session = _Session(
+        select_result,
+        membership_result,
+        update_memory_result,
+        update_promotion_result,
+    )
 
     with patch(
         "app.repositories.agent_memory_promotion_repository.write_scope",
@@ -163,17 +180,24 @@ async def test_approve_proposal_success_issues_both_updates():
         ok = await approve_proposal(proposal_id=42, reviewer_id="admin-uuid")
 
     assert ok is True
-    assert len(session.calls) == 3
+    assert len(session.calls) == 4
 
     # Call 0: SELECT FOR UPDATE
     assert "FOR UPDATE" in session.calls[0]["sql"].upper()
     assert session.calls[0]["params"]["id"] == 42
 
-    # Call 1: UPDATE agent_memory — must set visibility='shared' and bind team_id
-    memory_sql = session.calls[1]["sql"].upper()
+    # Call 1: membership check — must reference team_members and memory_id
+    membership_sql = session.calls[1]["sql"].upper()
+    assert "TEAM_MEMBERS" in membership_sql
+    assert "EXISTS" in membership_sql
+    assert session.calls[1]["params"]["memory_id"] == 111
+    assert session.calls[1]["params"]["target_team_id"] == 10
+
+    # Call 2: UPDATE agent_memory — must set visibility='shared' and bind team_id
+    memory_sql = session.calls[2]["sql"].upper()
     assert "UPDATE" in memory_sql
     assert "AGENT_MEMORY" in memory_sql
-    memory_params = session.calls[1]["params"]
+    memory_params = session.calls[2]["params"]
     assert memory_params.get("visibility") == "shared"
     assert memory_params.get("memory_id") == 111
     # Critical: team_id must be bound to proposal's target_team_id (10).
@@ -181,14 +205,14 @@ async def test_approve_proposal_success_issues_both_updates():
     # requires team_id IS NOT NULL when visibility = 'shared'.
     assert memory_params.get("team_id") == 10
 
-    # Call 2: UPDATE agent_memory_promotions — must bind reviewer_id + status=approved
-    promo_sql = session.calls[2]["sql"].upper()
+    # Call 3: UPDATE agent_memory_promotions — must bind reviewer_id + status=approved
+    promo_sql = session.calls[3]["sql"].upper()
     assert "UPDATE" in promo_sql
     assert "AGENT_MEMORY_PROMOTIONS" in promo_sql
     # Verify the promotion row is stamped with status = 'approved' (matches
     # _UPDATE_PROMOTION_APPROVED_SQL which hard-codes the literal 'approved').
-    assert "'APPROVED'" in promo_sql or "= 'approved'" in session.calls[2]["sql"]
-    promo_params = session.calls[2]["params"]
+    assert "'APPROVED'" in promo_sql or "= 'approved'" in session.calls[3]["sql"]
+    promo_params = session.calls[3]["params"]
     assert promo_params.get("reviewer_id") == "admin-uuid"
     assert promo_params.get("proposal_id") == 42
 
@@ -328,3 +352,69 @@ async def test_list_proposals_returns_joined_rows():
     assert "JOIN" in session_obj._sql.upper() or "join" in session_obj._sql
     assert session_obj._params["status"] == "pending"
     assert session_obj._params["limit"] == 50
+
+
+# ---------------------------------------------------------------------------
+# TOCTOU membership re-check test (Phase C1 security fix)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_approve_proposal_returns_false_when_owner_no_longer_member():
+    """TOCTOU guard: if the memory owner was removed from the target team between
+    proposal-creation and admin approval, approve_proposal must return False
+    WITHOUT issuing either mutating UPDATE.
+
+    Only the SELECT FOR UPDATE (call 0) and the membership EXISTS check (call 1)
+    should be recorded — no UPDATE to agent_memory, no UPDATE to
+    agent_memory_promotions.
+    """
+    from app.repositories.agent_memory_promotion_repository import approve_proposal
+
+    # Call 0: SELECT FOR UPDATE returns a pending proposal row.
+    # Call 1: membership EXISTS check returns False (owner was removed from team).
+    # No further calls should occur.
+    pending_row = {
+        "id": 77,
+        "memory_id": 222,
+        "target_team_id": 55,
+        "target_project_id": None,
+        "scrubbed_body_md": "sensitive memory body",
+        "status": "pending",
+    }
+    select_result = _MappingResult([pending_row])
+    membership_result = _ScalarResult(False)  # owner is NO LONGER a member
+
+    session = _Session(select_result, membership_result)
+
+    with patch(
+        "app.repositories.agent_memory_promotion_repository.write_scope",
+        return_value=_Scope(session),
+    ):
+        ok = await approve_proposal(proposal_id=77, reviewer_id="admin-uuid")
+
+    # Must fail-closed: return False without sharing the memory.
+    assert ok is False
+
+    # Exactly 2 calls: the guard SELECT and the membership check — NO UPDATEs.
+    assert len(session.calls) == 2
+
+    # Call 0: the pending-guard SELECT FOR UPDATE
+    assert "FOR UPDATE" in session.calls[0]["sql"].upper()
+    assert session.calls[0]["params"]["id"] == 77
+
+    # Call 1: the membership EXISTS check (atom within the same transaction)
+    membership_sql = session.calls[1]["sql"].upper()
+    assert "EXISTS" in membership_sql
+    assert "TEAM_MEMBERS" in membership_sql
+    assert session.calls[1]["params"]["memory_id"] == 222
+    assert session.calls[1]["params"]["target_team_id"] == 55
+
+    # Confirm neither mutating UPDATE was reached.
+    # Note: the SELECT FOR UPDATE SQL itself contains the word UPDATE, so we check
+    # for UPDATE statements (lines starting with UPDATE after stripping whitespace).
+    for call in session.calls:
+        sql_stripped = call["sql"].strip().upper()
+        assert not sql_stripped.startswith(
+            "UPDATE"
+        ), f"Unexpected mutating UPDATE issued after membership check returned False:\n{call['sql']}"

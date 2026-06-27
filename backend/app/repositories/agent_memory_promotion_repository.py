@@ -41,6 +41,18 @@ _SELECT_PENDING_FOR_UPDATE_SQL = text(
     """
 )
 
+_CHECK_OWNER_STILL_MEMBER_SQL = text(
+    """
+    SELECT EXISTS (
+        SELECT 1
+        FROM public.team_members tm
+        JOIN public.agent_memory m ON m.owner_user_id = tm.user_id
+        WHERE m.id = :memory_id
+          AND tm.team_id = :target_team_id
+    )
+    """
+)
+
 _UPDATE_AGENT_MEMORY_PROMOTE_SQL = text(
     """
     UPDATE public.agent_memory
@@ -156,11 +168,20 @@ async def insert_proposal(
 
 
 async def approve_proposal(*, proposal_id: int, reviewer_id: str) -> bool:
-    """Single-transaction approval: SELECT FOR UPDATE (guard) → UPDATE agent_memory
+    """Single-transaction approval: SELECT FOR UPDATE (guard) →
+    EXISTS membership re-check (TOCTOU guard) → UPDATE agent_memory
     (flip to shared) → UPDATE promotion (mark approved).
 
-    Returns False immediately (without mutating) if no pending proposal matches
-    ``proposal_id``, or on any error (rolled back). Never raises.
+    All four steps run in the same ``write_scope()`` transaction, making the
+    membership check and the flip atomic.
+
+    Returns False (without mutating) if:
+    - No pending proposal matches ``proposal_id``.
+    - The memory owner is no longer a member of the target team at approve time
+      (TOCTOU guard — proposal stays pending so an admin can see it was skipped).
+    - Any error occurs (rolled back).
+
+    Never raises.
     """
     try:
         async with write_scope() as session:
@@ -173,7 +194,29 @@ async def approve_proposal(*, proposal_id: int, reviewer_id: str) -> bool:
             if row is None:
                 return False
 
-            # Step 2 — promote the memory row to shared.
+            # Step 2 — TOCTOU guard: re-verify the memory owner is STILL a member
+            # of the target team at approve time, inside the same transaction.
+            # If the owner was removed from the team after proposal-creation but
+            # before admin approval, we must refuse to share the memory.
+            membership_result = await session.execute(
+                _CHECK_OWNER_STILL_MEMBER_SQL,
+                {
+                    "memory_id": row["memory_id"],
+                    "target_team_id": row["target_team_id"],
+                },
+            )
+            is_still_member = membership_result.scalar()
+            if not is_still_member:
+                logger.warning(
+                    "[agent_memory_promotions] approve_proposal refused: "
+                    "memory owner is no longer a member of team={} for proposal_id={}; "
+                    "memory stays private, proposal stays pending",
+                    row["target_team_id"],
+                    proposal_id,
+                )
+                return False
+
+            # Step 3 — promote the memory row to shared.
             await session.execute(
                 _UPDATE_AGENT_MEMORY_PROMOTE_SQL,
                 {
@@ -185,7 +228,7 @@ async def approve_proposal(*, proposal_id: int, reviewer_id: str) -> bool:
                 },
             )
 
-            # Step 3 — mark the proposal as approved.
+            # Step 4 — mark the proposal as approved.
             await session.execute(
                 _UPDATE_PROMOTION_APPROVED_SQL,
                 {
