@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 # ---------------------------------------------------------------------------
-# _consolidate_pair: non-dup draft is written
+# _consolidate_context: non-dup draft is written (personal scope)
 # ---------------------------------------------------------------------------
 
 
@@ -24,10 +24,15 @@ import pytest
 async def test_consolidate_pair_writes_non_dup_drafts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Non-dup draft flows through to write_memory_row with scope='agent_user'."""
+    """Non-dup draft flows through write_memory_row with scope='agent_user'.
+
+    Updated for C0: tests _consolidate_context directly (the unit that writes)
+    rather than _consolidate_pair (which now enumerates contexts and delegates).
+    Personal context (team_id=None, project_id=None) → scope='agent_user'.
+    """
     from app.workflows.consolidate_agent_memory import (
         MIN_NEW_MESSAGES,
-        _consolidate_pair,
+        _consolidate_context,
     )
 
     # Enough messages to pass the cost guard
@@ -60,6 +65,8 @@ async def test_consolidate_pair_writes_non_dup_drafts(
         body_md: str,
         when_to_use: str,
         fingerprint: str,
+        team_id=None,
+        project_id=None,
     ) -> bool:
         written_calls.append(
             {
@@ -93,7 +100,7 @@ async def test_consolidate_pair_writes_non_dup_drafts(
         fake_consolidator,
     )
 
-    result = await _consolidate_pair("u1", "a1")
+    result = await _consolidate_context("u1", "a1", team_id=None, project_id=None)
 
     assert result["written"] == 1
     assert result["skipped"] == 0
@@ -103,7 +110,7 @@ async def test_consolidate_pair_writes_non_dup_drafts(
     assert kw["owner_user_id"] == "u1"
     assert kw["agent_id"] == "a1"
 
-    # Fix 2: assert fingerprint passthrough — must equal make_fingerprint("u1", "a1", draft)
+    # Assert fingerprint passthrough — must equal make_fingerprint("u1", "a1", draft)
     from app.services.ai.memory.agent_memory_consolidation import (
         MemoryDraft,
         make_fingerprint,
@@ -120,7 +127,7 @@ async def test_consolidate_pair_writes_non_dup_drafts(
 
 
 # ---------------------------------------------------------------------------
-# _consolidate_pair: dup fingerprint is skipped (write_memory_row not called)
+# _consolidate_context: dup fingerprint is skipped (write_memory_row not called)
 # ---------------------------------------------------------------------------
 
 
@@ -128,14 +135,17 @@ async def test_consolidate_pair_writes_non_dup_drafts(
 async def test_consolidate_pair_skips_dup_fingerprint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A draft whose fingerprint already exists must NOT be written."""
+    """A draft whose fingerprint already exists must NOT be written.
+
+    Updated for C0: tests _consolidate_context (the direct writer).
+    """
     from app.services.ai.memory.agent_memory_consolidation import (
         MemoryDraft,
         make_fingerprint,
     )
     from app.workflows.consolidate_agent_memory import (
         MIN_NEW_MESSAGES,
-        _consolidate_pair,
+        _consolidate_context,
     )
 
     messages = [
@@ -188,7 +198,7 @@ async def test_consolidate_pair_skips_dup_fingerprint(
         fake_consolidator,
     )
 
-    result = await _consolidate_pair("u1", "a1")
+    result = await _consolidate_context("u1", "a1", team_id=None, project_id=None)
 
     # consolidate_pair returns [] after dedup → loop has 0 iterations
     assert result["written"] == 0
@@ -197,7 +207,7 @@ async def test_consolidate_pair_skips_dup_fingerprint(
 
 
 # ---------------------------------------------------------------------------
-# _consolidate_pair: too few messages → early return, no write
+# _consolidate_context: too few messages → early return, no write
 # ---------------------------------------------------------------------------
 
 
@@ -205,10 +215,13 @@ async def test_consolidate_pair_skips_dup_fingerprint(
 async def test_consolidate_pair_too_few_messages_returns_zero(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Pairs below MIN_NEW_MESSAGES skip consolidation entirely."""
+    """Contexts below MIN_NEW_MESSAGES skip consolidation entirely.
+
+    Updated for C0: tests _consolidate_context (the direct writer).
+    """
     from app.workflows.consolidate_agent_memory import (
         MIN_NEW_MESSAGES,
-        _consolidate_pair,
+        _consolidate_context,
     )
 
     # One fewer message than the threshold
@@ -229,7 +242,7 @@ async def test_consolidate_pair_too_few_messages_returns_zero(
         fake_write,
     )
 
-    result = await _consolidate_pair("u1", "a1")
+    result = await _consolidate_context("u1", "a1", team_id=None, project_id=None)
 
     assert result["written"] == 0
     assert not write_called[0]
@@ -284,7 +297,7 @@ async def test_trigger_consolidation_endpoint_returns_counts() -> None:
 
     with patch(
         "app.workflows.consolidate_agent_memory._consolidate_pair",
-        new=AsyncMock(return_value={"written": 2, "skipped": 1}),
+        new=AsyncMock(return_value={"written": 2, "skipped": 1, "contexts": 1}),
     ):
         auth = MagicMock()
         result = await trigger_consolidation(
@@ -293,3 +306,371 @@ async def test_trigger_consolidation_endpoint_returns_counts() -> None:
 
     assert result.written == 2
     assert result.skipped == 1
+    assert result.contexts == 1
+
+
+# ---------------------------------------------------------------------------
+# Phase C0 (Task 2): _consolidate_context — scope derivation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_consolidate_context_project_scope_writes_with_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_consolidate_context with project_id=55, team_id=10 writes scope='project'."""
+    from app.workflows.consolidate_agent_memory import (
+        MIN_NEW_MESSAGES,
+        _consolidate_context,
+    )
+
+    messages = [
+        {"role": "user", "content": f"msg {i}"} for i in range(MIN_NEW_MESSAGES)
+    ]
+
+    written_calls: list[dict] = []
+    call_idx = [0]
+
+    async def fake_fetch_all(sql: str, params=None) -> list:
+        idx = call_idx[0]
+        call_idx[0] += 1
+        if idx == 0:
+            return messages
+        return []
+
+    async def fake_existing_fps(
+        *, owner_user_id: str, agent_id: str, scope: str, team_id, project_id
+    ) -> set:
+        return set()
+
+    async def fake_write(
+        *,
+        owner_user_id: str,
+        agent_id: str,
+        scope: str,
+        kind: str,
+        title: str,
+        body_md: str,
+        when_to_use: str,
+        fingerprint: str,
+        team_id=None,
+        project_id=None,
+    ) -> bool:
+        written_calls.append(
+            {
+                "scope": scope,
+                "team_id": team_id,
+                "project_id": project_id,
+                "owner_user_id": owner_user_id,
+                "agent_id": agent_id,
+            }
+        )
+        return True
+
+    async def fake_consolidator(prompt: str, model: str = "") -> str:
+        return (
+            '[{"title":"Deploy service","body_md":"kubectl apply",'
+            '"when_to_use":"when deploying","kind":"procedure"}]'
+        )
+
+    monkeypatch.setattr("app.db.engine.fetch_all", fake_fetch_all)
+    monkeypatch.setattr(
+        "app.workflows.consolidate_agent_memory.existing_fingerprints",
+        fake_existing_fps,
+    )
+    monkeypatch.setattr(
+        "app.workflows.consolidate_agent_memory.write_memory_row",
+        fake_write,
+    )
+    monkeypatch.setattr(
+        "app.workflows.consolidate_agent_memory.default_consolidator",
+        fake_consolidator,
+    )
+
+    result = await _consolidate_context("u1", "a1", team_id=10, project_id=55)
+
+    assert result["written"] == 1
+    assert result["skipped"] == 0
+    assert len(written_calls) == 1
+    kw = written_calls[0]
+    assert kw["scope"] == "project"
+    assert kw["team_id"] == 10
+    assert kw["project_id"] == 55
+
+
+@pytest.mark.asyncio
+async def test_consolidate_context_team_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_consolidate_context with team_id=10, project_id=None writes scope='team'."""
+    from app.workflows.consolidate_agent_memory import (
+        MIN_NEW_MESSAGES,
+        _consolidate_context,
+    )
+
+    messages = [
+        {"role": "user", "content": f"msg {i}"} for i in range(MIN_NEW_MESSAGES)
+    ]
+
+    written_calls: list[dict] = []
+    call_idx = [0]
+
+    async def fake_fetch_all(sql: str, params=None) -> list:
+        idx = call_idx[0]
+        call_idx[0] += 1
+        if idx == 0:
+            return messages
+        return []
+
+    async def fake_existing_fps(
+        *, owner_user_id: str, agent_id: str, scope: str, team_id, project_id
+    ) -> set:
+        return set()
+
+    async def fake_write(
+        *,
+        owner_user_id: str,
+        agent_id: str,
+        scope: str,
+        kind: str,
+        title: str,
+        body_md: str,
+        when_to_use: str,
+        fingerprint: str,
+        team_id=None,
+        project_id=None,
+    ) -> bool:
+        written_calls.append(
+            {"scope": scope, "team_id": team_id, "project_id": project_id}
+        )
+        return True
+
+    async def fake_consolidator(prompt: str, model: str = "") -> str:
+        return (
+            '[{"title":"Team meeting","body_md":"notes",'
+            '"when_to_use":"team context","kind":"fact"}]'
+        )
+
+    monkeypatch.setattr("app.db.engine.fetch_all", fake_fetch_all)
+    monkeypatch.setattr(
+        "app.workflows.consolidate_agent_memory.existing_fingerprints",
+        fake_existing_fps,
+    )
+    monkeypatch.setattr(
+        "app.workflows.consolidate_agent_memory.write_memory_row",
+        fake_write,
+    )
+    monkeypatch.setattr(
+        "app.workflows.consolidate_agent_memory.default_consolidator",
+        fake_consolidator,
+    )
+
+    result = await _consolidate_context("u1", "a1", team_id=10, project_id=None)
+
+    assert result["written"] == 1
+    assert len(written_calls) == 1
+    kw = written_calls[0]
+    assert kw["scope"] == "team"
+    assert kw["team_id"] == 10
+    assert kw["project_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_consolidate_context_personal_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_consolidate_context with both None writes scope='agent_user' + NULL ids."""
+    from app.workflows.consolidate_agent_memory import (
+        MIN_NEW_MESSAGES,
+        _consolidate_context,
+    )
+
+    messages = [
+        {"role": "user", "content": f"msg {i}"} for i in range(MIN_NEW_MESSAGES)
+    ]
+
+    written_calls: list[dict] = []
+    call_idx = [0]
+
+    async def fake_fetch_all(sql: str, params=None) -> list:
+        idx = call_idx[0]
+        call_idx[0] += 1
+        if idx == 0:
+            return messages
+        return []
+
+    async def fake_existing_fps(
+        *, owner_user_id: str, agent_id: str, scope: str, team_id, project_id
+    ) -> set:
+        return set()
+
+    async def fake_write(
+        *,
+        owner_user_id: str,
+        agent_id: str,
+        scope: str,
+        kind: str,
+        title: str,
+        body_md: str,
+        when_to_use: str,
+        fingerprint: str,
+        team_id=None,
+        project_id=None,
+    ) -> bool:
+        written_calls.append(
+            {"scope": scope, "team_id": team_id, "project_id": project_id}
+        )
+        return True
+
+    async def fake_consolidator(prompt: str, model: str = "") -> str:
+        return (
+            '[{"title":"Personal note","body_md":"body",'
+            '"when_to_use":"personal","kind":"fact"}]'
+        )
+
+    monkeypatch.setattr("app.db.engine.fetch_all", fake_fetch_all)
+    monkeypatch.setattr(
+        "app.workflows.consolidate_agent_memory.existing_fingerprints",
+        fake_existing_fps,
+    )
+    monkeypatch.setattr(
+        "app.workflows.consolidate_agent_memory.write_memory_row",
+        fake_write,
+    )
+    monkeypatch.setattr(
+        "app.workflows.consolidate_agent_memory.default_consolidator",
+        fake_consolidator,
+    )
+
+    result = await _consolidate_context("u1", "a1", team_id=None, project_id=None)
+
+    assert result["written"] == 1
+    assert len(written_calls) == 1
+    kw = written_calls[0]
+    assert kw["scope"] == "agent_user"
+    assert kw["team_id"] is None
+    assert kw["project_id"] is None
+
+
+# ---------------------------------------------------------------------------
+# Phase C0 (Task 2): enumerate_active_pairs_step — context columns returned
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_enumerate_active_pairs_includes_context_columns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """enumerate_active_pairs_step passes through team_id / project_id from SQL."""
+    from app.workflows.consolidate_agent_memory import (
+        MIN_NEW_MESSAGES,
+        enumerate_active_pairs_step,
+    )
+
+    rows = [
+        {
+            "user_id": "u1",
+            "agent_id": "a1",
+            "team_id": 10,
+            "project_id": 55,
+            "msg_count": MIN_NEW_MESSAGES,
+        },
+        {
+            "user_id": "u2",
+            "agent_id": "a2",
+            "team_id": None,
+            "project_id": None,
+            "msg_count": MIN_NEW_MESSAGES + 3,
+        },
+        # Below threshold — filtered out
+        {
+            "user_id": "u3",
+            "agent_id": "a3",
+            "team_id": 99,
+            "project_id": None,
+            "msg_count": MIN_NEW_MESSAGES - 1,
+        },
+    ]
+
+    async def fake_fetch_all(sql: str, params=None) -> list:
+        return rows
+
+    monkeypatch.setattr("app.db.engine.fetch_all", fake_fetch_all)
+
+    pairs = await enumerate_active_pairs_step()
+
+    assert len(pairs) == 2
+    pair_map = {p["user_id"]: p for p in pairs}
+    assert pair_map["u1"]["team_id"] == 10
+    assert pair_map["u1"]["project_id"] == 55
+    assert pair_map["u2"]["team_id"] is None
+    assert pair_map["u2"]["project_id"] is None
+    assert "u3" not in pair_map
+
+
+# ---------------------------------------------------------------------------
+# Phase C0 (Task 2): _consolidate_pair — enumerates contexts and sums results
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_consolidate_pair_enumerates_contexts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_consolidate_pair queries contexts for the pair and consolidates each."""
+    from app.workflows.consolidate_agent_memory import _consolidate_pair
+
+    # Two contexts for the same (u1, a1) pair
+    context_rows = [
+        {"team_id": None, "project_id": None},
+        {"team_id": 10, "project_id": 55},
+    ]
+
+    context_calls: list[tuple] = []
+
+    async def fake_fetch_all(sql: str, params=None) -> list:
+        return context_rows
+
+    async def fake_consolidate_context(
+        user_id: str, agent_id: str, team_id, project_id
+    ) -> dict:
+        context_calls.append((user_id, agent_id, team_id, project_id))
+        return {"written": 1, "skipped": 0}
+
+    monkeypatch.setattr("app.db.engine.fetch_all", fake_fetch_all)
+    monkeypatch.setattr(
+        "app.workflows.consolidate_agent_memory._consolidate_context",
+        fake_consolidate_context,
+    )
+
+    result = await _consolidate_pair("u1", "a1")
+
+    assert result["contexts"] == 2
+    assert result["written"] == 2
+    assert result["skipped"] == 0
+    assert len(context_calls) == 2
+
+
+# ---------------------------------------------------------------------------
+# Phase C0 (Task 2): admin endpoint maps contexts field
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_trigger_consolidation_endpoint_maps_contexts() -> None:
+    """Admin endpoint ConsolidateResponse includes contexts count."""
+    from app.api.admin.settings_router import trigger_consolidation
+    from app.schemas.admin import ConsolidateRequest
+
+    with patch(
+        "app.workflows.consolidate_agent_memory._consolidate_pair",
+        new=AsyncMock(return_value={"written": 3, "skipped": 0, "contexts": 2}),
+    ):
+        auth = MagicMock()
+        result = await trigger_consolidation(
+            ConsolidateRequest(user_id="u1", agent_id="a1"), auth
+        )
+
+    assert result.written == 3
+    assert result.skipped == 0
+    assert result.contexts == 2

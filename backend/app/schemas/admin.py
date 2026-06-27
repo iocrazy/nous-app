@@ -772,3 +772,4 @@ class ConsolidateResponse(BaseModel):
 
     written: int
     skipped: int
+    contexts: int = 0

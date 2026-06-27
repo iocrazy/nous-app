@@ -585,4 +585,5 @@ async def trigger_consolidation(body: ConsolidateRequest, auth: AdminAuthDep):
     return ConsolidateResponse(
         written=result.get("written", 0),
         skipped=result.get("skipped", 0),
+        contexts=result.get("contexts", 0),
     )
