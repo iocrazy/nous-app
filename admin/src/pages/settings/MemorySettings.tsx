@@ -12,6 +12,7 @@ import {
 } from '@arco-design/web-react'
 import { IconStorage, IconRobot, IconCode, IconSync, IconApps } from '@arco-design/web-react/icon'
 import { SectionHeader } from './SectionHeader'
+import { PromotionsSection } from './PromotionsSection'
 import { useAuth } from '../../auth/AuthProvider'
 
 type CatalogModel = {
@@ -182,11 +183,14 @@ export function MemorySettings() {
 
   if (isLoading) {
     return (
-      <Card title="Memory (Graphiti)" style={{ marginBottom: 20 }}>
-        <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
-          <Spin size={28} />
-        </div>
-      </Card>
+      <>
+        <Card title="Memory (Graphiti)" style={{ marginBottom: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
+            <Spin size={28} />
+          </div>
+        </Card>
+        <PromotionsSection />
+      </>
     )
   }
 
@@ -194,6 +198,7 @@ export function MemorySettings() {
     isSet ? <Tag color="green">key set</Tag> : <Tag>no key</Tag>
 
   return (
+    <>
     <Card title="Memory (Graphiti)" style={{ marginBottom: 20 }}>
       <SectionHeader
         icon={<IconStorage />}
@@ -476,5 +481,7 @@ export function MemorySettings() {
         </Button>
       </div>
     </Card>
+    <PromotionsSection />
+    </>
   )
 }
