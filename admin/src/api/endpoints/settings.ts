@@ -358,3 +358,77 @@ export function useUpdateHonchoConnection() {
     },
   })
 }
+
+// ── Promotion Review (Agent Memory C2) ────────────────────────────────────
+
+export interface PromotionItem {
+  id: number
+  memory_id: number
+  proposed_scope: string
+  target_team_id: number
+  target_project_id: number | null
+  title: string
+  owner_user_id: string
+  original_body_md: string
+  scrubbed_body_md: string
+  classification_kind: string
+  confidence: number
+  justification: string
+  status: string
+  created_at: string
+}
+
+export interface PromotionListResponse { items: PromotionItem[] }
+
+const PROMOTIONS_URL = '/api/v1/admin/settings/memory/promotions'
+
+export function usePromotions(status: 'pending' | 'approved' | 'rejected' = 'pending') {
+  return useQuery({
+    queryKey: ['settings', 'promotions', status],
+    queryFn: async () => {
+      const { data } = await apiClient.get<PromotionListResponse>(
+        PROMOTIONS_URL, { params: { status } },
+      )
+      return data
+    },
+  })
+}
+
+export function useApprovePromotion() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (proposalId: number) => {
+      const { data } = await apiClient.post<{ approved: boolean }>(
+        `${PROMOTIONS_URL}/${proposalId}/approve`,
+      )
+      return data
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['settings', 'promotions'] }),
+  })
+}
+
+export function useRejectPromotion() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (proposalId: number) => {
+      const { data } = await apiClient.post<{ rejected: boolean }>(
+        `${PROMOTIONS_URL}/${proposalId}/reject`,
+      )
+      return data
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['settings', 'promotions'] }),
+  })
+}
+
+export function useDemoteMemory() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (memoryId: number) => {
+      const { data } = await apiClient.post<{ demoted: boolean }>(
+        `/api/v1/admin/settings/memory/${memoryId}/demote`,
+      )
+      return data
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['settings', 'promotions'] }),
+  })
+}
