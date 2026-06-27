@@ -105,8 +105,20 @@ def test_merge_scoring_config_garbage_falls_back():
 def test_config_payload_roundtrips_through_merge():
     payload = config_payload(default_scoring_config())
     assert set(payload["tier_weights"].keys()) == {"1", "2", "3"}  # str keys for jsonb
+    assert "summary_max_chars" in payload
     # payload feeds back through merge unchanged
     assert merge_scoring_config(payload).tier_weights == TIER_WEIGHTS
+
+
+def test_summary_max_chars_parsed_clamped_and_defaulted():
+    # admin sets a cap → parsed as int
+    assert merge_scoring_config({"summary_max_chars": 40}).summary_max_chars == 40
+    # float coerced, ceiling-clamped, never negative
+    assert merge_scoring_config({"summary_max_chars": 9999}).summary_max_chars == 500
+    assert merge_scoring_config({"summary_max_chars": -5}).summary_max_chars == 0
+    # absent / garbage → default 0 (= agent default governs)
+    assert merge_scoring_config({}).summary_max_chars == 0
+    assert merge_scoring_config({"summary_max_chars": "x"}).summary_max_chars == 0
 
 
 def test_normalize_dims_clamps_and_drops_empty():
