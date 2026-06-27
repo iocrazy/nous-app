@@ -62,6 +62,18 @@ _INSERT_SQL = text(
     """
 )
 
+_INSERT_RETURNING_SQL = text(
+    """
+    INSERT INTO public.agent_memory
+        (scope, owner_user_id, agent_id, team_id, project_id, visibility, kind,
+         title, body_md, when_to_use, fingerprint)
+    VALUES
+        (:scope, :owner_user_id, :agent_id, :team_id, :project_id, 'private',
+         :kind, :title, :body_md, :when_to_use, :fingerprint)
+    RETURNING id
+    """
+)
+
 _FINGERPRINTS_SQL = text(
     """
     SELECT fingerprint FROM public.agent_memory
@@ -111,6 +123,49 @@ async def write_memory_row(
         return False
 
 
+async def write_memory_row_returning_id(
+    *,
+    owner_user_id: str,
+    agent_id: str,
+    scope: str,
+    kind: str,
+    title: str,
+    body_md: str,
+    when_to_use: str,
+    fingerprint: str,
+    team_id: Optional[int] = None,
+    project_id: Optional[int] = None,
+) -> Optional[int]:
+    """Insert one PRIVATE agent_memory row and return its new BIGINT id.
+
+    Returns None on any error (never raises). Keeps write_memory_row
+    unchanged for backward-compat.
+    """
+    try:
+        async with write_scope() as session:
+            result = await session.execute(
+                _INSERT_RETURNING_SQL,
+                {
+                    "scope": scope,
+                    "owner_user_id": owner_user_id,
+                    "agent_id": agent_id,
+                    "team_id": team_id,
+                    "project_id": project_id,
+                    "kind": kind,
+                    "title": title,
+                    "body_md": body_md,
+                    "when_to_use": when_to_use,
+                    "fingerprint": fingerprint,
+                },
+            )
+        return result.scalar_one_or_none()
+    except Exception:  # noqa: BLE001 — consolidation write is best-effort
+        logger.warning(
+            f"[agent_memory] write_returning_id failed for owner={owner_user_id}"
+        )
+        return None
+
+
 async def existing_fingerprints(
     *,
     owner_user_id: str,
@@ -138,4 +193,9 @@ async def existing_fingerprints(
         return set()
 
 
-__all__ = ["existing_fingerprints", "recall_rows", "write_memory_row"]
+__all__ = [
+    "existing_fingerprints",
+    "recall_rows",
+    "write_memory_row",
+    "write_memory_row_returning_id",
+]
