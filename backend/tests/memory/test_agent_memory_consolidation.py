@@ -93,7 +93,13 @@ async def test_existing_fingerprints_returns_set():
     with patch(
         "app.repositories.agent_memory_repository.write_scope", return_value=_Scope()
     ):
-        fps = await existing_fingerprints(owner_user_id="u1", agent_id="a1")
+        fps = await existing_fingerprints(
+            owner_user_id="u1",
+            agent_id="a1",
+            scope="agent_user",
+            team_id=None,
+            project_id=None,
+        )
     assert fps == {"fp1", "fp2"}
 
 
@@ -112,7 +118,7 @@ async def test_consolidate_pair_parses_dedups_caps():
 
     # The LLM returns two drafts (one already stored → must be deduped).
     dup = MemoryDraft(title="Deploy", body_md="x", when_to_use="w", kind="fact")
-    dup_fp = make_fingerprint("u1", "a1", dup)
+    dup_fp = make_fingerprint("u1", "a1", "agent_user", "", dup)
 
     async def fake_consolidator(prompt: str) -> str:
         return (
@@ -123,6 +129,8 @@ async def test_consolidate_pair_parses_dedups_caps():
     out = await consolidate_pair(
         owner_user_id="u1",
         agent_id="a1",
+        scope="agent_user",
+        scope_id="",
         recent_activity="...",
         existing_titles=["Deploy"],
         existing_fingerprints={dup_fp},
@@ -163,7 +171,9 @@ def test_make_fingerprint_stable_and_title_normalized():
         title=" deploy ", body_md="DIFFERENT", when_to_use="z", kind="decision"
     )
     # fingerprint keys off normalized title only → same key (dedup by topic)
-    assert make_fingerprint("u1", "a1", a) == make_fingerprint("u1", "a1", b)
+    assert make_fingerprint("u1", "a1", "agent_user", "", a) == make_fingerprint(
+        "u1", "a1", "agent_user", "", b
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +191,8 @@ async def test_consolidate_pair_never_raises_when_consolidator_raises():
     out = await consolidate_pair(
         owner_user_id="u1",
         agent_id="a1",
+        scope="agent_user",
+        scope_id="",
         recent_activity="x",
         existing_titles=[],
         existing_fingerprints=set(),
@@ -205,6 +217,8 @@ async def test_consolidate_pair_caps_at_max_entries():
     out = await consolidate_pair(
         owner_user_id="u1",
         agent_id="a1",
+        scope="agent_user",
+        scope_id="",
         recent_activity="x",
         existing_titles=[],
         existing_fingerprints=set(),
@@ -223,3 +237,62 @@ def test_parse_keeps_good_item_when_array_has_a_bad_one():
         '[{"title":123},{"title":"Good","body_md":"b","when_to_use":"w","kind":"fact"}]'
     )
     assert len(drafts) == 1 and drafts[0].title == "Good"
+
+
+# ---------------------------------------------------------------------------
+# C0 — context-scoped fingerprint + write (Task 1)
+# ---------------------------------------------------------------------------
+
+
+def test_make_fingerprint_distinguishes_contexts():
+    from app.services.ai.memory.agent_memory_consolidation import (
+        MemoryDraft,
+        make_fingerprint,
+    )
+
+    d = MemoryDraft(title="Deploy", body_md="x", when_to_use="w", kind="fact")
+    personal = make_fingerprint("u1", "a1", "agent_user", "", d)
+    team = make_fingerprint("u1", "a1", "team", "10", d)
+    project = make_fingerprint("u1", "a1", "project", "55", d)
+    # same topic, different contexts → three distinct fingerprints
+    assert len({personal, team, project}) == 3
+
+
+@pytest.mark.asyncio
+async def test_write_memory_row_persists_context():
+    from unittest.mock import patch
+
+    from app.repositories.agent_memory_repository import write_memory_row
+
+    captured = {}
+
+    class _Session:
+        async def execute(self, stmt, params=None):
+            captured["params"] = params
+
+    class _Scope:
+        async def __aenter__(self):
+            return _Session()
+
+        async def __aexit__(self, *a):
+            return False
+
+    with patch(
+        "app.repositories.agent_memory_repository.write_scope", return_value=_Scope()
+    ):
+        ok = await write_memory_row(
+            owner_user_id="u1",
+            agent_id="a1",
+            scope="team",
+            kind="fact",
+            title="t",
+            body_md="b",
+            when_to_use="w",
+            fingerprint="fp",
+            team_id=10,
+            project_id=None,
+        )
+    assert ok is True
+    assert captured["params"]["team_id"] == 10
+    assert captured["params"]["project_id"] is None
+    assert captured["params"]["scope"] == "team"
