@@ -42,7 +42,7 @@ export function MentionDropdown({
 
   return (
     <div className="absolute bottom-full left-0 right-0 mb-[6px] z-50">
-      <div className="bg-[#1c1c22] border border-white/[.12] rounded-[10px] shadow-2xl overflow-hidden">
+      <div className="bg-card border border-line-strong rounded-[10px] shadow-2xl overflow-hidden">
         {items.map((c, idx) => {
           const active = idx === activeIndex;
           return (
@@ -74,7 +74,7 @@ export function MentionDropdown({
                   AGENT
                 </span>
               )}
-              <span className="text-[13px] text-[#e7e7ea] truncate">{c.label}</span>
+              <span className="text-[13px] text-content truncate">{c.label}</span>
             </button>
           );
         })}
