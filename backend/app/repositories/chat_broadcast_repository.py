@@ -28,6 +28,8 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from loguru import logger
+
 from app.db import engine as db_engine
 
 
@@ -123,6 +125,10 @@ class ChatBroadcastRepository:
             if mc is not None:
                 if isinstance(mc, str):
                     mc = datetime.fromisoformat(mc)
+                # Normalize to UTC-aware so comparisons against the (UTC-aware)
+                # watermark from get_watermark never raise naive/aware TypeError.
+                if mc.tzinfo is None:
+                    mc = mc.replace(tzinfo=timezone.utc)
                 if max_completed_at is None or mc > max_completed_at:
                     max_completed_at = mc
 
@@ -150,7 +156,16 @@ class ChatBroadcastRepository:
         raw = row["value"]
         ts_str = str(raw)
 
-        dt = datetime.fromisoformat(ts_str)
+        # A corrupted/unparseable watermark must not crash the scanner loop —
+        # treat it like a missing watermark (first-run: skip + reset next pass).
+        try:
+            dt = datetime.fromisoformat(ts_str)
+        except ValueError:
+            logger.warning(
+                f"[broadcast] unparseable watermark for channel {channel_id}: "
+                f"{ts_str!r} — treating as absent"
+            )
+            return None
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt
