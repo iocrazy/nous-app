@@ -234,7 +234,7 @@ export default function CreateGroupModal({ teamId, open, onClose, onCreated }: P
                       'flex-1 border rounded-[9px] p-[11px] cursor-pointer flex gap-[9px] items-start text-left transition-colors',
                       visibility === 'group'
                         ? 'border-indigo-500 bg-indigo-500/[.08]'
-                        : 'border-line-strong hover:border-white/[.20]',
+                        : 'border-line-strong hover:border-line-strong',
                     ].join(' ')}
                   >
                     <Lock
@@ -263,7 +263,7 @@ export default function CreateGroupModal({ teamId, open, onClose, onCreated }: P
                       'flex-1 border rounded-[9px] p-[11px] cursor-pointer flex gap-[9px] items-start text-left transition-colors',
                       visibility === 'public'
                         ? 'border-indigo-500 bg-indigo-500/[.08]'
-                        : 'border-line-strong hover:border-white/[.20]',
+                        : 'border-line-strong hover:border-line-strong',
                     ].join(' ')}
                   >
                     <Globe
@@ -311,7 +311,7 @@ export default function CreateGroupModal({ teamId, open, onClose, onCreated }: P
                             'text-[12.5px] border transition-colors',
                             selected
                               ? 'bg-indigo-500/[.15] border-indigo-500/50 text-indigo-300'
-                              : 'bg-island-2 border-line text-content hover:border-white/[.20]',
+                              : 'bg-island-2 border-line text-content hover:border-line-strong',
                           ].join(' ')}
                         >
                           <span className="w-5 h-5 rounded-full bg-gradient-to-br from-[#475569] to-[#64748b] grid place-items-center text-[9px] font-semibold text-white shrink-0">
@@ -349,7 +349,7 @@ export default function CreateGroupModal({ teamId, open, onClose, onCreated }: P
                             'text-[12.5px] border transition-colors',
                             selected
                               ? 'bg-amber-500/[.15] border-amber-500/50 text-amber-300'
-                              : 'bg-island-2 border-line text-content hover:border-white/[.20]',
+                              : 'bg-island-2 border-line text-content hover:border-line-strong',
                           ].join(' ')}
                         >
                           <span className="w-5 h-5 rounded-full bg-gradient-to-br from-amber-400 to-amber-500 grid place-items-center text-[9px] font-semibold text-[#1a1505] shrink-0">

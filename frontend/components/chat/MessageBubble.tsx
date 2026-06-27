@@ -266,7 +266,7 @@ export function MessageBubble({
               onKeyDown={handleKeyDown}
               autoFocus
               rows={3}
-              className="w-full bg-card border border-line-strong rounded-[9px] text-[14px] text-content px-[10px] py-[8px] resize-none leading-[1.55] focus:outline-none focus:border-white/[.25] transition-colors"
+              className="w-full bg-card border border-line-strong rounded-[9px] text-[14px] text-content px-[10px] py-[8px] resize-none leading-[1.55] focus:outline-none focus:border-indigo-500/50 transition-colors"
             />
             <div className="flex gap-[6px]">
               <button
