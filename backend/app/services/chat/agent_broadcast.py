@@ -101,11 +101,8 @@ async def scan_and_broadcast() -> dict[str, Any]:
             if not bc_agents:
                 continue
 
-            # ── Watermark + member check ──────────────────────────────────
+            # ── Watermark check ───────────────────────────────────────────
             wm = await repo.get_watermark(channel_id)
-            members = await repo.team_member_ids(team_id)
-            if not members:
-                continue
 
             if wm is None:
                 # First run for this channel — set watermark to now, post NOTHING.
@@ -114,7 +111,9 @@ async def scan_and_broadcast() -> dict[str, Any]:
                 continue
 
             # ── Count completed workflows since watermark ─────────────────
-            counts = await repo.completed_workflow_counts_since(members, wm)
+            # Counts are scoped to the channel's team via a JOIN on team_members
+            # inside the repo (team_id, not a user_id list) — no array-bind.
+            counts = await repo.completed_workflow_counts_since(team_id, wm)
             if counts["total"] <= 0:
                 continue
 

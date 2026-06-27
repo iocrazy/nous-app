@@ -68,46 +68,38 @@ class ChatBroadcastRepository:
             )
         return result
 
-    async def team_member_ids(self, team_id: int) -> list[str]:
-        """Return user_ids (as plain strings) for all members of team_id."""
-        rows = await db_engine.fetch_all(
-            "SELECT user_id FROM public.team_members WHERE team_id = :tid",
-            {"tid": _bigint(team_id)},
-        )
-        return [str(r["user_id"]) for r in rows]
-
     async def completed_workflow_counts_since(
         self,
-        user_ids: list[str],
+        team_id: int,
         since: Optional[datetime],
     ) -> dict:
-        """Aggregate completed workflow counts for the given users since a timestamp.
+        """Aggregate completed workflow counts for a team's members since a timestamp.
 
         Returns: {"total": int, "by_kind": {task_kind: count}, "max_completed_at": datetime|None}
 
         Reads task_tracking READ ONLY — never writes any task_tracking column.
-        Guard: empty user_ids returns zeros without querying.
+        Scopes to team membership by JOINing team_members on the task owner —
+        no user_id array-bind (avoids Supavisor/asyncpg uuid[] bind fragility);
+        a team with no members simply yields zero rows.
         """
-        if not user_ids:
-            return {"total": 0, "by_kind": {}, "max_completed_at": None}
-
-        params: dict[str, Any] = {"uids": user_ids}
+        params: dict[str, Any] = {"tid": _bigint(team_id)}
         time_clause = ""
         if since is not None:
-            time_clause = "AND completed_at > :since"
+            time_clause = "AND tt.completed_at > :since"
             params["since"] = since
 
         rows = await db_engine.fetch_all(
             f"""
-            SELECT task_kind,
+            SELECT tt.task_kind AS task_kind,
                    COUNT(*) AS cnt,
-                   MAX(completed_at) AS max_completed_at
-              FROM public.task_tracking
-             WHERE status = 'completed'
-               AND task_kind = 'workflow'
-               AND user_id = ANY(CAST(:uids AS uuid[]))
+                   MAX(tt.completed_at) AS max_completed_at
+              FROM public.task_tracking tt
+              JOIN public.team_members tm ON tm.user_id = tt.user_id
+             WHERE tm.team_id = :tid
+               AND tt.status = 'completed'
+               AND tt.task_kind = 'workflow'
                {time_clause}
-             GROUP BY task_kind
+             GROUP BY tt.task_kind
             """,
             params,
         )
