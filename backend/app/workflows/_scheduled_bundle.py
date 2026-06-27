@@ -48,6 +48,7 @@ from app.workflows.scheduled_recovery import (  # noqa: F401
 from app.workflows.stranded_issue_monitor import (  # noqa: F401
     stranded_issue_monitor_workflow,
 )
+from app.workflows.task_broadcast_scanner import task_broadcast_workflow  # noqa: F401
 from app.workflows.temp_resource_sweeper import (  # noqa: F401
     sweep_temp_resources,
     temp_resource_sweeper_scheduled,
