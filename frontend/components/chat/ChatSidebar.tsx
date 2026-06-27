@@ -37,9 +37,9 @@ function ChannelRow({
 
   const activeClass = isActive
     ? 'bg-indigo-500/[0.18] text-indigo-300 font-[550]'
-    : 'text-[#a3a3ad] hover:bg-[#17171b] hover:text-[#e7e7ea]';
+    : 'text-content-2 hover:bg-island-2 hover:text-content';
 
-  const glyphActiveClass = isActive ? 'text-indigo-300' : 'text-[#74747e]';
+  const glyphActiveClass = isActive ? 'text-indigo-300' : 'text-content-3';
 
   const glyph =
     channel.type === 'public' ? (
@@ -110,7 +110,7 @@ function AgentDmRow({
 }): React.ReactElement {
   const activeClass = isActive
     ? 'bg-indigo-500/[0.18] text-indigo-300 font-[550]'
-    : 'text-[#a3a3ad] hover:bg-[#17171b] hover:text-[#e7e7ea]';
+    : 'text-content-2 hover:bg-island-2 hover:text-content';
 
   return (
     <div
@@ -155,29 +155,29 @@ export function ChatSidebar({
   const dms = channels.filter((c) => c.type === 'dm');
 
   return (
-    <div className="flex flex-col h-full overflow-hidden bg-[#15151a] border border-white/[.12] rounded-[18px]">
+    <div className="flex flex-col h-full overflow-hidden bg-island border border-line-strong rounded-[18px]">
       {/* Header */}
       <div className="px-[14px] pt-[14px] pb-[10px] flex items-center justify-between flex-shrink-0">
-        <h2 className="text-[15px] font-[650] tracking-[-0.01em] text-[#e7e7ea]">
+        <h2 className="text-[15px] font-[650] tracking-[-0.01em] text-content">
           {t('chat.sidebarTitle')}
         </h2>
         <button
           type="button"
           title={t('chat.newChannel')}
           onClick={onNew}
-          className="w-[26px] h-[26px] rounded-[7px] grid place-items-center text-[#74747e] hover:text-[#e7e7ea] hover:bg-[#17171b] border border-transparent transition-colors"
+          className="w-[26px] h-[26px] rounded-[7px] grid place-items-center text-content-3 hover:text-content hover:bg-island-2 border border-transparent transition-colors"
         >
           <Plus size={14} />
         </button>
       </div>
 
       {/* Search */}
-      <div className="mx-3 mb-[10px] flex items-center gap-2 py-[7px] px-[10px] bg-ink-950 border border-white/[.065] rounded-[9px] text-[#74747e] flex-shrink-0">
+      <div className="mx-3 mb-[10px] flex items-center gap-2 py-[7px] px-[10px] bg-ink-950 border border-line rounded-[9px] text-content-3 flex-shrink-0">
         <Search size={13} className="flex-shrink-0" />
         <input
           type="text"
           placeholder={t('chat.searchPlaceholder')}
-          className="flex-1 bg-transparent border-none outline-none text-[#e7e7ea] text-[13px] placeholder:text-[#74747e] font-[inherit]"
+          className="flex-1 bg-transparent border-none outline-none text-content text-[13px] placeholder:text-content-3 font-[inherit]"
         />
       </div>
 
@@ -186,7 +186,7 @@ export function ChatSidebar({
         {/* Groups section */}
         {groups.length > 0 && (
           <>
-            <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#6b6b75] pt-3 pb-[5px] px-[6px]">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-content-4 pt-3 pb-[5px] px-[6px]">
               {t('chat.sectionGroups')}
             </div>
             {groups.map((ch) => (
@@ -203,7 +203,7 @@ export function ChatSidebar({
         {/* Direct Messages section — human DMs + agent DM rows */}
         {(dms.length > 0 || agents.length > 0) && (
           <>
-            <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#6b6b75] pt-3 pb-[5px] px-[6px]">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-content-4 pt-3 pb-[5px] px-[6px]">
               {t('chat.sectionDMs')}
             </div>
             {dms.map((ch) => (
@@ -217,7 +217,7 @@ export function ChatSidebar({
             {agents.length > 0 && (
               <>
                 {dms.length > 0 && (
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#6b6b75] pt-2 pb-[5px] px-[6px]">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-content-4 pt-2 pb-[5px] px-[6px]">
                     {t('chat.agentDm.section')}
                   </div>
                 )}

@@ -49,7 +49,7 @@ function getTypeIcon(mimeType: string | null | undefined): React.ReactElement {
   if (mimeType?.startsWith('video/')) return <Film size={14} className="text-purple-400" />;
   if (mimeType?.startsWith('image/')) return <Image size={14} className="text-green-400" />;
   if (mimeType?.startsWith('audio/')) return <Music size={14} className="text-cyan-400" />;
-  return <File size={14} className="text-[#74747e]" />;
+  return <File size={14} className="text-content-3" />;
 }
 
 // ResourceCard-exact thumbnail logic: attempt cover whenever any signal is
@@ -171,16 +171,16 @@ export default function ResourcePicker({ open, teamId, onClose, onSelect }: Prop
       className="fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px] grid place-items-center"
       onClick={handleBackdropClick}
     >
-      <div className="w-[520px] max-h-[80vh] bg-[#15151a] border border-white/[.12] rounded-[18px] shadow-[0_24px_70px_rgba(0,0,0,.6)] flex flex-col overflow-hidden">
+      <div className="w-[520px] max-h-[80vh] bg-island border border-line-strong rounded-[18px] shadow-[0_24px_70px_rgba(0,0,0,.6)] flex flex-col overflow-hidden">
 
         {/* ── Header ── */}
-        <div className="flex items-center justify-between px-5 py-[18px] border-b border-white/[.065] shrink-0">
-          <h3 className="text-[16px] font-semibold text-[#e7e7ea] leading-none">
+        <div className="flex items-center justify-between px-5 py-[18px] border-b border-line shrink-0">
+          <h3 className="text-[16px] font-semibold text-content leading-none">
             {t('chat.mediaCard.title')}
           </h3>
           <button
             onClick={onClose}
-            className="w-[26px] h-[26px] rounded-[7px] grid place-items-center text-[#74747e] hover:text-[#a3a3ad] hover:bg-white/[.06] transition-colors"
+            className="w-[26px] h-[26px] rounded-[7px] grid place-items-center text-content-3 hover:text-content-2 hover:bg-white/[.06] transition-colors"
             aria-label="Close"
           >
             <X size={14} strokeWidth={2} />
@@ -193,7 +193,7 @@ export default function ResourcePicker({ open, teamId, onClose, onSelect }: Prop
             <Search
               size={14}
               strokeWidth={2}
-              className="absolute left-[11px] top-1/2 -translate-y-1/2 text-[#74747e] pointer-events-none"
+              className="absolute left-[11px] top-1/2 -translate-y-1/2 text-content-3 pointer-events-none"
             />
             <input
               ref={searchInputRef}
@@ -201,7 +201,7 @@ export default function ResourcePicker({ open, teamId, onClose, onSelect }: Prop
               value={search}
               onChange={(e) => handleSearchChange(e.target.value)}
               placeholder={t('chat.mediaCard.search')}
-              className="w-full bg-[#09090b] border border-white/[.12] rounded-[9px] pl-[32px] pr-[11px] py-[9px] text-[13.5px] text-[#e7e7ea] font-[inherit] outline-none focus:border-indigo-500/50 placeholder:text-[#74747e]"
+              className="w-full bg-app-bg border border-line-strong rounded-[9px] pl-[32px] pr-[11px] py-[9px] text-[13.5px] text-content font-[inherit] outline-none focus:border-indigo-500/50 placeholder:text-content-3"
             />
           </div>
         </div>
@@ -209,11 +209,11 @@ export default function ResourcePicker({ open, teamId, onClose, onSelect }: Prop
         {/* ── Body / Grid ── */}
         <div className="flex-1 overflow-y-auto px-5 pb-5 min-h-0">
           {loading ? (
-            <div className="py-10 text-center text-[13px] text-[#74747e]">
+            <div className="py-10 text-center text-[13px] text-content-3">
               {t('chat.mediaCard.loading')}
             </div>
           ) : items.length === 0 ? (
-            <div className="py-10 text-center text-[13px] text-[#74747e]">
+            <div className="py-10 text-center text-[13px] text-content-3">
               {t('chat.mediaCard.empty')}
             </div>
           ) : (
@@ -230,10 +230,10 @@ export default function ResourcePicker({ open, teamId, onClose, onSelect }: Prop
                     key={item.id}
                     type="button"
                     onClick={() => handleSelect(item)}
-                    className="flex flex-col rounded-[10px] bg-[#17171b] border border-white/[.065] overflow-hidden text-left hover:border-indigo-500/50 hover:bg-[#1c1c22] transition-colors group"
+                    className="flex flex-col rounded-[10px] bg-island-2 border border-line overflow-hidden text-left hover:border-indigo-500/50 hover:bg-card transition-colors group"
                   >
                     {/* Thumbnail */}
-                    <div className="relative w-full aspect-video bg-[#0e0e12] overflow-hidden shrink-0">
+                    <div className="relative w-full aspect-video bg-ink-950 overflow-hidden shrink-0">
                       {thumbnailSrc ? (
                         <img
                           src={thumbnailSrc}
@@ -255,12 +255,12 @@ export default function ResourcePicker({ open, teamId, onClose, onSelect }: Prop
                     {/* Info */}
                     <div className="px-[9px] py-[8px] flex flex-col gap-[3px] min-w-0">
                       <p
-                        className="text-[12px] font-medium text-[#e7e7ea] leading-[1.35] truncate"
+                        className="text-[12px] font-medium text-content leading-[1.35] truncate"
                         title={filename}
                       >
                         {filename}
                       </p>
-                      <div className="flex items-center gap-[5px] text-[11px] text-[#74747e]">
+                      <div className="flex items-center gap-[5px] text-[11px] text-content-3">
                         {getTypeIcon(mimeType)}
                         <span>{t(`chat.mediaCard.${getTypeKey(mimeType)}`)}</span>
                         {fileSize ? (
