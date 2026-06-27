@@ -15,11 +15,12 @@ task_tracking discipline (CLAUDE.md route C):
   This module ONLY reads task_tracking (status / completed_at / user_id / task_kind).
   It MUST NOT write or PATCH any task_tracking column.
 
-Array-bind choice:
-  user_id = ANY(CAST(:uids AS uuid[])) with the uids parameter as a Python list.
-  SQLAlchemy + asyncpg handles Python list → PostgreSQL uuid[] via the CAST.
-  If this causes DataError in some Supavisor configurations (cf. increment_mentions),
-  fall back to an expanded IN clause.
+Team scoping:
+  completed_workflow_counts_since JOINs team_members (by team_id) rather than
+  binding a user_id array — avoids Supavisor/asyncpg uuid[] bind fragility and
+  needs no separate member-id fetch. team_members PK is (team_id, user_id)
+  (migration 051) so the JOIN matches each task at most once; COUNT uses
+  COUNT(DISTINCT dbos_workflow_id) as a constraint-independent safeguard.
 """
 
 from __future__ import annotations
@@ -91,7 +92,7 @@ class ChatBroadcastRepository:
         rows = await db_engine.fetch_all(
             f"""
             SELECT tt.task_kind AS task_kind,
-                   COUNT(*) AS cnt,
+                   COUNT(DISTINCT tt.dbos_workflow_id) AS cnt,
                    MAX(tt.completed_at) AS max_completed_at
               FROM public.task_tracking tt
               JOIN public.team_members tm ON tm.user_id = tt.user_id
