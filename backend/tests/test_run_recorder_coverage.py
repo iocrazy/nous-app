@@ -83,6 +83,11 @@ ALLOWED_BYPASS_PATHS: dict[str, str] = {
     # fire-and-forget — telemetry tracked via session_memory.version
     # bumps + last_updated_at, not RunRecorder.
     "services/ai/runner/session_memory_runner.py": "session-memory maintenance auxiliary LLM, fire-and-forget",
+    # Agent Memory Phase B (/dream): background consolidation LLM that distils
+    # durable agent_memory from recent sessions. Runs in a weekly DBOS
+    # scheduled workflow (off the chat path), best-effort — telemetry via the
+    # workflow's own logs/counts, not RunRecorder.
+    "services/ai/memory/agent_memory_consolidator.py": "agent-memory /dream consolidation LLM, scheduled fire-and-forget",
     # Phase 2 of #199: head summarizer for context compaction. Cheap
     # model (default Haiku 4.5) called from inside ContextCompactor's
     # orange/red tier when a long conversation needs to fit the
