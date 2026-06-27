@@ -272,7 +272,7 @@ export const TopicInspirationPage: React.FC = () => {
       {/* Current Hotspots block — browse affordance; only in the all view */}
       {!loading && view === 'all' && !searching && topByScore.length > 0 && (
         <div className="mt-4">
-          <CurrentHotspots items={topByScore} />
+          <CurrentHotspots items={topByScore} onSelect={handleSelect} />
         </div>
       )}
 
