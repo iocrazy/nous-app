@@ -15,13 +15,18 @@ patch("app.db.engine.<method>", fake_async_fn).
 
 from __future__ import annotations
 
+import inspect
 import json
 from datetime import datetime, timezone
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.repositories.chat_broadcast_repository import ChatBroadcastRepository
+from app.services.chat.agent_broadcast import (
+    build_broadcast_summary,
+    scan_and_broadcast,
+)
 
 _REPO = ChatBroadcastRepository()
 
@@ -370,3 +375,331 @@ async def test_set_watermark_stores_iso_timestamp():
     assert (
         _NOW.isoformat() in params_str or "2026-06-27" in params_str
     ), "ISO timestamp must appear in query params"
+
+
+# =============================================================================
+# Task 2: scan_and_broadcast + build_broadcast_summary (service layer)
+# =============================================================================
+#
+# Mocking strategy: patch the factory functions at their import location in
+# the service module (app.services.chat.agent_broadcast.*) so that all
+# real DB / Supabase calls are intercepted.
+#
+# Agent dict convention: capability_profile.chat mirrors the real schema so
+# that agent_chat_caps() (the real parser) is exercised, not mocked.
+
+_BC_CHAN_ID = 3333333333333333333
+_BC_TEAM_ID = 4444444444444444444
+_BC_AGENT_ID = "dddddddd-0000-0000-0000-000000000001"
+_BC_AGENT_ID_2 = "dddddddd-0000-0000-0000-000000000002"
+_BC_USER_ID = "eeeeeeee-0000-0000-0000-000000000001"
+_WM_TS = datetime(2026, 6, 26, 10, 0, 0, tzinfo=timezone.utc)
+_MAX_TS = datetime(2026, 6, 27, 9, 0, 0, tzinfo=timezone.utc)
+
+
+def _agent(
+    auto_broadcast: bool, enabled: bool = True, allowed_team_ids: list = []
+) -> dict:
+    """Build a minimal agent dict that agent_chat_caps() can parse correctly."""
+    return {
+        "id": _BC_AGENT_ID,
+        "slug": "test-broadcast-bot",
+        "capability_profile": {
+            "chat": {
+                "enabled": True if enabled else False,
+                "auto_broadcast": True if auto_broadcast else False,
+                "allowed_team_ids": list(allowed_team_ids),
+            }
+        },
+    }
+
+
+def _candidate(channel_id=_BC_CHAN_ID, team_id=_BC_TEAM_ID, agent_ids=None) -> dict:
+    return {
+        "channel_id": channel_id,
+        "team_id": team_id,
+        "agent_ids": agent_ids if agent_ids is not None else [_BC_AGENT_ID],
+    }
+
+
+def _counts(total: int = 3, max_ts: datetime = _MAX_TS) -> dict:
+    by_kind = {"workflow": total} if total > 0 else {}
+    return {
+        "total": total,
+        "by_kind": by_kind,
+        "max_completed_at": max_ts if total > 0 else None,
+    }
+
+
+def _make_repos(
+    candidates=None,
+    agent=None,
+    watermark=_WM_TS,
+    members=None,
+    counts_ret=None,
+):
+    """Return (broadcast_repo_mock, chat_repo_mock, agent_repo_mock)."""
+    broadcast_repo = MagicMock()
+    broadcast_repo.list_broadcast_candidate_channels = AsyncMock(
+        return_value=candidates if candidates is not None else [_candidate()]
+    )
+    broadcast_repo.get_watermark = AsyncMock(return_value=watermark)
+    broadcast_repo.team_member_ids = AsyncMock(
+        return_value=members if members is not None else [_BC_USER_ID]
+    )
+    broadcast_repo.completed_workflow_counts_since = AsyncMock(
+        return_value=counts_ret if counts_ret is not None else _counts()
+    )
+    broadcast_repo.set_watermark = AsyncMock()
+
+    chat_repo = MagicMock()
+    chat_repo.send_message = AsyncMock(return_value={"id": 999, "seq": 1})
+
+    agent_repo = MagicMock()
+    _agent_val = agent if agent is not None else _agent(auto_broadcast=True)
+    agent_repo.get_by_id = AsyncMock(return_value=_agent_val)
+
+    return broadcast_repo, chat_repo, agent_repo
+
+
+_SVC = "app.services.chat.agent_broadcast"
+
+
+# ── (a) PERM-11 gate: auto_broadcast=False → no post ─────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_perm11_auto_broadcast_false_skips_post():
+    """An agent with auto_broadcast=False must never trigger a send."""
+    br, cr, ar = _make_repos(agent=_agent(auto_broadcast=False))
+
+    with (
+        patch(f"{_SVC}.get_broadcast_repository", return_value=br),
+        patch(f"{_SVC}.get_chat_repository", return_value=cr),
+        patch(f"{_SVC}.get_agent_repository", return_value=ar),
+    ):
+        result = await scan_and_broadcast()
+
+    cr.send_message.assert_not_called()
+    assert result["channels_scanned"] == 1
+    assert result["messages_posted"] == 0
+
+
+# ── (b) Happy path: auto_broadcast=True → posts once ─────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_happy_path_eligible_agent_posts_once():
+    """An auto_broadcast+enabled agent with a valid watermark posts exactly once."""
+    br, cr, ar = _make_repos(agent=_agent(auto_broadcast=True), watermark=_WM_TS)
+
+    with (
+        patch(f"{_SVC}.get_broadcast_repository", return_value=br),
+        patch(f"{_SVC}.get_chat_repository", return_value=cr),
+        patch(f"{_SVC}.get_agent_repository", return_value=ar),
+    ):
+        result = await scan_and_broadcast()
+
+    cr.send_message.assert_called_once()
+    call_kwargs = cr.send_message.call_args.kwargs
+    assert call_kwargs["channel_id"] == _BC_CHAN_ID
+    assert call_kwargs["sender_id"] is None
+    assert call_kwargs["sender_type"] == "agent"
+    assert call_kwargs["content_type"] == "text"
+    assert call_kwargs["from_bot_agent_id"] == _BC_AGENT_ID
+    assert "text" in call_kwargs["body"]
+
+    assert result["channels_scanned"] == 1
+    assert result["messages_posted"] == 1
+
+
+# ── (c) No-backfill: wm=None → set_watermark(now), no post ──────────────────
+
+
+@pytest.mark.asyncio
+async def test_no_backfill_first_run_sets_watermark_no_post():
+    """When a channel has no watermark, set watermark=~now and post NOTHING."""
+    br, cr, ar = _make_repos(agent=_agent(auto_broadcast=True), watermark=None)
+
+    with (
+        patch(f"{_SVC}.get_broadcast_repository", return_value=br),
+        patch(f"{_SVC}.get_chat_repository", return_value=cr),
+        patch(f"{_SVC}.get_agent_repository", return_value=ar),
+    ):
+        result = await scan_and_broadcast()
+
+    # Must set the watermark
+    br.set_watermark.assert_called_once()
+    set_wm_args = br.set_watermark.call_args
+    assert (
+        set_wm_args.args[0] == _BC_CHAN_ID
+        or set_wm_args.kwargs.get("channel_id") == _BC_CHAN_ID
+    )
+    wm_value = (
+        set_wm_args.args[1]
+        if len(set_wm_args.args) > 1
+        else set_wm_args.kwargs.get("ts")
+    )
+    assert isinstance(wm_value, datetime), "Watermark must be a datetime"
+    assert wm_value.tzinfo is not None, "Watermark must be timezone-aware"
+
+    # Must NOT post
+    cr.send_message.assert_not_called()
+    assert result["messages_posted"] == 0
+
+
+# ── (d) No-double-post: counts.total=0 → no send, watermark unchanged ─────────
+
+
+@pytest.mark.asyncio
+async def test_no_double_post_zero_counts_no_send():
+    """When no new completions since the watermark, do not post and do not advance wm."""
+    br, cr, ar = _make_repos(
+        agent=_agent(auto_broadcast=True),
+        watermark=_WM_TS,
+        counts_ret=_counts(total=0),
+    )
+
+    with (
+        patch(f"{_SVC}.get_broadcast_repository", return_value=br),
+        patch(f"{_SVC}.get_chat_repository", return_value=cr),
+        patch(f"{_SVC}.get_agent_repository", return_value=ar),
+    ):
+        result = await scan_and_broadcast()
+
+    cr.send_message.assert_not_called()
+    br.set_watermark.assert_not_called()
+    assert result["messages_posted"] == 0
+
+
+# ── (e) Summary safety: only counts + kind names in the output ────────────────
+
+
+def test_build_broadcast_summary_format_and_safety():
+    """build_broadcast_summary output must contain only counts+kinds, no private data."""
+    text = build_broadcast_summary(3, {"workflow": 3})
+
+    # Must contain the count and "task(s) completed"
+    assert "3" in text
+    assert "task(s) completed" in text
+    assert "workflow" in text
+
+    # Must NOT contain any private-data field names
+    forbidden = {"title", "subtitle", "metadata", "resource", "content", "name"}
+    text_lower = text.lower()
+    for word in forbidden:
+        assert word not in text_lower, f"Broadcast summary must not contain {word!r}"
+
+
+def test_build_broadcast_summary_exact_format():
+    """Verify the exact format including the · separator."""
+    text = build_broadcast_summary(5, {"workflow": 3, "download": 2})
+    assert text.startswith("✅ 5 task(s) completed")
+    assert " · " in text
+    assert "3 workflow" in text
+    assert "2 download" in text
+
+
+def test_build_broadcast_summary_no_breakdown_when_empty():
+    """When by_kind is empty, return only the header (no · separator)."""
+    text = build_broadcast_summary(7, {})
+    assert text == "✅ 7 task(s) completed"
+    assert "·" not in text
+
+
+def test_build_broadcast_summary_pure_function_no_extra_inputs():
+    """Summary takes only (int, dict[str,int]) — no other inputs possible."""
+    sig = inspect.signature(build_broadcast_summary)
+    params = list(sig.parameters.keys())
+    assert params == [
+        "total",
+        "by_kind",
+    ], f"build_broadcast_summary must take ONLY (total, by_kind), got {params}"
+
+
+# ── (f) Watermark advances to max_completed_at only after a successful post ───
+
+
+@pytest.mark.asyncio
+async def test_watermark_advances_to_max_completed_at_after_post():
+    """After a successful send, set_watermark must be called with max_completed_at."""
+    br, cr, ar = _make_repos(
+        agent=_agent(auto_broadcast=True),
+        watermark=_WM_TS,
+        counts_ret=_counts(total=2, max_ts=_MAX_TS),
+    )
+
+    with (
+        patch(f"{_SVC}.get_broadcast_repository", return_value=br),
+        patch(f"{_SVC}.get_chat_repository", return_value=cr),
+        patch(f"{_SVC}.get_agent_repository", return_value=ar),
+    ):
+        await scan_and_broadcast()
+
+    # send_message must be called BEFORE set_watermark
+    cr.send_message.assert_called_once()
+    br.set_watermark.assert_called_once()
+
+    set_wm_args = br.set_watermark.call_args
+    advanced_ts = (
+        set_wm_args.args[1]
+        if len(set_wm_args.args) > 1
+        else set_wm_args.kwargs.get("ts")
+    )
+    assert (
+        advanced_ts == _MAX_TS
+    ), f"Watermark must advance to max_completed_at={_MAX_TS}, got {advanced_ts}"
+
+
+# ── (g) One bad channel does not abort other channels ─────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_one_bad_channel_does_not_abort_scan():
+    """An exception in one channel's processing must not stop the scan of other channels."""
+    _CHAN_A = 5555555555555555555
+    _CHAN_B = 6666666666666666666
+
+    br = MagicMock()
+    br.list_broadcast_candidate_channels = AsyncMock(
+        return_value=[
+            _candidate(channel_id=_CHAN_A),
+            _candidate(channel_id=_CHAN_B),
+        ]
+    )
+
+    # Channel A: get_watermark raises; channel B: works fine
+    call_count = 0
+
+    async def get_watermark_side_effect(channel_id):
+        nonlocal call_count
+        call_count += 1
+        if channel_id == _CHAN_A:
+            raise RuntimeError("simulated DB failure on channel A")
+        return _WM_TS
+
+    br.get_watermark = AsyncMock(side_effect=get_watermark_side_effect)
+    br.team_member_ids = AsyncMock(return_value=[_BC_USER_ID])
+    br.completed_workflow_counts_since = AsyncMock(return_value=_counts(total=1))
+    br.set_watermark = AsyncMock()
+
+    cr = MagicMock()
+    cr.send_message = AsyncMock(return_value={"id": 1, "seq": 1})
+
+    ar = MagicMock()
+    ar.get_by_id = AsyncMock(return_value=_agent(auto_broadcast=True))
+
+    with (
+        patch(f"{_SVC}.get_broadcast_repository", return_value=br),
+        patch(f"{_SVC}.get_chat_repository", return_value=cr),
+        patch(f"{_SVC}.get_agent_repository", return_value=ar),
+    ):
+        result = await scan_and_broadcast()
+
+    # Channel B must have been processed despite channel A failing
+    cr.send_message.assert_called_once()
+    send_kwargs = cr.send_message.call_args.kwargs
+    assert send_kwargs["channel_id"] == _CHAN_B
+
+    assert result["channels_scanned"] == 2
+    assert result["messages_posted"] == 1
