@@ -82,12 +82,19 @@ LIMIT 40
 """
 
 # Existing memory titles to supply to the /dream prompt so the model
-# knows which topics are already covered.
+# knows which topics are already covered.  Must be context-scoped (NULL-safe)
+# so a project-scope run does NOT see personal or other-team titles as already
+# covered — that would cause the LLM to skip generating the same topic for this
+# context, defeating Phase C0's "same topic in different contexts → distinct
+# memories" goal.  Mirrors the IS NOT DISTINCT FROM predicate used by the
+# fingerprint dedup layer (_FINGERPRINTS_SQL in agent_memory_repository.py).
 _EXISTING_TITLES_SQL = """
 SELECT title
 FROM public.agent_memory
 WHERE owner_user_id = :user_id
   AND agent_id      = :agent_id
+  AND team_id       IS NOT DISTINCT FROM :team_id
+  AND project_id    IS NOT DISTINCT FROM :project_id
   AND status        = 'active'
 ORDER BY created_at DESC
 LIMIT 50
@@ -164,9 +171,15 @@ async def _consolidate_context(
         recent_activity = "\n".join(parts)
 
         # 3. Existing memory titles (prompt context: skip these topics).
+        #    Context-scoped so project/team runs don't bleed into each other.
         title_rows = await db_engine.fetch_all(
             _EXISTING_TITLES_SQL,
-            {"user_id": user_id, "agent_id": agent_id},
+            {
+                "user_id": user_id,
+                "agent_id": agent_id,
+                "team_id": team_id,
+                "project_id": project_id,
+            },
         )
         existing_titles = [r["title"] for r in title_rows if r.get("title")]
 

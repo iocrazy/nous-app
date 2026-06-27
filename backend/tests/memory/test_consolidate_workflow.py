@@ -674,3 +674,90 @@ async def test_trigger_consolidation_endpoint_maps_contexts() -> None:
     assert result.written == 3
     assert result.skipped == 0
     assert result.contexts == 2
+
+
+# ---------------------------------------------------------------------------
+# Phase C0 (Task 2 — Important finding): _EXISTING_TITLES_SQL must be
+# context-scoped so project/team consolidation runs do NOT see titles from
+# the user's personal (or another team's) memories as already covered.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_existing_titles_query_is_context_scoped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The SECOND fetch_all call (existing-titles query) must carry
+    team_id=10 and project_id=55 in its params dict when called with a
+    project context.  Without the fix the params only had user_id/agent_id,
+    causing cross-context title bleed.
+    """
+    from app.workflows.consolidate_agent_memory import (
+        MIN_NEW_MESSAGES,
+        _consolidate_context,
+    )
+
+    messages = [
+        {"role": "user", "content": f"msg {i}"} for i in range(MIN_NEW_MESSAGES)
+    ]
+
+    # Capture every (sql, params) pair passed to db_engine.fetch_all.
+    fetch_calls: list[dict] = []
+    call_idx = [0]
+
+    async def fake_fetch_all(sql: str, params=None) -> list:
+        fetch_calls.append({"sql": sql, "params": dict(params) if params else {}})
+        idx = call_idx[0]
+        call_idx[0] += 1
+        if idx == 0:
+            return messages  # first call = recent messages
+        return []  # second call = existing titles (what we're testing)
+
+    async def fake_existing_fps(
+        *, owner_user_id: str, agent_id: str, scope: str, team_id, project_id
+    ) -> set:
+        return set()
+
+    async def fake_write(**kwargs) -> bool:
+        return True
+
+    async def fake_consolidator(prompt: str, model: str = "") -> str:
+        return (
+            '[{"title":"Project tip","body_md":"body",'
+            '"when_to_use":"in project","kind":"fact"}]'
+        )
+
+    monkeypatch.setattr("app.db.engine.fetch_all", fake_fetch_all)
+    monkeypatch.setattr(
+        "app.workflows.consolidate_agent_memory.existing_fingerprints",
+        fake_existing_fps,
+    )
+    monkeypatch.setattr(
+        "app.workflows.consolidate_agent_memory.write_memory_row",
+        fake_write,
+    )
+    monkeypatch.setattr(
+        "app.workflows.consolidate_agent_memory.default_consolidator",
+        fake_consolidator,
+    )
+
+    await _consolidate_context("u1", "a1", team_id=10, project_id=55)
+
+    # Must have made exactly 2 fetch_all calls:
+    #   [0] = _RECENT_MESSAGES_SQL  (message load)
+    #   [1] = _EXISTING_TITLES_SQL  (title context for /dream prompt)
+    assert len(fetch_calls) == 2, (
+        f"Expected 2 fetch_all calls but got {len(fetch_calls)}: "
+        f"{[c['sql'][:40] for c in fetch_calls]}"
+    )
+
+    title_call_params = fetch_calls[1]["params"]
+
+    assert title_call_params.get("team_id") == 10, (
+        f"_EXISTING_TITLES_SQL must be scoped by team_id=10; "
+        f"got params={title_call_params}"
+    )
+    assert title_call_params.get("project_id") == 55, (
+        f"_EXISTING_TITLES_SQL must be scoped by project_id=55; "
+        f"got params={title_call_params}"
+    )
