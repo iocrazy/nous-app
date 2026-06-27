@@ -238,7 +238,7 @@ async def consolidate_pair(
 
         return result
     except Exception:  # noqa: BLE001 — consolidation must never break callers
-        logger.debug(
+        logger.opt(exception=True).warning(
             f"[agent_memory_consolidation] consolidate_pair failed "
             f"for user={owner_user_id} agent={agent_id}"
         )

@@ -164,3 +164,62 @@ def test_make_fingerprint_stable_and_title_normalized():
     )
     # fingerprint keys off normalized title only → same key (dedup by topic)
     assert make_fingerprint("u1", "a1", a) == make_fingerprint("u1", "a1", b)
+
+
+# ---------------------------------------------------------------------------
+# Phase B fixes — never-raise contract, cap enforcement, per-item tolerance
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_consolidate_pair_never_raises_when_consolidator_raises():
+    from app.services.ai.memory.agent_memory_consolidation import consolidate_pair
+
+    async def boom(prompt: str) -> str:
+        raise RuntimeError("llm down")
+
+    out = await consolidate_pair(
+        owner_user_id="u1",
+        agent_id="a1",
+        recent_activity="x",
+        existing_titles=[],
+        existing_fingerprints=set(),
+        consolidator=boom,
+        max_entries=10,
+    )
+    assert out == []
+
+
+@pytest.mark.asyncio
+async def test_consolidate_pair_caps_at_max_entries():
+    from app.services.ai.memory.agent_memory_consolidation import consolidate_pair
+
+    items = ",".join(
+        '{"title":"T%d","body_md":"b","when_to_use":"w","kind":"fact"}' % i
+        for i in range(5)
+    )
+
+    async def many(prompt: str) -> str:
+        return "[" + items + "]"
+
+    out = await consolidate_pair(
+        owner_user_id="u1",
+        agent_id="a1",
+        recent_activity="x",
+        existing_titles=[],
+        existing_fingerprints=set(),
+        consolidator=many,
+        max_entries=2,
+    )
+    assert len(out) == 2  # capped
+
+
+def test_parse_keeps_good_item_when_array_has_a_bad_one():
+    from app.services.ai.memory.agent_memory_consolidation import (
+        parse_consolidation_output,
+    )
+
+    drafts = parse_consolidation_output(
+        '[{"title":123},{"title":"Good","body_md":"b","when_to_use":"w","kind":"fact"}]'
+    )
+    assert len(drafts) == 1 and drafts[0].title == "Good"
