@@ -51,7 +51,7 @@ function MediaCard({ body }: { body: MediaCardBody }): React.ReactElement {
   const hasThumb = Boolean(body.image_url);
 
   return (
-    <div className="mt-2 max-w-[420px] bg-[#1d1d22] border border-white/[.12] rounded-[12px] overflow-hidden">
+    <div className="mt-2 max-w-[420px] bg-card border border-line-strong rounded-[12px] overflow-hidden">
       {/* Thumbnail */}
       <div className="h-[150px] bg-gradient-to-br from-slate-800 to-slate-900 relative grid place-items-center">
         {hasThumb ? (
@@ -73,7 +73,7 @@ function MediaCard({ body }: { body: MediaCardBody }): React.ReactElement {
       {/* Body */}
       <div className="px-[13px] py-[11px]">
         {body.title && (
-          <div className="text-[13.5px] font-semibold text-[#e7e7ea] whitespace-nowrap overflow-hidden text-ellipsis">
+          <div className="text-[13.5px] font-semibold text-content whitespace-nowrap overflow-hidden text-ellipsis">
             {body.title}
           </div>
         )}
@@ -81,10 +81,10 @@ function MediaCard({ body }: { body: MediaCardBody }): React.ReactElement {
           <div className="flex gap-4 mt-[7px]">
             {body.fields.map((f) => (
               <div key={f.title} className="flex flex-col">
-                <span className="text-[10px] uppercase tracking-[0.06em] text-[#74747e]">
+                <span className="text-[10px] uppercase tracking-[0.06em] text-content-3">
                   {f.title}
                 </span>
-                <span className="text-[12.5px] text-[#a3a3ad] mt-px">
+                <span className="text-[12.5px] text-content-2 mt-px">
                   {f.value}
                 </span>
               </div>
@@ -104,7 +104,7 @@ function MediaCard({ body }: { body: MediaCardBody }): React.ReactElement {
         </button>
         <button
           type="button"
-          className="flex items-center gap-[6px] text-[12px] px-[11px] py-[5px] rounded-[9px] bg-[#17171b] border border-white/[.065] text-[#a3a3ad] transition-colors hover:text-[#e7e7ea] hover:bg-[#1d1d22]"
+          className="flex items-center gap-[6px] text-[12px] px-[11px] py-[5px] rounded-[9px] bg-island-2 border border-line text-content-2 transition-colors hover:text-content hover:bg-card"
         >
           <Download size={13} />
           {t('chat.download')}
@@ -209,7 +209,7 @@ export function MessageBubble({
       <div className="flex-1 min-w-0">
         {/* Meta row */}
         <div className="flex items-center gap-2 mb-[3px]">
-          <span className="text-[13.5px] font-[650] text-[#e7e7ea]">
+          <span className="text-[13.5px] font-[650] text-content">
             {displayName}
           </span>
           {isAgent && (
@@ -217,11 +217,11 @@ export function MessageBubble({
               AGENT
             </span>
           )}
-          <span className="text-[10.5px] text-[#74747e]">
+          <span className="text-[10.5px] text-content-3">
             {fmtTime(message.created_at)}
           </span>
           {message.edited_at && !isDeleted && (
-            <span className="text-[10.5px] text-[#74747e]">
+            <span className="text-[10.5px] text-content-3">
               {'·'} {t('chat.edited')}
             </span>
           )}
@@ -234,7 +234,7 @@ export function MessageBubble({
                   type="button"
                   onClick={handleEditClick}
                   title={t('chat.edit')}
-                  className="p-[5px] rounded-[7px] bg-[#1d1d22] border border-white/[.12] text-[#74747e] hover:text-[#e7e7ea] hover:bg-[#252529] transition-colors"
+                  className="p-[5px] rounded-[7px] bg-card border border-line-strong text-content-3 hover:text-content hover:bg-island-2 transition-colors"
                 >
                   <Pencil size={12} />
                 </button>
@@ -243,7 +243,7 @@ export function MessageBubble({
                 type="button"
                 onClick={handleDeleteClick}
                 title={t('chat.delete')}
-                className="p-[5px] rounded-[7px] bg-[#1d1d22] border border-white/[.12] text-[#74747e] hover:text-red-400 hover:bg-red-500/[.1] transition-colors"
+                className="p-[5px] rounded-[7px] bg-card border border-line-strong text-content-3 hover:text-red-400 hover:bg-red-500/[.1] transition-colors"
               >
                 <Trash2 size={12} />
               </button>
@@ -254,7 +254,7 @@ export function MessageBubble({
         {/* Content */}
         {isDeleted ? (
           /* Tombstone: replace body with muted italic line */
-          <p className="text-[13px] text-[#74747e] italic">
+          <p className="text-[13px] text-content-3 italic">
             {t('chat.deleted')}
           </p>
         ) : editing ? (
@@ -266,7 +266,7 @@ export function MessageBubble({
               onKeyDown={handleKeyDown}
               autoFocus
               rows={3}
-              className="w-full bg-[#1d1d22] border border-white/[.12] rounded-[9px] text-[14px] text-[#e7e7ea] px-[10px] py-[8px] resize-none leading-[1.55] focus:outline-none focus:border-white/[.25] transition-colors"
+              className="w-full bg-card border border-line-strong rounded-[9px] text-[14px] text-content px-[10px] py-[8px] resize-none leading-[1.55] focus:outline-none focus:border-indigo-500/50 transition-colors"
             />
             <div className="flex gap-[6px]">
               <button
@@ -279,7 +279,7 @@ export function MessageBubble({
               <button
                 type="button"
                 onClick={handleCancel}
-                className="text-[12px] px-[10px] py-[4px] rounded-[7px] bg-[#17171b] border border-white/[.065] text-[#74747e] hover:text-[#e7e7ea] transition-colors"
+                className="text-[12px] px-[10px] py-[4px] rounded-[7px] bg-island-2 border border-line text-content-3 hover:text-content transition-colors"
               >
                 {t('chat.cancel')}
               </button>
@@ -288,7 +288,7 @@ export function MessageBubble({
         ) : isMediaCard ? (
           <MediaCard body={message.body as MediaCardBody} />
         ) : (
-          <p className="text-[14px] text-[#e7e7ea] leading-[1.55] whitespace-pre-wrap break-words">
+          <p className="text-[14px] text-content leading-[1.55] whitespace-pre-wrap break-words">
             {String(message.body.text ?? '')}
           </p>
         )}

@@ -235,7 +235,7 @@ export function Composer({
   return (
     <div className="flex-shrink-0 px-[18px] pb-4 pt-3">
       {/* Input box — relative so MentionDropdown can anchor to it */}
-      <div className="relative bg-ink-950 border border-white/[.12] rounded-[12px] px-3 py-[10px] focus-within:border-indigo-500/50 transition-colors">
+      <div className="relative bg-ink-950 border border-line-strong rounded-[12px] px-3 py-[10px] focus-within:border-indigo-500/50 transition-colors">
         {/* Mention dropdown — floats above the input box */}
         <MentionDropdown
           open={dropdownOpen}
@@ -253,7 +253,7 @@ export function Composer({
           onInput={handleInput}
           className={[
             'w-full bg-transparent border-none outline-none resize-none',
-            'text-[14px] text-[#e7e7ea] placeholder:text-[#74747e] font-[inherit]',
+            'text-[14px] text-content placeholder:text-content-3 font-[inherit]',
             'leading-[1.55] min-h-[22px] max-h-[120px] overflow-y-auto',
             'disabled:opacity-40 disabled:cursor-not-allowed',
           ].join(' ')}
@@ -265,7 +265,7 @@ export function Composer({
             type="button"
             disabled={disabled}
             title={t('chat.attachResource')}
-            className="w-[30px] h-[30px] rounded-[8px] grid place-items-center text-[#74747e] hover:text-[#e7e7ea] hover:bg-[#17171b] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="w-[30px] h-[30px] rounded-[8px] grid place-items-center text-content-3 hover:text-content hover:bg-island-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             <Paperclip size={14} />
           </button>
@@ -274,7 +274,7 @@ export function Composer({
             disabled={disabled}
             onClick={onAttachMedia}
             title={t('chat.attachMedia')}
-            className="w-[30px] h-[30px] rounded-[8px] grid place-items-center text-[#74747e] hover:text-[#e7e7ea] hover:bg-[#17171b] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="w-[30px] h-[30px] rounded-[8px] grid place-items-center text-content-3 hover:text-content hover:bg-island-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             <Image size={14} />
           </button>
@@ -283,7 +283,7 @@ export function Composer({
             disabled={disabled}
             onClick={handleAtButton}
             title={t('chat.mention')}
-            className="w-[30px] h-[30px] rounded-[8px] grid place-items-center text-[#74747e] hover:text-[#e7e7ea] hover:bg-[#17171b] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="w-[30px] h-[30px] rounded-[8px] grid place-items-center text-content-3 hover:text-content hover:bg-island-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             <AtSign size={14} />
           </button>
@@ -304,7 +304,7 @@ export function Composer({
       </div>
 
       {/* Hint */}
-      <p className="text-[11px] text-[#74747e] mt-[7px] pl-[2px]">
+      <p className="text-[11px] text-content-3 mt-[7px] pl-[2px]">
         {t('chat.composerHint')}
       </p>
     </div>

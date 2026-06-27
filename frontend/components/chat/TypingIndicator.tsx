@@ -36,7 +36,7 @@ export function TypingIndicator({
           style={{ animationDelay: delay, animationDuration: '0.8s' }}
         />
       ))}
-      {label && <span className="text-[12px] text-[#74747e] ml-1">{label}</span>}
+      {label && <span className="text-[12px] text-content-3 ml-1">{label}</span>}
     </div>
   );
 }

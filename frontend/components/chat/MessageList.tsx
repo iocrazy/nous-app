@@ -57,7 +57,7 @@ export function MessageList({
             type="button"
             onClick={onLoadOlder}
             disabled={loadingOlder}
-            className="flex items-center gap-2 text-[12px] text-[#74747e] hover:text-[#a3a3ad] disabled:opacity-50 disabled:cursor-not-allowed transition-colors px-3 py-1.5 rounded-[9px] bg-[#17171b] border border-white/[.065]"
+            className="flex items-center gap-2 text-[12px] text-content-3 hover:text-content-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors px-3 py-1.5 rounded-[9px] bg-island-2 border border-line"
           >
             {loadingOlder && (
               <Loader2 size={12} className="animate-spin" />

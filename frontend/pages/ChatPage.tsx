@@ -556,7 +556,7 @@ export function ChatPage(): React.ReactElement {
       </div>
 
       {/* ── Conversation island ── */}
-      <div className="flex-1 flex flex-col h-full bg-[#15151a] border border-white/[.12] rounded-[18px] overflow-hidden min-w-0">
+      <div className="flex-1 flex flex-col h-full bg-island border border-line-strong rounded-[18px] overflow-hidden min-w-0">
         {activeAgentDm !== null ? (
           /* ── Agent DM view: render AIChatPanel locked to the selected agent ── */
           <AIChatPanel
@@ -568,15 +568,15 @@ export function ChatPage(): React.ReactElement {
           /* ── Channel view ── */
           <>
             {/* Header */}
-            <div className="flex items-center gap-[10px] px-[18px] py-[13px] border-b border-white/[.08] flex-shrink-0">
-              <MessageSquare size={15} className="text-[#74747e] flex-shrink-0" />
-              <span className="text-[15px] font-[650] tracking-[-0.01em] text-[#e7e7ea] whitespace-nowrap overflow-hidden text-ellipsis">
+            <div className="flex items-center gap-[10px] px-[18px] py-[13px] border-b border-line flex-shrink-0">
+              <MessageSquare size={15} className="text-content-3 flex-shrink-0" />
+              <span className="text-[15px] font-[650] tracking-[-0.01em] text-content whitespace-nowrap overflow-hidden text-ellipsis">
                 {activeChannel?.name ?? activeChannel?.id ?? t('chat.noChannels')}
               </span>
               {activeChannel?.topic && (
                 <>
-                  <span className="text-[#4a4a52] text-[13px]">·</span>
-                  <span className="text-[12.5px] text-[#74747e] whitespace-nowrap overflow-hidden text-ellipsis">
+                  <span className="text-content-4 text-[13px]">·</span>
+                  <span className="text-[12.5px] text-content-3 whitespace-nowrap overflow-hidden text-ellipsis">
                     {activeChannel.topic}
                   </span>
                 </>
@@ -584,7 +584,7 @@ export function ChatPage(): React.ReactElement {
               {activeChannel && onlineUserIds.length > 0 && (
                 <div className="ml-auto flex items-center gap-[5px] flex-shrink-0">
                   <span className="w-[6px] h-[6px] rounded-full bg-emerald-400 flex-shrink-0" />
-                  <span className="text-[11.5px] text-[#74747e]">
+                  <span className="text-[11.5px] text-content-3">
                     {t('chat.typing.online', { count: onlineUserIds.length })}
                   </span>
                 </div>
@@ -594,8 +594,8 @@ export function ChatPage(): React.ReactElement {
             {/* Body: message list or empty state */}
             {channels.length === 0 || !activeId ? (
               <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-6">
-                <MessageSquare size={36} className="text-[#4a4a52]" />
-                <p className="text-[14px] text-[#74747e]">{t('chat.noChannels')}</p>
+                <MessageSquare size={36} className="text-content-4" />
+                <p className="text-[14px] text-content-3">{t('chat.noChannels')}</p>
               </div>
             ) : (
               <>

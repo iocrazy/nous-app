@@ -179,16 +179,16 @@ export default function CreateGroupModal({ teamId, open, onClose, onCreated }: P
       className="fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px] grid place-items-center"
       onClick={handleBackdropClick}
     >
-      <div className="w-[460px] bg-[#15151a] border border-white/[.12] rounded-[18px] shadow-[0_24px_70px_rgba(0,0,0,.6)] overflow-hidden">
+      <div className="w-[460px] bg-island border border-line-strong rounded-[18px] shadow-[0_24px_70px_rgba(0,0,0,.6)] overflow-hidden">
 
         {/* ── Header ── */}
-        <div className="flex items-center justify-between px-5 py-[18px] border-b border-white/[.065]">
-          <h3 className="text-[16px] font-semibold text-[#e7e7ea] leading-none">
+        <div className="flex items-center justify-between px-5 py-[18px] border-b border-line">
+          <h3 className="text-[16px] font-semibold text-content leading-none">
             {t('chat.createGroup.title')}
           </h3>
           <button
             onClick={onClose}
-            className="w-[26px] h-[26px] rounded-[7px] grid place-items-center text-[#74747e] hover:text-[#a3a3ad] hover:bg-white/[.06] transition-colors"
+            className="w-[26px] h-[26px] rounded-[7px] grid place-items-center text-content-3 hover:text-content-2 hover:bg-white/[.06] transition-colors"
             aria-label="Close"
           >
             <X size={14} strokeWidth={2} />
@@ -199,14 +199,14 @@ export default function CreateGroupModal({ teamId, open, onClose, onCreated }: P
         <div className="px-5 py-[18px] flex flex-col gap-4">
 
           {loading ? (
-            <div className="py-8 text-center text-[13px] text-[#74747e]">
+            <div className="py-8 text-center text-[13px] text-content-3">
               {t('chat.createGroup.loading')}
             </div>
           ) : (
             <>
               {/* Group name */}
               <div>
-                <label className="block text-[11px] font-semibold uppercase tracking-[.06em] text-[#74747e] mb-[6px]">
+                <label className="block text-[11px] font-semibold uppercase tracking-[.06em] text-content-3 mb-[6px]">
                   {t('chat.createGroup.nameLabel')}
                 </label>
                 <input
@@ -216,13 +216,13 @@ export default function CreateGroupModal({ teamId, open, onClose, onCreated }: P
                   onChange={e => setName(e.target.value)}
                   onKeyDown={handleNameKeyDown}
                   placeholder={t('chat.createGroup.namePlaceholder')}
-                  className="w-full bg-[#09090b] border border-white/[.12] rounded-[9px] px-[11px] py-[9px] text-[14px] text-[#e7e7ea] font-[inherit] outline-none focus:border-indigo-500/50 placeholder:text-[#74747e]"
+                  className="w-full bg-app-bg border border-line-strong rounded-[9px] px-[11px] py-[9px] text-[14px] text-content font-[inherit] outline-none focus:border-indigo-500/50 placeholder:text-content-3"
                 />
               </div>
 
               {/* Visibility segmented control */}
               <div>
-                <label className="block text-[11px] font-semibold uppercase tracking-[.06em] text-[#74747e] mb-[6px]">
+                <label className="block text-[11px] font-semibold uppercase tracking-[.06em] text-content-3 mb-[6px]">
                   {t('chat.createGroup.visibility')}
                 </label>
                 <div className="flex gap-2">
@@ -234,7 +234,7 @@ export default function CreateGroupModal({ teamId, open, onClose, onCreated }: P
                       'flex-1 border rounded-[9px] p-[11px] cursor-pointer flex gap-[9px] items-start text-left transition-colors',
                       visibility === 'group'
                         ? 'border-indigo-500 bg-indigo-500/[.08]'
-                        : 'border-white/[.12] hover:border-white/[.20]',
+                        : 'border-line-strong hover:border-line-strong',
                     ].join(' ')}
                   >
                     <Lock
@@ -242,14 +242,14 @@ export default function CreateGroupModal({ teamId, open, onClose, onCreated }: P
                       strokeWidth={2}
                       className={[
                         'mt-[1px] shrink-0',
-                        visibility === 'group' ? 'text-indigo-300' : 'text-[#74747e]',
+                        visibility === 'group' ? 'text-indigo-300' : 'text-content-3',
                       ].join(' ')}
                     />
                     <div>
-                      <div className="text-[13px] font-semibold text-[#e7e7ea]">
+                      <div className="text-[13px] font-semibold text-content">
                         {t('chat.createGroup.private')}
                       </div>
-                      <div className="text-[11px] text-[#74747e] mt-[2px] leading-[1.4]">
+                      <div className="text-[11px] text-content-3 mt-[2px] leading-[1.4]">
                         {t('chat.createGroup.privateDesc')}
                       </div>
                     </div>
@@ -263,7 +263,7 @@ export default function CreateGroupModal({ teamId, open, onClose, onCreated }: P
                       'flex-1 border rounded-[9px] p-[11px] cursor-pointer flex gap-[9px] items-start text-left transition-colors',
                       visibility === 'public'
                         ? 'border-indigo-500 bg-indigo-500/[.08]'
-                        : 'border-white/[.12] hover:border-white/[.20]',
+                        : 'border-line-strong hover:border-line-strong',
                     ].join(' ')}
                   >
                     <Globe
@@ -271,14 +271,14 @@ export default function CreateGroupModal({ teamId, open, onClose, onCreated }: P
                       strokeWidth={2}
                       className={[
                         'mt-[1px] shrink-0',
-                        visibility === 'public' ? 'text-indigo-300' : 'text-[#74747e]',
+                        visibility === 'public' ? 'text-indigo-300' : 'text-content-3',
                       ].join(' ')}
                     />
                     <div>
-                      <div className="text-[13px] font-semibold text-[#e7e7ea]">
+                      <div className="text-[13px] font-semibold text-content">
                         {t('chat.createGroup.public')}
                       </div>
-                      <div className="text-[11px] text-[#74747e] mt-[2px] leading-[1.4]">
+                      <div className="text-[11px] text-content-3 mt-[2px] leading-[1.4]">
                         {t('chat.createGroup.publicDesc')}
                       </div>
                     </div>
@@ -288,11 +288,11 @@ export default function CreateGroupModal({ teamId, open, onClose, onCreated }: P
 
               {/* Members picker */}
               <div>
-                <label className="block text-[11px] font-semibold uppercase tracking-[.06em] text-[#74747e] mb-[6px]">
+                <label className="block text-[11px] font-semibold uppercase tracking-[.06em] text-content-3 mb-[6px]">
                   {t('chat.createGroup.members')}
                 </label>
                 {members.length === 0 ? (
-                  <p className="text-[12px] text-[#74747e]">
+                  <p className="text-[12px] text-content-3">
                     {t('chat.createGroup.noMembers')}
                   </p>
                 ) : (
@@ -311,7 +311,7 @@ export default function CreateGroupModal({ teamId, open, onClose, onCreated }: P
                             'text-[12.5px] border transition-colors',
                             selected
                               ? 'bg-indigo-500/[.15] border-indigo-500/50 text-indigo-300'
-                              : 'bg-[#17171b] border-white/[.065] text-[#e7e7ea] hover:border-white/[.20]',
+                              : 'bg-island-2 border-line text-content hover:border-line-strong',
                           ].join(' ')}
                         >
                           <span className="w-5 h-5 rounded-full bg-gradient-to-br from-[#475569] to-[#64748b] grid place-items-center text-[9px] font-semibold text-white shrink-0">
@@ -327,11 +327,11 @@ export default function CreateGroupModal({ teamId, open, onClose, onCreated }: P
 
               {/* Agents picker */}
               <div>
-                <label className="block text-[11px] font-semibold uppercase tracking-[.06em] text-[#74747e] mb-[6px]">
+                <label className="block text-[11px] font-semibold uppercase tracking-[.06em] text-content-3 mb-[6px]">
                   {t('chat.createGroup.agents')}
                 </label>
                 {agents.length === 0 ? (
-                  <p className="text-[12px] text-[#74747e]">
+                  <p className="text-[12px] text-content-3">
                     {t('chat.createGroup.noAgents')}
                   </p>
                 ) : (
@@ -349,7 +349,7 @@ export default function CreateGroupModal({ teamId, open, onClose, onCreated }: P
                             'text-[12.5px] border transition-colors',
                             selected
                               ? 'bg-amber-500/[.15] border-amber-500/50 text-amber-300'
-                              : 'bg-[#17171b] border-white/[.065] text-[#e7e7ea] hover:border-white/[.20]',
+                              : 'bg-island-2 border-line text-content hover:border-line-strong',
                           ].join(' ')}
                         >
                           <span className="w-5 h-5 rounded-full bg-gradient-to-br from-amber-400 to-amber-500 grid place-items-center text-[9px] font-semibold text-[#1a1505] shrink-0">
@@ -367,12 +367,12 @@ export default function CreateGroupModal({ teamId, open, onClose, onCreated }: P
         </div>
 
         {/* ── Footer ── */}
-        <div className="flex justify-end gap-[10px] px-5 py-[14px] border-t border-white/[.065]">
+        <div className="flex justify-end gap-[10px] px-5 py-[14px] border-t border-line">
           <button
             type="button"
             onClick={onClose}
             disabled={creating}
-            className="text-[13.5px] font-semibold px-4 py-[9px] rounded-[9px] bg-[#17171b] border border-white/[.065] text-[#a3a3ad] hover:text-[#e7e7ea] transition-colors disabled:opacity-50"
+            className="text-[13.5px] font-semibold px-4 py-[9px] rounded-[9px] bg-island-2 border border-line text-content-2 hover:text-content transition-colors disabled:opacity-50"
           >
             {t('chat.createGroup.cancel')}
           </button>
