@@ -7,7 +7,7 @@ fingerprint-dedup helpers; they never raise (best-effort consolidation).
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Optional, Set
 
 from loguru import logger
 from sqlalchemy import text
@@ -54,11 +54,11 @@ async def recall_rows(
 _INSERT_SQL = text(
     """
     INSERT INTO public.agent_memory
-        (scope, owner_user_id, agent_id, visibility, kind, title, body_md,
-         when_to_use, fingerprint)
+        (scope, owner_user_id, agent_id, team_id, project_id, visibility, kind,
+         title, body_md, when_to_use, fingerprint)
     VALUES
-        (:scope, :owner_user_id, :agent_id, 'private', :kind, :title, :body_md,
-         :when_to_use, :fingerprint)
+        (:scope, :owner_user_id, :agent_id, :team_id, :project_id, 'private',
+         :kind, :title, :body_md, :when_to_use, :fingerprint)
     """
 )
 
@@ -66,6 +66,9 @@ _FINGERPRINTS_SQL = text(
     """
     SELECT fingerprint FROM public.agent_memory
     WHERE owner_user_id = :owner_user_id AND agent_id = :agent_id
+      AND scope = :scope
+      AND team_id IS NOT DISTINCT FROM :team_id
+      AND project_id IS NOT DISTINCT FROM :project_id
       AND status = 'active' AND fingerprint <> ''
     """
 )
@@ -81,6 +84,8 @@ async def write_memory_row(
     body_md: str,
     when_to_use: str,
     fingerprint: str,
+    team_id: Optional[int] = None,
+    project_id: Optional[int] = None,
 ) -> bool:
     """Insert one PRIVATE agent_memory row. Returns False on any error (never raises)."""
     try:
@@ -91,6 +96,8 @@ async def write_memory_row(
                     "scope": scope,
                     "owner_user_id": owner_user_id,
                     "agent_id": agent_id,
+                    "team_id": team_id,
+                    "project_id": project_id,
                     "kind": kind,
                     "title": title,
                     "body_md": body_md,
@@ -104,13 +111,26 @@ async def write_memory_row(
         return False
 
 
-async def existing_fingerprints(*, owner_user_id: str, agent_id: str) -> Set[str]:
-    """Fingerprints already stored for this (owner, agent). Empty set on error."""
+async def existing_fingerprints(
+    *,
+    owner_user_id: str,
+    agent_id: str,
+    scope: str,
+    team_id: Optional[int],
+    project_id: Optional[int],
+) -> Set[str]:
+    """Fingerprints already stored for this (owner, agent, scope, context). Empty set on error."""
     try:
         async with write_scope() as session:
             result = await session.execute(
                 _FINGERPRINTS_SQL,
-                {"owner_user_id": owner_user_id, "agent_id": agent_id},
+                {
+                    "owner_user_id": owner_user_id,
+                    "agent_id": agent_id,
+                    "scope": scope,
+                    "team_id": team_id,
+                    "project_id": project_id,
+                },
             )
             return {str(fp) for fp in result.scalars().all()}
     except Exception:  # noqa: BLE001

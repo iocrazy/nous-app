@@ -45,7 +45,9 @@ async def test_consolidate_pair_writes_non_dup_drafts(
             return messages  # first call = recent messages
         return []  # second call = existing titles
 
-    async def fake_existing_fps(*, owner_user_id: str, agent_id: str) -> set:
+    async def fake_existing_fps(
+        *, owner_user_id: str, agent_id: str, scope: str, team_id, project_id
+    ) -> set:
         return set()  # nothing stored yet
 
     async def fake_write(
@@ -113,7 +115,7 @@ async def test_consolidate_pair_writes_non_dup_drafts(
         when_to_use="when deploying",
         kind="procedure",
     )
-    expected_fp = make_fingerprint("u1", "a1", expected_draft)
+    expected_fp = make_fingerprint("u1", "a1", "agent_user", "", expected_draft)
     assert kw["fingerprint"] == expected_fp
 
 
@@ -147,7 +149,7 @@ async def test_consolidate_pair_skips_dup_fingerprint(
         when_to_use="when deploying",
         kind="procedure",
     )
-    dup_fp = make_fingerprint("u1", "a1", dup_draft)
+    dup_fp = make_fingerprint("u1", "a1", "agent_user", "", dup_draft)
 
     written_calls: list = []
     call_idx = [0]
@@ -157,7 +159,9 @@ async def test_consolidate_pair_skips_dup_fingerprint(
         call_idx[0] += 1
         return messages if idx == 0 else []
 
-    async def fake_existing_fps(*, owner_user_id: str, agent_id: str) -> set:
+    async def fake_existing_fps(
+        *, owner_user_id: str, agent_id: str, scope: str, team_id, project_id
+    ) -> set:
         return {dup_fp}  # already stored — should be deduped
 
     async def fake_write(**kwargs) -> bool:

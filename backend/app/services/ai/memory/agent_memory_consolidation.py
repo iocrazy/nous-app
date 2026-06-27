@@ -40,15 +40,14 @@ class MemoryDraft:
 # ---------------------------------------------------------------------------
 
 
-def make_fingerprint(owner_user_id: str, agent_id: str, draft: MemoryDraft) -> str:
-    """SHA1 of ``owner|agent|scope|normalised_title``.
-
-    Keys off the normalised title only so that two drafts covering the same
-    topic always resolve to the same fingerprint regardless of body content.
-    This is intentional: the dedup unit is *topic*, not content.
-    """
+def make_fingerprint(
+    owner_user_id: str, agent_id: str, scope: str, scope_id: str, draft: MemoryDraft
+) -> str:
+    """SHA1 of ``owner|agent|scope|scope_id|normalised_title`` — the dedup unit
+    is *topic within a context*, so the same topic in two contexts stays
+    distinct (and can be promoted independently)."""
     normalised = draft.title.strip().lower()
-    raw = f"{owner_user_id}|{agent_id}|agent_user|{normalised}"
+    raw = f"{owner_user_id}|{agent_id}|{scope}|{scope_id}|{normalised}"
     return hashlib.sha1(raw.encode()).hexdigest()
 
 
@@ -197,6 +196,8 @@ async def consolidate_pair(
     *,
     owner_user_id: str,
     agent_id: str,
+    scope: str,
+    scope_id: str,
     recent_activity: str,
     existing_titles: List[str],
     existing_fingerprints: Set[str],
@@ -229,7 +230,7 @@ async def consolidate_pair(
 
         result: List[Tuple[MemoryDraft, str]] = []
         for draft in drafts:
-            fp = make_fingerprint(owner_user_id, agent_id, draft)
+            fp = make_fingerprint(owner_user_id, agent_id, scope, scope_id, draft)
             if fp in existing_fingerprints:
                 continue
             result.append((draft, fp))

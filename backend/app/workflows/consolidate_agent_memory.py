@@ -125,12 +125,22 @@ async def _consolidate_pair(user_id: str, agent_id: str) -> dict[str, Any]:
         existing_titles = [r["title"] for r in title_rows if r.get("title")]
 
         # 4. Existing fingerprints (dedup lookup).
-        fps = await existing_fingerprints(owner_user_id=user_id, agent_id=agent_id)
+        # scope/team_id/project_id are hardcoded here; Task 2 will derive them
+        # from the session context and pass them through properly.
+        fps = await existing_fingerprints(
+            owner_user_id=user_id,
+            agent_id=agent_id,
+            scope="agent_user",
+            team_id=None,
+            project_id=None,
+        )
 
         # 5. Consolidate: prompt → LLM call → parse → dedup → cap at max_entries.
         pairs = await consolidate_pair(
             owner_user_id=user_id,
             agent_id=agent_id,
+            scope="agent_user",
+            scope_id="",
             recent_activity=recent_activity,
             existing_titles=existing_titles,
             existing_fingerprints=fps,
