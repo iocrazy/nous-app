@@ -339,6 +339,7 @@ export const TopicInspirationPage: React.FC = () => {
         hotspot={selected}
         onToggleSave={(h) => applyState(h, { is_saved: !h.is_saved })}
         onToggleHide={(h) => applyState(h, { is_hidden: !h.is_hidden })}
+        onClose={() => setSelected(null)}
       />
 
       {/* Floating parse widget — bottom-right, 3 states */}
