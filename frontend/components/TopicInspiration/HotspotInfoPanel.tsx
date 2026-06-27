@@ -267,6 +267,11 @@ export const HotspotInfoPanel: React.FC<Props> = ({
               count: h.source_count,
               defaultValue: 'Seen on {{count}} platforms',
             })}
+            {(h.source_names?.length ?? 0) > 0 && (
+              <div className="mt-0.5 font-normal text-content-3">
+                {h.source_names!.join(' · ')}
+              </div>
+            )}
           </div>
         )}
         {h.captured_at && <div>{h.captured_at.slice(0, 16).replace('T', ' ')}</div>}

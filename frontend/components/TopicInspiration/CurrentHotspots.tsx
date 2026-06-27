@@ -15,7 +15,12 @@ function relativeTime(iso?: string | null): string {
   return d === 1 ? '1d ago' : `${d}d ago`;
 }
 
-export const CurrentHotspots: React.FC<{ items: Hotspot[] }> = ({ items }) => {
+export const CurrentHotspots: React.FC<{
+  items: Hotspot[];
+  /** Open the detail panel for a tapped hotspot. Without it rows are inert —
+   *  which on touch (no hover) means the content is unreachable. */
+  onSelect?: (h: Hotspot) => void;
+}> = ({ items, onSelect }) => {
   const { t } = useTranslation();
   const island = islandUI();
 
@@ -39,9 +44,11 @@ export const CurrentHotspots: React.FC<{ items: Hotspot[] }> = ({ items }) => {
         }`}
       >
         {items.map((item, i) => (
-          <div
+          <button
+            type="button"
             key={item.id}
-            className={`flex items-center justify-between py-1.5 ${
+            onClick={() => onSelect?.(item)}
+            className={`w-full text-left flex items-center justify-between py-1.5 transition-opacity hover:opacity-70 ${
               i > 0 ? 'border-t border-line' : ''
             }`}
           >
@@ -111,7 +118,7 @@ export const CurrentHotspots: React.FC<{ items: Hotspot[] }> = ({ items }) => {
                 </span>
               );
             })()}
-          </div>
+          </button>
         ))}
       </div>
     </div>
