@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { FileText, Download, ExternalLink, Star, EyeOff } from 'lucide-react';
+import { FileText, Download, ExternalLink, Star, EyeOff, X } from 'lucide-react';
 import { useIslandWork } from '../../contexts/IslandWorkContext';
 import { useToast } from '../Toast';
 import {
@@ -27,12 +27,16 @@ interface Props {
   hotspot: Hotspot | null;
   onToggleSave?: (h: Hotspot) => void;
   onToggleHide?: (h: Hotspot) => void;
+  /** Close the panel (clears the selection). Needed by the mobile overlay,
+   *  which has no island splitter/reopen handle to dismiss it. */
+  onClose?: () => void;
 }
 
 export const HotspotInfoPanel: React.FC<Props> = ({
   hotspot,
   onToggleSave,
   onToggleHide,
+  onClose,
 }) => {
   const { t } = useTranslation();
   const { infoIslandEl, setInfoAvailable, setInfoVisible } = useIslandWork();
@@ -66,7 +70,11 @@ export const HotspotInfoPanel: React.FC<Props> = ({
     };
   }, [hotspot]);
 
-  if (!hotspot || !infoIslandEl) return null;
+  // Render whenever a hotspot is selected. Desktop portals into the right info
+  // island; mobile (where that island is `display:none` via `island-frame
+  // hidden sm:flex`) gets a full-screen overlay instead — without it, tapping a
+  // hotspot on touch did nothing because the only surface was hidden.
+  if (!hotspot) return null;
 
   // Content/text come from the detail fetch when available; live state flags
   // come from the prop so card↔panel stay in sync after a toggle.
@@ -104,7 +112,7 @@ export const HotspotInfoPanel: React.FC<Props> = ({
   const btn =
     'w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-colors';
 
-  return createPortal(
+  const panel = (
     <div className="p-4 space-y-3">
       {/* Header: title + save/hide toggles */}
       <div className="flex items-start gap-2">
@@ -276,7 +284,38 @@ export const HotspotInfoPanel: React.FC<Props> = ({
         )}
         {h.captured_at && <div>{h.captured_at.slice(0, 16).replace('T', ' ')}</div>}
       </div>
-    </div>,
-    infoIslandEl,
+    </div>
+  );
+
+  return (
+    <>
+      {/* Desktop: the right info island (hidden on mobile via its parent frame). */}
+      {infoIslandEl && createPortal(panel, infoIslandEl)}
+
+      {/* Mobile: full-screen overlay — the info island is display:none below sm,
+          so this is the only reachable surface on touch. */}
+      {createPortal(
+        <div
+          className="sm:hidden fixed inset-0 z-[70] flex flex-col"
+          style={{ background: 'var(--island, #fff)' }}
+        >
+          <div className="flex items-center justify-between px-4 py-3 border-b border-line shrink-0">
+            <span className="text-sm font-semibold text-content">
+              {t('topic.details', 'Details')}
+            </span>
+            <button
+              type="button"
+              aria-label={t('common.close', 'Close')}
+              onClick={() => onClose?.()}
+              className="p-1.5 rounded-md hover:bg-island-2 text-content-3"
+            >
+              <X size={18} />
+            </button>
+          </div>
+          <div className="flex-1 overflow-auto">{panel}</div>
+        </div>,
+        document.body,
+      )}
+    </>
   );
 };
