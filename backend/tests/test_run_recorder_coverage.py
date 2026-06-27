@@ -107,6 +107,13 @@ ALLOWED_BYPASS_PATHS: dict[str, str] = {
     # via canvas-side telemetry in a later slice (current PR ships
     # the runner; agent_runs binding is Phase 4.5).
     "services/canvas/canvas_run_service.py": "smart-canvas single-turn creative LLM, not a chat session",
+    # Agent Memory Phase C1 promotion gate: cheap-model classification/scrub
+    # call that decides if a private memory entry is safe to share with a
+    # team or project. Runs off the chat path as a scheduled/background
+    # step; telemetry tracked via promotion proposal records, not RunRecorder.
+    "services/ai/memory/promotion_evaluator.py": (
+        "agent-memory promotion classification/scrub LLM, scheduled fire-and-forget"
+    ),
 }
 
 # Patterns that indicate a direct LLM call. If any of these appear in a

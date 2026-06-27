@@ -9,7 +9,7 @@ and the function returns False / [] / None as documented.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 from sqlalchemy import text
@@ -270,10 +270,102 @@ async def list_proposals(
         return []
 
 
+# ---------------------------------------------------------------------------
+# Authorization queries for resolve_promotion_target
+# ---------------------------------------------------------------------------
+
+_CHECK_TEAM_MEMBER_SQL = text(
+    """
+    SELECT EXISTS (
+        SELECT 1 FROM public.team_members
+        WHERE team_id = :team_id AND user_id = :owner
+    )
+    """
+)
+
+_SELECT_PROJECT_TEAM_ID_SQL = text(
+    """
+    SELECT team_id FROM public.projects WHERE id = :project_id
+    """
+)
+
+
+async def resolve_promotion_target(
+    *,
+    owner_user_id: str,
+    scope: str,
+    team_id: Optional[int],
+    project_id: Optional[int],
+) -> Optional[Tuple[int, Optional[int]]]:
+    """Authorize a promotion request and return the target (team_id, project_id).
+
+    Logic
+    -----
+    - ``scope == 'team'``:
+        Require ``team_id`` non-NULL AND owner is a member of that team.
+        Returns ``(team_id, None)`` on success, else None.
+    - ``scope == 'project'``:
+        Require ``project_id`` non-NULL; read ``projects.team_id``; require
+        that team_id non-NULL AND owner is a member of that team.
+        Returns ``(project_team_id, project_id)`` on success, else None.
+    - Any other scope: None (no DB query issued).
+
+    Never raises — errors are logged and None is returned (fail-closed).
+    """
+    try:
+        if scope == "team":
+            if team_id is None:
+                return None
+            async with write_scope() as session:
+                result = await session.execute(
+                    _CHECK_TEAM_MEMBER_SQL,
+                    {"team_id": team_id, "owner": owner_user_id},
+                )
+                is_member = result.scalar()
+            if not is_member:
+                return None
+            return (team_id, None)
+
+        if scope == "project":
+            if project_id is None:
+                return None
+            async with write_scope() as session:
+                # Step 1: look up the project's team_id.
+                proj_result = await session.execute(
+                    _SELECT_PROJECT_TEAM_ID_SQL,
+                    {"project_id": project_id},
+                )
+                project_team_id = proj_result.scalar()
+                if project_team_id is None:
+                    return None
+
+                # Step 2: verify owner is a member of that team.
+                member_result = await session.execute(
+                    _CHECK_TEAM_MEMBER_SQL,
+                    {"team_id": project_team_id, "owner": owner_user_id},
+                )
+                is_member = member_result.scalar()
+
+            if not is_member:
+                return None
+            return (project_team_id, project_id)
+
+        # Unknown scope — never authorized.
+        return None
+
+    except Exception:  # noqa: BLE001 — best-effort, fail-closed
+        logger.warning(
+            f"[agent_memory_promotions] resolve_promotion_target failed "
+            f"for user={owner_user_id} scope={scope}"
+        )
+        return None
+
+
 __all__ = [
     "approve_proposal",
     "demote_memory",
     "insert_proposal",
     "list_proposals",
     "reject_proposal",
+    "resolve_promotion_target",
 ]
