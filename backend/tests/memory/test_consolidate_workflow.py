@@ -99,6 +99,21 @@ async def test_consolidate_pair_writes_non_dup_drafts(
     assert kw["owner_user_id"] == "u1"
     assert kw["agent_id"] == "a1"
 
+    # Fix 2: assert fingerprint passthrough — must equal make_fingerprint("u1", "a1", draft)
+    from app.services.ai.memory.agent_memory_consolidation import (
+        MemoryDraft,
+        make_fingerprint,
+    )
+
+    expected_draft = MemoryDraft(
+        title="Deploy service",
+        body_md="kubectl apply",
+        when_to_use="when deploying",
+        kind="procedure",
+    )
+    expected_fp = make_fingerprint("u1", "a1", expected_draft)
+    assert kw["fingerprint"] == expected_fp
+
 
 # ---------------------------------------------------------------------------
 # _consolidate_pair: dup fingerprint is skipped (write_memory_row not called)

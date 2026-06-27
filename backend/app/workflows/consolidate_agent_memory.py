@@ -40,29 +40,29 @@ _LOOKBACK_DAYS = 7
 
 # Distinct active (user, agent) pairs with their recent message count.
 # Filtered in Python after fetch to let MIN_NEW_MESSAGES be a module constant.
-_ACTIVE_PAIRS_SQL = """
+_ACTIVE_PAIRS_SQL = f"""
 SELECT
     s.user_id::text  AS user_id,
     s.agent_id::text AS agent_id,
     COUNT(m.id)::int AS msg_count
 FROM public.ai_sessions s
 JOIN public.ai_messages m ON m.session_id = s.id
-WHERE s.updated_at  >= now() - interval '7 days'
+WHERE s.updated_at  >= now() - interval '{_LOOKBACK_DAYS} days'
   AND s.agent_id    IS NOT NULL
   AND s.user_id     IS NOT NULL
-  AND m.created_at  >= now() - interval '7 days'
+  AND m.created_at  >= now() - interval '{_LOOKBACK_DAYS} days'
 GROUP BY s.user_id, s.agent_id
 """
 
 # Recent messages for one (user, agent), ascending, capped at 40 to bound
 # the prompt size.
-_RECENT_MESSAGES_SQL = """
+_RECENT_MESSAGES_SQL = f"""
 SELECT m.role, m.content
 FROM public.ai_messages m
 JOIN public.ai_sessions s ON s.id = m.session_id
 WHERE s.user_id  = :user_id
   AND s.agent_id = :agent_id
-  AND m.created_at >= now() - interval '7 days'
+  AND m.created_at >= now() - interval '{_LOOKBACK_DAYS} days'
 ORDER BY m.created_at ASC
 LIMIT 40
 """
