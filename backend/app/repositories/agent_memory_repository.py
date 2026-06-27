@@ -166,6 +166,25 @@ async def write_memory_row_returning_id(
         return None
 
 
+_USER_TEAM_IDS_SQL = text(
+    "SELECT team_id FROM public.team_members WHERE user_id = :uid"
+)
+
+
+async def get_user_team_ids(user_id: str) -> List[int]:
+    """The caller's team memberships → list of BIGINT team ids (or []).
+
+    Never raises — a failed lookup degrades to owner-only recall.
+    """
+    try:
+        async with read_scope() as session:
+            result = await session.execute(_USER_TEAM_IDS_SQL, {"uid": user_id})
+            return [int(t) for t in result.scalars().all()]
+    except Exception:  # noqa: BLE001 — recall must degrade, never raise
+        logger.warning(f"[agent_memory] team-ids read failed user={user_id}")
+        return []
+
+
 async def existing_fingerprints(
     *,
     owner_user_id: str,
@@ -195,6 +214,7 @@ async def existing_fingerprints(
 
 __all__ = [
     "existing_fingerprints",
+    "get_user_team_ids",
     "recall_rows",
     "write_memory_row",
     "write_memory_row_returning_id",

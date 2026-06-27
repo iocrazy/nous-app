@@ -25,14 +25,16 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Optional
 from uuid import UUID
 
 from app.core.config import settings
+from app.repositories.agent_memory_repository import get_user_team_ids
 from app.services.ai.adapters.factory import get_adapter_for_user
 from app.services.ai.llm.llm_fallback_chain import LLMFallbackChain
 from app.services.ai.memory import registry as memory_registry
+from app.services.ai.memory.agent_memory import recall
 from app.services.ai.runner.agent_runner import AgentRunner
 from app.services.ai.skills.skill_tool_service import SkillToolService
 from app.services.infra.hooks import HookRegistry
@@ -555,11 +557,22 @@ async def _safe_recall_agent_memory(
 
     Off by default (FEATURE_AGENT_MEMORY=False); returns [] on disabled /
     failure — a memory miss must never break a chat turn.
+
+    When the flag is on, fetches the user's team memberships and rebuilds
+    ctx with the populated team_ids so shared memories are included.
+    Team-ids fetch is inside the flag gate — zero cost when the flag is off.
+    If the team fetch itself raises, recall degrades to owner-only (team_ids=()).
     """
     if not settings.FEATURE_AGENT_MEMORY:
         return []
     try:
-        from app.services.ai.memory.agent_memory import recall
+        try:
+            team_ids = tuple(await get_user_team_ids(str(ctx.user_id)))
+            ctx = replace(ctx, team_ids=team_ids)
+        except Exception:  # noqa: BLE001 — team fetch failure must not break recall
+            logger.warning(
+                f"[agent_memory] team-ids fetch failed; falling back to owner-only user={ctx.user_id}"
+            )
 
         hits = await recall(ctx, query, limit=5)
         return [f"{h.kind}: {h.title} — {h.body_md}".strip() for h in hits]
