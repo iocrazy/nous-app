@@ -87,7 +87,9 @@ ALLOWED_BYPASS_PATHS: dict[str, str] = {
     # durable agent_memory from recent sessions. Runs in a weekly DBOS
     # scheduled workflow (off the chat path), best-effort — telemetry via the
     # workflow's own logs/counts, not RunRecorder.
-    "services/ai/memory/agent_memory_consolidator.py": "agent-memory /dream consolidation LLM, scheduled fire-and-forget",
+    "services/ai/memory/agent_memory_consolidator.py": (
+        "agent-memory /dream consolidation LLM, scheduled fire-and-forget"
+    ),
     # Phase 2 of #199: head summarizer for context compaction. Cheap
     # model (default Haiku 4.5) called from inside ContextCompactor's
     # orange/red tier when a long conversation needs to fit the
