@@ -35,12 +35,19 @@ from dbos import DBOS
 from loguru import logger
 
 from app.db import engine as db_engine
+from app.repositories.agent_memory_promotion_repository import (
+    insert_proposal,
+    resolve_promotion_target,
+)
 from app.repositories.agent_memory_repository import (
     existing_fingerprints,
     write_memory_row,
+    write_memory_row_returning_id,
 )
 from app.services.ai.memory.agent_memory_consolidation import consolidate_pair
 from app.services.ai.memory.agent_memory_consolidator import default_consolidator
+from app.services.ai.memory.promotion_evaluator import default_promotion_evaluator
+from app.services.ai.memory.promotion_gate import evaluate_promotion
 
 MIN_NEW_MESSAGES = 6
 MAX_ENTRIES_PER_PAIR = 10
@@ -208,29 +215,85 @@ async def _consolidate_context(
         # 6. Write each non-dup entry as a private memory row.
         written = 0
         skipped = 0
+        proposed = 0
+        _team_or_project = scope in {"team", "project"}
         for draft, fp in pairs:
-            ok = await write_memory_row(
-                owner_user_id=user_id,
-                agent_id=agent_id,
-                scope=scope,
-                kind=draft.kind,
-                title=draft.title,
-                body_md=draft.body_md,
-                when_to_use=draft.when_to_use,
-                fingerprint=fp,
-                team_id=team_id,
-                project_id=project_id,
-            )
-            if ok:
-                written += 1
+            if _team_or_project:
+                # Use RETURNING id so we can link the proposal to the new row.
+                memory_id = await write_memory_row_returning_id(
+                    owner_user_id=user_id,
+                    agent_id=agent_id,
+                    scope=scope,
+                    kind=draft.kind,
+                    title=draft.title,
+                    body_md=draft.body_md,
+                    when_to_use=draft.when_to_use,
+                    fingerprint=fp,
+                    team_id=team_id,
+                    project_id=project_id,
+                )
+                if memory_id is not None:
+                    written += 1
+                    # Attempt promotion gate — each candidate in its own
+                    # try/except so a gate failure never aborts the write loop.
+                    try:
+                        target = await resolve_promotion_target(
+                            owner_user_id=user_id,
+                            scope=scope,
+                            team_id=team_id,
+                            project_id=project_id,
+                        )
+                        if target is None:
+                            pass  # not authorized — no proposal
+                        else:
+                            verdict = await evaluate_promotion(
+                                draft=draft,
+                                scope=scope,
+                                evaluator=default_promotion_evaluator,
+                            )
+                            if verdict is not None:
+                                await insert_proposal(
+                                    memory_id=memory_id,
+                                    proposed_scope=scope,
+                                    target_team_id=target[0],
+                                    target_project_id=target[1],
+                                    classification_kind=draft.kind,
+                                    confidence=verdict.confidence,
+                                    justification=verdict.justification,
+                                    scrubbed_body_md=verdict.scrubbed_body_md,
+                                )
+                                proposed += 1
+                    except Exception:  # noqa: BLE001 — gate failure must not abort loop
+                        logger.opt(exception=True).warning(
+                            f"[consolidate_agent_memory] promotion gate failed "
+                            f"for user={user_id} scope={scope} memory_id={memory_id}"
+                        )
+                else:
+                    skipped += 1  # write failure (best-effort)
             else:
-                skipped += 1  # write failure (best-effort)
+                # agent_user scope: NEVER enters promotion pipeline.
+                ok = await write_memory_row(
+                    owner_user_id=user_id,
+                    agent_id=agent_id,
+                    scope=scope,
+                    kind=draft.kind,
+                    title=draft.title,
+                    body_md=draft.body_md,
+                    when_to_use=draft.when_to_use,
+                    fingerprint=fp,
+                    team_id=team_id,
+                    project_id=project_id,
+                )
+                if ok:
+                    written += 1
+                else:
+                    skipped += 1  # write failure (best-effort)
 
         logger.info(
             f"[consolidate_agent_memory] context user={user_id} agent={agent_id} "
-            f"scope={scope}: written={written} skipped={skipped}"
+            f"scope={scope}: written={written} skipped={skipped} proposed={proposed}"
         )
-        return {"written": written, "skipped": skipped}
+        return {"written": written, "skipped": skipped, "proposed": proposed}
 
     except Exception:  # noqa: BLE001 — per-context errors must not abort the run
         logger.opt(exception=True).warning(
@@ -258,6 +321,7 @@ async def _consolidate_pair(user_id: str, agent_id: str) -> dict[str, Any]:
         )
         total_written = 0
         total_skipped = 0
+        total_proposed = 0
         for row in context_rows:
             result = await _consolidate_context(
                 user_id,
@@ -267,23 +331,26 @@ async def _consolidate_pair(user_id: str, agent_id: str) -> dict[str, Any]:
             )
             total_written += result.get("written", 0)
             total_skipped += result.get("skipped", 0)
+            total_proposed += result.get("proposed", 0)
 
         contexts = len(context_rows)
         logger.info(
             f"[consolidate_agent_memory] pair user={user_id} agent={agent_id}: "
-            f"contexts={contexts} written={total_written} skipped={total_skipped}"
+            f"contexts={contexts} written={total_written} skipped={total_skipped} "
+            f"proposed={total_proposed}"
         )
         return {
             "written": total_written,
             "skipped": total_skipped,
             "contexts": contexts,
+            "proposed": total_proposed,
         }
 
     except Exception:  # noqa: BLE001
         logger.opt(exception=True).warning(
             f"[consolidate_agent_memory] pair failed user={user_id} agent={agent_id}"
         )
-        return {"written": 0, "skipped": 0, "contexts": 0}
+        return {"written": 0, "skipped": 0, "contexts": 0, "proposed": 0}
 
 
 @DBOS.step()

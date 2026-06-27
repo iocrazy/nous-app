@@ -7,6 +7,12 @@ from app.core.admin_deps import AdminAuthDep
 from app.repositories.admin.system_settings_repository import (
     get_system_settings_repository,
 )
+from app.repositories.agent_memory_promotion_repository import (
+    approve_proposal,
+    demote_memory,
+    list_proposals,
+    reject_proposal,
+)
 from app.schemas.admin import (
     AIGovernanceResponse,
     AIGovernanceUpdate,
@@ -21,6 +27,8 @@ from app.schemas.admin import (
     MemoryReloadResponse,
     MemorySlotStatus,
     MemorySlotUpdate,
+    PromotionItem,
+    PromotionListResponse,
     SystemSettingResponse,
     SystemSettingUpdate,
     TaskModuleGovernanceResponse,
@@ -586,4 +594,85 @@ async def trigger_consolidation(body: ConsolidateRequest, auth: AdminAuthDep):
         written=result.get("written", 0),
         skipped=result.get("skipped", 0),
         contexts=result.get("contexts", 0),
+        proposed=result.get("proposed", 0),
     )
+
+
+@router.get("/memory/promotions", response_model=PromotionListResponse)
+async def list_memory_promotions(auth: AdminAuthDep, status: str = "pending"):
+    """List agent-memory promotion proposals (Phase C1 review queue).
+
+    Each row is a pending (or reviewed) proposal to flip a private team/project
+    memory to shared, JOINed with its source agent_memory row for the title,
+    owner, and original body so the admin can compare against the scrubbed text.
+    """
+    rows = await list_proposals(status=status, limit=100)
+    logger.info(
+        "[Admin] promotions listed by {} status={}: {} item(s)",
+        auth.user_id,
+        status,
+        len(rows),
+    )
+    items = [
+        PromotionItem(
+            id=row["id"],
+            memory_id=row["memory_id"],
+            proposed_scope=row["proposed_scope"],
+            target_team_id=row["target_team_id"],
+            target_project_id=row.get("target_project_id"),
+            title=row.get("title") or "",
+            owner_user_id=str(row.get("owner_user_id") or ""),
+            original_body_md=row.get("body_md") or "",
+            scrubbed_body_md=row.get("scrubbed_body_md") or "",
+            classification_kind=row.get("classification_kind") or "",
+            confidence=row.get("confidence") or 0.0,
+            justification=row.get("justification") or "",
+            status=row["status"],
+            created_at=str(row.get("created_at") or ""),
+        )
+        for row in rows
+    ]
+    return PromotionListResponse(items=items)
+
+
+@router.post("/memory/promotions/{proposal_id}/approve")
+async def approve_memory_promotion(proposal_id: int, auth: AdminAuthDep):
+    """Approve a promotion proposal — flips the memory row to shared (Phase C1).
+
+    Delegates to the service-role transaction in the repository, which sets
+    visibility='shared' + team_id and writes the scrubbed body in one statement.
+    """
+    approved = await approve_proposal(proposal_id=proposal_id, reviewer_id=auth.user_id)
+    logger.info(
+        "[Admin] promotion {} approve by {}: {}",
+        proposal_id,
+        auth.user_id,
+        approved,
+    )
+    return {"approved": approved}
+
+
+@router.post("/memory/promotions/{proposal_id}/reject")
+async def reject_memory_promotion(proposal_id: int, auth: AdminAuthDep):
+    """Reject a promotion proposal — the memory row stays private (Phase C1)."""
+    rejected = await reject_proposal(proposal_id=proposal_id, reviewer_id=auth.user_id)
+    logger.info(
+        "[Admin] promotion {} reject by {}: {}",
+        proposal_id,
+        auth.user_id,
+        rejected,
+    )
+    return {"rejected": rejected}
+
+
+@router.post("/memory/{memory_id}/demote")
+async def demote_agent_memory(memory_id: int, auth: AdminAuthDep):
+    """Revoke a shared memory — flip it back to private (Phase C1)."""
+    demoted = await demote_memory(memory_id=memory_id)
+    logger.info(
+        "[Admin] memory {} demote by {}: {}",
+        memory_id,
+        auth.user_id,
+        demoted,
+    )
+    return {"demoted": demoted}

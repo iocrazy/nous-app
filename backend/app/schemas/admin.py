@@ -773,3 +773,34 @@ class ConsolidateResponse(BaseModel):
     written: int
     skipped: int
     contexts: int = 0
+    proposed: int = 0
+
+
+# ============================================
+# Memory Promotion Review Schemas (Phase C1)
+# ============================================
+
+
+class PromotionItem(BaseModel):
+    """Single promotion proposal row (JOINed with agent_memory)."""
+
+    id: int
+    memory_id: int
+    proposed_scope: str
+    target_team_id: int
+    target_project_id: Optional[int] = None
+    title: str
+    owner_user_id: str
+    original_body_md: str
+    scrubbed_body_md: str
+    classification_kind: str
+    confidence: float
+    justification: str
+    status: str
+    created_at: str
+
+
+class PromotionListResponse(BaseModel):
+    """Response for GET /memory/promotions."""
+
+    items: List[PromotionItem]
