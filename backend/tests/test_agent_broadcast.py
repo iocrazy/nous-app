@@ -3,9 +3,8 @@
 Tests cover:
   - list_broadcast_candidate_channels: joins agent_channels + channels (non-archived),
     groups agent_ids per channel.
-  - team_member_ids: queries team_members table by team_id.
   - completed_workflow_counts_since: filters status='completed', task_kind='workflow',
-    completed_at > :since, user_id filtering; empty user_ids short-circuits.
+    completed_at > :since; scopes to team via JOIN team_members on team_id (no array-bind).
   - get_watermark / set_watermark: read/write system_settings under
     broadcast_watermark_channel_{id} key.
 
@@ -106,70 +105,12 @@ async def test_candidate_channels_coerces_ids_to_int():
     assert isinstance(result[0]["team_id"], int)
 
 
-# ── team_member_ids ───────────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_team_member_ids_queries_team_members_table():
-    """SQL queries team_members WHERE team_id = :tid and returns user_id strings."""
-    captured: dict = {}
-
-    async def fake_fetch_all(sql, params=None):
-        captured["sql"] = sql
-        captured["params"] = params
-        return [{"user_id": _USER_ID_1}, {"user_id": _USER_ID_2}]
-
-    with patch("app.db.engine.fetch_all", fake_fetch_all):
-        result = await _REPO.team_member_ids(_TEAM_ID)
-
-    sql = captured["sql"]
-    assert "team_members" in sql, "SQL must query team_members table"
-    assert "user_id" in sql, "SQL must select user_id"
-    assert "team_id" in sql, "SQL must filter by team_id"
-
-    assert isinstance(captured["params"]["tid"], int), "team_id must be coerced to int"
-    assert captured["params"]["tid"] == int(_TEAM_ID)
-
-    assert result == [_USER_ID_1, _USER_ID_2]
-    for uid in result:
-        assert isinstance(uid, str), "user_ids must be returned as strings"
-
-
-@pytest.mark.asyncio
-async def test_team_member_ids_returns_empty_list_for_no_members():
-    """Returns [] when team has no members."""
-
-    async def fake_fetch_all(sql, params=None):
-        return []
-
-    with patch("app.db.engine.fetch_all", fake_fetch_all):
-        result = await _REPO.team_member_ids(_TEAM_ID)
-
-    assert result == []
-
-
 # ── completed_workflow_counts_since ──────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_counts_since_empty_user_ids_short_circuits():
-    """Empty user_ids must return zeros without issuing any DB query."""
-    calls: list = []
-
-    async def fake_fetch_all(sql, params=None):
-        calls.append(sql)
-        return []
-
-    with patch("app.db.engine.fetch_all", fake_fetch_all):
-        result = await _REPO.completed_workflow_counts_since([], _SINCE)
-
-    assert calls == [], "DB must NOT be queried when user_ids is empty"
-    assert result == {"total": 0, "by_kind": {}, "max_completed_at": None}
-
-
-@pytest.mark.asyncio
 async def test_counts_since_sql_filters_status_and_task_kind():
-    """SQL must filter on status='completed' and task_kind='workflow'."""
+    """SQL must JOIN team_members, filter on status='completed' and task_kind='workflow'."""
     captured: dict = {}
 
     async def fake_fetch_all(sql, params=None):
@@ -178,15 +119,18 @@ async def test_counts_since_sql_filters_status_and_task_kind():
         return [{"task_kind": "workflow", "cnt": 3, "max_completed_at": _NOW}]
 
     with patch("app.db.engine.fetch_all", fake_fetch_all):
-        result = await _REPO.completed_workflow_counts_since([_USER_ID_1], _SINCE)
+        result = await _REPO.completed_workflow_counts_since(_TEAM_ID, _SINCE)
 
     sql = captured["sql"]
     assert "task_tracking" in sql, "SQL must query task_tracking table"
+    assert "team_members" in sql, "SQL must JOIN team_members"
+    assert "JOIN" in sql.upper(), "SQL must use JOIN"
+    assert "tm.team_id" in sql, "SQL must filter by tm.team_id"
+    assert ":tid" in sql, "SQL must use :tid parameter"
     assert "completed" in sql, "SQL must filter status='completed'"
     assert "workflow" in sql, "SQL must filter task_kind='workflow'"
     assert "completed_at" in sql, "SQL must reference completed_at"
     assert "since" in sql, "SQL must use :since parameter"
-    assert "user_id" in sql, "SQL must filter by user_id"
     assert "COUNT" in sql.upper(), "SQL must COUNT rows"
     assert "GROUP BY" in sql.upper(), "SQL must GROUP BY task_kind"
 
@@ -207,9 +151,7 @@ async def test_counts_since_aggregates_multiple_rows():
         ]
 
     with patch("app.db.engine.fetch_all", fake_fetch_all):
-        result = await _REPO.completed_workflow_counts_since(
-            [_USER_ID_1, _USER_ID_2], _SINCE
-        )
+        result = await _REPO.completed_workflow_counts_since(_TEAM_ID, _SINCE)
 
     assert result["total"] == 7
     assert result["by_kind"]["workflow"] == 7
@@ -224,7 +166,21 @@ async def test_counts_since_zero_rows_returns_zero_dict():
         return []
 
     with patch("app.db.engine.fetch_all", fake_fetch_all):
-        result = await _REPO.completed_workflow_counts_since([_USER_ID_1], _SINCE)
+        result = await _REPO.completed_workflow_counts_since(_TEAM_ID, _SINCE)
+
+    assert result == {"total": 0, "by_kind": {}, "max_completed_at": None}
+
+
+@pytest.mark.asyncio
+async def test_counts_since_empty_team_returns_zero_dict():
+    """A team with no members yields zero rows (JOIN produces nothing); returns zero dict."""
+
+    async def fake_fetch_all(sql, params=None):
+        # The JOIN on team_members simply produces no rows for an empty team.
+        return []
+
+    with patch("app.db.engine.fetch_all", fake_fetch_all):
+        result = await _REPO.completed_workflow_counts_since(_TEAM_ID, _SINCE)
 
     assert result == {"total": 0, "by_kind": {}, "max_completed_at": None}
 
@@ -240,7 +196,7 @@ async def test_counts_since_none_since_no_time_filter_in_sql():
         return []
 
     with patch("app.db.engine.fetch_all", fake_fetch_all):
-        result = await _REPO.completed_workflow_counts_since([_USER_ID_1], since=None)
+        result = await _REPO.completed_workflow_counts_since(_TEAM_ID, since=None)
 
     # :since must NOT appear in params when since=None
     assert "since" not in (
@@ -250,8 +206,8 @@ async def test_counts_since_none_since_no_time_filter_in_sql():
 
 
 @pytest.mark.asyncio
-async def test_counts_since_user_ids_param_present():
-    """The user_ids list must be passed as a parameter (not inlined)."""
+async def test_counts_since_team_id_param_present():
+    """The team_id must be passed as :tid parameter; no uids/array param must exist."""
     captured: dict = {}
 
     async def fake_fetch_all(sql, params=None):
@@ -260,12 +216,14 @@ async def test_counts_since_user_ids_param_present():
         return []
 
     with patch("app.db.engine.fetch_all", fake_fetch_all):
-        await _REPO.completed_workflow_counts_since([_USER_ID_1, _USER_ID_2], _SINCE)
+        await _REPO.completed_workflow_counts_since(_TEAM_ID, _SINCE)
 
     params = captured.get("params") or {}
-    # Either 'uids' list param or expanded uid_N params must be present
-    has_uids = "uids" in params or any(k.startswith("uid") for k in params)
-    assert has_uids, "user_ids must be bound as query parameter(s)"
+    assert "tid" in params, "team_id must be bound as :tid query parameter"
+    assert params["tid"] == int(_TEAM_ID), ":tid value must match the provided team_id"
+    assert "uids" not in params, ":uids must NOT be present (array-bind removed)"
+    has_uid_n = any(k.startswith("uid") for k in params)
+    assert not has_uid_n, "Expanded uid_N params must NOT be present"
 
 
 # ── get_watermark ─────────────────────────────────────────────────────────────
@@ -435,18 +393,18 @@ def _make_repos(
     candidates=None,
     agent=None,
     watermark=_WM_TS,
-    members=None,
     counts_ret=None,
 ):
-    """Return (broadcast_repo_mock, chat_repo_mock, agent_repo_mock)."""
+    """Return (broadcast_repo_mock, chat_repo_mock, agent_repo_mock).
+
+    Note: team_member_ids is no longer called by the service — the repo now
+    JOINs team_members internally via completed_workflow_counts_since(team_id, wm).
+    """
     broadcast_repo = MagicMock()
     broadcast_repo.list_broadcast_candidate_channels = AsyncMock(
         return_value=candidates if candidates is not None else [_candidate()]
     )
     broadcast_repo.get_watermark = AsyncMock(return_value=watermark)
-    broadcast_repo.team_member_ids = AsyncMock(
-        return_value=members if members is not None else [_BC_USER_ID]
-    )
     broadcast_repo.completed_workflow_counts_since = AsyncMock(
         return_value=counts_ret if counts_ret is not None else _counts()
     )
@@ -679,7 +637,6 @@ async def test_one_bad_channel_does_not_abort_scan():
         return _WM_TS
 
     br.get_watermark = AsyncMock(side_effect=get_watermark_side_effect)
-    br.team_member_ids = AsyncMock(return_value=[_BC_USER_ID])
     br.completed_workflow_counts_since = AsyncMock(return_value=_counts(total=1))
     br.set_watermark = AsyncMock()
 
