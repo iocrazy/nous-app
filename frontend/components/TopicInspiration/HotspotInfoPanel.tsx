@@ -292,27 +292,41 @@ export const HotspotInfoPanel: React.FC<Props> = ({
       {/* Desktop: the right info island (hidden on mobile via its parent frame). */}
       {infoIslandEl && createPortal(panel, infoIslandEl)}
 
-      {/* Mobile: full-screen overlay — the info island is display:none below sm,
-          so this is the only reachable surface on touch. */}
+      {/* Mobile: a bottom-sheet CARD over a dimmed + blurred backdrop (the info
+          island is display:none below sm). Tap the backdrop to dismiss — so it
+          doesn't hijack the page or the swipe-back gesture like a full takeover. */}
       {createPortal(
         <div
-          className="sm:hidden fixed inset-0 z-[70] flex flex-col"
-          style={{ background: 'var(--island, #fff)' }}
+          className="sm:hidden fixed inset-0 z-[70] flex items-end bg-black/40 backdrop-blur-sm animate-in fade-in"
+          onClick={() => onClose?.()}
         >
-          <div className="flex items-center justify-between px-4 py-3 border-b border-line shrink-0">
-            <span className="text-sm font-semibold text-content">
-              {t('topic.details', 'Details')}
-            </span>
-            <button
-              type="button"
-              aria-label={t('common.close', 'Close')}
-              onClick={() => onClose?.()}
-              className="p-1.5 rounded-md hover:bg-island-2 text-content-3"
+          <div
+            className="w-full max-h-[88vh] overflow-y-auto rounded-t-2xl shadow-2xl animate-in slide-in-from-bottom"
+            style={{ background: 'var(--island, #fff)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Sticky header: grab handle + title + close */}
+            <div
+              className="sticky top-0 z-10 px-4 pt-2 pb-2 border-b border-line"
+              style={{ background: 'var(--island, #fff)' }}
             >
-              <X size={18} />
-            </button>
+              <div className="mx-auto mb-2 h-1 w-9 rounded-full bg-line-strong" />
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-content">
+                  {t('topic.details', 'Details')}
+                </span>
+                <button
+                  type="button"
+                  aria-label={t('common.close', 'Close')}
+                  onClick={() => onClose?.()}
+                  className="p-1.5 rounded-md hover:bg-island-2 text-content-3"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+            {panel}
           </div>
-          <div className="flex-1 overflow-auto">{panel}</div>
         </div>,
         document.body,
       )}
