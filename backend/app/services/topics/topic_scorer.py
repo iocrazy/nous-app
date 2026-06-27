@@ -216,14 +216,27 @@ class TopicScorerService:
             )
             return {}
 
+        # ai_summary length is an admin-tunable runtime knob (topics.scoring
+        # config), injected into the request line — not a hardcoded prompt edit.
+        # 0 = let the agent's own default ("1-2 句") govern.
+        from app.services.topics.scoring import load_scoring_config
+
+        instructions = (
+            "Score the following batch of hotspots. Return JSON only, "
+            "one object per input item, echoing each item's index `i`."
+        )
+        try:
+            summary_cap = (await load_scoring_config()).summary_max_chars
+        except Exception:  # noqa: BLE001 — never block scoring on a config read
+            summary_cap = 0
+        if summary_cap > 0:
+            instructions += f" 每条 ai_summary 控制在 {summary_cap} 个字以内。"
+
         composer = self._build_composer()
         composed_base = await composer.compose(
             ComposerInput(
                 agent_slug=AGENT_SLUG,
-                request_instructions=(
-                    "Score the following batch of hotspots. Return JSON only, "
-                    "one object per input item, echoing each item's index `i`."
-                ),
+                request_instructions=instructions,
             )
         )
         user_messages = [{"role": "user", "content": self.build_user_payload(items)}]

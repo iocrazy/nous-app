@@ -38,6 +38,11 @@ DEFAULT_TIER = 2
 
 # Featured-board score floor (code default; admin-tunable via system_settings).
 DEFAULT_FEATURED_MIN_SCORE = 0.6
+# ai_summary length cap (chars) injected into the scorer prompt. 0 = no cap →
+# the agent's own default ("1-2 句") governs. Admin-tunable so summary length is
+# a runtime knob, not a hardcoded prompt edit + redeploy.
+DEFAULT_SUMMARY_MAX_CHARS = 0
+SUMMARY_MAX_CHARS_CEILING = 500  # sanity bound on the admin-entered value
 # system_settings key holding the admin-tuned scoring config (jsonb).
 SCORING_CONFIG_KEY = "topics.scoring"
 
@@ -86,6 +91,8 @@ class ScoringConfig:
     dim_weights: dict[str, float]
     tier_weights: dict[int, float]
     featured_min_score: float
+    # Max chars for the LLM-written ai_summary (0 = use the agent default).
+    summary_max_chars: int
 
 
 def default_scoring_config() -> ScoringConfig:
@@ -93,6 +100,7 @@ def default_scoring_config() -> ScoringConfig:
         dim_weights=dict(DIM_WEIGHTS),
         tier_weights=dict(TIER_WEIGHTS),
         featured_min_score=DEFAULT_FEATURED_MIN_SCORE,
+        summary_max_chars=DEFAULT_SUMMARY_MAX_CHARS,
     )
 
 
@@ -124,7 +132,13 @@ def merge_scoring_config(raw: Any) -> ScoringConfig:
     featured = (
         _clamp01(fms) if isinstance(fms, (int, float)) else DEFAULT_FEATURED_MIN_SCORE
     )
-    return ScoringConfig(dim_weights, tier_weights, featured)
+    smc = raw.get("summary_max_chars")
+    summary_max = (
+        max(0, min(SUMMARY_MAX_CHARS_CEILING, int(smc)))
+        if isinstance(smc, (int, float))
+        else DEFAULT_SUMMARY_MAX_CHARS
+    )
+    return ScoringConfig(dim_weights, tier_weights, featured, summary_max)
 
 
 async def load_scoring_config() -> ScoringConfig:
@@ -153,6 +167,7 @@ def config_payload(cfg: Optional[ScoringConfig] = None) -> dict[str, Any]:
         "dim_weights": c.dim_weights,
         "tier_weights": {str(t): w for t, w in c.tier_weights.items()},
         "featured_min_score": c.featured_min_score,
+        "summary_max_chars": c.summary_max_chars,
     }
 
 

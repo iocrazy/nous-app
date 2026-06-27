@@ -224,6 +224,8 @@ export interface TopicScoringConfig {
   dim_weights: Record<string, number>
   tier_weights: Record<string, number>
   featured_min_score: number
+  /** ai_summary length cap in chars. 0 = use the agent default ("1-2 句"). */
+  summary_max_chars: number
 }
 
 const TOPIC_SCORING_URL = '/api/v1/admin/settings/topics-scoring'

@@ -707,11 +707,13 @@ class TopicScoringConfigResponse(BaseModel):
     dim_weights: per-dimension weight (novelty/impact/credibility/actionability/
     shareability). tier_weights: source-credibility-tier multipliers, keyed by
     tier as a string ("1"/"2"/"3"). featured_min_score: the Featured-board floor.
+    summary_max_chars: ai_summary length cap in chars (0 = agent default "1-2 句").
     """
 
     dim_weights: Dict[str, float]
     tier_weights: Dict[str, float]
     featured_min_score: float
+    summary_max_chars: int = 0
 
 
 # ============================================

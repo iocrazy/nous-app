@@ -141,6 +141,29 @@ export function TopicScoring() {
         </div>
       </Card>
 
+      <Card title="AI Summary" style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 500 }}>Summary max chars</div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-3)' }}>
+              ai_summary 字数上限（汉字）。0 = 用 Agent 默认（“1-2 句”）。改完即时生效，无需发版。
+            </div>
+          </div>
+          <InputNumber
+            mode="button"
+            min={0}
+            max={500}
+            step={10}
+            precision={0}
+            value={cfg.summary_max_chars}
+            onChange={(v) =>
+              setCfg((c) => (c ? { ...c, summary_max_chars: Number(v) || 0 } : c))
+            }
+            style={{ width: 130 }}
+          />
+        </div>
+      </Card>
+
       <Button type="primary" loading={update.isPending} onClick={save}>
         Save
       </Button>
