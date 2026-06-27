@@ -176,11 +176,18 @@ async def test_approve_proposal_success_issues_both_updates():
     memory_params = session.calls[1]["params"]
     assert memory_params.get("visibility") == "shared"
     assert memory_params.get("memory_id") == 111
+    # Critical: team_id must be bound to proposal's target_team_id (10).
+    # This satisfies the DB CHECK agent_memory_shared_requires_team_id which
+    # requires team_id IS NOT NULL when visibility = 'shared'.
+    assert memory_params.get("team_id") == 10
 
     # Call 2: UPDATE agent_memory_promotions — must bind reviewer_id + status=approved
     promo_sql = session.calls[2]["sql"].upper()
     assert "UPDATE" in promo_sql
     assert "AGENT_MEMORY_PROMOTIONS" in promo_sql
+    # Verify the promotion row is stamped with status = 'approved' (matches
+    # _UPDATE_PROMOTION_APPROVED_SQL which hard-codes the literal 'approved').
+    assert "'APPROVED'" in promo_sql or "= 'approved'" in session.calls[2]["sql"]
     promo_params = session.calls[2]["params"]
     assert promo_params.get("reviewer_id") == "admin-uuid"
     assert promo_params.get("proposal_id") == 42
