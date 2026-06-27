@@ -11,6 +11,8 @@ from app.schemas.admin import (
     AIGovernanceResponse,
     AIGovernanceUpdate,
     ChatModuleGovernanceResponse,
+    ConsolidateRequest,
+    ConsolidateResponse,
     GraphMemorySettingsResponse,
     GraphMemorySettingsUpdate,
     HonchoConnectionResponse,
@@ -552,4 +554,35 @@ async def put_honcho_connection(update: HonchoConnectionUpdate, auth: AdminAuthD
     cfg = await HonchoMemoryConfig.from_settings()
     return HonchoConnectionResponse(
         enabled=cfg.enabled, base_url=cfg.base_url, workspace_id=cfg.workspace_id
+    )
+
+
+# ── Agent Memory Consolidation (Phase B) ─────────────────────────────────────
+
+
+@router.post("/memory/consolidate", response_model=ConsolidateResponse)
+async def trigger_consolidation(body: ConsolidateRequest, auth: AdminAuthDep):
+    """Manually run the Phase-B consolidation step for one (user, agent) pair.
+
+    Useful for end-to-end validation without waiting for the weekly scheduled
+    run. Delegates to the plain ``_consolidate_pair`` helper (not the DBOS
+    step) to avoid entering a step context outside a workflow.
+    """
+    # Lazy import avoids pulling DBOS at module load time (DBOS decorators on
+    # the step/workflow functions register side effects on import).
+    from app.workflows.consolidate_agent_memory import (
+        _consolidate_pair,
+    )
+
+    result = await _consolidate_pair(body.user_id, body.agent_id)
+    logger.info(
+        "[Admin] manual consolidation triggered by {} for user={} agent={}: {}",
+        auth.user_id,
+        body.user_id,
+        body.agent_id,
+        result,
+    )
+    return ConsolidateResponse(
+        written=result.get("written", 0),
+        skipped=result.get("skipped", 0),
     )

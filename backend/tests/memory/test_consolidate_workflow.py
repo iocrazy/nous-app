@@ -11,6 +11,8 @@ All tests run without a real DB or LLM.
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 # ---------------------------------------------------------------------------
@@ -263,3 +265,27 @@ async def test_enumerate_active_pairs_filters_by_min_messages(
     assert "u1" in user_ids
     assert "u3" in user_ids
     assert "u2" not in user_ids
+
+
+# ---------------------------------------------------------------------------
+# Task 4: admin trigger endpoint — trigger_consolidation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_trigger_consolidation_endpoint_returns_counts() -> None:
+    """Admin endpoint delegates to _consolidate_pair and maps written/skipped."""
+    from app.api.admin.settings_router import trigger_consolidation
+    from app.schemas.admin import ConsolidateRequest
+
+    with patch(
+        "app.workflows.consolidate_agent_memory._consolidate_pair",
+        new=AsyncMock(return_value={"written": 2, "skipped": 1}),
+    ):
+        auth = MagicMock()
+        result = await trigger_consolidation(
+            ConsolidateRequest(user_id="u1", agent_id="a1"), auth
+        )
+
+    assert result.written == 2
+    assert result.skipped == 1

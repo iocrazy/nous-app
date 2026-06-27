@@ -751,3 +751,22 @@ class HonchoConnectionUpdate(BaseModel):
     enabled: Optional[bool] = None
     base_url: Optional[str] = None
     workspace_id: Optional[str] = None
+
+
+# ============================================
+# Memory Consolidation Schemas (Phase B)
+# ============================================
+
+
+class ConsolidateRequest(BaseModel):
+    """Admin manual trigger: run consolidation for one (user, agent) pair."""
+
+    user_id: str
+    agent_id: str
+
+
+class ConsolidateResponse(BaseModel):
+    """Result counts from a manual consolidation run."""
+
+    written: int
+    skipped: int
