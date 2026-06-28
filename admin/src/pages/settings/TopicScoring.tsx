@@ -1,11 +1,23 @@
 import { useEffect, useState } from 'react'
-import { Card, InputNumber, Button, Message, Spin, Divider } from '@arco-design/web-react'
+import {
+  Card,
+  InputNumber,
+  Button,
+  Message,
+  Spin,
+  Divider,
+  Switch,
+  Input,
+} from '@arco-design/web-react'
 import { IconThunderbolt } from '@arco-design/web-react/icon'
 import { SectionHeader } from './SectionHeader'
 import {
   useTopicScoringConfig,
   useUpdateTopicScoringConfig,
+  useTopicPrefilterConfig,
+  useUpdateTopicPrefilterConfig,
   type TopicScoringConfig,
+  type TopicPrefilterConfig,
 } from '../../api/endpoints/settings'
 
 // Order + labels for the five LLM-rated dimensions (the agent emits raw 0..1
@@ -29,11 +41,24 @@ export function TopicScoring() {
   const update = useUpdateTopicScoringConfig()
   const [cfg, setCfg] = useState<TopicScoringConfig | null>(null)
 
+  const { data: preData, isLoading: preLoading } = useTopicPrefilterConfig()
+  const updatePre = useUpdateTopicPrefilterConfig()
+  const [pre, setPre] = useState<TopicPrefilterConfig | null>(null)
+  // Edit keywords as one textarea (one per line); convert on save.
+  const [kwText, setKwText] = useState('')
+
   useEffect(() => {
     if (data) setCfg(data)
   }, [data])
 
-  if (isLoading || !cfg) {
+  useEffect(() => {
+    if (preData) {
+      setPre(preData)
+      setKwText((preData.keywords || []).join('\n'))
+    }
+  }, [preData])
+
+  if (isLoading || !cfg || preLoading || !pre) {
     return (
       <div style={{ padding: 48, textAlign: 'center' }}>
         <Spin />
@@ -53,6 +78,20 @@ export function TopicScoring() {
     try {
       await update.mutateAsync(cfg)
       Message.success('Scoring config saved — applies on the next scoring pass.')
+    } catch (e) {
+      Message.error(`Save failed: ${(e as Error).message}`)
+    }
+  }
+
+  const savePrefilter = async () => {
+    if (!pre) return
+    const keywords = kwText
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean)
+    try {
+      await updatePre.mutateAsync({ ...pre, keywords })
+      Message.success('Pre-filter saved — applies on the next fetch tick.')
     } catch (e) {
       Message.error(`Save failed: ${(e as Error).message}`)
     }
@@ -166,6 +205,67 @@ export function TopicScoring() {
 
       <Button type="primary" loading={update.isPending} onClick={save}>
         Save
+      </Button>
+
+      <Divider />
+
+      <SectionHeader
+        icon={<IconThunderbolt />}
+        title="L0 Pre-filter (intake gate)"
+        subtitle="噪声源（社交热榜等）入库前的关键词闸门。默认只放行含 AI 关键词的条目——做媒体/泛内容可关闭闸门或换成你自己的关键词（综艺/明星/影视/赛事…）。改完下个抓取周期生效，无需发版。"
+      />
+
+      <Card title="Pre-filter" style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 500 }}>Enable keyword gate</div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-3)' }}>
+              关闭 = 噪声源的全部热点都入库（不再按关键词过滤）。
+            </div>
+          </div>
+          <Switch
+            checked={pre.enabled}
+            onChange={(v) => setPre((p) => (p ? { ...p, enabled: v } : p))}
+          />
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 500 }}>Apply from tier</div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-3)' }}>
+              该 tier 及更"噪"的源才过闸门（1–4）；更优质的低 tier 源直接放行。
+            </div>
+          </div>
+          <InputNumber
+            mode="button"
+            min={1}
+            max={4}
+            step={1}
+            precision={0}
+            disabled={!pre.enabled}
+            value={pre.tier_from}
+            onChange={(v) => setPre((p) => (p ? { ...p, tier_from: Number(v) || 3 } : p))}
+            style={{ width: 130 }}
+          />
+        </div>
+
+        <div>
+          <div style={{ fontWeight: 500 }}>Include keywords</div>
+          <div style={{ fontSize: 12, color: 'var(--color-text-3)', marginBottom: 8 }}>
+            每行一个关键词（不区分大小写，子串匹配标题+正文）。留空 = 不按关键词过滤（等于对该闸门放行全部）。
+          </div>
+          <Input.TextArea
+            value={kwText}
+            onChange={setKwText}
+            disabled={!pre.enabled}
+            autoSize={{ minRows: 6, maxRows: 16 }}
+            placeholder={'综艺\n明星\n影视\n电影\n电视剧\n热搜'}
+          />
+        </div>
+      </Card>
+
+      <Button type="primary" loading={updatePre.isPending} onClick={savePrefilter}>
+        Save pre-filter
       </Button>
     </div>
   )

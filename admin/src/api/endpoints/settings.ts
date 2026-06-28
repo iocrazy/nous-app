@@ -253,6 +253,41 @@ export function useUpdateTopicScoringConfig() {
   })
 }
 
+// ── Topic L0 pre-filter config ────────────────────────────────────────────
+export interface TopicPrefilterConfig {
+  /** Master switch for the keyword gate. Off = every item flows in. */
+  enabled: boolean
+  /** Include terms — a gated source's item must contain one. [] = no gate. */
+  keywords: string[]
+  /** Source tier (1-4) at/above which the gate applies. */
+  tier_from: number
+}
+
+const TOPIC_PREFILTER_URL = '/api/v1/admin/settings/topics-prefilter'
+
+export function useTopicPrefilterConfig() {
+  return useQuery({
+    queryKey: ['settings', 'topics-prefilter'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<TopicPrefilterConfig>(TOPIC_PREFILTER_URL)
+      return data
+    },
+  })
+}
+
+export function useUpdateTopicPrefilterConfig() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (update: TopicPrefilterConfig) => {
+      const { data } = await apiClient.put<TopicPrefilterConfig>(TOPIC_PREFILTER_URL, update)
+      return data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings', 'topics-prefilter'] })
+    },
+  })
+}
+
 // ── Signal Sources (admin global enable/disable + tier) ───────────────────
 export interface AdminSource {
   id: string

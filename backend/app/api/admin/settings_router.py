@@ -32,11 +32,18 @@ from app.schemas.admin import (
     SystemSettingResponse,
     SystemSettingUpdate,
     TaskModuleGovernanceResponse,
+    TopicPrefilterConfigResponse,
     TopicScoringConfigResponse,
 )
 from app.services.ai.memory import registry as memory_registry
 from app.services.ai.memory.graph_memory import STRUCTURED_OUTPUT_MODES
 from app.services.ai.memory.honcho_memory import HonchoMemoryConfig
+from app.services.topics.keyword_filter import (
+    PREFILTER_CONFIG_KEY,
+    load_prefilter_config,
+    merge_prefilter_config,
+    prefilter_payload,
+)
 from app.services.topics.scoring import (
     SCORING_CONFIG_KEY,
     config_payload,
@@ -112,6 +119,35 @@ async def update_topics_scoring_config(
         details={"value": payload},
     )
     return TopicScoringConfigResponse(**payload)
+
+
+@router.get("/topics-prefilter", response_model=TopicPrefilterConfigResponse)
+async def get_topics_prefilter_config(auth: AdminAuthDep):
+    """Current L0 pre-filter config (admin-tuned, merged over code defaults)."""
+    cfg = await load_prefilter_config()
+    return TopicPrefilterConfigResponse(**prefilter_payload(cfg))
+
+
+@router.put("/topics-prefilter", response_model=TopicPrefilterConfigResponse)
+async def update_topics_prefilter_config(
+    body: TopicPrefilterConfigResponse,
+    auth: AdminAuthDep,
+):
+    """Persist L0 pre-filter knobs to ``system_settings['topics.prefilter']``.
+    Validated through the same merge as reads. Takes effect on the next fetch
+    tick — no redeploy."""
+    validated = merge_prefilter_config(body.model_dump())
+    payload = prefilter_payload(validated)
+    repo = get_system_settings_repository()
+    await repo.upsert_setting(PREFILTER_CONFIG_KEY, payload, auth.user_id)
+    await create_audit_log(
+        admin_id=auth.user_id,
+        action="update_topics_prefilter_config",
+        target_type="system_setting",
+        target_id=PREFILTER_CONFIG_KEY,
+        details={"value": payload},
+    )
+    return TopicPrefilterConfigResponse(**payload)
 
 
 @router.get("", response_model=list[SystemSettingResponse])

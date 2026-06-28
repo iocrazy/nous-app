@@ -16,7 +16,10 @@ from app.services.topics.clustering import (
     is_match,
 )
 from app.services.topics.embedding_service import TopicEmbeddingService
-from app.services.topics.keyword_filter import relevance_filter
+from app.services.topics.keyword_filter import (
+    load_prefilter_config,
+    relevance_filter,
+)
 from app.services.topics.scoring import compute_quality, load_scoring_config
 from app.services.topics.topic_scorer import TopicScorerService
 
@@ -134,6 +137,10 @@ async def run_topic_fetch_once(
         key = (src["kind"], json.dumps(src.get("config") or {}, sort_keys=True))
         groups.setdefault(key, []).append(src)
 
+    # L0 pre-filter config (admin-tuned: enabled / keywords / tier_from). Loaded
+    # ONCE per tick — same gate applies to every source this run.
+    prefilter_cfg = await load_prefilter_config()
+
     ok = failed = written = dropped = upstream = 0
     for (kind, _cfg), group in groups.items():
         try:
@@ -151,7 +158,11 @@ async def run_topic_fetch_once(
             sid = str(src["id"])
             try:
                 # L0 pre-filter is tier-specific, so it runs per source.
-                candidates = relevance_filter(fetched, tier=int(src.get("tier") or 2))
+                candidates = relevance_filter(
+                    fetched,
+                    tier=int(src.get("tier") or 2),
+                    config=prefilter_cfg,
+                )
                 dropped += len(fetched) - len(candidates)
                 rows = hotspots_repo.build_rows(
                     candidates,
