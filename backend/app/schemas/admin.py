@@ -716,6 +716,20 @@ class TopicScoringConfigResponse(BaseModel):
     summary_max_chars: int = 0
 
 
+class TopicPrefilterConfigResponse(BaseModel):
+    """Admin-tunable L0 pre-filter (system_settings['topics.prefilter']).
+
+    enabled: master switch for the keyword gate. keywords: include terms — an
+    item from a gated source must contain one to be ingested; empty list = no
+    keyword gate (everything passes). tier_from: source tier (1-4) at/above
+    which the gate applies (curated lower tiers always pass through).
+    """
+
+    enabled: bool = True
+    keywords: List[str] = []
+    tier_from: int = 3
+
+
 # ============================================
 # Memory Control-Plane Schemas (Phase 2a)
 # ============================================

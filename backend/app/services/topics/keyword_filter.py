@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Any, Optional
+
+from loguru import logger
+
 from app.services.topics.adapters.base import HotspotCandidate
 
 # L0 pre-filter (scoring pipeline Phase 2). AI-relevance keyword set. Noisy
@@ -58,10 +63,83 @@ AI_INCLUDE: list[str] = [
     "agentic",
 ]
 
-# Sources at this tier or noisier get the AI-relevance gate; curated sources
+# Sources at this tier or noisier get the relevance gate; curated sources
 # below it pass through untouched (they're already on-topic; filtering them
 # risks dropping relevant items a keyword set doesn't happen to cover).
 TIER_PREFILTER_FROM = 3
+
+# system_settings key holding the admin-tuned L0 pre-filter config (jsonb).
+PREFILTER_CONFIG_KEY = "topics.prefilter"
+
+
+@dataclass(frozen=True)
+class PrefilterConfig:
+    """Admin-tunable L0 gate. ``AI_INCLUDE`` is just the *default* keyword set —
+    a media-focused operator can disable the gate entirely, swap in their own
+    keywords (综艺/明星/影视/赛事…), or change which source tier it applies to,
+    all from the admin panel without a redeploy."""
+
+    enabled: bool
+    keywords: tuple[str, ...]
+    tier_from: int
+
+
+def default_prefilter_config() -> PrefilterConfig:
+    return PrefilterConfig(
+        enabled=True, keywords=tuple(AI_INCLUDE), tier_from=TIER_PREFILTER_FROM
+    )
+
+
+def merge_prefilter_config(raw: Any) -> PrefilterConfig:
+    """Merge an admin-stored jsonb blob over code defaults. Never raises.
+
+    Semantics: an ABSENT ``keywords`` key falls back to the AI default; an
+    EXPLICIT empty list means "no keyword gate" (everything passes) — that's how
+    a media operator opts out of AI-only filtering while keeping the row."""
+    if not isinstance(raw, dict):
+        return default_prefilter_config()
+    enabled = raw.get("enabled", True)
+    enabled = bool(enabled) if isinstance(enabled, bool) else True
+    if isinstance(raw.get("keywords"), list):
+        keywords = tuple(str(w).strip() for w in raw["keywords"] if str(w).strip())
+    else:
+        keywords = tuple(AI_INCLUDE)
+    tf = raw.get("tier_from")
+    tier_from = (
+        int(tf)
+        if isinstance(tf, (int, float)) and 1 <= int(tf) <= 4
+        else TIER_PREFILTER_FROM
+    )
+    return PrefilterConfig(enabled, keywords, tier_from)
+
+
+def prefilter_payload(cfg: Optional[PrefilterConfig] = None) -> dict[str, Any]:
+    """Serialize to the admin GET/PUT jsonb shape."""
+    c = cfg or default_prefilter_config()
+    return {
+        "enabled": c.enabled,
+        "keywords": list(c.keywords),
+        "tier_from": c.tier_from,
+    }
+
+
+async def load_prefilter_config() -> PrefilterConfig:
+    """Admin-tuned L0 config from ``system_settings['topics.prefilter']``, merged
+    over code defaults. Service-role engine read. Never raises — any failure /
+    missing key returns the code defaults (current AI-keyword behavior)."""
+    try:
+        from app.db import engine as db_engine
+
+        if not db_engine.is_configured():
+            return default_prefilter_config()
+        raw = await db_engine.fetch_val(
+            "SELECT value FROM public.system_settings WHERE key = :k",
+            {"k": PREFILTER_CONFIG_KEY},
+        )
+        return merge_prefilter_config(raw)
+    except Exception:  # noqa: BLE001
+        logger.warning("[prefilter] config read failed — using code defaults")
+        return default_prefilter_config()
 
 
 def keyword_filter(
@@ -87,16 +165,23 @@ def relevance_filter(
     candidates: list[HotspotCandidate],
     *,
     tier: int,
+    config: Optional[PrefilterConfig] = None,
     include: list[str] | None = None,
 ) -> list[HotspotCandidate]:
-    """L0 gate: for noisy low-tier sources keep only AI-relevant items; curated
-    (tier below ``TIER_PREFILTER_FROM``) sources pass through untouched."""
+    """L0 gate: for noisy low-tier sources keep only keyword-relevant items;
+    curated (tier below the configured threshold) sources pass through untouched.
+
+    ``config`` (admin-tuned) governs enabled / keywords / tier_from; when omitted
+    the code defaults reproduce the original AI-keyword behavior. ``include``, if
+    given, still overrides the keyword list (kept for tests / call sites)."""
+    cfg = config or default_prefilter_config()
+    if not cfg.enabled:
+        return list(candidates)
     try:
         t = int(tier)
     except (TypeError, ValueError):
         t = 2
-    if t < TIER_PREFILTER_FROM:
+    if t < cfg.tier_from:
         return list(candidates)
-    return keyword_filter(
-        candidates, include=include if include is not None else AI_INCLUDE, exclude=[]
-    )
+    inc = list(include) if include is not None else list(cfg.keywords)
+    return keyword_filter(candidates, include=inc, exclude=[])
