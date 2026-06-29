@@ -9,6 +9,7 @@ Uses Supabase as backend data storage.
 from fastapi import APIRouter
 
 from app.api.admin import admin_router
+from app.api.agent_memory_user_router import router as agent_memory_user_router
 from app.api.ai_library_router import router as ai_library_router
 from app.api.ai_memory_router import router as ai_memory_router
 from app.api.ai_router import router as ai_pipeline_router
@@ -108,6 +109,7 @@ api_router.include_router(router=system_router, tags=["系统监控"])
 
 api_router.include_router(router=ai_settings_router, tags=["AI"])
 api_router.include_router(router=ai_memory_router, tags=["AI Memory"])
+api_router.include_router(router=agent_memory_user_router, tags=["Agent Memories"])
 
 api_router.include_router(router=ai_pipeline_router, tags=["AI"])
 

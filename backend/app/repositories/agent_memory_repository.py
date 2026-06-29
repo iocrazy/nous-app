@@ -256,6 +256,72 @@ async def existing_fingerprints(
         return set()
 
 
+_LIST_USER_SQL = text(
+    """
+    SELECT id, owner_user_id, title, body_md, kind, scope, visibility,
+           when_to_use, created_at
+    FROM public.agent_memory
+    WHERE status = 'active'
+      AND (
+        owner_user_id = :user_id
+        OR (visibility = 'shared' AND team_id = ANY(:team_ids))
+      )
+    ORDER BY created_at DESC
+    LIMIT :limit
+    """
+)
+
+_DELETE_USER_SQL = text(
+    """
+    DELETE FROM public.agent_memory
+    WHERE id = :id AND owner_user_id = :user_id
+    """
+)
+
+
+async def list_user_memories(
+    *, user_id: str, team_ids: List[int], limit: int = 200
+) -> List[Dict[str, Any]]:
+    """List active memories visible to a user (own + team-shared).
+
+    Identical isolation predicate to recall_rows. Returns raw dicts (or []
+    on error; never raises).
+    """
+    try:
+        async with read_scope() as session:
+            result = await session.execute(
+                _LIST_USER_SQL,
+                {"user_id": user_id, "team_ids": team_ids, "limit": limit},
+            )
+            return [dict(m) for m in result.mappings().all()]
+    except Exception:  # noqa: BLE001 — best-effort, never raises
+        logger.warning("[agent_memory] list_user_memories failed user={}", user_id)
+        return []
+
+
+async def delete_user_memory(*, memory_id: int, user_id: str) -> bool:
+    """Delete one memory row owned by this user.
+
+    Owner-scoped: WHERE id = :id AND owner_user_id = :user_id.
+    Returns True if a row was deleted (rowcount > 0), False otherwise.
+    Never raises.
+    """
+    try:
+        async with write_scope() as session:
+            result = await session.execute(
+                _DELETE_USER_SQL,
+                {"id": memory_id, "user_id": user_id},
+            )
+            return result.rowcount > 0
+    except Exception:  # noqa: BLE001 — best-effort, never raises
+        logger.warning(
+            "[agent_memory] delete_user_memory failed memory_id={} user={}",
+            memory_id,
+            user_id,
+        )
+        return False
+
+
 async def get_memory_stats() -> Dict[str, Any]:
     """Return aggregate counts over agent_memory and agent_memory_promotions.
 
@@ -303,9 +369,11 @@ async def get_memory_stats() -> Dict[str, Any]:
 
 
 __all__ = [
+    "delete_user_memory",
     "existing_fingerprints",
     "get_memory_stats",
     "get_user_team_ids",
+    "list_user_memories",
     "recall_rows",
     "write_memory_row",
     "write_memory_row_returning_id",
