@@ -82,4 +82,23 @@ describe('AgentMemoriesPanel', () => {
     );
     expect(screen.queryByText('Own Memory Title')).toBeNull();
   });
+
+  it('when deleteAgentMemory rejects, reverts the row to visible and shows error', async () => {
+    mockService.deleteAgentMemory.mockRejectedValue(new Error('Network error'));
+    render(<AgentMemoriesPanel />);
+    await screen.findByText('Own Memory Title');
+
+    // Trigger delete flow
+    fireEvent.click(screen.getByTitle('agentMemories.delete'));
+    fireEvent.click(screen.getByText('agentMemories.deleteConfirm'));
+
+    // Error banner appears with the error message
+    await waitFor(() =>
+      expect(screen.getByText('Network error')).toBeTruthy(),
+    );
+    // Row is reverted — still visible after the failed delete
+    expect(screen.getByText('Own Memory Title')).toBeTruthy();
+    // listAgentMemories should NOT have been called again (no re-fetch on failure)
+    expect(mockService.listAgentMemories).toHaveBeenCalledTimes(1);
+  });
 });

@@ -32,17 +32,26 @@ export const AgentMemoriesPanel: React.FC = () => {
   }, []);
 
   const handleDelete = async (id: number) => {
-    // Optimistically remove from local list
+    // Capture item + position before optimistic removal so we can revert on failure
+    const idx = items.findIndex((item) => item.id === id);
+    if (idx === -1) return;
+    const removed = items[idx];
+
+    // Optimistically remove from local state + clear confirm
     setItems((prev) => prev.filter((item) => item.id !== id));
     setConfirmDeleteId(null);
+
     try {
       await deleteAgentMemory(id);
+      // SUCCESS: item already removed from state, nothing more needed
     } catch (err) {
+      // FAILURE: revert — re-insert the captured item at its original position
+      setItems((prev) => {
+        const next = [...prev];
+        next.splice(idx, 0, removed);
+        return next;
+      });
       setError(err instanceof Error ? err.message : t('agentMemories.deleteError'));
-      // Restore list on failure
-      listAgentMemories()
-        .then(setItems)
-        .catch(() => {});
     }
   };
 
