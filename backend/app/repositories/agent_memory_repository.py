@@ -14,6 +14,50 @@ from sqlalchemy import text
 
 from app.db.session import read_scope, write_scope
 
+# ---------------------------------------------------------------------------
+# Aggregate stats queries (Phase C2 observability)
+# ---------------------------------------------------------------------------
+
+_STATS_AM_SQL = text(
+    """
+    SELECT
+      count(*) FILTER (WHERE status='active')                          AS total_active,
+      count(*) FILTER (WHERE status='active' AND visibility='private') AS vis_private,
+      count(*) FILTER (WHERE status='active' AND visibility='shared')  AS vis_shared,
+      count(*) FILTER (WHERE status='active' AND scope='agent_user')   AS scope_agent_user,
+      count(*) FILTER (WHERE status='active' AND scope='team')         AS scope_team,
+      count(*) FILTER (WHERE status='active' AND scope='project')      AS scope_project,
+      count(*) FILTER (WHERE status='active')                          AS st_active,
+      count(*) FILTER (WHERE status='archived')                        AS st_archived,
+      count(*) FILTER (WHERE status='superseded')                      AS st_superseded,
+      count(*) FILTER (WHERE created_at >= now() - interval '24 hours') AS created_24h,
+      count(*) FILTER (WHERE created_at >= now() - interval '7 days')   AS created_7d,
+      max(created_at)                                                   AS last_created_at
+    FROM public.agent_memory
+    """
+)
+
+_STATS_PROMO_SQL = text(
+    """
+    SELECT
+      count(*) FILTER (WHERE status='pending')  AS pending,
+      count(*) FILTER (WHERE status='approved') AS approved,
+      count(*) FILTER (WHERE status='rejected') AS rejected
+    FROM public.agent_memory_promotions
+    """
+)
+
+_ZERO_STATS: Dict[str, Any] = {
+    "total_active": 0,
+    "by_visibility": {},
+    "by_scope": {},
+    "by_status": {},
+    "created_24h": 0,
+    "created_7d": 0,
+    "last_created_at": None,
+    "promotions": {"pending": 0, "approved": 0, "rejected": 0},
+}
+
 # Ranked, scope-isolated recall. Isolation predicate:
 #   own rows (any visibility) OR shared rows of a team the caller belongs to.
 # search_tsv is the GENERATED tsvector; ts_rank gives BM25-like relevance.
@@ -212,8 +256,55 @@ async def existing_fingerprints(
         return set()
 
 
+async def get_memory_stats() -> Dict[str, Any]:
+    """Return aggregate counts over agent_memory and agent_memory_promotions.
+
+    Runs two FILTER-aggregate queries in one session and maps the result into
+    the documented dict shape.  Never raises — returns the zero/empty-shaped
+    dict on any error (best-effort observability).
+    """
+    try:
+        async with read_scope() as session:
+            am_result = await session.execute(_STATS_AM_SQL)
+            am = am_result.mappings().first() or {}
+
+            promo_result = await session.execute(_STATS_PROMO_SQL)
+            promo = promo_result.mappings().first() or {}
+
+        last_ts = am.get("last_created_at")
+        return {
+            "total_active": int(am.get("total_active", 0)),
+            "by_visibility": {
+                "private": int(am.get("vis_private", 0)),
+                "shared": int(am.get("vis_shared", 0)),
+            },
+            "by_scope": {
+                "agent_user": int(am.get("scope_agent_user", 0)),
+                "team": int(am.get("scope_team", 0)),
+                "project": int(am.get("scope_project", 0)),
+            },
+            "by_status": {
+                "active": int(am.get("st_active", 0)),
+                "archived": int(am.get("st_archived", 0)),
+                "superseded": int(am.get("st_superseded", 0)),
+            },
+            "created_24h": int(am.get("created_24h", 0)),
+            "created_7d": int(am.get("created_7d", 0)),
+            "last_created_at": str(last_ts) if last_ts is not None else None,
+            "promotions": {
+                "pending": int(promo.get("pending", 0)),
+                "approved": int(promo.get("approved", 0)),
+                "rejected": int(promo.get("rejected", 0)),
+            },
+        }
+    except Exception:  # noqa: BLE001 — observability is best-effort, never raises
+        logger.warning("[agent_memory] get_memory_stats failed — returning zero stats")
+        return _ZERO_STATS.copy()
+
+
 __all__ = [
     "existing_fingerprints",
+    "get_memory_stats",
     "get_user_team_ids",
     "recall_rows",
     "write_memory_row",

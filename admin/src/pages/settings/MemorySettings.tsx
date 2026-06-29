@@ -13,6 +13,7 @@ import {
 import { IconStorage, IconRobot, IconCode, IconSync, IconApps } from '@arco-design/web-react/icon'
 import { SectionHeader } from './SectionHeader'
 import { PromotionsSection } from './PromotionsSection'
+import { MemoryStatsCard } from './MemoryStatsCard'
 import { useAuth } from '../../auth/AuthProvider'
 
 type CatalogModel = {
@@ -189,6 +190,7 @@ export function MemorySettings() {
             <Spin size={28} />
           </div>
         </Card>
+        <MemoryStatsCard />
         <PromotionsSection />
       </>
     )
@@ -481,6 +483,7 @@ export function MemorySettings() {
         </Button>
       </div>
     </Card>
+    <MemoryStatsCard />
     <PromotionsSection />
     </>
   )

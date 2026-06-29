@@ -467,3 +467,27 @@ export function useDemoteMemory() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['settings', 'promotions'] }),
   })
 }
+
+// ── Memory Stats (Phase C2 observability) ─────────────────────────────────
+
+export interface MemoryStats {
+  recall_enabled: boolean
+  total_active: number
+  by_visibility: Record<string, number>
+  by_scope: Record<string, number>
+  by_status: Record<string, number>
+  created_24h: number
+  created_7d: number
+  last_created_at: string | null
+  promotions: Record<string, number>
+}
+
+export function useMemoryStats() {
+  return useQuery({
+    queryKey: ['settings', 'memory-stats'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<MemoryStats>('/api/v1/admin/settings/memory/stats')
+      return data
+    },
+  })
+}

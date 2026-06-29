@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
+from app.core.config import settings
 from app.repositories.admin.system_settings_repository import (
     get_system_settings_repository,
 )
@@ -13,6 +14,7 @@ from app.repositories.agent_memory_promotion_repository import (
     list_proposals,
     reject_proposal,
 )
+from app.repositories.agent_memory_repository import get_memory_stats
 from app.schemas.admin import (
     AIGovernanceResponse,
     AIGovernanceUpdate,
@@ -27,6 +29,7 @@ from app.schemas.admin import (
     MemoryReloadResponse,
     MemorySlotStatus,
     MemorySlotUpdate,
+    MemoryStatsResponse,
     PromotionItem,
     PromotionListResponse,
     SystemSettingResponse,
@@ -712,3 +715,28 @@ async def demote_agent_memory(memory_id: int, auth: AdminAuthDep):
         demoted,
     )
     return {"demoted": demoted}
+
+
+# ── Agent Memory Stats (Phase C2 observability) ───────────────────────────────
+
+
+@router.get("/memory/stats", response_model=MemoryStatsResponse)
+async def memory_stats(auth: AdminAuthDep):
+    """Aggregate counts over agent_memory + promotion queue depth + recall flag.
+
+    Safe to call at any time — delegates to get_memory_stats which never raises
+    (returns zeroed shape on DB error). The recall_enabled field reflects the
+    live FEATURE_AGENT_MEMORY setting without a server restart.
+    """
+    stats = await get_memory_stats()
+    return MemoryStatsResponse(
+        recall_enabled=bool(settings.FEATURE_AGENT_MEMORY),
+        total_active=stats.get("total_active", 0),
+        by_visibility=stats.get("by_visibility", {}),
+        by_scope=stats.get("by_scope", {}),
+        by_status=stats.get("by_status", {}),
+        created_24h=stats.get("created_24h", 0),
+        created_7d=stats.get("created_7d", 0),
+        last_created_at=stats.get("last_created_at"),
+        promotions=stats.get("promotions", {}),
+    )

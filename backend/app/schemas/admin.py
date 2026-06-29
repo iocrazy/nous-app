@@ -818,3 +818,23 @@ class PromotionListResponse(BaseModel):
     """Response for GET /memory/promotions."""
 
     items: List[PromotionItem]
+
+
+# ============================================
+# Memory Stats Schemas (Phase C2 observability)
+# ============================================
+
+
+class MemoryStatsResponse(BaseModel):
+    """Response for GET /memory/stats — store counts, promotion queue depth,
+    and recall flag state."""
+
+    recall_enabled: bool
+    total_active: int
+    by_visibility: Dict[str, int]
+    by_scope: Dict[str, int]
+    by_status: Dict[str, int]
+    created_24h: int
+    created_7d: int
+    last_created_at: Optional[str] = None
+    promotions: Dict[str, int]
