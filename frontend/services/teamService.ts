@@ -1,4 +1,5 @@
 import { getSupabaseClient } from '../supabaseClient';
+import { apiClient } from './apiClient';
 import { Team, TeamMember } from '../types';
 
 // PostgREST returns BIGINT as JSON number; ensure IDs are always strings.
@@ -148,6 +149,20 @@ export const fetchTeamMembers = async (teamId: string): Promise<TeamMember[]> =>
 
   if (error) throw error;
   return data || [];
+};
+
+/**
+ * Fetch team members via the BACKEND endpoint, which enriches each member with
+ * `name` (user_profiles.username) + `email` using the service role. The direct
+ * Supabase `fetchTeamMembers` above cannot resolve other members' names —
+ * `user_profiles` RLS only exposes the caller's own row — so use this whenever
+ * display names are needed (chat sender names, @-mention list, member pickers).
+ */
+export const getTeamMembers = async (teamId: string): Promise<TeamMember[]> => {
+  const res = await apiClient.get<{ members: TeamMember[]; total: number }>(
+    `/api/v1/teams/${teamId}/members`,
+  );
+  return res.members || [];
 };
 
 export const updateTeam = async (teamId: string, updates: { name?: string; description?: string }): Promise<Team> => {
