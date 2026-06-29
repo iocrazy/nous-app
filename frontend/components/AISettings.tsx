@@ -46,6 +46,7 @@ import { ApprovalsPanel } from './ApprovalsPanel';
 import { TokenBillingDashboard } from './TokenBillingDashboard';
 import { NousCenterVerifyPanel } from '../features/canvas-core/smart/NousCenterVerifyPanel';
 import { MemoryPanel } from './MemoryPanel';
+import { AgentMemoriesPanel } from './AgentMemoriesPanel';
 import { AIHealthBoard } from './AIHealthBoard';
 import { useSettingsStore } from '../stores/settingsStore';
 
@@ -1482,6 +1483,9 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
 
       {/* Phase 4: user-facing AI memory management (Claude-style) */}
       <MemoryPanel />
+
+      {/* Agent memories: facts/decisions the AI has curated (own + team-shared) */}
+      <AgentMemoriesPanel />
 
       {/* Phase 3: Token usage dashboard */}
       <section className="mt-8 bg-ink-900/40 border border-ink-800 rounded-lg overflow-hidden">
