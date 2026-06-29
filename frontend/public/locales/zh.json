@@ -2067,6 +2067,18 @@
     "forgetConfirm": "删除所有已学记忆?你的聊天记录会保留。",
     "forgetYes": "确认清除"
   },
+  "agentMemories": {
+    "title": "我的智能体记忆",
+    "subtitle": "AI 保存的事实与决策。个人记忆仅自己可见；团队记忆对成员共享。",
+    "empty": "暂无记忆",
+    "delete": "删除",
+    "deleteConfirm": "删除这条记忆?",
+    "personal": "个人",
+    "shared": "团队共享",
+    "sharedByTeammate": "队友共享",
+    "loadError": "加载失败",
+    "deleteError": "删除失败"
+  },
   "aiHealth": {
     "title": "功能健康检查",
     "subtitle": "每个 AI 功能实际使用的模型和密钥。",

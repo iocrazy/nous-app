@@ -2067,6 +2067,18 @@
     "forgetConfirm": "Delete all learned memory? Your chat history is kept.",
     "forgetYes": "Yes, forget"
   },
+  "agentMemories": {
+    "title": "My Agent Memories",
+    "subtitle": "Facts and decisions your AI has saved. Personal ones are yours; team ones are shared.",
+    "empty": "No saved memories yet",
+    "delete": "Delete",
+    "deleteConfirm": "Delete this memory?",
+    "personal": "Personal",
+    "shared": "Shared with Team",
+    "sharedByTeammate": "Shared by a teammate",
+    "loadError": "Failed to load memories",
+    "deleteError": "Failed to delete"
+  },
   "aiHealth": {
     "title": "Capability Health",
     "subtitle": "What model and key each AI feature actually uses.",
