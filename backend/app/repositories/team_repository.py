@@ -169,7 +169,31 @@ class TeamRepository:
             .execute()
         )
 
-        return members.data or []
+        rows = members.data or []
+
+        # Enrich with display name from user_profiles.username — the team_members
+        # table carries no name/email, so without this every member (and chat
+        # message sender) renders as a raw UUID. One batched lookup, best-effort.
+        if rows:
+            ids = [r["user_id"] for r in rows if r.get("user_id")]
+            try:
+                profiles = (
+                    await client.table("user_profiles")
+                    .select("id, username")
+                    .in_("id", ids)
+                    .execute()
+                )
+                name_by_id = {p["id"]: p.get("username") for p in (profiles.data or [])}
+            except (
+                Exception
+            ) as exc:  # noqa: BLE001 — enrichment must never fail the list
+                logger.warning(f"[team_members] username enrichment failed: {exc}")
+                name_by_id = {}
+            for r in rows:
+                if r.get("name") is None:
+                    r["name"] = name_by_id.get(r["user_id"])
+
+        return rows
 
     async def add_member(
         self, team_id: str, new_user_id: str, role: str = "member"
