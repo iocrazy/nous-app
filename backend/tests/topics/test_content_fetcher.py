@@ -59,3 +59,16 @@ def test_fetch_article_text_rejects_non_http():
     assert asyncio.run(fetch_article_text("")) is None
     assert asyncio.run(fetch_article_text("not-a-url")) is None
     assert asyncio.run(fetch_article_text("ftp://x")) is None
+
+
+def test_boilerplate_guard_drops_nav_shell():
+    from app.services.topics.content_fetcher import _looks_like_boilerplate
+
+    # the cls.cn nav shell trafilatura sometimes latches onto
+    nav = "关于我们\n网站声明\n联系方式\n用户反馈\n网站地图\n首页\n电报\n话题"
+    assert _looks_like_boilerplate(nav) is True
+    # a real article (no/one marker) passes
+    article = "财联社6月29日电，Omdia指出预计到2030年RGB LED电视将占全球电视市场13%。"
+    assert _looks_like_boilerplate(article) is False
+    # one stray marker alone isn't enough to drop a real article
+    assert _looks_like_boilerplate("某公司更新了联系方式并发布新品。") is False

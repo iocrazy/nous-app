@@ -29,6 +29,17 @@ CONTENT_FETCH_CONFIG_KEY = "topics.content_fetch"
 # Bound text length so a runaway page can't bloat a row / the embedder input.
 _MAX_BODY_CHARS = 4000
 
+# Site-chrome markers. On JS-rendered pages (e.g. cls.cn 财联社) trafilatura can
+# latch onto the nav/footer shell instead of the article ("关于我们 / 网站声明 /
+# 联系方式 / …"). favor_precision avoids most of it; this is the belt-and-braces
+# guard — ≥2 markers in the extracted text = it's chrome, not an article → drop,
+# so navigation junk never pollutes the embedding/score.
+_BOILERPLATE_MARKERS = ("网站声明", "联系方式", "网站地图", "用户反馈", "关于我们")
+
+
+def _looks_like_boilerplate(text: str) -> bool:
+    return sum(1 for m in _BOILERPLATE_MARKERS if m in text) >= 2
+
 
 @dataclass(frozen=True)
 class ContentFetchConfig:
@@ -117,8 +128,18 @@ def _extract_sync(url: str) -> Optional[str]:
         html = trafilatura.fetch_url(url)
         if not html:
             return None
-        text = trafilatura.extract(html, include_comments=False, include_tables=False)
-        return (text or "").strip()[:_MAX_BODY_CHARS] or None
+        # favor_precision: prefer the article body over sidebars/nav — without it
+        # JS-heavy pages (cls.cn) yield the nav shell.
+        text = trafilatura.extract(
+            html,
+            include_comments=False,
+            include_tables=False,
+            favor_precision=True,
+        )
+        text = (text or "").strip()[:_MAX_BODY_CHARS]
+        if not text or _looks_like_boilerplate(text):
+            return None
+        return text
     except Exception as e:  # noqa: BLE001 — best-effort enrichment
         logger.debug(f"[content-fetch] extract failed for {url}: {e}")
         return None
