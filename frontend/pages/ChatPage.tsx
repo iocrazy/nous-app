@@ -74,6 +74,8 @@ export function ChatPage(): React.ReactElement {
 
   /** People that can be @-mentioned in the Composer (current team members, excluding self). */
   const [membersForComposer, setMembersForComposer] = useState<{ user_id: string; label: string }[]>([]);
+  /** Full team-member name map (includes self) — resolves message sender_id → display name. */
+  const [memberNameById, setMemberNameById] = useState<Record<string, string>>({});
   /** Chat-enabled agents that can be @-summoned in the Composer. */
   const [agentsForComposer, setAgentsForComposer] = useState<{ slug: string; label: string }[]>([]);
 
@@ -189,6 +191,12 @@ export function ChatPage(): React.ReactElement {
           teamMembers
             .filter((m) => m.user_id !== currentUserId)
             .map((m) => ({ user_id: m.user_id, label: m.name ?? m.email ?? m.user_id })),
+        );
+        // Full map (incl. self) for resolving message sender_id → display name.
+        setMemberNameById(
+          Object.fromEntries(
+            teamMembers.map((m) => [m.user_id, m.name ?? m.email ?? m.user_id]),
+          ),
         );
         setAgentsForComposer(
           allAgents
@@ -605,6 +613,7 @@ export function ChatPage(): React.ReactElement {
                   hasOlder={hasOlder}
                   loadingOlder={loadingOlder}
                   currentUserId={currentUserId}
+                  memberNameById={memberNameById}
                   onEdit={handleEditMessage}
                   onDelete={handleDeleteMessage}
                 />

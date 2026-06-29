@@ -349,3 +349,52 @@ describe('MessageBubble', () => {
     expect(screen.queryByRole('textbox')).toBeNull();
   });
 });
+
+// ── Sender display-name resolution (#sender-name fix) ──────────────────────────
+
+describe('MessageBubble sender name resolution', () => {
+  it('resolves sender_id → member name via memberNameById (not the raw UUID)', () => {
+    render(
+      <MessageBubble
+        message={makeMessage({ sender_id: 'U2', body: { text: 'hi' } })}
+        currentUserId="U1"
+        memberNameById={{ U2: 'Alice' }}
+      />,
+    );
+    expect(screen.getByText('Alice')).toBeDefined();
+    expect(screen.queryByText('U2')).toBeNull();
+  });
+
+  it('falls back to body.sender_name when sender_id is not in the map', () => {
+    render(
+      <MessageBubble
+        message={makeMessage({ sender_id: 'U9', body: { text: 'hi', sender_name: 'Bob' } })}
+        currentUserId="U1"
+        memberNameById={{ U2: 'Alice' }}
+      />,
+    );
+    expect(screen.getByText('Bob')).toBeDefined();
+  });
+
+  it('falls back to the raw id only when neither map nor body name is present', () => {
+    render(
+      <MessageBubble
+        message={makeMessage({ sender_id: 'U9', body: { text: 'hi' } })}
+        currentUserId="U1"
+        memberNameById={{ U2: 'Alice' }}
+      />,
+    );
+    expect(screen.getAllByText('U9').length).toBeGreaterThan(0);
+  });
+
+  it('shows "Agent" for an agent message with no name hint', () => {
+    render(
+      <MessageBubble
+        message={makeMessage({ sender_id: null, sender_type: 'agent', body: { text: 'hi' } })}
+        currentUserId="U1"
+        memberNameById={{ U2: 'Alice' }}
+      />,
+    );
+    expect(screen.getByText('Agent')).toBeDefined();
+  });
+});

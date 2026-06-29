@@ -31,11 +31,13 @@ function fmtTime(iso: string): string {
   }
 }
 
-/** Derive two-letter initials from sender_id (UUID/snowflake) or a name. */
-function initials(senderId: string | null): string {
-  if (!senderId) return '?';
-  // If it looks like a UUID or snowflake, fall back to first 2 chars
-  return senderId.slice(0, 2).toUpperCase();
+/** Two-letter initials from a display name (e.g. "Chat E2E Test" → "CE"). */
+function initials(name: string | null): string {
+  if (!name) return '?';
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
 // ── Media card sub-component ─────────────────────────────────────────────────
@@ -120,6 +122,8 @@ export interface MessageBubbleProps {
   message: ChatMessage;
   /** Authenticated user id — gates edit/delete actions to own messages. */
   currentUserId?: string | null;
+  /** Resolves a sender_id (UUID) to a display name; without it, names show as raw UUIDs. */
+  memberNameById?: Record<string, string>;
   /** Called when the user saves an edited draft. */
   onEdit?: (id: string, text: string) => void;
   /** Called when the user confirms a soft-delete. */
@@ -129,6 +133,7 @@ export interface MessageBubbleProps {
 export function MessageBubble({
   message,
   currentUserId,
+  memberNameById,
   onEdit,
   onDelete,
 }: MessageBubbleProps): React.ReactElement {
@@ -146,11 +151,19 @@ export function MessageBubble({
     ? 'bg-gradient-to-br from-amber-400 to-amber-500 text-[#1a1505]'
     : 'bg-gradient-to-br from-slate-500 to-slate-400 text-white';
 
-  // Derive display name: body may carry a sender_name hint; fall back to id
-  const displayName =
+  // Resolve display name: agents show their body hint or "Agent"; users resolve
+  // sender_id → team-member name (covers realtime + others' messages), then a
+  // persisted body.sender_name hint, then the raw id as a last resort.
+  const bodyName =
     typeof message.body.sender_name === 'string'
       ? message.body.sender_name
-      : (message.sender_id ?? 'Unknown');
+      : undefined;
+  const displayName = isAgent
+    ? (bodyName ?? 'Agent')
+    : (memberNameById?.[message.sender_id ?? ''] ??
+      bodyName ??
+      message.sender_id ??
+      'Unknown');
 
   // ── event handlers ──────────────────────────────────────────────────────
 
@@ -202,7 +215,7 @@ export function MessageBubble({
         ].join(' ')}
         aria-hidden="true"
       >
-        {initials(message.sender_id)}
+        {initials(displayName)}
       </div>
 
       {/* Body */}
