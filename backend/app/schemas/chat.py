@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ChannelCreate(BaseModel):
@@ -54,6 +54,14 @@ class MessageOut(BaseModel):
     edited_at: Optional[datetime] = None
     deleted_at: Optional[datetime] = None
     created_at: datetime
+
+    @field_validator("sender_id", mode="before")
+    @classmethod
+    def _coerce_sender_id(cls, v: Any) -> Optional[str]:
+        # asyncpg returns the auth.users UUID column as a uuid.UUID object;
+        # MessageOut's contract is a string, so coerce (None stays None).
+        # Without this, every message endpoint 500s on ResponseValidationError.
+        return None if v is None else str(v)
 
 
 class MarkReadIn(BaseModel):

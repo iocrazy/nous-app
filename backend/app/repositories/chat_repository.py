@@ -220,7 +220,7 @@ class ChatRepository:
               FROM public.channel_messages
              WHERE channel_id = :cid
                AND deleted_at IS NULL
-               AND (:before IS NULL OR seq < :before)
+               AND (CAST(:before AS bigint) IS NULL OR seq < CAST(:before AS bigint))
              ORDER BY seq DESC
              LIMIT :limit
             """,
