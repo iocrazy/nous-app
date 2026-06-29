@@ -127,12 +127,28 @@ export function Composer({
     if (!text) return;
 
     // Keep only ids whose @<label> token is still present in the message.
-    // Require a word boundary after the label so "@Alice" does not match
-    // "@Alice Smith" (prefix collision between e.g. "Alice" and "Alice Smith").
+    // Guard against prefix collisions: "@Alice" must not match inside "@Alice Smith"
+    // even though "@Alice " (with trailing space) appears there.
+    // For each label, build a negative lookahead that excludes any longer tracked
+    // label that starts with this label followed by a space (e.g. "Alice Smith"
+    // is an extension of "Alice", so the lookahead becomes (?! Smith) which
+    // prevents the match when " Smith" immediately follows "@Alice").
     const mentionUserIds: string[] = [];
+    const allTrackedLabels = [...mentionMapRef.current.values()];
     for (const [id, label] of mentionMapRef.current.entries()) {
       const esc = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      if (new RegExp(`@${esc}(?:\\s|$)`).test(text)) {
+      const extensions = allTrackedLabels.filter(
+        (l) => l !== label && l.startsWith(label + ' '),
+      );
+      const negLookahead =
+        extensions.length > 0
+          ? `(?!${extensions
+              .map((l) =>
+                l.slice(label.length).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+              )
+              .join('|')})`
+          : '';
+      if (new RegExp(`@${esc}${negLookahead}(?:\\s|$)`).test(text)) {
         mentionUserIds.push(id);
       }
     }
