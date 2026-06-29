@@ -117,7 +117,9 @@ async def test_list_user_memories_binds_user_id_and_team_ids():
 
     scope, captured = _make_read_scope([_ROW_OWN])
 
-    with patch("app.repositories.agent_memory_repository.read_scope", return_value=scope):
+    with patch(
+        "app.repositories.agent_memory_repository.read_scope", return_value=scope
+    ):
         await list_user_memories(user_id="user-abc", team_ids=[7, 8])
 
     assert captured["params"]["user_id"] == "user-abc"
@@ -131,7 +133,9 @@ async def test_list_user_memories_returns_mapped_dicts():
 
     scope, _ = _make_read_scope([_ROW_OWN, _ROW_SHARED])
 
-    with patch("app.repositories.agent_memory_repository.read_scope", return_value=scope):
+    with patch(
+        "app.repositories.agent_memory_repository.read_scope", return_value=scope
+    ):
         result = await list_user_memories(user_id="user-abc", team_ids=[7])
 
     assert len(result) == 2
@@ -148,7 +152,9 @@ async def test_list_user_memories_isolation_sql_predicate():
 
     scope, captured = _make_read_scope([])
 
-    with patch("app.repositories.agent_memory_repository.read_scope", return_value=scope):
+    with patch(
+        "app.repositories.agent_memory_repository.read_scope", return_value=scope
+    ):
         await list_user_memories(user_id="user-abc", team_ids=[7])
 
     sql = captured["sql"]
@@ -187,7 +193,9 @@ async def test_list_user_memories_execute_error_returns_empty():
         async def __aexit__(self, *a):
             return False
 
-    with patch("app.repositories.agent_memory_repository.read_scope", return_value=_Scope()):
+    with patch(
+        "app.repositories.agent_memory_repository.read_scope", return_value=_Scope()
+    ):
         result = await list_user_memories(user_id="user-abc", team_ids=[1])
 
     assert result == []
@@ -205,7 +213,9 @@ async def test_delete_user_memory_returns_true_when_row_deleted():
 
     scope, captured = _make_write_scope(1)
 
-    with patch("app.repositories.agent_memory_repository.write_scope", return_value=scope):
+    with patch(
+        "app.repositories.agent_memory_repository.write_scope", return_value=scope
+    ):
         result = await delete_user_memory(memory_id=10, user_id="user-abc")
 
     assert result is True
@@ -218,7 +228,9 @@ async def test_delete_user_memory_returns_false_when_not_found():
 
     scope, _ = _make_write_scope(0)
 
-    with patch("app.repositories.agent_memory_repository.write_scope", return_value=scope):
+    with patch(
+        "app.repositories.agent_memory_repository.write_scope", return_value=scope
+    ):
         result = await delete_user_memory(memory_id=999, user_id="user-abc")
 
     assert result is False
@@ -231,7 +243,9 @@ async def test_delete_user_memory_binds_id_and_user_id():
 
     scope, captured = _make_write_scope(1)
 
-    with patch("app.repositories.agent_memory_repository.write_scope", return_value=scope):
+    with patch(
+        "app.repositories.agent_memory_repository.write_scope", return_value=scope
+    ):
         await delete_user_memory(memory_id=10, user_id="user-abc")
 
     assert captured["params"]["id"] == 10
@@ -245,7 +259,9 @@ async def test_delete_user_memory_sql_has_owner_filter():
 
     scope, captured = _make_write_scope(1)
 
-    with patch("app.repositories.agent_memory_repository.write_scope", return_value=scope):
+    with patch(
+        "app.repositories.agent_memory_repository.write_scope", return_value=scope
+    ):
         await delete_user_memory(memory_id=10, user_id="user-abc")
 
     sql = captured["sql"]
@@ -282,7 +298,9 @@ async def test_delete_user_memory_never_raises_on_execute_error():
         async def __aexit__(self, *a):
             return False
 
-    with patch("app.repositories.agent_memory_repository.write_scope", return_value=_Scope()):
+    with patch(
+        "app.repositories.agent_memory_repository.write_scope", return_value=_Scope()
+    ):
         result = await delete_user_memory(memory_id=10, user_id="user-abc")
 
     assert result is False
