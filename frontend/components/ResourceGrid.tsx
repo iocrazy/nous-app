@@ -47,6 +47,7 @@ import { ResourceFetchUrlModal } from './ResourceFetchUrlModal';
 import { TempResourceActions } from './TempResourceActions';
 import { ttlBadgeText } from '../utils/tempTtl';
 import { tempTtlService } from '../services/tempTtlService';
+import { useGridVirtualizer } from '../hooks/useGridVirtualizer';
 
 // ─── Justified layout helper ────────────────────────────
 // Derive a display aspect ratio (w/h) for a resource, clamped to a sane range.
@@ -388,6 +389,15 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
     observer.observe(sentinel);
     return () => observer.disconnect();
   }, [hasMore, isLoadingMore, searchQuery, loadMore]);
+
+  // Grid virtualizer — unconditional hook; only its output is used in the grid branch.
+  // Must be declared after contentScrollRef (its scrollRef arg) is initialized.
+  // Alias containerRef to avoid colliding with any existing local ref.
+  const {
+    columns,
+    rowVirtualizer,
+    containerRef: virtualContainerRef,
+  } = useGridVirtualizer({ scrollRef: contentScrollRef, itemCount: sortedItems.length });
 
   // Sort panel
   const [showSortMenu, setShowSortMenu] = useState(false);
@@ -1157,59 +1167,85 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                       })}
                     </div>
                   ) : viewMode === 'grid' ? (
-                    <div className="grid grid-cols-2 gap-3 downloads-grid">
-                      {sortedItems.map((item) => {
-                        const badge = isTempContext ? ttlBadgeText(item.created_at, scopeTtl) : '';
+                    <div
+                      ref={virtualContainerRef}
+                      style={{ height: rowVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}
+                      data-virtualized="grid"
+                    >
+                      {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                        const start = virtualRow.index * columns;
+                        const rowItems = sortedItems.slice(start, start + columns);
                         return (
-                        <div key={item.id} {...getItemTouchHandlers('file', item)}>
-                        <ResourceCard
-                          item={item}
-                          onClick={(e?: any) => {
-                            if (isMobileDevice) {
-                              onResourceDoubleClick(item);
-                              return;
-                            }
-                            onCardClick(`item:${item.id}`, e);
-                            if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) onResourceClick(item);
-                          }}
-                          onDoubleClick={() => onResourceDoubleClick(item)}
-                          viewMode="grid"
-                          isSelected={selectedResource?.id === item.id}
-                          showRestoreAction={isRecycleView}
-                          onTrash={isRecycleView ? undefined : handleTrash}
-                          onRestore={isRecycleView ? handleRestore : undefined}
-                          onPermanentDelete={isRecycleView ? handlePermanentDelete : undefined}
-                          onContextMenu={!isRecycleView ? (e) => onFileContextMenu(e, item) : undefined}
-                          renaming={renamingResourceId === item.id}
-                          renameValue={renamingResourceId === item.id ? renameValue : undefined}
-                          onRenameChange={onRenameChange}
-                          onRenameConfirm={onRenameResourceConfirm}
-                          onRenameCancel={onRenameResourceCancel}
-                          onStartRename={() => onStartRenameResource(item.id, item.resource?.filename ?? '')}
-                          selectable
-                          isChecked={selectedIds.has(`item:${item.id}`)}
-                          onToggleSelect={(e) => onToggleSelect(`item:${item.id}`, e)}
-                          forceShowCheckbox={multiSelectMode}
-                          selectedIds={selectedIds}
-                          compositeId={`item:${item.id}`}
-                          isTranscoding={!!item.resource?.id && transcodingResourceIds.has(String(item.resource.id))}
-                        />
-                        {isTempContext && (
-                          <div className="flex items-center gap-2 px-2 py-1.5 bg-ink-900/60 rounded-b-xl border-t border-ink-800/50">
-                            {badge && (
-                              <span className="text-xs text-amber-700 dark:text-amber-300 flex-1 truncate">
-                                {badge}
-                              </span>
-                            )}
-                            <TempResourceActions
-                              resourceId={item.resource_id}
-                              scopeType={scopeType}
-                              scopeId={scopeId}
-                              onDone={isTempView ? reloadTemp : reloadResources}
-                            />
+                          <div
+                            key={virtualRow.key}
+                            data-index={virtualRow.index}
+                            ref={rowVirtualizer.measureElement}
+                            style={{
+                              position: 'absolute',
+                              top: 0,
+                              left: 0,
+                              width: '100%',
+                              transform: `translateY(${virtualRow.start}px)`,
+                              display: 'grid',
+                              gridTemplateColumns: `repeat(${columns}, minmax(0,1fr))`,
+                              gap: '12px',
+                            }}
+                          >
+                            {rowItems.map((item) => {
+                              const badge = isTempContext ? ttlBadgeText(item.created_at, scopeTtl) : '';
+                              return (
+                              <div key={item.id} {...getItemTouchHandlers('file', item)}>
+                              <ResourceCard
+                                item={item}
+                                onClick={(e?: any) => {
+                                  if (isMobileDevice) {
+                                    onResourceDoubleClick(item);
+                                    return;
+                                  }
+                                  onCardClick(`item:${item.id}`, e);
+                                  if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) onResourceClick(item);
+                                }}
+                                onDoubleClick={() => onResourceDoubleClick(item)}
+                                viewMode="grid"
+                                isSelected={selectedResource?.id === item.id}
+                                showRestoreAction={isRecycleView}
+                                onTrash={isRecycleView ? undefined : handleTrash}
+                                onRestore={isRecycleView ? handleRestore : undefined}
+                                onPermanentDelete={isRecycleView ? handlePermanentDelete : undefined}
+                                onContextMenu={!isRecycleView ? (e) => onFileContextMenu(e, item) : undefined}
+                                renaming={renamingResourceId === item.id}
+                                renameValue={renamingResourceId === item.id ? renameValue : undefined}
+                                onRenameChange={onRenameChange}
+                                onRenameConfirm={onRenameResourceConfirm}
+                                onRenameCancel={onRenameResourceCancel}
+                                onStartRename={() => onStartRenameResource(item.id, item.resource?.filename ?? '')}
+                                selectable
+                                isChecked={selectedIds.has(`item:${item.id}`)}
+                                onToggleSelect={(e) => onToggleSelect(`item:${item.id}`, e)}
+                                forceShowCheckbox={multiSelectMode}
+                                selectedIds={selectedIds}
+                                compositeId={`item:${item.id}`}
+                                isTranscoding={!!item.resource?.id && transcodingResourceIds.has(String(item.resource.id))}
+                              />
+                              {isTempContext && (
+                                <div className="flex items-center gap-2 px-2 py-1.5 bg-ink-900/60 rounded-b-xl border-t border-ink-800/50">
+                                  {badge && (
+                                    <span className="text-xs text-amber-700 dark:text-amber-300 flex-1 truncate">
+                                      {badge}
+                                    </span>
+                                  )}
+                                  <TempResourceActions
+                                    resourceId={item.resource_id}
+                                    scopeType={scopeType}
+                                    scopeId={scopeId}
+                                    onDone={isTempView ? reloadTemp : reloadResources}
+                                  />
+                                </div>
+                              )}
+                              </div>
+                              );
+                            })}
                           </div>
-                        )}
-                        </div>
                         );
                       })}
                     </div>
