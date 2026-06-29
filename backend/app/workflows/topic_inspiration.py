@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime
 
@@ -14,6 +15,10 @@ from app.services.topics.clustering import (
     CLUSTER_MAX_ITEMS,
     WINDOW_HOURS,
     is_match,
+)
+from app.services.topics.content_fetcher import (
+    fetch_article_text,
+    load_content_fetch_config,
 )
 from app.services.topics.embedding_service import TopicEmbeddingService
 from app.services.topics.keyword_filter import (
@@ -69,6 +74,54 @@ async def embed_unembedded_once(
             embedded += 1
     summary = {"unembedded": len(rows), "embedded": embedded}
     logger.info(f"topic_embed done: {summary}")
+    return summary
+
+
+async def enrich_content_once(
+    *,
+    hotspots_repo: HotspotsRepository | None = None,
+    sources_repo: SignalSourcesRepository | None = None,
+    max_items: int | None = None,
+) -> dict:
+    """L0.5: backfill the article body for curated (tier ≤ tier_max) news whose
+    body is still empty, via trafilatura. Backfilled rows clear their embedding
+    so the embed pass recomputes on the richer text.
+
+    Admin-gated (``topics.content_fetch``), DISABLED by default. Additive +
+    isolated: never blocks the rest of the tick. Politeness-bounded by the
+    configured concurrency. Returns a summary; empty when disabled."""
+    cfg = await load_content_fetch_config()
+    if not cfg.enabled:
+        return {"enabled": False, "needing": 0, "filled": 0}
+
+    hotspots_repo = hotspots_repo or HotspotsRepository()
+    sources_repo = sources_repo or SignalSourcesRepository()
+
+    tiers = await sources_repo.tier_map()
+    article_source_ids = [sid for sid, t in tiers.items() if t <= cfg.tier_max]
+    rows = await hotspots_repo.list_needing_content(
+        article_source_ids, limit=cfg.max_items if max_items is None else max_items
+    )
+    if not rows:
+        return {"enabled": True, "needing": 0, "filled": 0}
+
+    sem = asyncio.Semaphore(cfg.concurrency)
+    filled = 0
+
+    async def _one(row: dict) -> bool:
+        async with sem:
+            text = await fetch_article_text(
+                str(row.get("url") or ""), timeout_s=cfg.timeout_s
+            )
+        if text and len(text) >= cfg.min_chars:
+            await hotspots_repo.patch_content(str(row["id"]), text)
+            return True
+        return False
+
+    results = await asyncio.gather(*(_one(r) for r in rows), return_exceptions=True)
+    filled = sum(1 for r in results if r is True)
+    summary = {"enabled": True, "needing": len(rows), "filled": filled}
+    logger.info(f"topic_enrich done: {summary}")
     return summary
 
 
@@ -262,6 +315,11 @@ async def score_unscored_once(
 @DBOS.workflow()
 async def topic_fetch_workflow(scheduled_time: datetime, actual_time: datetime) -> None:
     await run_topic_fetch_once()
+    try:
+        # L0.5 before scoring so the scorer (and embedder) see real article text.
+        await enrich_content_once()
+    except Exception as e:  # noqa: BLE001 — never let enrichment break the schedule
+        logger.warning(f"topic content-enrich pass failed: {e}")
     try:
         await score_unscored_once()
     except Exception as e:  # noqa: BLE001 — never let scoring break the schedule

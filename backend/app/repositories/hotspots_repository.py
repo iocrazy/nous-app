@@ -262,6 +262,41 @@ class HotspotsRepository:
         except Exception as e:  # noqa: BLE001
             logger.error(f"patch_embedding failed for {hotspot_id}: {e}")
 
+    async def list_needing_content(
+        self, source_ids: list[str], limit: int = 40
+    ) -> list[dict[str, Any]]:
+        """Hotspots whose body is still empty but that have a real article URL,
+        restricted to the given (curated, article-bearing) source ids. Feeds the
+        trafilatura content-enrichment pass. Empty source_ids → empty."""
+        if not source_ids:
+            return []
+        client = await self._client()
+        result = (
+            await client.table(self.TABLE)
+            .select("id, url, title")
+            .in_("source_id", source_ids)
+            .not_.is_("url", "null")
+            .or_("content_original.is.null,content_original.eq.")
+            .order("captured_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return result.data or []
+
+    async def patch_content(self, hotspot_id: str, content: str) -> None:
+        """Backfill the article body AND clear the embedding so the embed pass
+        recomputes the vector from the now-richer text (title + body). Title-only
+        embeddings are noisier; re-embedding on real content tightens clustering."""
+        if not content or not content.strip():
+            return
+        client = await self._client()
+        try:
+            await client.table(self.TABLE).update(
+                {"content_original": content.strip(), "embedding": None}
+            ).eq("id", hotspot_id).execute()
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"patch_content failed for {hotspot_id}: {e}")
+
     async def patch_enrichment(self, hotspot_id: str, enrichment: dict) -> None:
         """Write AI enrichment (score/reason/ai_summary/category/tags/score_dims).
         Skips None. ``score`` is the code-computed composite; ``score_dims`` holds
