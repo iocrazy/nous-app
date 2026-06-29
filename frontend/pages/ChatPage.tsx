@@ -24,7 +24,7 @@ import { useTeamContext } from '../contexts/TeamContext';
 import { useToast } from '../components/Toast';
 import { chatService } from '../services/chatService';
 import { getResourceCoverUrl } from '../services/resourceService';
-import { fetchTeamMembers } from '../services/teamService';
+import { getTeamMembers } from '../services/teamService';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { useChannelRealtime } from '../hooks/useChannelRealtime';
 import { useChannelPresence } from '../hooks/useChannelPresence';
@@ -181,7 +181,7 @@ export function ChatPage(): React.ReactElement {
     let cancelled = false;
 
     Promise.all([
-      fetchTeamMembers(selectedTeamId),
+      getTeamMembers(selectedTeamId),
       aiLibraryService.listAgents(),
     ])
       .then(([teamMembers, allAgents]) => {
