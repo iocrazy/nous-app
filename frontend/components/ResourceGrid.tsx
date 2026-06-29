@@ -1189,6 +1189,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                               display: 'grid',
                               gridTemplateColumns: `repeat(${columns}, minmax(0,1fr))`,
                               gap: '12px',
+                              paddingBottom: '12px',
                             }}
                           >
                             {rowItems.map((item) => {
