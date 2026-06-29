@@ -54,6 +54,21 @@ describe('chatService.listChannels', () => {
     expect(typeof result[1].mentions).toBe('number');
   });
 
+  it('coerces BIGINT id/team_id/last_message_seq (JSON numbers) to strings', async () => {
+    // The API serializes snowflake columns as numbers; toChannel must coerce to
+    // string so `team_id === selectedTeamId` (a URL string) matches on reload.
+    stubResponse([
+      { id: 322106311188579, team_id: 322106045079553, last_message_seq: 7, name: 'General', mention_count: 0 },
+    ]);
+    const result = await chatService.listChannels();
+    expect(typeof result[0].id).toBe('string');
+    expect(result[0].id).toBe('322106311188579');
+    expect(typeof result[0].team_id).toBe('string');
+    expect(result[0].team_id).toBe('322106045079553');
+    expect(typeof result[0].last_message_seq).toBe('string');
+    expect(result[0].team_id === '322106045079553').toBe(true);
+  });
+
   it('defaults mentions to 0 when neither mention_count nor mentions present', async () => {
     stubResponse([{ id: 'ch3', name: 'Random' }]);
     const [channel] = await chatService.listChannels();
