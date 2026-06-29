@@ -20,8 +20,24 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return resp.json() as Promise<T>;
 }
 
-type ChannelRow = Omit<Channel, 'mentions'> & { mention_count?: number; mentions?: number };
-const toChannel = (r: ChannelRow): Channel => ({ ...r, mentions: r.mention_count ?? r.mentions ?? 0 });
+type ChannelRow = Omit<Channel, 'mentions' | 'id' | 'team_id' | 'last_message_seq'> & {
+  id: string | number;
+  team_id: string | number;
+  last_message_seq: string | number;
+  mention_count?: number;
+  mentions?: number;
+};
+// The API serializes BIGINT/snowflake columns as JSON numbers, but Channel
+// declares them as strings (and callers compare against string ids from the
+// URL). Coerce the snowflake fields to string so e.g. `team_id === selectedTeamId`
+// matches — without this, channels are filtered out on reload (number !== string).
+const toChannel = (r: ChannelRow): Channel => ({
+  ...r,
+  id: String(r.id),
+  team_id: String(r.team_id),
+  last_message_seq: String(r.last_message_seq),
+  mentions: r.mention_count ?? r.mentions ?? 0,
+});
 
 export const chatService = {
   listChannels: async (): Promise<Channel[]> =>
