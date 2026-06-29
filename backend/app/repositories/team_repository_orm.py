@@ -140,7 +140,7 @@ from sqlalchemy import update as sa_update
 from sqlalchemy.exc import IntegrityError
 
 from app.db.session import read_scope, write_scope
-from app.models import TeamMembers, Teams
+from app.models import TeamMembers, Teams, UserProfiles
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
 from app.repositories.team_repository import TeamRepository
 
@@ -287,7 +287,24 @@ class TeamRepositoryOrm(TeamRepository):
                 .where(TeamMembers.team_id == int(team_id))
                 .order_by(TeamMembers.joined_at.asc())
             )
-            return [_member_row(r) for r in result.scalars().all()]
+            rows = [_member_row(r) for r in result.scalars().all()]
+
+            # Enrich `name` from user_profiles.username — team_members has no
+            # name/email column, so without this every member (and chat message
+            # sender) renders as a raw UUID. Same scope/session, one batched query.
+            ids = [r["user_id"] for r in rows if r.get("user_id")]
+            if ids:
+                prof = await session.execute(
+                    select(UserProfiles.id, UserProfiles.username).where(
+                        UserProfiles.id.in_(ids)
+                    )
+                )
+                name_by_id = {str(pid): uname for pid, uname in prof.all()}
+                for r in rows:
+                    if r.get("name") is None:
+                        r["name"] = name_by_id.get(str(r["user_id"]))
+
+            return rows
 
     async def add_member(
         self, team_id: str, new_user_id: str, role: str = "member"
