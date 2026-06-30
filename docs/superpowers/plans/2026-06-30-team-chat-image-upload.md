@@ -1,77 +1,95 @@
-# Team Chat — Send Images (Discord/Feishu-style) Implementation Plan
+# Team Chat — Send Images (independent store + opt-in save-to-library) Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development. Steps use `- [ ]`.
+> **REVISED (2026-06-30):** chat images are an INDEPENDENT store (not auto-added to the resource library). User can opt-in "save to library" (team OR personal) which COPIES the file. Mirrors the `generated_media` (Tier-1 store) + promote-to-resources pattern.
 
-**Goal:** Let users send images in Team Chat the way Discord/Feishu do: upload via **click + paste + drag-drop**, the image renders **inline** in the message bubble (not a boxed card-with-filename), click to **expand fullscreen**. Uploaded images are saved to the **current team's resource library** (NAS disk) and the message references the resource.
+**Goal:** Send images in Team Chat (Discord/Feishu-style: click + paste + drag-drop, inline render, click-to-expand). Uploaded chat images live in an **independent chat store** (`teams/{team}/chat/...` on disk + a `chat_attachments` table), referenced by the message — NOT in the resource library. A per-image **"Save to library"** action copies the file into the **team OR personal** resource library (opt-in import).
 
-**Architecture (verified reuse path):** Composer gains upload affordances (wire the existing paperclip button to a hidden file input, attach `useComposerPaste` to the textarea, wrap the composer in `useComposerDropzone`); all funnel into one `onAttachFiles(files)` callback. ChatPage uploads each file via `resourceService.uploadResource(file, selectedTeamId)` (team-scoped — lands at `teams/{teamId}/uploads/...`), then sends a `media_card` message whose body is marked `kind:'image'` (`{resource_id, kind:'image', image_url: getResourceCoverUrl(id), alt}`). `MessageBubble` renders `kind:'image'` media_cards as an **inline `<img>`** (cover URL is public/no-auth) with click → a new `ImageLightbox` overlay. **Reuse the `media_card` content type** — body is free-form JSON, so no new content_type / DB migration / Pydantic-Literal change.
+**Architecture (verified):** Backend mirrors the proven `generated_media` trio. New `chat_attachments` table (clone of `generated_media`: id/scope_id/channel_id/creator/file_path/mime/size/promoted_resource_id, service-role RLS). `POST /chat/channels/{cid}/attachments` writes the file to `{DOWNLOAD_PATH}/teams/{team}/chat/{uuid}/{name}` + inserts a row. `GET /chat/attachments/{id}/file` serves it **world-readable-by-id, no auth** (FileResponse + realpath-under-DOWNLOAD_PATH guard + immutable cache — exactly like `get_generation_cover`). The chat message is a `media_card` with body `{kind:'image', attachment_id, image_url:'/api/v1/chat/attachments/{id}/file', alt}` (reuse `media_card` — no content_type migration). `MessageBubble` renders `kind:'image'` inline + click → `ImageLightbox`. `POST /chat/attachments/{id}/promote` body `{scope_id}` copies the file into resources under the chosen scope (team or personal) — a clone of `PromoteGeneratedMediaService`. Frontend "Save to library" offers team vs personal (personal = `personalTeamId` from `useTeamContext`).
 
-**Tech Stack:** React 19 + existing `resourceService.uploadResource` + `useComposerPaste`/`useComposerDropzone` hooks + `ChatAttachmentPicker.helpers` (validation) + i18next.
+**Tech Stack:** FastAPI + db_engine (service-role, BYPASSRLS) + `shutil`/`DOWNLOAD_PATH`; React 19 + existing composer affordances (T1 done) + RTL.
 
 ## Global Constraints
-- **Branch:** `feature/chat-image-upload` (off origin/master).
-- **Reuse, don't rebuild:** upload → `resourceService.uploadResource(file, scopeId, folderId?, onProgress?)` (scopeId = `selectedTeamId` from `useTeamContext`). paste → `useComposerPaste({onFiles})`. drop → `useComposerDropzone({onFiles})`. validation/limits → `ChatAttachmentPicker.helpers` (`validateFileBatch`, `MAX_FILES_AT_ONCE=4`, `MAX_FILE_SIZE_BYTES=50MB`, `ACCEPT_ATTR`). Do NOT reuse `useChatAttachmentUpload`/`aiLibraryService.uploadChatAttachment` — those go to the AI-chat 24h-TTL temp endpoint, NOT the team library.
-- **Storage = team resource library** (the big-player object-storage/file-service equivalent): images uploaded in a team's chat become resources in that team's library (scope_id = teamId). This is intentional (Feishu-style chat-files-in-space) + reuses dedup/cover/serving.
-- **Content type stays `media_card`**; image messages set `body.kind = 'image'`. Body shape: `{ resource_id: string, kind: 'image', image_url: string (cover URL), alt?: string }`. Non-image media_cards (the existing resource-picker cards) are unaffected (no `kind`, render as today).
-- **Inline `<img>` uses the cover URL** (`getResourceCoverUrl(id)`, no token) — confirmed public/no-auth and serves the full original for image mimes. Do NOT use `/file` (needs `?token=`).
-- **Multiple files**: a paste/drop/pick of N images (≤4) sends N image messages (one per image), each through the existing append/dedupe path. Validation rejects non-images for the image path (or routes non-images to the existing resource flow — for THIS slice, accept images only; reject others with a toast).
-- **Optimistic UX**: while uploading, show a lightweight "sending image…" indicator (a transient state); on success the real message arrives via the normal send+append. Errors → toast, no half-sent state.
-- **Island UI:** zero emoji, no `zinc-*`; match the chat module's hex/token style. Lightbox = a `fixed inset-0` overlay (follow existing modal pattern, e.g. ConfirmDialog), `object-contain`, click-backdrop / Esc to close.
-- **i18n** for all visible text (en+zh parity, valid JSON).
-- **Verification:** `npx vitest run <files>` + `npx tsc --noEmit` + `npm run build` per task; **plus a real logged-in browser pass** (per feedback_ui_early_visual_ux_pass): paste/drop/pick an image → it appears inline → click expands. (Register a test user; clean up after.)
+- **Branch:** `feature/chat-image-upload` (T1 already committed: composer click/paste/drop → `onAttachFiles`).
+- **Independent store — NOT the resource library.** Chat images write to `teams/{team_id}/chat/{uuid}/{filename}` under `DOWNLOAD_PATH` and are tracked in `chat_attachments`. They do NOT appear in the resource library unless the user explicitly "Saves to library".
+- **Clone the generated_media pattern** (don't reinvent): table mirrors `supabase/migrations/307_generated_media.sql`; repo/service mirror `generated_media_service.py`; serve route mirrors `get_generation_cover` (`generated_media_router.py:49`, realpath guard + immutable cache, NO auth); promote mirrors `promote_generated_media_service.py` (4-step: resource → `shutil.copy2` → version → resource_item; idempotent via `promoted_resource_id`).
+- **Reuse `media_card` content_type** (body free-form): image messages set `body.kind='image'`. No new content_type, no DB CHECK / Pydantic-Literal change.
+- **Membership gates:** upload requires the caller be a member of the channel (reuse `ChatService`/`is_member`); scope_id for the attachment = the channel's `team_id`. Promote requires the caller can access the attachment (channel member) AND can write to the target `scope_id` (member of that team, or it's their own personal team).
+- **Serve security:** world-readable-by-id (unguessable snowflake) + `os.path.realpath` under `DOWNLOAD_PATH` traversal guard (copy from `generated_media_router.py:62-65`). Same posture as the existing cover routes.
+- **Migration number = 326** (max is 325). Service-role-only RLS on `chat_attachments`.
+- **Image-only this slice:** non-image files rejected with a toast. Limits via `ChatAttachmentPicker.helpers` (≤4 files, ≤50MB).
+- **Agent images:** out of scope to GENERATE here; the principle "agent chat images use the chat store" is satisfied because any image posted to a channel goes through `chat_attachments`. Standalone agent generation (`generate_media_tools` → `generated_media`) is unchanged.
+- **Island UI**, zero emoji, no `zinc-*`; i18n en+zh parity. Backend lint black/isort/flake8; frontend tsc + build + vitest.
+- **Verification:** unit/build per task + a **real logged-in browser pass** (paste/drop/pick → inline → expand → save-to-library team+personal) per `feedback_ui_early_visual_ux_pass`; clean up test data after.
 
 ## File Structure
-- `frontend/components/chat/Composer.tsx` — wire paperclip → hidden `<input type=file accept=image>`; attach `useComposerPaste` + `useComposerDropzone`; `onAttachFiles?(files: File[])` prop + drag overlay.
-- `frontend/pages/ChatPage.tsx` — `handleAttachFiles(files)`: validate → uploadResource(each, selectedTeamId) → build image media_card body → sendMessage; uploading state.
-- `frontend/components/chat/MessageBubble.tsx` — render `body.kind==='image'` media_cards inline; click → lightbox.
-- `frontend/components/chat/ImageLightbox.tsx` — new fullscreen image overlay.
-- `frontend/public/locales/{en,zh}.json` — `chat.image.*` keys.
+- `supabase/migrations/326_chat_attachments.sql` — new table + RLS.
+- `backend/app/repositories/chat_attachment_repository.py` — insert / get / set_promoted.
+- `backend/app/services/chat/chat_attachment_service.py` — save file (disk) + row; promote (copy → resource).
+- `backend/app/api/chat_router.py` (or a new `chat_attachments_router.py` included by it) — upload / serve / promote routes.
+- `backend/tests/test_chat_attachments.py`.
+- `frontend/services/chatService.ts` — `uploadChatImage(channelId, file)` + `saveChatImageToLibrary(attachmentId, scopeId)`.
+- `frontend/pages/ChatPage.tsx` — `handleAttachFiles` (upload → send image message); uploading state.
+- `frontend/components/chat/MessageBubble.tsx` — inline image render + save-to-library action.
+- `frontend/components/chat/ImageLightbox.tsx` — fullscreen viewer (new).
+- `frontend/public/locales/{en,zh}.json` — `chat.image.*`.
 
 ---
 
-## Task 1: Composer upload affordances (click + paste + drag-drop)
+## Task 2: Backend — chat_attachments table + upload + serve
 
-**Files:** Modify `frontend/components/chat/Composer.tsx`. Read `useComposerPaste.ts`, `useComposerDropzone.ts`, `ChatAttachmentPicker.helpers.ts` first.
+**Files:** `supabase/migrations/326_chat_attachments.sql`, `backend/app/repositories/chat_attachment_repository.py`, `backend/app/services/chat/chat_attachment_service.py`, routes in `chat_router.py` (or new router), `backend/tests/test_chat_attachments.py`. Read `307_generated_media.sql`, `generated_media_service.py` (`_download_to`/`register_generated_media`), `generated_media_router.py` (`get_generation_cover` serve), `chat_repository.py` (`_bigint`, db_engine usage), `chat_service.py` (`is_member`/`_require_member`).
 
-**Interfaces (Produces):** Composer gains `onAttachFiles?: (files: File[]) => void`. The paperclip button opens a hidden file input (`accept` = images); pasting image files / dropping files calls `onAttachFiles`. A drag overlay shows on `isDragActive`.
-
-- [ ] **Step 1:** Add `onAttachFiles?: (files: File[]) => void` to `ComposerProps`. Add a hidden `<input ref type="file" accept="image/*" multiple>`; the existing paperclip button (`title={t('chat.attachResource')}`, currently no onClick) → `onClick` triggers the input; on change → `onAttachFiles(Array.from(files))` + reset input value. (Keep the existing 附加媒体/Image button → onAttachMedia ResourcePicker unchanged.)
-- [ ] **Step 2:** Attach `const { onPaste } = useComposerPaste({ onFiles: (f) => onAttachFiles?.(f), disabled })` to the textarea's `onPaste`. (Read useComposerPaste's exact `onFiles` arg type — File[] or FileList; adapt.)
-- [ ] **Step 3:** Wrap the composer root with `useComposerDropzone({ onFiles: (f) => onAttachFiles?.(f), disabled })` → spread `rootProps` on the wrapper, render a subtle drag overlay (island-styled, `t('chat.image.dropHint')`) when `isDragActive`.
-- [ ] **Step 4:** `cd frontend && npx tsc --noEmit` (no new errors) + `npm run build`. Commit — `feat(chat): composer image attach affordances (click/paste/drop)`.
-
----
-
-## Task 2: ChatPage upload + send image messages
-
-**Files:** Modify `frontend/pages/ChatPage.tsx`. Reuse `resourceService.uploadResource`, `getResourceCoverUrl`, `validateFileBatch` (from ChatAttachmentPicker.helpers), `selectedTeamId`, the existing `appendMessage`/send path.
-
-**Interfaces (Consumes):** Composer.onAttachFiles (Task 1).
-
-- [ ] **Step 1:** Add `const [uploadingImages, setUploadingImages] = useState(0)` (count of in-flight uploads, for the indicator).
-- [ ] **Step 2:** `handleAttachFiles(files)` (useCallback): guard `activeId` + `selectedTeamId`. Run `validateFileBatch(files)` (reuse the helper for count/size); keep only `image/*` files — if any non-image, `addToast(t('chat.image.onlyImages'),'error')` and drop them (this slice = images only). For each valid image, sequentially (or `Promise.all`, bounded): `setUploadingImages(n=>n+1)`, `const res = await resourceService.uploadResource(file, selectedTeamId)`, build `body = { resource_id: String(res.id), kind: 'image', image_url: getResourceCoverUrl(String(res.id)), alt: res.filename ?? 'image' }`, `const msg = await chatService.sendMessage(activeIdRef.current, body, 'media_card')`, `appendMessage(msg)` (reuse existing helper + dedupe), `scheduleMarkRead(...)`; on error `addToast(t('chat.image.uploadError'),'error')`; finally `setUploadingImages(n=>n-1)`.
-- [ ] **Step 3:** Pass `onAttachFiles={handleAttachFiles}` to `<Composer>`. Show an "uploading image…" indicator (e.g. near the composer or TypingIndicator slot) when `uploadingImages > 0` (`t('chat.image.uploading')`).
-- [ ] **Step 4:** `npx tsc --noEmit` + `npm run build`. Commit — `feat(chat): upload chat images to team library + send as inline image message`.
+- [ ] **Step 1: Migration 326** — `chat_attachments`: `id BIGINT PK DEFAULT generate_snowflake_id()`, `scope_id BIGINT NOT NULL` (team), `channel_id BIGINT NOT NULL REFERENCES channels(id) ON DELETE CASCADE`, `creator_id UUID NOT NULL`, `mime TEXT`, `file_path TEXT NOT NULL`, `file_size_bytes BIGINT`, `width INT`, `height INT`, `promoted_resource_id BIGINT`, `created_at TIMESTAMPTZ NOT NULL DEFAULT now()`. Enable RLS + a service-role-only policy (copy the `generated_media` RLS block: `FOR ALL TO service_role USING(true) WITH CHECK(true)`, plus no anon/authenticated policy). Index on `channel_id`.
+- [ ] **Step 2: Repository** `ChatAttachmentRepository`: `async def create(self, *, scope_id, channel_id, creator_id, mime, file_path, file_size_bytes, width=None, height=None) -> dict` (INSERT ... RETURNING * via `db_engine.execute_returning_one`, `_bigint` coercion); `async def get(self, attachment_id) -> dict|None`; `async def set_promoted(self, attachment_id, resource_id) -> None`.
+- [ ] **Step 3: Service** `chat_attachment_service.save_chat_image(*, channel_id:int, user_id:str, file_bytes:bytes, filename:str, mime:str) -> dict`: resolve the channel's `team_id` (via `chat_repository.get_channel`) as `scope_id`; verify membership (`is_member(channel_id, user_id)` → else PermissionError); generate `uuid_hex`; rel path `f"teams/{scope_id}/chat/{uuid_hex}/{safe_name}"`; write bytes under `settings.DOWNLOAD_PATH` atomically (`.part`→`os.replace`, mirror `generated_media_service._download_to`); insert the row; return it. Validate `mime` starts with `image/` (else ValueError).
+- [ ] **Step 4: Routes** in `chat_router.py`:
+  - `POST /channels/{channel_id}/attachments` (multipart `file: UploadFile`, `AuthDep`) → read bytes, call service, return `{id, mime, file_size_bytes, url: f"/api/v1/chat/attachments/{id}/file"}`. Map PermissionError→403, ValueError→400.
+  - `GET /attachments/{attachment_id}/file` (NO auth) → fetch row, build `full = realpath(DOWNLOAD_PATH / file_path)`, guard `full.startswith(realpath(DOWNLOAD_PATH))` (else 404), `FileResponse(full, media_type=mime, headers={Cache-Control: public, max-age=604800, immutable})`. (Copy the guard from `generated_media_router.py:62-65`.)
+- [ ] **Step 5: Tests** `test_chat_attachments.py` (mock db_engine + a tmp DOWNLOAD_PATH or mock the write): service rejects non-image mime; service rejects non-member (PermissionError); create builds the `teams/{scope}/chat/...` path + inserts row; serve route's realpath guard rejects `..` traversal. Backend lint. Run `uv run pytest tests/test_chat_attachments.py -v`.
+- [ ] **Step 6:** Commit — `feat(chat): chat_attachments store + upload/serve endpoints (mig 326)`.
 
 ---
 
-## Task 3: Inline image render + ImageLightbox
+## Task 3: Backend — promote chat image to library (team OR personal)
 
-**Files:** Modify `frontend/components/chat/MessageBubble.tsx`; create `frontend/components/chat/ImageLightbox.tsx`. Read the existing MediaCard sub-component + a `fixed inset-0` modal (e.g. `ConfirmDialog.tsx`) for the overlay pattern.
+**Files:** `backend/app/services/chat/chat_attachment_service.py` (add `promote`), route in `chat_router.py`, extend `test_chat_attachments.py`. Read `promote_generated_media_service.py` (the 4-step copy) + `resources_service.py:146-162` (upload layout).
 
-- [ ] **Step 1: ImageLightbox.tsx** — props `{ src: string; alt?: string; onClose: () => void }`. A `fixed inset-0 z-[60] bg-black/80` overlay, centered `<img src alt className="max-w-[92vw] max-h-[92vh] object-contain rounded">`; click backdrop or Esc → `onClose` (add a keydown listener + cleanup); a small close button. Island-styled, zero emoji. Clicking the image itself should NOT close (stopPropagation).
-- [ ] **Step 2: MessageBubble inline image** — in the content branch, BEFORE the existing `isMediaCard` card branch, detect `const isImage = message.content_type === 'media_card' && (message.body as any).kind === 'image' && typeof (message.body as any).image_url === 'string'`. When `isImage`, render an inline thumbnail: `<button onClick={()=>setLightbox(true)}><img src={body.image_url} alt={body.alt} className="max-w-[min(78%,360px)] max-h-[320px] rounded-[12px] object-cover ..." loading="lazy" onError={hide}/></button>` aligned by the existing own/other `items-end/start`. Local `const [lightbox, setLightbox] = useState(false)`; render `{lightbox && <ImageLightbox src={body.image_url} alt={body.alt} onClose={()=>setLightbox(false)} />}`. The existing non-image media_card branch (resource picker cards) stays unchanged.
-- [ ] **Step 3:** Tests — add MessageBubble cases: a `media_card` with `body.kind:'image'` renders an `<img>` (not the boxed card / not "Open in Library"); a `media_card` WITHOUT `kind` still renders the existing card. (RTL: query `img` / role.) Keep existing 24 green.
-- [ ] **Step 4: i18n** — add `chat.image.*` to en+zh: `uploading` ("Sending image…"/"图片发送中…"), `uploadError` ("Failed to send image"/"图片发送失败"), `onlyImages` ("Only images can be attached here"/"此处仅支持图片"), `dropHint` ("Drop images to send"/"拖拽图片以发送"), `close` ("Close"/"关闭"), `imageAlt` ("Image"/"图片"). Matching keys, valid JSON.
-- [ ] **Step 5:** `npx vitest run components/chat/MessageBubble.test.tsx` + `npx tsc --noEmit` + `npm run build` + JSON parse. Commit — `feat(chat): inline image render + fullscreen lightbox`.
+- [ ] **Step 1: promote service** `promote_chat_image(*, attachment_id:int, user_id:str, target_scope_id:int) -> dict`: fetch attachment (404 if none); verify caller is a member of the attachment's channel (access) AND a member of `target_scope_id` team OR it's the caller's personal team (write-perm) — else PermissionError; idempotent (if `promoted_resource_id` set, return it). Clone `PromoteGeneratedMediaService.promote`: create resource (`source_type='upload'`, provenance in metadata: `{from:'chat', attachment_id, channel_id}`) → `shutil.copy2` file from `teams/{att.scope}/chat/...` → `teams/{target_scope}/uploads/{rid}/v1/{filename}` → create version → create resource_item (scope=target_scope) → `set_promoted(attachment_id, rid)`. Return `{promoted_resource_id}`.
+- [ ] **Step 2: route** `POST /attachments/{attachment_id}/promote` body `{scope_id:int}` (`AuthDep`) → call service with `target_scope_id=scope_id`; PermissionError→403, ValueError→400. Returns `{promoted_resource_id: str}`.
+- [ ] **Step 3: Tests:** promote copies the file + creates a resource under the chosen scope; idempotent (second call returns same id, no dup); non-member of target scope → 403. Lint.
+- [ ] **Step 4:** Commit — `feat(chat): promote chat image to team/personal library (copy)`.
+
+---
+
+## Task 4: Frontend — upload + send image message
+
+**Files:** `frontend/services/chatService.ts`, `frontend/pages/ChatPage.tsx`. Reuse `ChatAttachmentPicker.helpers` (`validateFileBatch`), the T1 `onAttachFiles`, `selectedTeamId`/`personalTeamId` from `useTeamContext`, the existing `appendMessage`/send path.
+
+- [ ] **Step 1: chatService** — `uploadChatImage(channelId: string, file: File): Promise<{id:string; url:string; mime:string}>` → multipart POST `/chat/channels/{channelId}/attachments` (FormData `file`, auth headers, strip Content-Type). `saveChatImageToLibrary(attachmentId: string, scopeId: string): Promise<{promoted_resource_id:string}>` → POST `/chat/attachments/{attachmentId}/promote` `{scope_id:Number(scopeId)}`.
+- [ ] **Step 2: ChatPage `handleAttachFiles(files)`** — guard activeId+selectedTeamId; `validateFileBatch`; keep only `image/*` (else toast `chat.image.onlyImages`); `setUploadingImages(n+1)`; for each: `const att = await chatService.uploadChatImage(activeIdRef.current, file)`; `body = {kind:'image', attachment_id: att.id, image_url: att.url, alt: file.name}`; `const msg = await chatService.sendMessage(activeIdRef.current, body, 'media_card')`; `appendMessage(msg)`; `scheduleMarkRead`; on error toast `chat.image.uploadError`; finally decrement. Pass `onAttachFiles={handleAttachFiles}` to `<Composer>` + show `chat.image.uploading` indicator when `uploadingImages>0`.
+- [ ] **Step 3:** `npx tsc --noEmit` + `npm run build`. Commit — `feat(chat): upload chat image (independent store) + send inline image message`.
+
+---
+
+## Task 5: Frontend — inline render + lightbox + save-to-library
+
+**Files:** `frontend/components/chat/MessageBubble.tsx`, `frontend/components/chat/ImageLightbox.tsx` (new), `frontend/pages/ChatPage.tsx` (pass personalTeamId + a save handler down), `frontend/public/locales/{en,zh}.json`. Read MediaCard sub-component + a `fixed inset-0` modal (ConfirmDialog).
+
+- [ ] **Step 1: ImageLightbox.tsx** — `{src, alt?, onClose}`; `fixed inset-0 z-[60] bg-black/80` overlay, centered `<img className="max-w-[92vw] max-h-[92vh] object-contain">`, backdrop/Esc/close-button → onClose, image click stopPropagation. Island, zero emoji.
+- [ ] **Step 2: MessageBubble inline image** — detect `isImage = content_type==='media_card' && body.kind==='image' && typeof body.image_url==='string'`. Render inline `<button onClick=open lightbox><img src={body.image_url} alt={body.alt} className="max-w-[min(78%,360px)] max-h-[320px] rounded-[12px] object-cover" loading="lazy" onError=hide/></button>`, aligned by existing own/other `items-end/start`; local lightbox state + render `<ImageLightbox>`. On hover (own OR any — your call; for now ALL image messages), show a small **"Save to library"** button → calls a passed `onSaveImage?(attachmentId)` (which opens a tiny team/personal chooser). Existing non-image media_card branch unchanged.
+- [ ] **Step 3: Save-to-library UX** — simplest: a small action on the image that, on click, shows two choices (team / personal) — implement as a lightweight inline menu or a `window.confirm`-style two-step is too crude; do a tiny popover with two buttons (`chat.image.saveTeam` / `chat.image.savePersonal`). ChatPage provides `handleSaveImage(attachmentId, scope:'team'|'personal')` → `chatService.saveChatImageToLibrary(attachmentId, scope==='team'?selectedTeamId:personalTeamId)` → toast `chat.image.saved`. Pass it + a flag down to MessageBubble via MessageList (new optional props `onSaveImage`). (personalTeamId from `useTeamContext`.)
+- [ ] **Step 4: i18n** `chat.image.*`: `uploading`, `uploadError`, `onlyImages`, `close`, `imageAlt`, `save` ("Save to library"/"保存到素材库"), `saveTeam` ("Team library"/"团队素材库"), `savePersonal` ("My library"/"我的素材库"), `saved` ("Saved to library"/"已保存到素材库"), `saveError`. en+zh parity, valid JSON. (`dropHint` already added in T1.)
+- [ ] **Step 5: Tests** — MessageBubble: `kind:'image'` renders `<img>` (not the boxed card / no "Open in Library"); non-`kind` media_card unchanged; clicking image opens lightbox (state). Keep suite green.
+- [ ] **Step 6:** `npx vitest run components/chat/MessageBubble.test.tsx` + tsc + build + JSON parse. Commit — `feat(chat): inline image + lightbox + save-to-library (team/personal)`.
 
 ---
 
 ## Self-Review
-**Spec coverage:** send images via click + paste + drag-drop (Discord/Feishu入口); inline image render + click-to-expand lightbox (大厂渲染); stored in the team resource library on NAS (大厂对象存储等价物 + 飞书式入库). Reuses `media_card` (no migration). 
-**Deferrals:** non-image file attachments (this slice = images only; the paperclip can later route non-images to the resource flow); image dimensions/aspect-ratio placeholder (width/height backfilled async — use `object-cover` capped box for now, no layout shift handling); multi-image gallery grouping (each image = its own message); drag-to-reorder/captions; agent-sent images. The 附加媒体 ResourcePicker (existing-resource cards) is untouched.
-**Storage note:** uploaded chat images ARE added to the team's资源库 (scope_id=teamId) — intentional, matches Feishu (chat files live in the team space) + reuses cover/serving/dedup. If the user later wants chat images excluded from the library browser, that's a separate filter.
-**Verification:** build + unit + a real logged-in browser pass (paste an image → inline → click expands), then clean up the test user/data.
+**Spec coverage:** independent chat-image store (`teams/{team}/chat/` + `chat_attachments`, NOT the library) per user decision; click/paste/drop upload (T1); inline render + fullscreen lightbox (Discord/Feishu); opt-in **save to team OR personal library** = physical copy (clone of generated-media promote). Agent standalone images = `generated_media` (unchanged, answered); chat-posted images = `chat_attachments`.
+**Deferrals:** non-image attachments; image width/height capture (nullable; layout uses capped box); agent POSTING images into channels (store is ready, the agent-turn image path is separate); gallery grouping; dedup across chat. 
+**Security:** serve = world-readable-by-snowflake-id + realpath guard (same posture as cover routes); upload/promote membership-gated; `chat_attachments` RLS service-role-only.
+**Verification:** backend pytest + frontend unit/build + real logged-in browser pass (upload via paste/drop/pick → inline → expand → save to team & personal → confirm it appears in the resource library) + cleanup.
 
 ## Execution Handoff
-Execute via superpowers:subagent-driven-development; final whole-branch review; **real logged-in UI verification** (per the early-visual-UX-pass rule); then ship (frontend-only → Vercel + merge → private).
+Execute via superpowers:subagent-driven-development; T2/T3 backend (mig+endpoints), T4/T5 frontend; final whole-branch review; **real logged-in UI verification**; ship (backend → CI → ACR deploy; frontend → Vercel) → flip private.
