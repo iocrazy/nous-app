@@ -143,9 +143,11 @@ export function TopicScoring() {
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 600, fontSize: 15 }}>Topic Inspiration — master switch</div>
-            <div style={{ fontSize: 12, color: 'var(--color-text-3)' }}>
-              整个话题灵感功能的总开关。关闭 = 停止采集/评分/抓取/聚类 + 前端隐藏页面。
+            <div style={{ fontWeight: 600, fontSize: 15 }}>Topic Inspiration — master switch（总开关）</div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-3)', lineHeight: 1.6 }}>
+              整个「话题灵感」功能的总开关。<br />
+              <b>开启</b>：正常采集热点、评分、展示页面。<br />
+              <b>关闭</b>：立即停止所有后台处理（采集 / 评分 / 正文抓取 / 聚类），并对所有用户隐藏整个话题灵感页面（导航和页面都不可见）。已采集的数据保留，重新开启即恢复。
             </div>
           </div>
           <Switch
@@ -159,15 +161,16 @@ export function TopicScoring() {
       <SectionHeader
         icon={<IconThunderbolt />}
         title="Topic Scoring"
-        subtitle="Tune how hotspots are scored. The LLM rates five raw dimensions; these weights are the code-side composite (no redeploy)."
+        subtitle="热点评分配置。LLM 给每条热点打 5 个维度的原始分，下面的权重是代码侧的合成公式（改完即时生效，无需发版）。"
       />
 
       <Card title="Scoring" style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 500 }}>Enable scoring</div>
-            <div style={{ fontSize: 12, color: 'var(--color-text-3)' }}>
-              总开关：关闭 = 停止给新热点打分/生成摘要（已有分数保留）。
+            <div style={{ fontWeight: 500 }}>Enable scoring（AI 评分与摘要）</div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-3)', lineHeight: 1.6 }}>
+              <b>开启</b>：自动给新热点用 LLM 打 5 维质量分 + 生成中文摘要。<br />
+              <b>关闭</b>：停止评分和摘要（省 LLM 费用），已有的分数 / 摘要保留不变。下个抓取周期生效。
             </div>
           </div>
           <Switch
@@ -290,9 +293,11 @@ export function TopicScoring() {
       <Card title="Pre-filter" style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
           <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 500 }}>Enable keyword gate</div>
-            <div style={{ fontSize: 12, color: 'var(--color-text-3)' }}>
-              关闭 = 噪声源的全部热点都入库（不再按关键词过滤）。
+            <div style={{ fontWeight: 500 }}>Enable keyword gate（关键词闸门）</div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-3)', lineHeight: 1.6 }}>
+              入库前的关键词过滤，只对噪声源（社交热榜等 tier ≥ 下方设定）生效。<br />
+              <b>开启</b>：噪声源只放行命中下方关键词的热点（过滤无关内容）。<br />
+              <b>关闭</b>：噪声源全部热点都入库（量更大更杂，靠后续评分降噪）。下个抓取周期生效。
             </div>
           </div>
           <Switch
@@ -351,9 +356,11 @@ export function TopicScoring() {
       <Card title="Content fetch" style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
           <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 500 }}>Enable content fetch</div>
-            <div style={{ fontSize: 12, color: 'var(--color-text-3)' }}>
-              总开关：关闭 = 停止抓取正文（热点只保留标题）。
+            <div style={{ fontWeight: 500 }}>Enable content fetch（新闻正文抓取）</div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-3)', lineHeight: 1.6 }}>
+              用 trafilatura 给优质新闻源抓取真实文章正文回填。<br />
+              <b>开启</b>：评分和摘要更准（不再只看标题）。<br />
+              <b>关闭</b>：只保留标题（社交源本就无正文，不受影响）。下个抓取周期生效。
             </div>
           </div>
           <Switch
