@@ -19,6 +19,7 @@ from app.api.canvases_router import router as canvases_router
 from app.api.chat_router import router as chat_router
 from app.api.cleanup_router import router as cleanup_router
 from app.api.collections_router import router as collections_router
+from app.api.conversation_router import router as conversation_router
 from app.api.error_report_router import router as error_report_router
 from app.api.flows_router import router as flows_router
 from app.api.frontend_config_router import router as frontend_config_router
@@ -64,6 +65,7 @@ from app.api.temp_ttl_router import router as temp_ttl_router
 from app.api.topics_router import router as _topics_router
 from app.api.user_settings_router import router as settings_router
 from app.api.workforce_router import router as workforce_router
+from app.core.config import settings
 
 api_router = APIRouter()
 
@@ -142,6 +144,9 @@ api_router.include_router(router=flows_router)
 api_router.include_router(router=teams_router, tags=["Teams"])
 
 api_router.include_router(router=chat_router, tags=["Chat"])
+
+if settings.FEATURE_CONVERSATIONS:
+    api_router.include_router(router=conversation_router, tags=["Conversations"])
 
 # DBOS orchestrator health + introspection (PR-D2.2)
 from app.api.dbos_router import router as dbos_router  # noqa: E402
