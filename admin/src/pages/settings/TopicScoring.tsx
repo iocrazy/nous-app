@@ -18,6 +18,8 @@ import {
   useUpdateTopicPrefilterConfig,
   useTopicContentFetchConfig,
   useUpdateTopicContentFetchConfig,
+  useTopicModuleConfig,
+  useUpdateTopicModuleConfig,
   type TopicScoringConfig,
   type TopicPrefilterConfig,
   type TopicContentFetchConfig,
@@ -53,6 +55,22 @@ export function TopicScoring() {
   const { data: cfData, isLoading: cfLoading } = useTopicContentFetchConfig()
   const updateCf = useUpdateTopicContentFetchConfig()
   const [cf, setCf] = useState<TopicContentFetchConfig | null>(null)
+
+  const { data: modData } = useTopicModuleConfig()
+  const updateMod = useUpdateTopicModuleConfig()
+
+  const toggleModule = async (enabled: boolean) => {
+    try {
+      await updateMod.mutateAsync({ enabled })
+      Message.success(
+        enabled
+          ? 'Topic Inspiration enabled.'
+          : 'Topic Inspiration turned off — collection paused, page hidden.',
+      )
+    } catch (e) {
+      Message.error(`Save failed: ${(e as Error).message}`)
+    }
+  }
 
   useEffect(() => {
     if (data) setCfg(data)
@@ -120,6 +138,24 @@ export function TopicScoring() {
 
   return (
     <div style={{ maxWidth: 720 }}>
+      <Card
+        style={{ marginBottom: 24, borderColor: 'rgb(var(--primary-6))' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 600, fontSize: 15 }}>Topic Inspiration — master switch</div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-3)' }}>
+              整个话题灵感功能的总开关。关闭 = 停止采集/评分/抓取/聚类 + 前端隐藏页面。
+            </div>
+          </div>
+          <Switch
+            checked={modData?.enabled ?? true}
+            loading={updateMod.isPending}
+            onChange={toggleModule}
+          />
+        </div>
+      </Card>
+
       <SectionHeader
         icon={<IconThunderbolt />}
         title="Topic Scoring"

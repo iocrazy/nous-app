@@ -21,6 +21,7 @@ import { CurrentHotspots } from '../components/TopicInspiration/CurrentHotspots'
 import { SourceHealthBadge } from '../components/TopicInspiration/SourceHealthBadge';
 import { TopicFilterBar } from '../components/TopicInspiration/TopicFilterBar';
 import { topHotspots, partitionBySignal } from '../components/TopicInspiration/hotspotRanking';
+import { useTopicModuleEnabled } from '../hooks/useTopicModuleEnabled';
 
 const TOP_HOTSPOTS_COUNT = 5;
 
@@ -28,6 +29,7 @@ export const TopicInspirationPage: React.FC = () => {
   const { t } = useTranslation();
   const island = islandUI();
   const { addToast } = useToast();
+  const moduleEnabled = useTopicModuleEnabled();
   const [hotspots, setHotspots] = useState<Hotspot[]>([]);
   const [dates, setDates] = useState<string[]>([]);
   const [day, setDay] = useState<string | undefined>(undefined);
@@ -164,6 +166,20 @@ export const TopicInspirationPage: React.FC = () => {
 
   const cPrimary = island ? 'text-content' : 'text-ink-50';
   const cSub = island ? 'text-content-3' : 'text-ink-400';
+
+  // Global master switch (admin) — when off, hide the whole page (also blocks
+  // direct-URL access, not just the nav item).
+  if (!moduleEnabled) {
+    return (
+      <div className="max-w-[1180px] mx-auto px-6 py-24 text-center">
+        <Lightbulb size={32} className={`mx-auto mb-3 ${island ? 'text-content-4' : 'text-ink-500'}`} />
+        <h1 className={`text-lg font-bold ${cPrimary}`}>{t('topic.title')}</h1>
+        <p className={`mt-2 text-sm ${cSub}`}>
+          {t('topic.moduleDisabled', 'This feature is currently turned off.')}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-[1180px] mx-auto px-6 py-6">

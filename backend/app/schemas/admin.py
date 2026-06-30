@@ -718,6 +718,13 @@ class TopicScoringConfigResponse(BaseModel):
     enabled: bool = True
 
 
+class TopicModuleConfigResponse(BaseModel):
+    """Global master switch for the whole Topic Inspiration module
+    (system_settings['topics.module']). Off = pause everything + hide the page."""
+
+    enabled: bool = True
+
+
 class TopicContentFetchConfigResponse(BaseModel):
     """Admin-tunable L0.5 article-body enrichment
     (system_settings['topics.content_fetch']).
