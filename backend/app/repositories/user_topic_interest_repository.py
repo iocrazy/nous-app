@@ -53,18 +53,52 @@ class UserTopicInterestRepository:
     async def rank_hotspot_ids(
         self, user_id: str, *, window_hours: int = 72, limit: int = 100
     ) -> list[str]:
-        """Hotspot ids in the window ranked by cosine similarity to the user's
-        interest embedding (closest first). Empty when no interest embedding or
-        no embedded hotspots."""
+        """Hotspot ids in the window for the user's "For You" feed.
+
+        The interest text is treated as KEYWORDS (whitespace-separated): a
+        hotspot must match at least one keyword in its title/body to qualify —
+        that's the per-user filter. Within the matched set, ranking prefers
+        embedding cosine similarity to the interest vector (semantic boost), and
+        falls back to recency when embeddings aren't available. So it works even
+        when the embedding provider is unconfigured (keyword-only), and gets
+        sharper when embeddings exist. Empty interest_text → no keyword filter
+        (pure embedding/recency rank, the original behaviour). Empty list when
+        nothing matches or no interest is set."""
         rows = await db_engine.fetch_all(
             """
+            WITH me AS (
+                SELECT interest_text,
+                       embedding,
+                       regexp_split_to_array(
+                           lower(trim(coalesce(interest_text, ''))), '\\s+'
+                       ) AS words
+                  FROM public.user_topic_interests
+                 WHERE user_id = :uid
+            )
             SELECT h.id::text AS id
-              FROM public.hotspots h
-              JOIN public.user_topic_interests i ON i.user_id = :uid
-             WHERE i.embedding IS NOT NULL
-               AND h.embedding IS NOT NULL
-               AND h.captured_at >= now() - make_interval(hours => :win)
-             ORDER BY h.embedding <=> i.embedding
+              FROM public.hotspots h, me
+             WHERE h.captured_at >= now() - make_interval(hours => :win)
+               AND (
+                   -- no keywords set → don't filter (original embedding rank)
+                   me.words IS NULL
+                   OR array_length(me.words, 1) IS NULL
+                   OR (array_length(me.words, 1) = 1 AND me.words[1] = '')
+                   -- otherwise keep hotspots matching any keyword in title/body
+                   OR EXISTS (
+                       SELECT 1 FROM unnest(me.words) AS w
+                        WHERE w <> ''
+                          AND (
+                              lower(h.title) LIKE '%' || w || '%'
+                              OR lower(coalesce(h.content_original, '')) LIKE '%' || w || '%'
+                          )
+                   )
+               )
+             ORDER BY
+               CASE
+                   WHEN me.embedding IS NOT NULL AND h.embedding IS NOT NULL
+                   THEN (h.embedding <=> me.embedding)
+               END NULLS LAST,
+               h.captured_at DESC
              LIMIT :lim
             """,
             {"uid": user_id, "win": window_hours, "lim": limit},

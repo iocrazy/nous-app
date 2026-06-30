@@ -66,4 +66,10 @@ async def test_rank_hotspot_ids_returns_ordered_ids(monkeypatch):
     ids = await UserTopicInterestRepository().rank_hotspot_ids("u1", limit=50)
     assert ids == ["7", "3", "9"]
     assert seen["params"]["uid"] == "u1" and seen["params"]["lim"] == 50
+    # embedding semantic ranking is still present...
     assert "<=>" in seen["sql"]
+    # ...AND the interest text now drives a keyword filter (split → match
+    # title/body), so For You works even without an embedding.
+    assert "regexp_split_to_array" in seen["sql"]
+    assert "unnest(me.words)" in seen["sql"]
+    assert "h.content_original" in seen["sql"]
