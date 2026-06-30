@@ -35,12 +35,19 @@ from app.schemas.admin import (
     SystemSettingResponse,
     SystemSettingUpdate,
     TaskModuleGovernanceResponse,
+    TopicContentFetchConfigResponse,
     TopicPrefilterConfigResponse,
     TopicScoringConfigResponse,
 )
 from app.services.ai.memory import registry as memory_registry
 from app.services.ai.memory.graph_memory import STRUCTURED_OUTPUT_MODES
 from app.services.ai.memory.honcho_memory import HonchoMemoryConfig
+from app.services.topics.content_fetcher import (
+    CONTENT_FETCH_CONFIG_KEY,
+    content_fetch_payload,
+    load_content_fetch_config,
+    merge_content_fetch_config,
+)
 from app.services.topics.keyword_filter import (
     PREFILTER_CONFIG_KEY,
     load_prefilter_config,
@@ -151,6 +158,35 @@ async def update_topics_prefilter_config(
         details={"value": payload},
     )
     return TopicPrefilterConfigResponse(**payload)
+
+
+@router.get("/topics-content-fetch", response_model=TopicContentFetchConfigResponse)
+async def get_topics_content_fetch_config(auth: AdminAuthDep):
+    """Current L0.5 content-enrichment config (admin-tuned, over code defaults)."""
+    cfg = await load_content_fetch_config()
+    return TopicContentFetchConfigResponse(**content_fetch_payload(cfg))
+
+
+@router.put("/topics-content-fetch", response_model=TopicContentFetchConfigResponse)
+async def update_topics_content_fetch_config(
+    body: TopicContentFetchConfigResponse,
+    auth: AdminAuthDep,
+):
+    """Persist content-fetch knobs to ``system_settings['topics.content_fetch']``.
+    Validated/clamped through the same merge as reads. Takes effect on the next
+    fetch tick — no redeploy. ``enabled`` is the trafilatura kill switch."""
+    validated = merge_content_fetch_config(body.model_dump())
+    payload = content_fetch_payload(validated)
+    repo = get_system_settings_repository()
+    await repo.upsert_setting(CONTENT_FETCH_CONFIG_KEY, payload, auth.user_id)
+    await create_audit_log(
+        admin_id=auth.user_id,
+        action="update_topics_content_fetch_config",
+        target_type="system_setting",
+        target_id=CONTENT_FETCH_CONFIG_KEY,
+        details={"value": payload},
+    )
+    return TopicContentFetchConfigResponse(**payload)
 
 
 @router.get("", response_model=list[SystemSettingResponse])

@@ -110,6 +110,15 @@ def test_config_payload_roundtrips_through_merge():
     assert merge_scoring_config(payload).tier_weights == TIER_WEIGHTS
 
 
+def test_scoring_enabled_defaults_on_and_parses():
+    # master switch defaults on; explicit false is honored; garbage → default on
+    assert default_scoring_config().enabled is True
+    assert merge_scoring_config({"enabled": False}).enabled is False
+    assert merge_scoring_config({"enabled": "no"}).enabled is True
+    assert merge_scoring_config({}).enabled is True
+    assert "enabled" in config_payload(default_scoring_config())
+
+
 def test_summary_max_chars_parsed_clamped_and_defaulted():
     # admin sets a cap → parsed as int
     assert merge_scoring_config({"summary_max_chars": 40}).summary_max_chars == 40

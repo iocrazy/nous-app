@@ -43,6 +43,9 @@ DEFAULT_FEATURED_MIN_SCORE = 0.6
 # a runtime knob, not a hardcoded prompt edit + redeploy.
 DEFAULT_SUMMARY_MAX_CHARS = 0
 SUMMARY_MAX_CHARS_CEILING = 500  # sanity bound on the admin-entered value
+# Master switch for the LLM scoring pass. False = stop scoring new hotspots
+# (admin kill switch); existing scores are kept. Default on.
+DEFAULT_SCORING_ENABLED = True
 # system_settings key holding the admin-tuned scoring config (jsonb).
 SCORING_CONFIG_KEY = "topics.scoring"
 
@@ -93,6 +96,8 @@ class ScoringConfig:
     featured_min_score: float
     # Max chars for the LLM-written ai_summary (0 = use the agent default).
     summary_max_chars: int
+    # Master switch for the scoring pass (admin kill switch). Default on.
+    enabled: bool = DEFAULT_SCORING_ENABLED
 
 
 def default_scoring_config() -> ScoringConfig:
@@ -101,6 +106,7 @@ def default_scoring_config() -> ScoringConfig:
         tier_weights=dict(TIER_WEIGHTS),
         featured_min_score=DEFAULT_FEATURED_MIN_SCORE,
         summary_max_chars=DEFAULT_SUMMARY_MAX_CHARS,
+        enabled=DEFAULT_SCORING_ENABLED,
     )
 
 
@@ -138,7 +144,9 @@ def merge_scoring_config(raw: Any) -> ScoringConfig:
         if isinstance(smc, (int, float))
         else DEFAULT_SUMMARY_MAX_CHARS
     )
-    return ScoringConfig(dim_weights, tier_weights, featured, summary_max)
+    en = raw.get("enabled")
+    enabled = bool(en) if isinstance(en, bool) else DEFAULT_SCORING_ENABLED
+    return ScoringConfig(dim_weights, tier_weights, featured, summary_max, enabled)
 
 
 async def load_scoring_config() -> ScoringConfig:
@@ -168,6 +176,7 @@ def config_payload(cfg: Optional[ScoringConfig] = None) -> dict[str, Any]:
         "tier_weights": {str(t): w for t, w in c.tier_weights.items()},
         "featured_min_score": c.featured_min_score,
         "summary_max_chars": c.summary_max_chars,
+        "enabled": c.enabled,
     }
 
 

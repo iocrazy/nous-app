@@ -16,8 +16,11 @@ import {
   useUpdateTopicScoringConfig,
   useTopicPrefilterConfig,
   useUpdateTopicPrefilterConfig,
+  useTopicContentFetchConfig,
+  useUpdateTopicContentFetchConfig,
   type TopicScoringConfig,
   type TopicPrefilterConfig,
+  type TopicContentFetchConfig,
 } from '../../api/endpoints/settings'
 
 // Order + labels for the five LLM-rated dimensions (the agent emits raw 0..1
@@ -47,6 +50,10 @@ export function TopicScoring() {
   // Edit keywords as one textarea (one per line); convert on save.
   const [kwText, setKwText] = useState('')
 
+  const { data: cfData, isLoading: cfLoading } = useTopicContentFetchConfig()
+  const updateCf = useUpdateTopicContentFetchConfig()
+  const [cf, setCf] = useState<TopicContentFetchConfig | null>(null)
+
   useEffect(() => {
     if (data) setCfg(data)
   }, [data])
@@ -58,7 +65,11 @@ export function TopicScoring() {
     }
   }, [preData])
 
-  if (isLoading || !cfg || preLoading || !pre) {
+  useEffect(() => {
+    if (cfData) setCf(cfData)
+  }, [cfData])
+
+  if (isLoading || !cfg || preLoading || !pre || cfLoading || !cf) {
     return (
       <div style={{ padding: 48, textAlign: 'center' }}>
         <Spin />
@@ -97,6 +108,16 @@ export function TopicScoring() {
     }
   }
 
+  const saveContentFetch = async () => {
+    if (!cf) return
+    try {
+      await updateCf.mutateAsync(cf)
+      Message.success('Content fetch saved — applies on the next fetch tick.')
+    } catch (e) {
+      Message.error(`Save failed: ${(e as Error).message}`)
+    }
+  }
+
   return (
     <div style={{ maxWidth: 720 }}>
       <SectionHeader
@@ -104,6 +125,21 @@ export function TopicScoring() {
         title="Topic Scoring"
         subtitle="Tune how hotspots are scored. The LLM rates five raw dimensions; these weights are the code-side composite (no redeploy)."
       />
+
+      <Card title="Scoring" style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 500 }}>Enable scoring</div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-3)' }}>
+              总开关：关闭 = 停止给新热点打分/生成摘要（已有分数保留）。
+            </div>
+          </div>
+          <Switch
+            checked={cfg.enabled}
+            onChange={(v) => setCfg((c) => (c ? { ...c, enabled: v } : c))}
+          />
+        </div>
+      </Card>
 
       <Card title="Dimension weights" style={{ marginBottom: 16 }}>
         {DIM_LABELS.map((d) => (
@@ -266,6 +302,66 @@ export function TopicScoring() {
 
       <Button type="primary" loading={updatePre.isPending} onClick={savePrefilter}>
         Save pre-filter
+      </Button>
+
+      <Divider />
+
+      <SectionHeader
+        icon={<IconThunderbolt />}
+        title="L0.5 Content fetch (article body)"
+        subtitle="用 trafilatura 给优质新闻源（tier ≤ N）抓真实正文回填，让评分/摘要不再只看标题。社交源（聚合页）跳过。改完下个抓取周期生效。"
+      />
+
+      <Card title="Content fetch" style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 500 }}>Enable content fetch</div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-3)' }}>
+              总开关：关闭 = 停止抓取正文（热点只保留标题）。
+            </div>
+          </div>
+          <Switch
+            checked={cf.enabled}
+            onChange={(v) => setCf((c) => (c ? { ...c, enabled: v } : c))}
+          />
+        </div>
+
+        {(
+          [
+            { key: 'tier_max', label: 'Apply to tier ≤', hint: '只对该 tier 及更优质的源抓正文（社交聚合页无正文）', min: 1, max: 4, step: 1 },
+            { key: 'max_items', label: 'Max items / pass', hint: '每个抓取周期抓多少条（限速）', min: 1, max: 200, step: 5 },
+            { key: 'concurrency', label: 'Concurrency', hint: '并发抓取数（礼貌限制，避免封 IP）', min: 1, max: 16, step: 1 },
+            { key: 'timeout_s', label: 'Timeout (s)', hint: '单条抓取超时', min: 3, max: 60, step: 1 },
+            { key: 'min_chars', label: 'Min chars', hint: '抽出的正文短于此判为无效丢弃', min: 1, max: 2000, step: 10 },
+          ] as Array<{ key: keyof TopicContentFetchConfig; label: string; hint: string; min: number; max: number; step: number }>
+        ).map((f) => (
+          <div
+            key={f.key}
+            style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}
+          >
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 500 }}>{f.label}</div>
+              <div style={{ fontSize: 12, color: 'var(--color-text-3)' }}>{f.hint}</div>
+            </div>
+            <InputNumber
+              mode="button"
+              min={f.min}
+              max={f.max}
+              step={f.step}
+              precision={0}
+              disabled={!cf.enabled}
+              value={cf[f.key] as number}
+              onChange={(v) =>
+                setCf((c) => (c ? { ...c, [f.key]: Number(v) || f.min } : c))
+              }
+              style={{ width: 130 }}
+            />
+          </div>
+        ))}
+      </Card>
+
+      <Button type="primary" loading={updateCf.isPending} onClick={saveContentFetch}>
+        Save content fetch
       </Button>
     </div>
   )
