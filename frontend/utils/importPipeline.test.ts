@@ -250,6 +250,49 @@ describe('runImport', () => {
     expect(lastTransfer.done).toBe(N);
   });
 
+  it('precomputed: zero hashFile + zero checkBatch calls, partitions dups correctly', async () => {
+    // 10 files; indices 2, 5, 7 are duplicates in the precomputed maps.
+    const files = makeFiles(10);
+
+    const hashByFile = new Map<File, string>(files.map((f, i) => [f, `hash-${i}`]));
+    const dupByHash = new Map<string, { duplicate: boolean; existing: { id: string } | null }>(
+      files.map((_f, i) => {
+        const isDup = [2, 5, 7].includes(i);
+        return [
+          `hash-${i}`,
+          { duplicate: isDup, existing: isDup ? { id: `existing-${i}` } : null },
+        ] as const;
+      }),
+    );
+
+    const hashFile = vi.fn(async (_f: File): Promise<string> => 'should-not-be-called');
+    const checkBatch = vi.fn(async () => []);
+    const upload = vi.fn(async (_f: File) => {});
+    const link = vi.fn(async (_id: string) => {});
+
+    const result = await runImport(
+      files,
+      { hashFile, checkBatch, upload, link },
+      {
+        dupAction: 'skip-link',
+        onProgress: () => {},
+        precomputed: { hashByFile, dupByHash },
+      },
+    );
+
+    // Phase 1 must be entirely skipped
+    expect(hashFile).not.toHaveBeenCalled();
+    expect(checkBatch).not.toHaveBeenCalled();
+
+    // Partition must be correct: 3 linked (indices 2, 5, 7), 7 uploaded
+    expect(result).toEqual({ uploaded: 7, linked: 3, failed: 0, total: 10 });
+    expect(upload).toHaveBeenCalledTimes(7);
+    expect(link).toHaveBeenCalledTimes(3);
+    expect(link).toHaveBeenCalledWith('existing-2');
+    expect(link).toHaveBeenCalledWith('existing-5');
+    expect(link).toHaveBeenCalledWith('existing-7');
+  });
+
   it('abort-during-checking: stops firing checkBatch calls after signal aborted', async () => {
     // 9 files / chunkSize 3 = 3 possible chunks; abort after chunk 1 → only 1 call
     const files = makeFiles(9);

@@ -369,7 +369,7 @@ class ResourcesRepository:
 
         Issues a single PostgREST ``.in_`` query and returns a mapping of
         ``{file_hash: first_matching_row}``.  Never raises — returns ``{}`` on
-        any error.  Caller is responsible for keeping ``file_hashes`` ≤ 200.
+        any error.  Caller is responsible for keeping ``file_hashes`` ≤ 100.
         """
         if not file_hashes:
             return {}

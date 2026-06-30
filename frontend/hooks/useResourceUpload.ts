@@ -173,6 +173,9 @@ export function useResourceUpload({
       .filter((f) => hashCache.has(f))
       .map((f) => ({ file: f, hash: hashCache.get(f) as string }));
 
+    // Per-hash dedup results — handed to runImport so Phase 2 skips a second
+    // round of checkBatch HTTP calls (the batch dedup runs exactly once).
+    const dupByHash = new Map<string, { duplicate: boolean; existing: { id: string } | null }>();
     let dupCount = 0;
     let checkDone = 0;
 
@@ -195,6 +198,12 @@ export function useResourceUpload({
         }));
       }
 
+      for (const r of batchResult) {
+        dupByHash.set(r.file_hash, {
+          duplicate: r.duplicate,
+          existing: r.existing as { id: string } | null,
+        });
+      }
       dupCount += batchResult.filter((r) => r.duplicate).length;
       checkDone += chunk.length;
       upload.setBulkSummary({
@@ -263,6 +272,12 @@ export function useResourceUpload({
           {
             dupAction,
             signal: controller.signal,
+            // Pass the Phase 1 results so runImport skips its own dedup
+            // check entirely — batch dedup HTTP calls fire exactly once.
+            precomputed: {
+              hashByFile: hashCache,
+              dupByHash,
+            },
             onProgress: (p) => {
               upload.setBulkSummary({ ...p, phase: p.phase });
               upload.setOverallProgress(
