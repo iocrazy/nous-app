@@ -136,7 +136,6 @@ export const ResourcesViewInner: React.FC = () => {
     scopeId,
     selectedFolderId,
     selectedLibraryId,
-    setResources,
     reloadResources,
     addToast,
   });

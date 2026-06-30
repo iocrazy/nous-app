@@ -688,6 +688,7 @@
     "bulkLinked": "已链接 {{count}} 个",
     "bulkFailed": "失败 {{count}} 个",
     "dupSummaryTitle": "{{count}} 个文件（共 {{total}} 个）已存在",
+    "dupSummarySubtitle": "这些文件已存在于你的库中，请选择如何处理。",
     "dupSkipLink": "跳过并链接已有文件",
     "dupUploadAnyway": "仍然上传",
     "importDone": "导入完成：上传 {{uploaded}} 个，链接 {{linked}} 个，失败 {{failed}} 个",

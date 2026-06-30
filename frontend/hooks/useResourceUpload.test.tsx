@@ -81,13 +81,11 @@ function makeFile(name: string, type = 'text/plain'): File {
 
 const addToastSpy = vi.fn();
 const reloadResourcesSpy = vi.fn(async () => {});
-const setResourcesSpy = vi.fn();
 
 const defaultOpts = {
   scopeId: 'scope-1',
   selectedFolderId: null as null | string,
   selectedLibraryId: null as null | string,
-  setResources: setResourcesSpy,
   reloadResources: reloadResourcesSpy,
   addToast: addToastSpy,
 };

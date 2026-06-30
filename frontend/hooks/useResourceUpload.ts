@@ -23,7 +23,6 @@ import {
   checkDuplicatesBatch,
   linkExistingResource,
 } from '../services/resourceService';
-import type { ResourceItem } from '../types';
 
 // ─── Constants ────────────────────────────────────────
 
@@ -71,7 +70,6 @@ interface UseResourceUploadOptions {
   scopeId: string;
   selectedFolderId: string | null | undefined;
   selectedLibraryId: string | null | undefined;
-  setResources: React.Dispatch<React.SetStateAction<ResourceItem[]>>;
   /** Re-fetch the current resource list honouring active filter params. */
   reloadResources: () => Promise<void>;
   addToast: (msg: string, type: 'success' | 'error' | 'info') => void;
@@ -247,52 +245,54 @@ export function useResourceUpload({
 
     let result: { uploaded: number; linked: number; failed: number; total: number };
     try {
-      result = await runImport(
-        validFiles,
-        {
-          hashFile: cachedHash,
-          checkBatch: checkDuplicatesBatch,
-          upload: (f) =>
-            uploadResource(f, scopeId, selectedFolderId, undefined, selectedLibraryId).then(
-              () => undefined,
-            ),
-          link: (existingId) =>
-            linkExistingResource(existingId, scopeId, selectedFolderId, selectedLibraryId).then(
-              () => undefined,
-            ),
-        },
-        {
-          dupAction,
-          signal: controller.signal,
-          onProgress: (p) => {
-            upload.setBulkSummary({ ...p, phase: p.phase });
-            upload.setOverallProgress(
-              p.total ? Math.round((p.done / p.total) * 100) : 0,
-            );
+      try {
+        result = await runImport(
+          validFiles,
+          {
+            hashFile: cachedHash,
+            checkBatch: checkDuplicatesBatch,
+            upload: (f) =>
+              uploadResource(f, scopeId, selectedFolderId, undefined, selectedLibraryId).then(
+                () => undefined,
+              ),
+            link: (existingId) =>
+              linkExistingResource(existingId, scopeId, selectedFolderId, selectedLibraryId).then(
+                () => undefined,
+              ),
           },
-        },
+          {
+            dupAction,
+            signal: controller.signal,
+            onProgress: (p) => {
+              upload.setBulkSummary({ ...p, phase: p.phase });
+              upload.setOverallProgress(
+                p.total ? Math.round((p.done / p.total) * 100) : 0,
+              );
+            },
+          },
+        );
+      } catch {
+        result = { uploaded: 0, linked: 0, failed: validFiles.length, total: validFiles.length };
+      }
+
+      // ── Finish ───────────────────────────────────────────────────────────────
+      addToast(
+        t('resources.importDone', {
+          uploaded: result.uploaded,
+          linked: result.linked,
+          failed: result.failed,
+        }),
+        result.failed > 0 ? 'info' : 'success',
       );
-    } catch {
-      result = { uploaded: 0, linked: 0, failed: validFiles.length, total: validFiles.length };
+
+      try {
+        await reloadResources();
+      } catch { /* ignore */ }
+    } finally {
+      upload.setIsUploading(false);
+      upload.setOverallProgress(0);
+      upload.setBulkSummary(null);
     }
-
-    // ── Finish ───────────────────────────────────────────────────────────────
-    addToast(
-      t('resources.importDone', {
-        uploaded: result.uploaded,
-        linked: result.linked,
-        failed: result.failed,
-      }),
-      result.failed > 0 ? 'info' : 'success',
-    );
-
-    try {
-      await reloadResources();
-    } catch { /* ignore */ }
-
-    upload.setIsUploading(false);
-    upload.setOverallProgress(0);
-    upload.setBulkSummary(null);
   }, [
     scopeId,
     selectedFolderId,

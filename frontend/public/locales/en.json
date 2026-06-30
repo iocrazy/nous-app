@@ -688,6 +688,7 @@
     "bulkLinked": "{{count}} linked",
     "bulkFailed": "{{count}} failed",
     "dupSummaryTitle": "{{count}} of {{total}} already exist",
+    "dupSummarySubtitle": "These files already exist in your library. Choose what to do.",
     "dupSkipLink": "Skip & Link Existing",
     "dupUploadAnyway": "Upload Anyway",
     "importDone": "Import complete: {{uploaded}} uploaded, {{linked}} linked, {{failed}} failed",

@@ -161,7 +161,7 @@ export const ResourcesModals: React.FC<ResourcesModalsProps> = ({
                 })}
               </h3>
               <p className="text-sm text-ink-400">
-                {t('resources.duplicateMessage', { filename: '' }).replace('"" ', '')}
+                {t('resources.dupSummarySubtitle')}
               </p>
             </div>
             <div className="flex flex-col gap-2 p-4 border-t border-ink-800">
