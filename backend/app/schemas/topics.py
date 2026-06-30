@@ -119,3 +119,10 @@ class SourceCreateRequest(BaseModel):
 class SourceMutationResponse(BaseModel):
     success: bool = True
     source: Optional[SourceHealthOut] = None
+
+
+class ModuleStatusResponse(BaseModel):
+    """Whether the Topic Inspiration module is enabled (global master switch).
+    The frontend hides the page/nav when false."""
+
+    enabled: bool = True

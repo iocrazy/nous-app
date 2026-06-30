@@ -290,6 +290,37 @@ export function useUpdateTopicPrefilterConfig() {
   })
 }
 
+// ── Topic Inspiration module master switch ────────────────────────────────
+export interface TopicModuleConfig {
+  /** Global on/off for the whole Topic Inspiration feature. */
+  enabled: boolean
+}
+
+const TOPIC_MODULE_URL = '/api/v1/admin/settings/topics-module'
+
+export function useTopicModuleConfig() {
+  return useQuery({
+    queryKey: ['settings', 'topics-module'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<TopicModuleConfig>(TOPIC_MODULE_URL)
+      return data
+    },
+  })
+}
+
+export function useUpdateTopicModuleConfig() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (update: TopicModuleConfig) => {
+      const { data } = await apiClient.put<TopicModuleConfig>(TOPIC_MODULE_URL, update)
+      return data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings', 'topics-module'] })
+    },
+  })
+}
+
 // ── Topic L0.5 content-fetch (trafilatura) config ─────────────────────────
 export interface TopicContentFetchConfig {
   /** Master switch for trafilatura body-fetch. Off = stop fetching article bodies. */

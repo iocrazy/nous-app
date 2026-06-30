@@ -28,6 +28,7 @@ import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { SidebarSection } from './sidebar/SidebarSection';
 import { hasPermission } from '../utils/permissions';
 import { VIEW_PATH_MAP, pathnameToView } from '../utils/routeConfig';
+import { useTopicModuleEnabled } from '../hooks/useTopicModuleEnabled';
 
 // ---------------------------------------------------------------------------
 // SidebarItem
@@ -242,6 +243,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const location = useLocation();
   const navigate = useNavigate();
   const currentView = pathnameToView(location.pathname);
+  // Global Topic Inspiration master switch (admin) — hide the nav item when off.
+  const topicModuleEnabled = useTopicModuleEnabled();
 
   // iconRail (detail routes, D5) pins the narrow rail → render icon-only.
   const collapsed = iconRail || collapsedProp;
@@ -443,7 +446,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       <nav className="flex-1 flex flex-col gap-4">
         <SidebarSection label="" hideLabel>
-          {isViewEnabled('parser') && (
+          {isViewEnabled('parser') && topicModuleEnabled && (
             <SidebarItem icon={Lightbulb} label={t('nav.topicInspiration')} active={currentView === 'parser'} onClick={() => handleNav('parser')} collapsed={collapsed} island={island} />
           )}
           {isViewEnabled('resources') && (

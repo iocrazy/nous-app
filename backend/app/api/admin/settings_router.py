@@ -36,6 +36,7 @@ from app.schemas.admin import (
     SystemSettingUpdate,
     TaskModuleGovernanceResponse,
     TopicContentFetchConfigResponse,
+    TopicModuleConfigResponse,
     TopicPrefilterConfigResponse,
     TopicScoringConfigResponse,
 )
@@ -53,6 +54,11 @@ from app.services.topics.keyword_filter import (
     load_prefilter_config,
     merge_prefilter_config,
     prefilter_payload,
+)
+from app.services.topics.module_config import (
+    MODULE_CONFIG_KEY,
+    is_module_enabled,
+    parse_module_enabled,
 )
 from app.services.topics.scoring import (
     SCORING_CONFIG_KEY,
@@ -158,6 +164,33 @@ async def update_topics_prefilter_config(
         details={"value": payload},
     )
     return TopicPrefilterConfigResponse(**payload)
+
+
+@router.get("/topics-module", response_model=TopicModuleConfigResponse)
+async def get_topics_module_config(auth: AdminAuthDep):
+    """Global Topic Inspiration master switch."""
+    return TopicModuleConfigResponse(enabled=await is_module_enabled())
+
+
+@router.put("/topics-module", response_model=TopicModuleConfigResponse)
+async def update_topics_module_config(
+    body: TopicModuleConfigResponse,
+    auth: AdminAuthDep,
+):
+    """Persist the module master switch to ``system_settings['topics.module']``.
+    Off = pause the whole feature (scheduled tick skipped) + the frontend hides
+    the page. Instant, no redeploy."""
+    payload = {"enabled": parse_module_enabled(body.model_dump())}
+    repo = get_system_settings_repository()
+    await repo.upsert_setting(MODULE_CONFIG_KEY, payload, auth.user_id)
+    await create_audit_log(
+        admin_id=auth.user_id,
+        action="update_topics_module_config",
+        target_type="system_setting",
+        target_id=MODULE_CONFIG_KEY,
+        details={"value": payload},
+    )
+    return TopicModuleConfigResponse(**payload)
 
 
 @router.get("/topics-content-fetch", response_model=TopicContentFetchConfigResponse)

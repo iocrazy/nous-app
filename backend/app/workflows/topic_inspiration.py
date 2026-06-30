@@ -316,6 +316,13 @@ async def score_unscored_once(
 @DBOS.scheduled("*/30 * * * *")  # every 30 min
 @DBOS.workflow()
 async def topic_fetch_workflow(scheduled_time: datetime, actual_time: datetime) -> None:
+    # Module master switch — off = the whole feature is paused (no fetch / score
+    # / embed / cluster this tick).
+    from app.services.topics.module_config import is_module_enabled
+
+    if not await is_module_enabled():
+        logger.info("topic module disabled — skipping tick")
+        return
     await run_topic_fetch_once()
     try:
         # L0.5 before scoring so the scorer (and embedder) see real article text.

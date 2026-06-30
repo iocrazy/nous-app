@@ -102,6 +102,19 @@ export async function getInterest(): Promise<TopicInterest> {
   return { interest_text: d.interest_text || '', has_embedding: !!d.has_embedding };
 }
 
+/** Global master switch — whether the Topic Inspiration module is enabled.
+ *  Fails open (returns true) so a transient error never hides the feature. */
+export async function getModuleStatus(): Promise<boolean> {
+  try {
+    const resp = await fetch(`${base()}/module-status`, { headers: await getAuthHeaders() });
+    const d = await jsonOrThrow(resp);
+    return d.enabled !== false;
+  } catch (err) {
+    console.error('topic module-status load failed', err);
+    return true;
+  }
+}
+
 export async function setInterest(interest_text: string): Promise<TopicInterest> {
   const resp = await fetch(`${base()}/interest`, {
     method: 'PUT',

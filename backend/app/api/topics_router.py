@@ -32,6 +32,7 @@ from app.schemas.topics import (
     HotspotStateResponse,
     InterestRequest,
     InterestResponse,
+    ModuleStatusResponse,
     SourceCreateRequest,
     SourceHealthOut,
     SourceHealthResponse,
@@ -229,6 +230,15 @@ async def set_hotspot_state(hotspot_id: str, body: HotspotStateRequest, auth: Au
 async def hotspot_dates(auth: AuthDep, limit_days: int = Query(60, ge=1, le=180)):
     repo = HotspotsRepository()
     return DatesResponse(dates=await repo.distinct_dates(limit_days))
+
+
+@router.get("/module-status", response_model=ModuleStatusResponse)
+async def module_status(auth: AuthDep):
+    """Global master switch for the Topic Inspiration module. The frontend reads
+    this to hide the page/nav when an admin has turned the feature off."""
+    from app.services.topics.module_config import is_module_enabled
+
+    return ModuleStatusResponse(enabled=await is_module_enabled())
 
 
 def _to_health_out(
