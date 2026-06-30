@@ -2190,11 +2190,11 @@
     "seenOnPlatforms": "Seen on {{count}} platforms",
     "view_foryou": "For You",
     "view_featured": "Featured",
-    "interestPlaceholder": "Describe your interests, e.g. AI models, chips, startups",
+    "interestPlaceholder": "Keywords, space-separated, e.g. variety shows, celebrities, films",
     "saveInterest": "Save",
-    "interestSaved": "Interests saved",
-    "interestNoEmbed": "Saved, but embedding is unavailable",
-    "setInterestPrompt": "Describe your interests above to get a personalized feed.",
-    "noForYouYet": "No matches yet — check back as more hotspots are analyzed."
+    "interestSaved": "Keywords saved",
+    "interestNoEmbed": "Saved (keyword filtering; semantic ranking unavailable)",
+    "setInterestPrompt": "Enter keywords above (e.g. variety, celebrities, films) to get a feed filtered to topics you care about.",
+    "noForYouYet": "No hotspots match your keywords yet — try broader keywords or check back later."
   }
 }

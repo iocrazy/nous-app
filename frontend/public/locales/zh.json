@@ -2190,11 +2190,11 @@
     "seenOnPlatforms": "出现在 {{count}} 个平台",
     "view_foryou": "为你推荐",
     "view_featured": "精选",
-    "interestPlaceholder": "描述你的兴趣，例如 AI 大模型、芯片、创业",
+    "interestPlaceholder": "输入关键词，空格分隔，例如：综艺 明星 影视 世界杯",
     "saveInterest": "保存",
-    "interestSaved": "兴趣已保存",
-    "interestNoEmbed": "已保存，但 embedding 暂不可用",
-    "setInterestPrompt": "在上方描述你的兴趣，获取个性化推荐。",
-    "noForYouYet": "暂无匹配 —— 随着更多热点被分析，稍后再来看。"
+    "interestSaved": "关键词已保存",
+    "interestNoEmbed": "已保存（按关键词筛选；语义排序暂不可用）",
+    "setInterestPrompt": "在上方输入关键词（如 综艺 明星 影视），获取只看你关心话题的 feed。",
+    "noForYouYet": "没有命中你关键词的热点 —— 试试更宽泛的关键词，或稍后再来。"
   }
 }
