@@ -1,14 +1,18 @@
-"""Team Chat REST endpoints (PHASE-1 backend foundation)."""
+"""Team Chat REST endpoints (PHASE-1 backend foundation + Task 2 attachments)."""
 
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, UploadFile, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from app.core.config import settings
 from app.core.deps import AuthDep
+from app.repositories.chat_attachment_repository import get_chat_attachment_repository
 from app.schemas.chat import (
     AgentAdd,
     ChannelCreate,
@@ -18,6 +22,7 @@ from app.schemas.chat import (
     MessageCreate,
     MessageOut,
 )
+from app.services.chat.chat_attachment_service import save_chat_image
 from app.services.chat_service import get_chat_service
 
 logger = logging.getLogger(__name__)
@@ -199,3 +204,63 @@ async def delete_message(channel_id: int, message_id: int, auth: AuthDep):
     except PermissionError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
     return row
+
+
+# ── Task 2: Chat attachments (independent image store) ─────────────────────
+
+
+@router.post("/channels/{channel_id}/attachments")
+async def upload_chat_attachment(channel_id: int, file: UploadFile, auth: AuthDep):
+    """Upload an image to the independent chat store.
+
+    Returns ``{id, mime, file_size_bytes, url}`` where ``url`` is the public
+    serve endpoint (no auth required — world-readable-by-snowflake-id).
+    """
+    file_bytes = await file.read()
+    mime = file.content_type or "application/octet-stream"
+    filename = file.filename or "attachment"
+    try:
+        row = await save_chat_image(
+            channel_id=channel_id,
+            user_id=str(auth.user_id),
+            file_bytes=file_bytes,
+            filename=filename,
+            mime=mime,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    att_id = str(row["id"])
+    return {
+        "id": att_id,
+        "mime": row.get("mime"),
+        "file_size_bytes": row.get("file_size_bytes"),
+        "url": f"/api/v1/chat/attachments/{att_id}/file",
+    }
+
+
+@router.get("/attachments/{attachment_id}/file")
+async def serve_chat_attachment(attachment_id: int):
+    """Serve a chat image file (no auth — world-readable-by-snowflake-id).
+
+    Security: realpath must stay under DOWNLOAD_PATH (traversal guard mirrors
+    get_generation_cover in generated_media_router.py:62-65).
+    Cache-Control: immutable — snowflake IDs are unguessable and files are
+    never mutated in place.
+    """
+    repo = get_chat_attachment_repository()
+    row = await repo.get(attachment_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="not found")
+    base = os.path.realpath(settings.DOWNLOAD_PATH)
+    real = os.path.realpath(os.path.join(settings.DOWNLOAD_PATH, row["file_path"]))
+    if not (real == base or real.startswith(base + os.sep)):
+        raise HTTPException(status_code=404, detail="not found")
+    if not os.path.isfile(real):
+        raise HTTPException(status_code=404, detail="file missing")
+    return FileResponse(
+        real,
+        media_type=row.get("mime") or "application/octet-stream",
+        headers={"Cache-Control": "public, max-age=604800, immutable"},
+    )
