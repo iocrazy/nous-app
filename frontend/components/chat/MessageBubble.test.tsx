@@ -398,3 +398,31 @@ describe('MessageBubble sender name resolution', () => {
     expect(screen.getByText('Agent')).toBeDefined();
   });
 });
+
+// ── Right/left alignment (own vs others, chat-app layout) ─────────────────────
+
+describe('MessageBubble alignment', () => {
+  it('own message: row reversed (right side) + accent bubble', () => {
+    const { container } = render(
+      <MessageBubble
+        message={makeMessage({ sender_id: 'U1', body: { text: 'mine' } })}
+        currentUserId="U1"
+      />,
+    );
+    expect(container.querySelector('.flex-row-reverse')).not.toBeNull();
+    expect(container.querySelector('.items-end')).not.toBeNull();
+    // accent (indigo) bubble for own text
+    expect(container.innerHTML).toMatch(/indigo-500/);
+  });
+
+  it("other's message: left side (not reversed) + neutral card bubble", () => {
+    const { container } = render(
+      <MessageBubble
+        message={makeMessage({ sender_id: 'U2', body: { text: 'theirs' } })}
+        currentUserId="U1"
+      />,
+    );
+    expect(container.querySelector('.flex-row-reverse')).toBeNull();
+    expect(container.querySelector('.items-start')).not.toBeNull();
+  });
+});

@@ -206,7 +206,14 @@ export function MessageBubble({
   // ── render ──────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex gap-[11px] group">
+    <div
+      className={[
+        'flex gap-[11px] group',
+        // Own messages sit on the right (avatar on the right), others on the
+        // left — matching common chat-app layout.
+        isOwn ? 'flex-row-reverse' : '',
+      ].join(' ')}
+    >
       {/* Avatar */}
       <div
         className={[
@@ -219,7 +226,12 @@ export function MessageBubble({
       </div>
 
       {/* Body */}
-      <div className="flex-1 min-w-0">
+      <div
+        className={[
+          'flex-1 min-w-0 flex flex-col',
+          isOwn ? 'items-end' : 'items-start',
+        ].join(' ')}
+      >
         {/* Meta row */}
         <div className="flex items-center gap-2 mb-[3px]">
           <span className="text-[13.5px] font-[650] text-content">
@@ -301,9 +313,18 @@ export function MessageBubble({
         ) : isMediaCard ? (
           <MediaCard body={message.body as MediaCardBody} />
         ) : (
-          <p className="text-[14px] text-content leading-[1.55] whitespace-pre-wrap break-words">
+          <div
+            className={[
+              'max-w-[min(78%,560px)] px-[12px] py-[8px] rounded-[14px]',
+              'text-[14px] text-content leading-[1.55] whitespace-pre-wrap break-words',
+              // Own = accent bubble hugging the right; others = neutral card on the left.
+              isOwn
+                ? 'bg-indigo-500/[.16] rounded-tr-[4px]'
+                : 'bg-card rounded-tl-[4px]',
+            ].join(' ')}
+          >
             {String(message.body.text ?? '')}
-          </p>
+          </div>
         )}
       </div>
     </div>
