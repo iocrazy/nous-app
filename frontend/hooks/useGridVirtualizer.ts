@@ -6,6 +6,7 @@ interface UseGridVirtualizerOpts {
   scrollRef: React.RefObject<HTMLElement>
   itemCount: number
   estimateRowHeight?: number
+  fixedColumns?: number
 }
 
 interface UseGridVirtualizerResult {
@@ -26,6 +27,7 @@ export function useGridVirtualizer({
   scrollRef,
   itemCount,
   estimateRowHeight,
+  fixedColumns,
 }: UseGridVirtualizerOpts): UseGridVirtualizerResult {
   const containerRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
@@ -49,7 +51,7 @@ export function useGridVirtualizer({
 
   // isMobile: treat container widths below 768px as mobile.
   const isMobile = width > 0 && width < 768
-  const columns = columnsForWidth(width, isMobile)
+  const columns = (fixedColumns && fixedColumns > 0) ? fixedColumns : columnsForWidth(width, isMobile)
 
   // Guard: columns must be >= 1 to avoid division-by-zero in Math.ceil.
   const safeColumns = Math.max(1, columns)
