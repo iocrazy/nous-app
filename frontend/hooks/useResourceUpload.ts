@@ -2,19 +2,28 @@
 
 /**
  * Upload hook for ResourcesView.
- * Handles file validation, duplicate detection, chunked upload, drag-and-drop.
+ *
+ * Two-phase batch import pipeline:
+ *   Phase 1 — hash all files (bounded concurrency) + batch-dedup → ONE
+ *             upfront duplicate decision modal (no per-file prompts).
+ *   Phase 2 — call runImport() with cached hashes + resolved dupAction;
+ *             progress driven via bulkSummary aggregate (no 100 k DOM rows).
+ *
+ * Preserved: file validation, drag/drop handlers, folder/library scoping.
  */
 
 import { useState, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useUpload, type UploadFileProgress } from '../contexts/UploadContext';
 import { computeFileHash } from '../utils/fileHash';
+import { runWithConcurrency } from '../utils/concurrency';
+import { runImport } from '../utils/importPipeline';
 import {
   uploadResource,
-  checkDuplicate,
+  checkDuplicatesBatch,
   linkExistingResource,
 } from '../services/resourceService';
-import type { Resource, ResourceItem } from '../types';
+import type { ResourceItem } from '../types';
 
 // ─── Constants ────────────────────────────────────────
 
@@ -24,6 +33,8 @@ const BLOCKED_EXTENSIONS = new Set([
 ]);
 
 const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500 MB
+const HASH_CONCURRENCY = 8;
+const CHECK_CHUNK = 100; // must match backend cap
 
 export function validateFile(file: File): string | null {
   const ext = '.' + file.name.split('.').pop()?.toLowerCase();
@@ -34,11 +45,26 @@ export function validateFile(file: File): string | null {
 
 // ─── Types ────────────────────────────────────────────
 
+/**
+ * Legacy per-file duplicate alert (kept for backward compat with
+ * ResourcesModals / ResourcesViewInner — never triggered in the new
+ * batch-import path, but the type & state remain in the return shape).
+ */
 export interface DuplicateAlertState {
   file: File;
-  existing: Resource;
+  existing: import('../types').Resource;
   remainingDuplicates: number;
   resolve: (decision: { action: 'use-existing' | 'keep-both' | 'cancel'; applyToAll: boolean }) => void;
+}
+
+/**
+ * Upfront batch duplicate decision: shown ONCE before the transfer starts
+ * when the pre-pass detects ≥1 duplicate.
+ */
+export interface BatchDupDecisionState {
+  dupCount: number;
+  totalCount: number;
+  resolve: (action: 'skip-link' | 'upload' | 'cancel') => void;
 }
 
 interface UseResourceUploadOptions {
@@ -57,7 +83,6 @@ export function useResourceUpload({
   scopeId,
   selectedFolderId,
   selectedLibraryId,
-  setResources,
   reloadResources,
   addToast,
 }: UseResourceUploadOptions) {
@@ -66,7 +91,11 @@ export function useResourceUpload({
   const uploading = upload.isUploading;
 
   const [dragOver, setDragOver] = useState(false);
+  // Legacy per-file modal — kept so existing callers (ResourcesModals) compile
   const [duplicateAlert, setDuplicateAlert] = useState<DuplicateAlertState | null>(null);
+  // NEW: one upfront batch-level duplicate decision
+  const [batchDupDecision, setBatchDupDecision] = useState<BatchDupDecisionState | null>(null);
+
   const dragCounterRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -74,8 +103,9 @@ export function useResourceUpload({
   const handleUpload = useCallback(async (files: FileList | File[]) => {
     if (!files.length || uploading) return;
 
+    // ── Validation pass ──────────────────────────────────────────────────────
     const validFiles: File[] = [];
-    const initialProgress: UploadFileProgress[] = [];
+    const errorItems: UploadFileProgress[] = [];
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
@@ -83,7 +113,7 @@ export function useResourceUpload({
       const id = `${Date.now()}-${i}`;
 
       if (validationError) {
-        initialProgress.push({
+        errorItems.push({
           id,
           filename: file.name,
           percent: 0,
@@ -95,143 +125,166 @@ export function useResourceUpload({
         });
       } else {
         validFiles.push(file);
-        initialProgress.push({
-          id,
-          filename: file.name,
-          percent: 0,
-          status: 'uploading',
-          fileSize: file.size,
-          bytesUploaded: 0,
-          speed: 0,
-        });
       }
     }
 
-    if (validFiles.length === 0 && initialProgress.length > 0) {
-      upload.setItems(initialProgress);
-      return;
+    // Surface validation errors immediately
+    if (errorItems.length > 0) {
+      upload.setItems((prev) => [...prev, ...errorItems]);
     }
 
-    upload.setItems((prev) => [...prev, ...initialProgress]);
+    // Nothing valid to import
+    if (validFiles.length === 0) return;
+
+    // ── Setup ────────────────────────────────────────────────────────────────
     upload.setIsUploading(true);
     upload.setOverallProgress(0);
+    upload.setUploadStartTime(Date.now());
+    upload.setBulkSummary({
+      total: validFiles.length,
+      done: 0,
+      linked: 0,
+      failed: 0,
+      phase: 'hashing',
+    });
 
-    const batchStartTime = Date.now();
-    upload.setUploadStartTime(batchStartTime);
+    // ── Phase 1a: Hash all files (bounded concurrency) ───────────────────────
+    const hashCache = new Map<File, string>();
+    let hashDone = 0;
 
-    let completedCount = 0;
-    let linkedCount = 0;
-    const validFileEntryIds = initialProgress
-      .filter((p) => p.status === 'uploading')
-      .map((p) => p.id);
+    await runWithConcurrency(
+      validFiles,
+      HASH_CONCURRENCY,
+      async (file) => {
+        const hash = await computeFileHash(file);
+        hashCache.set(file, hash);
+        hashDone++;
+        upload.setBulkSummary({
+          total: validFiles.length,
+          done: hashDone,
+          linked: 0,
+          failed: 0,
+          phase: 'hashing',
+        });
+        return hash;
+      },
+    );
 
-    let batchDupAction: 'use-existing' | 'keep-both' | null = null;
+    // ── Phase 1b: Batch dedup check (chunks of ≤100) ─────────────────────────
+    const toCheck = validFiles
+      .filter((f) => hashCache.has(f))
+      .map((f) => ({ file: f, hash: hashCache.get(f) as string }));
 
-    for (let i = 0; i < validFiles.length; i++) {
-      const file = validFiles[i];
-      const entryId = validFileEntryIds[i];
-      const fileStartTime = Date.now();
+    let dupCount = 0;
+    let checkDone = 0;
 
+    for (let ci = 0; ci < toCheck.length; ci += CHECK_CHUNK) {
+      const chunk = toCheck.slice(ci, ci + CHECK_CHUNK);
+      const batchItems = chunk.map(({ file, hash }) => ({
+        file_hash: hash,
+        file_size: file.size,
+      }));
+
+      let batchResult: { file_hash: string; duplicate: boolean; existing: unknown }[];
       try {
-        upload.setItems((prev) =>
-          prev.map((p) => p.id === entryId ? { ...p, percent: 0 } : p)
-        );
-
-        const fileHash = await computeFileHash(file);
-        const dupResult = await checkDuplicate(fileHash, file.size);
-
-        if (dupResult.duplicate && dupResult.existing) {
-          let action = batchDupAction;
-
-          if (!action) {
-            const remainingToCheck = validFiles.length - i - 1;
-            const decision = await new Promise<{ action: 'use-existing' | 'keep-both' | 'cancel'; applyToAll: boolean }>((resolve) => {
-              setDuplicateAlert({
-                file,
-                existing: dupResult.existing as Resource,
-                remainingDuplicates: remainingToCheck,
-                resolve,
-              });
-            });
-            setDuplicateAlert(null);
-            action = decision.action;
-            if (decision.applyToAll) {
-              batchDupAction = decision.action === 'cancel' ? null : decision.action;
-            }
-          }
-
-          if (action === 'cancel') {
-            upload.setItems((prev) =>
-              prev.map((p) => p.id === entryId ? { ...p, status: 'error', error: t('common.cancel') } : p)
-            );
-            continue;
-          }
-
-          if (action === 'use-existing') {
-            await linkExistingResource(
-              String(dupResult.existing.id),
-              scopeId,
-              selectedFolderId,
-              selectedLibraryId,
-            );
-            linkedCount++;
-            completedCount++;
-            const fileSz = file.size;
-            upload.setItems((prev) =>
-              prev.map((p) => p.id === entryId
-                ? { ...p, percent: 100, status: 'complete', bytesUploaded: fileSz, speed: 0 }
-                : p
-              )
-            );
-            upload.setOverallProgress(Math.round((completedCount / validFiles.length) * 100));
-            continue;
-          }
-          // action === 'keep-both' → fall through to normal upload
-        }
-
-        await uploadResource(
-          file,
-          scopeId,
-          selectedFolderId,
-          (progress) => {
-            const fileEntry = initialProgress.find((p) => p.id === entryId);
-            const fileSz = fileEntry?.fileSize || 0;
-            const bytesUploaded = Math.round(fileSz * progress / 100);
-            const elapsedSec = Math.max((Date.now() - fileStartTime) / 1000, 0.5);
-            const speed = bytesUploaded > 0 ? Math.round(bytesUploaded / elapsedSec) : 0;
-            upload.setItems((prev) =>
-              prev.map((p) => p.id === entryId ? { ...p, percent: progress, bytesUploaded, speed } : p)
-            );
-            const overall = Math.round(((completedCount + progress / 100) / validFiles.length) * 100);
-            upload.setOverallProgress(overall);
-          },
-          selectedLibraryId,
-        );
-
-        completedCount++;
-        const fileEntry = initialProgress.find((p) => p.id === entryId);
-        const fileSz = fileEntry?.fileSize || 0;
-        upload.setItems((prev) =>
-          prev.map((p) => p.id === entryId ? { ...p, percent: 100, status: 'complete', bytesUploaded: fileSz, speed: 0 } : p)
-        );
+        batchResult = await checkDuplicatesBatch(batchItems);
       } catch {
-        upload.setItems((prev) =>
-          prev.map((p) => p.id === entryId
-            ? { ...p, status: 'error', error: t('resources.uploadFailed') }
-            : p
-          )
-        );
+        // Fail-open: treat every item as non-duplicate on service error
+        batchResult = batchItems.map(({ file_hash }) => ({
+          file_hash,
+          duplicate: false,
+          existing: null,
+        }));
       }
+
+      dupCount += batchResult.filter((r) => r.duplicate).length;
+      checkDone += chunk.length;
+      upload.setBulkSummary({
+        total: validFiles.length,
+        done: checkDone,
+        linked: 0,
+        failed: 0,
+        phase: 'checking',
+      });
     }
 
-    if (linkedCount > 0) {
-      addToast(
-        linkedCount === 1
-          ? t('resources.linkedExisting')
-          : t('resources.linkedExistingCount', { count: linkedCount }),
-        'success'
-      );
+    // ── Upfront duplicate decision (ONE modal for the whole batch) ───────────
+    let dupAction: 'skip-link' | 'upload' = 'skip-link';
+
+    if (dupCount > 0) {
+      const decision = await new Promise<'skip-link' | 'upload' | 'cancel'>((resolve) => {
+        setBatchDupDecision({ dupCount, totalCount: validFiles.length, resolve });
+      });
+      setBatchDupDecision(null);
+
+      if (decision === 'cancel') {
+        upload.setIsUploading(false);
+        upload.setOverallProgress(0);
+        upload.setBulkSummary(null);
+        return;
+      }
+      dupAction = decision;
     }
+
+    // ── Phase 2: Transfer via runImport (cached hashes, bounded concurrency) ──
+    const controller = new AbortController();
+
+    // Reset progress counters for the transfer phase
+    upload.setBulkSummary({
+      total: validFiles.length,
+      done: 0,
+      linked: 0,
+      failed: 0,
+      phase: 'hashing',
+    });
+    upload.setOverallProgress(0);
+
+    // Cached hash function — never re-hashes what Phase 1 already computed
+    const cachedHash = (f: File): Promise<string> =>
+      hashCache.has(f)
+        ? Promise.resolve(hashCache.get(f) as string)
+        : computeFileHash(f);
+
+    let result: { uploaded: number; linked: number; failed: number; total: number };
+    try {
+      result = await runImport(
+        validFiles,
+        {
+          hashFile: cachedHash,
+          checkBatch: checkDuplicatesBatch,
+          upload: (f) =>
+            uploadResource(f, scopeId, selectedFolderId, undefined, selectedLibraryId).then(
+              () => undefined,
+            ),
+          link: (existingId) =>
+            linkExistingResource(existingId, scopeId, selectedFolderId, selectedLibraryId).then(
+              () => undefined,
+            ),
+        },
+        {
+          dupAction,
+          signal: controller.signal,
+          onProgress: (p) => {
+            upload.setBulkSummary({ ...p, phase: p.phase });
+            upload.setOverallProgress(
+              p.total ? Math.round((p.done / p.total) * 100) : 0,
+            );
+          },
+        },
+      );
+    } catch {
+      result = { uploaded: 0, linked: 0, failed: validFiles.length, total: validFiles.length };
+    }
+
+    // ── Finish ───────────────────────────────────────────────────────────────
+    addToast(
+      t('resources.importDone', {
+        uploaded: result.uploaded,
+        linked: result.linked,
+        failed: result.failed,
+      }),
+      result.failed > 0 ? 'info' : 'success',
+    );
 
     try {
       await reloadResources();
@@ -239,7 +292,17 @@ export function useResourceUpload({
 
     upload.setIsUploading(false);
     upload.setOverallProgress(0);
-  }, [scopeId, selectedFolderId, selectedLibraryId, uploading, t, upload, addToast, reloadResources]);
+    upload.setBulkSummary(null);
+  }, [
+    scopeId,
+    selectedFolderId,
+    selectedLibraryId,
+    uploading,
+    t,
+    upload,
+    addToast,
+    reloadResources,
+  ]);
 
   // ─── Drag & drop handlers ──────────────────────────
 
@@ -274,8 +337,12 @@ export function useResourceUpload({
     upload,
     uploading,
     dragOver,
+    /** Legacy per-file dup alert — kept for backward compat; never triggered in new path. */
     duplicateAlert,
     setDuplicateAlert,
+    /** Batch-level upfront duplicate decision (non-null only while awaiting user input). */
+    batchDupDecision,
+    setBatchDupDecision,
     fileInputRef,
     folderInputRef,
     handleUpload,

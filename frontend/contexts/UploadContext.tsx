@@ -13,15 +13,31 @@ export interface UploadFileProgress {
   speed: number;
 }
 
+/**
+ * Aggregate progress summary for bulk imports.
+ * Set by useResourceUpload; consumed by the TopBar task panel.
+ * null when no bulk import is running.
+ */
+export interface BulkSummary {
+  total: number;
+  done: number;
+  linked: number;
+  failed: number;
+  phase: 'hashing' | 'checking' | 'transferring' | 'idle';
+}
+
 interface UploadContextType {
   items: UploadFileProgress[];
   isUploading: boolean;
   overallProgress: number;
   uploadStartTime: number;
+  /** Aggregate summary for bulk imports (null when idle). */
+  bulkSummary: BulkSummary | null;
   setItems: React.Dispatch<React.SetStateAction<UploadFileProgress[]>>;
   setIsUploading: (v: boolean) => void;
   setOverallProgress: (v: number) => void;
   setUploadStartTime: (v: number) => void;
+  setBulkSummary: React.Dispatch<React.SetStateAction<BulkSummary | null>>;
   clearCompleted: () => void;
 }
 
@@ -34,11 +50,13 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isUploading, setIsUploading] = useState(false);
   const [overallProgress, setOverallProgress] = useState(0);
   const [uploadStartTime, setUploadStartTime] = useState(0);
+  const [bulkSummary, setBulkSummary] = useState<BulkSummary | null>(null);
 
   const clearCompleted = useCallback(() => {
     setItems([]);
     setIsUploading(false);
     setOverallProgress(0);
+    setBulkSummary(null);
   }, []);
 
   return (
@@ -47,10 +65,12 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       isUploading,
       overallProgress,
       uploadStartTime,
+      bulkSummary,
       setItems,
       setIsUploading,
       setOverallProgress,
       setUploadStartTime,
+      setBulkSummary,
       clearCompleted,
     }}>
       {children}

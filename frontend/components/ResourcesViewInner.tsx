@@ -124,6 +124,7 @@ export const ResourcesViewInner: React.FC = () => {
     dragOver,
     duplicateAlert,
     setDuplicateAlert,
+    batchDupDecision,
     fileInputRef,
     folderInputRef,
     handleUpload,
@@ -759,6 +760,7 @@ export const ResourcesViewInner: React.FC = () => {
         onCloseFolderPicker={() => { ops.setFolderPickerMode(null); ops.setOperationTargetItems([]); ops.setOperationTargetFolders([]); }}
         onConfirmFolderPicker={ops.handleFolderPickerConfirm}
         duplicateAlert={duplicateAlert}
+        batchDupDecision={batchDupDecision}
         pendingPermanentDelete={pendingPermanentDelete}
         pendingBatchPermanentDelete={pendingBatchPermanentDelete}
         pendingBatchPermanentDeleteFolders={pendingBatchPermanentDeleteFolders}
