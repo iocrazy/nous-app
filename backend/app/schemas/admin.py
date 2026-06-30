@@ -708,12 +708,31 @@ class TopicScoringConfigResponse(BaseModel):
     shareability). tier_weights: source-credibility-tier multipliers, keyed by
     tier as a string ("1"/"2"/"3"). featured_min_score: the Featured-board floor.
     summary_max_chars: ai_summary length cap in chars (0 = agent default "1-2 句").
+    enabled: master switch for the LLM scoring pass (off = stop scoring new items).
     """
 
     dim_weights: Dict[str, float]
     tier_weights: Dict[str, float]
     featured_min_score: float
     summary_max_chars: int = 0
+    enabled: bool = True
+
+
+class TopicContentFetchConfigResponse(BaseModel):
+    """Admin-tunable L0.5 article-body enrichment
+    (system_settings['topics.content_fetch']).
+
+    enabled: master switch for trafilatura body-fetch (off = stop fetching).
+    tier_max: only fetch bodies for sources at/below this tier (curated news).
+    max_items/concurrency/timeout_s/min_chars: per-pass bounds + quality floor.
+    """
+
+    enabled: bool = False
+    tier_max: int = 2
+    max_items: int = 40
+    concurrency: int = 4
+    timeout_s: int = 15
+    min_chars: int = 80
 
 
 class TopicPrefilterConfigResponse(BaseModel):

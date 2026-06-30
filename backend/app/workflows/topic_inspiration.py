@@ -264,11 +264,13 @@ async def score_unscored_once(
     hotspots_repo = hotspots_repo or HotspotsRepository()
     scorer = scorer or TopicScorerService()
     sources_repo = sources_repo or SignalSourcesRepository()
+    cfg = await load_scoring_config()  # admin-tuned weights, else code defaults
+    if not cfg.enabled:  # admin kill switch — stop scoring new hotspots
+        return {"unscored": 0, "scored": 0, "enabled": False}
     rows = await hotspots_repo.list_unscored(limit=max_items)
     if not rows:
         return {"unscored": 0, "scored": 0}
     tiers = await sources_repo.tier_map()
-    cfg = await load_scoring_config()  # admin-tuned weights, else code defaults
     scored = 0
     for start in range(0, len(rows), batch_size):
         chunk = rows[start : start + batch_size]

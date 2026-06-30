@@ -226,6 +226,8 @@ export interface TopicScoringConfig {
   featured_min_score: number
   /** ai_summary length cap in chars. 0 = use the agent default ("1-2 句"). */
   summary_max_chars: number
+  /** Master switch for the scoring pass. Off = stop scoring new hotspots. */
+  enabled: boolean
 }
 
 const TOPIC_SCORING_URL = '/api/v1/admin/settings/topics-scoring'
@@ -284,6 +286,46 @@ export function useUpdateTopicPrefilterConfig() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['settings', 'topics-prefilter'] })
+    },
+  })
+}
+
+// ── Topic L0.5 content-fetch (trafilatura) config ─────────────────────────
+export interface TopicContentFetchConfig {
+  /** Master switch for trafilatura body-fetch. Off = stop fetching article bodies. */
+  enabled: boolean
+  /** Only fetch bodies for sources at/below this tier (curated news). */
+  tier_max: number
+  max_items: number
+  concurrency: number
+  timeout_s: number
+  min_chars: number
+}
+
+const TOPIC_CONTENT_FETCH_URL = '/api/v1/admin/settings/topics-content-fetch'
+
+export function useTopicContentFetchConfig() {
+  return useQuery({
+    queryKey: ['settings', 'topics-content-fetch'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<TopicContentFetchConfig>(TOPIC_CONTENT_FETCH_URL)
+      return data
+    },
+  })
+}
+
+export function useUpdateTopicContentFetchConfig() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (update: TopicContentFetchConfig) => {
+      const { data } = await apiClient.put<TopicContentFetchConfig>(
+        TOPIC_CONTENT_FETCH_URL,
+        update,
+      )
+      return data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings', 'topics-content-fetch'] })
     },
   })
 }
