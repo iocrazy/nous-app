@@ -187,4 +187,107 @@ describe('runImport', () => {
     expect(result.failed).toBe(1);
     expect(result.uploaded).toBe(3);
   });
+
+  // ── New tests ──────────────────────────────────────────────────────────────
+
+  it('fail-open: when checkBatch rejects, all files are uploaded (dedup-outage)', async () => {
+    const files = makeFiles(5);
+    const upload = vi.fn(async (_f: File) => {});
+    const link = vi.fn(async (_id: string) => {});
+    // checkBatch always throws — simulates a service outage
+    const checkBatch = vi.fn(async () => {
+      throw new Error('service unavailable');
+    });
+
+    const result = await runImport(
+      files,
+      { hashFile: fakeHashFn(), checkBatch, upload, link },
+      { dupAction: 'skip-link', onProgress: () => {} },
+    );
+
+    // Fail-open: all files uploaded as novel, none linked, none failed
+    expect(result).toEqual({ uploaded: 5, linked: 0, failed: 0, total: 5 });
+    expect(upload).toHaveBeenCalledTimes(5);
+    expect(link).not.toHaveBeenCalled();
+  });
+
+  it('real-time progress: onProgress fires per-item during hashing and transferring', async () => {
+    const N = 10;
+    const files = makeFiles(N);
+    const checkBatch = vi.fn(fakeBatch([]));
+    const progressCalls: Array<{ phase: string; done: number }> = [];
+
+    await runImport(
+      files,
+      {
+        hashFile: fakeHashFn(),
+        checkBatch,
+        upload: vi.fn(async () => {}),
+        link: vi.fn(async () => {}),
+      },
+      {
+        dupAction: 'skip-link',
+        onProgress: (p) => {
+          progressCalls.push({ phase: p.phase, done: p.done });
+        },
+      },
+    );
+
+    const hashingCalls = progressCalls.filter((p) => p.phase === 'hashing');
+    const transferringCalls = progressCalls.filter((p) => p.phase === 'transferring');
+
+    // One call per item — not a post-hoc burst
+    expect(hashingCalls.length).toBe(N);
+    expect(transferringCalls.length).toBe(N);
+
+    // done is monotonically non-decreasing across transferring calls
+    for (let i = 1; i < transferringCalls.length; i++) {
+      expect(transferringCalls[i].done).toBeGreaterThanOrEqual(transferringCalls[i - 1].done);
+    }
+
+    // Final transferring emit has done === uploaded + linked === N
+    const lastTransfer = transferringCalls[transferringCalls.length - 1];
+    expect(lastTransfer.done).toBe(N);
+  });
+
+  it('abort-during-checking: stops firing checkBatch calls after signal aborted', async () => {
+    // 9 files / chunkSize 3 = 3 possible chunks; abort after chunk 1 → only 1 call
+    const files = makeFiles(9);
+    const controller = new AbortController();
+    let callCount = 0;
+
+    const checkBatch = vi.fn(
+      async (items: { file_hash: string; file_size: number }[]) => {
+        callCount++;
+        if (callCount === 1) {
+          // Abort during the first chunk; subsequent chunks must be skipped
+          controller.abort();
+        }
+        return items.map(({ file_hash }) => ({
+          file_hash,
+          duplicate: false,
+          existing: null,
+        }));
+      },
+    );
+
+    await runImport(
+      files,
+      {
+        hashFile: fakeHashFn(),
+        checkBatch,
+        upload: vi.fn(async () => {}),
+        link: vi.fn(async () => {}),
+      },
+      {
+        dupAction: 'skip-link',
+        checkChunk: 3,
+        signal: controller.signal,
+        onProgress: () => {},
+      },
+    );
+
+    // Only the first chunk fires; the abort guard breaks the loop before chunks 2 & 3
+    expect(checkBatch).toHaveBeenCalledTimes(1);
+  });
 });

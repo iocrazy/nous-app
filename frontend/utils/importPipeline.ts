@@ -16,6 +16,13 @@ import { runWithConcurrency } from './concurrency';
 
 // ── Public types ─────────────────────────────────────────────────────────────
 
+/** Minimal shape returned per item by checkBatch. */
+export interface CheckBatchResultItem {
+  file_hash: string;
+  duplicate: boolean;
+  existing: { id: string } | null;
+}
+
 export interface ImportDeps {
   /** Compute a stable content hash (e.g. SHA-256 hex) for a file. */
   hashFile: (f: File) => Promise<string>;
@@ -25,7 +32,7 @@ export interface ImportDeps {
    */
   checkBatch: (
     items: { file_hash: string; file_size: number }[],
-  ) => Promise<{ file_hash: string; duplicate: boolean; existing: any }[]>;
+  ) => Promise<CheckBatchResultItem[]>;
   /** Upload a novel file. */
   upload: (f: File) => Promise<void>;
   /**
@@ -94,22 +101,25 @@ export async function runImport(
   const total = files.length;
 
   // ── Phase 1a: Hash all files with bounded concurrency ─────────────────────
+  // onProgress is emitted from inside each worker as files complete so the
+  // caller gets real-time updates rather than a post-hoc burst.
+  // JS is single-threaded: ++hashDone crosses no await boundary → atomic.
+  let hashDone = 0;
   const hashResults = await runWithConcurrency(
     files,
     hashConcurrency,
-    (file) => deps.hashFile(file),
+    async (file) => {
+      try {
+        return await deps.hashFile(file);
+      } finally {
+        onProgress({ phase: 'hashing', total, done: ++hashDone, linked: 0, failed: 0 });
+      }
+    },
     { signal },
   );
 
   // Build parallel arrays: hashes[i] is null when hashing failed for file[i].
-  // Emit per-file hashing progress after all hashes complete (results are
-  // returned in input order by runWithConcurrency).
-  const hashes: Array<string | null> = [];
-  for (let i = 0; i < hashResults.length; i++) {
-    const r = hashResults[i];
-    hashes.push(r.ok ? r.value : null);
-    onProgress({ phase: 'hashing', total, done: i + 1, linked: 0, failed: 0 });
-  }
+  const hashes: Array<string | null> = hashResults.map((r) => (r.ok ? r.value : null));
 
   // ── Phase 1b: Chunk and batch-dedup ──────────────────────────────────────
   // Only include files whose hash succeeded.
@@ -121,17 +131,20 @@ export async function runImport(
   }
 
   // Map hash → existing resource (populated below for confirmed duplicates).
-  const dupMap = new Map<string, any>();
+  const dupMap = new Map<string, { id: string }>();
   let checkDone = 0;
 
   for (let ci = 0; ci < toCheck.length; ci += checkChunk) {
+    // Abort guard: stop firing checkBatch HTTP calls when signal is aborted.
+    if (signal?.aborted) break;
+
     const chunk = toCheck.slice(ci, ci + checkChunk);
     const batchItems = chunk.map(({ file, hash }) => ({
       file_hash: hash,
       file_size: file.size,
     }));
 
-    let batchResult: Array<{ file_hash: string; duplicate: boolean; existing: any }>;
+    let batchResult: CheckBatchResultItem[];
     try {
       batchResult = await deps.checkBatch(batchItems);
     } catch {
@@ -164,7 +177,7 @@ export async function runImport(
     if (dupAction === 'skip-link') {
       const existing = dupMap.get(hash);
       if (existing) {
-        transferItems.push({ type: 'link', existingId: existing.id as string });
+        transferItems.push({ type: 'link', existingId: existing.id });
       } else {
         transferItems.push({ type: 'upload', file: files[i] });
       }
@@ -175,46 +188,43 @@ export async function runImport(
   }
 
   // ── Phase 2: Transfer with bounded concurrency ────────────────────────────
-  const transferResults = await runWithConcurrency(
+  // Shared mutable counters — JS single-threaded so ++ between awaits is atomic.
+  // onProgress is emitted inside each worker for real-time updates.
+  const counts = { uploaded: 0, linked: 0, failed: 0 };
+
+  await runWithConcurrency(
     transferItems,
     uploadConcurrency,
     async (item) => {
-      if (item.type === 'link') {
-        await deps.link(item.existingId);
-        return 'linked' as const;
+      try {
+        if (item.type === 'link') {
+          await deps.link(item.existingId);
+          counts.linked++;
+          return 'linked' as const;
+        }
+        await deps.upload(item.file);
+        counts.uploaded++;
+        return 'uploaded' as const;
+      } catch (err) {
+        counts.failed++;
+        throw err;
+      } finally {
+        onProgress({
+          phase: 'transferring',
+          total,
+          done: counts.uploaded + counts.linked,
+          linked: counts.linked,
+          failed: counts.failed,
+        });
       }
-      await deps.upload(item.file);
-      return 'uploaded' as const;
     },
     { signal },
   );
 
-  // Emit per-item transferring progress in input order.
-  // done = uploaded + linked (failures don't count toward done).
-  let uploaded = 0;
-  let linked = 0;
-  let transferFailed = 0;
-
-  for (const result of transferResults) {
-    if (result.ok) {
-      if (result.value === 'linked') linked++;
-      else uploaded++;
-    } else {
-      transferFailed++;
-    }
-    onProgress({
-      phase: 'transferring',
-      total,
-      done: uploaded + linked,
-      linked,
-      failed: transferFailed,
-    });
-  }
-
   return {
-    uploaded,
-    linked,
-    failed: failedFromHash + transferFailed,
+    uploaded: counts.uploaded,
+    linked: counts.linked,
+    failed: failedFromHash + counts.failed,
     total,
   };
 }
