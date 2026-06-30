@@ -66,7 +66,10 @@ async def _summon_runner(
 @router.get("/", response_model=list[ConversationOut])
 async def list_my_conversations(auth: AuthDep):
     svc = get_conversation_service()
-    rows = await svc.list_my_conversations(user_id=auth.user_id)
+    try:
+        rows = await svc.list_my_conversations(user_id=auth.user_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
     return rows
 
 
@@ -102,6 +105,8 @@ async def add_members(conversation_id: int, payload: MemberAdd, auth: AuthDep):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="not a member"
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     return {"added": added}
 
 
@@ -124,6 +129,8 @@ async def list_messages(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="not a member"
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
 @router.post("/{conversation_id}/agents")
@@ -180,6 +187,8 @@ async def mark_read(conversation_id: int, payload: MarkReadIn, auth: AuthDep):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="not a member"
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     return {"ok": True}
 
 

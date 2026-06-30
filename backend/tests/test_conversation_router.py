@@ -47,7 +47,7 @@ _MSG_DICT: dict[str, Any] = {
 }
 
 
-def _make_client(svc: Any) -> TestClient:
+def _make_client() -> TestClient:
     """Build a test FastAPI app that includes conversation_router directly
     (bypassing the flag-gate in api/__init__.py) and overrides get_auth."""
     from app.api.conversation_router import router
@@ -142,7 +142,7 @@ def test_post_message_403_when_not_member():
     with _patch(
         "app.api.conversation_router.get_conversation_service", return_value=svc
     ):
-        client = _make_client(svc)
+        client = _make_client()
         r = client.post(
             f"/api/v1/conversations/{_CONV_ID}/messages",
             json={"type": "text", "body": {"text": "hi"}},
@@ -165,12 +165,9 @@ def test_post_message_ok_and_schedules_summon():
     with _patch(
         "app.api.conversation_router.get_conversation_service", return_value=svc
     ):
-        client = _make_client(svc)
         # TestClient runs background tasks synchronously before returning
-        client2 = TestClient(
-            client.app, raise_server_exceptions=True  # type: ignore[attr-defined]
-        )
-        r = client2.post(
+        client = _make_client()
+        r = client.post(
             f"/api/v1/conversations/{_CONV_ID}/messages",
             json={"type": "text", "body": {"text": "hello"}},
         )
@@ -200,7 +197,7 @@ def test_create_conversation_value_error_400():
     with _patch(
         "app.api.conversation_router.get_conversation_service", return_value=svc
     ):
-        client = _make_client(svc)
+        client = _make_client()
         r = client.post(
             "/api/v1/conversations",
             json={
@@ -285,3 +282,89 @@ def test_smoke_real_db_sender_id_coercion_and_null_before_seq():
             assert isinstance(mo.seq, str)
 
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# HTTP-layer smoke — exercises the full HTTP→response_model serialization path
+# (the #918-class gap: asyncpg int8/UUID types only surface as 500s via HTTP)
+# ---------------------------------------------------------------------------
+
+_EXISTING_USER_HTTP = "ca5e636f-6e60-414c-be54-110acf8c45c7"
+_TEAM_SCOPE_ID_HTTP = 307991314617965
+
+
+def _make_http_smoke_client() -> TestClient:
+    """Build a TestClient that includes conversation_router with a real-user
+    auth override.  raise_server_exceptions=False so a serialization 500
+    surfaces as a response (inspectable) rather than a Python exception."""
+    from app.api.conversation_router import router
+    from app.core.deps import get_auth
+
+    app = FastAPI()
+    app.include_router(router, prefix="/api/v1")
+
+    class _RealAuth:
+        user_id = _EXISTING_USER_HTTP
+        email = "smoke@example.com"
+
+    async def _grant():
+        return _RealAuth()
+
+    app.dependency_overrides[get_auth] = _grant
+    return TestClient(app, raise_server_exceptions=False)
+
+
+@pytest.mark.skipif(not _has_db, reason=_SMOKE_REASON)
+def test_smoke_http_layer_response_model_serialization():
+    """Close the #918-class gap: exercises the FULL HTTP → response_model path
+    so asyncpg int8/UUID 500s are caught here rather than in production.
+
+    Steps:
+      1. POST /conversations      — create a conversation
+      2. POST /conversations/{id}/messages — post a text message
+         Assert: 200 (NOT 500), sender_id is str or None
+      3. GET  /conversations/{id}/messages  (no before_seq) — fetch messages
+         Assert: returns the posted message, proving the NULL→CAST path works
+    """
+    client = _make_http_smoke_client()
+
+    # 1. Create conversation
+    r_create = client.post(
+        "/api/v1/conversations/",
+        json={
+            "type": "group",
+            "scope_id": _TEAM_SCOPE_ID_HTTP,
+            "name": "HTTP Smoke Conv",
+            "history_mode": "shared",
+            "member_ids": [],
+        },
+    )
+    assert (
+        r_create.status_code == 200
+    ), f"create conversation failed: {r_create.status_code} {r_create.text}"
+    conv_id = r_create.json()["id"]
+
+    # 2. Post a message — this is where asyncpg UUID/int8 types would trigger 500
+    r_post = client.post(
+        f"/api/v1/conversations/{conv_id}/messages",
+        json={"type": "text", "body": {"text": "http smoke"}},
+    )
+    assert (
+        r_post.status_code == 200
+    ), f"post message failed: {r_post.status_code} {r_post.text}"
+    msg_data = r_post.json()
+    # sender_id must be a string (str) or null — never a raw UUID object (which
+    # would have caused a Pydantic serialization 500 before the fix)
+    assert msg_data.get("sender_id") is None or isinstance(
+        msg_data["sender_id"], str
+    ), f"sender_id should be str or None, got {type(msg_data.get('sender_id'))}: {msg_data.get('sender_id')}"
+
+    # 3. GET messages with no before_seq — exercises the NULL→CAST path over HTTP
+    r_get = client.get(f"/api/v1/conversations/{conv_id}/messages")
+    assert (
+        r_get.status_code == 200
+    ), f"get messages failed: {r_get.status_code} {r_get.text}"
+    msgs = r_get.json()
+    assert (
+        isinstance(msgs, list) and len(msgs) >= 1
+    ), f"expected at least 1 message, got: {msgs}"
