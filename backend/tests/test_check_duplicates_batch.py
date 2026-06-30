@@ -6,7 +6,7 @@ Coverage:
 - duplicate=True only when hash exists AND file_size_bytes == item.file_size
 - duplicate=False when hash exists but size differs (collision guard)
 - duplicate=False when hash is absent
-- >200 items → HTTP 422
+- >100 items → HTTP 422
 - creator_id binding (per-user; never cross-user)
 """
 
@@ -252,14 +252,14 @@ async def test_check_duplicates_order_preserved() -> None:
 
 
 @pytest.mark.asyncio
-async def test_check_duplicates_over_200_returns_422() -> None:
-    """Sending > 200 items must return HTTP 422 immediately."""
+async def test_check_duplicates_over_100_returns_422() -> None:
+    """Sending > 100 items must return HTTP 422 immediately."""
     from fastapi import HTTPException
 
     from app.api.resources_upload_router import check_duplicates_batch
     from app.schemas.resources_batch import CheckDuplicatesItem, CheckDuplicatesRequest
 
-    items = [CheckDuplicatesItem(file_hash="a" * 64, file_size=1) for _ in range(201)]
+    items = [CheckDuplicatesItem(file_hash="a" * 64, file_size=1) for _ in range(101)]
     auth = MagicMock(user_id="u1")
     body = CheckDuplicatesRequest(items=items)
 

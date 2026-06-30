@@ -79,7 +79,10 @@ async def check_duplicate(
         raise HTTPException(status_code=500, detail="Failed to check duplicate")
 
 
-_MAX_BATCH_DEDUP = 200
+_MAX_BATCH_DEDUP = 100
+# 100 × 64-char SHA-256 ≈ 6.5 KB URI — safely below the self-hosted
+# Supabase nginx/kong large_client_header_buffers default of 8 KB.
+# Client must chunk to this size; keep in sync with frontend checkChunk.
 
 
 @router.post("/check-duplicates")
@@ -89,7 +92,7 @@ async def check_duplicates_batch(
 ) -> CheckDuplicatesResponse:
     """Batch duplicate check for bulk import.
 
-    Accepts up to 200 file hashes/sizes in one request and returns one
+    Accepts up to 100 file hashes/sizes in one request and returns one
     result per input item (order preserved).  ``duplicate=True`` only when
     a row with the same hash *and* the same ``file_size_bytes`` exists for
     the authenticated user (collision guard identical to the single endpoint).

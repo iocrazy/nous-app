@@ -21,7 +21,9 @@ class CheckDuplicatesItem(BaseModel):
 class CheckDuplicatesRequest(BaseModel):
     """Batch duplicate-check request body.
 
-    At most 200 items per request (PostgREST .in_ / URL-length cap).
+    At most 100 items per request (PostgREST .in_ / URL-length cap).
+    100 × 64-char SHA-256 ≈ 6.5 KB URI, safely under the 8 KB nginx/kong
+    large_client_header_buffers default on self-hosted Supabase stacks.
     The endpoint returns HTTP 422 if this limit is exceeded.
     """
 
