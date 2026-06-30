@@ -15,6 +15,7 @@ from app.core.deps import AuthDep
 from app.core.scope_dep import scoped_request
 from app.core.scope_guards import verify_scope_access
 from app.repositories.resources_repository import ResourcesRepository
+from app.schemas.resources_batch import CheckDuplicatesRequest, CheckDuplicatesResponse
 from app.services.library.permission_service import PermissionService
 from app.services.library.resources_service import ResourcesService
 
@@ -76,6 +77,52 @@ async def check_duplicate(
     except Exception as e:
         logger.error(f"Failed to check duplicate: {e}")
         raise HTTPException(status_code=500, detail="Failed to check duplicate")
+
+
+_MAX_BATCH_DEDUP = 200
+
+
+@router.post("/check-duplicates")
+async def check_duplicates_batch(
+    body: CheckDuplicatesRequest,
+    auth: AuthDep,
+) -> CheckDuplicatesResponse:
+    """Batch duplicate check for bulk import.
+
+    Accepts up to 200 file hashes/sizes in one request and returns one
+    result per input item (order preserved).  ``duplicate=True`` only when
+    a row with the same hash *and* the same ``file_size_bytes`` exists for
+    the authenticated user (collision guard identical to the single endpoint).
+    """
+    if len(body.items) > _MAX_BATCH_DEDUP:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Too many items: {len(body.items)} > {_MAX_BATCH_DEDUP}",
+        )
+
+    try:
+        repo = ResourcesRepository()
+        file_hashes = [item.file_hash for item in body.items]
+        hash_map = await repo.find_by_hashes(file_hashes, auth.user_id)
+
+        results = []
+        for item in body.items:
+            row = hash_map.get(item.file_hash)
+            if row and row.get("file_size_bytes") == item.file_size:
+                results.append(
+                    {"file_hash": item.file_hash, "duplicate": True, "existing": row}
+                )
+            else:
+                results.append(
+                    {"file_hash": item.file_hash, "duplicate": False, "existing": None}
+                )
+
+        return CheckDuplicatesResponse(results=results)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to batch check duplicates: {}", e)
+        raise HTTPException(status_code=500, detail="Failed to check duplicates")
 
 
 @router.post("/link-existing")

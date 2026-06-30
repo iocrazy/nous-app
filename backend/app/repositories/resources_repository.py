@@ -362,6 +362,42 @@ class ResourcesRepository:
             logger.error(f"Failed to find resources by hash: {e}")
             return []
 
+    async def find_by_hashes(
+        self, file_hashes: list[str], creator_id: str
+    ) -> dict[str, dict]:
+        """Find non-trashed resources matching any of the given hashes for a creator.
+
+        Issues a single PostgREST ``.in_`` query and returns a mapping of
+        ``{file_hash: first_matching_row}``.  Never raises — returns ``{}`` on
+        any error.  Caller is responsible for keeping ``file_hashes`` ≤ 200.
+        """
+        if not file_hashes:
+            return {}
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_RESOURCES)
+                .select(
+                    "id, filename, file_type, mime_type, file_size_bytes, "
+                    "thumbnail_path, cover_image_path, created_at, file_hash"
+                )
+                .in_("file_hash", file_hashes)
+                .eq("creator_id", creator_id)
+                .eq("is_trashed", False)
+                .execute()
+            )
+            rows: list[dict] = result.data or []
+            # Build hash→first-row map (first row per hash wins)
+            mapping: dict[str, dict] = {}
+            for row in rows:
+                h = row.get("file_hash")
+                if h and h not in mapping:
+                    mapping[h] = row
+            return mapping
+        except Exception as e:
+            logger.error("Failed to find resources by hashes: {}", e)
+            return {}
+
     async def find_resource_item(
         self,
         resource_id: str,
