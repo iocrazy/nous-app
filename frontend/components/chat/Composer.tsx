@@ -19,12 +19,16 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Paperclip, Image, AtSign, Send } from 'lucide-react';
 import { MentionDropdown, type MentionCandidate } from './MentionDropdown';
+import { useComposerPaste } from '../../hooks/useComposerPaste';
+import { useComposerDropzone } from '../../hooks/useComposerDropzone';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface ComposerProps {
   onSend: (text: string, mentionUserIds: string[]) => void;
   onAttachMedia?: () => void;
+  /** Called when the user picks, pastes, or drops image files. */
+  onAttachFiles?: (files: File[]) => void;
   /** Called on each input change when content is non-empty. Hook-side throttling applies. */
   onTyping?: () => void;
   disabled?: boolean;
@@ -59,6 +63,7 @@ function _detectMention(
 export function Composer({
   onSend,
   onAttachMedia,
+  onAttachFiles,
   onTyping,
   disabled = false,
   placeholder,
@@ -67,7 +72,20 @@ export function Composer({
 }: ComposerProps): React.ReactElement {
   const { t } = useTranslation();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const resolvedPlaceholder = placeholder ?? t('chat.composerPlaceholder');
+
+  // ── file attach hooks ──────────────────────────────────────────────────────
+
+  const { onPaste } = useComposerPaste({
+    onFiles: (f) => onAttachFiles?.(Array.from(f)),
+    disabled,
+  });
+
+  const { rootProps, isDragActive } = useComposerDropzone({
+    onFiles: (f) => onAttachFiles?.(Array.from(f)),
+    disabled,
+  });
 
   // mention state
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -249,7 +267,32 @@ export function Composer({
   // ── render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex-shrink-0 px-[18px] pb-4 pt-3">
+    <div className="relative flex-shrink-0 px-[18px] pb-4 pt-3" {...rootProps}>
+      {/* Hidden file input for click-to-attach */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          const fs = e.target.files;
+          if (fs && fs.length) {
+            onAttachFiles?.(Array.from(fs));
+          }
+          e.target.value = '';
+        }}
+      />
+
+      {/* Drag-over overlay */}
+      {isDragActive && (
+        <div className="absolute inset-0 z-10 rounded-[12px] border-2 border-dashed border-indigo-500/60 bg-indigo-500/[0.06] flex items-center justify-center pointer-events-none">
+          <span className="text-[13px] font-medium text-indigo-400">
+            {t('chat.image.dropHint')}
+          </span>
+        </div>
+      )}
+
       {/* Input box — relative so MentionDropdown can anchor to it */}
       <div className="relative bg-ink-950 border border-line-strong rounded-[12px] px-3 py-[10px] focus-within:border-indigo-500/50 transition-colors">
         {/* Mention dropdown — floats above the input box */}
@@ -267,6 +310,7 @@ export function Composer({
           rows={1}
           onKeyDown={handleKeyDown}
           onInput={handleInput}
+          onPaste={onPaste}
           className={[
             'w-full bg-transparent border-none outline-none resize-none',
             'text-[14px] text-content placeholder:text-content-3 font-[inherit]',
@@ -281,6 +325,7 @@ export function Composer({
             type="button"
             disabled={disabled}
             title={t('chat.attachResource')}
+            onClick={() => fileInputRef.current?.click()}
             className="w-[30px] h-[30px] rounded-[8px] grid place-items-center text-content-3 hover:text-content hover:bg-island-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             <Paperclip size={14} />

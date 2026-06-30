@@ -1577,6 +1577,9 @@
     },
     "agentDm": {
       "section": "Agents"
+    },
+    "image": {
+      "dropHint": "Drop images to send"
     }
   },
   "mcp": {
