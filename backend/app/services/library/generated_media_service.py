@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import re
 import uuid as _uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -64,7 +65,7 @@ async def _download_to(
 
 @dataclass
 class GenerationOrigin:
-    kind: str  # 'agent_run' | 'canvas_run'
+    kind: str  # 'agent_run' | 'canvas_run' | 'chat_upload'
     run_id: Optional[str] = None
     agent_id: Optional[str] = None
     canvas_id: Optional[int] = None
@@ -76,6 +77,7 @@ class GenerationOrigin:
     cost_cents: Optional[float] = None
     parent_resource_id: Optional[int] = None
     derivation_kind: Optional[str] = None
+    channel_id: Optional[int] = None
 
 
 async def register_generated_media(
@@ -96,10 +98,11 @@ async def register_generated_media(
         "INSERT INTO public.generated_media "
         "(scope_id, creator_id, media_kind, mime, file_path, file_size_bytes, "
         " origin_kind, origin_run_id, agent_id, canvas_id, node_id, prompt, model, "
-        " provider, params, cost_cents, parent_resource_id, derivation_kind) "
+        " provider, params, cost_cents, parent_resource_id, derivation_kind, channel_id) "
         "VALUES (:scope_id, :creator_id, :media_kind, :mime, :file_path, :file_size_bytes, "
         " :origin_kind, :origin_run_id, :agent_id, :canvas_id, :node_id, :prompt, :model, "
-        " :provider, CAST(:params AS jsonb), :cost_cents, :parent_resource_id, :derivation_kind) "
+        " :provider, CAST(:params AS jsonb), :cost_cents, :parent_resource_id, :derivation_kind,"
+        " :channel_id) "
         "RETURNING *",
         {
             "scope_id": scope_id,
@@ -120,6 +123,57 @@ async def register_generated_media(
             "cost_cents": origin.cost_cents,
             "parent_resource_id": origin.parent_resource_id,
             "derivation_kind": origin.derivation_kind,
+            "channel_id": origin.channel_id,
+        },
+    )
+    return row or {}
+
+
+def _safe_filename(name: str) -> str:
+    name = os.path.basename(name or "")
+    name = re.sub(r"[^\w.\-]", "_", name)
+    return name or "attachment"
+
+
+async def register_uploaded_media(
+    *,
+    user_id: str,
+    scope_id: int,
+    file_bytes: bytes,
+    filename: str,
+    mime: str,
+    origin: GenerationOrigin,
+    subdir: str = "chat",
+) -> dict:
+    """Write uploaded bytes into the staged store and insert one row. Returns it."""
+    kind = media_kind_from_mime(mime)
+    gen_uuid = _uuid.uuid4().hex
+    rel = f"teams/{scope_id}/{subdir}/{gen_uuid}/{_safe_filename(filename)}"
+    dest = f"{settings.DOWNLOAD_PATH}/{rel}"
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    part = dest + ".part"
+    try:
+        with open(part, "wb") as fp:
+            fp.write(file_bytes)
+        os.replace(part, dest)
+    except BaseException:
+        Path(part).unlink(missing_ok=True)
+        raise
+    row = await db_engine.execute_returning_one(
+        "INSERT INTO public.generated_media "
+        "(scope_id, creator_id, media_kind, mime, file_path, file_size_bytes, "
+        " origin_kind, channel_id) "
+        "VALUES (:scope_id, :creator_id, :media_kind, :mime, :file_path, "
+        " :file_size_bytes, :origin_kind, :channel_id) RETURNING *",
+        {
+            "scope_id": scope_id,
+            "creator_id": user_id,
+            "media_kind": kind,
+            "mime": mime,
+            "file_path": rel,
+            "file_size_bytes": len(file_bytes),
+            "origin_kind": origin.kind,
+            "channel_id": origin.channel_id,
         },
     )
     return row or {}
@@ -131,4 +185,6 @@ __all__ = [
     "ext_for",
     "_download_to",
     "register_generated_media",
+    "register_uploaded_media",
+    "_safe_filename",
 ]

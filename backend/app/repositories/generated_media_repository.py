@@ -12,7 +12,7 @@ _COLS = (
     "id, scope_id, creator_id, media_kind, mime, file_path, file_size_bytes, "
     "origin_kind, origin_run_id, agent_id, canvas_id, node_id, prompt, model, "
     "provider, params, cost_cents, parent_resource_id, derivation_kind, "
-    "promoted_resource_id, created_at"
+    "promoted_resource_id, channel_id, created_at"
 )
 
 # Snowflake BIGINT columns: must be str() before reaching the frontend to avoid
@@ -23,6 +23,7 @@ _BIGINT_COLS = (
     "canvas_id",
     "parent_resource_id",
     "promoted_resource_id",
+    "channel_id",
 )
 _UUID_COLS = ("creator_id", "agent_id")
 

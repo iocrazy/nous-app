@@ -1,38 +1,25 @@
-"""Chat image upload service (Task 2 — independent chat store).
+"""Chat image upload service (Task 2 — unified generated_media store).
 
 save_chat_image():
   1. Validates mime starts with 'image/'
   2. Resolves channel → team_id (= scope_id)
   3. Verifies caller is a channel member
-  4. Writes bytes atomically (.part → os.replace) under DOWNLOAD_PATH
-  5. Inserts chat_attachments row and returns it
+  4. Delegates atomic file write + INSERT to register_uploaded_media
+  5. Returns the generated_media row
 
-The file layout mirrors generated_media:
+Files land at:
   {DOWNLOAD_PATH}/teams/{scope_id}/chat/{uuid_hex}/{safe_filename}
-
-No width/height capture in this slice (nullable columns, backfill out of scope).
 """
 
 from __future__ import annotations
 
-import os
-import re
-import uuid as _uuid
 from typing import Optional
 
-from app.core.config import settings
-from app.repositories.chat_attachment_repository import (
-    ChatAttachmentRepository,
-    get_chat_attachment_repository,
-)
 from app.repositories.chat_repository import ChatRepository, get_chat_repository
-
-
-def _safe_filename(name: str) -> str:
-    """Strip directory components and replace unsafe characters."""
-    name = os.path.basename(name)
-    name = re.sub(r"[^\w.\-]", "_", name)
-    return name or "attachment"
+from app.services.library.generated_media_service import (
+    GenerationOrigin,
+    register_uploaded_media,
+)
 
 
 async def save_chat_image(
@@ -43,11 +30,10 @@ async def save_chat_image(
     filename: str,
     mime: str,
     chat_repo: Optional[ChatRepository] = None,
-    attachment_repo: Optional[ChatAttachmentRepository] = None,
 ) -> dict:
-    """Validate, write atomically, and register a chat image attachment.
+    """Validate membership and register a chat image into the staged store.
 
-    Returns the inserted ``chat_attachments`` row as a plain dict.
+    Returns the inserted ``generated_media`` row as a plain dict.
 
     Raises:
       ValueError      — mime is not ``image/*`` or channel is not found.
@@ -57,7 +43,6 @@ async def save_chat_image(
         raise ValueError(f"mime must start with 'image/', got {mime!r}")
 
     chat_repo = chat_repo or get_chat_repository()
-    attachment_repo = attachment_repo or get_chat_attachment_repository()
 
     channel = await chat_repo.get_channel(channel_id=channel_id)
     if channel is None:
@@ -68,32 +53,13 @@ async def save_chat_image(
     if not is_member:
         raise PermissionError("not a member of this channel")
 
-    uuid_hex = _uuid.uuid4().hex
-    safe_name = _safe_filename(filename)
-    rel_path = f"teams/{scope_id}/chat/{uuid_hex}/{safe_name}"
-    dest = os.path.join(settings.DOWNLOAD_PATH, rel_path)
-
-    # Atomic write: write to .part first, then os.replace (mirrors _download_to
-    # in generated_media_service.py).
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
-    part = dest + ".part"
-    try:
-        with open(part, "wb") as fp:
-            fp.write(file_bytes)
-        os.replace(part, dest)
-    except BaseException:
-        try:
-            os.unlink(part)
-        except OSError:
-            pass
-        raise
-
-    row = await attachment_repo.create(
+    row = await register_uploaded_media(
+        user_id=user_id,
         scope_id=scope_id,
-        channel_id=channel_id,
-        creator_id=user_id,
+        file_bytes=file_bytes,
+        filename=filename,
         mime=mime,
-        file_path=rel_path,
-        file_size_bytes=len(file_bytes),
+        origin=GenerationOrigin(kind="chat_upload", channel_id=channel_id),
+        subdir="chat",
     )
     return row
