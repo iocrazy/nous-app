@@ -231,27 +231,40 @@ const TaskCenterPanel: React.FC<{
           <div className="max-h-80 overflow-y-auto">
             {showActive ? (
               <>
-                {/* Active uploads from UploadContext (client-side progress) */}
-                {uploadingItems.map((item) => (
-                  <div key={item.id} className={`px-3 py-2.5 border-b ${island ? 'border-line' : 'border-ink-800/50'}`}>
+                {/* Active uploads from UploadContext (client-side progress).
+                    Bulk imports (bulkSummary non-null): render one aggregate row.
+                    Small / legacy uploads (bulkSummary null): render per-file rows. */}
+                {upload.bulkSummary ? (
+                  <div className={`px-3 py-2.5 border-b ${island ? 'border-line' : 'border-ink-800/50'}`}>
                     <div className="flex items-center gap-2.5">
                       <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-sm bg-blue-500/20 text-blue-400">
                         <UploadIcon size={14} />
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between">
-                          <span className={`text-xs ${island ? 'text-content-2' : 'text-ink-300'} truncate max-w-[180px]`}>{item.filename}</span>
-                          <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                            <span className={`text-[10px] ${island ? 'text-content-3' : 'text-ink-500'}`}>{item.percent}%</span>
-                            {item.speed > 0 && (
-                              <span className={`text-[10px] ${island ? 'text-content-4' : 'text-ink-600'}`}>{uploadFormatSpeed(item.speed)}</span>
-                            )}
-                          </div>
+                          <span className={`text-xs font-medium ${island ? 'text-content-2' : 'text-ink-300'} truncate`}>
+                            {t('resources.bulkImporting', {
+                              done: upload.bulkSummary.done,
+                              total: upload.bulkSummary.total,
+                            })}
+                          </span>
+                          <span className={`text-[10px] shrink-0 ml-2 ${island ? 'text-content-3' : 'text-ink-500'}`}>
+                            {upload.overallProgress}%
+                          </span>
                         </div>
                         <div className="flex items-center gap-2 mt-0.5">
-                          <span className={`text-[10px] ${island ? 'text-content-4' : 'text-ink-600'}`}>Upload</span>
-                          {item.fileSize > 0 && (
-                            <span className={`text-[10px] ${island ? 'text-content-4' : 'text-ink-600'}`}>{uploadFormatFileSize(item.fileSize)}</span>
+                          <span className={`text-[10px] ${island ? 'text-content-4' : 'text-ink-600'} capitalize`}>
+                            {upload.bulkSummary.phase}
+                          </span>
+                          {upload.bulkSummary.linked > 0 && (
+                            <span className={`text-[10px] ${island ? 'text-content-4' : 'text-ink-600'}`}>
+                              {t('resources.bulkLinked', { count: upload.bulkSummary.linked })}
+                            </span>
+                          )}
+                          {upload.bulkSummary.failed > 0 && (
+                            <span className="text-[10px] text-red-400">
+                              {t('resources.bulkFailed', { count: upload.bulkSummary.failed })}
+                            </span>
                           )}
                         </div>
                       </div>
@@ -259,11 +272,44 @@ const TaskCenterPanel: React.FC<{
                     <div className={`mt-1.5 h-1 ${island ? 'bg-island-2' : 'bg-ink-800'} rounded-full overflow-hidden`}>
                       <div
                         className="h-full rounded-full transition-all duration-300 bg-indigo-500"
-                        style={{ width: `${Math.max(item.percent, 2)}%` }}
+                        style={{ width: `${Math.max(upload.overallProgress, 2)}%` }}
                       />
                     </div>
                   </div>
-                ))}
+                ) : (
+                  uploadingItems.map((item) => (
+                    <div key={item.id} className={`px-3 py-2.5 border-b ${island ? 'border-line' : 'border-ink-800/50'}`}>
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-sm bg-blue-500/20 text-blue-400">
+                          <UploadIcon size={14} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between">
+                            <span className={`text-xs ${island ? 'text-content-2' : 'text-ink-300'} truncate max-w-[180px]`}>{item.filename}</span>
+                            <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                              <span className={`text-[10px] ${island ? 'text-content-3' : 'text-ink-500'}`}>{item.percent}%</span>
+                              {item.speed > 0 && (
+                                <span className={`text-[10px] ${island ? 'text-content-4' : 'text-ink-600'}`}>{uploadFormatSpeed(item.speed)}</span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className={`text-[10px] ${island ? 'text-content-4' : 'text-ink-600'}`}>Upload</span>
+                            {item.fileSize > 0 && (
+                              <span className={`text-[10px] ${island ? 'text-content-4' : 'text-ink-600'}`}>{uploadFormatFileSize(item.fileSize)}</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className={`mt-1.5 h-1 ${island ? 'bg-island-2' : 'bg-ink-800'} rounded-full overflow-hidden`}>
+                        <div
+                          className="h-full rounded-full transition-all duration-300 bg-indigo-500"
+                          style={{ width: `${Math.max(item.percent, 2)}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))
+                )}
 
                 {/* Client-side zip exports (ExportTaskContext) — same row style
                     as uploads, so a bulk download shows progress + a record. */}

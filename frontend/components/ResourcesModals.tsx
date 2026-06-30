@@ -15,7 +15,7 @@ import { ShareModal } from './ShareModal';
 import { FolderPickerModal } from './FolderPickerModal';
 import { DuplicateFileAlert } from './DuplicateFileAlert';
 import type { SmartCollection, ResourceItem, Folder } from '../types';
-import type { DuplicateAlertState } from '../hooks/useResourceUpload';
+import type { DuplicateAlertState, BatchDupDecisionState } from '../hooks/useResourceUpload';
 
 interface ResourcesModalsProps {
   // Smart folder
@@ -37,8 +37,10 @@ interface ResourcesModalsProps {
   selectedLibraryId: string | null | undefined;
   onCloseFolderPicker: () => void;
   onConfirmFolderPicker: (folderId: string | null, libraryId?: string | null) => Promise<void>;
-  // Duplicate alert
+  // Legacy per-file duplicate alert (kept for compat; never triggered in new batch path)
   duplicateAlert: DuplicateAlertState | null;
+  /** Batch-level upfront duplicate decision modal. */
+  batchDupDecision: BatchDupDecisionState | null;
   // Permanent delete
   pendingPermanentDelete: string | null;
   pendingBatchPermanentDelete: string[] | null;
@@ -67,6 +69,7 @@ export const ResourcesModals: React.FC<ResourcesModalsProps> = ({
   onCloseFolderPicker,
   onConfirmFolderPicker,
   duplicateAlert,
+  batchDupDecision,
   pendingPermanentDelete,
   pendingBatchPermanentDelete,
   pendingBatchPermanentDeleteFolders,
@@ -137,6 +140,52 @@ export const ResourcesModals: React.FC<ResourcesModalsProps> = ({
           onKeepBoth={(applyToAll) => duplicateAlert.resolve({ action: 'keep-both', applyToAll })}
           onCancel={() => duplicateAlert.resolve({ action: 'cancel', applyToAll: false })}
         />
+      )}
+
+      {/* Batch Duplicate Decision (ONE upfront modal for bulk imports) */}
+      {batchDupDecision && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => batchDupDecision.resolve('cancel')}
+          />
+          <div className="relative bg-ink-900 border border-ink-800 rounded-2xl shadow-2xl w-full max-w-sm mx-4">
+            <div className="p-6 text-center">
+              <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center mx-auto mb-4">
+                <AlertTriangle className="text-amber-400" size={24} />
+              </div>
+              <h3 className="text-lg font-semibold text-ink-50 mb-2">
+                {t('resources.dupSummaryTitle', {
+                  count: batchDupDecision.dupCount,
+                  total: batchDupDecision.totalCount,
+                })}
+              </h3>
+              <p className="text-sm text-ink-400">
+                {t('resources.dupSummarySubtitle')}
+              </p>
+            </div>
+            <div className="flex flex-col gap-2 p-4 border-t border-ink-800">
+              <button
+                onClick={() => batchDupDecision.resolve('skip-link')}
+                className="w-full px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors"
+              >
+                {t('resources.dupSkipLink')}
+              </button>
+              <button
+                onClick={() => batchDupDecision.resolve('upload')}
+                className="w-full px-4 py-2 text-sm font-medium text-ink-200 bg-ink-800 hover:bg-ink-700 rounded-lg transition-colors"
+              >
+                {t('resources.dupUploadAnyway')}
+              </button>
+              <button
+                onClick={() => batchDupDecision.resolve('cancel')}
+                className="w-full px-4 py-2 text-sm font-medium text-ink-400 hover:text-ink-200 transition-colors"
+              >
+                {t('common.cancel')}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Permanent Delete Confirmation */}

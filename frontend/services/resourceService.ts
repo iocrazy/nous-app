@@ -926,6 +926,32 @@ export async function fetchResourceCount(
 
 // ─── Duplicate Detection ─────────────────────────────────
 
+/**
+ * Batch duplicate check — POSTs up to 100 items (matching the backend cap) and
+ * returns one result per input item.
+ *
+ * Fail-open: on any network or server error every item is returned as
+ * non-duplicate so a dedup outage never blocks an upload.
+ */
+export async function checkDuplicatesBatch(
+  items: { file_hash: string; file_size: number }[],
+): Promise<{ file_hash: string; duplicate: boolean; existing: Resource | null }[]> {
+  const apiUrl = getApiUrl();
+  const failOpen = () =>
+    items.map((i) => ({ file_hash: i.file_hash, duplicate: false, existing: null }));
+  try {
+    const response = await fetch(`${apiUrl}/api/v1/resources/check-duplicates`, {
+      method: 'POST',
+      headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items }),
+    });
+    if (!response.ok) return failOpen();
+    return response.json();
+  } catch {
+    return failOpen();
+  }
+}
+
 export async function checkDuplicate(
   fileHash: string,
   fileSize: number,
