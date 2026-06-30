@@ -53,7 +53,16 @@ export const conversationService = {
     history_mode?: 'shared' | 'joined';
     member_ids?: string[];
   }): Promise<Channel> =>
-    toConversation(await req<ConversationRow>('/conversations', { method: 'POST', body: JSON.stringify(p) })),
+    toConversation(await req<ConversationRow>('/conversations', {
+      method: 'POST',
+      body: JSON.stringify({
+        type: p.type,
+        scope_id: p.team_id,        // new API field name
+        name: p.name ?? null,
+        history_mode: p.history_mode ?? 'shared',
+        member_ids: p.member_ids ?? [],
+      }),
+    })),
 
   addMembers: (conversationId: string, userIds: string[]) =>
     req<{ added: number }>(`/conversations/${conversationId}/members`, {
