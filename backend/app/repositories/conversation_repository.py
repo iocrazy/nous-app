@@ -534,7 +534,7 @@ class ConversationRepository:
             return
         eng = db_engine.get_engine()
         async with eng.begin() as conn:
-            for ord, gid in enumerate(generated_media_ids):
+            for ord_val, gid in enumerate(generated_media_ids):
                 await conn.execute(
                     text(
                         """
@@ -547,7 +547,7 @@ class ConversationRepository:
                     {
                         "mid": _bigint(message_id),
                         "gid": _bigint(gid),
-                        "ord": ord,
+                        "ord": ord_val,
                     },
                 )
 

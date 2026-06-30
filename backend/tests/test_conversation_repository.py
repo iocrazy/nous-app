@@ -191,6 +191,7 @@ async def test_send_message_advances_sender_read_cursor_for_user() -> None:
     assert "conversation_members" in third_sql
     assert "last_read_seq" in third_sql
     assert "member_type" in third_sql
+    assert "'user'" in third_sql
 
 
 @pytest.mark.asyncio
