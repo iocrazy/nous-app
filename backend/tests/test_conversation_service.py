@@ -239,6 +239,69 @@ async def test_dispatch_summons_writes_agent_reply(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_dispatch_summons_reply_write_failure_does_not_raise(monkeypatch):
+    """dispatch_summons must not raise when repo.send_message fails after a reply."""
+    agent_id = "agent-uuid-222"
+    agent_slug = "error-agent"
+
+    repo = _make_repo()
+    repo.list_conversation_agent_ids.return_value = [agent_id]
+    # send_message raises — simulates a DB outage during reply write
+    repo.send_message.side_effect = Exception("db down")
+
+    fake_agent = {
+        "id": agent_id,
+        "slug": agent_slug,
+        "agent_md": "",
+        "identity_md": "",
+    }
+    fake_agent_repo = AsyncMock()
+    fake_agent_repo.get_by_id.return_value = fake_agent
+
+    fake_caps = _make_enabled_caps()
+
+    with (
+        patch(
+            "app.services.conversation_service.run_conversation_agent_turn",
+            new=AsyncMock(return_value="I have a reply!"),
+        ),
+        patch(
+            "app.services.conversation_service.get_agent_repository",
+            return_value=fake_agent_repo,
+        ),
+        patch(
+            "app.services.conversation_service.agent_chat_caps", return_value=fake_caps
+        ),
+        patch(
+            "app.services.conversation_service.extract_agent_mentions",
+            return_value=[agent_slug],
+        ),
+    ):
+        from app.services.conversation_service import ConversationService
+
+        svc = ConversationService(repo)
+        # Must NOT raise — failed reply write is log-and-continue
+        result = await svc.dispatch_summons(
+            conversation_id=1,
+            summoner_user_id="u1",
+            message={
+                "body": {"text": f"@{agent_slug} hi"},
+                "from_agent_id": None,
+            },
+        )
+
+    # Agent was not added to replied because write failed
+    assert agent_slug not in result
+    # send_message was attempted (the guard did not short-circuit before the call)
+    repo.send_message.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# 4. add_agent — PermissionError when caps disabled
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
 async def test_add_agent_raises_when_caps_disabled():
     """add_agent raises PermissionError when agent_chat_caps.enabled is False."""
     repo = _make_repo()
@@ -266,6 +329,42 @@ async def test_add_agent_raises_when_caps_disabled():
                 conversation_id=1,
                 user_id="u1",
                 agent_slug="bot",
+            )
+
+    repo.add_agent_member.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_add_agent_raises_when_scope_restricted():
+    """add_agent raises PermissionError when caps.enabled=True but allows_team=False."""
+    repo = _make_repo()
+    fake_agent = {"id": "a2", "slug": "scoped-bot", "agent_md": ""}
+    fake_agent_repo = AsyncMock()
+    fake_agent_repo.get_by_slug.return_value = fake_agent
+
+    # caps enabled but NOT allowed for this team scope
+    scope_restricted_caps = MagicMock()
+    scope_restricted_caps.enabled = True
+    scope_restricted_caps.allows_team.return_value = False
+
+    with (
+        patch(
+            "app.services.conversation_service.get_agent_repository",
+            return_value=fake_agent_repo,
+        ),
+        patch(
+            "app.services.conversation_service.agent_chat_caps",
+            return_value=scope_restricted_caps,
+        ),
+    ):
+        from app.services.conversation_service import ConversationService
+
+        svc = ConversationService(repo)
+        with pytest.raises(PermissionError, match="agent not enabled"):
+            await svc.add_agent(
+                conversation_id=1,
+                user_id="u1",
+                agent_slug="scoped-bot",
             )
 
     repo.add_agent_member.assert_not_called()

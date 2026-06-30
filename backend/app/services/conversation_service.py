@@ -293,16 +293,22 @@ class ConversationService:
                     )
                     continue
             if reply:
-                await self._repo.send_message(
-                    conversation_id=conversation_id,
-                    sender_id=None,
-                    sender_type="agent",
-                    type="text",
-                    body={"text": reply},
-                    parent_id=None,
-                    from_agent_id=agent["id"],
-                )
-                replied.append(slug)
+                try:
+                    await self._repo.send_message(
+                        conversation_id=conversation_id,
+                        sender_id=None,
+                        sender_type="agent",
+                        type="text",
+                        body={"text": reply},
+                        parent_id=None,
+                        from_agent_id=agent["id"],
+                    )
+                    replied.append(slug)
+                except Exception as exc:
+                    logger.error(
+                        f"[dispatch_summons] reply_write_failed: "
+                        f"agent={slug} error={exc!r}"
+                    )
         return replied
 
     async def _require_member(self, conversation_id: int, user_id: str) -> None:
