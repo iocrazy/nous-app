@@ -6,3 +6,8 @@
 export function islandUI(): boolean {
   return import.meta.env.VITE_FEATURE_ISLAND_UI === 'true';
 }
+
+/** Unified conversations API + realtime (Phase 1). OFF → legacy /chat. */
+export function conversations(): boolean {
+  return import.meta.env.VITE_FEATURE_CONVERSATIONS === 'true';
+}

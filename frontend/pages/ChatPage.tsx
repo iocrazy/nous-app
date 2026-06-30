@@ -23,12 +23,15 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTeamContext } from '../contexts/TeamContext';
 import { useToast } from '../components/Toast';
 import { chatService } from '../services/chatService';
+import { conversationService } from '../services/conversationService';
 import { getResourceCoverUrl } from '../services/resourceService';
 import { getTeamMembers } from '../services/teamService';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { useChannelRealtime } from '../hooks/useChannelRealtime';
+import { useConversationRealtime } from '../hooks/useConversationRealtime';
 import { useChannelPresence } from '../hooks/useChannelPresence';
 import { useMentionBadges } from '../hooks/useMentionBadges';
+import { conversations } from '../utils/featureFlags';
 import { AIChatPanel } from '../components/AIChatPanel';
 import { ChatSidebar } from '../components/chat/ChatSidebar';
 import { MessageList } from '../components/chat/MessageList';
@@ -53,6 +56,11 @@ export function ChatPage(): React.ReactElement {
   const { selectedTeamId, currentTeam } = useTeamContext();
   const { addToast } = useToast();
   const { currentUserId, userProfile } = useAuth();
+
+  // ── Service seam ──────────────────────────────────────────────────────────
+  // conversations() is a build-time constant (VITE_FEATURE_CONVERSATIONS).
+  // When OFF, this is exactly chatService — zero behaviour change.
+  const svc = conversations() ? conversationService : chatService;
 
   // ── State ──────────────────────────────────────────────────────────────────
 
@@ -112,7 +120,7 @@ export function ChatPage(): React.ReactElement {
     (channelId: string, lastSeq: string) => {
       if (markReadTimer.current) clearTimeout(markReadTimer.current);
       markReadTimer.current = setTimeout(() => {
-        chatService.markRead(channelId, lastSeq).catch((err: unknown) => {
+        svc.markRead(channelId, lastSeq).catch((err: unknown) => {
           // Mark-read failures are non-critical; log silently
           console.error('[ChatPage] markRead failed', err);
         });
@@ -142,7 +150,7 @@ export function ChatPage(): React.ReactElement {
 
     let cancelled = false;
 
-    chatService
+    svc
       .listChannels()
       .then((list) => {
         if (cancelled) return;
@@ -226,7 +234,7 @@ export function ChatPage(): React.ReactElement {
 
     let cancelled = false;
 
-    chatService
+    svc
       .listMessages(activeId, undefined, 30)
       .then((page) => {
         if (cancelled) return;
@@ -269,7 +277,7 @@ export function ChatPage(): React.ReactElement {
 
     setLoadingOlder(true);
 
-    chatService
+    svc
       .listMessages(activeId, oldestSeq, 30)
       .then((page) => {
         // Bail early if the user switched channels while this fetch was in flight
@@ -328,7 +336,7 @@ export function ChatPage(): React.ReactElement {
       let cursor: string | undefined = undefined; // start from latest
       const fresh: ChatMessage[] = [];
       for (let page = 0; page < 5; page++) {
-        const batch = await chatService.listMessages(channelId, cursor, 30); // DESC
+        const batch = await svc.listMessages(channelId, cursor, 30); // DESC
         if (channelId !== activeIdRef.current) return; // channel switched mid-fetch
         if (!batch.length) break;
         // batch is newest→oldest; collect those strictly newer than lastSeq
@@ -377,7 +385,7 @@ export function ChatPage(): React.ReactElement {
       const original = messagesRef.current.find((x) => x.id === messageId);
       const originalBody = original?.body ?? {};
       try {
-        const updated = await chatService.editMessage(
+        const updated = await svc.editMessage(
           activeIdRef.current,
           messageId,
           { ...originalBody, text },
@@ -395,7 +403,7 @@ export function ChatPage(): React.ReactElement {
     async (messageId: string) => {
       if (!activeIdRef.current) return;
       try {
-        const updated = await chatService.deleteMessage(
+        const updated = await svc.deleteMessage(
           activeIdRef.current,
           messageId,
         );
@@ -409,20 +417,22 @@ export function ChatPage(): React.ReactElement {
   );
 
   // ── Realtime subscription ─────────────────────────────────────────────────
+  //
+  // Rules-of-hooks seam: both hooks are always called; the inactive one receives
+  // null so its useEffect no-ops (both hooks null-guard at the top of the effect).
+  // conversations() is a build-time constant, so the routing is stable across
+  // renders and there is no conditional hook invocation.
 
-  useChannelRealtime(
-    activeId,
-    (m) => {
-      appendMessage(m);
+  const _legacyId = conversations() ? null : activeId;
+  const _convId   = conversations() ? activeId : null;
 
-      // Schedule mark-read when a new realtime message arrives
-      if (activeId) {
-        scheduleMarkRead(activeId, m.seq);
-      }
-    },
-    updateMessage,
-    gapFill,
-  );
+  const _onRealtimeInsert = (m: ChatMessage) => {
+    appendMessage(m);
+    if (activeId) scheduleMarkRead(activeId, m.seq);
+  };
+
+  useChannelRealtime(_legacyId, _onRealtimeInsert, updateMessage, gapFill);
+  useConversationRealtime(_convId, _onRealtimeInsert, updateMessage, gapFill);
 
   // ── Presence + typing ─────────────────────────────────────────────────────
 
@@ -455,7 +465,7 @@ export function ChatPage(): React.ReactElement {
         body.mention_user_ids = mentionUserIds;
       }
 
-      chatService
+      svc
         .sendMessage(activeId, body)
         .then((sent) => {
           appendMessage(sent);
@@ -505,7 +515,7 @@ export function ChatPage(): React.ReactElement {
 
       setSending(true);
 
-      chatService
+      svc
         .sendMessage(activeId, body, 'media_card')
         .then((sent) => {
           appendMessage(sent);
