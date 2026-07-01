@@ -1579,7 +1579,18 @@
       "section": "Agents"
     },
     "image": {
-      "dropHint": "Drop images to send"
+      "uploading": "Uploading image…",
+      "uploadError": "Failed to upload image",
+      "onlyImages": "Only image files can be sent here",
+      "unavailable": "Image upload is unavailable here",
+      "dropHint": "Drop images to send",
+      "close": "Close image",
+      "alt": "Chat image",
+      "save": "Save to library",
+      "saveTeam": "Save to team library",
+      "savePersonal": "Save to personal library",
+      "saved": "Image saved to library",
+      "saveError": "Failed to save image"
     }
   },
   "mcp": {

@@ -1553,12 +1553,15 @@ export interface Channel {
 export interface ChatMessage {
   id: string;
   channel_id: string;
+  conversation_id?: string;
   seq: string;
   sender_id: string | null;
-  sender_type: 'user' | 'agent';
-  content_type: 'text' | 'media_card' | 'task_card' | 'system';
+  sender_type: 'user' | 'agent' | 'system';
+  content_type: 'text' | 'image' | 'media_card' | 'task_card' | 'system';
+  type?: 'text' | 'image' | 'media_card' | 'task_card' | 'system';
   body: Record<string, unknown>;
   reply_to_id: string | null;
+  parent_id?: string | null;
   edited_at: string | null;
   deleted_at: string | null;
   created_at: string;

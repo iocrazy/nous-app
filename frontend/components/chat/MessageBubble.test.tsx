@@ -84,6 +84,53 @@ describe('MessageBubble', () => {
     expect(screen.getByText('5:00')).toBeDefined();
   });
 
+  it('renders an image message and opens the lightbox on click', () => {
+    render(
+      <MessageBubble
+        message={makeMessage({
+          content_type: 'image',
+          body: {
+            kind: 'image',
+            image_url: '/api/v1/generated-media/123/cover',
+            generated_media_id: '123',
+            alt: 'Uploaded image',
+          },
+        })}
+        currentUserId="U1"
+      />,
+    );
+
+    const img = screen.getByRole('img', { name: 'Uploaded image' });
+    expect(img).toBeDefined();
+    fireEvent.click(img.closest('button')!);
+    expect(screen.getByRole('dialog')).toBeDefined();
+  });
+
+  it('calls onSaveImage with the selected image scope', () => {
+    const onSaveImage = vi.fn();
+    render(
+      <MessageBubble
+        message={makeMessage({
+          content_type: 'image',
+          body: {
+            kind: 'image',
+            image_url: '/api/v1/generated-media/123/cover',
+            generated_media_id: '123',
+            alt: 'Uploaded image',
+          },
+        })}
+        currentUserId="U1"
+        onSaveImage={onSaveImage}
+        canSaveImageToTeam
+        canSaveImageToPersonal
+      />,
+    );
+
+    fireEvent.click(screen.getByTitle('chat.image.save'));
+    fireEvent.click(screen.getByText('chat.image.savePersonal'));
+    expect(onSaveImage).toHaveBeenCalledWith('123', 'personal');
+  });
+
   // ── Deleted message ────────────────────────────────────────────────────────
 
   it('renders tombstone (chat.deleted key) for deleted messages', () => {

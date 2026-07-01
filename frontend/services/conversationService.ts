@@ -6,7 +6,15 @@ const API_BASE =
   'http://localhost:8080';
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const headers = await getAuthHeaders();
+  const headers = new Headers(await getAuthHeaders());
+  if (init?.body instanceof FormData) {
+    headers.delete('Content-Type');
+  }
+  if (init?.headers) {
+    new Headers(init.headers).forEach((value, key) => {
+      headers.set(key, value);
+    });
+  }
   const resp = await fetch(`${API_BASE}/api/v1${path}`, { ...init, headers });
   if (!resp.ok) {
     let detail = `${resp.status}`;
@@ -20,9 +28,6 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return resp.json() as Promise<T>;
 }
 
-// Minimal Conversation type. The new API exposes scope_id / last_seq instead
-// of the legacy team_id / last_message_seq. toConversation normalises these
-// back to the Channel shape so ChatPage state stays typed as Channel[].
 type ConversationRow = Omit<Channel, 'mentions' | 'id' | 'team_id' | 'last_message_seq'> & {
   id: string | number;
   scope_id: string | number;
@@ -31,9 +36,6 @@ type ConversationRow = Omit<Channel, 'mentions' | 'id' | 'team_id' | 'last_messa
   mentions?: number;
 };
 
-// Map the new API field names (scope_id / last_seq) onto the Channel interface
-// (team_id / last_message_seq) and coerce snowflake BIGINTs to string so
-// comparisons like `ch.team_id === selectedTeamId` keep working.
 const toConversation = (r: ConversationRow): Channel => ({
   ...r,
   id: String(r.id),
@@ -41,6 +43,51 @@ const toConversation = (r: ConversationRow): Channel => ({
   last_message_seq: String(r.last_seq),
   mentions: r.mention_count ?? r.mentions ?? 0,
 });
+
+export type ConversationMessageRow = Omit<
+  Partial<ChatMessage>,
+  'id' | 'channel_id' | 'conversation_id' | 'seq' | 'reply_to_id' | 'parent_id'
+> & {
+  id: string | number;
+  channel_id?: string | number;
+  conversation_id?: string | number;
+  seq: string | number;
+  content_type?: ChatMessage['content_type'];
+  type?: ChatMessage['content_type'];
+  reply_to_id?: string | number | null;
+  parent_id?: string | number | null;
+};
+
+export interface ConversationImageUpload {
+  id: string;
+  mime: string;
+  file_size_bytes?: number;
+  url: string;
+}
+
+export function normalizeConversationMessage(row: ConversationMessageRow): ChatMessage {
+  const channelId = row.conversation_id ?? row.channel_id;
+  const replyToId = row.parent_id ?? row.reply_to_id ?? null;
+  const contentType = row.type ?? row.content_type ?? 'text';
+
+  return {
+    ...row,
+    id: String(row.id),
+    channel_id: channelId == null ? '' : String(channelId),
+    conversation_id: channelId == null ? undefined : String(channelId),
+    seq: String(row.seq),
+    sender_id: row.sender_id == null ? null : String(row.sender_id),
+    sender_type: row.sender_type ?? 'user',
+    content_type: contentType,
+    type: contentType,
+    body: row.body ?? {},
+    reply_to_id: replyToId == null ? null : String(replyToId),
+    parent_id: replyToId == null ? null : String(replyToId),
+    edited_at: row.edited_at ?? null,
+    deleted_at: row.deleted_at ?? null,
+    created_at: row.created_at ?? new Date(0).toISOString(),
+  };
+}
 
 export const conversationService = {
   listChannels: async (): Promise<Channel[]> =>
@@ -57,7 +104,7 @@ export const conversationService = {
       method: 'POST',
       body: JSON.stringify({
         type: p.type,
-        scope_id: p.team_id,        // new API field name
+        scope_id: p.team_id,
         name: p.name ?? null,
         history_mode: p.history_mode ?? 'shared',
         member_ids: p.member_ids ?? [],
@@ -74,19 +121,21 @@ export const conversationService = {
     const q = new URLSearchParams();
     if (beforeSeq) q.set('before_seq', beforeSeq);
     q.set('limit', String(limit));
-    return req<ChatMessage[]>(`/conversations/${conversationId}/messages?${q.toString()}`);
+    return req<ConversationMessageRow[]>(
+      `/conversations/${conversationId}/messages?${q.toString()}`,
+    ).then((rows) => rows.map(normalizeConversationMessage));
   },
 
   sendMessage: (
     conversationId: string,
     body: Record<string, unknown>,
-    contentType: 'text' | 'media_card' | 'task_card' = 'text',
+    contentType: 'text' | 'image' | 'media_card' | 'task_card' = 'text',
     replyToId?: string,
   ) =>
-    req<ChatMessage>(`/conversations/${conversationId}/messages`, {
+    req<ConversationMessageRow>(`/conversations/${conversationId}/messages`, {
       method: 'POST',
       body: JSON.stringify({ type: contentType, body, parent_id: replyToId ?? null }),
-    }),
+    }).then(normalizeConversationMessage),
 
   markRead: (conversationId: string, lastReadSeq: string) =>
     req<{ ok: boolean }>(`/conversations/${conversationId}/read`, {
@@ -95,19 +144,39 @@ export const conversationService = {
     }),
 
   editMessage: (conversationId: string, messageId: string, body: Record<string, unknown>) =>
-    req<ChatMessage>(`/conversations/${conversationId}/messages/${messageId}`, {
+    req<ConversationMessageRow>(`/conversations/${conversationId}/messages/${messageId}`, {
       method: 'PATCH',
       body: JSON.stringify({ body }),
-    }),
+    }).then(normalizeConversationMessage),
 
   deleteMessage: (conversationId: string, messageId: string) =>
-    req<ChatMessage>(`/conversations/${conversationId}/messages/${messageId}`, {
+    req<ConversationMessageRow>(`/conversations/${conversationId}/messages/${messageId}`, {
       method: 'DELETE',
-    }),
+    }).then(normalizeConversationMessage),
 
   addAgent: (conversationId: string, agentSlug: string) =>
     req<{ added: boolean; agent_id?: string }>(`/conversations/${conversationId}/agents`, {
       method: 'POST',
       body: JSON.stringify({ agent_slug: agentSlug }),
     }),
+
+  uploadConversationImage: (conversationId: string, file: File) => {
+    const body = new FormData();
+    body.append('file', file);
+    return req<ConversationImageUpload>(`/conversations/${conversationId}/attachments`, {
+      method: 'POST',
+      body,
+    }).then((row) => ({ ...row, id: String(row.id) }));
+  },
+
+  saveImageToLibrary: (attachmentId: string, scopeId: string) =>
+    req<{ promoted_resource_id: string }>(
+      `/conversations/attachments/${attachmentId}/promote`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ scope_id: Number(scopeId) }),
+      },
+    ).then((row) => ({
+      promoted_resource_id: String(row.promoted_resource_id),
+    })),
 };

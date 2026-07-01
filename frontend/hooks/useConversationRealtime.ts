@@ -1,5 +1,9 @@
 import { useEffect, useRef } from 'react';
 import { getSupabaseClient } from '../supabaseClient';
+import {
+  normalizeConversationMessage,
+  type ConversationMessageRow,
+} from '../services/conversationService';
 import type { ChatMessage } from '../types';
 
 export function useConversationRealtime(
@@ -31,12 +35,16 @@ export function useConversationRealtime(
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
-        (payload) => cbRef.current(payload.new as ChatMessage),
+        (payload) =>
+          cbRef.current(normalizeConversationMessage(payload.new as ConversationMessageRow)),
       )
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
-        (payload) => updateCbRef.current?.(payload.new as ChatMessage),
+        (payload) =>
+          updateCbRef.current?.(
+            normalizeConversationMessage(payload.new as ConversationMessageRow),
+          ),
       )
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
