@@ -77,7 +77,7 @@ class GenerationOrigin:
     cost_cents: Optional[float] = None
     parent_resource_id: Optional[int] = None
     derivation_kind: Optional[str] = None
-    channel_id: Optional[int] = None
+    conversation_id: Optional[int] = None
 
 
 async def register_generated_media(
@@ -98,11 +98,11 @@ async def register_generated_media(
         "INSERT INTO public.generated_media "
         "(scope_id, creator_id, media_kind, mime, file_path, file_size_bytes, "
         " origin_kind, origin_run_id, agent_id, canvas_id, node_id, prompt, model, "
-        " provider, params, cost_cents, parent_resource_id, derivation_kind, channel_id) "
+        " provider, params, cost_cents, parent_resource_id, derivation_kind, conversation_id) "
         "VALUES (:scope_id, :creator_id, :media_kind, :mime, :file_path, :file_size_bytes, "
         " :origin_kind, :origin_run_id, :agent_id, :canvas_id, :node_id, :prompt, :model, "
         " :provider, CAST(:params AS jsonb), :cost_cents, :parent_resource_id, :derivation_kind,"
-        " :channel_id) "
+        " :conversation_id) "
         "RETURNING *",
         {
             "scope_id": scope_id,
@@ -123,7 +123,7 @@ async def register_generated_media(
             "cost_cents": origin.cost_cents,
             "parent_resource_id": origin.parent_resource_id,
             "derivation_kind": origin.derivation_kind,
-            "channel_id": origin.channel_id,
+            "conversation_id": origin.conversation_id,
         },
     )
     return row or {}
@@ -162,9 +162,9 @@ async def register_uploaded_media(
     row = await db_engine.execute_returning_one(
         "INSERT INTO public.generated_media "
         "(scope_id, creator_id, media_kind, mime, file_path, file_size_bytes, "
-        " origin_kind, channel_id) "
+        " origin_kind, conversation_id) "
         "VALUES (:scope_id, :creator_id, :media_kind, :mime, :file_path, "
-        " :file_size_bytes, :origin_kind, :channel_id) RETURNING *",
+        " :file_size_bytes, :origin_kind, :conversation_id) RETURNING *",
         {
             "scope_id": scope_id,
             "creator_id": user_id,
@@ -173,7 +173,7 @@ async def register_uploaded_media(
             "file_path": rel,
             "file_size_bytes": len(file_bytes),
             "origin_kind": origin.kind,
-            "channel_id": origin.channel_id,
+            "conversation_id": origin.conversation_id,
         },
     )
     return row or {}

@@ -1,13 +1,4 @@
-"""Unit tests for ConversationService (Task 5).
-
-TDD: write failing tests first, then implement.
-
-Required assertions per brief:
-  1. post_message raises PermissionError when user is not a member.
-  2. dispatch_summons returns [] when message["from_agent_id"] is set (anti-loop).
-  3. dispatch_summons writes an agent reply via repo.send_message with from_agent_id set.
-  4. add_agent raises PermissionError when agent_chat_caps is disabled.
-"""
+"""Unit tests for ConversationService."""
 
 from __future__ import annotations
 
@@ -44,6 +35,7 @@ def _make_repo(**overrides) -> AsyncMock:
     repo.list_conversation_agent_ids.return_value = []
     repo.edit_message.return_value = {"id": 10, "seq": 1}
     repo.soft_delete_message.return_value = {"id": 10, "seq": 1}
+    repo.add_attachments.return_value = None
     repo.increment_mentions.return_value = None
     repo.recent_messages.return_value = []
     repo.list_member_ids.return_value = ["u1", "u2"]
@@ -109,6 +101,29 @@ async def test_post_message_member_ok():
     )
     assert result["seq"] == 3
     repo.send_message.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_post_image_message_links_generated_media():
+    repo = _make_repo()
+    repo.send_message.return_value = {"id": 5, "seq": 3, "from_agent_id": None}
+
+    from app.services.conversation_service import ConversationService
+
+    svc = ConversationService(repo)
+    result = await svc.post_message(
+        conversation_id=1,
+        user_id="u1",
+        type="image",
+        body={"generated_media_id": "777", "kind": "image"},
+        parent_id=None,
+    )
+
+    assert result["seq"] == 3
+    repo.add_attachments.assert_awaited_once_with(
+        message_id=5,
+        generated_media_ids=[777],
+    )
 
 
 # ---------------------------------------------------------------------------

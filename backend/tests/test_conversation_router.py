@@ -1,4 +1,4 @@
-"""Tests for Unified Conversations router and schemas (Task 7).
+"""Tests for Unified Conversations router and schemas.
 
 Mocked tests use a FastAPI TestClient with an overridden service dependency
 and a stubbed auth user — no real DB required.
@@ -209,6 +209,90 @@ def test_create_conversation_value_error_400():
             },
         )
     assert r.status_code == 400
+
+
+def test_upload_attachment_ok():
+    save = AsyncMock(
+        return_value={
+            "id": 123,
+            "mime": "image/png",
+            "file_size_bytes": 3,
+        }
+    )
+    with _patch("app.api.conversation_router.save_chat_image", new=save):
+        client = _make_client()
+        r = client.post(
+            f"/api/v1/conversations/{_CONV_ID}/attachments",
+            files={"file": ("shot.png", b"PNG", "image/png")},
+        )
+
+    assert r.status_code == 200
+    assert r.json() == {
+        "id": "123",
+        "mime": "image/png",
+        "file_size_bytes": 3,
+        "url": "/api/v1/generated-media/123/cover",
+    }
+    save.assert_awaited_once_with(
+        conversation_id=_CONV_ID,
+        user_id=_USER_ID,
+        file_bytes=b"PNG",
+        filename="shot.png",
+        mime="image/png",
+    )
+
+
+def test_upload_attachment_rejects_non_image():
+    save = AsyncMock()
+    with _patch("app.api.conversation_router.save_chat_image", new=save):
+        client = _make_client()
+        r = client.post(
+            f"/api/v1/conversations/{_CONV_ID}/attachments",
+            files={"file": ("doc.txt", b"text", "text/plain")},
+        )
+
+    assert r.status_code == 400
+    save.assert_not_called()
+
+
+def test_promote_attachment_ok():
+    class _FakePromoter:
+        async def promote(self, *, gen_id, user_id, target_scope_id):
+            assert gen_id == 123
+            assert user_id == _USER_ID
+            assert target_scope_id == 456
+            return {"id": 789}
+
+    with _patch(
+        "app.api.conversation_router.PromoteGeneratedMediaService",
+        return_value=_FakePromoter(),
+    ):
+        client = _make_client()
+        r = client.post(
+            "/api/v1/conversations/attachments/123/promote",
+            json={"scope_id": 456},
+        )
+
+    assert r.status_code == 200
+    assert r.json() == {"promoted_resource_id": "789"}
+
+
+def test_promote_attachment_permission_error_403():
+    class _FakePromoter:
+        async def promote(self, *, gen_id, user_id, target_scope_id):
+            raise PermissionError("not authorised")
+
+    with _patch(
+        "app.api.conversation_router.PromoteGeneratedMediaService",
+        return_value=_FakePromoter(),
+    ):
+        client = _make_client()
+        r = client.post(
+            "/api/v1/conversations/attachments/123/promote",
+            json={"scope_id": 456},
+        )
+
+    assert r.status_code == 403
 
 
 # ---------------------------------------------------------------------------

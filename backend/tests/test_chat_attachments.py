@@ -1,4 +1,4 @@
-"""Test suite for Task 2 — chat uploads via the generated_media staged store.
+"""Test suite for chat uploads via the generated_media staged store.
 
 Coverage:
   Service layer (save_chat_image):
@@ -6,14 +6,14 @@ Coverage:
     2. non-member caller → PermissionError
     3. member + image → file written atomically under
        tmp_path/teams/{scope}/chat/... AND INSERT called with
-       origin_kind='chat_upload' + channel_id set
+       origin_kind='chat_upload' + conversation_id set
   Utility:
     4. _safe_filename strips directory traversal and replaces unsafe chars
 
 Mocking idiom (mirrors test_generated_media_register.py):
   - monkeypatch module-level attributes (settings, db_engine) on the
     service module so the real import graph is exercised
-  - AsyncMock for chat_repo (get_channel / is_member)
+  - AsyncMock for conv_repo (get_conversation / is_member)
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ async def test_save_chat_image_rejects_non_image_mime():
 
     with pytest.raises(ValueError, match="image/"):
         await save_chat_image(
-            channel_id=1,
+            conversation_id=1,
             user_id="user-1",
             file_bytes=b"data",
             filename="doc.pdf",
@@ -44,24 +44,26 @@ async def test_save_chat_image_rejects_non_image_mime():
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_save_chat_image_raises_for_non_member():
-    """PermissionError when caller is not a channel member."""
+    """PermissionError when caller is not a conversation member."""
     from app.services.chat.chat_attachment_service import save_chat_image
 
-    fake_chat_repo = AsyncMock()
-    fake_chat_repo.get_channel.return_value = {"id": 10, "team_id": 42}
-    fake_chat_repo.is_member.return_value = False
+    fake_conv_repo = AsyncMock()
+    fake_conv_repo.get_conversation.return_value = {"id": 10, "scope_id": 42}
+    fake_conv_repo.is_member.return_value = False
 
     with pytest.raises(PermissionError, match="not a member"):
         await save_chat_image(
-            channel_id=10,
+            conversation_id=10,
             user_id="outsider",
             file_bytes=b"\xff\xd8\xff",
             filename="photo.jpg",
             mime="image/jpeg",
-            chat_repo=fake_chat_repo,
+            conv_repo=fake_conv_repo,
         )
 
-    fake_chat_repo.is_member.assert_awaited_once_with(channel_id=10, user_id="outsider")
+    fake_conv_repo.is_member.assert_awaited_once_with(
+        conversation_id=10, user_id="outsider"
+    )
 
 
 @pytest.mark.unit
@@ -73,14 +75,14 @@ async def test_save_chat_image_writes_file_and_calls_insert(tmp_path, monkeypatc
 
     monkeypatch.setattr(gm_svc.settings, "DOWNLOAD_PATH", str(tmp_path))
 
-    fake_chat_repo = AsyncMock()
-    fake_chat_repo.get_channel.return_value = {"id": 5, "team_id": 77}
-    fake_chat_repo.is_member.return_value = True
+    fake_conv_repo = AsyncMock()
+    fake_conv_repo.get_conversation.return_value = {"id": 5, "scope_id": 77}
+    fake_conv_repo.is_member.return_value = True
 
     expected_row = {
         "id": 9876543210,
         "scope_id": 77,
-        "channel_id": 5,
+        "conversation_id": 5,
         "creator_id": "user-abc",
         "mime": "image/png",
         "file_path": "teams/77/chat/placeholder/shot.png",
@@ -101,12 +103,12 @@ async def test_save_chat_image_writes_file_and_calls_insert(tmp_path, monkeypatc
     )
 
     result = await save_chat_image(
-        channel_id=5,
+        conversation_id=5,
         user_id="user-abc",
         file_bytes=b"PNG",
         filename="shot.png",
         mime="image/png",
-        chat_repo=fake_chat_repo,
+        conv_repo=fake_conv_repo,
     )
 
     # File must be written to disk under the right path structure
@@ -119,10 +121,9 @@ async def test_save_chat_image_writes_file_and_calls_insert(tmp_path, monkeypatc
     assert dest.exists(), "file must exist on disk"
     assert dest.read_bytes() == b"PNG"
 
-    # INSERT params must carry origin_kind='chat_upload' and channel_id=5
     p = captured["params"]
     assert p["origin_kind"] == "chat_upload"
-    assert p["channel_id"] == 5
+    assert p["conversation_id"] == 5
     assert p["scope_id"] == 77
     assert p["creator_id"] == "user-abc"
     assert p["mime"] == "image/png"

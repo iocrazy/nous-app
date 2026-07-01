@@ -1,25 +1,11 @@
-"""Unified Conversations REST endpoints (Phase 1 — Task 7).
-
-Port of api/chat_router.py with the Rename Map applied:
-  /chat/channels           → /conversations
-  channel_id               → conversation_id
-  content_type             → type
-  reply_to_id              → parent_id
-  get_chat_service         → get_conversation_service
-  dispatch_summons(channel_id=...) → dispatch_summons(conversation_id=...)
-
-PermissionError  → HTTP 403
-ValueError       → HTTP 400
-
-Attachment upload/promote endpoints are Task 9 — not included here.
-"""
+"""Unified Conversations REST endpoints."""
 
 from __future__ import annotations
 
 import logging
 from typing import Any, Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
 
 from app.core.deps import AuthDep
@@ -32,7 +18,11 @@ from app.schemas.conversation import (
     MessageCreate,
     MessageOut,
 )
+from app.services.chat.chat_attachment_service import save_chat_image
 from app.services.conversation_service import get_conversation_service
+from app.services.library.promote_generated_media_service import (
+    PromoteGeneratedMediaService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -231,3 +221,69 @@ async def delete_message(conversation_id: int, message_id: int, auth: AuthDep):
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     return row
+
+
+class PromoteAttachmentBody(BaseModel):
+    scope_id: int
+
+
+@router.post("/{conversation_id}/attachments")
+async def upload_attachment(
+    conversation_id: int,
+    auth: AuthDep,
+    file: UploadFile,
+) -> dict:
+    """Upload an image into the staged generated_media store for this conversation.
+
+    Returns: {id, mime, file_size_bytes, url}
+    Errors:  400 for non-image mime or unknown conversation; 403 for non-members.
+    """
+    mime = file.content_type or ""
+    if not mime.startswith("image/"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Only image/* uploads are supported; got {mime!r}",
+        )
+    file_bytes = await file.read()
+    try:
+        row = await save_chat_image(
+            conversation_id=conversation_id,
+            user_id=auth.user_id,
+            file_bytes=file_bytes,
+            filename=file.filename or "upload",
+            mime=mime,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    return {
+        "id": str(row["id"]),
+        "mime": row["mime"],
+        "file_size_bytes": row["file_size_bytes"],
+        "url": f"/api/v1/generated-media/{row['id']}/cover",
+    }
+
+
+@router.post("/attachments/{attachment_id}/promote")
+async def promote_attachment(
+    attachment_id: int,
+    body: PromoteAttachmentBody,
+    auth: AuthDep,
+) -> dict:
+    """Promote a staged chat attachment into a first-class resource.
+
+    Returns: {promoted_resource_id}
+    Errors:  400 if generation not found or missing file; 403 for auth failures.
+    """
+    try:
+        resource = await PromoteGeneratedMediaService().promote(
+            gen_id=attachment_id,
+            user_id=auth.user_id,
+            target_scope_id=body.scope_id,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    return {"promoted_resource_id": str(resource["id"])}

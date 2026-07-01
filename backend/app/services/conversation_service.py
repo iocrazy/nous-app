@@ -1,28 +1,4 @@
-"""Unified Conversation orchestration + in-app authorization (Phase 1).
-
-Port of chat_service.py onto ConversationRepository (Task 4).
-
-Rename Map applied throughout:
-  ChatService             → ConversationService
-  ChatRepository          → ConversationRepository
-  channel_id              → conversation_id
-  channel["team_id"]      → conversation["scope_id"]
-  content_type            → type
-  reply_to_id             → parent_id
-  from_bot_agent_id       → from_agent_id
-  _CHANNEL_TURN_CAP       → _CONVERSATION_TURN_CAP
-  _channel_agent_semaphores → _conversation_agent_semaphores
-  get_chat_service        → get_conversation_service
-
-Forward dependency (Task 6):
-  run_conversation_agent_turn is imported from a stub module
-  (app.services.chat.conversation_agent_turn) at the top level.
-  Task 6 will replace the stub body.  Tests can monkeypatch via:
-    monkeypatch.setattr(
-        app.services.chat.conversation_agent_turn,
-        "run_conversation_agent_turn", fake_fn
-    )
-"""
+"""Unified Conversation orchestration and in-app authorization."""
 
 from __future__ import annotations
 
@@ -116,6 +92,17 @@ class ConversationService:
             body=body,
             parent_id=parent_id,
         )
+        if type == "image" and body.get("generated_media_id"):
+            try:
+                await self._repo.add_attachments(
+                    message_id=int(msg["id"]),
+                    generated_media_ids=[int(body["generated_media_id"])],
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"[post_message] add_attachments failed: "
+                    f"conversation={conversation_id} error={exc!r}"
+                )
         if type == "text":
             try:
                 raw = body.get("mention_user_ids")

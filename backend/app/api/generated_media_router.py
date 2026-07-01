@@ -102,11 +102,13 @@ async def delete_generation(gen_id: int, auth: AuthDep) -> dict:
 
 @router.post("/{gen_id}/promote")
 async def promote_generation(gen_id: int, auth: AuthDep) -> dict:
-    scope_id = await _scope(auth)
+    target_scope_id = await _scope(auth)
     try:
         resource = await PromoteGeneratedMediaService().promote(
-            gen_id=gen_id, user_id=str(auth.user_id), scope_id=scope_id
+            gen_id=gen_id, user_id=str(auth.user_id), target_scope_id=target_scope_id
         )
-    except ValueError:
-        raise HTTPException(status_code=404, detail="generation not found")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
     return {"data": {"promoted_resource_id": str(resource["id"])}}

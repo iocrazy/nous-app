@@ -55,8 +55,8 @@ async def test_promote_route_returns_resource_id(monkeypatch, client):
         return 42
 
     class _FakeSvc:
-        async def promote(self, *, gen_id, user_id, scope_id):
-            assert scope_id == 42
+        async def promote(self, *, gen_id, user_id, target_scope_id):
+            assert target_scope_id == 42
             return {"id": 555}
 
     monkeypatch.setattr(r, "_scope", _fake_scope)
@@ -77,7 +77,7 @@ async def test_promote_route_404_when_not_in_scope(monkeypatch, client):
         return 99
 
     class _FakeSvcNotFound:
-        async def promote(self, *, gen_id, user_id, scope_id):
+        async def promote(self, *, gen_id, user_id, target_scope_id):
             raise ValueError("generation not found")
 
     monkeypatch.setattr(r, "_scope", _fake_scope)
