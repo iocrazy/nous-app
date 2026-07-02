@@ -128,17 +128,6 @@ class Settings(BaseSettings):
         "Covers parsed_media CRUD + lists + search + statistics; the 9 "
         "wrapper methods route through the ORM overrides via Python MRO)",
     )
-    USE_ORM_STYLE_TEMPLATES: bool = Field(
-        default=False,
-        description="Route StyleTemplateRepository through the SQLAlchemy 2.0 "
-        "ORM session layer (Batch L1 — replaces the supabase-py REST path for "
-        "the style_templates table). Strategy C: created_by uuid → str at the "
-        "dict boundary (REST-parity); bigint id / team_id stay native int; "
-        "created_at / updated_at → ISO str. Covers get_by_id / list_templates "
-        "reads + create / update / hard_delete writes (commit via "
-        "write_scope()). NOTE: style_templates_router is a 301 redirect to "
-        "/skills, so this repo has no live call sites today.",
-    )
     USE_ORM_LIBRARIES: bool = Field(
         default=False,
         description="Route LibrariesRepository through the SQLAlchemy 2.0 ORM "
@@ -149,21 +138,6 @@ class Settings(BaseSettings):
         "Covers get_by_id / list_by_scope reads + create / update / delete "
         "writes (commit via write_scope(); create/update return {} on empty "
         "per REST contract).",
-    )
-    USE_ORM_NOTIFICATIONS: bool = Field(
-        default=False,
-        description="Route NotificationRepository through the SQLAlchemy 2.0 "
-        "ORM session layer (Batch L1b — replaces the supabase-py REST path for "
-        "the notifications / user_notifications / team_members tables). "
-        "Strategy C: bigint id / notification_id / team_id stay native int (the "
-        "5.3 trap — the team-membership filter does `n['team_id'] in team_ids` "
-        "with int both sides); created_at → ISO str; created_by uuid → str for "
-        "shape parity (router serializes straight to HTTP; no type-sensitive "
-        "Python consumer). user_id is an input only. Covers get_user_"
-        "notifications (multi-table read + read-status join) / get_unread_count "
-        "/ mark_as_read / mark_all_as_read writes (upsert, commit via "
-        "write_scope()). delete_notification preserves the legacy graceful "
-        "no-op contract (writes a phantom dismissed_at column → returns False).",
     )
     USE_ORM_SCRIPTS: bool = Field(
         default=False,
@@ -971,19 +945,6 @@ class Settings(BaseSettings):
         "USE_ORM_POINTS). ⚠️ CONCERN (pre-existing, NOT fixed): confirm_order/"
         "refund_order do update_order THEN add_points as two un-transactioned awaits "
         "— cross-repo non-atomic; flagged for a human. Inert; flip false to revert.",
-    )
-    USE_ORM_COLLECTIONS: bool = Field(
-        default=False,
-        description="Route CollectionsRepository (smart_collections CRUD — the "
-        "SmartCollections model already existed in the reflected set) through the "
-        "SQLAlchemy 2.0 ORM (deferred-repo finish wave). Strategy-C value-type "
-        "parity: id (bigint snowflake) → NATIVE int (PostgREST returned a JSON "
-        "number → int; same type); user_id is an INPUT (caller passes str) and "
-        "the returned dicts carry it back as-is; rules / cached_video_ids (jsonb / "
-        "array) → native dict/list; created_at / updated_at / cached_at "
-        "(timestamptz) → ISO str (the router/UI read them as strings, REST "
-        "returned ISO). Writes COMMIT via write_scope(); update/delete keep the "
-        "WHERE user_id == owner ownership filter. Inert; flip false to revert.",
     )
     USE_ORM_USER_MCP_SERVERS: bool = Field(
         default=False,

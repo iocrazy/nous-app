@@ -1,50 +1,65 @@
 """Smart-collection cache column drift regression.
 
 The `smart_collections` table has a `cached_video_ids` column (ARRAY bigint);
-there is no `cached_media_ids` column. update_cache() previously wrote the
-phantom key, which 500'd at PostgREST, and the service read it back from the
-same phantom key, so the 5-minute cache fast-path never triggered.
+there is no `cached_media_ids` column. update_cache() must write the real
+column, and the service must read it back from the same key so the 5-minute
+cache fast-path triggers. (Historically the phantom `cached_media_ids` key
+500'd at PostgREST and broke the fast-path; the column drift is now
+structurally impossible since update_cache targets the mapped ORM attribute.)
 """
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock
 
 import pytest
 
+from app.repositories import collections_repository as repo_mod
 from app.repositories.collections_repository import CollectionsRepository
 from app.services.library.collections_service import CollectionsService
 
 
 @pytest.mark.asyncio
-async def test_update_cache_writes_cached_video_ids_not_phantom():
+async def test_update_cache_writes_cached_video_ids_not_phantom(monkeypatch):
+    """update_cache() must SET the real cached_video_ids column, never the
+    phantom cached_media_ids. The ORM body issues an UPDATE via write_scope();
+    we mock the session to capture the emitted statement and its bind params."""
     repo = CollectionsRepository()
-    captured = {}
+    captured: dict = {}
 
-    # Mock the Supabase query builder chain:
-    # table.update(payload).eq("id", id).execute()
-    builder = MagicMock()
+    class _FakeScalars:
+        def first(self):
+            return None
 
-    def _update(payload):
-        captured["payload"] = payload
-        return builder
+    class _FakeResult:
+        def scalars(self):
+            return _FakeScalars()
 
-    builder.update.side_effect = _update
-    builder.eq.return_value = builder
-    builder.execute = AsyncMock(return_value=MagicMock(data=[{"id": "c1"}]))
+    class _FakeSession:
+        async def execute(self, stmt):
+            captured["stmt"] = stmt
+            return _FakeResult()
 
-    with patch.object(repo, "_get_table", AsyncMock(return_value=builder)):
-        await repo.update_cache("c1", media_ids=[10, 20, 30], count=3)
+    @asynccontextmanager
+    async def _fake_write_scope():
+        yield _FakeSession()
 
-    payload = captured["payload"]
+    # update_cache imports write_scope at module scope, so patch it there.
+    monkeypatch.setattr(repo_mod, "write_scope", _fake_write_scope)
+
+    await repo.update_cache("12345", media_ids=[10, 20, 30], count=3)
+
+    stmt = captured["stmt"]
+    sql = str(stmt)
     # The real column is cached_video_ids; the phantom one must be gone.
-    assert "cached_video_ids" in payload
-    assert "cached_media_ids" not in payload
-    # Value shape matches ARRAY(BigInteger): a list of int ids.
-    assert payload["cached_video_ids"] == [10, 20, 30]
-    # Companion cache columns preserved.
-    assert payload["cached_count"] == 3
-    assert "cached_at" in payload
+    assert "cached_video_ids" in sql
+    assert "cached_media_ids" not in sql
+    # Bind params carry the ARRAY(BigInteger) value + companion cache columns.
+    params = stmt.compile().params
+    assert params["cached_video_ids"] == [10, 20, 30]
+    assert params["cached_count"] == 3
+    assert "cached_at" in params
 
 
 @pytest.mark.asyncio

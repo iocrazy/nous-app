@@ -1,4 +1,4 @@
-"""Integration tests for NotificationRepositoryOrm (Batch L1b) against real PG.
+"""Integration tests for the ORM NotificationRepository against real PG.
 
 Proves the REST → ORM swap is invisible AND that STRATEGY-C value-type parity
 holds for the notifications / user_notifications surface:
@@ -96,11 +96,9 @@ async def _seed_notification(conn, **overrides) -> dict:
 
 
 def _repo():
-    from app.repositories.notification_repository_orm import (
-        NotificationRepositoryOrm,
-    )
+    from app.repositories.notification_repository import NotificationRepository
 
-    return NotificationRepositoryOrm()
+    return NotificationRepository()
 
 
 # ─── Reads + strategy-C parity ──────────────────────────────────────────
@@ -225,34 +223,13 @@ async def test_delete_notification_legacy_noop_returns_false(
     assert result is False
 
 
-# ─── Flag-off legacy parity ─────────────────────────────────────────────
+# ─── Factory (ORM-only, post-rollout) ───────────────────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    from app.core.config import settings
+async def test_factory_returns_orm_repository():
+    """Per-domain rollout flag retired → factory unconditionally returns the
+    ORM-backed NotificationRepository."""
     from app.repositories import notification_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_NOTIFICATIONS", False)
     repo = mod.get_notification_repository()
     assert type(repo) is mod.NotificationRepository
-    from app.repositories.notification_repository_orm import (
-        NotificationRepositoryOrm,
-    )
-
-    assert not isinstance(repo, NotificationRepositoryOrm)
-
-
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories import notification_repository as mod
-    from app.repositories.notification_repository_orm import (
-        NotificationRepositoryOrm,
-    )
-
-    monkeypatch.setattr(settings, "USE_ORM_NOTIFICATIONS", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    repo = mod.get_notification_repository()
-    assert isinstance(repo, NotificationRepositoryOrm)

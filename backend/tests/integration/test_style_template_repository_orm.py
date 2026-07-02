@@ -1,4 +1,4 @@
-"""Integration tests for StyleTemplateRepositoryOrm (Batch L1) against real PG.
+"""Integration tests for the ORM StyleTemplateRepository against real PG.
 
 Proves the REST → ORM swap is invisible to call sites AND that STRATEGY-C
 value-type parity holds for the style_templates table:
@@ -97,11 +97,9 @@ async def _seed(conn, **overrides) -> dict:
 
 
 def _repo():
-    from app.repositories.style_template_repository_orm import (
-        StyleTemplateRepositoryOrm,
-    )
+    from app.repositories.style_template_repository import StyleTemplateRepository
 
-    return StyleTemplateRepositoryOrm()
+    return StyleTemplateRepository()
 
 
 # ─── Reads ──────────────────────────────────────────────────────────────
@@ -264,36 +262,13 @@ async def test_delete_commits(integration_db_url, patched_engine, cleanup_test_r
     assert still == 0
 
 
-# ─── Flag-off legacy parity ─────────────────────────────────────────────
+# ─── Factory (ORM-only, post-rollout) ───────────────────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    """USE_ORM_STYLE_TEMPLATES off (default) → legacy REST repo."""
-    from app.core.config import settings
+async def test_factory_returns_orm_repository():
+    """Per-domain rollout flag retired → factory unconditionally returns the
+    ORM-backed StyleTemplateRepository."""
     from app.repositories import style_template_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_STYLE_TEMPLATES", False)
     repo = mod.get_style_template_repository()
     assert type(repo) is mod.StyleTemplateRepository
-    from app.repositories.style_template_repository_orm import (
-        StyleTemplateRepositoryOrm,
-    )
-
-    assert not isinstance(repo, StyleTemplateRepositoryOrm)
-
-
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    """USE_ORM_STYLE_TEMPLATES on + engine configured → ORM subclass."""
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories import style_template_repository as mod
-    from app.repositories.style_template_repository_orm import (
-        StyleTemplateRepositoryOrm,
-    )
-
-    monkeypatch.setattr(settings, "USE_ORM_STYLE_TEMPLATES", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    repo = mod.get_style_template_repository()
-    assert isinstance(repo, StyleTemplateRepositoryOrm)
