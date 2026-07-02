@@ -17,9 +17,6 @@ interface FolderInfoPanelProps {
   readOnly?: boolean;
   onClose: () => void;
   onRename: (name: string) => void;
-  /** Island shell: render transparently — the info island already paints the
-   *  card surface, so a bg here would be a box inside a box. */
-  island?: boolean;
 }
 
 function formatDate(dateStr: string | null | undefined): string {
@@ -33,12 +30,12 @@ function formatDate(dateStr: string | null | undefined): string {
   });
 }
 
-const InfoRow = ({ label, value, island = false }: { label: string; value?: string | null; island?: boolean }) => {
+const InfoRow = ({ label, value }: { label: string; value?: string | null }) => {
   if (!value) return null;
   return (
     <div className="flex justify-between items-center py-1.5">
-      <span className={`text-xs ${island ? 'text-content-3' : 'text-ink-500'}`}>{label}</span>
-      <span className={`text-xs ${island ? 'text-content-2' : 'text-ink-300'} text-right`}>{value}</span>
+      <span className="text-xs text-content-3">{label}</span>
+      <span className="text-xs text-content-2 text-right">{value}</span>
     </div>
   );
 };
@@ -49,7 +46,6 @@ export const FolderInfoPanel: React.FC<FolderInfoPanelProps> = ({
   readOnly = false,
   onClose,
   onRename,
-  island = false,
 }) => {
   const { t } = useTranslation();
 
@@ -81,28 +77,26 @@ export const FolderInfoPanel: React.FC<FolderInfoPanelProps> = ({
   const hasPreview = previewItems && previewItems.length > 0;
   const previewSlots = previewItems ? previewItems.slice(0, 4) : [];
 
-  // Island redesign: align neutral text/border to the mock --content/--line ladder.
-  // Classic (island=false) keeps the exact original ink classes for D12 byte-identical render.
-  const cPrimary = island ? 'text-content' : 'text-ink-50';
-  const cText400 = island ? 'text-content-2' : 'text-ink-400';
-  const cLabel = island ? 'text-content-3' : 'text-ink-500';
-  const cFaint = island ? 'text-content-4' : 'text-ink-600';
-  const cHoverPrimary = island ? 'hover:text-content' : 'hover:text-ink-50';
-  const cGroupHover400 = island ? 'group-hover:text-content-2' : 'group-hover:text-ink-400';
-  const cBorderHeader = island ? 'border-line' : 'border-ink-800';
-  const cBorderSection = island ? 'border-line' : 'border-ink-800/60';
-  // Surface tokens — mirror the resource/download panels: island paints the
-  // preview/placeholder/input/hover surfaces with --island-2; classic keeps the
-  // exact original ink surfaces so D12 stays byte-identical when island=false.
-  const cHoverSurface = island ? 'hover:bg-island-2' : 'hover:bg-ink-800';
-  const cPreviewBg = island ? 'bg-island-2' : 'bg-ink-800/50';
-  const cTileBg = island ? 'bg-island-2' : 'bg-ink-800';
-  const cFieldBg = island ? 'bg-island-2' : 'bg-ink-800';
+  // Island redesign: neutral text/border aligned to the mock --content/--line ladder.
+  const cPrimary = 'text-content';
+  const cText400 = 'text-content-2';
+  const cLabel = 'text-content-3';
+  const cFaint = 'text-content-4';
+  const cHoverPrimary = 'hover:text-content';
+  const cGroupHover400 = 'group-hover:text-content-2';
+  const cBorderHeader = 'border-line';
+  const cBorderSection = 'border-line';
+  // Surface tokens — mirror the resource/download panels: preview/placeholder/
+  // input/hover surfaces painted with --island-2.
+  const cHoverSurface = 'hover:bg-island-2';
+  const cPreviewBg = 'bg-island-2';
+  const cTileBg = 'bg-island-2';
+  const cFieldBg = 'bg-island-2';
 
   return (
-    <div className={`flex-1 min-w-0 h-full overflow-y-auto ${island ? '' : 'bg-ink-900'}`}>
+    <div className="flex-1 min-w-0 h-full overflow-y-auto">
       {/* Header */}
-      <div className={`flex items-center justify-between p-4 border-b ${cBorderHeader} sticky top-0 z-10 ${island ? 'bg-island' : 'bg-ink-900'}`}>
+      <div className={`flex items-center justify-between p-4 border-b ${cBorderHeader} sticky top-0 z-10 bg-island`}>
         <h3 className={`text-sm font-semibold ${cPrimary}`}>{t('resources.folderInfoPanel.title')}</h3>
         <button
           onClick={onClose}
@@ -186,23 +180,19 @@ export const FolderInfoPanel: React.FC<FolderInfoPanelProps> = ({
             <InfoRow
               label={t('resources.folderInfoPanel.itemCount', 'Items')}
               value={String(folder.resource_count)}
-              island={island}
             />
           )}
           <InfoRow
             label={t('resources.infoPanel.type')}
             value={t('resources.folderInfoPanel.typeFolder', 'Folder')}
-            island={island}
           />
           <InfoRow
             label={t('resources.infoPanel.created')}
             value={formatDate(folder.created_at)}
-            island={island}
           />
           <InfoRow
             label={t('resources.infoPanel.modified')}
             value={formatDate(folder.updated_at)}
-            island={island}
           />
         </div>
       </div>

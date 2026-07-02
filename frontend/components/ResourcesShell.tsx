@@ -62,10 +62,10 @@ export const ResourcesShell: React.FC<ResourcesShellProps> = ({ sidebarProps, in
 
   return (
     <div className="flex h-full min-h-0">
-      <ResourcesSidebar {...sidebarProps} island />
+      <ResourcesSidebar {...sidebarProps} />
       <div className="flex-1 min-w-0 flex flex-col">{children}</div>
       {!isDownloadsView && infoIslandEl && createPortal(
-        <ResourcesInfoPanelWrapper island {...infoPanelProps} />,
+        <ResourcesInfoPanelWrapper {...infoPanelProps} />,
         infoIslandEl,
       )}
     </div>

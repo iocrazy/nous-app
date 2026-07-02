@@ -31,22 +31,20 @@ export interface ResourcesSidebarProps {
   onSmartFolderContextMenu: (e: React.MouseEvent, sf: SmartCollection) => void;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
-  /** Rendered inside the island work-island (no fixed global TopBar to clear). */
-  island?: boolean;
 }
 
 // ─── Helper ────────────────────────────────────────────
 
-const sidebarItemClass = (active: boolean, island = false) =>
+const sidebarItemClass = (active: boolean) =>
   `w-full flex items-center gap-3 px-3 py-2 text-[13px] rounded-lg transition-colors text-left cursor-pointer select-none ${
     active
-      ? `${island ? 'bg-island-2' : 'bg-ink-800/80'} ${island ? 'text-content' : 'text-ink-50'} font-medium`
-      : `${island ? 'text-content-2' : 'text-ink-400'} ${island ? 'hover:bg-island-2' : 'hover:bg-ink-800/50'} ${island ? 'hover:text-content-2' : 'hover:text-ink-200'}`
+      ? 'bg-island-2 text-content font-medium'
+      : 'text-content-2 hover:bg-island-2 hover:text-content-2'
   }`;
 
 // Section label (island redesign D3) — visual grouping only, no behavior.
-const SectionLabel: React.FC<{ children: React.ReactNode; island?: boolean }> = ({ children, island = false }) => (
-  <div className={`px-3 pt-1.5 pb-1 text-[10px] font-semibold uppercase tracking-[0.08em] ${island ? 'text-content-4' : 'text-ink-600'} select-none`}>
+const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div className="px-3 pt-1.5 pb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-content-4 select-none">
     {children}
   </div>
 );
@@ -64,7 +62,6 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
   onSmartFolderContextMenu,
   collapsed = false,
   onToggleCollapse,
-  island = false,
 }) => {
   const { t } = useTranslation();
   const {
@@ -87,26 +84,25 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
     downloadsCount,
   } = useResourcesContext();
 
-  // Island redesign: align neutral ink surfaces/borders/text to the mock
-  // --content/--line/--island ladder. Classic (island=false) keeps the exact
-  // original ink classes so D12 stays byte-identical.
-  const cText200 = island ? 'text-content-2' : 'text-ink-200';
-  const cText400 = island ? 'text-content-2' : 'text-ink-400';
-  const cText500 = island ? 'text-content-3' : 'text-ink-500';
-  const cText600 = island ? 'text-content-4' : 'text-ink-600';
-  const cHover200 = island ? 'hover:text-content-2' : 'hover:text-ink-200';
-  const cHover300 = island ? 'hover:text-content-2' : 'hover:text-ink-300';
-  const cHover400 = island ? 'hover:text-content-2' : 'hover:text-ink-400';
-  const cBadgeBg = island ? 'bg-island-2' : 'bg-ink-800';
-  const cHandleBg = island ? 'bg-island-2' : 'bg-ink-800/80';
-  const cHoverSurface800 = island ? 'hover:bg-island-2' : 'hover:bg-ink-800';
-  const cHoverSurface700 = island ? 'hover:bg-island-2' : 'hover:bg-ink-700';
-  const cBorderRail = island ? 'border-line' : 'border-ink-800/40';
-  const cBorderSection = island ? 'border-line' : 'border-ink-800/60';
-  const cBorderChild = island ? 'border-line' : 'border-ink-700/40';
-  const cInputBg = island ? 'bg-island-2' : 'bg-ink-900';
-  const cInputBorder = island ? 'border-line' : 'border-ink-700';
-  const cPlaceholder = island ? 'placeholder-content-4' : 'placeholder-ink-500';
+  // Island redesign: neutral ink surfaces/borders/text aligned to the mock
+  // --content/--line/--island ladder.
+  const cText200 = 'text-content-2';
+  const cText400 = 'text-content-2';
+  const cText500 = 'text-content-3';
+  const cText600 = 'text-content-4';
+  const cHover200 = 'hover:text-content-2';
+  const cHover300 = 'hover:text-content-2';
+  const cHover400 = 'hover:text-content-2';
+  const cBadgeBg = 'bg-island-2';
+  const cHandleBg = 'bg-island-2';
+  const cHoverSurface800 = 'hover:bg-island-2';
+  const cHoverSurface700 = 'hover:bg-island-2';
+  const cBorderRail = 'border-line';
+  const cBorderSection = 'border-line';
+  const cBorderChild = 'border-line';
+  const cInputBg = 'bg-island-2';
+  const cInputBorder = 'border-line';
+  const cPlaceholder = 'placeholder-content-4';
 
   // ── Local UI state ──
   const [librariesExpanded, setLibrariesExpanded] = useState(true);
@@ -154,7 +150,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
         )}
       </div>
     ) : (
-    <div className={`group hidden md:flex md:static w-52 shrink-0 border-r ${cBorderRail} flex-col ${island ? 'pt-4' : 'pt-16'}`} style={{ position: 'relative' }}>
+    <div className={`group hidden md:flex md:static w-52 shrink-0 border-r ${cBorderRail} flex-col pt-4`} style={{ position: 'relative' }}>
       {/* Header */}
       <div className="px-4 pt-4 pb-3">
         <span className={`text-sm font-semibold ${cText200}`}>{t('sidebar.resources', 'Resources')}</span>
@@ -162,7 +158,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
       {/* Navigation */}
       <div className="flex-1 overflow-y-auto px-2 pb-4 space-y-0.5">
         {/* ── Locations (island redesign D3: high-frequency content first) ── */}
-        <SectionLabel island={island}>{t('resources.sectionLocations', 'Locations')}</SectionLabel>
+        <SectionLabel>{t('resources.sectionLocations', 'Locations')}</SectionLabel>
 
         {/* ── Main section: Team Libraries / Personal Resources ── */}
         {!isPersonal ? (
@@ -171,7 +167,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
             <div className="flex items-center justify-between pr-1">
               <button
                 onClick={() => setLibrariesExpanded(!librariesExpanded)}
-                className={sidebarItemClass(isResourcesView && !!selectedLibraryId && !librariesExpanded, island)}
+                className={sidebarItemClass(isResourcesView && !!selectedLibraryId && !librariesExpanded)}
               >
                 <BookOpen size={15} className="shrink-0 opacity-70" />
                 <span className="flex-1 truncate">{t('resources.library')}</span>
@@ -199,7 +195,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
                   <button
                     key={lib.id}
                     onClick={() => navigate(resPath(`/resources/library/${lib.id}`))}
-                    className={`group ${sidebarItemClass(isResourcesView && selectedLibraryId === String(lib.id), island)}`}
+                    className={`group ${sidebarItemClass(isResourcesView && selectedLibraryId === String(lib.id))}`}
                   >
                     <BookOpen size={14} className="shrink-0 opacity-60" />
                     <span className="truncate flex-1">{lib.name}</span>
@@ -255,7 +251,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
             {/* Personal mode: My Downloads + My Uploads */}
             <button
               onClick={() => navigate(resPath('/resources/downloads'))}
-              className={sidebarItemClass(isDownloadsView, island)}
+              className={sidebarItemClass(isDownloadsView)}
             >
               <Download size={15} className="shrink-0 opacity-70" />
               <span className="flex-1 truncate">{t('resources.downloads')}</span>
@@ -270,7 +266,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
                 onClick={() => navigate(resPath('/resources'))}
                 onDragOver={onSidebarDragOver}
                 onDrop={(e) => onSidebarDrop(e, null)}
-                className={sidebarItemClass(isResourcesView && selectedFolderId === null && !selectedSmartFolderId, island)}
+                className={sidebarItemClass(isResourcesView && selectedFolderId === null && !selectedSmartFolderId)}
               >
                 <FolderOpen size={15} className="shrink-0 opacity-70" />
                 <span className="flex-1 truncate">{t('resources.myResources')}</span>
@@ -293,7 +289,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
             {/* Project Assets — canvas-grouped assets + chat uploads */}
             <button
               onClick={() => navigate(resPath('/resources/project-assets'))}
-              className={sidebarItemClass(isProjectAssetsView, island)}
+              className={sidebarItemClass(isProjectAssetsView)}
             >
               <Layers size={15} className="shrink-0 opacity-70" />
               <span className="flex-1 truncate">{t('resources.projectAssets')}</span>
@@ -309,7 +305,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
         <div className="flex items-center justify-between pr-1">
           <button
             onClick={() => setSmartFoldersExpanded(!smartFoldersExpanded)}
-            className={sidebarItemClass(isResourcesView && !!selectedSmartFolderId && !smartFoldersExpanded, island)}
+            className={sidebarItemClass(isResourcesView && !!selectedSmartFolderId && !smartFoldersExpanded)}
           >
             <Zap size={15} className="shrink-0 opacity-70" />
             <span className="flex-1 truncate">{t('resources.smartFolders')}</span>
@@ -342,7 +338,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
                   e.stopPropagation();
                   onSmartFolderContextMenu(e, sf);
                 }}
-                className={`group ${sidebarItemClass(isResourcesView && selectedSmartFolderId === String(sf.id), island)}`}
+                className={`group ${sidebarItemClass(isResourcesView && selectedSmartFolderId === String(sf.id))}`}
               >
                 <Zap size={14} className="shrink-0 opacity-60" />
                 <span className="truncate flex-1">{sf.name}</span>
@@ -377,7 +373,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
       <div className={`px-2 pb-3 pt-2 border-t ${cBorderSection} space-y-0.5`}>
         <button
           onClick={() => navigate(resPath('/resources/shared'))}
-          className={sidebarItemClass(isSharedView, island)}
+          className={sidebarItemClass(isSharedView)}
         >
           <Share2 size={15} className="shrink-0 opacity-70" />
           <span className="flex-1">{t('resources.sharedManagement')}</span>
@@ -385,7 +381,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
 
         <button
           onClick={() => navigate(resPath('/resources/recycle'))}
-          className={sidebarItemClass(isRecycleView, island)}
+          className={sidebarItemClass(isRecycleView)}
         >
           <Trash2 size={15} className="shrink-0 opacity-70" />
           <span className="flex-1">{t('resources.recycleBin')}</span>

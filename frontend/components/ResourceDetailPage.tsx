@@ -195,8 +195,7 @@ const FilePreview: React.FC<{
   resource: Resource;
   fileUrl: string | null;
   onCoverUpdated?: (updated: Resource) => void;
-  island?: boolean;
-}> = ({ resource, fileUrl, onCoverUpdated, island }) => {
+}> = ({ resource, fileUrl, onCoverUpdated }) => {
   const { t } = useTranslation();
   const { addToast } = useToast();
   const mime = resource.mime_type || '';
@@ -221,8 +220,8 @@ const FilePreview: React.FC<{
     return (
       <div className="flex flex-col items-center gap-4 text-center">
         <IconComponent size={64} className={`${color} opacity-60`} />
-        <p className={`${island ? 'text-content-2' : 'text-ink-400'} text-sm`}>{resource.filename}</p>
-        <p className={`${island ? 'text-content-3' : 'text-ink-500'} text-xs`}>{t('resources.noPreview')}</p>
+        <p className="text-content-2 text-sm">{resource.filename}</p>
+        <p className="text-content-3 text-xs">{t('resources.noPreview')}</p>
       </div>
     );
   }
@@ -320,8 +319,8 @@ const FilePreview: React.FC<{
   return (
     <div className="flex flex-col items-center gap-4 text-center">
       <IconComponent size={64} className={`${color} opacity-60`} />
-      <p className={`${island ? 'text-content-2' : 'text-ink-300'} font-medium`}>{resource.filename}</p>
-      <p className={`${island ? 'text-content-3' : 'text-ink-500'} text-sm`}>{t('resources.noPreview')}</p>
+      <p className="text-content-2 font-medium">{resource.filename}</p>
+      <p className="text-content-3 text-sm">{t('resources.noPreview')}</p>
       <a
         href={fileUrl}
         download
@@ -1731,11 +1730,11 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             </div>
           ) : isAudio && fileUrl ? (
             <div className="w-full h-full">
-              <FilePreview resource={resource} fileUrl={fileUrl} onCoverUpdated={setResource} island={true} />
+              <FilePreview resource={resource} fileUrl={fileUrl} onCoverUpdated={setResource} />
             </div>
           ) : (
             <div className="p-6">
-              <FilePreview resource={resource} fileUrl={fileUrl} onCoverUpdated={setResource} island={true} />
+              <FilePreview resource={resource} fileUrl={fileUrl} onCoverUpdated={setResource} />
             </div>
           )}
           </div>
