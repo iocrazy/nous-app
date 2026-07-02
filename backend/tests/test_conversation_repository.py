@@ -361,6 +361,37 @@ async def test_add_attachments_empty_list_is_noop() -> None:
     assert len(conn.calls) == 0
 
 
+# ── messages_in_range ─────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_messages_in_range_bounds_and_excludes_deleted() -> None:
+    """messages_in_range must bound seq on both ends, exclude soft-deleted rows,
+    and return ascending (oldest-first) order — the compaction feed's contract."""
+    from app.repositories.conversation_repository import ConversationRepository
+
+    captured: dict = {}
+
+    async def fake_fetch_all(sql: str, params: dict | None = None) -> list:
+        captured["sql"] = sql
+        captured["params"] = params
+        return []
+
+    repo = ConversationRepository()
+    with patch("app.db.engine.fetch_all", fake_fetch_all):
+        result = await repo.messages_in_range(conversation_id=1, from_seq=5, to_seq=40)
+
+    assert result == []
+    sql = captured["sql"]
+    assert "seq >= :from_seq" in sql and "seq <= :to_seq" in sql
+    assert "deleted_at IS NULL" in sql
+    assert "ORDER BY seq ASC" in sql
+    params = captured["params"]
+    assert params["from_seq"] == 5
+    assert params["to_seq"] == 40
+    assert params["cid"] == 1
+
+
 # ── name / title bridge ───────────────────────────────────────────────────────
 
 

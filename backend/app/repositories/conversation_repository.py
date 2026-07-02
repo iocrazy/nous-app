@@ -409,6 +409,37 @@ class ConversationRepository:
         )
         return [dict(r) for r in reversed(rows)]
 
+    async def messages_in_range(
+        self,
+        *,
+        conversation_id: int,
+        from_seq: int,
+        to_seq: int,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Ascending non-deleted messages with from_seq <= seq <= to_seq.
+
+        Compaction feed (Phase 1.5): the caller summarizes this span and
+        advances conversation_memory.last_seq_summarized to to_seq.
+        """
+        rows = await db_engine.fetch_all(
+            """
+            SELECT seq, sender_type, type, body, created_at
+              FROM public.messages
+             WHERE conversation_id = :cid AND seq >= :from_seq AND seq <= :to_seq
+               AND deleted_at IS NULL
+             ORDER BY seq ASC
+             LIMIT :limit
+            """,
+            {
+                "cid": _bigint(conversation_id),
+                "from_seq": _bigint(from_seq),
+                "to_seq": _bigint(to_seq),
+                "limit": limit,
+            },
+        )
+        return [dict(r) for r in rows]
+
     # ── Mention fanout ────────────────────────────────────────────────────────
 
     async def increment_mentions(
