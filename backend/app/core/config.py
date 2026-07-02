@@ -128,17 +128,6 @@ class Settings(BaseSettings):
         "Covers parsed_media CRUD + lists + search + statistics; the 9 "
         "wrapper methods route through the ORM overrides via Python MRO)",
     )
-    USE_ORM_STYLE_TEMPLATES: bool = Field(
-        default=False,
-        description="Route StyleTemplateRepository through the SQLAlchemy 2.0 "
-        "ORM session layer (Batch L1 — replaces the supabase-py REST path for "
-        "the style_templates table). Strategy C: created_by uuid → str at the "
-        "dict boundary (REST-parity); bigint id / team_id stay native int; "
-        "created_at / updated_at → ISO str. Covers get_by_id / list_templates "
-        "reads + create / update / hard_delete writes (commit via "
-        "write_scope()). NOTE: style_templates_router is a 301 redirect to "
-        "/skills, so this repo has no live call sites today.",
-    )
     USE_ORM_LIBRARIES: bool = Field(
         default=False,
         description="Route LibrariesRepository through the SQLAlchemy 2.0 ORM "
