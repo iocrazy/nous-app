@@ -41,10 +41,6 @@ vi.mock('react-i18next', () => ({
   Trans: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-vi.mock('../utils/featureFlags', () => ({
-  islandUI: () => false,
-}));
-
 vi.mock('../hooks/useFilterBarVisibility', () => ({
   useFilterBarVisibility: () => ({ visible: false, toggle: vi.fn() }),
 }));

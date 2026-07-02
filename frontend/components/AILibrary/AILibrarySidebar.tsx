@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { islandUI } from '../../utils/featureFlags';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -130,7 +129,7 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
 
   return (
     <>
-      <div className={`group relative flex w-52 flex-col border-r border-ink-800/40 ${islandUI() ? '' : 'pt-16'}`}>
+      <div className={`group relative flex w-52 flex-col border-r border-ink-800/40`}>
         {/* Header */}
         <div className="px-4 pt-4 pb-3">
           <span className="text-sm font-semibold text-ink-200">

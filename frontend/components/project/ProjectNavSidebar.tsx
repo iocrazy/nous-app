@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { islandUI } from '../../utils/featureFlags';
 import {
   ChevronDown,
   ChevronLeft,
@@ -157,7 +156,7 @@ export function ProjectNavSidebar({
   }
 
   return (
-    <div className={`group relative w-52 h-full flex flex-col border-r border-ink-800/40 ${islandUI() ? '' : 'pt-16'}`}>
+    <div className={`group relative w-52 h-full flex flex-col border-r border-ink-800/40`}>
       {/* Collapse toggle */}
       {onToggleCollapse && (
         <button

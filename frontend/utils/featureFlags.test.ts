@@ -1,21 +1,21 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { islandUI } from './featureFlags';
+import { conversations } from './featureFlags';
 
-describe('featureFlags.islandUI', () => {
+describe('featureFlags.conversations', () => {
   afterEach(() => { vi.unstubAllEnvs(); });
 
   it('is false when the env var is unset', () => {
-    vi.stubEnv('VITE_FEATURE_ISLAND_UI', '');
-    expect(islandUI()).toBe(false);
+    vi.stubEnv('VITE_FEATURE_CONVERSATIONS', '');
+    expect(conversations()).toBe(false);
   });
 
   it('is true only for the literal string "true"', () => {
-    vi.stubEnv('VITE_FEATURE_ISLAND_UI', 'true');
-    expect(islandUI()).toBe(true);
+    vi.stubEnv('VITE_FEATURE_CONVERSATIONS', 'true');
+    expect(conversations()).toBe(true);
   });
 
   it('is false for any other value', () => {
-    vi.stubEnv('VITE_FEATURE_ISLAND_UI', '1');
-    expect(islandUI()).toBe(false);
+    vi.stubEnv('VITE_FEATURE_CONVERSATIONS', '1');
+    expect(conversations()).toBe(false);
   });
 });

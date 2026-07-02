@@ -11,7 +11,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Plus, Search, Columns, Filter, ArrowUpDown, RotateCw } from 'lucide-react';
-import { islandUI } from '../../utils/featureFlags';
 
 /**
  * Paperclip-exact view-mode icons. lucide's LayoutList/LayoutGrid/Grid3x3
@@ -280,7 +279,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
   const filterCount = activeFilterCount(filters);
 
   return (
-    <div className={`flex flex-col bg-ink-950 ${islandUI() ? 'h-full min-h-0' : 'h-[calc(100vh-5rem)] -mx-4 sm:-mx-8 -mb-28 sm:-mb-8'}`}>
+    <div className={`flex flex-col bg-ink-950 h-full min-h-0`}>
       <div className="flex items-center gap-2 px-4 py-3 sticky top-0 z-10 bg-ink-950">
         <button
           type="button"

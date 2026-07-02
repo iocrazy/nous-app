@@ -2,7 +2,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Eye, FileText, Link2, Loader2, Mic, X } from 'lucide-react';
-import { islandUI } from '../../utils/featureFlags';
 import { useToast } from '../Toast';
 import { detectParseMode } from './parseModeDetect';
 import {
@@ -35,7 +34,6 @@ const AI_INTENTS = [
 
 export const FloatingParse: React.FC = () => {
   const { t } = useTranslation();
-  const island = islandUI();
   const { addToast } = useToast();
   const [phase, setPhase] = useState<Phase>('collapsed');
   const [input, setInput] = useState('');
@@ -170,11 +168,7 @@ export const FloatingParse: React.FC = () => {
     return (
       <button
         onClick={() => setPhase('input')}
-        className={`fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-2.5 rounded-full shadow-lg text-sm font-semibold ${
-          island
-            ? 'bg-island border border-line-strong text-content'
-            : 'bg-ink-800 text-ink-100'
-        }`}
+        className={`fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-2.5 rounded-full shadow-lg text-sm font-semibold bg-island border border-line-strong text-content`}
       >
         <Link2 size={16} /> {t('topic.parseLink', 'Parse Link')}
       </button>
@@ -183,11 +177,7 @@ export const FloatingParse: React.FC = () => {
 
   return (
     <div
-      className={`fixed bottom-6 right-6 z-40 w-[360px] rounded-[var(--r-lg)] shadow-2xl p-4 ${
-        island
-          ? 'bg-island border border-line-strong'
-          : 'bg-ink-900 border border-ink-800'
-      }`}
+      className={`fixed bottom-6 right-6 z-40 w-[360px] rounded-[var(--r-lg)] shadow-2xl p-4 bg-island border border-line-strong`}
     >
       <div className="flex items-center justify-between mb-2">
         <span className="text-sm font-semibold text-content">

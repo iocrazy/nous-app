@@ -2,7 +2,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Lightbulb, Search, X } from 'lucide-react';
-import { islandUI } from '../utils/featureFlags';
 import {
   getHotspots,
   getHotspotDates,
@@ -27,7 +26,6 @@ const TOP_HOTSPOTS_COUNT = 5;
 
 export const TopicInspirationPage: React.FC = () => {
   const { t } = useTranslation();
-  const island = islandUI();
   const { addToast } = useToast();
   const moduleEnabled = useTopicModuleEnabled();
   const [hotspots, setHotspots] = useState<Hotspot[]>([]);
@@ -164,15 +162,15 @@ export const TopicInspirationPage: React.FC = () => {
     [hotspots, view, searching],
   );
 
-  const cPrimary = island ? 'text-content' : 'text-ink-50';
-  const cSub = island ? 'text-content-3' : 'text-ink-400';
+  const cPrimary = 'text-content';
+  const cSub = 'text-content-3';
 
   // Global master switch (admin) — when off, hide the whole page (also blocks
   // direct-URL access, not just the nav item).
   if (!moduleEnabled) {
     return (
       <div className="max-w-[1180px] mx-auto px-6 py-24 text-center">
-        <Lightbulb size={32} className={`mx-auto mb-3 ${island ? 'text-content-4' : 'text-ink-500'}`} />
+        <Lightbulb size={32} className={`mx-auto mb-3 text-content-4`} />
         <h1 className={`text-lg font-bold ${cPrimary}`}>{t('topic.title')}</h1>
         <p className={`mt-2 text-sm ${cSub}`}>
           {t('topic.moduleDisabled', 'This feature is currently turned off.')}
@@ -185,7 +183,7 @@ export const TopicInspirationPage: React.FC = () => {
     <div className="max-w-[1180px] mx-auto px-6 py-6">
       {/* Page header */}
       <div className="flex items-center gap-2">
-        <Lightbulb size={22} className={island ? 'text-content-2' : 'text-ink-300'} />
+        <Lightbulb size={22} className={'text-content-2'} />
         <h1 className={`text-[22px] font-bold ${cPrimary}`}>{t('topic.title')}</h1>
         <div className="ml-auto">
           <SourceHealthBadge />
@@ -198,28 +196,20 @@ export const TopicInspirationPage: React.FC = () => {
       <div className="mt-4 relative">
         <Search
           size={15}
-          className={`absolute left-3 top-1/2 -translate-y-1/2 ${
-            island ? 'text-content-4' : 'text-ink-500'
-          }`}
+          className={`absolute left-3 top-1/2 -translate-y-1/2 text-content-4`}
         />
         <input
           type="text"
           value={queryInput}
           onChange={(e) => setQueryInput(e.target.value)}
           placeholder={t('topic.searchPlaceholder', 'Search hotspots...')}
-          className={`w-full rounded-lg pl-9 pr-9 py-2 text-sm outline-none transition-colors ${
-            island
-              ? 'bg-island-2 border border-line-strong text-content placeholder:text-content-4 focus:border-accent/50'
-              : 'bg-ink-900 border border-ink-700 text-ink-100 placeholder:text-ink-500 focus:border-indigo-500/50'
-          }`}
+          className={`w-full rounded-lg pl-9 pr-9 py-2 text-sm outline-none transition-colors bg-island-2 border border-line-strong text-content placeholder:text-content-4 focus:border-accent/50`}
         />
         {queryInput && (
           <button
             onClick={() => setQueryInput('')}
             aria-label={t('common.clear', 'Clear')}
-            className={`absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded ${
-              island ? 'text-content-4 hover:text-content' : 'text-ink-500 hover:text-ink-200'
-            }`}
+            className={`absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-content-4 hover:text-content`}
           >
             <X size={15} />
           </button>
@@ -254,18 +244,12 @@ export const TopicInspirationPage: React.FC = () => {
               if (e.key === 'Enter') saveInterest();
             }}
             placeholder={t('topic.interestPlaceholder', '关键词，空格分隔，如：综艺 明星 影视 世界杯')}
-            className={`flex-1 rounded-lg px-3 py-2 text-sm outline-none transition-colors ${
-              island
-                ? 'bg-island-2 border border-line-strong text-content placeholder:text-content-4 focus:border-accent/50'
-                : 'bg-ink-900 border border-ink-700 text-ink-100 placeholder:text-ink-500 focus:border-indigo-500/50'
-            }`}
+            className={`flex-1 rounded-lg px-3 py-2 text-sm outline-none transition-colors bg-island-2 border border-line-strong text-content placeholder:text-content-4 focus:border-accent/50`}
           />
           <button
             onClick={saveInterest}
             disabled={interestSaving}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-40 ${
-              island ? 'bg-accent text-white' : 'bg-indigo-600 text-white'
-            }`}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-40 bg-accent text-white`}
           >
             {interestSaving ? t('common.loading', 'Loading...') : t('topic.saveInterest', 'Save')}
           </button>
@@ -310,9 +294,7 @@ export const TopicInspirationPage: React.FC = () => {
           <div className="mt-3">
             <button
               onClick={() => setShowLowSignal((v) => !v)}
-              className={`text-xs font-medium transition-colors ${
-                island ? 'text-content-3 hover:text-content' : 'text-ink-400 hover:text-ink-200'
-              }`}
+              className={`text-xs font-medium transition-colors text-content-3 hover:text-content`}
             >
               {showLowSignal
                 ? t('topic.hideLowSignal', 'Hide low-signal')

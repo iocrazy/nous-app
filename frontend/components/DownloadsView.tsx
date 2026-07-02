@@ -17,7 +17,6 @@ import { useNavigate } from 'react-router-dom';
 import { useLibraryContext } from '../contexts/LibraryContext';
 import { useTeamContext } from '../contexts/TeamContext';
 import { useIslandWork } from '../contexts/IslandWorkContext';
-import { islandUI } from '../utils/featureFlags';
 import { Video } from '../types';
 import { FilterBar } from './resources/filter/FilterBar';
 import { useFilterBarConfig } from '../hooks/useFilterBarConfig';
@@ -419,15 +418,14 @@ export const DownloadsView: React.FC = () => {
   // In island mode the My Downloads info panel renders INSIDE the shell's info
   // island (portaled, bare) instead of a floating overlay — matching My Uploads.
   // ResourcesShell yields infoAvailable/infoVisible to us when isDownloadsView.
-  const island = islandUI();
   const { infoIslandEl, infoVisible, setInfoVisible, setInfoAvailable } = useIslandWork();
   const hasSelection = !!selectedVideo;
-  useEffect(() => { if (island) setInfoAvailable(hasSelection); }, [island, hasSelection, setInfoAvailable]);
-  useEffect(() => { if (island) setInfoVisible(showInfoPanel && hasSelection); }, [island, showInfoPanel, hasSelection, setInfoVisible]);
+  useEffect(() => { setInfoAvailable(hasSelection); }, [hasSelection, setInfoAvailable]);
+  useEffect(() => { setInfoVisible(showInfoPanel && hasSelection); }, [showInfoPanel, hasSelection, setInfoVisible]);
   // Reflect the shell's reopen-handle (infoVisible→true) back into showInfoPanel.
-  useEffect(() => { if (island && infoVisible && !showInfoPanel) setShowInfoPanel(true); }, [island, infoVisible, showInfoPanel]);
+  useEffect(() => { if (infoVisible && !showInfoPanel) setShowInfoPanel(true); }, [infoVisible, showInfoPanel]);
   // When the selection clears, also release the island panel availability.
-  useEffect(() => { if (island && !hasSelection) setInfoAvailable(false); }, [island, hasSelection, setInfoAvailable]);
+  useEffect(() => { if (!hasSelection) setInfoAvailable(false); }, [hasSelection, setInfoAvailable]);
   const [renameTarget, setRenameTarget] = useState<Video | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [shareTargetResourceId, setShareTargetResourceId] = useState<string | null>(null);
@@ -890,7 +888,6 @@ export const DownloadsView: React.FC = () => {
       {/* Toolbar */}
       <div
         className="hidden md:block px-6 py-2 border-b border-ink-800/80 space-y-2"
-        style={{ paddingRight: !island && selectedVideo && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
       >
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
@@ -1015,7 +1012,6 @@ export const DownloadsView: React.FC = () => {
             // (~7rem + safe-area). Desktop reverts to the original 20 px.
             : 'px-3 pt-3 pb-[calc(7rem+env(safe-area-inset-bottom,6px))] md:pb-5'
         }`}
-        style={{ paddingRight: !island && selectedVideo && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
         onTouchStart={handlePullStart}
         onTouchMove={handlePullMove}
         onTouchEnd={handlePullEnd}
@@ -1203,7 +1199,7 @@ export const DownloadsView: React.FC = () => {
       {/* Info Panel — island: bare column portaled into the shell's info island
           (integrated, like My Uploads); classic: floating overlay in place. */}
       {selectedVideo && (() => {
-        const useIsland = island && !!infoIslandEl;
+        const useIsland = !!infoIslandEl;
         const panel = (
           <DownloadInfoPanel
             bare={useIsland}

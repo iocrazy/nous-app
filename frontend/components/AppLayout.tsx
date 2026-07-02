@@ -33,7 +33,6 @@ import { CreateCollectionModal } from './CreateCollectionModal';
 import { CreateProjectModal } from './CreateProjectModal';
 import { PaymentModal } from './PaymentModal';
 import { IslandShell } from './IslandShell';
-import { islandUI } from '../utils/featureFlags';
 
 // ---------------------------------------------------------------------------
 // AppLayout
@@ -359,9 +358,6 @@ function AppLayoutInner() {
     },
   ];
 
-  // Island shell (spec D1–D12) — flag-gated. Hoist the Sidebar/TopBar props so
-  // the classic frame and the IslandShell frame share IDENTICAL wiring (D12).
-  const island = islandUI();
   // Island UI is desktop-only by design — on mobile (<640px) fall through to the
   // classic <main> so the routed page renders (IslandShell is `hidden sm:flex`).
   const isDesktop = useIsDesktop();
@@ -524,18 +520,6 @@ function AppLayoutInner() {
         hidden={isDetailPage}
       />
 
-      {/* Desktop frame — classic fixed Sidebar+TopBar (flag OFF). Island frame
-          (flag ON) is rendered below in place of <main>. Both are `sm:flex`
-          / `hidden`-gated so mobile chrome below is unaffected. */}
-      {!island && (
-        <>
-          {/* Sidebar */}
-          <Sidebar {...sidebarProps} />
-          {/* TopBar — fixed, sibling to Sidebar for clean positioning */}
-          <TopBar {...topBarProps} />
-        </>
-      )}
-
       {/* Mobile workspace avatar — hidden on detail pages */}
       <button
         className={`sm:hidden fixed top-[calc(env(safe-area-inset-top,0px)+10px)] left-3 z-[31] w-9 h-9 rounded-full transition-all active:scale-95 ${isDetailPage ? 'hidden' : ''}`}
@@ -552,9 +536,9 @@ function AppLayoutInner() {
         </div>
       </button>
 
-      {/* Main Content — island shell (flag ON) draws the full desktop frame
-          (topbar + nav island + workspace island); otherwise the classic main. */}
-      {island && isDesktop ? (
+      {/* Main Content — island shell draws the full desktop frame (topbar +
+          nav island + workspace island); mobile falls back to the classic main. */}
+      {isDesktop ? (
         <IslandShell isDetailPage={isDetailPage} topBarProps={topBarProps} sidebarProps={sidebarProps}>
           <Outlet />
         </IslandShell>

@@ -11,7 +11,6 @@ import { ArrowDown, ArrowUp, Minus, Plus } from 'lucide-react';
 
 import type { ChipId } from './types';
 import { filterVisibleChips } from './chipVisibility';
-import { islandUI } from '../../../utils/featureFlags';
 
 export interface FilterConfigPanelProps {
   pinnedChips: ChipId[];
@@ -41,11 +40,10 @@ export const FilterConfigPanel: React.FC<FilterConfigPanelProps> = ({
 }) => {
   const { t } = useTranslation();
   const panelRef = useRef<HTMLDivElement>(null);
-  const island = islandUI();
   // Local gate consts (DRY — these neutral ink classes repeat below).
-  const cLabel = island ? 'text-content-3' : 'text-ink-500';
-  const cArrowBtn = island ? 'text-content-2 hover:text-content' : 'text-ink-400 hover:text-ink-100';
-  const cActionBtn = island ? 'text-content-2' : 'text-ink-400';
+  const cLabel = 'text-content-3';
+  const cArrowBtn = 'text-content-2 hover:text-content';
+  const cActionBtn = 'text-content-2';
 
   // Apply scope allowlist. When provided, hide any chip outside the set
   // from both Pinned (a chip the user pinned in another scope is still
@@ -74,7 +72,7 @@ export const FilterConfigPanel: React.FC<FilterConfigPanelProps> = ({
   return (
     <div
       ref={panelRef}
-      className={`absolute right-0 top-full mt-1.5 z-40 w-64 ${island ? 'bg-card' : 'bg-ink-900/95'} backdrop-blur-sm border ${island ? 'border-line' : 'border-ink-700/80'} rounded-xl shadow-2xl py-2 animate-dropdown`}
+      className="absolute right-0 top-full mt-1.5 z-40 w-64 bg-card backdrop-blur-sm border border-line rounded-xl shadow-2xl py-2 animate-dropdown"
       role="dialog"
       aria-label={t('resources.filter.filterConfig', 'Filter Settings')}
     >
@@ -92,7 +90,7 @@ export const FilterConfigPanel: React.FC<FilterConfigPanelProps> = ({
         return (
           <div
             key={id}
-            className={`flex items-center gap-1 px-2 py-1 text-xs ${island ? 'text-content-2 hover:bg-island-2' : 'text-ink-200 hover:bg-ink-800/60'} rounded-md mx-1`}
+            className="flex items-center gap-1 px-2 py-1 text-xs text-content-2 hover:bg-island-2 rounded-md mx-1"
           >
             <span className="flex-1 truncate px-1">{chipLabel(id)}</span>
             <button
@@ -126,7 +124,7 @@ export const FilterConfigPanel: React.FC<FilterConfigPanelProps> = ({
         );
       })}
 
-      <div className={`mx-2.5 my-2 border-t ${island ? 'border-line' : 'border-ink-700/60'}`} />
+      <div className="mx-2.5 my-2 border-t border-line" />
 
       <div className={`px-3 pb-1 text-[10px] font-semibold uppercase tracking-widest ${cLabel}`}>
         {t('resources.filter.available', 'Available')}
@@ -139,7 +137,7 @@ export const FilterConfigPanel: React.FC<FilterConfigPanelProps> = ({
       {visibleAvailable.map((id) => (
         <div
           key={id}
-          className={`flex items-center gap-1 px-2 py-1 text-xs ${island ? 'text-content-2 hover:bg-island-2' : 'text-ink-300 hover:bg-ink-800/60'} rounded-md mx-1`}
+          className="flex items-center gap-1 px-2 py-1 text-xs text-content-2 hover:bg-island-2 rounded-md mx-1"
         >
           <span className="flex-1 truncate px-1">{chipLabel(id)}</span>
           <button

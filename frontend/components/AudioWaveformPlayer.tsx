@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Play, Pause, Volume2, VolumeX } from 'lucide-react';
 import { buildSodaTheme, type SodaTheme } from '../utils/sodaTheme';
-import { islandUI } from '../utils/featureFlags';
 
 interface AudioWaveformPlayerProps {
   src: string;
@@ -68,20 +67,15 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
 }) => {
   const isCompact = layout === 'compact';
   const isCapsule = layout === 'capsule';
-  // Island redesign: route the full/compact player's neutral ink surfaces to the
-  // mock --content/--island-2/--line ladder when the island UI is on. The flag
-  // is global+build-time, so flag-OFF (classic) every gate resolves to the exact
-  // original ink class → D12 byte-identical.
-  const island = islandUI();
-  const cInkText300 = island ? 'text-content-2' : 'text-ink-300';
-  const cInkText400 = island ? 'text-content-2' : 'text-ink-400';
-  const cInkText500 = island ? 'text-content-3' : 'text-ink-500';
-  const cInkHover200 = island ? 'hover:text-content' : 'hover:text-ink-200';
-  const cInkCtrlBg = island ? 'bg-island-2' : 'bg-ink-800';
-  const cInkCtrlHover = island ? 'hover:bg-island-2' : 'hover:bg-ink-700';
-  const cInkTrack = island ? 'bg-island-2' : 'bg-ink-700';
-  const cInkBarBg = island ? 'bg-island-2/60' : 'bg-ink-900/50';
-  const cInkBarBorder = island ? 'border-line' : 'border-ink-800/50';
+  const cInkText300 = 'text-content-2';
+  const cInkText400 = 'text-content-2';
+  const cInkText500 = 'text-content-3';
+  const cInkHover200 = 'hover:text-content';
+  const cInkCtrlBg = 'bg-island-2';
+  const cInkCtrlHover = 'hover:bg-island-2';
+  const cInkTrack = 'bg-island-2';
+  const cInkBarBg = 'bg-island-2/60';
+  const cInkBarBorder = 'border-line';
   // Compact lives in a narrow row, so 200 hair-thin bars compress into an
   // unreadable blur. Fewer, wider bars (and a proportional vertical margin
   // below) make the waveform legible even for short tracks. The capsule row is

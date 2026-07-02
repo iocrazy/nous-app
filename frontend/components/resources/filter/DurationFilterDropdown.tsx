@@ -14,7 +14,6 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, Clock } from 'lucide-react';
 
-import { islandUI } from '../../../utils/featureFlags';
 import type { DurationChipValue, DurationPresetId } from './types';
 
 export interface DurationFilterDropdownProps {
@@ -37,13 +36,8 @@ export const DurationFilterDropdown: React.FC<DurationFilterDropdownProps> = ({
   onClearAll,
 }) => {
   const { t } = useTranslation();
-  const island = islandUI();
 
-  const inputClass = `flex-1 ${
-    island ? 'bg-card border border-line' : 'bg-ink-900/60 border border-ink-700'
-  } rounded px-1.5 py-1 text-[11px] ${
-    island ? 'text-content-2' : 'text-ink-200'
-  } focus:outline-none focus:border-indigo-500`;
+  const inputClass = 'flex-1 bg-card border border-line rounded px-1.5 py-1 text-[11px] text-content-2 focus:outline-none focus:border-indigo-500';
 
   const labels: Record<DurationPresetId, string> = {
     short60s: t('resources.filter.durationPresets.short60s', '≤ 60 seconds'),
@@ -98,15 +92,13 @@ export const DurationFilterDropdown: React.FC<DurationFilterDropdownProps> = ({
             className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between transition-colors ${
               active
                 ? 'bg-indigo-500/10 text-indigo-300'
-                : island
-                  ? 'text-content-2 hover:bg-island-2'
-                  : 'text-ink-300 hover:bg-ink-800'
+                : 'text-content-2 hover:bg-island-2'
             }`}
           >
             <span className="flex items-center gap-2">
               <Clock
                 size={12}
-                className={active ? 'text-indigo-300' : island ? 'text-content-3' : 'text-ink-500'}
+                className={active ? 'text-indigo-300' : 'text-content-3'}
                 aria-hidden="true"
               />
               <span>{labels[preset]}</span>
@@ -116,11 +108,11 @@ export const DurationFilterDropdown: React.FC<DurationFilterDropdownProps> = ({
         );
       })}
       {value.preset === 'custom' && (
-        <div className={`px-3 py-2 space-y-1.5 border-t ${island ? 'border-line' : 'border-ink-700/60'} mt-1`}>
+        <div className="px-3 py-2 space-y-1.5 border-t border-line mt-1">
           <div className="flex items-center gap-2">
             <label
               htmlFor="filter-duration-min"
-              className={`text-[10px] uppercase tracking-wider ${island ? 'text-content-3' : 'text-ink-500'} w-8 shrink-0`}
+              className="text-[10px] uppercase tracking-wider text-content-3 w-8 shrink-0"
             >
               {t('resources.filter.durationPresets.min', 'Min (seconds)')}
             </label>
@@ -137,7 +129,7 @@ export const DurationFilterDropdown: React.FC<DurationFilterDropdownProps> = ({
           <div className="flex items-center gap-2">
             <label
               htmlFor="filter-duration-max"
-              className={`text-[10px] uppercase tracking-wider ${island ? 'text-content-3' : 'text-ink-500'} w-8 shrink-0`}
+              className="text-[10px] uppercase tracking-wider text-content-3 w-8 shrink-0"
             >
               {t('resources.filter.durationPresets.max', 'Max (seconds)')}
             </label>
@@ -155,11 +147,11 @@ export const DurationFilterDropdown: React.FC<DurationFilterDropdownProps> = ({
       )}
       {value.preset !== null && (
         <>
-          <div className={`mx-2.5 my-1 border-t ${island ? 'border-line' : 'border-ink-700/60'}`} />
+          <div className="mx-2.5 my-1 border-t border-line" />
           <button
             type="button"
             onClick={onClearAll}
-            className={`w-full text-left px-3 py-2 text-xs ${island ? 'text-content-3 hover:text-content-2 hover:bg-island-2' : 'text-ink-500 hover:text-ink-300 hover:bg-ink-800'} transition-colors`}
+            className="w-full text-left px-3 py-2 text-xs text-content-3 hover:text-content-2 hover:bg-island-2 transition-colors"
           >
             {t('resources.filter.clearSelection', 'Clear selection')}
           </button>

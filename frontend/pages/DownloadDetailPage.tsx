@@ -28,7 +28,6 @@ import { useDownloadDetail } from './DownloadDetailPage/useDownloadDetail';
 import { DownloadMenuDropdown, MobileDownloadMenu } from './DownloadDetailPage/DownloadMenuDropdown';
 import { DeleteDialog } from './DownloadDetailPage/DeleteDialog';
 import { createPortal } from 'react-dom';
-import { islandUI } from '../utils/featureFlags';
 import { useIslandWork } from '../contexts/IslandWorkContext';
 import { CometBack } from '../components/CometBack';
 
@@ -58,15 +57,12 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
     handleUpdate, handleDelete, handleBack, addToast,
   } = detail;
 
-  // Island app-shell integration (no-op in classic — useIslandWork returns an
-  // inert shape outside a shell, and `island` gates every island-only branch).
-  const island = islandUI();
   const { infoIslandEl, setInfoVisible, setInfoAvailable } = useIslandWork();
   // Island desktop layout: stage in the work island + panel portaled to the info
   // island. Single source for both gates so they can't diverge (IslandShell is
   // `hidden sm:flex` at 640px while `isMobile` is the md breakpoint at 767px — a
   // mismatch in the 640–767px band would double-mount VideoDetailPanel).
-  const islandDesktop = island && !isMobile;
+  const islandDesktop = !isMobile;
 
   // iOS WebKit (standalone PWA): safe-area insets / viewport can stay unsettled
   // until the first scroll, leaving the header tucked under the status bar until
@@ -112,7 +108,6 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
   // transition settles makes the detail's intent win. The claims are one-shot,
   // so a later user collapse (onCollapse) is not fought.
   useEffect(() => {
-    if (!island) return;
     const claim = () => { setInfoAvailable(true); setInfoVisible(true); };
     claim();
     const raf = requestAnimationFrame(claim);
@@ -125,7 +120,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
       setInfoAvailable(false);
       setInfoVisible(false);
     };
-  }, [island, setInfoAvailable, setInfoVisible]);
+  }, [setInfoAvailable, setInfoVisible]);
 
   // Audio palette + cover-tint. Computed before the early returns (video-null
   // safe) so the tint hooks below obey the rules of hooks. Soda tracks carry
@@ -640,60 +635,6 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
       )}
 
       <div className="flex flex-col h-full p-0 sm:p-4 md:p-0">
-        {/* Desktop header — classic split-pane layout only; island uses the stage-head */}
-        {!island && (
-        <div className="detail-header-glow hidden sm:flex items-center justify-between px-4 py-2.5 mb-2 shrink-0">
-          {/* Glowing accent line that dips to cradle the round Back button */}
-          <svg
-            className="detail-header-glow__line"
-            preserveAspectRatio="xMinYMid meet"
-            viewBox="0 0 1100 30"
-            aria-hidden="true"
-          >
-            <defs>
-              <linearGradient
-                id="detailGlowGrad"
-                x1="0"
-                y1="0"
-                x2="1100"
-                y2="0"
-                gradientUnits="userSpaceOnUse"
-              >
-                <stop offset="0" stopColor="rgba(139,92,246,0)" />
-                <stop offset="0.034" stopColor="rgba(139,92,246,1)" />
-                <stop offset="0.155" stopColor="rgba(139,92,246,0.55)" />
-                <stop offset="0.273" stopColor="rgba(139,92,246,0.25)" />
-                <stop offset="0.382" stopColor="rgba(139,92,246,0)" />
-              </linearGradient>
-            </defs>
-            {/* Tapering ribbon: thick where it cradles the ~38px button (dip
-                centered at x≈37), narrowing to a point by x≈420 (title end) so
-                the line gets thinner and fades out toward the right. */}
-            <path d="M0 5.2 H6 C22 5.2 24 19.2 37 19.2 C50 19.2 52 5.2 68 5.2 L420 6.6 L68 6.8 C52 6.8 50 20.8 37 20.8 C24 20.8 22 6.8 6 6.8 H0 Z" />
-          </svg>
-
-          {/* Left: back + title */}
-          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-            <button
-              onClick={handleBack}
-              title="Back"
-              aria-label="Back"
-              className="detail-back-btn"
-            >
-              <ArrowLeft size={18} />
-            </button>
-            <span className="text-xs sm:text-sm text-ink-200 font-medium truncate">
-              {titleText}
-            </span>
-          </div>
-
-          {/* Right: share + download + more — hidden on mobile, shown in metadata area instead */}
-          <div className="hidden sm:flex items-center gap-1 sm:gap-1.5 shrink-0">
-            {actionButtons}
-          </div>
-        </div>
-        )}
-
         {/* Island desktop: the stage fills the work island; the detail panel is
             portaled to the shell's info island (rendered below). Mobile + classic
             share the split-pane content row in the else branch (unchanged). */}

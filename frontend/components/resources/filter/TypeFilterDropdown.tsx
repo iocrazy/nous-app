@@ -15,7 +15,6 @@ import {
 } from 'lucide-react';
 
 import { FILTER_VALUES, type ResourceFilterType } from '../resourceFilters';
-import { islandUI } from '../../../utils/featureFlags';
 
 export interface TypeFilterDropdownProps {
   selectedTypes: ResourceFilterType[];
@@ -29,7 +28,6 @@ export const TypeFilterDropdown: React.FC<TypeFilterDropdownProps> = ({
   onClearAll,
 }) => {
   const { t } = useTranslation();
-  const island = islandUI();
   const selectedSet = useMemo(() => new Set(selectedTypes), [selectedTypes]);
 
   const toggle = (value: ResourceFilterType) => {
@@ -59,13 +57,13 @@ export const TypeFilterDropdown: React.FC<TypeFilterDropdownProps> = ({
             type="button"
             onClick={() => toggle(opt.value)}
             className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between transition-colors ${
-              active ? 'bg-indigo-500/10 text-indigo-300' : island ? 'text-content-2 hover:bg-island-2' : 'text-ink-300 hover:bg-ink-800'
+              active ? 'bg-indigo-500/10 text-indigo-300' : 'text-content-2 hover:bg-island-2'
             }`}
           >
             <span className="flex items-center gap-2">
               <Icon
                 size={12}
-                className={active ? 'text-indigo-300' : island ? 'text-content-3' : 'text-ink-500'}
+                className={active ? 'text-indigo-300' : 'text-content-3'}
                 aria-hidden="true"
               />
               <span>{opt.label}</span>
@@ -76,11 +74,11 @@ export const TypeFilterDropdown: React.FC<TypeFilterDropdownProps> = ({
       })}
       {selectedTypes.length > 0 && (
         <>
-          <div className={`mx-2.5 my-1 border-t ${island ? 'border-line' : 'border-ink-700/60'}`} />
+          <div className="mx-2.5 my-1 border-t border-line" />
           <button
             type="button"
             onClick={onClearAll}
-            className={`w-full text-left px-3 py-2 text-xs ${island ? 'text-content-3 hover:text-content-2 hover:bg-island-2' : 'text-ink-500 hover:text-ink-300 hover:bg-ink-800'} transition-colors`}
+            className="w-full text-left px-3 py-2 text-xs text-content-3 hover:text-content-2 hover:bg-island-2 transition-colors"
           >
             {t('resources.filter.clearSelection', 'Clear selection')}
           </button>

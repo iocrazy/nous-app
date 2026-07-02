@@ -9,7 +9,6 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { Calendar, CalendarRange, Check, Clock, type LucideIcon } from 'lucide-react';
 
-import { islandUI } from '../../../utils/featureFlags';
 import type { DateAddedChipValue, DatePresetId } from './types';
 
 export interface DateAddedFilterDropdownProps {
@@ -33,15 +32,10 @@ export const DateAddedFilterDropdown: React.FC<DateAddedFilterDropdownProps> = (
   onClearAll,
 }) => {
   const { t } = useTranslation();
-  const island = islandUI();
-  const inactiveRow = island
-    ? 'text-content-2 hover:bg-island-2'
-    : 'text-ink-300 hover:bg-ink-800';
-  const inactiveIcon = island ? 'text-content-3' : 'text-ink-500';
-  const labelMuted = island ? 'text-content-3' : 'text-ink-500';
-  const dateInputCls = island
-    ? 'flex-1 bg-island-2 border border-line rounded px-1.5 py-1 text-[11px] text-content-2 focus:outline-none focus:border-indigo-500'
-    : 'flex-1 bg-ink-900/60 border border-ink-700 rounded px-1.5 py-1 text-[11px] text-ink-200 focus:outline-none focus:border-indigo-500';
+  const inactiveRow = 'text-content-2 hover:bg-island-2';
+  const inactiveIcon = 'text-content-3';
+  const labelMuted = 'text-content-3';
+  const dateInputCls = 'flex-1 bg-island-2 border border-line rounded px-1.5 py-1 text-[11px] text-content-2 focus:outline-none focus:border-indigo-500';
 
   const labels: Record<DatePresetId, string> = {
     today: t('resources.filter.date.today', 'Today'),
@@ -119,7 +113,7 @@ export const DateAddedFilterDropdown: React.FC<DateAddedFilterDropdownProps> = (
         );
       })}
       {value.preset === 'custom' && (
-        <div className={`px-3 py-2 space-y-1.5 border-t ${island ? 'border-line' : 'border-ink-700/60'} mt-1`}>
+        <div className="px-3 py-2 space-y-1.5 border-t border-line mt-1">
           <div className="flex items-center gap-2">
             <label
               htmlFor="filter-date-after"
@@ -154,11 +148,11 @@ export const DateAddedFilterDropdown: React.FC<DateAddedFilterDropdownProps> = (
       )}
       {value.preset !== null && (
         <>
-          <div className={`mx-2.5 my-1 border-t ${island ? 'border-line' : 'border-ink-700/60'}`} />
+          <div className="mx-2.5 my-1 border-t border-line" />
           <button
             type="button"
             onClick={onClearAll}
-            className={`w-full text-left px-3 py-2 text-xs ${island ? 'text-content-3 hover:text-content-2 hover:bg-island-2' : 'text-ink-500 hover:text-ink-300 hover:bg-ink-800'} transition-colors`}
+            className="w-full text-left px-3 py-2 text-xs text-content-3 hover:text-content-2 hover:bg-island-2 transition-colors"
           >
             {t('resources.filter.clearSelection', 'Clear selection')}
           </button>

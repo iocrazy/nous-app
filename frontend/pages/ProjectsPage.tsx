@@ -19,7 +19,6 @@ import { ProjectScriptsTab } from '../components/project/ProjectScriptsTab';
 import { ProjectOutputTab } from '../components/project/ProjectOutputTab';
 import { StageSelector } from '../components/project/StageSelector';
 import { StageToolGrid } from '../components/project/StageToolGrid';
-import { islandUI } from '../utils/featureFlags';
 
 // Map URL tab param → ProjectNavSidebar section key
 const TAB_TO_SECTION: Record<string, string> = {
@@ -39,13 +38,6 @@ export function ProjectsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { currentUserId } = useAuth();
   const { selectedTeamId, personalTeamId } = useTeamContext();
-  // Island mode is a build-time constant for the session. Inside the island
-  // work card (spec D1–D12) the page must fill the card and let it own the
-  // height + scroll, so we drop the classic AppLayout-padding-canceling
-  // negative margins / 100vh / fixed-TopBar pt-20 offset. Classic (flag OFF)
-  // path stays byte-identical. Below sm the island frame is `hidden sm:flex`,
-  // so only the desktop path is affected in island mode.
-  const island = islandUI();
 
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [reviewFile, setReviewFile] = useState<ProjectFile | null>(null);
@@ -201,8 +193,7 @@ export function ProjectsPage() {
 
     return (
       <div
-        className={island ? 'flex h-full min-h-0' : 'flex -mx-4 -mt-14 -mb-20 sm:-mx-8 sm:-mt-20 sm:-mb-8'}
-        style={island ? undefined : { height: '100vh' }}
+        className={'flex h-full min-h-0'}
       >
         <ProjectNavSidebar
           project={selectedProject}
@@ -222,7 +213,7 @@ export function ProjectsPage() {
             <StageSelector projectId={selectedProject.id} canWrite={true} />
             <StageToolGrid projectId={selectedProject.id} setActiveTab={setActiveTab} />
           </div>
-          <div className={island ? 'flex-1 overflow-y-auto px-8 pb-8' : 'flex-1 overflow-y-auto px-8 pt-4 pb-8'}>
+          <div className={'flex-1 overflow-y-auto px-8 pb-8'}>
             {activeTab === 'files' && (
               <ProjectFilesView
                 project={selectedProject}
@@ -249,8 +240,7 @@ export function ProjectsPage() {
   return (
     <>
       <div
-        className={island ? 'flex h-full min-h-0' : 'flex -mx-4 -mt-14 -mb-20 sm:-mx-8 sm:-mt-20 sm:-mb-8'}
-        style={island ? undefined : { height: '100vh' }}
+        className={'flex h-full min-h-0'}
       >
         <ProjectFilterSidebar
           activeFilter={activeFilter}
@@ -262,7 +252,7 @@ export function ProjectsPage() {
           collapsed={sidebarCollapsed}
           onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
         />
-        <div className={island ? 'flex-1 min-w-0 h-full overflow-y-auto px-8 pt-3 pb-8' : 'flex-1 min-w-0 px-8 pt-20 pb-8'}>
+        <div className={'flex-1 min-w-0 h-full overflow-y-auto px-8 pt-3 pb-8'}>
           <ProjectsListView
             projects={filteredProjects}
             onProjectSelect={handleProjectSelect}

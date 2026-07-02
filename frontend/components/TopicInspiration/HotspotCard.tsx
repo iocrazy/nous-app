@@ -3,7 +3,6 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { Star, EyeOff } from 'lucide-react';
 import type { Hotspot } from '../../services/topicService';
-import { islandUI } from '../../utils/featureFlags';
 
 interface Props {
   hotspot: Hotspot;
@@ -21,16 +20,13 @@ export const HotspotCard: React.FC<Props> = ({
   onToggleHide,
 }) => {
   const { t } = useTranslation();
-  const island = islandUI();
   const isPick = typeof hotspot.score === 'number' && hotspot.score >= 0.8;
   const read = !!hotspot.is_read;
 
-  const bgClass = island ? 'bg-island' : 'bg-ink-900';
+  const bgClass = 'bg-island';
   const borderClass = selected
     ? 'border-[rgba(99,102,241,.35)] shadow-[0_0_0_2px_rgba(99,102,241,.12)]'
-    : island
-    ? 'border-line-strong hover:border-accent/40'
-    : 'border-ink-800 hover:border-ink-600';
+    : 'border-line-strong hover:border-accent/40';
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' || e.key === ' ') {
@@ -39,9 +35,7 @@ export const HotspotCard: React.FC<Props> = ({
     }
   };
 
-  const iconBtn = `p-1 rounded-md transition-colors ${
-    island ? 'hover:bg-island-2 text-content-4' : 'hover:bg-ink-800 text-ink-500'
-  }`;
+  const iconBtn = `p-1 rounded-md transition-colors hover:bg-island-2 text-content-4`;
 
   return (
     <div
@@ -56,7 +50,7 @@ export const HotspotCard: React.FC<Props> = ({
       {/* Header row: source + board rank (left) + pick/score + actions (right) */}
       <div className="flex items-center justify-between">
         <span className="flex items-center gap-1.5 min-w-0">
-          <span className={`text-[12px] truncate ${island ? 'text-content-4' : 'text-ink-500'}`}>
+          <span className={`text-[12px] truncate text-content-4`}>
             {hotspot.source_label}
           </span>
           {typeof hotspot.best_rank === 'number' && hotspot.best_rank <= 10 && (
@@ -144,9 +138,7 @@ export const HotspotCard: React.FC<Props> = ({
 
       {/* Title */}
       <h4
-        className={`text-[15px] font-semibold mt-1.5 mb-1 ${
-          island ? 'text-content' : 'text-ink-100'
-        }`}
+        className={`text-[15px] font-semibold mt-1.5 mb-1 text-content`}
       >
         {hotspot.title}
       </h4>
@@ -154,9 +146,7 @@ export const HotspotCard: React.FC<Props> = ({
       {/* Summary */}
       {(hotspot.ai_summary || hotspot.summary) && (
         <p
-          className={`text-[13px] leading-relaxed ${
-            island ? 'text-content-2' : 'text-ink-300'
-          }`}
+          className={`text-[13px] leading-relaxed text-content-2`}
         >
           {hotspot.ai_summary || hotspot.summary}
         </p>
@@ -168,9 +158,7 @@ export const HotspotCard: React.FC<Props> = ({
           {(hotspot.tags ?? []).map((tag) => (
             <span
               key={tag}
-              className={`text-[10px] px-2 py-0.5 rounded-full ${
-                island ? 'bg-island-2 text-content-3' : 'bg-ink-800 text-ink-400'
-              }`}
+              className={`text-[10px] px-2 py-0.5 rounded-full bg-island-2 text-content-3`}
             >
               {tag}
             </span>

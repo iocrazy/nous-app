@@ -2,7 +2,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Hotspot } from '../../services/topicService';
-import { islandUI } from '../../utils/featureFlags';
 
 function relativeTime(iso?: string | null): string {
   if (!iso) return '';
@@ -22,7 +21,6 @@ export const CurrentHotspots: React.FC<{
   onSelect?: (h: Hotspot) => void;
 }> = ({ items, onSelect }) => {
   const { t } = useTranslation();
-  const island = islandUI();
 
   if (items.length === 0) return null;
 
@@ -30,18 +28,14 @@ export const CurrentHotspots: React.FC<{
     <div className="mb-5">
       {/* Section header */}
       <div
-        className={`text-[11px] font-bold tracking-wide mb-2.5 ${
-          island ? 'text-content-3' : 'text-ink-500'
-        }`}
+        className={`text-[11px] font-bold tracking-wide mb-2.5 text-content-3`}
       >
         {t('topic.currentHot', 'Current Hotspots')}
       </div>
 
       {/* Ranked list block */}
       <div
-        className={`rounded-[12px] px-3.5 py-1 ${
-          island ? 'bg-island-2' : 'bg-ink-800'
-        }`}
+        className={`rounded-[12px] px-3.5 py-1 bg-island-2`}
       >
         {items.map((item, i) => (
           <button
@@ -64,9 +58,7 @@ export const CurrentHotspots: React.FC<{
                 {i + 1}
               </span>
               <span
-                className={`text-[13px] truncate ${
-                  island ? 'text-content' : 'text-ink-100'
-                }`}
+                className={`text-[13px] truncate text-content`}
               >
                 {item.title}
               </span>
@@ -89,9 +81,7 @@ export const CurrentHotspots: React.FC<{
               const time = relativeTime(item.captured_at);
               return (
                 <span
-                  className={`text-[11px] shrink-0 ml-3 flex items-center gap-1 ${
-                    island ? 'text-content-4' : 'text-ink-500'
-                  }`}
+                  className={`text-[11px] shrink-0 ml-3 flex items-center gap-1 text-content-4`}
                 >
                   <span className={showTip ? 'relative group/src cursor-help' : undefined}>
                     <span
