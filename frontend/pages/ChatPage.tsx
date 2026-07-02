@@ -540,6 +540,7 @@ export function ChatPage(): React.ReactElement {
       }
 
       setSending(true);
+      addToast(t('chat.image.uploading'), 'info');
       try {
         for (const file of files) {
           const attachment = await conversationService.uploadConversationImage(

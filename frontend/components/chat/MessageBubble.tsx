@@ -142,14 +142,19 @@ export function MessageBubble({
 
   const isAgent = message.sender_type === 'agent';
   const isMediaCard = message.content_type === 'media_card';
-  const isImage = message.content_type === 'image';
+  // `type` is the new canonical field (mirrored from `content_type` by
+  // normalizeConversationMessage); fall back to `content_type` for any
+  // legacy path that only populates that field. `body.kind` is the
+  // server-side discriminator that confirms the body actually is an
+  // image payload (not just a message tagged with the image type).
+  const isImage =
+    (message.type ?? message.content_type) === 'image' &&
+    message.body.kind === 'image' &&
+    typeof message.body.image_url === 'string';
   const isText = message.content_type === 'text';
   const isOwn = message.sender_type === 'user' && message.sender_id === currentUserId;
   const isDeleted = !!message.deleted_at;
-  const imageUrl =
-    isImage && typeof message.body.image_url === 'string'
-      ? message.body.image_url
-      : null;
+  const imageUrl = isImage ? (message.body.image_url as string) : null;
   const imageAlt =
     typeof message.body.alt === 'string' ? message.body.alt : t('chat.image.alt');
   const generatedMediaId =
