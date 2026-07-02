@@ -185,6 +185,8 @@ the full scope flip/rollback procedure. Order: shadow `resources` → flip
 > `analysis` (Tier 3), `user_mcp_servers` (Tier 5) were the last three REST repos
 > without an ORM sibling. They are now code-complete behind `USE_ORM_COLLECTIONS`
 > / `USE_ORM_ANALYSIS` / `USE_ORM_USER_MCP_SERVERS` (all default false, inert).
+> *(Post-rollout update 2026-07-02: `USE_ORM_COLLECTIONS` has since been retired —
+> collections is ORM-only, legacy REST path deleted; see cleanup batch 1.)*
 > ✅ **Validated against the live dev DB (== prod schema):** the
 > `resource_analysis` and `user_mcp_servers` tables were ABSENT on the self-hosted
 > prod (their original migrations 014→076 / 194 never ran there), so **mig 262 /
