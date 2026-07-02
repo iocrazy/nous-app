@@ -1,18 +1,92 @@
-"""Repository for audit_logs (admin activity trail)."""
+"""Audit logs repository — data access for the admin activity trail.
+
+ORM 2.0 (post-rollout cleanup): ``AuditLogsRepository`` is the SQLAlchemy 2.0
+implementation for the ``audit_logs`` admin activity trail. The legacy
+supabase-py REST path and its per-domain rollout flag have been retired; call
+sites go through ``get_audit_logs_repository()`` (bottom of this file) which now
+unconditionally returns this repository.
+
+MODEL: ``app.models.AuditLogs`` (table ``audit_logs``) — verified reflected.
+
+★ UUID CONSUMER AUDIT (admin reads-across-all-users; service_role scope) ★
+=========================================================================
+``audit_logs`` has TWO uuid columns. The admin app reads across all admins, so
+neither is a per-user authz ``==`` guard — but both are still type-sensitive on
+the consumer side, so BOTH are str()'d:
+
+  id (uuid) → **str** — REST returned a str; the router does ``str(log["id"])``
+    into ``AuditLogResponse.id: str``. str() either way; we str() at the boundary
+    so the SELECT *-shaped dict matches REST exactly.
+  admin_id (uuid) → **str** — REQUIRED for shape + behavioural parity. The
+    list_audit_logs router uses ``log["admin_id"]`` as a **dict key**
+    (``admin_info.get(aid)``), builds ``list({log["admin_id"] ...})`` to feed
+    ``batch_get_user_info(admin_ids)``, and sets ``AuditLogResponse.admin_id: str``.
+    A native ``uuid.UUID`` key hashes/compares differently from the str keys that
+    ``batch_get_user_info`` returns, so the lookup would silently miss and every
+    row would render with ``admin_email=None``. str() preserves the REST behaviour.
+
+NON-uuid type-sensitive columns
+-------------------------------
+  created_at (timestamptz) → **.isoformat()** ALWAYS. CONSUMED: the /stats
+    endpoint does ``created_at[:10]`` (string slicing to bucket by day) — a native
+    datetime is not subscriptable, so this MUST be an ISO str. The
+    ``AuditLogResponse.created_at: datetime`` field parses the ISO str fine.
+  action / target_type / target_id / ip_address (text/varchar) → native str.
+  details (jsonb) → native dict.
+
+Model-quirk scan: ``AuditLogs`` has NO SQLAlchemy ``Enum`` column and NO renamed
+column (no ``metadata_``). ``_plain`` is not load-bearing; reads route through
+``_name_to_attr`` + ``_orm_obj_to_dict``, then the uuid→str / datetime→ISO sweep.
+
+DATE-RANGE FILTER BINDING (v3 rule): ``list`` filters
+``created_at >= start_date`` / ``created_at <= end_date``. The legacy bound
+``start_date.isoformat()`` strings (PostgREST auto-coerced); the typed ORM
+``timestamptz`` column compared to a VARCHAR raises in PG. We bind the NATIVE
+``datetime`` objects the router already hands us (FastAPI parses the ISO query
+param into a ``datetime``); we add ``tzinfo=timezone.utc`` only when the incoming
+datetime is naive so the comparison is tz-aware and matches REST's UTC semantics.
+
+READS ONLY — there are no writes in this repo. (Audit rows are written by
+``app.utils.admin_helpers.create_audit_log``, a separate path.)
+"""
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any, Optional
+import uuid as _uuid
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
-from app.db import get_async_supabase_admin
+from sqlalchemy import distinct, func, select
+
+from app.db.session import read_scope
+from app.models import AuditLogs
+from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
+
+_AUDIT_N2A: Dict[str, str] = _name_to_attr(AuditLogs)
+
+
+def _aware(dt: datetime) -> datetime:
+    """Return a tz-aware datetime for a timestamptz filter bind. A naive
+    datetime is assumed UTC (matches the legacy REST/UTC semantics)."""
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
+def _row(obj: Any) -> Dict[str, Any]:
+    """SELECT *-shaped, strategy-C-parity dict for one ``audit_logs`` row:
+    uuid id / admin_id → str, created_at → ISO str. NULLs pass through."""
+    out = _orm_obj_to_dict(obj, _AUDIT_N2A)
+    for key, value in out.items():
+        if isinstance(value, _uuid.UUID):
+            out[key] = str(value)
+        elif isinstance(value, datetime):
+            out[key] = value.isoformat()
+    return out
 
 
 class AuditLogsRepository:
-    TABLE = "audit_logs"
+    """ORM-backed AuditLogsRepository (admin audit trail reads)."""
 
-    async def _client(self):
-        return await get_async_supabase_admin()
+    TABLE = "audit_logs"
 
     async def list(
         self,
@@ -25,84 +99,60 @@ class AuditLogsRepository:
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
     ) -> tuple[list[dict[str, Any]], int]:
-        """Return (rows, total_count). Total is exact-count from PostgREST."""
-        client = await self._client()
-        query = client.table(self.TABLE).select("*", count="exact")
-
+        """Return (rows, total_count). Total is an exact count over the SAME
+        predicate set (count='exact' parity), newest-first, paginated."""
+        base = select(AuditLogs)
         if admin_id:
-            query = query.eq("admin_id", admin_id)
+            base = base.where(AuditLogs.admin_id == admin_id)
         if action:
-            query = query.eq("action", action)
+            base = base.where(AuditLogs.action == action)
         if target_type:
-            query = query.eq("target_type", target_type)
+            base = base.where(AuditLogs.target_type == target_type)
         if start_date:
-            query = query.gte("created_at", start_date.isoformat())
+            base = base.where(AuditLogs.created_at >= _aware(start_date))
         if end_date:
-            query = query.lte("created_at", end_date.isoformat())
-
-        query = query.order("created_at", desc=True)
+            base = base.where(AuditLogs.created_at <= _aware(end_date))
 
         offset = (page - 1) * page_size
-        query = query.range(offset, offset + page_size - 1)
-
-        result = await query.execute()
-        rows = result.data or []
-        return rows, result.count or len(rows)
+        async with read_scope() as session:
+            total = await session.scalar(
+                select(func.count()).select_from(base.subquery())
+            )
+            result = await session.execute(
+                base.order_by(AuditLogs.created_at.desc())
+                .offset(offset)
+                .limit(page_size)
+            )
+            rows = [_row(r) for r in result.scalars().all()]
+        return rows, (total or len(rows))
 
     async def list_distinct_actions(self) -> list[str]:
-        client = await self._client()
-        result = await client.table(self.TABLE).select("action").execute()
-        if not result.data:
-            return []
-        actions = {log["action"] for log in result.data if log.get("action")}
+        """Sorted list of distinct, non-null ``action`` values (filter dropdown).
+
+        The legacy fetched every ``action`` and de-duped in Python; we push the
+        DISTINCT to PG (equivalent result), drop NULLs, and sort — matching the
+        legacy ``sorted({...})`` output exactly."""
+        async with read_scope() as session:
+            result = await session.execute(
+                select(distinct(AuditLogs.action)).where(AuditLogs.action.isnot(None))
+            )
+            actions = {a for (a,) in result.all() if a}
         return sorted(actions)
 
-    async def list_since(self, start_date: datetime) -> list[dict[str, Any]]:
-        """All audit log rows at or after start_date (used for stats)."""
-        client = await self._client()
-        result = (
-            await client.table(self.TABLE)
-            .select("*")
-            .gte("created_at", start_date.isoformat())
-            .execute()
-        )
-        return result.data or []
+    async def list_since(self, start_date: datetime) -> List[dict[str, Any]]:
+        """All audit log rows at/after ``start_date`` (used for /stats). The
+        ``created_at`` filter binds a NATIVE tz-aware datetime (v3 rule)."""
+        async with read_scope() as session:
+            result = await session.execute(
+                select(AuditLogs).where(AuditLogs.created_at >= _aware(start_date))
+            )
+            return [_row(r) for r in result.scalars().all()]
 
 
 def get_audit_logs_repository() -> "AuditLogsRepository":
-    """Return the right AuditLogsRepository implementation per env.
+    """Return the AuditLogsRepository (SQLAlchemy 2.0 ORM).
 
-    ORM when ``USE_ORM_ADMIN_AUDIT_LOGS`` is set AND the SQLAlchemy engine is
-    configured; otherwise the legacy supabase-py REST path. A flag-on but
-    engine-missing deploy logs once and falls back to REST (never crashes).
-    """
-    from app.core.config import settings
-    from app.db.engine import is_configured
-
-    if settings.USE_ORM_ADMIN_AUDIT_LOGS:
-        if is_configured():
-            from app.repositories.admin.audit_logs_repository_orm import (
-                AuditLogsRepositoryOrm,
-            )
-
-            return AuditLogsRepositoryOrm()
-        from loguru import logger
-
-        logger.warning(
-            "USE_ORM_ADMIN_AUDIT_LOGS=true but SUPAVISOR_DATABASE_URL is empty "
-            "— falling back to supabase-py path"
-        )
-
-    from app.db.shadow_compare import shadow_enabled
-
-    if shadow_enabled("admin_audit_logs") and is_configured():
-        from app.db.shadow_compare import ShadowRepo
-        from app.repositories.admin.audit_logs_repository_orm import (
-            AuditLogsRepositoryOrm,
-        )
-
-        return ShadowRepo(
-            AuditLogsRepository(), AuditLogsRepositoryOrm(), "admin_audit_logs"
-        )
-
+    The per-domain rollout flag and the legacy supabase-py REST path have been
+    retired post-rollout; this now unconditionally returns the ORM
+    implementation."""
     return AuditLogsRepository()

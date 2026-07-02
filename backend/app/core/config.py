@@ -697,18 +697,6 @@ class Settings(BaseSettings):
     )
 
     # ── Phase 2 admin wave (5 small logs/stats/settings repos) ──────────
-    USE_ORM_ADMIN_AUDIT_LOGS: bool = Field(
-        default=False,
-        description="Route AuditLogsRepository (admin activity trail on "
-        "audit_logs) through the SQLAlchemy 2.0 ORM (Phase 2 admin wave). "
-        "Strategy C: id + admin_id (uuid) → str — admin_id is a DICT KEY in the "
-        "router (admin_info.get(aid)) and a str field on AuditLogResponse; id is "
-        "str()'d into the response. created_at (timestamptz) → ISO str (CONSUMED "
-        "— the /stats endpoint does created_at[:10] string-slicing). No "
-        "SQLAlchemy Enum / no renamed column on AuditLogs. Date-range filters "
-        "(start_date/end_date on created_at) bind NATIVE tz-aware datetimes (v3 "
-        "rule). Reads only — no writes in this repo. Inert; flip false to revert.",
-    )
     USE_ORM_ADMIN_MONITORING: bool = Field(
         default=False,
         description="Route MonitoringRepository (admin monitoring dashboard — "

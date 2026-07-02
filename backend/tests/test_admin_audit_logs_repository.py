@@ -1,67 +1,113 @@
-"""Unit tests for AuditLogsRepository."""
+"""Unit tests for AuditLogsRepository (ORM 2.0, model-backed reads).
+
+Post-rollout the repository is the SQLAlchemy 2.0 implementation — reads go
+through ``read_scope()`` with ``select(AuditLogs)`` statements and the row
+objects are converted to SELECT *-shaped dicts by ``_row``. These tests mock
+``read_scope`` with a fake session that captures every emitted ``(sql, binds)``
+pair and returns in-memory ``AuditLogs`` instances, so the compiled SQL shape +
+bind params AND the ``_row`` value-type sweep are asserted WITHOUT a live
+database (the DSN-gated integration suite in
+``tests/integration/test_audit_logs_repository_orm.py`` exercises the real
+round-trip). This keeps fast, always-run coverage of the collapsed ORM bodies.
+"""
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
 import pytest
 
+import app.repositories.admin.audit_logs_repository as mod
+from app.models import AuditLogs
 from app.repositories.admin.audit_logs_repository import AuditLogsRepository
 
 
-class _FakeQuery:
+class _FakeScalars:
+    def __init__(self, rows: list[Any]) -> None:
+        self._rows = rows
+
+    def all(self) -> list[Any]:
+        return self._rows
+
+
+class _FakeResult:
+    """Supports both ``.scalars().all()`` (model reads) and ``.all()``
+    (the distinct-action 1-tuple rows)."""
+
+    def __init__(self, scalar_rows: list[Any], all_rows: list[Any]) -> None:
+        self._scalar_rows = scalar_rows
+        self._all_rows = all_rows
+
+    def scalars(self) -> _FakeScalars:
+        return _FakeScalars(self._scalar_rows)
+
+    def all(self) -> list[Any]:
+        return self._all_rows
+
+
+class _FakeSession:
+    """Captures execute/scalar (stmt, binds); returns configured rows / count."""
+
     def __init__(self) -> None:
-        self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
-        self._data: Any = []
-        self._count: int | None = None
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.scalar_rows: list[Any] = []
+        self.all_rows: list[Any] = []
+        self.scalar_value: int | None = 0
 
-    def __getattr__(self, name: str):
-        def _capture(*args: Any, **kwargs: Any) -> "_FakeQuery":
-            self.calls.append((name, args, kwargs))
-            return self
+    async def execute(self, stmt: Any) -> _FakeResult:
+        self.calls.append((str(stmt), stmt.compile().params))
+        return _FakeResult(self.scalar_rows, self.all_rows)
 
-        return _capture
-
-    async def execute(self) -> Any:
-        class _R:
-            data = self._data
-            count = self._count
-
-        return _R()
+    async def scalar(self, stmt: Any) -> Any:
+        self.calls.append((str(stmt), stmt.compile().params))
+        return self.scalar_value
 
 
-class _FakeClient:
-    def __init__(self, query: _FakeQuery) -> None:
-        self._query = query
+class _ScopeCM:
+    def __init__(self, session: _FakeSession) -> None:
+        self._session = session
 
-    def table(self, name: str) -> _FakeQuery:
-        self._query.calls.append(("table", (name,), {}))
-        return self._query
+    async def __aenter__(self) -> _FakeSession:
+        return self._session
+
+    async def __aexit__(self, *exc: Any) -> bool:
+        return False
 
 
 @pytest.fixture
-def fake_query() -> _FakeQuery:
-    return _FakeQuery()
+def fake_session(monkeypatch: pytest.MonkeyPatch) -> _FakeSession:
+    session = _FakeSession()
+    monkeypatch.setattr(mod, "read_scope", lambda: _ScopeCM(session))
+    return session
 
 
 @pytest.fixture
-def repo(fake_query: _FakeQuery) -> AuditLogsRepository:
-    r = AuditLogsRepository()
+def repo() -> AuditLogsRepository:
+    return AuditLogsRepository()
 
-    async def _client():
-        return _FakeClient(fake_query)
 
-    r._client = _client  # type: ignore[method-assign]
-    return r
+def _log(**overrides: Any) -> AuditLogs:
+    fields: dict[str, Any] = {
+        "id": uuid.uuid4(),
+        "admin_id": uuid.uuid4(),
+        "action": "ban_user",
+        "target_type": "user",
+        "created_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+    }
+    fields.update(overrides)
+    return AuditLogs(**fields)
 
 
 @pytest.mark.asyncio
 async def test_list_threads_all_filters(
-    repo: AuditLogsRepository, fake_query: _FakeQuery
+    repo: AuditLogsRepository, fake_session: _FakeSession
 ) -> None:
-    fake_query._data = [{"id": "a1"}]
-    fake_query._count = 1
+    row_id = uuid.uuid4()
+    admin = uuid.uuid4()
+    fake_session.scalar_rows = [_log(id=row_id, admin_id=admin)]
+    fake_session.scalar_value = 1
     start = datetime(2026, 4, 1, tzinfo=timezone.utc)
     end = datetime(2026, 4, 17, tzinfo=timezone.utc)
 
@@ -74,86 +120,94 @@ async def test_list_threads_all_filters(
         start_date=start,
         end_date=end,
     )
-    assert rows == [{"id": "a1"}]
     assert total == 1
+    # _row value-type sweep: uuid → str, created_at → ISO str.
+    assert rows[0]["id"] == str(row_id)
+    assert rows[0]["admin_id"] == str(admin)
+    assert rows[0]["created_at"] == "2026-04-01T00:00:00+00:00"
 
-    eq_values = [c[1] for c in fake_query.calls if c[0] == "eq"]
-    assert ("admin_id", "admin-1") in eq_values
-    assert ("action", "ban_user") in eq_values
-    assert ("target_type", "user") in eq_values
-
-    gte = next(c for c in fake_query.calls if c[0] == "gte")
-    lte = next(c for c in fake_query.calls if c[0] == "lte")
-    assert gte[1] == ("created_at", start.isoformat())
-    assert lte[1] == ("created_at", end.isoformat())
+    # Every filter is threaded into the SELECT and its bind params.
+    sql, binds = fake_session.calls[-1]  # the paginated SELECT
+    assert "audit_logs" in sql
+    assert "admin_id" in sql and "action" in sql and "target_type" in sql
+    assert "created_at" in sql
+    values = set(binds.values())
+    assert "admin-1" in values
+    assert "ban_user" in values
+    assert "user" in values
+    assert start in values  # gte binds the tz-aware datetime
+    assert end in values  # lte binds the tz-aware datetime
 
 
 @pytest.mark.asyncio
 async def test_list_pagination_math(
-    repo: AuditLogsRepository, fake_query: _FakeQuery
+    repo: AuditLogsRepository, fake_session: _FakeSession
 ) -> None:
-    fake_query._data = []
-    fake_query._count = 0
+    fake_session.scalar_rows = []
+    fake_session.scalar_value = 0
     await repo.list(page=3, page_size=50)
 
-    range_call = next(c for c in fake_query.calls if c[0] == "range")
-    # page=3, page_size=50 → range(100, 149)
-    assert range_call[1] == (100, 149)
+    sql, binds = fake_session.calls[-1]  # the paginated SELECT
+    # page=3, page_size=50 → OFFSET 100, LIMIT 50.
+    assert 100 in binds.values()
+    assert 50 in binds.values()
 
 
 @pytest.mark.asyncio
 async def test_list_orders_newest_first(
-    repo: AuditLogsRepository, fake_query: _FakeQuery
+    repo: AuditLogsRepository, fake_session: _FakeSession
 ) -> None:
-    fake_query._data = []
-    fake_query._count = 0
+    fake_session.scalar_rows = []
+    fake_session.scalar_value = 0
     await repo.list(page=1, page_size=10)
 
-    order = next(c for c in fake_query.calls if c[0] == "order")
-    assert order[1] == ("created_at",)
-    assert order[2] == {"desc": True}
+    sql, _ = fake_session.calls[-1]
+    assert "ORDER BY" in sql
+    assert "created_at DESC" in sql
 
 
 @pytest.mark.asyncio
 async def test_list_total_fallback_when_count_is_none(
-    repo: AuditLogsRepository, fake_query: _FakeQuery
+    repo: AuditLogsRepository, fake_session: _FakeSession
 ) -> None:
-    fake_query._data = [{"id": "a1"}, {"id": "a2"}]
-    fake_query._count = None
+    fake_session.scalar_rows = [_log(), _log()]
+    fake_session.scalar_value = None
     rows, total = await repo.list(page=1, page_size=20)
-    assert total == 2
+    assert total == 2  # falls back to len(rows) when count scalar is None
 
 
 @pytest.mark.asyncio
 async def test_list_distinct_actions_empty_input(
-    repo: AuditLogsRepository, fake_query: _FakeQuery
+    repo: AuditLogsRepository, fake_session: _FakeSession
 ) -> None:
-    fake_query._data = []
+    fake_session.all_rows = []
     assert await repo.list_distinct_actions() == []
 
 
 @pytest.mark.asyncio
 async def test_list_distinct_actions_sorts_and_dedups(
-    repo: AuditLogsRepository, fake_query: _FakeQuery
+    repo: AuditLogsRepository, fake_session: _FakeSession
 ) -> None:
-    fake_query._data = [
-        {"action": "ban_user"},
-        {"action": "update_user"},
-        {"action": "ban_user"},
-        {"action": None},
+    fake_session.all_rows = [
+        ("ban_user",),
+        ("update_user",),
+        ("ban_user",),
+        (None,),
     ]
     result = await repo.list_distinct_actions()
-    assert result == ["ban_user", "update_user"]
+    assert result == ["ban_user", "update_user"]  # sorted, de-duped, NULL dropped
 
 
 @pytest.mark.asyncio
 async def test_list_since_uses_gte(
-    repo: AuditLogsRepository, fake_query: _FakeQuery
+    repo: AuditLogsRepository, fake_session: _FakeSession
 ) -> None:
-    fake_query._data = [{"id": "a1"}]
+    row_id = uuid.uuid4()
+    fake_session.scalar_rows = [_log(id=row_id)]
     since = datetime(2026, 4, 10, tzinfo=timezone.utc)
     rows = await repo.list_since(since)
-    assert rows == [{"id": "a1"}]
+    assert rows[0]["id"] == str(row_id)
 
-    gte = next(c for c in fake_query.calls if c[0] == "gte")
-    assert gte[1] == ("created_at", since.isoformat())
+    sql, binds = fake_session.calls[-1]
+    assert "created_at >=" in sql
+    assert since in binds.values()  # tz-aware datetime bound (v3 rule)
