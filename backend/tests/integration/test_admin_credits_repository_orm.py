@@ -1,4 +1,4 @@
-"""Integration tests for AdminCreditsRepositoryOrm (Phase 2 admin wave — ★ MONEY ★).
+"""Integration tests for the ORM AdminCreditsRepository (Phase 2 admin wave — ★ MONEY ★).
 
 Admin credit-administration surface. Proves the REST → ORM swap is invisible AND
 that STRATEGY-C value-type parity holds on the credits tables — with dedicated
@@ -112,11 +112,9 @@ async def seed_package(integration_db_url):
 
 
 def _repo():
-    from app.repositories.admin.credits_repository_orm import (
-        AdminCreditsRepositoryOrm,
-    )
+    from app.repositories.admin.credits_repository import AdminCreditsRepository
 
-    return AdminCreditsRepositoryOrm()
+    return AdminCreditsRepository()
 
 
 # ─── package CRUD: create COMMITS + native int money + uuid id str ───────
@@ -511,34 +509,15 @@ async def test_teams_count_and_orders_count(
     assert type(n_pending) is int and n_pending >= 1
 
 
-# ─── factory on/off ─────────────────────────────────────────────────────
+# ─── factory (ORM-only, post-rollout) ───────────────────────────────────
 
 
-def test_factory_off_returns_legacy():
-    from unittest.mock import patch
-
+def test_factory_returns_orm_repository():
+    """Per-domain rollout flag ``USE_ORM_ADMIN_CREDITS`` retired → factory
+    unconditionally returns the ORM-backed AdminCreditsRepository."""
     from app.repositories.admin.credits_repository import (
         AdminCreditsRepository,
         get_admin_credits_repository,
     )
 
-    with patch("app.core.config.settings.USE_ORM_ADMIN_CREDITS", False):
-        assert type(get_admin_credits_repository()) is AdminCreditsRepository
-
-
-def test_factory_on_returns_orm(integration_db_url):
-    from unittest.mock import patch
-
-    from app.repositories.admin.credits_repository_orm import (
-        AdminCreditsRepositoryOrm,
-    )
-
-    with (
-        patch("app.core.config.settings.USE_ORM_ADMIN_CREDITS", True),
-        patch("app.db.engine.is_configured", return_value=True),
-    ):
-        from app.repositories.admin.credits_repository import (
-            get_admin_credits_repository,
-        )
-
-        assert type(get_admin_credits_repository()) is AdminCreditsRepositoryOrm
+    assert type(get_admin_credits_repository()) is AdminCreditsRepository
