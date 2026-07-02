@@ -1,4 +1,4 @@
-"""Integration tests for AdminStatsRepositoryOrm (Phase 2 admin wave) vs real PG.
+"""Integration tests for the ORM AdminStatsRepository (Phase 2 admin wave) vs real PG.
 
 Proves the REST → ORM swap is invisible AND strategy-C parity for the admin
 dashboard aggregations:
@@ -114,9 +114,9 @@ async def _seed_media(conn, *, status="completed", created_at=None) -> int:
 
 
 def _repo():
-    from app.repositories.admin.stats_repository_orm import AdminStatsRepositoryOrm
+    from app.repositories.admin.stats_repository import AdminStatsRepository
 
-    return AdminStatsRepositoryOrm()
+    return AdminStatsRepository()
 
 
 async def test_counts_return_native_int(
@@ -226,25 +226,12 @@ async def test_completed_videos_by_user_resource_centric(
     assert active_count >= 1
 
 
-# ─── factory parity ─────────────────────────────────────────────────────
+# ─── Factory (ORM-only, post-rollout) ───────────────────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    from app.core.config import settings
+async def test_factory_returns_orm_repository():
+    """Per-domain rollout flag retired → factory unconditionally returns the
+    ORM-backed AdminStatsRepository."""
     from app.repositories.admin import stats_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_ADMIN_STATS", False)
     assert type(mod.get_admin_stats_repository()) is mod.AdminStatsRepository
-
-
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories.admin import stats_repository as mod
-    from app.repositories.admin.stats_repository_orm import AdminStatsRepositoryOrm
-
-    monkeypatch.setattr(settings, "USE_ORM_ADMIN_STATS", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    assert isinstance(mod.get_admin_stats_repository(), AdminStatsRepositoryOrm)

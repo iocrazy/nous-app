@@ -1,4 +1,4 @@
-"""Integration tests for AdminSearchRepositoryOrm (Phase 2 admin wave) vs real PG.
+"""Integration tests for the ORM AdminSearchRepository (Phase 2 admin wave) vs real PG.
 
 Proves the REST → ORM swap is invisible AND strategy-C parity for the admin
 cross-log search + request-trace correlation:
@@ -70,9 +70,9 @@ async def cleanup_test_rows(integration_db_url):
 
 
 def _repo():
-    from app.repositories.admin.search_repository_orm import AdminSearchRepositoryOrm
+    from app.repositories.admin.search_repository import AdminSearchRepository
 
-    return AdminSearchRepositoryOrm()
+    return AdminSearchRepository()
 
 
 async def test_request_logs_shape_and_parity(
@@ -317,22 +317,9 @@ async def test_audit_logs_returns_rows(integration_db_url, patched_engine):
 # ─── factory parity ─────────────────────────────────────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    from app.core.config import settings
+async def test_factory_returns_orm_repository():
+    """Per-domain rollout flag retired → factory unconditionally returns the
+    ORM-backed AdminSearchRepository."""
     from app.repositories.admin import search_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_ADMIN_SEARCH", False)
     assert type(mod.get_admin_search_repository()) is mod.AdminSearchRepository
-
-
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories.admin import search_repository as mod
-    from app.repositories.admin.search_repository_orm import AdminSearchRepositoryOrm
-
-    monkeypatch.setattr(settings, "USE_ORM_ADMIN_SEARCH", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    assert isinstance(mod.get_admin_search_repository(), AdminSearchRepositoryOrm)

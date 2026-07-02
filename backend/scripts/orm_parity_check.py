@@ -23,16 +23,6 @@ _SINCE = datetime.now(timezone.utc) - timedelta(days=30)
 
 def _cases():
     """(domain, rest_repo, orm_repo, method, args) — read methods only."""
-    from app.repositories.admin.stats_repository import AdminStatsRepository
-    from app.repositories.admin.stats_repository_orm import (
-        AdminStatsRepositoryOrm,
-    )
-    from app.repositories.admin.system_settings_repository import (
-        SystemSettingsRepository,
-    )
-    from app.repositories.admin.system_settings_repository_orm import (
-        SystemSettingsRepositoryOrm,
-    )
     from app.repositories.admin.tasks_repository import AdminTasksRepository
     from app.repositories.admin.tasks_repository_orm import (
         AdminTasksRepositoryOrm,
@@ -46,28 +36,12 @@ def _cases():
         # NOTE: audit_logs is excluded — its domain was collapsed to ORM-only
         # (USE_ORM_ADMIN_AUDIT_LOGS retired), so there is no longer a separate
         # REST impl to diff against. Parity was proven pre-collapse.
-        (
-            "stats",
-            AdminStatsRepository(),
-            AdminStatsRepositoryOrm(),
-            "count_user_profiles",
-            (),
-        ),
-        ("stats", AdminStatsRepository(), AdminStatsRepositoryOrm(), "count_teams", ()),
-        (
-            "stats",
-            AdminStatsRepository(),
-            AdminStatsRepositoryOrm(),
-            "count_parsed_media",
-            (),
-        ),
-        (
-            "system_settings",
-            SystemSettingsRepository(),
-            SystemSettingsRepositoryOrm(),
-            "list_non_transcode",
-            (),
-        ),
+        # NOTE: stats is excluded — its domain was collapsed to ORM-only
+        # (USE_ORM_ADMIN_STATS retired), so there is no longer a separate REST
+        # impl to diff against. Parity was proven pre-collapse.
+        # NOTE: system_settings is excluded — its domain was collapsed to
+        # ORM-only (USE_ORM_ADMIN_SYSTEM_SETTINGS retired), so there is no longer
+        # a separate REST impl to diff against. Parity was proven pre-collapse.
         # NOTE: ADMIN_ALERT_RULES is excluded — the `alert_rules` table does not
         # exist on the self-hosted prod (a dead/never-deployed feature; both REST
         # and ORM error identically). Not a parity concern.
