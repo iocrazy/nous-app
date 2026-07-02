@@ -139,21 +139,6 @@ class Settings(BaseSettings):
         "writes (commit via write_scope(); create/update return {} on empty "
         "per REST contract).",
     )
-    USE_ORM_NOTIFICATIONS: bool = Field(
-        default=False,
-        description="Route NotificationRepository through the SQLAlchemy 2.0 "
-        "ORM session layer (Batch L1b — replaces the supabase-py REST path for "
-        "the notifications / user_notifications / team_members tables). "
-        "Strategy C: bigint id / notification_id / team_id stay native int (the "
-        "5.3 trap — the team-membership filter does `n['team_id'] in team_ids` "
-        "with int both sides); created_at → ISO str; created_by uuid → str for "
-        "shape parity (router serializes straight to HTTP; no type-sensitive "
-        "Python consumer). user_id is an input only. Covers get_user_"
-        "notifications (multi-table read + read-status join) / get_unread_count "
-        "/ mark_as_read / mark_all_as_read writes (upsert, commit via "
-        "write_scope()). delete_notification preserves the legacy graceful "
-        "no-op contract (writes a phantom dismissed_at column → returns False).",
-    )
     USE_ORM_SCRIPTS: bool = Field(
         default=False,
         description="Route the four Script*Repository classes (ScriptProject / "
