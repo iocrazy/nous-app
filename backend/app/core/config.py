@@ -696,21 +696,6 @@ class Settings(BaseSettings):
         "write_scope(). Inert — flip back to false to roll back.",
     )
 
-    # ── Phase 2 admin wave (5 small logs/stats/settings repos) ──────────
-    USE_ORM_ADMIN_TABLE_PREFERENCES: bool = Field(
-        default=False,
-        description="Route AdminTablePreferencesRepository "
-        "(admin_table_preferences — Notion-style per-user table config) through "
-        "the SQLAlchemy 2.0 ORM (Phase 2 admin wave). COLUMN-SUBSET selects "
-        "(table_key, filters, sorts, visible_columns, column_order) — NO uuid / "
-        "timestamptz in the projection, so no value-type coercion is needed. "
-        "filters/sorts (jsonb) → native dict/list, visible_columns/column_order "
-        "(text[]) → native list[str]. upsert() reproduces the legacy "
-        "on_conflict='user_id,table_key' via pg_insert().on_conflict_do_update "
-        "and COMMITS via write_scope(); delete() commits. No date filters. Inert; "
-        "flip false to revert.",
-    )
-
     # ── Phase 2 admin wave pass 2 (search / alerts / logs / tasks / videos) ──
     USE_ORM_ADMIN_TASKS: bool = Field(
         default=False,

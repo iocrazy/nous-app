@@ -1,9 +1,10 @@
-"""Integration tests for AdminTablePreferencesRepositoryOrm (admin wave) vs PG.
+"""Integration tests for AdminTablePreferencesRepository (admin wave) vs PG.
 
-Proves the REST → ORM swap is invisible for admin_table_preferences. The
-projection (table_key, filters, sorts, visible_columns, column_order) has NO uuid
-/ NO timestamptz, so the parity concern is shape (jsonb → dict/list, text[] →
-list[str]) + write COMMIT semantics (upsert / delete via write_scope()).
+Post-collapse (USE_ORM_ADMIN_TABLE_PREFERENCES retired): AdminTablePreferencesRepository
+IS the SQLAlchemy 2.0 ORM implementation. The projection (table_key, filters,
+sorts, visible_columns, column_order) has NO uuid / NO timestamptz, so the parity
+concern is shape (jsonb → dict/list, text[] → list[str]) + write COMMIT semantics
+(upsert / delete via write_scope()).
 
     source /tmp/orm2_integration.env
     uv run pytest tests/integration/test_table_preferences_repository_orm.py -v
@@ -65,11 +66,11 @@ async def _real_user_id(conn):
 
 
 def _repo():
-    from app.repositories.admin.table_preferences_repository_orm import (
-        AdminTablePreferencesRepositoryOrm,
+    from app.repositories.admin.table_preferences_repository import (
+        AdminTablePreferencesRepository,
     )
 
-    return AdminTablePreferencesRepositoryOrm()
+    return AdminTablePreferencesRepository()
 
 
 async def test_get_missing_returns_none(
@@ -194,33 +195,15 @@ async def test_delete_commits(integration_db_url, patched_engine, cleanup_test_r
     assert count == 0  # delete committed
 
 
-# ─── factory parity ─────────────────────────────────────────────────────
+# ─── Factory (ORM-only, post-rollout) ───────────────────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    from app.core.config import settings
+async def test_factory_returns_orm_repository():
+    """Per-domain rollout flag retired → factory unconditionally returns the
+    ORM-backed AdminTablePreferencesRepository."""
     from app.repositories.admin import table_preferences_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_ADMIN_TABLE_PREFERENCES", False)
     assert (
         type(mod.get_admin_table_preferences_repository())
         is mod.AdminTablePreferencesRepository
-    )
-
-
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories.admin import table_preferences_repository as mod
-    from app.repositories.admin.table_preferences_repository_orm import (
-        AdminTablePreferencesRepositoryOrm,
-    )
-
-    monkeypatch.setattr(settings, "USE_ORM_ADMIN_TABLE_PREFERENCES", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    assert isinstance(
-        mod.get_admin_table_preferences_repository(),
-        AdminTablePreferencesRepositoryOrm,
     )
