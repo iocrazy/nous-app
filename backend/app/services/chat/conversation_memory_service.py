@@ -144,9 +144,7 @@ async def build_memory_block(
     return "\n\n".join(parts)
 
 
-async def maybe_compact(
-    *, conversation: dict[str, Any], agent_id: Optional[str] = None
-) -> None:
+async def maybe_compact(*, conversation: dict[str, Any]) -> None:
     if not settings.FEATURE_GROUP_AGENT_MEMORY:
         return
     try:

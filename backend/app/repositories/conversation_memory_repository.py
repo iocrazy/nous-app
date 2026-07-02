@@ -37,7 +37,8 @@ class ConversationMemoryRepository:
             "ON CONFLICT (conversation_id) DO UPDATE SET "
             "summary_md = EXCLUDED.summary_md, "
             "last_seq_summarized = EXCLUDED.last_seq_summarized, "
-            "model = EXCLUDED.model, updated_at = now()",
+            "model = EXCLUDED.model, updated_at = now() "
+            "WHERE public.conversation_memory.last_seq_summarized < EXCLUDED.last_seq_summarized",
             {
                 "cid": int(conversation_id),
                 "summary": summary_md,

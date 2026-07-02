@@ -314,10 +314,7 @@ class ConversationService:
         # Phase 1.5 — rolling summary upkeep. Never raises; flag-gated inside.
         if replied:
             try:
-                await maybe_compact(
-                    conversation=conversation,
-                    agent_id=slug_to_agent[replied[0]].get("id"),
-                )
+                await maybe_compact(conversation=conversation)
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"[dispatch_summons] compact_failed: {exc!r}")
 

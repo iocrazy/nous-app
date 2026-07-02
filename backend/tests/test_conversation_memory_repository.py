@@ -79,6 +79,10 @@ async def test_upsert_uses_on_conflict(fake_engine) -> None:
     sql = fake_engine.last_sql()
     assert "INSERT INTO public.conversation_memory" in sql
     assert "ON CONFLICT (conversation_id) DO UPDATE" in sql
+    assert (
+        "WHERE public.conversation_memory.last_seq_summarized "
+        "< EXCLUDED.last_seq_summarized" in sql
+    )
     assert fake_engine.last_params()["last_seq"] == 40
 
 
