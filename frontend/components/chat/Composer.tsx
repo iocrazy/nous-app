@@ -321,15 +321,20 @@ export function Composer({
 
         {/* Toolbar */}
         <div className="flex items-center gap-1 mt-[9px]">
-          <button
-            type="button"
-            disabled={disabled}
-            title={t('chat.attachResource')}
-            onClick={() => fileInputRef.current?.click()}
-            className="w-[30px] h-[30px] rounded-[8px] grid place-items-center text-content-3 hover:text-content hover:bg-island-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            <Paperclip size={14} />
-          </button>
+          {/* Image upload is only wired when the caller passes onAttachFiles
+              (conversations feature on). Keep the button hidden otherwise so
+              the flag-off path never shows an entry that errors on click. */}
+          {onAttachFiles && (
+            <button
+              type="button"
+              disabled={disabled}
+              title={t('chat.attachResource')}
+              onClick={() => fileInputRef.current?.click()}
+              className="w-[30px] h-[30px] rounded-[8px] grid place-items-center text-content-3 hover:text-content hover:bg-island-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              <Paperclip size={14} />
+            </button>
+          )}
           <button
             type="button"
             disabled={disabled}
