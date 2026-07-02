@@ -697,18 +697,6 @@ class Settings(BaseSettings):
     )
 
     # ── Phase 2 admin wave (5 small logs/stats/settings repos) ──────────
-    USE_ORM_ADMIN_MONITORING: bool = Field(
-        default=False,
-        description="Route MonitoringRepository (admin monitoring dashboard — "
-        "reads api_request_logs / application_logs / frontend_error_logs) through "
-        "the SQLAlchemy 2.0 ORM (Phase 2 admin wave). COLUMN-SUBSET selects (not "
-        "SELECT *). Strategy C: timestamp / logged_at (timestamptz) → ISO str "
-        "(CONSUMED — the router does ts.replace('Z',...)+fromisoformat(ts) and "
-        "sets RecentErrorEntry.logged_at:str); status_code / response_time_ms "
-        "(int) stay native; frontend_error_count returns native int. No uuid in "
-        "any projection. Date-range filters bind NATIVE tz-aware datetimes (v3 "
-        "rule; these are the LOTS-of-date-windows surface). Reads only. Inert.",
-    )
     USE_ORM_ADMIN_STATS: bool = Field(
         default=False,
         description="Route AdminStatsRepository (admin dashboard aggregations "

@@ -114,11 +114,9 @@ async def _seed_fe(conn, when):
 
 
 def _repo():
-    from app.repositories.admin.monitoring_repository_orm import (
-        MonitoringRepositoryOrm,
-    )
+    from app.repositories.admin.monitoring_repository import MonitoringRepository
 
-    return MonitoringRepositoryOrm()
+    return MonitoringRepository()
 
 
 async def test_request_logs_between_shape_and_parity(
@@ -208,28 +206,12 @@ async def test_frontend_error_count_native_int(
     assert count >= 2
 
 
-# ─── factory parity ─────────────────────────────────────────────────────
+# ─── factory ─────────────────────────────────────────────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    from app.core.config import settings
+async def test_factory_returns_orm_only_repo():
+    """Post-rollout the flag is retired; the factory unconditionally returns the
+    collapsed ORM-only MonitoringRepository."""
     from app.repositories.admin import monitoring_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_ADMIN_MONITORING", False)
-    repo = mod.get_monitoring_repository()
-    assert type(repo) is mod.MonitoringRepository
-
-
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories.admin import monitoring_repository as mod
-    from app.repositories.admin.monitoring_repository_orm import (
-        MonitoringRepositoryOrm,
-    )
-
-    monkeypatch.setattr(settings, "USE_ORM_ADMIN_MONITORING", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    assert isinstance(mod.get_monitoring_repository(), MonitoringRepositoryOrm)
+    assert type(mod.get_monitoring_repository()) is mod.MonitoringRepository
