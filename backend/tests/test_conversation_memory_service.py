@@ -68,6 +68,16 @@ async def test_build_block_never_raises(monkeypatch):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_build_block_malformed_conversation_returns_empty(monkeypatch):
+    monkeypatch.setattr(svc.settings, "FEATURE_GROUP_AGENT_MEMORY", True)
+    out = await svc.build_memory_block(
+        conversation={}, user_query="q", summoner_user_id="u1", agent={"id": "a1"}
+    )
+    assert out == ""  # never raises, degrades to empty
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_compact_below_threshold_is_noop(monkeypatch):
     monkeypatch.setattr(svc.settings, "FEATURE_GROUP_AGENT_MEMORY", True)
     summarize = AsyncMock()

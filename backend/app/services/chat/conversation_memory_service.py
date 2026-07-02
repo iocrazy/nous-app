@@ -111,8 +111,13 @@ async def build_memory_block(
 ) -> str:
     if not settings.FEATURE_GROUP_AGENT_MEMORY:
         return ""
+    try:
+        cid = int(conversation["id"])
+        scope_id = int(conversation["scope_id"])
+    except (KeyError, TypeError, ValueError) as exc:
+        logger.warning(f"[conv_memory] malformed conversation dict: {exc!r}")
+        return ""
     parts: list[str] = []
-    cid = int(conversation["id"])
     try:
         mem = await get_conversation_memory_repository().load(cid)
         if mem and (mem.get("summary_md") or "").strip():
@@ -125,7 +130,7 @@ async def build_memory_block(
         if settings.FEATURE_AGENT_MEMORY:
             ctx = MemoryContext(
                 user_id=summoner_user_id,
-                team_ids=(int(conversation["scope_id"]),),
+                team_ids=(scope_id,),
                 agent_id=str(agent.get("id")) if agent.get("id") else None,
             )
             hits = await recall(ctx, user_query, limit=5)
