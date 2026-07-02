@@ -74,7 +74,6 @@ import { downloadFile } from '../utils/download';
 import { useToast } from './Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useIslandWork } from '../contexts/IslandWorkContext';
-import { islandUI } from '../utils/featureFlags';
 import { CometBack } from './CometBack';
 import { ShareModal } from './ShareModal';
 import { VersionManagerModal } from './VersionManagerModal';
@@ -382,55 +381,50 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
 
   // Island app-shell integration (no-op in classic — useIslandWork returns an
   // inert shape outside a shell, and `island` gates every island-only branch).
-  const island = islandUI();
   const { infoIslandEl, setInfoVisible, setInfoAvailable } = useIslandWork();
-  // Island desktop = flag on AND the md+ split-pane layout is active (same
+  // Island desktop = the md+ split-pane layout is active (same
   // breakpoint the rest of this page uses), so the inspector is never both
   // mounted in the work island and portaled into the info island.
-  const islandDesktop = island && isDesktop;
+  const islandDesktop = isDesktop;
 
   // Island redesign: align neutral text/border ink to the mock --content/--line
-  // ladder. Classic (island=false) keeps the EXACT original ink classes so the
-  // D12 classic render stays byte-identical; only island swaps to the soft ladder.
-  const cPrimary = island ? 'text-content' : 'text-ink-50';
-  const cText100 = island ? 'text-content' : 'text-ink-100';
-  const cText200 = island ? 'text-content' : 'text-ink-200';
-  const cText300 = island ? 'text-content-2' : 'text-ink-300';
-  const cText400 = island ? 'text-content-2' : 'text-ink-400';
-  const cLabel = island ? 'text-content-3' : 'text-ink-500';
-  const cFaint = island ? 'text-content-4' : 'text-ink-600';
-  const cHover100 = island ? 'hover:text-content' : 'hover:text-ink-100';
-  const cHover200 = island ? 'hover:text-content' : 'hover:text-ink-200';
-  const cHover300 = island ? 'hover:text-content-2' : 'hover:text-ink-300';
-  const cGroupHover400 = island ? 'group-hover:text-content-2' : 'group-hover:text-ink-400';
-  const cBorder700 = island ? 'border-line' : 'border-ink-700';
-  const cBorder700_30 = island ? 'border-line' : 'border-ink-700/30';
-  const cBorder700_50 = island ? 'border-line' : 'border-ink-700/50';
-  const cBorder700_60 = island ? 'border-line' : 'border-ink-700/60';
-  const cBorder800 = island ? 'border-line' : 'border-ink-800';
-  const cBorder800_60 = island ? 'border-line' : 'border-ink-800/60';
-  const cBorder800_80 = island ? 'border-line' : 'border-ink-800/80';
-  const cHoverBorder700 = island ? 'hover:border-line' : 'hover:border-ink-700';
-  const cPlaceholder = island ? 'placeholder-content-4' : 'placeholder-ink-600';
-  // Surface backgrounds — map raw ink to the mock's semantic surface tokens in
-  // island; classic (island=false) keeps the EXACT original ink class so the
-  // D12 classic render stays byte-identical.
-  const cCardBg = island ? 'bg-card' : 'bg-ink-900';
-  const cCtrlBg = island ? 'bg-island-2' : 'bg-ink-800';
-  const cActiveBg = island ? 'bg-card' : 'bg-ink-800';
-  const cHoverSurf = island ? 'hover:bg-island-2' : 'hover:bg-ink-800';
-  const cHoverSurf7 = island ? 'hover:bg-island-2' : 'hover:bg-ink-700';
-  const cInputBg = island ? 'bg-island-2' : 'bg-ink-800/50';
+  // ladder.
+  const cPrimary = 'text-content';
+  const cText100 = 'text-content';
+  const cText200 = 'text-content';
+  const cText300 = 'text-content-2';
+  const cText400 = 'text-content-2';
+  const cLabel = 'text-content-3';
+  const cFaint = 'text-content-4';
+  const cHover100 = 'hover:text-content';
+  const cHover200 = 'hover:text-content';
+  const cHover300 = 'hover:text-content-2';
+  const cGroupHover400 = 'group-hover:text-content-2';
+  const cBorder700 = 'border-line';
+  const cBorder700_30 = 'border-line';
+  const cBorder700_50 = 'border-line';
+  const cBorder700_60 = 'border-line';
+  const cBorder800 = 'border-line';
+  const cBorder800_60 = 'border-line';
+  const cBorder800_80 = 'border-line';
+  const cHoverBorder700 = 'hover:border-line';
+  const cPlaceholder = 'placeholder-content-4';
+  // Surface backgrounds — map raw ink to the mock's semantic surface tokens.
+  const cCardBg = 'bg-card';
+  const cCtrlBg = 'bg-island-2';
+  const cActiveBg = 'bg-card';
+  const cHoverSurf = 'hover:bg-island-2';
+  const cHoverSurf7 = 'hover:bg-island-2';
+  const cInputBg = 'bg-island-2';
 
   // Island mode: this page owns an info island (the inspector). Mark it
   // available + visible on mount so the shell mounts the info aside (our portal
   // target), and tear it down on unmount. No-op in classic.
   useEffect(() => {
-    if (!island) return;
     setInfoAvailable(true);
     setInfoVisible(true);
     return () => { setInfoAvailable(false); setInfoVisible(false); };
-  }, [island, setInfoAvailable, setInfoVisible]);
+  }, [setInfoAvailable, setInfoVisible]);
 
   // File list panel state
   const [showFileList, setShowFileList] = useState(false);
@@ -1297,262 +1291,6 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
 
   return (
     <div className="flex flex-col h-full animate-in fade-in duration-300">
-      {/* Top bar — [PanelLeft | ← Back] | [◀ prev | filename (2/5) | next ▶] | [Download | ⋯] */}
-      {/* Classic top bar — island desktop renders the stage-head below instead. */}
-      {!island && (
-      <div className="detail-header-glow hidden md:flex items-center justify-between px-4 py-2.5 mb-2 shrink-0">
-        {/* Glowing accent line that dips to cradle the round Back button */}
-        <svg
-          className="detail-header-glow__line"
-          preserveAspectRatio="xMinYMid meet"
-          viewBox="0 0 1100 30"
-          aria-hidden="true"
-        >
-          <defs>
-            <linearGradient
-              id="detailGlowGrad"
-              x1="0"
-              y1="0"
-              x2="1100"
-              y2="0"
-              gradientUnits="userSpaceOnUse"
-            >
-              <stop offset="0" stopColor="rgba(139,92,246,0)" />
-              <stop offset="0.034" stopColor="rgba(139,92,246,1)" />
-              <stop offset="0.155" stopColor="rgba(139,92,246,0.55)" />
-              <stop offset="0.273" stopColor="rgba(139,92,246,0.25)" />
-              <stop offset="0.382" stopColor="rgba(139,92,246,0)" />
-            </linearGradient>
-          </defs>
-          <path d="M0 5.2 H6 C22 5.2 24 19.2 37 19.2 C50 19.2 52 5.2 68 5.2 L420 6.6 L68 6.8 C52 6.8 50 20.8 37 20.8 C24 20.8 22 6.8 6 6.8 H0 Z" />
-        </svg>
-
-        {/* Left: back + panel toggle */}
-        <div className="flex items-center gap-2 md:min-w-[140px]">
-          <button
-            onClick={handleBack}
-            title={t('common.back')}
-            aria-label="Back"
-            className="detail-back-btn"
-          >
-            <ArrowLeft size={18} />
-          </button>
-          <button
-            onClick={() => setShowFileList(!showFileList)}
-            className={`hidden md:block p-1.5 rounded-lg transition-colors ${
-              showFileList ? 'bg-ink-800 text-indigo-400' : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800'
-            }`}
-            title={t('resources.fileListPanel')}
-          >
-            <PanelLeft size={16} />
-          </button>
-        </div>
-
-        {/* Center: prev/next + filename */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => navigateToSibling('prev')}
-            disabled={!hasPrev}
-            className={`p-1 rounded transition-colors ${
-              hasPrev ? 'text-ink-400 hover:text-ink-200 hover:bg-ink-800' : 'text-ink-700 cursor-not-allowed'
-            }`}
-            title={t('resources.prevFile')}
-          >
-            <ChevronLeft size={18} />
-          </button>
-          <div className="flex items-center gap-2 px-2">
-            <FileIcon size={14} className={iconColor} />
-            <span className="text-sm text-ink-200 font-medium max-w-[140px] md:max-w-[300px] truncate">
-              {resource.filename}
-            </span>
-            {/* Version dropdown */}
-            {versions.length > 0 && (
-              <div className="relative" ref={versionDropdownRef}>
-                <button
-                  onClick={() => setShowVersionDropdown(!showVersionDropdown)}
-                  className={`flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-md transition-colors ${
-                    selectedVersionId
-                      ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
-                      : 'bg-ink-800 text-ink-400 hover:text-ink-200 hover:bg-ink-700'
-                  }`}
-                >
-                  <Layers size={12} />
-                  <span>
-                    {selectedVersionId
-                      ? `v${versions.find(v => v.id === selectedVersionId)?.version_number ?? '?'}`
-                      : `v${resource.current_version}`}
-                  </span>
-                  <ChevronDown size={12} />
-                </button>
-                {showVersionDropdown && (
-                  <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1 z-30 bg-ink-900 border border-ink-700 rounded-lg shadow-xl w-56 py-1">
-                    <div className="px-3 py-1.5 border-b border-ink-800">
-                      <p className="text-[10px] font-semibold text-ink-500 uppercase tracking-widest">
-                        {t('resources.versions', 'Versions')}
-                      </p>
-                    </div>
-                    <div className="max-h-48 overflow-y-auto py-1">
-                      {versions
-                        .sort((a, b) => b.version_number - a.version_number)
-                        .map((ver) => {
-                          const isCurrentVer = ver.version_number === resource.current_version;
-                          const isSelected = selectedVersionId ? ver.id === selectedVersionId : isCurrentVer;
-                          return (
-                            <button
-                              key={ver.id}
-                              onClick={() => handleSelectVersion(ver)}
-                              className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors ${
-                                isSelected
-                                  ? 'bg-indigo-500/10 text-indigo-300'
-                                  : 'text-ink-400 hover:bg-ink-800 hover:text-ink-200'
-                              }`}
-                            >
-                              <span className={`font-semibold ${isCurrentVer ? 'text-indigo-400' : ''}`}>
-                                v{ver.version_number}
-                              </span>
-                              <span className="truncate flex-1 text-left">{ver.filename}</span>
-                              {ver.transcode_status === 'completed' && (
-                                <span className="text-[9px] px-1 py-0.5 bg-emerald-500/20 text-emerald-400 rounded">
-                                  HLS
-                                </span>
-                              )}
-                              {(ver.transcode_status === 'pending' || ver.transcode_status === 'processing') && (
-                                <Loader2 size={10} className="animate-spin text-amber-400 shrink-0" />
-                              )}
-                              {isCurrentVer && (
-                                <span className="text-[9px] px-1 py-0.5 bg-emerald-500/20 text-emerald-400 rounded">
-                                  current
-                                </span>
-                              )}
-                            </button>
-                          );
-                        })}
-                    </div>
-                    <div className="border-t border-ink-800 px-2 py-1.5">
-                      <button
-                        onClick={() => { setShowVersionDropdown(false); setShowVersionManager(true); }}
-                        className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-indigo-400 hover:bg-indigo-500/10 rounded-md transition-colors"
-                      >
-                        <Layers size={12} />
-                        {t('resources.manageVersions', 'Manage Versions')}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-            {/* Transcoding status badge */}
-            {isVideo && transcodeStatus === 'pending' && (
-              <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/15 text-amber-400 rounded-md">
-                <Loader2 size={10} className="animate-spin" />
-                {t('resources.transcoding', 'Transcoding...')}
-              </span>
-            )}
-            {isVideo && transcodeStatus === 'processing' && (
-              <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/15 text-amber-400 rounded-md">
-                <Loader2 size={10} className="animate-spin" />
-                {t('resources.transcoding', 'Transcoding...')}
-              </span>
-            )}
-            {isVideo && transcodeStatus === 'failed' && viewingVersion && (
-              <button
-                onClick={async () => {
-                  try {
-                    await retryTranscode(resourceId, viewingVersion.id);
-                    // Optimistic update: show as pending
-                    setVersions((prev) =>
-                      prev.map((v) =>
-                        v.id === viewingVersion.id
-                          ? { ...v, transcode_status: 'pending' }
-                          : v,
-                      ),
-                    );
-                  } catch (err) {
-                    console.error('Retry transcode failed:', err);
-                    // user sees the badge stay as "failed"
-                  }
-                }}
-                className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-red-500/15 text-red-400 hover:bg-red-500/25 hover:text-red-300 rounded-md transition-colors cursor-pointer"
-                title={t('resources.retryTranscode', 'Retry')}
-              >
-                <RefreshCw size={10} />
-                {t('resources.transcodeFailed', 'Transcode Failed')}
-              </button>
-            )}
-            {isVideo && transcodeStatus === 'completed' && (
-              <span className="px-1.5 py-0.5 text-[10px] font-medium bg-emerald-500/15 text-emerald-400 rounded-md">
-                HLS
-              </span>
-            )}
-            {currentIndex >= 0 && siblingFiles.length > 0 && (
-              <span className="text-xs text-ink-500">
-                ({currentIndex + 1}/{siblingFiles.length})
-              </span>
-            )}
-          </div>
-          <button
-            onClick={() => navigateToSibling('next')}
-            disabled={!hasNext}
-            className={`p-1 rounded transition-colors ${
-              hasNext ? 'text-ink-400 hover:text-ink-200 hover:bg-ink-800' : 'text-ink-700 cursor-not-allowed'
-            }`}
-            title={t('resources.nextFile')}
-          >
-            <ChevronRight size={18} />
-          </button>
-        </div>
-
-        {/* Right: download + more — desktop only in top bar, mobile shows in card */}
-        <div className="hidden md:flex items-center gap-1.5 min-w-[140px] justify-end">
-          <button
-            onClick={() => setShowShareModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg btn-tint-indigo transition-colors"
-          >
-            <Share2 size={14} />
-            <span>{t('resources.share')}</span>
-          </button>
-          {fileUrl && (
-            <a
-              href={fileUrl}
-              download
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-ink-400 hover:text-ink-200 hover:bg-ink-800 rounded-lg transition-colors"
-            >
-              <Download size={14} />
-              <span>{t('resources.download')}</span>
-            </a>
-          )}
-          <div className="relative">
-            <button
-              onClick={() => setShowMoreMenu(!showMoreMenu)}
-              className="p-1.5 text-ink-400 hover:text-ink-200 hover:bg-ink-800 rounded-lg transition-colors"
-            >
-              <MoreHorizontal size={16} />
-            </button>
-            {showMoreMenu && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setShowMoreMenu(false)} />
-                <div className="absolute right-0 top-full mt-1 z-20 bg-ink-900 border border-ink-700 rounded-lg shadow-xl py-1 w-44">
-                  {fileUrl && (
-                    <button
-                      className="block w-full text-left px-3 py-1.5 text-xs text-ink-400 hover:bg-ink-800 hover:text-ink-200 transition-colors"
-                      onClick={() => {
-                        setShowMoreMenu(false);
-                        downloadFile(fileUrl, resource.filename || 'download', {
-                          onSuccess: (f) => addToast(`Downloaded: ${f}`, 'success'),
-                          onError: (msg) => addToast(`Download failed (${msg})`, 'error'),
-                        });
-                      }}
-                    >
-                      {t('resources.downloadOriginal')}
-                    </button>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-      )}
 
       {/* Island stage-head — comet back · file nav/title/version · actions.
           Mirrors the download detail stage-head and carries the same controls
@@ -1820,7 +1558,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   value={fileListSearch}
                   onChange={(e) => setFileListSearch(e.target.value)}
                   placeholder={t('resources.searchFiles')}
-                  className={`w-full ${island ? 'bg-island-2' : 'bg-ink-800/60'} border ${cBorder700_30} rounded-lg pl-8 pr-3 py-1.5 text-xs ${cText200} ${cPlaceholder} focus:outline-none focus:border-indigo-500/50 transition-colors`}
+                  className={`w-full bg-island-2 border ${cBorder700_30} rounded-lg pl-8 pr-3 py-1.5 text-xs ${cText200} ${cPlaceholder} focus:outline-none focus:border-indigo-500/50 transition-colors`}
                 />
               </div>
             </div>
@@ -1842,7 +1580,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                     className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-all ${
                       isActive
                         ? 'bg-indigo-500/10 border-l-2 border-indigo-400'
-                        : `${island ? 'hover:bg-island-2' : 'hover:bg-ink-800/60'} border-l-2 border-transparent`
+                        : `hover:bg-island-2 border-l-2 border-transparent`
                     }`}
                   >
                     {thumb ? (
@@ -1993,11 +1731,11 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             </div>
           ) : isAudio && fileUrl ? (
             <div className="w-full h-full">
-              <FilePreview resource={resource} fileUrl={fileUrl} onCoverUpdated={setResource} island={island} />
+              <FilePreview resource={resource} fileUrl={fileUrl} onCoverUpdated={setResource} island={true} />
             </div>
           ) : (
             <div className="p-6">
-              <FilePreview resource={resource} fileUrl={fileUrl} onCoverUpdated={setResource} island={island} />
+              <FilePreview resource={resource} fileUrl={fileUrl} onCoverUpdated={setResource} island={true} />
             </div>
           )}
           </div>
@@ -2466,7 +2204,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                       <button
                         key={ver.id}
                         onClick={() => handleSelectVersion(ver)}
-                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors ${island ? 'hover:bg-island-2' : 'hover:bg-ink-800/70'} ${
+                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors hover:bg-island-2 ${
                           isViewing
                             ? 'bg-indigo-500/10 border border-indigo-500/20'
                             : 'bg-transparent'
@@ -2582,7 +2320,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                           {transcript.segments.map((seg, i) => (
                             <div
                               key={i}
-                              className={`flex gap-2 px-3 py-2 ${island ? 'hover:bg-island-2' : 'hover:bg-ink-800/30'} transition-colors group`}
+                              className={`flex gap-2 px-3 py-2 hover:bg-island-2 transition-colors group`}
                             >
                               <button
                                 className="text-[10px] font-mono text-indigo-400/70 group-hover:text-indigo-400 shrink-0 pt-0.5 transition-colors"
@@ -2652,7 +2390,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                         <ChevronDown size={8} />
                       </button>
                       {exportOpen && (
-                        <div className={`absolute bottom-full mb-1 left-0 ${island ? 'bg-card' : 'bg-ink-800'} border ${cBorder700} rounded-lg shadow-xl overflow-hidden z-10 min-w-[100px]`}>
+                        <div className={`absolute bottom-full mb-1 left-0 bg-card border ${cBorder700} rounded-lg shadow-xl overflow-hidden z-10 min-w-[100px]`}>
                           <button
                             onClick={() => { handleExportSRT(); setExportOpen(false); }}
                             className={`w-full px-3 py-1.5 text-[10px] ${cText300} ${cHoverSurf7} text-left transition-colors`}

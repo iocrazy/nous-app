@@ -16,7 +16,6 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { Tag } from '../../../types';
-import { islandUI } from '../../../utils/featureFlags';
 import { EagleTagBrowser } from '../../EagleTagPicker/EagleTagBrowser';
 import { useTagPreferences } from '../../EagleTagPicker/useTagPreferences';
 
@@ -36,7 +35,6 @@ export const TagsFilterDropdown: React.FC<TagsFilterDropdownProps> = ({
   onMergeTags,
 }) => {
   const { t } = useTranslation();
-  const island = islandUI();
   const { prefs, toggleStar, updateSettings } = useTagPreferences();
 
   const selectedSet = React.useMemo(() => new Set(selectedTagIds), [selectedTagIds]);
@@ -54,7 +52,7 @@ export const TagsFilterDropdown: React.FC<TagsFilterDropdownProps> = ({
 
   if (allTags.length === 0) {
     return (
-      <div className={`w-64 px-3 py-4 text-xs ${island ? 'text-content-3' : 'text-ink-500'}`} role="menu" aria-label="Tags filter">
+      <div className="w-64 px-3 py-4 text-xs text-content-3" role="menu" aria-label="Tags filter">
         {t('resources.filter.noTags', 'No tags yet')}
       </div>
     );
@@ -81,7 +79,7 @@ export const TagsFilterDropdown: React.FC<TagsFilterDropdownProps> = ({
         <button
           type="button"
           onClick={onClearAll}
-          className={`border-t ${island ? 'border-line' : 'border-ink-800'} px-3 py-2 text-xs ${island ? 'text-content-2 hover:text-content' : 'text-ink-400 hover:text-ink-100'} text-left`}
+          className="border-t border-line px-3 py-2 text-xs text-content-2 hover:text-content text-left"
         >
           {t('resources.filter.clearSelection', 'Clear selection')}
         </button>

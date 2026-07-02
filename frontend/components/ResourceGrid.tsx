@@ -1,6 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { islandUI } from '../utils/featureFlags';
 import {
   Clock,
   Filter,
@@ -290,7 +289,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
     selectedFolder, setSelectedFolder,
     selectedIds, setSelectedIds,
     multiSelectMode, setMultiSelectMode,
-    showInfoPanel, infoPanelWidth, setShowInfoPanel,
+    showInfoPanel, setShowInfoPanel,
     recycleFolderId, setRecycleFolderId,
     navigate, resPath, canUpload, addToast,
     transcodingResourceIds,
@@ -531,7 +530,6 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
       {/* Toolbar -- desktop only */}
       <div
         className="hidden md:block px-3 md:px-6 pt-3 pb-2 border-b border-ink-800/80 space-y-2"
-        style={{ paddingRight: !islandUI() && (selectedResource?.resource || selectedFolder) && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
       >
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <div className="flex items-center gap-3 min-w-0">
@@ -835,7 +833,6 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
       <div
         ref={contentScrollRef}
         className="flex-1 md:min-h-0 overflow-y-auto p-3 md:p-6 relative"
-        style={{ paddingRight: !islandUI() && (selectedResource?.resource || selectedFolder) && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
         onDragEnter={canUploadDrop ? onDragEnter : undefined}
         onDragOver={canUploadDrop ? onDragOver : undefined}
         onDragLeave={canUploadDrop ? onDragLeave : undefined}

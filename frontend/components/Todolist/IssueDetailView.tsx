@@ -11,7 +11,6 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { islandUI } from '../../utils/featureFlags';
 import {
   ChevronLeft, MoreHorizontal, AlignLeft, Paperclip, FileText, Plus,
   MessageSquare, Activity, Link2, Bot,
@@ -203,7 +202,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
   };
 
   return (
-    <div className={`flex flex-col bg-ink-950 border-t border-ink-800/80 ${islandUI() ? 'h-full min-h-0' : 'h-[calc(100vh-5rem)] -mx-4 sm:-mx-8 -mb-28 sm:-mb-8'}`}>
+    <div className={`flex flex-col bg-ink-950 border-t border-ink-800/80 h-full min-h-0`}>
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-ink-800/80 text-[13px] text-ink-500">
         <Link to={`/team/${teamId}/todolist`} className="inline-flex items-center gap-1 hover:text-ink-300">
           <ChevronLeft size={13} />

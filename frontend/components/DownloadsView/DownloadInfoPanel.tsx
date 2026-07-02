@@ -15,7 +15,6 @@ import { Video, Tag } from '../../types';
 import { EagleTagPicker } from '../EagleTagPicker';
 import { AIStatusBadge } from './AIStatusBadge';
 import { getCoverUrl, formatResolution } from '../../utils/awemeType';
-import { islandUI } from '../../utils/featureFlags';
 
 interface ResourceData {
   id: string;
@@ -82,32 +81,25 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
 }) => {
   const { t } = useTranslation();
 
-  // Island shell (spec D1–D12): align this panel to the uploads panel
-  // (ResourceInfoPanel) in color + layout. The flag is global (VITE_FEATURE_ISLAND_UI);
-  // when OFF (classic) every const resolves to the exact original ink class and the
-  // layout branches fall to the original markup → D12 byte-identical.
-  const island = islandUI();
   // Local edit state powers the island dashed click-to-edit Notes affordance.
   const [editingNotes, setEditingNotes] = useState(false);
 
-  const cPrimary = island ? 'text-content' : 'text-ink-50';
-  const cText300 = island ? 'text-content-2' : 'text-ink-300';
-  const cText400 = island ? 'text-content-2' : 'text-ink-400';
-  const cLabel = island ? 'text-content-3' : 'text-ink-500';
-  const cFaint700 = island ? 'text-content-4' : 'text-ink-700';
-  const cHoverPrimary = island ? 'hover:text-content' : 'hover:text-ink-50';
-  const cSurface = island ? 'bg-island' : 'bg-ink-900';
-  const cBorderWrap = island ? 'border-line' : 'border-ink-800';
-  const cBorderHeader = island ? 'border-line' : 'border-ink-800/80';
-  const cBorderSection = island ? 'border-line' : 'border-ink-800/60';
-  // Surface tokens — mirror ResourceInfoPanel: island paints inputs/hovers/chips
-  // with --island-2/--line; classic keeps the exact original ink surfaces.
-  const cInputBg = island ? 'bg-island-2' : 'bg-ink-800/50';
-  const cInputBorder = island ? 'border-line' : 'border-ink-700/50';
-  const cHoverSurface = island ? 'hover:bg-island-2' : 'hover:bg-ink-800';
-  const cChipBg = island ? 'bg-island-2' : 'bg-ink-800/50';
-  const cChipText = island ? 'text-content-3' : 'text-ink-500';
-  const cChipBorder = island ? 'border-line' : 'border-ink-700/50';
+  const cPrimary = 'text-content';
+  const cText300 = 'text-content-2';
+  const cText400 = 'text-content-2';
+  const cLabel = 'text-content-3';
+  const cFaint700 = 'text-content-4';
+  const cHoverPrimary = 'hover:text-content';
+  const cSurface = 'bg-island';
+  const cBorderWrap = 'border-line';
+  const cBorderHeader = 'border-line';
+  const cBorderSection = 'border-line';
+  const cInputBg = 'bg-island-2';
+  const cInputBorder = 'border-line';
+  const cHoverSurface = 'hover:bg-island-2';
+  const cChipBg = 'bg-island-2';
+  const cChipText = 'text-content-3';
+  const cChipBorder = 'border-line';
 
   const body = (
     <div className="flex-1 overflow-y-auto">
@@ -153,7 +145,7 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
           {/* Notes — island layout: click-to-edit dashed row, placed right after the
               title to mirror the uploads panel (ResourceInfoPanel). Classic keeps its
               original textarea block further down (rendered only when !island). */}
-          {island && selectedResourceData && (
+          {selectedResourceData && (
             <div className="px-4 mt-3">
               <h4 className="text-[11px] font-semibold text-content-3 uppercase tracking-widest mb-1.5">
                 {t('resources.infoPanel.notes')}
@@ -210,52 +202,6 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
             </div>
           )}
 
-          {/* Rating — classic only: island merges rating into the PROPERTIES first
-              row (matches the uploads panel). Classic keeps this standalone section. */}
-          {!island && (
-            <div className="px-4 mt-4">
-              <h4 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-2">
-                {t('resources.infoPanel.rating')}
-              </h4>
-              <div className="flex items-center gap-0.5">
-                {[1, 2, 3, 4, 5].map(star => (
-                  <button
-                    key={star}
-                    onClick={() => onRating(star)}
-                    onMouseEnter={() => onHoverRating(star)}
-                    onMouseLeave={() => onHoverRating(0)}
-                    className="p-0.5 transition-colors"
-                  >
-                    <Star
-                      size={16}
-                      className={(panelHoverRating || panelRating) >= star
-                        ? 'text-amber-400 fill-amber-400'
-                        : 'text-ink-600'}
-                    />
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Notes — classic only: island renders the dashed click-to-edit Notes row
-              up near the title instead (see above). */}
-          {!island && selectedResourceData && (
-            <div className="px-4 mt-4">
-              <h4 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-1.5">
-                {t('resources.infoPanel.notes')}
-              </h4>
-              <textarea
-                value={panelNotes}
-                onChange={e => onNotesChange(e.target.value)}
-                onBlur={onNotesBlur}
-                placeholder={t('resources.infoPanel.notesPlaceholder')}
-                className="w-full bg-ink-900 border border-ink-800 rounded-lg px-3 py-2 text-xs text-ink-300 placeholder-ink-600 resize-none min-h-[60px] focus:outline-none focus:border-ink-600 transition-colors"
-                rows={3}
-              />
-            </div>
-          )}
-
           {/* AI Status */}
           {(selectedVideo.transcript_status || selectedVideo.summary_status || selectedVideo.visual_analysis_status) && (
             <div className={`px-4 mt-4 border-t ${cBorderSection} pt-3`}>
@@ -302,7 +248,6 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
             <div className="space-y-0">
               {/* Rating — island merges it into the properties list (first row) to
                   mirror the uploads panel. Classic shows the standalone section above. */}
-              {island && (
                 <div className="flex justify-between items-center py-1.5 pr-0.5">
                   <span className="text-xs text-content-3">{t('resources.infoPanel.rating')}</span>
                   <div className="flex items-center gap-0.5" onMouseLeave={() => onHoverRating(0)}>
@@ -323,7 +268,6 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
                     ))}
                   </div>
                 </div>
-              )}
               {selectedVideo.author && (
                 <div className="flex justify-between items-center py-1.5">
                   <span className={`text-xs ${cLabel}`}>{t('resources.infoPanel.author')}</span>

@@ -2,7 +2,6 @@ import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { ResourcesSidebar, type ResourcesSidebarProps } from './ResourcesSidebar';
 import { ResourcesInfoPanelWrapper } from './ResourcesInfoPanelWrapper';
-import { islandUI } from '../utils/featureFlags';
 import { useIslandWork } from '../contexts/IslandWorkContext';
 import { useResourcesContext } from '../contexts/ResourcesContext';
 
@@ -32,47 +31,8 @@ export interface ResourcesShellProps {
 /**
  * ResourcesShell — layout adapter for the resources page.
  *
- * Handles the overall flex layout:
- *   Desktop:  [Sidebar] [Content] [InfoPanel]
- *   Mobile:   [Content] only (sidebar hidden via CSS, info panel is overlay)
- *
  * All business logic (handlers, state, modals) stays in ResourcesView.
  * This component is purely structural.
- */
-export const ResourcesShell: React.FC<ResourcesShellProps> = (props) => {
-  // Island mode is a stable build-time constant for the session, so this early
-  // return cannot violate the Rules of Hooks: the classic branch below calls no
-  // hooks, and the island child encapsulates its own hooks.
-  if (islandUI()) {
-    return <ResourcesShellIsland {...props} />;
-  }
-
-  const { sidebarProps, infoPanelProps, children } = props;
-  // Mobile uses min-h-screen so content can grow past the viewport (viewport
-  // scrolls naturally + infinite scroll observer fires). Desktop keeps
-  // sm:h-full to stay inside the sm:h-screen + sm:overflow-hidden frame set
-  // up by AppLayout — internal scroll is handled by DownloadsView's
-  // md:overflow-y-auto content area. The previous ``style={height:100vh}``
-  // pinned mobile to the viewport and clipped everything below, which
-  // silently broke infinite scroll on the Downloads grid / list.
-  return (
-    <div className="flex min-h-screen sm:h-full sm:min-h-0 sm:-m-8 sm:-mt-20 sm:-mb-8">
-      {/* Left panel: Desktop sidebar navigation (hidden on mobile) */}
-      <ResourcesSidebar {...sidebarProps} />
-
-      {/* Center panel: Main content */}
-      <div className="flex-1 min-w-0 flex flex-col sm:pt-14">
-        {children}
-      </div>
-
-      {/* Right panel: Info panel (collapsible) */}
-      <ResourcesInfoPanelWrapper {...infoPanelProps} />
-    </div>
-  );
-};
-
-/**
- * ResourcesShellIsland — island-shell variant of the resources layout.
  *
  * The rail + content render inside the shell's work island (no AppLayout
  * padding to escape, no global topbar offset). The info panel is portaled into
@@ -80,7 +40,7 @@ export const ResourcesShell: React.FC<ResourcesShellProps> = (props) => {
  * ResourcesContext stays the source of truth for selection + panel visibility,
  * which we mirror into the shell's island-work context via effects.
  */
-const ResourcesShellIsland: React.FC<ResourcesShellProps> = ({ sidebarProps, infoPanelProps, children }) => {
+export const ResourcesShell: React.FC<ResourcesShellProps> = ({ sidebarProps, infoPanelProps, children }) => {
   const { showInfoPanel, setShowInfoPanel, selectedResource, selectedFolder, isDownloadsView } = useResourcesContext();
   const { infoIslandEl, infoVisible, setInfoVisible, setInfoAvailable } = useIslandWork();
 

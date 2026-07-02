@@ -7,8 +7,6 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, Star } from 'lucide-react';
 
-import { islandUI } from '../../../utils/featureFlags';
-
 export interface RatingFilterDropdownProps {
   /** 0 = inactive, 1..5 = minimum rating. */
   minRating: number;
@@ -22,10 +20,7 @@ export const RatingFilterDropdown: React.FC<RatingFilterDropdownProps> = ({
   onChange,
 }) => {
   const { t } = useTranslation();
-  const island = islandUI();
-  const inactiveRow = island
-    ? 'text-content-2 hover:bg-island-2'
-    : 'text-ink-300 hover:bg-ink-800';
+  const inactiveRow = 'text-content-2 hover:bg-island-2';
 
   // Width hugs the widest option (≥ plus 5 stars + Check); previously
   // a fixed w-44 left a big empty strip on the right of each row.
@@ -41,7 +36,7 @@ export const RatingFilterDropdown: React.FC<RatingFilterDropdownProps> = ({
         <span className="flex-1">{t('resources.filter.anyRating', 'Any rating')}</span>
         {minRating === 0 && <Check size={12} className="text-indigo-400 shrink-0" />}
       </button>
-      <div className={`mx-2.5 my-1 border-t ${island ? 'border-line' : 'border-ink-700/60'}`} />
+      <div className="mx-2.5 my-1 border-t border-line" />
       {CHOICES.map((value) => {
         const active = minRating === value;
         return (
@@ -54,7 +49,7 @@ export const RatingFilterDropdown: React.FC<RatingFilterDropdownProps> = ({
             }`}
           >
             <span className="flex items-center gap-1">
-              <span className={`${island ? 'text-content-2' : 'text-ink-400'} mr-1`}>{'≥'}</span>
+              <span className="text-content-2 mr-1">{'≥'}</span>
               {Array.from({ length: value }).map((_, i) => (
                 <Star
                   key={i}

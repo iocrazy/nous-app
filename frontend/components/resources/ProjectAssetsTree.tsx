@@ -9,7 +9,6 @@ import {
   fetchProjectAssetsTree,
   type ProjectAssetTreeNode,
 } from '../../services/projectAssetsService';
-import { islandUI } from '../../utils/featureFlags';
 
 export type ProjectAssetsSelection =
   | { kind: 'chat-uploads' }
@@ -24,7 +23,6 @@ interface Props {
 
 export const ProjectAssetsTree: React.FC<Props> = ({ selection, onSelect, chatUploadsCount }) => {
   const { t } = useTranslation();
-  const island = islandUI();
   const [tree, setTree] = useState<ProjectAssetTreeNode[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -51,41 +49,41 @@ export const ProjectAssetsTree: React.FC<Props> = ({ selection, onSelect, chatUp
     });
 
   return (
-    <div className={`w-60 shrink-0 border-r ${island ? 'border-line' : 'border-ink-800/60'} overflow-y-auto py-2 text-sm`}>
+    <div className="w-60 shrink-0 border-r border-line overflow-y-auto py-2 text-sm">
       <button
         onClick={() => onSelect({ kind: 'chat-uploads' })}
         className={`flex items-center gap-2 w-full px-3 py-1.5 rounded-md ${
           selection.kind === 'chat-uploads'
-            ? island ? 'bg-island-2 text-content-2' : 'bg-ink-800 text-ink-100'
-            : island ? 'text-content-2 hover:bg-island-2' : 'text-ink-300 hover:bg-ink-800/60'
+            ? 'bg-island-2 text-content-2'
+            : 'text-content-2 hover:bg-island-2'
         }`}
       >
         <MessageSquare size={15} className="opacity-70 shrink-0" />
         <span className="flex-1 truncate text-left">{t('projectAssets.chatUploads')}</span>
-        <span className={`text-xs ${island ? 'text-content-3' : 'text-ink-500'}`}>{chatUploadsCount}</span>
+        <span className="text-xs text-content-3">{chatUploadsCount}</span>
       </button>
 
       <button
         onClick={() => onSelect({ kind: 'generations' })}
         className={`flex items-center gap-2 w-full px-3 py-1.5 rounded-md ${
           selection.kind === 'generations'
-            ? island ? 'bg-island-2 text-content-2' : 'bg-ink-800 text-ink-100'
-            : island ? 'text-content-2 hover:bg-island-2' : 'text-ink-300 hover:bg-ink-800/60'
+            ? 'bg-island-2 text-content-2'
+            : 'text-content-2 hover:bg-island-2'
         }`}
       >
         <Sparkles size={15} className="opacity-70 shrink-0" />
         <span className="flex-1 truncate text-left">{t('projectAssets.generations', 'Generations')}</span>
       </button>
 
-      <div className={`mx-2 my-2 border-t ${island ? 'border-line' : 'border-ink-800/50'}`} />
+      <div className="mx-2 my-2 border-t border-line" />
 
-      {loading && <div className={`px-3 py-2 ${island ? 'text-content-3' : 'text-ink-500'}`}>{t('common.loading')}</div>}
+      {loading && <div className="px-3 py-2 text-content-3">{t('common.loading')}</div>}
 
       {!loading && tree.map((project) => (
         <div key={project.project_id}>
           <button
             onClick={() => toggle(project.project_id)}
-            className={`flex items-center gap-1.5 w-full px-2 py-1.5 ${island ? 'text-content-2 hover:text-content-2' : 'text-ink-400 hover:text-ink-200'}`}
+            className="flex items-center gap-1.5 w-full px-2 py-1.5 text-content-2 hover:text-content-2"
           >
             {expanded.has(project.project_id)
               ? <ChevronDown size={14} className="shrink-0" />
@@ -99,20 +97,20 @@ export const ProjectAssetsTree: React.FC<Props> = ({ selection, onSelect, chatUp
               onClick={() => onSelect({ kind: 'canvas', canvasId: canvas.canvas_id, canvasName: canvas.canvas_name })}
               className={`flex items-center gap-2 w-full pl-7 pr-3 py-1.5 rounded-md ${
                 selection.kind === 'canvas' && selection.canvasId === canvas.canvas_id
-                  ? island ? 'bg-island-2 text-content-2' : 'bg-ink-800 text-ink-100'
-                  : island ? 'text-content-2 hover:bg-island-2' : 'text-ink-300 hover:bg-ink-800/60'
+                  ? 'bg-island-2 text-content-2'
+                  : 'text-content-2 hover:bg-island-2'
               }`}
             >
               {canvas.kind === 'smart'
                 ? <Sparkles size={14} className="opacity-70 shrink-0" />
                 : <Layers size={14} className="opacity-70 shrink-0" />}
               <span className="flex-1 truncate text-left">{canvas.canvas_name}</span>
-              <span className={`text-xs ${island ? 'text-content-3' : 'text-ink-500'}`}>{canvas.asset_count}</span>
+              <span className="text-xs text-content-3">{canvas.asset_count}</span>
             </button>
           ))}
 
           {expanded.has(project.project_id) && project.canvases.length === 0 && (
-            <div className={`pl-7 pr-3 py-1 text-xs ${island ? 'text-content-4' : 'text-ink-600'}`}>{t('projectAssets.noCanvases')}</div>
+            <div className="pl-7 pr-3 py-1 text-xs text-content-4">{t('projectAssets.noCanvases')}</div>
           )}
         </div>
       ))}

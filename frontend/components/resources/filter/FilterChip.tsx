@@ -11,7 +11,6 @@
 
 import React, { useEffect, useRef } from 'react';
 import { X, type LucideIcon } from 'lucide-react';
-import { islandUI } from '../../../utils/featureFlags';
 
 export interface FilterChipProps {
   /** Machine id, surfaced as data attribute for tests. */
@@ -49,7 +48,6 @@ export const FilterChip: React.FC<FilterChipProps> = ({
   children,
 }) => {
   const rootRef = useRef<HTMLDivElement>(null);
-  const island = islandUI();
 
   // Close on outside click / Esc.
   useEffect(() => {
@@ -78,9 +76,7 @@ export const FilterChip: React.FC<FilterChipProps> = ({
         className={`inline-flex items-center rounded-lg border transition-colors ${
           isActive
             ? 'border-indigo-500/60 bg-indigo-500/10 text-indigo-300'
-            : island
-              ? 'border-line bg-island-2 text-content-2 hover:border-line-strong hover:text-content'
-              : 'border-ink-700/80 bg-ink-900/40 text-ink-300 hover:border-ink-600 hover:text-ink-100'
+            : 'border-line bg-island-2 text-content-2 hover:border-line-strong hover:text-content'
         }`}
       >
         <button
@@ -100,7 +96,7 @@ export const FilterChip: React.FC<FilterChipProps> = ({
               e.stopPropagation();
               onClear();
             }}
-            className={`pr-1.5 pl-0.5 py-1 ${island ? 'text-content-2 hover:text-content' : 'text-ink-400 hover:text-ink-100'}`}
+            className="pr-1.5 pl-0.5 py-1 text-content-2 hover:text-content"
             aria-label={`Clear ${label}`}
           >
             <X size={12} />
@@ -108,7 +104,7 @@ export const FilterChip: React.FC<FilterChipProps> = ({
         )}
       </div>
       {isOpen && (
-        <div className={`absolute left-0 top-full mt-1.5 z-30 min-w-[14rem] ${island ? 'bg-card' : 'bg-ink-900/95'} backdrop-blur-sm border ${island ? 'border-line' : 'border-ink-700/80'} rounded-xl shadow-2xl animate-dropdown`}>
+        <div className="absolute left-0 top-full mt-1.5 z-30 min-w-[14rem] bg-card backdrop-blur-sm border border-line rounded-xl shadow-2xl animate-dropdown">
           {children}
         </div>
       )}
