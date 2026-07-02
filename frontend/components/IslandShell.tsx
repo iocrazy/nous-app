@@ -7,7 +7,7 @@ import { IslandWorkProvider, useIslandWork } from '../contexts/IslandWorkContext
 // Island redesign v2 P1b — desktop app shell. Background micro-glow + a
 // full-width global topbar strip, then a content row with a floating nav
 // island and a workspace island. The heavy children (TopBar/Sidebar) keep all
-// their logic; we only place them inside island cards and pass `island`. Detail
+// their logic; we only place them inside island cards. Detail
 // routes pin the 54px icon rail (spec D5). Mobile chrome is rendered by
 // AppLayout outside this shell and is unaffected (this frame is `hidden sm:flex`).
 //
@@ -68,11 +68,11 @@ function IslandShellFrame({ isDetailPage, topBarProps, sidebarProps, children }:
 
   return (
     <div className="island-frame hidden sm:flex">
-      <TopBar {...topBarProps} island />
+      <TopBar {...topBarProps} />
       <div className="island-frame__row">
         {/* Nav island */}
         <div className="island-card relative flex-shrink-0">
-          <Sidebar {...sidebarProps} island iconRail={isDetailPage} />
+          <Sidebar {...sidebarProps} iconRail={isDetailPage} />
         </div>
         {/* Workspace island — wraps today's routed content unchanged */}
         <main className="island-card flex-1 min-w-0 overflow-auto">
