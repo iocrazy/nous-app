@@ -758,22 +758,6 @@ class Settings(BaseSettings):
         "audit_logs() now queries the real table audit_logs via admin_id (was the "
         "nonexistent table admin_audit_logs → PG 42P01). Reads only. Inert.",
     )
-    USE_ORM_ADMIN_REQUEST_LOGS: bool = Field(
-        default=False,
-        description="Route the three admin-console log repositories "
-        "(RequestLogsRepository / FrontendErrorLogsRepository / AppLogsRepository — "
-        "api_request_logs / frontend_error_logs / application_logs) through the "
-        "SQLAlchemy 2.0 ORM (Phase 2 admin wave). SELECT * via _orm_obj_to_dict "
-        "(FrontendErrorLogs has a renamed metadata→metadata_ — keyed back as "
-        "'metadata'). Strategy C: timestamp / created_at / logged_at (timestamptz) "
-        "→ ISO str (CONSUMED — str Pydantic fields; stats does ts[:13] slicing); id "
-        "(BIGINT) → native int (router str()s it); status_code / response_time_ms / "
-        "line (int) → native int; user_id (uuid) → str (in SELECT * but not a "
-        "dict-key here); jsonb → native dict. has_exception True → exception IS NOT "
-        "NULL / False → IS NULL (legacy parity); NOISE_MODULES exclusion preserved. "
-        "Date-range filters bind NATIVE tz-aware datetimes (v3 — many windows). "
-        "Reads only. Inert; flip false to revert.",
-    )
     USE_ORM_ADMIN_TASKS: bool = Field(
         default=False,
         description="Route AdminTasksRepository (admin Task Center on task_tracking) "

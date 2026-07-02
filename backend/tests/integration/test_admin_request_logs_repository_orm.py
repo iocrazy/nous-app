@@ -1,9 +1,10 @@
 """Integration tests for the three admin log repos' ORM impls (Phase 2 admin wave).
 
-RequestLogsRepositoryOrm / FrontendErrorLogsRepositoryOrm / AppLogsRepositoryOrm
-over api_request_logs / frontend_error_logs / application_logs.
+RequestLogsRepository / FrontendErrorLogsRepository / AppLogsRepository (post
+ORM-collapse, ORM-only) over api_request_logs / frontend_error_logs /
+application_logs.
 
-Proves REST → ORM swap invisibility + strategy-C parity:
+Proves strategy-C parity of the collapsed ORM bodies:
   - timestamp / created_at / logged_at (timestamptz) → ISO STR
   - id (BIGINT) → native int; status_code / response_time_ms (int) → native int
   - FrontendErrorLogs renamed metadata_ keyed back as "metadata"
@@ -73,27 +74,27 @@ async def cleanup_test_rows(integration_db_url):
 
 
 def _req_repo():
-    from app.repositories.admin.request_logs_repository_orm import (
-        RequestLogsRepositoryOrm,
+    from app.repositories.admin.request_logs_repository import (
+        RequestLogsRepository,
     )
 
-    return RequestLogsRepositoryOrm()
+    return RequestLogsRepository()
 
 
 def _fe_repo():
-    from app.repositories.admin.request_logs_repository_orm import (
-        FrontendErrorLogsRepositoryOrm,
+    from app.repositories.admin.request_logs_repository import (
+        FrontendErrorLogsRepository,
     )
 
-    return FrontendErrorLogsRepositoryOrm()
+    return FrontendErrorLogsRepository()
 
 
 def _app_repo():
-    from app.repositories.admin.request_logs_repository_orm import (
-        AppLogsRepositoryOrm,
+    from app.repositories.admin.request_logs_repository import (
+        AppLogsRepository,
     )
 
-    return AppLogsRepositoryOrm()
+    return AppLogsRepository()
 
 
 # ─── RequestLogs ────────────────────────────────────────────────────────
@@ -289,35 +290,14 @@ async def test_app_logged_at_window_boundary(
 # ─── factory parity ─────────────────────────────────────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    from app.core.config import settings
+async def test_factories_return_collapsed_repos():
+    """Post-rollout the three factories unconditionally return the (now ORM-only)
+    collapsed classes — no flag, no engine fallback, no shadow branch."""
     from app.repositories.admin import request_logs_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_ADMIN_REQUEST_LOGS", False)
     assert type(mod.get_request_logs_repository()) is mod.RequestLogsRepository
     assert (
         type(mod.get_frontend_error_logs_repository())
         is mod.FrontendErrorLogsRepository
     )
     assert type(mod.get_app_logs_repository()) is mod.AppLogsRepository
-
-
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories.admin import request_logs_repository as mod
-    from app.repositories.admin.request_logs_repository_orm import (
-        AppLogsRepositoryOrm,
-        FrontendErrorLogsRepositoryOrm,
-        RequestLogsRepositoryOrm,
-    )
-
-    monkeypatch.setattr(settings, "USE_ORM_ADMIN_REQUEST_LOGS", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    assert isinstance(mod.get_request_logs_repository(), RequestLogsRepositoryOrm)
-    assert isinstance(
-        mod.get_frontend_error_logs_repository(), FrontendErrorLogsRepositoryOrm
-    )
-    assert isinstance(mod.get_app_logs_repository(), AppLogsRepositoryOrm)
