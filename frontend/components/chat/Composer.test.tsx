@@ -309,4 +309,35 @@ describe('Composer @mention dropdown logic', () => {
     expect(screen.queryByText('Alice')).toBeNull();
     expect(onSend).not.toHaveBeenCalled();
   });
+
+  // ── Image-attach button gating (flag-off UX) ────────────────────────────────
+  // The upload entry (Paperclip, title chat.attachResource) must only render
+  // when the caller wires onAttachFiles. On the flag-off path ChatPage passes
+  // undefined, so the button must be absent — otherwise clicking it errors with
+  // chat.image.unavailable (the prod bug this guards against).
+
+  it('hides the image-attach button when onAttachFiles is not provided', () => {
+    render(
+      <Composer
+        onSend={onSend}
+        onTyping={onTyping}
+        members={MEMBERS}
+        agents={AGENTS}
+      />,
+    );
+    expect(screen.queryByTitle('chat.attachResource')).toBeNull();
+  });
+
+  it('shows the image-attach button when onAttachFiles is provided', () => {
+    render(
+      <Composer
+        onSend={onSend}
+        onTyping={onTyping}
+        onAttachFiles={vi.fn()}
+        members={MEMBERS}
+        agents={AGENTS}
+      />,
+    );
+    expect(screen.queryByTitle('chat.attachResource')).toBeTruthy();
+  });
 });

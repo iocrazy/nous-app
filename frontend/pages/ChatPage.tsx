@@ -710,7 +710,9 @@ export function ChatPage(): React.ReactElement {
                 <Composer
                   onSend={handleSend}
                   onAttachMedia={() => setShowPicker(true)}
-                  onAttachFiles={handleAttachFiles}
+                  onAttachFiles={
+                    featureConversations ? handleAttachFiles : undefined
+                  }
                   onTyping={sendTyping}
                   disabled={sending || !activeId}
                   placeholder={
