@@ -1,4 +1,4 @@
-"""Integration tests for AdminTagsRepositoryOrm (Phase 2 admin wave) vs real PG.
+"""Integration tests for AdminTagsRepository (SQLAlchemy 2.0 ORM) vs real PG.
 
 tags / tag_groups / resource_tags admin reads + writes.
 
@@ -78,9 +78,9 @@ async def seed(integration_db_url):
 
 
 def _repo():
-    from app.repositories.admin.tags_repository_orm import AdminTagsRepositoryOrm
+    from app.repositories.admin.tags_repository import AdminTagsRepository
 
-    return AdminTagsRepositoryOrm()
+    return AdminTagsRepository()
 
 
 async def test_list_tags_shape_embed_parity(integration_db_url, patched_engine, seed):
@@ -193,25 +193,11 @@ async def test_reorder_tags_commit(integration_db_url, patched_engine, seed):
         await conn.close()
 
 
-# ─── factory parity ─────────────────────────────────────────────────────
+# ─── factory ─────────────────────────────────────────────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    from app.core.config import settings
+async def test_factory_returns_orm_repo():
     from app.repositories.admin import tags_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_ADMIN_TAGS", False)
+    # Post-collapse the factory is flag-free — always the ORM AdminTagsRepository.
     assert type(mod.get_admin_tags_repository()) is mod.AdminTagsRepository
-
-
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories.admin import tags_repository as mod
-    from app.repositories.admin.tags_repository_orm import AdminTagsRepositoryOrm
-
-    monkeypatch.setattr(settings, "USE_ORM_ADMIN_TAGS", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    assert isinstance(mod.get_admin_tags_repository(), AdminTagsRepositoryOrm)

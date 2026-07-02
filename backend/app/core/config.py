@@ -732,23 +732,6 @@ class Settings(BaseSettings):
         "bool(rowcount) via RETURNING id (REST bool(result.data) parity). No "
         "date-range filter. Inert; flip false to revert.",
     )
-    USE_ORM_ADMIN_TAGS: bool = Field(
-        default=False,
-        description="Route AdminTagsRepository (admin tags + tag_groups console on "
-        "tags / tag_groups / resource_tags) through the SQLAlchemy 2.0 ORM (Phase 2 "
-        "admin wave). Strategy C: tags.id / tag_groups.id / group_id / "
-        "resource_tags.tag_id are ALL BIGINT (NOT uuid — checked) → native int (the "
-        "5.3 trap; consumers str() at dict-key lookup boundaries, str(int) "
-        "round-trips). The only uuid column, tags.user_id, → str (generic sweep; "
-        "list_tags returns the row dict RAW to the JSON encoder, REST emitted a "
-        "string). created_at (timestamptz) → ISO str; type is plain String + DB "
-        "CHECK (NOT Enum). The PostgREST embed select('*, tag_groups(name)') is "
-        "reproduced via a LEFT OUTER JOIN attaching the nested {'tag_groups': "
-        "{'name': ...} | None} shape. WRITES (create/update/delete/batch/reorder for "
-        "tags + groups) COMMIT via write_scope(); delete cascades resource_tags "
-        "first (verbatim legacy order); bool returns mirror REST bool(result.data) "
-        "via RETURNING. No date-range filter. Inert; flip false to revert.",
-    )
     USE_ORM_ADMIN_TRANSCODE: bool = Field(
         default=False,
         description="Route AdminTranscodeRepository (HLS transcode admin console on "
