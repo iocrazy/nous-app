@@ -268,6 +268,7 @@ async def run_conversation_agent_turn(
             user_id=UUID(summoner_user_id),
             trigger="chat_summon",
             session_id=None,
+            conversation_id=int(conversation_id),
             team_id=int(scope_id) if scope_id is not None else None,
             project_id=None,
             model=model or None,
