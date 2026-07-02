@@ -1027,6 +1027,11 @@ class Settings(BaseSettings):
         "true once the agent_memories table is populated and recall quality "
         "is validated in production.",
     )
+    FEATURE_CONVERSATIONS: bool = Field(
+        default=False,
+        description="Serve the unified /conversations API. Off (default) keeps "
+        "only the legacy /chat API live.",
+    )
 
     # ============================================
     # 下载设置

@@ -1,21 +1,11 @@
 /**
  * MessageBubble — a single message row in the Team Chat stream.
- *
- * Rendering rules:
- *   - sender_type === 'agent'    → amber gradient avatar + "AGENT" tag
- *   - content_type === 'media_card' → media card from message.body
- *   - otherwise                 → plain text from message.body.text
- *   - isDeleted (deleted_at set) → tombstone (muted italic); no edit/delete actions
- *
- * Owner gate: edit + delete actions only shown when isOwn && !isDeleted.
- * Inline edit: Enter saves, Shift+Enter inserts newline, Esc cancels.
- *
- * Purely presentational — no data fetching.
  */
 
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ExternalLink, Download, Pencil, Trash2 } from 'lucide-react';
+import { BookmarkPlus, ExternalLink, Download, Pencil, Trash2 } from 'lucide-react';
+import { ImageLightbox } from './ImageLightbox';
 import type { ChatMessage } from '../../types';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -128,6 +118,10 @@ export interface MessageBubbleProps {
   onEdit?: (id: string, text: string) => void;
   /** Called when the user confirms a soft-delete. */
   onDelete?: (id: string) => void;
+  /** Called when the user promotes an inline image into the library. */
+  onSaveImage?: (generatedMediaId: string, scope: 'team' | 'personal') => void;
+  canSaveImageToTeam?: boolean;
+  canSaveImageToPersonal?: boolean;
 }
 
 export function MessageBubble({
@@ -136,16 +130,41 @@ export function MessageBubble({
   memberNameById,
   onEdit,
   onDelete,
+  onSaveImage,
+  canSaveImageToTeam = false,
+  canSaveImageToPersonal = false,
 }: MessageBubbleProps): React.ReactElement {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
+  const [imageOpen, setImageOpen] = useState(false);
+  const [saveMenuOpen, setSaveMenuOpen] = useState(false);
 
   const isAgent = message.sender_type === 'agent';
   const isMediaCard = message.content_type === 'media_card';
+  // `type` is the new canonical field (mirrored from `content_type` by
+  // normalizeConversationMessage); fall back to `content_type` for any
+  // legacy path that only populates that field. `body.kind` is the
+  // server-side discriminator that confirms the body actually is an
+  // image payload (not just a message tagged with the image type).
+  const isImage =
+    (message.type ?? message.content_type) === 'image' &&
+    message.body.kind === 'image' &&
+    typeof message.body.image_url === 'string';
   const isText = message.content_type === 'text';
   const isOwn = message.sender_type === 'user' && message.sender_id === currentUserId;
   const isDeleted = !!message.deleted_at;
+  const imageUrl = isImage ? (message.body.image_url as string) : null;
+  const imageAlt =
+    typeof message.body.alt === 'string' ? message.body.alt : t('chat.image.alt');
+  const generatedMediaId =
+    isImage && message.body.generated_media_id != null
+      ? String(message.body.generated_media_id)
+      : null;
+  const canSaveImage =
+    generatedMediaId != null &&
+    onSaveImage != null &&
+    (canSaveImageToTeam || canSaveImageToPersonal);
 
   const avatarClass = isAgent
     ? 'bg-gradient-to-br from-amber-400 to-amber-500 text-[#1a1505]'
@@ -312,6 +331,79 @@ export function MessageBubble({
           </div>
         ) : isMediaCard ? (
           <MediaCard body={message.body as MediaCardBody} />
+        ) : imageUrl ? (
+          <>
+            <div
+              className={[
+                'relative max-w-[min(78%,360px)]',
+                isOwn ? 'self-end' : 'self-start',
+              ].join(' ')}
+            >
+              <button
+                type="button"
+                onClick={() => setImageOpen(true)}
+                className="block overflow-hidden rounded-[12px] border border-line-strong bg-card"
+              >
+                <img
+                  src={imageUrl}
+                  alt={imageAlt}
+                  className="block max-h-[320px] w-auto max-w-full object-contain"
+                />
+              </button>
+              {canSaveImage && (
+                <div className="absolute right-2 top-2">
+                  <button
+                    type="button"
+                    title={t('chat.image.save')}
+                    aria-label={t('chat.image.save')}
+                    onClick={() => setSaveMenuOpen((open) => !open)}
+                    className="w-8 h-8 rounded-[8px] grid place-items-center bg-black/55 border border-white/20 text-white opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-black/70 transition"
+                  >
+                    <BookmarkPlus size={15} />
+                  </button>
+                  {saveMenuOpen && (
+                    <div className="absolute right-0 top-10 min-w-[150px] rounded-[8px] border border-line-strong bg-island shadow-xl overflow-hidden z-10">
+                      {canSaveImageToTeam && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (generatedMediaId) {
+                              onSaveImage?.(generatedMediaId, 'team');
+                            }
+                            setSaveMenuOpen(false);
+                          }}
+                          className="w-full px-3 py-2 text-left text-[12.5px] text-content hover:bg-island-2 transition-colors"
+                        >
+                          {t('chat.image.saveTeam')}
+                        </button>
+                      )}
+                      {canSaveImageToPersonal && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (generatedMediaId) {
+                              onSaveImage?.(generatedMediaId, 'personal');
+                            }
+                            setSaveMenuOpen(false);
+                          }}
+                          className="w-full px-3 py-2 text-left text-[12.5px] text-content hover:bg-island-2 transition-colors"
+                        >
+                          {t('chat.image.savePersonal')}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            {imageOpen && (
+              <ImageLightbox
+                src={imageUrl}
+                alt={imageAlt}
+                onClose={() => setImageOpen(false)}
+              />
+            )}
+          </>
         ) : (
           <div
             className={[

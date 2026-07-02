@@ -19,14 +19,15 @@ export interface MessageListProps {
   onLoadOlder: () => void;
   hasOlder: boolean;
   loadingOlder: boolean;
-  /** The authenticated user's id — consumed by Task 5 (MessageBubble) to gate edit/delete actions. */
+  /** The authenticated user's id for edit/delete ownership checks. */
   currentUserId?: string | null;
   /** Resolves a sender_id (UUID) to a display name for the message bubbles. */
   memberNameById?: Record<string, string>;
-  /** Called by Task 5 when the user saves an edited message. */
   onEdit?: (messageId: string, text: string) => void;
-  /** Called by Task 5 when the user soft-deletes a message. */
   onDelete?: (messageId: string) => void;
+  onSaveImage?: (generatedMediaId: string, scope: 'team' | 'personal') => void;
+  canSaveImageToTeam?: boolean;
+  canSaveImageToPersonal?: boolean;
 }
 
 export function MessageList({
@@ -38,6 +39,9 @@ export function MessageList({
   memberNameById,
   onEdit,
   onDelete,
+  onSaveImage,
+  canSaveImageToTeam,
+  canSaveImageToPersonal,
 }: MessageListProps): React.ReactElement {
   const { t } = useTranslation();
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -79,6 +83,9 @@ export function MessageList({
           memberNameById={memberNameById}
           onEdit={onEdit}
           onDelete={onDelete}
+          onSaveImage={onSaveImage}
+          canSaveImageToTeam={canSaveImageToTeam}
+          canSaveImageToPersonal={canSaveImageToPersonal}
         />
       ))}
 

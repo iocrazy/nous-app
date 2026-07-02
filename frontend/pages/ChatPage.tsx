@@ -1,18 +1,5 @@
 /**
  * ChatPage — Team Chat container.
- *
- * Wires together:
- *   - chatService  (Task 1): listChannels / listMessages / sendMessage / markRead
- *   - Chat presentational components (Task 2): ChatSidebar, MessageList, Composer
- *   - useChannelRealtime (Task 3): Supabase realtime INSERT subscription
- *
- * State lives entirely here; child components are purely presentational.
- *
- * Dedupe strategy: a Set<string> of seen message ids prevents the sender
- * seeing their own message twice (sendMessage append + realtime echo).
- *
- * Mark-read: debounced 800 ms after messages load or a new message arrives
- * while the channel is active; also zeroes the channel's unread badge locally.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -23,12 +10,16 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTeamContext } from '../contexts/TeamContext';
 import { useToast } from '../components/Toast';
 import { chatService } from '../services/chatService';
+import { conversationService } from '../services/conversationService';
 import { getResourceCoverUrl } from '../services/resourceService';
 import { getTeamMembers } from '../services/teamService';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { useChannelRealtime } from '../hooks/useChannelRealtime';
+import { useConversationRealtime } from '../hooks/useConversationRealtime';
 import { useChannelPresence } from '../hooks/useChannelPresence';
 import { useMentionBadges } from '../hooks/useMentionBadges';
+import { conversations } from '../utils/featureFlags';
+import { validateFileBatch } from '../components/ChatAttachmentPicker.helpers';
 import { AIChatPanel } from '../components/AIChatPanel';
 import { ChatSidebar } from '../components/chat/ChatSidebar';
 import { MessageList } from '../components/chat/MessageList';
@@ -50,9 +41,12 @@ const seqGt = (a: string, b: string): boolean => {
 
 export function ChatPage(): React.ReactElement {
   const { t } = useTranslation();
-  const { selectedTeamId, currentTeam } = useTeamContext();
+  const { selectedTeamId, personalTeamId, currentTeam } = useTeamContext();
   const { addToast } = useToast();
   const { currentUserId, userProfile } = useAuth();
+
+  const featureConversations = conversations();
+  const svc = featureConversations ? conversationService : chatService;
 
   // ── State ──────────────────────────────────────────────────────────────────
 
@@ -112,7 +106,7 @@ export function ChatPage(): React.ReactElement {
     (channelId: string, lastSeq: string) => {
       if (markReadTimer.current) clearTimeout(markReadTimer.current);
       markReadTimer.current = setTimeout(() => {
-        chatService.markRead(channelId, lastSeq).catch((err: unknown) => {
+        svc.markRead(channelId, lastSeq).catch((err: unknown) => {
           // Mark-read failures are non-critical; log silently
           console.error('[ChatPage] markRead failed', err);
         });
@@ -142,7 +136,7 @@ export function ChatPage(): React.ReactElement {
 
     let cancelled = false;
 
-    chatService
+    svc
       .listChannels()
       .then((list) => {
         if (cancelled) return;
@@ -226,7 +220,7 @@ export function ChatPage(): React.ReactElement {
 
     let cancelled = false;
 
-    chatService
+    svc
       .listMessages(activeId, undefined, 30)
       .then((page) => {
         if (cancelled) return;
@@ -269,7 +263,7 @@ export function ChatPage(): React.ReactElement {
 
     setLoadingOlder(true);
 
-    chatService
+    svc
       .listMessages(activeId, oldestSeq, 30)
       .then((page) => {
         // Bail early if the user switched channels while this fetch was in flight
@@ -328,7 +322,7 @@ export function ChatPage(): React.ReactElement {
       let cursor: string | undefined = undefined; // start from latest
       const fresh: ChatMessage[] = [];
       for (let page = 0; page < 5; page++) {
-        const batch = await chatService.listMessages(channelId, cursor, 30); // DESC
+        const batch = await svc.listMessages(channelId, cursor, 30); // DESC
         if (channelId !== activeIdRef.current) return; // channel switched mid-fetch
         if (!batch.length) break;
         // batch is newest→oldest; collect those strictly newer than lastSeq
@@ -377,7 +371,7 @@ export function ChatPage(): React.ReactElement {
       const original = messagesRef.current.find((x) => x.id === messageId);
       const originalBody = original?.body ?? {};
       try {
-        const updated = await chatService.editMessage(
+        const updated = await svc.editMessage(
           activeIdRef.current,
           messageId,
           { ...originalBody, text },
@@ -395,7 +389,7 @@ export function ChatPage(): React.ReactElement {
     async (messageId: string) => {
       if (!activeIdRef.current) return;
       try {
-        const updated = await chatService.deleteMessage(
+        const updated = await svc.deleteMessage(
           activeIdRef.current,
           messageId,
         );
@@ -409,20 +403,22 @@ export function ChatPage(): React.ReactElement {
   );
 
   // ── Realtime subscription ─────────────────────────────────────────────────
+  //
+  // Rules-of-hooks seam: both hooks are always called; the inactive one receives
+  // null so its useEffect no-ops (both hooks null-guard at the top of the effect).
+  // conversations() is a build-time constant, so the routing is stable across
+  // renders and there is no conditional hook invocation.
 
-  useChannelRealtime(
-    activeId,
-    (m) => {
-      appendMessage(m);
+  const _legacyId = featureConversations ? null : activeId;
+  const _convId = featureConversations ? activeId : null;
 
-      // Schedule mark-read when a new realtime message arrives
-      if (activeId) {
-        scheduleMarkRead(activeId, m.seq);
-      }
-    },
-    updateMessage,
-    gapFill,
-  );
+  const _onRealtimeInsert = (m: ChatMessage) => {
+    appendMessage(m);
+    if (activeId) scheduleMarkRead(activeId, m.seq);
+  };
+
+  useChannelRealtime(_legacyId, _onRealtimeInsert, updateMessage, gapFill);
+  useConversationRealtime(_convId, _onRealtimeInsert, updateMessage, gapFill);
 
   // ── Presence + typing ─────────────────────────────────────────────────────
 
@@ -455,7 +451,7 @@ export function ChatPage(): React.ReactElement {
         body.mention_user_ids = mentionUserIds;
       }
 
-      chatService
+      svc
         .sendMessage(activeId, body)
         .then((sent) => {
           appendMessage(sent);
@@ -505,7 +501,7 @@ export function ChatPage(): React.ReactElement {
 
       setSending(true);
 
-      chatService
+      svc
         .sendMessage(activeId, body, 'media_card')
         .then((sent) => {
           appendMessage(sent);
@@ -519,6 +515,90 @@ export function ChatPage(): React.ReactElement {
         });
     },
     [activeId, appendMessage, addToast, t],
+  );
+
+  // ── Upload inline images ─────────────────────────────────────────────────
+
+  const handleAttachFiles = useCallback(
+    async (files: File[]) => {
+      const channelId = activeIdRef.current;
+      if (!featureConversations) {
+        addToast(t('chat.image.unavailable'), 'error');
+        return;
+      }
+      if (!channelId || !selectedTeamId || files.length === 0 || sending) return;
+
+      const batchError = validateFileBatch(files);
+      if (batchError) {
+        addToast(batchError, 'error');
+        return;
+      }
+
+      if (files.some((file) => !file.type.startsWith('image/'))) {
+        addToast(t('chat.image.onlyImages'), 'error');
+        return;
+      }
+
+      setSending(true);
+      addToast(t('chat.image.uploading'), 'info');
+      try {
+        for (const file of files) {
+          const attachment = await conversationService.uploadConversationImage(
+            channelId,
+            file,
+          );
+          const sent = await conversationService.sendMessage(
+            channelId,
+            {
+              kind: 'image',
+              generated_media_id: attachment.id,
+              image_url: attachment.url,
+              alt: file.name,
+              mime: attachment.mime,
+            },
+            'image',
+          );
+          if (activeIdRef.current === channelId) {
+            appendMessage(sent);
+          }
+        }
+      } catch (err) {
+        console.error('[ChatPage] upload image failed', err);
+        addToast(t('chat.image.uploadError'), 'error');
+      } finally {
+        setSending(false);
+      }
+    },
+    [
+      featureConversations,
+      selectedTeamId,
+      sending,
+      appendMessage,
+      addToast,
+      t,
+    ],
+  );
+
+  const handleSaveImage = useCallback(
+    async (generatedMediaId: string, scope: 'team' | 'personal') => {
+      if (!featureConversations) return;
+      const targetScopeId = scope === 'team' ? selectedTeamId : personalTeamId;
+      if (!targetScopeId) {
+        addToast(t('chat.image.saveError'), 'error');
+        return;
+      }
+      try {
+        await conversationService.saveImageToLibrary(
+          generatedMediaId,
+          targetScopeId,
+        );
+        addToast(t('chat.image.saved'), 'success');
+      } catch (err) {
+        console.error('[ChatPage] save image failed', err);
+        addToast(t('chat.image.saveError'), 'error');
+      }
+    },
+    [featureConversations, selectedTeamId, personalTeamId, addToast, t],
   );
 
   // ── Channel selection ─────────────────────────────────────────────────────
@@ -616,11 +696,21 @@ export function ChatPage(): React.ReactElement {
                   memberNameById={memberNameById}
                   onEdit={handleEditMessage}
                   onDelete={handleDeleteMessage}
+                  onSaveImage={handleSaveImage}
+                  canSaveImageToTeam={
+                    featureConversations &&
+                    !!selectedTeamId &&
+                    selectedTeamId !== personalTeamId
+                  }
+                  canSaveImageToPersonal={
+                    featureConversations && !!personalTeamId
+                  }
                 />
                 <TypingIndicator names={typingUsers.map((u) => u.name)} />
                 <Composer
                   onSend={handleSend}
                   onAttachMedia={() => setShowPicker(true)}
+                  onAttachFiles={handleAttachFiles}
                   onTyping={sendTyping}
                   disabled={sending || !activeId}
                   placeholder={

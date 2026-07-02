@@ -11,8 +11,10 @@ from pathlib import Path
 from loguru import logger
 
 from app.core.config import settings
+from app.repositories.conversation_repository import get_conversation_repository
 from app.repositories.generated_media_repository import GeneratedMediaRepository
 from app.repositories.resources_repository import ResourcesRepository
+from app.services.library.resources_service import _resolve_personal_team_id
 
 
 class PromoteGeneratedMediaService:
@@ -20,12 +22,44 @@ class PromoteGeneratedMediaService:
         self.gen_repo = GeneratedMediaRepository()
         self.res_repo = ResourcesRepository()
 
-    async def promote(self, *, gen_id: int, user_id: str, scope_id: int) -> dict:
-        gen = await self.gen_repo.get(gen_id, scope_id)
-        if not gen:
+    async def promote(self, *, gen_id: int, user_id: str, target_scope_id: int) -> dict:
+        """Promote a Tier-1 generation into a Tier-2 resource."""
+        gen = await self.gen_repo.get_by_id(gen_id)
+        if gen is None:
             raise ValueError("generation not found")
 
-        # Idempotency: already promoted → return the existing resource.
+        conv_repo = get_conversation_repository()
+        personal_team_id = int(await _resolve_personal_team_id(user_id))
+
+        if gen.get("origin_kind") == "chat_upload":
+            conv_id = gen.get("conversation_id")
+            if conv_id is None:
+                raise PermissionError("chat_upload generation has no conversation_id")
+            if not await conv_repo.is_member(
+                conversation_id=int(conv_id), user_id=user_id
+            ):
+                raise PermissionError("not a member of the source conversation")
+        else:
+            gen_scope = gen.get("scope_id")
+            if gen_scope is None:
+                raise PermissionError("generation has no source scope")
+            source_scope_id = int(gen_scope)
+            can_read_source = (
+                source_scope_id == personal_team_id
+                or await conv_repo.is_team_member(
+                    team_id=source_scope_id, user_id=user_id
+                )
+            )
+            if not can_read_source:
+                raise PermissionError("not authorised to access this generation")
+
+        is_target_personal = personal_team_id == target_scope_id
+        is_target_team_member = await conv_repo.is_team_member(
+            team_id=target_scope_id, user_id=user_id
+        )
+        if not is_target_personal and not is_target_team_member:
+            raise PermissionError("not authorised to write to target scope")
+
         if gen.get("promoted_resource_id"):
             existing = await self.res_repo.get_resource_by_id(
                 str(gen["promoted_resource_id"])
@@ -68,8 +102,7 @@ class PromoteGeneratedMediaService:
         )
         resource_id = str(resource["id"])
 
-        # 2) copy file into resources layout
-        rel = f"teams/{scope_id}/uploads/{resource_id}/v1/{filename}"
+        rel = f"teams/{target_scope_id}/uploads/{resource_id}/v1/{filename}"
         dst_abs = os.path.join(settings.DOWNLOAD_PATH, rel)
         Path(dst_abs).parent.mkdir(parents=True, exist_ok=True)
         await asyncio.to_thread(shutil.copy2, src_abs, dst_abs)
@@ -93,7 +126,7 @@ class PromoteGeneratedMediaService:
         await self.res_repo.create_resource_item(
             {
                 "resource_id": resource_id,
-                "scope_id": scope_id,
+                "scope_id": target_scope_id,
                 "folder_id": None,
                 "added_by": user_id,
             }

@@ -1,4 +1,4 @@
-"""Team Chat REST endpoints (PHASE-1 backend foundation)."""
+"""Team Chat REST endpoints (PHASE-1 backend foundation + Task 2 attachments)."""
 
 from __future__ import annotations
 
