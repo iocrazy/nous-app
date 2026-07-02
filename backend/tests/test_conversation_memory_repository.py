@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import os
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -257,3 +257,111 @@ async def test_smoke_upsert_twice_load_returns_updated_row(
         conversation_id=conv_id, from_seq=1, to_seq=3
     )
     assert [r["seq"] for r in rows] == [1, 2, 3]
+
+
+# ── Integration test: end-to-end maybe_compact (Phase 1.5, Task 6) ────────────
+
+
+@pytest.fixture
+async def conv_for_compaction_smoke():
+    """Create a real conversation + 55 sent messages against the integration
+    DB, for the parallel-summons + post-turn maybe_compact end-to-end smoke.
+
+    Mirrors ``conv_for_memory_smoke`` above, but with enough messages to
+    cross the COMPACT_TRIGGER(30) + COMPACT_KEEP_TAIL(20) = 50 threshold.
+    """
+    if not _INTEGRATION_DSN:
+        pytest.skip("INTEGRATION_DATABASE_URL not set — skipping integration tests")
+
+    import asyncpg
+
+    from app.db import engine as db_engine
+    from app.db import session as db_session
+
+    db_engine._engine = None
+    db_session.dispose_sessionmaker()
+
+    with patch.object(db_engine.settings, "SUPAVISOR_DATABASE_URL", _INTEGRATION_DSN):
+        conn = await asyncpg.connect(_INTEGRATION_DSN)
+        conv_id = None
+        try:
+            row = await conn.fetchrow(
+                "SELECT id FROM auth.users WHERE id = $1",
+                _SMOKE_CREATOR_ID,
+            )
+            if not row:
+                pytest.skip(
+                    f"creator {_SMOKE_CREATOR_ID!r} not found in auth.users — "
+                    "cannot run integration smoke"
+                )
+
+            import app.repositories.conversation_memory_repository as _mem_mod
+            import app.repositories.conversation_repository as _conv_mod
+            from app.repositories.conversation_repository import (
+                get_conversation_repository,
+            )
+
+            _conv_mod._repo = None
+            _mem_mod._repo = None
+            conv_repo = get_conversation_repository()
+
+            c = await conv_repo.create_conversation(
+                creator_id=_SMOKE_CREATOR_ID,
+                scope_id=_SMOKE_SCOPE_ID,
+                type="group",
+                name="__smoke_conv_compact_test__",
+                history_mode="shared",
+                member_ids=[],
+            )
+            conv_id = c["id"]
+
+            for i in range(55):
+                await conv_repo.send_message(
+                    conversation_id=conv_id,
+                    sender_id=_SMOKE_CREATOR_ID,
+                    sender_type="user",
+                    type="text",
+                    body={"text": f"compact smoke message {i + 1}"},
+                    parent_id=None,
+                )
+
+            yield conv_id
+
+        finally:
+            if conv_id is not None:
+                await conn.execute("DELETE FROM conversations WHERE id = $1", conv_id)
+            await conn.close()
+            _conv_mod._repo = None  # type: ignore[union-attr]
+            _mem_mod._repo = None  # type: ignore[union-attr]
+
+    await db_engine.dispose_engine()
+    db_engine._engine = None
+    db_session.dispose_sessionmaker()
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_smoke_maybe_compact_end_to_end(
+    conv_for_compaction_smoke: int,
+) -> None:
+    """Real-DB smoke (Task 6): with FEATURE_GROUP_AGENT_MEMORY on and
+    _summarize stubbed to 'ROLLING', maybe_compact against a conversation
+    with 55 real sent messages upserts a conversation_memory row with
+    last_seq_summarized == 35 (55 - COMPACT_KEEP_TAIL) and
+    summary_md == 'ROLLING'."""
+    import app.repositories.conversation_memory_repository as _mem_mod
+    from app.services.chat import conversation_memory_service as _mem_svc
+
+    conv_id = conv_for_compaction_smoke
+    mem_repo = _mem_mod.get_conversation_memory_repository()
+
+    with (
+        patch.object(_mem_svc.settings, "FEATURE_GROUP_AGENT_MEMORY", True),
+        patch.object(_mem_svc, "_summarize", AsyncMock(return_value="ROLLING")),
+    ):
+        await _mem_svc.maybe_compact(conversation={"id": conv_id})
+
+    loaded = await mem_repo.load(conv_id)
+    assert loaded is not None
+    assert loaded["last_seq_summarized"] == 35
+    assert loaded["summary_md"] == "ROLLING"

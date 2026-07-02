@@ -14,6 +14,7 @@ from app.repositories.conversation_repository import (
 )
 from app.services.ai.permissions.agent_chat_caps import agent_chat_caps
 from app.services.chat.conversation_agent_turn import run_conversation_agent_turn
+from app.services.chat.conversation_memory_service import maybe_compact
 from app.services.chat.mention_parser import extract_agent_mentions
 
 # Per-conversation cap on concurrent agent turns (anti-flood).
@@ -271,8 +272,8 @@ class ConversationService:
             return []
 
         sem = _get_conversation_semaphore(conversation_id)
-        replied: list[str] = []
-        for slug in mentioned:
+
+        async def _summon_one(slug: str) -> Optional[str]:
             agent = slug_to_agent[slug]
             async with sem:
                 try:
@@ -281,29 +282,45 @@ class ConversationService:
                         summoner_user_id=summoner_user_id,
                         conversation=conversation,
                     )
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001
                     logger.error(
                         f"[dispatch_summons] agent_turn_failed: "
                         f"conversation={conversation_id} agent={slug} error={exc!r}"
                     )
-                    continue
-            if reply:
-                try:
-                    await self._repo.send_message(
-                        conversation_id=conversation_id,
-                        sender_id=None,
-                        sender_type="agent",
-                        type="text",
-                        body={"text": reply},
-                        parent_id=None,
-                        from_agent_id=agent["id"],
-                    )
-                    replied.append(slug)
-                except Exception as exc:
-                    logger.error(
-                        f"[dispatch_summons] reply_write_failed: "
-                        f"agent={slug} error={exc!r}"
-                    )
+                    return None
+            if not reply:
+                return None
+            try:
+                await self._repo.send_message(
+                    conversation_id=conversation_id,
+                    sender_id=None,
+                    sender_type="agent",
+                    type="text",
+                    body={"text": reply},
+                    parent_id=None,
+                    from_agent_id=agent["id"],
+                )
+                return slug
+            except Exception as exc:  # noqa: BLE001
+                logger.error(
+                    f"[dispatch_summons] reply_write_failed: "
+                    f"agent={slug} error={exc!r}"
+                )
+                return None
+
+        results = await asyncio.gather(*(_summon_one(s) for s in mentioned))
+        replied = [s for s in results if s]
+
+        # Phase 1.5 — rolling summary upkeep. Never raises; flag-gated inside.
+        if replied:
+            try:
+                await maybe_compact(
+                    conversation=conversation,
+                    agent_id=slug_to_agent[replied[0]].get("id"),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"[dispatch_summons] compact_failed: {exc!r}")
+
         return replied
 
     async def _require_member(self, conversation_id: int, user_id: str) -> None:

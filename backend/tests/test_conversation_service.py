@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 import types
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -266,6 +268,229 @@ async def test_dispatch_summons_writes_agent_reply(monkeypatch):
     assert call_kwargs["sender_type"] == "agent"
     assert call_kwargs["sender_id"] is None
     assert call_kwargs["body"] == {"text": "Great reply!"}
+
+
+# ---------------------------------------------------------------------------
+# 3b. dispatch_summons — parallel execution + post-turn compaction (Task 6)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_dispatch_two_agents_runs_concurrently():
+    """Two mentioned agents run under asyncio.gather (bounded by the
+    cap-2 semaphore) rather than serially: wall time stays close to a
+    single turn's duration, not their sum."""
+    agent_a_id, agent_b_id = "agent-uuid-aaa", "agent-uuid-bbb"
+    slug_a, slug_b = "agent-a", "agent-b"
+
+    repo = _make_repo()
+    repo.list_conversation_agent_ids.return_value = [agent_a_id, agent_b_id]
+    repo.send_message.return_value = {"id": 30, "seq": 6, "from_agent_id": None}
+
+    fake_agents = {
+        agent_a_id: {
+            "id": agent_a_id,
+            "slug": slug_a,
+            "agent_md": "",
+            "identity_md": "",
+        },
+        agent_b_id: {
+            "id": agent_b_id,
+            "slug": slug_b,
+            "agent_md": "",
+            "identity_md": "",
+        },
+    }
+    fake_agent_repo = AsyncMock()
+    fake_agent_repo.get_by_id.side_effect = lambda aid: fake_agents[aid]
+
+    fake_caps = _make_enabled_caps()
+
+    async def _slow_turn(**kwargs):
+        await asyncio.sleep(0.05)
+        return "r"
+
+    with (
+        patch(
+            "app.services.conversation_service.run_conversation_agent_turn",
+            new=AsyncMock(side_effect=_slow_turn),
+        ),
+        patch(
+            "app.services.conversation_service.get_agent_repository",
+            return_value=fake_agent_repo,
+        ),
+        patch(
+            "app.services.conversation_service.agent_chat_caps", return_value=fake_caps
+        ),
+        patch(
+            "app.services.conversation_service.extract_agent_mentions",
+            return_value=[slug_a, slug_b],
+        ),
+    ):
+        from app.services.conversation_service import ConversationService
+
+        svc = ConversationService(repo)
+        start = time.perf_counter()
+        result = await svc.dispatch_summons(
+            conversation_id=1001,
+            summoner_user_id="u1",
+            message={
+                "body": {"text": f"@{slug_a} @{slug_b} hi"},
+                "from_agent_id": None,
+            },
+        )
+        elapsed = time.perf_counter() - start
+
+    assert elapsed < 0.09, f"expected parallel execution, took {elapsed:.3f}s"
+    assert sorted(result) == sorted([slug_a, slug_b])
+
+
+@pytest.mark.asyncio
+async def test_dispatch_calls_maybe_compact_once_after_replies():
+    """maybe_compact is awaited exactly once when >=1 agent replies, and
+    NOT awaited when the anti-loop guard short-circuits or no agent
+    replies."""
+    agent_id = "agent-uuid-333"
+    agent_slug = "compact-agent"
+
+    repo = _make_repo()
+    repo.list_conversation_agent_ids.return_value = [agent_id]
+    repo.send_message.return_value = {"id": 40, "seq": 7, "from_agent_id": agent_id}
+
+    fake_agent = {
+        "id": agent_id,
+        "slug": agent_slug,
+        "agent_md": "",
+        "identity_md": "",
+    }
+    fake_agent_repo = AsyncMock()
+    fake_agent_repo.get_by_id.return_value = fake_agent
+    fake_caps = _make_enabled_caps()
+
+    mock_compact = AsyncMock()
+
+    with (
+        patch(
+            "app.services.conversation_service.run_conversation_agent_turn",
+            new=AsyncMock(return_value="a reply"),
+        ),
+        patch(
+            "app.services.conversation_service.get_agent_repository",
+            return_value=fake_agent_repo,
+        ),
+        patch(
+            "app.services.conversation_service.agent_chat_caps", return_value=fake_caps
+        ),
+        patch(
+            "app.services.conversation_service.extract_agent_mentions",
+            return_value=[agent_slug],
+        ),
+        patch("app.services.conversation_service.maybe_compact", new=mock_compact),
+    ):
+        from app.services.conversation_service import ConversationService
+
+        svc = ConversationService(repo)
+
+        # Case 1: at least one reply -> maybe_compact awaited once.
+        result = await svc.dispatch_summons(
+            conversation_id=1002,
+            summoner_user_id="u1",
+            message={"body": {"text": f"@{agent_slug} hi"}, "from_agent_id": None},
+        )
+        assert result == [agent_slug]
+        mock_compact.assert_awaited_once()
+        mock_compact.reset_mock()
+
+        # Case 2: anti-loop guard short-circuits -> not awaited.
+        result = await svc.dispatch_summons(
+            conversation_id=1002,
+            summoner_user_id="u1",
+            message={"body": {"text": "hi"}, "from_agent_id": "some-agent"},
+        )
+        assert result == []
+        mock_compact.assert_not_awaited()
+
+        # Case 3: no agent replies (turn returns falsy) -> not awaited.
+        with patch(
+            "app.services.conversation_service.run_conversation_agent_turn",
+            new=AsyncMock(return_value=""),
+        ):
+            result = await svc.dispatch_summons(
+                conversation_id=1002,
+                summoner_user_id="u1",
+                message={
+                    "body": {"text": f"@{agent_slug} hi"},
+                    "from_agent_id": None,
+                },
+            )
+        assert result == []
+        mock_compact.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_one_agent_failure_does_not_sink_the_other():
+    """First agent's turn raises; second agent's turn succeeds. Returned
+    list is exactly [second]; no exception escapes dispatch_summons."""
+    agent_a_id, agent_b_id = "agent-uuid-fail", "agent-uuid-ok"
+    slug_a, slug_b = "fail-agent", "ok-agent"
+
+    repo = _make_repo()
+    repo.list_conversation_agent_ids.return_value = [agent_a_id, agent_b_id]
+    repo.send_message.return_value = {"id": 50, "seq": 8, "from_agent_id": None}
+
+    fake_agents = {
+        agent_a_id: {
+            "id": agent_a_id,
+            "slug": slug_a,
+            "agent_md": "",
+            "identity_md": "",
+        },
+        agent_b_id: {
+            "id": agent_b_id,
+            "slug": slug_b,
+            "agent_md": "",
+            "identity_md": "",
+        },
+    }
+    fake_agent_repo = AsyncMock()
+    fake_agent_repo.get_by_id.side_effect = lambda aid: fake_agents[aid]
+    fake_caps = _make_enabled_caps()
+
+    async def _turn(*, agent_slug, summoner_user_id, conversation):
+        if agent_slug == slug_a:
+            raise RuntimeError("boom")
+        return "I'm fine"
+
+    with (
+        patch(
+            "app.services.conversation_service.run_conversation_agent_turn",
+            new=AsyncMock(side_effect=_turn),
+        ),
+        patch(
+            "app.services.conversation_service.get_agent_repository",
+            return_value=fake_agent_repo,
+        ),
+        patch(
+            "app.services.conversation_service.agent_chat_caps", return_value=fake_caps
+        ),
+        patch(
+            "app.services.conversation_service.extract_agent_mentions",
+            return_value=[slug_a, slug_b],
+        ),
+    ):
+        from app.services.conversation_service import ConversationService
+
+        svc = ConversationService(repo)
+        result = await svc.dispatch_summons(
+            conversation_id=1003,
+            summoner_user_id="u1",
+            message={
+                "body": {"text": f"@{slug_a} @{slug_b} hi"},
+                "from_agent_id": None,
+            },
+        )
+
+    assert result == [slug_b]
 
 
 # ---------------------------------------------------------------------------
