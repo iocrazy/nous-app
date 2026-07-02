@@ -89,6 +89,7 @@ class RunRecorder:
 
     # Optional context. ai_sessions.id is BIGINT Snowflake (mig 231) → str.
     session_id: Optional[str] = None
+    conversation_id: Optional[int] = None  # Phase 1.5: structural run→conversation link
     team_id: Optional[int] = None
     project_id: Optional[int] = None
     issue_id: Optional[int] = None  # links this run to an issue via mig-208 triggers
@@ -539,6 +540,9 @@ class RunRecorder:
             "agent_id": str(self.agent_id),
             "user_id": str(self.user_id),
             "session_id": str(self.session_id) if self.session_id else None,
+            "conversation_id": (
+                int(self.conversation_id) if self.conversation_id else None
+            ),
             "team_id": self.team_id,
             "project_id": self.project_id,
             "task_id": self.task_id,

@@ -910,6 +910,12 @@ class Settings(BaseSettings):
         description="Serve the unified /conversations API. Off (default) keeps "
         "only the legacy /chat API live.",
     )
+    FEATURE_GROUP_AGENT_MEMORY: bool = Field(
+        default=False,
+        description="Group-chat agent memory: inject conversation_memory "
+        "summary + agent_memory recall into conversation agent turns, and "
+        "compact after turns. Off (default) = Phase 1 behavior (20-msg tail).",
+    )
 
     # ============================================
     # 下载设置
