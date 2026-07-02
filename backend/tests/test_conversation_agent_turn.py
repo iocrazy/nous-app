@@ -105,6 +105,19 @@ def _make_composer(composed: MagicMock) -> MagicMock:
     return cls
 
 
+def _make_composer_capturing(composed: MagicMock, captured: dict) -> MagicMock:
+    """Like _make_composer, but records the ComposerInput passed to compose()."""
+
+    async def _compose(composer_input: object) -> MagicMock:
+        captured["input"] = composer_input
+        return composed
+
+    instance = MagicMock()
+    instance.compose = _compose
+    cls = MagicMock(return_value=instance)
+    return cls
+
+
 # ─── Test (a): _build_history maps roles and renders text body ────────────────
 
 
@@ -317,3 +330,111 @@ async def test_happy_path_returns_content() -> None:
         )
 
     assert result == "hello from agent"
+
+
+# ─── Test: memory block injection (Phase 1.5, Task 5) ─────────────────────────
+
+
+async def _run_happy_path_capturing_composer_input(*, memory_block_return: str) -> dict:
+    """Shared harness: run the happy path, patching build_memory_block, and
+    return the dict holding the ComposerInput passed to compose()."""
+    mock_repo = MagicMock()
+    mock_repo.get_by_slug = AsyncMock(return_value=_make_agent())
+
+    mock_conv_repo = MagicMock()
+    mock_conv_repo.recent_messages = AsyncMock(
+        return_value=[
+            {
+                "sender_type": "user",
+                "type": "text",
+                "body": {"text": "hello @script_ai"},
+            }
+        ]
+    )
+
+    runner = _make_runner()
+
+    async def _fake_run_turn(
+        composed: object,
+        *,
+        user_messages: object,
+        recorder: object,
+    ) -> dict:
+        return {"content": "hello from agent"}
+
+    runner.run_turn = _fake_run_turn
+
+    fake_stack = _make_stack(runner)
+    fake_composed = _make_composed()
+    captured: dict = {}
+
+    with (
+        patch(f"{_MOD}.get_agent_repository", return_value=mock_repo),
+        patch(f"{_MOD}.agent_chat_caps", return_value=_make_caps()),
+        patch(f"{_MOD}.get_conversation_repository", return_value=mock_conv_repo),
+        patch(f"{_MOD}.get_skill_repository", return_value=MagicMock()),
+        patch(
+            f"{_MOD}.build_agent_runner_stack",
+            AsyncMock(return_value=fake_stack),
+        ),
+        patch(
+            f"{_MOD}.build_memory_block",
+            AsyncMock(return_value=memory_block_return),
+        ),
+        patch(
+            f"{_MOD}.PromptComposer",
+            _make_composer_capturing(fake_composed, captured),
+        ),
+        patch(f"{_MOD}.RunRecorder", return_value=_make_recorder_cm()),
+        patch(f"{_MOD}.provider_key_for_model", return_value="qwen"),
+    ):
+        from app.services.chat.conversation_agent_turn import (
+            run_conversation_agent_turn,
+        )
+
+        result = await run_conversation_agent_turn(
+            agent_slug=AGENT_SLUG,
+            summoner_user_id=SUMMONER,
+            conversation=CONVERSATION,
+        )
+
+    assert result == "hello from agent"
+    return captured
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_memory_block_appended_to_request_instructions() -> None:
+    """When build_memory_block returns text, compose() receives
+    untrusted-guard + blank line + block."""
+    from app.services.chat.conversation_agent_turn import (
+        _UNTRUSTED_CHANNEL_INSTRUCTION,
+    )
+
+    captured = await _run_happy_path_capturing_composer_input(
+        memory_block_return="## Conversation summary (older messages)\nS"
+    )
+
+    composer_input = captured["input"]
+    assert composer_input.request_instructions.startswith(
+        _UNTRUSTED_CHANNEL_INSTRUCTION
+    )
+    assert (
+        "## Conversation summary (older messages)"
+        in composer_input.request_instructions
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_empty_memory_block_leaves_instructions_unchanged() -> None:
+    """When build_memory_block returns '', request_instructions is exactly the
+    untrusted-channel guard (unchanged)."""
+    from app.services.chat.conversation_agent_turn import (
+        _UNTRUSTED_CHANNEL_INSTRUCTION,
+    )
+
+    captured = await _run_happy_path_capturing_composer_input(memory_block_return="")
+
+    composer_input = captured["input"]
+    assert composer_input.request_instructions == _UNTRUSTED_CHANNEL_INSTRUCTION
