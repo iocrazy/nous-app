@@ -78,6 +78,11 @@ ALLOWED_BYPASS_PATHS: dict[str, str] = {
     # M1.5 chat compactor: cheap-model summarizer for history compaction.
     # Side-channel from the main agent run; cost tracked separately.
     "services/ai/chat/ai_library_chat_service.py": "compaction summariser auxiliary LLM, side-channel",
+    # Phase 1.5 group-chat compactor: cheap-model rolling summary for
+    # conversation_memory (post-turn, never-raise, flag-gated). Same
+    # side-channel shape as the 1:1 chat compactor above; cost bounded
+    # by the compaction threshold, tracked separately from agent runs.
+    "services/chat/conversation_memory_service.py": "conversation compaction auxiliary LLM, side-channel",
     # Wave 5b (B4) session-memory updater: cheap-model maintenance call
     # for the running session-memory.md document. Off-chat-path,
     # fire-and-forget — telemetry tracked via session_memory.version
