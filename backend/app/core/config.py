@@ -697,25 +697,6 @@ class Settings(BaseSettings):
     )
 
     # ── Phase 2 admin wave (5 small logs/stats/settings repos) ──────────
-    USE_ORM_ADMIN_STATS: bool = Field(
-        default=False,
-        description="Route AdminStatsRepository (admin dashboard aggregations "
-        "over user_profiles / parsed_media / teams / user_logs) through the "
-        "SQLAlchemy 2.0 ORM (Phase 2 admin wave). COUNT(*) returns native int "
-        "(the 5.3 trap). distinct_active_users_since returns native int. "
-        "created_at (timestamptz) → ISO str (CONSUMED — the growth/video-stats "
-        "endpoints do created_at[:10] string-slicing). video_download_status is "
-        "a SQLAlchemy Enum(DownloadStatus) → unwrapped to its bare .value via "
-        "_plain (CONSUMED — the router does status == 'completed'). user_id "
-        "(uuid) → str (DICT KEY in the storage endpoint). since/date filters bind "
-        "NATIVE tz-aware datetimes (v3 rule). NOTE — completed_videos_by_user() "
-        "was a PRE-EXISTING BROKEN endpoint (it selected parsed_media.user_id, "
-        "DROPPED in migration 083 → PG 42703 on /storage). FIXED (BUG 3, "
-        "resource-centric): both the REST and ORM repos now count per "
-        "resources.creator_id where is_trashed=false and return one "
-        "{'user_id': str} row per resource (the shape the /storage handler groups "
-        "on). Reads only. Inert; flip false to revert.",
-    )
     USE_ORM_ADMIN_SYSTEM_SETTINGS: bool = Field(
         default=False,
         description="Route SystemSettingsRepository (system_settings admin CRUD) "

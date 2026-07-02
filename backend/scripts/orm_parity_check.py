@@ -23,10 +23,6 @@ _SINCE = datetime.now(timezone.utc) - timedelta(days=30)
 
 def _cases():
     """(domain, rest_repo, orm_repo, method, args) — read methods only."""
-    from app.repositories.admin.stats_repository import AdminStatsRepository
-    from app.repositories.admin.stats_repository_orm import (
-        AdminStatsRepositoryOrm,
-    )
     from app.repositories.admin.system_settings_repository import (
         SystemSettingsRepository,
     )
@@ -46,21 +42,9 @@ def _cases():
         # NOTE: audit_logs is excluded — its domain was collapsed to ORM-only
         # (USE_ORM_ADMIN_AUDIT_LOGS retired), so there is no longer a separate
         # REST impl to diff against. Parity was proven pre-collapse.
-        (
-            "stats",
-            AdminStatsRepository(),
-            AdminStatsRepositoryOrm(),
-            "count_user_profiles",
-            (),
-        ),
-        ("stats", AdminStatsRepository(), AdminStatsRepositoryOrm(), "count_teams", ()),
-        (
-            "stats",
-            AdminStatsRepository(),
-            AdminStatsRepositoryOrm(),
-            "count_parsed_media",
-            (),
-        ),
+        # NOTE: stats is excluded — its domain was collapsed to ORM-only
+        # (USE_ORM_ADMIN_STATS retired), so there is no longer a separate REST
+        # impl to diff against. Parity was proven pre-collapse.
         (
             "system_settings",
             SystemSettingsRepository(),
