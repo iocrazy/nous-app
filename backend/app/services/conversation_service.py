@@ -84,6 +84,14 @@ class ConversationService:
         parent_id: Optional[int],
     ) -> dict[str, Any]:
         await self._require_member(conversation_id, user_id)
+        generated_media_id: Optional[int] = None
+        if type == "image" and body.get("generated_media_id"):
+            try:
+                generated_media_id = int(body["generated_media_id"])
+            except (ValueError, TypeError) as exc:
+                raise ValueError(
+                    f"invalid generated_media_id: {body['generated_media_id']!r}"
+                ) from exc
         msg = await self._repo.send_message(
             conversation_id=conversation_id,
             sender_id=user_id,
@@ -92,11 +100,11 @@ class ConversationService:
             body=body,
             parent_id=parent_id,
         )
-        if type == "image" and body.get("generated_media_id"):
+        if generated_media_id is not None:
             try:
                 await self._repo.add_attachments(
                     message_id=int(msg["id"]),
-                    generated_media_ids=[int(body["generated_media_id"])],
+                    generated_media_ids=[generated_media_id],
                 )
             except Exception as exc:
                 logger.warning(

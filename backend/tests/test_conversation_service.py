@@ -126,6 +126,26 @@ async def test_post_image_message_links_generated_media():
     )
 
 
+@pytest.mark.asyncio
+async def test_post_image_message_malformed_generated_media_id_raises():
+    repo = _make_repo()
+
+    from app.services.conversation_service import ConversationService
+
+    svc = ConversationService(repo)
+    with pytest.raises(ValueError):
+        await svc.post_message(
+            conversation_id=1,
+            user_id="u1",
+            type="image",
+            body={"generated_media_id": "not-a-number", "kind": "image"},
+            parent_id=None,
+        )
+
+    repo.send_message.assert_not_awaited()
+    repo.add_attachments.assert_not_awaited()
+
+
 # ---------------------------------------------------------------------------
 # 2. dispatch_summons — anti-loop guard
 # ---------------------------------------------------------------------------
