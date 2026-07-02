@@ -1,4 +1,4 @@
-"""Integration tests for SystemSettingsRepositoryOrm (admin wave) vs real PG.
+"""Integration tests for the ORM SystemSettingsRepository (admin wave) vs real PG.
 
 Proves the REST → ORM swap is invisible AND strategy-C parity for system_settings:
 
@@ -79,11 +79,11 @@ async def _seed_setting(conn, key, value, **overrides):
 
 
 def _repo():
-    from app.repositories.admin.system_settings_repository_orm import (
-        SystemSettingsRepositoryOrm,
+    from app.repositories.admin.system_settings_repository import (
+        SystemSettingsRepository,
     )
 
-    return SystemSettingsRepositoryOrm()
+    return SystemSettingsRepository()
 
 
 async def test_list_non_transcode_excludes_and_parity(
@@ -172,27 +172,12 @@ async def test_update_missing_key_returns_none(
     assert out is None  # REST-contract parity (no row matched)
 
 
-# ─── factory parity ─────────────────────────────────────────────────────
+# ─── Factory (ORM-only, post-rollout) ───────────────────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    from app.core.config import settings
+async def test_factory_returns_orm_repository():
+    """Per-domain rollout flag retired → factory unconditionally returns the
+    ORM-backed SystemSettingsRepository."""
     from app.repositories.admin import system_settings_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_ADMIN_SYSTEM_SETTINGS", False)
     assert type(mod.get_system_settings_repository()) is mod.SystemSettingsRepository
-
-
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories.admin import system_settings_repository as mod
-    from app.repositories.admin.system_settings_repository_orm import (
-        SystemSettingsRepositoryOrm,
-    )
-
-    monkeypatch.setattr(settings, "USE_ORM_ADMIN_SYSTEM_SETTINGS", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    assert isinstance(mod.get_system_settings_repository(), SystemSettingsRepositoryOrm)

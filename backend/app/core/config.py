@@ -697,17 +697,6 @@ class Settings(BaseSettings):
     )
 
     # ── Phase 2 admin wave (5 small logs/stats/settings repos) ──────────
-    USE_ORM_ADMIN_SYSTEM_SETTINGS: bool = Field(
-        default=False,
-        description="Route SystemSettingsRepository (system_settings admin CRUD) "
-        "through the SQLAlchemy 2.0 ORM (Phase 2 admin wave). Strategy C: "
-        "updated_by (uuid) → str (SystemSettingResponse.updated_by:Optional[str]); "
-        "updated_at (timestamptz) → ISO str; value/options (jsonb) → native dict. "
-        "The 'exclude transcode_* from list' policy is preserved verbatim. "
-        "update() WRITES value + updated_by and COMMITS via write_scope() (the "
-        "silent-rollback P0 lesson); exists() uses maybe_single parity. No date "
-        "filters. No SQLAlchemy Enum / no renamed column. Inert; flip false.",
-    )
     USE_ORM_ADMIN_TABLE_PREFERENCES: bool = Field(
         default=False,
         description="Route AdminTablePreferencesRepository "

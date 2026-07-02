@@ -1,17 +1,37 @@
-"""Unit tests for SystemSettingsRepository + AdminTablePreferencesRepository."""
+"""Unit tests for SystemSettingsRepository + AdminTablePreferencesRepository.
+
+SystemSettingsRepository is now the SQLAlchemy 2.0 ORM implementation (the
+legacy supabase-py REST path was retired with USE_ORM_ADMIN_SYSTEM_SETTINGS).
+Its tests mock ``read_scope``/``write_scope`` with a fake session that captures
+every emitted ``(compiled sql, binds)`` pair and returns configured ORM row
+objects / scalar values, so the compiled SQL shape + bind params AND the
+value-type parity sweep (updated_by uuid → str, updated_at timestamptz → ISO
+str, value/options jsonb → native dict) are asserted WITHOUT a live database
+(the DSN-gated integration suite in
+``tests/integration/test_system_settings_repository_orm.py`` exercises the real
+round-trip). AdminTablePreferencesRepository is still on the supabase-py REST
+path, so its tests keep the ``_client`` fake.
+"""
 
 from __future__ import annotations
 
+import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
+import app.repositories.admin.system_settings_repository as settings_mod
+from app.models import SystemSettings
 from app.repositories.admin.system_settings_repository import (
     SystemSettingsRepository,
 )
 from app.repositories.admin.table_preferences_repository import (
     AdminTablePreferencesRepository,
 )
+
+# ─── supabase-py REST fakes (AdminTablePreferencesRepository) ──────
 
 
 class _FakeQuery:
@@ -47,29 +67,90 @@ def fake_query() -> _FakeQuery:
     return _FakeQuery()
 
 
-# ─── SystemSettingsRepository ──────────────────────────────────────
+# ─── ORM fake session (SystemSettingsRepository) ───────────────────
+
+
+def _compile(stmt: Any) -> tuple[str, dict[str, Any]]:
+    compiled = stmt.compile(dialect=postgresql.dialect())
+    return str(compiled), dict(compiled.params)
+
+
+class _FakeScalars:
+    def __init__(self, rows: list[Any]) -> None:
+        self._rows = rows
+
+    def all(self) -> list[Any]:
+        return list(self._rows)
+
+    def first(self) -> Any:
+        return self._rows[0] if self._rows else None
+
+
+class _FakeResult:
+    def __init__(self, rows: list[Any]) -> None:
+        self._rows = rows
+
+    def scalars(self) -> _FakeScalars:
+        return _FakeScalars(self._rows)
+
+
+class _FakeSession:
+    """Captures execute/scalar (compiled sql, binds); returns configured rows /
+    scalar."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.rows: list[Any] = []
+        self.scalar_value: Any = None
+        self.raise_on_scalar: Exception | None = None
+
+    async def execute(self, stmt: Any) -> _FakeResult:
+        self.calls.append(_compile(stmt))
+        return _FakeResult(self.rows)
+
+    async def scalar(self, stmt: Any) -> Any:
+        self.calls.append(_compile(stmt))
+        if self.raise_on_scalar is not None:
+            raise self.raise_on_scalar
+        return self.scalar_value
+
+
+class _ScopeCM:
+    def __init__(self, session: _FakeSession) -> None:
+        self._session = session
+
+    async def __aenter__(self) -> _FakeSession:
+        return self._session
+
+    async def __aexit__(self, *exc: Any) -> bool:
+        return False
 
 
 @pytest.fixture
-def settings_repo(fake_query: _FakeQuery) -> SystemSettingsRepository:
-    r = SystemSettingsRepository()
+def fake_session(monkeypatch: pytest.MonkeyPatch) -> _FakeSession:
+    session = _FakeSession()
+    monkeypatch.setattr(settings_mod, "read_scope", lambda: _ScopeCM(session))
+    monkeypatch.setattr(settings_mod, "write_scope", lambda: _ScopeCM(session))
+    return session
 
-    async def _client():
-        return _FakeClient(fake_query)
 
-    r._client = _client  # type: ignore[method-assign]
-    return r
+@pytest.fixture
+def settings_repo() -> SystemSettingsRepository:
+    return SystemSettingsRepository()
+
+
+# ─── SystemSettingsRepository (ORM) ────────────────────────────────
 
 
 @pytest.mark.asyncio
 async def test_list_non_transcode_excludes_transcode_prefix(
-    settings_repo: SystemSettingsRepository, fake_query: _FakeQuery
+    settings_repo: SystemSettingsRepository, fake_session: _FakeSession
 ) -> None:
-    fake_query._data = [
-        {"key": "transcode_enabled", "value": True},
-        {"key": "transcode_tiers", "value": "720p"},
-        {"key": "something_else", "value": "ok"},
-        {"key": "another_setting", "value": 42},
+    fake_session.rows = [
+        SystemSettings(key="transcode_enabled", value=True),
+        SystemSettings(key="transcode_tiers", value="720p"),
+        SystemSettings(key="something_else", value="ok"),
+        SystemSettings(key="another_setting", value=42),
     ]
     rows = await settings_repo.list_non_transcode()
     keys = [r["key"] for r in rows]
@@ -78,57 +159,121 @@ async def test_list_non_transcode_excludes_transcode_prefix(
     assert "transcode_enabled" not in keys
     assert "transcode_tiers" not in keys
 
+    sql, _ = fake_session.calls[-1]
+    assert "system_settings" in sql
+    assert "ORDER BY public.system_settings.key" in sql  # ordered by key
+
 
 @pytest.mark.asyncio
-async def test_exists_true_when_data_present(
-    settings_repo: SystemSettingsRepository, fake_query: _FakeQuery
+async def test_list_non_transcode_parity_sweep(
+    settings_repo: SystemSettingsRepository, fake_session: _FakeSession
 ) -> None:
-    fake_query._data = {"key": "x"}
+    admin = uuid.uuid4()
+    updated_at = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    fake_session.rows = [
+        SystemSettings(
+            key="visible",
+            value={"a": 1},
+            updated_by=admin,
+            updated_at=updated_at,
+        ),
+    ]
+    rows = await settings_repo.list_non_transcode()
+    row = rows[0]
+    assert row["value"] == {"a": 1}  # jsonb → native dict
+    assert row["updated_by"] == str(admin)  # uuid → str
+    assert type(row["updated_by"]) is str
+    assert row["updated_at"] == updated_at.isoformat()  # tstz → ISO str
+    assert type(row["updated_at"]) is str
+
+
+@pytest.mark.asyncio
+async def test_exists_true_when_scalar_present(
+    settings_repo: SystemSettingsRepository, fake_session: _FakeSession
+) -> None:
+    fake_session.scalar_value = "x"
     assert await settings_repo.exists("x") is True
+
+    sql, binds = fake_session.calls[-1]
+    assert "system_settings.key = " in sql
+    assert "x" in binds.values()
 
 
 @pytest.mark.asyncio
 async def test_exists_false_on_none(
-    settings_repo: SystemSettingsRepository, fake_query: _FakeQuery
+    settings_repo: SystemSettingsRepository, fake_session: _FakeSession
 ) -> None:
-    fake_query._data = None
+    fake_session.scalar_value = None
     assert await settings_repo.exists("x") is False
 
 
 @pytest.mark.asyncio
 async def test_exists_false_on_exception(
-    settings_repo: SystemSettingsRepository, fake_query: _FakeQuery
+    settings_repo: SystemSettingsRepository, fake_session: _FakeSession
 ) -> None:
-    async def _raises():
-        raise RuntimeError("boom")
-
-    fake_query.execute = _raises  # type: ignore[assignment]
-
+    fake_session.raise_on_scalar = RuntimeError("boom")
     assert await settings_repo.exists("x") is False
 
 
 @pytest.mark.asyncio
-async def test_update_returns_first_row(
-    settings_repo: SystemSettingsRepository, fake_query: _FakeQuery
+async def test_update_returns_row_and_binds(
+    settings_repo: SystemSettingsRepository, fake_session: _FakeSession
 ) -> None:
-    fake_query._data = [{"key": "x", "value": "v", "updated_by": "admin"}]
-    row = await settings_repo.update("x", "v", "admin")
-    assert row == {"key": "x", "value": "v", "updated_by": "admin"}
+    admin = uuid.uuid4()
+    fake_session.rows = [
+        SystemSettings(key="x", value={"v": 1}, updated_by=admin),
+    ]
+    row = await settings_repo.update("x", {"v": 1}, str(admin))
+    assert row["key"] == "x"
+    assert row["value"] == {"v": 1}
+    assert row["updated_by"] == str(admin)
 
-    update = next(c for c in fake_query.calls if c[0] == "update")
-    assert update[1] == ({"value": "v", "updated_by": "admin"},)
+    sql, binds = fake_session.calls[-1]
+    assert "UPDATE public.system_settings SET" in sql
+    assert "RETURNING" in sql
+    assert {"v": 1} in binds.values()
+    assert str(admin) in binds.values()
 
 
 @pytest.mark.asyncio
 async def test_update_returns_none_on_empty(
-    settings_repo: SystemSettingsRepository, fake_query: _FakeQuery
+    settings_repo: SystemSettingsRepository, fake_session: _FakeSession
 ) -> None:
-    fake_query._data = []
+    fake_session.rows = []
     row = await settings_repo.update("x", "v", "admin")
     assert row is None
 
 
-# ─── AdminTablePreferencesRepository ───────────────────────────────
+@pytest.mark.asyncio
+async def test_upsert_uses_on_conflict_and_returns_row(
+    settings_repo: SystemSettingsRepository, fake_session: _FakeSession
+) -> None:
+    admin = uuid.uuid4()
+    fake_session.rows = [
+        SystemSettings(key="x", value={"v": 2}, updated_by=admin),
+    ]
+    row = await settings_repo.upsert_setting("x", {"v": 2}, str(admin))
+    assert row["key"] == "x"
+    assert row["value"] == {"v": 2}
+
+    sql, binds = fake_session.calls[-1]
+    assert "INSERT INTO public.system_settings" in sql
+    assert "ON CONFLICT (key) DO UPDATE" in sql
+    assert "RETURNING" in sql
+    assert "x" in binds.values()
+    assert {"v": 2} in binds.values()
+
+
+@pytest.mark.asyncio
+async def test_upsert_falls_back_when_no_row_returned(
+    settings_repo: SystemSettingsRepository, fake_session: _FakeSession
+) -> None:
+    fake_session.rows = []
+    row = await settings_repo.upsert_setting("x", {"v": 3}, "admin")
+    assert row == {"key": "x", "value": {"v": 3}}  # REST-parity fallback shape
+
+
+# ─── AdminTablePreferencesRepository (supabase-py REST) ─────────────
 
 
 @pytest.fixture
