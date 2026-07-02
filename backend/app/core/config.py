@@ -742,22 +742,6 @@ class Settings(BaseSettings):
     )
 
     # ── Phase 2 admin wave pass 2 (search / alerts / logs / tasks / videos) ──
-    USE_ORM_ADMIN_SEARCH: bool = Field(
-        default=False,
-        description="Route AdminSearchRepository (admin cross-log search + request "
-        "trace over api_request_logs / application_logs / frontend_error_logs / "
-        "admin_audit_logs) through the SQLAlchemy 2.0 ORM (Phase 2 admin wave). "
-        "Strategy C: all timestamptz (timestamp / logged_at / created_at) → ISO str "
-        "(CONSUMED — the router feeds them to fromisoformat via _parse_ts and stores "
-        "them on str fields); id (BIGINT) → native int (router str()s it); no uuid "
-        "in any real projection. JSONB filter extra->>request_id reproduced via "
-        "extra['request_id'].astext. Time bounds (ISO str) coerced to NATIVE "
-        "tz-aware datetimes before binding (v3 rule). TWO PRE-EXISTING SCHEMA-DRIFT "
-        "bugs were FIXED in both the REST and ORM repos: frontend_logs() now selects "
-        "the real column stack (was the nonexistent stack_trace → PG 42703); "
-        "audit_logs() now queries the real table audit_logs via admin_id (was the "
-        "nonexistent table admin_audit_logs → PG 42P01). Reads only. Inert.",
-    )
     USE_ORM_ADMIN_TASKS: bool = Field(
         default=False,
         description="Route AdminTasksRepository (admin Task Center on task_tracking) "
