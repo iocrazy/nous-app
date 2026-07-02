@@ -782,23 +782,6 @@ class Settings(BaseSettings):
         "audit_logs() now queries the real table audit_logs via admin_id (was the "
         "nonexistent table admin_audit_logs → PG 42P01). Reads only. Inert.",
     )
-    USE_ORM_ADMIN_ALERT_RULES: bool = Field(
-        default=False,
-        description="Route AlertRulesRepository (admin alert rules + alert history "
-        "on alert_rules / alert_history) through the SQLAlchemy 2.0 ORM (Phase 2 "
-        "admin wave). NO ORM MODEL exists for either table (mig 094, never "
-        "sqlacodegen'd) → reproduced via PARAMETERIZED text() inside read/write "
-        "scopes (no new models added to the shared package in this inert wave). "
-        "Strategy C: created_by (uuid) → str (AlertRuleItem.created_by:str); "
-        "created_at / updated_at / mute_until / resolved_at (timestamptz) → ISO str "
-        "(CONSUMED — str Pydantic fields; mute_until fed to fromisoformat); "
-        "threshold / metric_value (float8) → native float; id / rule_id (BIGINT) → "
-        "native int (str Pydantic fields coerce). WRITES (create/update/delete/"
-        "insert_history/resolve_history) COMMIT via write_scope(); update_rule "
-        "stamps updated_at=now() and guards against phantom keys via a column "
-        "allow-list. list_history date filters bind NATIVE tz-aware datetimes (v3). "
-        "Inert; flip false to revert.",
-    )
     USE_ORM_ADMIN_REQUEST_LOGS: bool = Field(
         default=False,
         description="Route the three admin-console log repositories "
