@@ -1,4 +1,4 @@
-"""Integration tests for AuditLogsRepositoryOrm (Phase 2 admin wave) vs real PG.
+"""Integration tests for the ORM AuditLogsRepository (Phase 2 admin wave) vs real PG.
 
 Proves the REST → ORM swap is invisible AND that STRATEGY-C value-type parity
 holds for the audit_logs admin trail:
@@ -90,11 +90,9 @@ async def _seed(conn, admin_id, **overrides) -> dict:
 
 
 def _repo():
-    from app.repositories.admin.audit_logs_repository_orm import (
-        AuditLogsRepositoryOrm,
-    )
+    from app.repositories.admin.audit_logs_repository import AuditLogsRepository
 
-    return AuditLogsRepositoryOrm()
+    return AuditLogsRepository()
 
 
 # ─── Reads + strategy-C parity ──────────────────────────────────────────
@@ -191,34 +189,12 @@ async def test_list_since_date_boundary(
     assert str(before["id"]) not in ids  # before cutoff excluded
 
 
-# ─── Flag-off / flag-on factory parity ──────────────────────────────────
+# ─── Factory (ORM-only, post-rollout) ───────────────────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    from app.core.config import settings
+async def test_factory_returns_orm_repository():
+    """Per-domain rollout flag retired → factory unconditionally returns the
+    ORM-backed AuditLogsRepository."""
     from app.repositories.admin import audit_logs_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_ADMIN_AUDIT_LOGS", False)
-    repo = mod.get_audit_logs_repository()
-    assert type(repo) is mod.AuditLogsRepository
-    from app.repositories.admin.audit_logs_repository_orm import (
-        AuditLogsRepositoryOrm,
-    )
-
-    assert not isinstance(repo, AuditLogsRepositoryOrm)
-
-
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories.admin import audit_logs_repository as mod
-    from app.repositories.admin.audit_logs_repository_orm import (
-        AuditLogsRepositoryOrm,
-    )
-
-    monkeypatch.setattr(settings, "USE_ORM_ADMIN_AUDIT_LOGS", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    repo = mod.get_audit_logs_repository()
-    assert isinstance(repo, AuditLogsRepositoryOrm)
+    assert type(mod.get_audit_logs_repository()) is mod.AuditLogsRepository

@@ -697,30 +697,6 @@ class Settings(BaseSettings):
     )
 
     # ── Phase 2 admin wave (5 small logs/stats/settings repos) ──────────
-    USE_ORM_ADMIN_AUDIT_LOGS: bool = Field(
-        default=False,
-        description="Route AuditLogsRepository (admin activity trail on "
-        "audit_logs) through the SQLAlchemy 2.0 ORM (Phase 2 admin wave). "
-        "Strategy C: id + admin_id (uuid) → str — admin_id is a DICT KEY in the "
-        "router (admin_info.get(aid)) and a str field on AuditLogResponse; id is "
-        "str()'d into the response. created_at (timestamptz) → ISO str (CONSUMED "
-        "— the /stats endpoint does created_at[:10] string-slicing). No "
-        "SQLAlchemy Enum / no renamed column on AuditLogs. Date-range filters "
-        "(start_date/end_date on created_at) bind NATIVE tz-aware datetimes (v3 "
-        "rule). Reads only — no writes in this repo. Inert; flip false to revert.",
-    )
-    USE_ORM_ADMIN_MONITORING: bool = Field(
-        default=False,
-        description="Route MonitoringRepository (admin monitoring dashboard — "
-        "reads api_request_logs / application_logs / frontend_error_logs) through "
-        "the SQLAlchemy 2.0 ORM (Phase 2 admin wave). COLUMN-SUBSET selects (not "
-        "SELECT *). Strategy C: timestamp / logged_at (timestamptz) → ISO str "
-        "(CONSUMED — the router does ts.replace('Z',...)+fromisoformat(ts) and "
-        "sets RecentErrorEntry.logged_at:str); status_code / response_time_ms "
-        "(int) stay native; frontend_error_count returns native int. No uuid in "
-        "any projection. Date-range filters bind NATIVE tz-aware datetimes (v3 "
-        "rule; these are the LOTS-of-date-windows surface). Reads only. Inert.",
-    )
     USE_ORM_ADMIN_STATS: bool = Field(
         default=False,
         description="Route AdminStatsRepository (admin dashboard aggregations "
@@ -781,39 +757,6 @@ class Settings(BaseSettings):
         "the real column stack (was the nonexistent stack_trace → PG 42703); "
         "audit_logs() now queries the real table audit_logs via admin_id (was the "
         "nonexistent table admin_audit_logs → PG 42P01). Reads only. Inert.",
-    )
-    USE_ORM_ADMIN_ALERT_RULES: bool = Field(
-        default=False,
-        description="Route AlertRulesRepository (admin alert rules + alert history "
-        "on alert_rules / alert_history) through the SQLAlchemy 2.0 ORM (Phase 2 "
-        "admin wave). NO ORM MODEL exists for either table (mig 094, never "
-        "sqlacodegen'd) → reproduced via PARAMETERIZED text() inside read/write "
-        "scopes (no new models added to the shared package in this inert wave). "
-        "Strategy C: created_by (uuid) → str (AlertRuleItem.created_by:str); "
-        "created_at / updated_at / mute_until / resolved_at (timestamptz) → ISO str "
-        "(CONSUMED — str Pydantic fields; mute_until fed to fromisoformat); "
-        "threshold / metric_value (float8) → native float; id / rule_id (BIGINT) → "
-        "native int (str Pydantic fields coerce). WRITES (create/update/delete/"
-        "insert_history/resolve_history) COMMIT via write_scope(); update_rule "
-        "stamps updated_at=now() and guards against phantom keys via a column "
-        "allow-list. list_history date filters bind NATIVE tz-aware datetimes (v3). "
-        "Inert; flip false to revert.",
-    )
-    USE_ORM_ADMIN_REQUEST_LOGS: bool = Field(
-        default=False,
-        description="Route the three admin-console log repositories "
-        "(RequestLogsRepository / FrontendErrorLogsRepository / AppLogsRepository — "
-        "api_request_logs / frontend_error_logs / application_logs) through the "
-        "SQLAlchemy 2.0 ORM (Phase 2 admin wave). SELECT * via _orm_obj_to_dict "
-        "(FrontendErrorLogs has a renamed metadata→metadata_ — keyed back as "
-        "'metadata'). Strategy C: timestamp / created_at / logged_at (timestamptz) "
-        "→ ISO str (CONSUMED — str Pydantic fields; stats does ts[:13] slicing); id "
-        "(BIGINT) → native int (router str()s it); status_code / response_time_ms / "
-        "line (int) → native int; user_id (uuid) → str (in SELECT * but not a "
-        "dict-key here); jsonb → native dict. has_exception True → exception IS NOT "
-        "NULL / False → IS NULL (legacy parity); NOISE_MODULES exclusion preserved. "
-        "Date-range filters bind NATIVE tz-aware datetimes (v3 — many windows). "
-        "Reads only. Inert; flip false to revert.",
     )
     USE_ORM_ADMIN_TASKS: bool = Field(
         default=False,
@@ -919,32 +862,6 @@ class Settings(BaseSettings):
         "get_member reproduce the legacy .single() RAISE-on-0-rows quirk (HTTP 500; "
         "the router's None-guard is dead for missing rows — NOT repaired, inert "
         "discipline). No date-range filter. Inert; flip false to revert.",
-    )
-    USE_ORM_ADMIN_CREDITS: bool = Field(
-        default=False,
-        description="Route AdminCreditsRepository (admin CREDIT-ADMINISTRATION "
-        "console on point_packages / point_pricing / point_transactions / orders / "
-        "teams / team_quotas) through the SQLAlchemy 2.0 ORM (Phase 2 admin wave — "
-        "★ MONEY ★). ALL money columns are Integer/BigInteger → NATIVE int (the 5.3 "
-        "trap): points_balance / amount / balance_after / amount_cents / "
-        "points_amount / points_cost / price_cents / storage_*_bytes — consumers "
-        "sum/abs/+= them. point_transactions.duration_seconds (the ONLY Numeric) → "
-        "str (REST JSON-string shape; no admin consumer does decimal math). ⚠️ "
-        "DICT-KEY UUID TRAPS: point_transactions.user_id / orders.user_id → str "
-        "(batch_get_user_auth_info str-keyed email enrichment); orders.package_id → "
-        "str (get_package_names str-keyed map); teams.owner_id / pricing+package ids "
-        "→ str. bigint ids (teams.id / team_id / txn+order id) → native int. "
-        "timestamptz (orders.paid_at / created_at) → ISO str (the router reparses "
-        "paid_at via datetime.fromisoformat). PR-E quirk: is_personal DERIVED from "
-        "teams.kind=='personal' (kind is plain Text, not Enum) and injected. READ "
-        "date filter orders_by_status/revenue_chart bind a tz-aware datetime (v3); "
-        "WRITE update_order coerces ISO-str paid_at/updated_at → datetime (v3 "
-        "mirror, asyncpg strict timestamptz codec). WRITES (package/pricing CRUD + "
-        "update_order) COMMIT via write_scope(); NONE touch a balance column (the "
-        "grant/adjust/refund money flows live in the router → PointsService, behind "
-        "USE_ORM_POINTS). ⚠️ CONCERN (pre-existing, NOT fixed): confirm_order/"
-        "refund_order do update_order THEN add_points as two un-transactioned awaits "
-        "— cross-repo non-atomic; flagged for a human. Inert; flip false to revert.",
     )
     USE_ORM_USER_MCP_SERVERS: bool = Field(
         default=False,

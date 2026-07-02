@@ -1,4 +1,4 @@
-"""Integration tests for AlertRulesRepositoryOrm (Phase 2 admin wave) vs real PG.
+"""Integration tests for the ORM AlertRulesRepository (Phase 2 admin wave) vs real PG.
 
 Proves the REST → ORM swap is invisible AND strategy-C parity for the alert rules
 + alert history console (text()-backed — no ORM model exists for either table):
@@ -86,11 +86,9 @@ async def cleanup_test_rows(integration_db_url, require_tables):
 
 
 def _repo():
-    from app.repositories.admin.alert_rules_repository_orm import (
-        AlertRulesRepositoryOrm,
-    )
+    from app.repositories.admin.alert_rules_repository import AlertRulesRepository
 
-    return AlertRulesRepositoryOrm()
+    return AlertRulesRepository()
 
 
 async def test_create_list_update_delete_round_trip(
@@ -205,27 +203,12 @@ async def test_resolve_history_commits(
     assert resolved is True
 
 
-# ─── factory parity ─────────────────────────────────────────────────────
+# ─── Factory (ORM-only, post-rollout) ───────────────────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    from app.core.config import settings
+async def test_factory_returns_orm_repository():
+    """Per-domain rollout flag retired → factory unconditionally returns the
+    ORM-backed AlertRulesRepository."""
     from app.repositories.admin import alert_rules_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_ADMIN_ALERT_RULES", False)
     assert type(mod.get_alert_rules_repository()) is mod.AlertRulesRepository
-
-
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories.admin import alert_rules_repository as mod
-    from app.repositories.admin.alert_rules_repository_orm import (
-        AlertRulesRepositoryOrm,
-    )
-
-    monkeypatch.setattr(settings, "USE_ORM_ADMIN_ALERT_RULES", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    assert isinstance(mod.get_alert_rules_repository(), AlertRulesRepositoryOrm)
