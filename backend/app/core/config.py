@@ -961,19 +961,6 @@ class Settings(BaseSettings):
         "refund_order do update_order THEN add_points as two un-transactioned awaits "
         "— cross-repo non-atomic; flagged for a human. Inert; flip false to revert.",
     )
-    USE_ORM_COLLECTIONS: bool = Field(
-        default=False,
-        description="Route CollectionsRepository (smart_collections CRUD — the "
-        "SmartCollections model already existed in the reflected set) through the "
-        "SQLAlchemy 2.0 ORM (deferred-repo finish wave). Strategy-C value-type "
-        "parity: id (bigint snowflake) → NATIVE int (PostgREST returned a JSON "
-        "number → int; same type); user_id is an INPUT (caller passes str) and "
-        "the returned dicts carry it back as-is; rules / cached_video_ids (jsonb / "
-        "array) → native dict/list; created_at / updated_at / cached_at "
-        "(timestamptz) → ISO str (the router/UI read them as strings, REST "
-        "returned ISO). Writes COMMIT via write_scope(); update/delete keep the "
-        "WHERE user_id == owner ownership filter. Inert; flip false to revert.",
-    )
     USE_ORM_USER_MCP_SERVERS: bool = Field(
         default=False,
         description="Route UserMcpServersRepository (user_mcp_servers CRUD) "

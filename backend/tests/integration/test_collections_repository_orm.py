@@ -1,4 +1,4 @@
-"""Integration tests for CollectionsRepositoryOrm against a real PG database.
+"""Integration tests for CollectionsRepository (ORM) against a real PG database.
 
 Covers: create → get_all → get_by_id → update → update_cache → delete
 round-trip, preset creation, and ASSERTS strategy-C value-type parity:
@@ -78,9 +78,9 @@ async def test_user(integration_db_url):
 
 
 def _repo():
-    from app.repositories.collections_repository_orm import CollectionsRepositoryOrm
+    from app.repositories.collections_repository import CollectionsRepository
 
-    return CollectionsRepositoryOrm()
+    return CollectionsRepository()
 
 
 # ─── Value-type parity helpers ──────────────────────────────────────────────
@@ -356,32 +356,12 @@ async def test_create_default_presets(integration_db_url, patched_engine, test_u
         _assert_parity(p)
 
 
-# ─── Factory flag tests ─────────────────────────────────────────────────────
+# ─── Factory ────────────────────────────────────────────────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    """FLAG=false → plain REST repo."""
-    from app.core.config import settings
+async def test_factory_returns_collections_repository():
+    """The flag is retired — the factory unconditionally returns the ORM repo."""
     from app.repositories import collections_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_COLLECTIONS", False)
     repo = mod.get_collections_repository()
     assert type(repo) is mod.CollectionsRepository
-    from app.repositories.collections_repository_orm import CollectionsRepositoryOrm
-
-    assert not isinstance(repo, CollectionsRepositoryOrm)
-
-
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    """FLAG=true + configured engine → ORM repo."""
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories import collections_repository as mod
-    from app.repositories.collections_repository_orm import CollectionsRepositoryOrm
-
-    monkeypatch.setattr(settings, "USE_ORM_COLLECTIONS", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    repo = mod.get_collections_repository()
-    assert isinstance(repo, CollectionsRepositoryOrm)
