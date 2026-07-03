@@ -91,9 +91,9 @@ async def cleanup_keys(integration_db_url):
 
 
 def _repo():
-    from app.repositories.api_key_repository_orm import ApiKeyRepositoryOrm
+    from app.repositories.api_key_repository import ApiKeyRepository
 
-    return ApiKeyRepositoryOrm()
+    return ApiKeyRepository()
 
 
 def _name() -> str:
@@ -261,30 +261,15 @@ async def test_update_and_delete_commit(
     assert await _repo().get_by_key_id(created["key_id"]) is None
 
 
-# ─── factory on/off ─────────────────────────────────────────────────────
+# ─── factory (flag-free after collapse) ──────────────────────────────────
 
 
-def test_factory_off_returns_legacy():
-    from unittest.mock import patch
-
+def test_factory_returns_collapsed_repo():
+    """Post-collapse the factory unconditionally returns the ORM-backed
+    ApiKeyRepository — no flag branch, no legacy REST sibling."""
     from app.repositories.api_key_repository import (
         ApiKeyRepository,
         get_api_key_repository,
     )
 
-    with patch("app.core.config.settings.USE_ORM_API_KEY", False):
-        assert type(get_api_key_repository()) is ApiKeyRepository
-
-
-def test_factory_on_returns_orm(integration_db_url):
-    from unittest.mock import patch
-
-    from app.repositories.api_key_repository_orm import ApiKeyRepositoryOrm
-
-    with (
-        patch("app.core.config.settings.USE_ORM_API_KEY", True),
-        patch("app.db.engine.is_configured", return_value=True),
-    ):
-        from app.repositories.api_key_repository import get_api_key_repository
-
-        assert type(get_api_key_repository()) is ApiKeyRepositoryOrm
+    assert type(get_api_key_repository()) is ApiKeyRepository
