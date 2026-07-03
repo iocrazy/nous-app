@@ -452,3 +452,24 @@ def test_smoke_http_layer_response_model_serialization():
     assert (
         isinstance(msgs, list) and len(msgs) >= 1
     ), f"expected at least 1 message, got: {msgs}"
+
+
+def test_root_routes_do_not_redirect():
+    """GET/POST /api/v1/conversations (no trailing slash) must match directly.
+
+    A "/" route under the prefix 307-redirects the bare path; browsers block
+    CORS preflight on redirects (and the proxied Location downgrades to http),
+    which broke the go-live browser pass. TestClient follows redirects by
+    default, so assert with follow_redirects=False.
+    """
+    svc = AsyncMock()
+    svc.list_my_conversations.return_value = []
+    with _patch(
+        "app.api.conversation_router.get_conversation_service", return_value=svc
+    ):
+        client = _make_client()
+        r = client.get("/api/v1/conversations", follow_redirects=False)
+        assert r.status_code != 307, "bare GET /conversations must not redirect"
+        assert r.status_code == 200
+        r = client.post("/api/v1/conversations", json={}, follow_redirects=False)
+        assert r.status_code != 307, "bare POST /conversations must not redirect"
