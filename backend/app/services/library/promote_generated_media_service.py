@@ -80,7 +80,11 @@ class PromoteGeneratedMediaService:
         size = os.path.getsize(src_abs)
         file_hash = await asyncio.to_thread(_sha256, src_abs)
 
-        # 1) resource row (source_type='generated' + provenance in metadata)
+        # 1) resource row. `resources` has NO metadata column (prod schema —
+        # inserting one 500s with PGRST204). Provenance stays queryable on the
+        # generated_media row itself (prompt/model/provider/origin_kind + the
+        # promoted_resource_id backlink written by mark_promoted below); only
+        # the prompt is denormalised into the existing gen_prompt column.
         resource = await self.res_repo.create_resource(
             {
                 "creator_id": user_id,
@@ -91,13 +95,7 @@ class PromoteGeneratedMediaService:
                 "file_size_bytes": size,
                 "current_version": 1,
                 "file_hash": file_hash,
-                "metadata": {
-                    "promoted_from_generated_media_id": str(gen["id"]),
-                    "prompt": gen.get("prompt"),
-                    "model": gen.get("model"),
-                    "provider": gen.get("provider"),
-                    "origin_kind": gen.get("origin_kind"),
-                },
+                "gen_prompt": gen.get("prompt"),
             }
         )
         resource_id = str(resource["id"])
