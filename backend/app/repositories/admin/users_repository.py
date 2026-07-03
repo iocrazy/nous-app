@@ -1,17 +1,106 @@
-"""Repository for admin user management (user_profiles table)."""
+"""Admin user management repository (user_profiles table).
+
+ORM 2.0 (post-rollout cleanup): ``AdminUsersRepository`` is the SQLAlchemy 2.0
+implementation for the admin user-management console
+(``app/api/admin/users_router.py``), which reads + WRITES the ``user_profiles``
+table. The legacy supabase-py REST path and its per-domain rollout flag have been
+retired; call sites go through ``get_admin_users_repository()`` (bottom of this
+file) which now unconditionally returns this repository.
+
+MODEL: ``app.models.UserProfiles`` (table ``user_profiles``) — verified reflected,
+exported from ``app.models``. PK ``id`` is **UUID**.
+
+★ UUID AUDIT (the M-tier core — admin email/info enrichment dict-key trap) ★
+============================================================================
+This is one of the two highest-risk repos. ``user_profiles.id`` is the user uuid
+that drives ALL enrichment. Per-column evidence (from users_router.py):
+
+  - ``user_profiles.id`` (UUID) → **str**. DICT-KEY EVIDENCE: list_users builds
+    ``user_ids = [u["id"] for u in rows]`` and passes it to
+    ``batch_get_user_counts(user_ids)`` + ``batch_get_user_auth_info(user_ids)``;
+    those helpers build their RETURNED dict keyed by the SAME ``uid`` they were
+    passed (``return uid, (...)``), and the router looks up with
+    ``user_counts.get(uid)`` / ``auth_info.get(uid)`` using that same ``uid``. The
+    key identity is internally consistent for ANY type — BUT the enrichment helpers
+    ALSO feed ``uid`` into Supabase calls (``get_user_video_count`` does
+    ``.eq("user_id", uid)``, ``get_user_auth_info`` calls auth-admin by id), where a
+    native ``uuid.UUID`` would serialize differently than the str the REST path
+    handed over. AND the response is ``AdminUserResponse.id: str`` (router does
+    ``str(uid)``) and ``get_by_id`` is also consumed by ``user_id == auth.user_id``
+    self-modification compares (auth.user_id is a str). REST returned id as a JSON
+    STRING; to keep the enrichment + compare + Supabase-filter paths byte-identical
+    we str() id at the read boundary (the generic ``_row`` sweep). A native UUID
+    here is exactly the admin silent-miss class of bug.
+  - No other uuid columns are returned to a type-sensitive consumer; ``id`` is the
+    only uuid on user_profiles. The sweep str()s it everywhere it appears.
+
+ENUM COLUMN (the parity trap)
+=============================
+``user_profiles.role`` is mapped as SQLAlchemy ``Enum(UserRole)`` → an ORM read
+returns an Enum MEMBER, whereas REST returned the bare string ("admin"/"user"/
+"test"). CONSUMED: the router does ``role=str(u.get("role", "user"))`` — and
+``str(UserRole.ADMIN)`` yields ``"UserRole.ADMIN"`` NOT ``"admin"`` (Enum members
+are str subclasses so ``==`` looks fine, but ``str()`` does not). We unwrap every
+Enum to its bare ``.value`` via ``_orm_obj_to_dict/_plain`` so ``str(role)`` →
+"admin" — byte-exact REST parity. This is load-bearing.
+
+STRATEGY-C VALUE-TYPE PARITY (per-field)
+----------------------------------------
+  created_at / updated_at (timestamptz) → **ISO str**. CONSUMED:
+    ``AdminUserResponse.created_at`` / ``updated_at`` (the router reads
+    ``u["created_at"]`` and ``u.get("updated_at")``; the response model accepts the
+    ISO str). display_id (bigint) → native int. is_banned (bool) → native. username
+    / avatar_url (text) → native str.
+
+WRITES (the silent-rollback P0 lesson) — ALL commit via write_scope()
+---------------------------------------------------------------------
+  update(user_id, changes) → UPDATE … RETURNING the full row → SELECT *-shaped dict
+    (REST returned ``result.data[0]``; None when no row matched). Binds the EXACT
+    changes dict (the router only ever sends real columns: role / is_banned —
+    PHANTOM SCREEN: both are real mapped columns). set_banned delegates to update().
+  No INSERT (admin never creates user_profiles via this repo).
+
+NO date/timestamp range filter exists → no timestamptz<VARCHAR hazard.
+get_by_id / exists returned None/False on absent under REST (maybe_single wrapped
+in try/except) — the ORM ``select(...).first()`` returns None on absent which is
+the same observable result; a genuine DB error propagates (acceptable: the legacy
+swallow was a maybe_single PGRST-no-row guard, not a blanket error mask, and the
+None-on-absent contract is preserved).
+"""
 
 from __future__ import annotations
 
-from typing import Any, Optional
+import uuid as _uuid
+from datetime import datetime
+from typing import Any, Dict, Optional
 
-from app.db import get_async_supabase_admin
+from sqlalchemy import func, select
+from sqlalchemy import update as sa_update
+
+from app.db.session import read_scope, write_scope
+from app.models import UserProfiles
+from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
+
+_UP_N2A: Dict[str, str] = _name_to_attr(UserProfiles)
+
+
+def _row(obj: Any) -> Dict[str, Any]:
+    """SELECT *-shaped, strategy-C-parity dict: Enum(role) → bare .value (via
+    _orm_obj_to_dict/_plain), uuid(id) → str (DICT-KEY enrichment — load-bearing),
+    datetime → ISO str. NULLs pass through."""
+    out = _orm_obj_to_dict(obj, _UP_N2A)
+    for key, value in out.items():
+        if isinstance(value, _uuid.UUID):
+            out[key] = str(value)
+        elif isinstance(value, datetime):
+            out[key] = value.isoformat()
+    return out
 
 
 class AdminUsersRepository:
-    TABLE = "user_profiles"
+    """ORM-backed admin user_profiles repository (reads + update/ban writes)."""
 
-    async def _client(self):
-        return await get_async_supabase_admin()
+    TABLE = "user_profiles"
 
     async def list_with_filters(
         self,
@@ -21,57 +110,57 @@ class AdminUsersRepository:
         search: Optional[str] = None,
         role: Optional[str] = None,
     ) -> tuple[list[dict[str, Any]], int]:
-        client = await self._client()
-        query = client.table(self.TABLE).select("*", count="exact")
+        base = select(UserProfiles)
         if search:
-            query = query.ilike("username", f"%{search}%")
+            base = base.where(UserProfiles.username.ilike(f"%{search}%"))
         if role:
-            query = query.eq("role", role)
+            # Enum column accepts its bare value on the bind side.
+            base = base.where(UserProfiles.role == role)
 
         offset = (page - 1) * page_size
-        result = await (
-            query.order("created_at", desc=True)
-            .range(offset, offset + page_size - 1)
-            .execute()
-        )
-        return result.data or [], result.count or 0
+        async with read_scope() as session:
+            total = await session.scalar(
+                select(func.count()).select_from(base.subquery())
+            )
+            result = await session.execute(
+                base.order_by(UserProfiles.created_at.desc())
+                .offset(offset)
+                .limit(page_size)
+            )
+            rows = [_row(o) for o in result.scalars().all()]
+        return rows, (total or 0)
 
     async def get_by_id(self, user_id: str) -> Optional[dict[str, Any]]:
-        client = await self._client()
-        try:
-            result = (
-                await client.table(self.TABLE)
-                .select("*")
-                .eq("id", user_id)
-                .maybe_single()
-                .execute()
-            )
-            return result.data
-        except Exception:
-            return None
+        stmt = select(UserProfiles).where(UserProfiles.id == user_id).limit(1)
+        async with read_scope() as session:
+            result = await session.execute(stmt)
+            obj = result.scalars().first()
+        return _row(obj) if obj is not None else None
 
     async def exists(self, user_id: str) -> bool:
-        client = await self._client()
-        try:
-            result = (
-                await client.table(self.TABLE)
-                .select("id")
-                .eq("id", user_id)
-                .maybe_single()
-                .execute()
-            )
-            return result.data is not None
-        except Exception:
-            return False
+        stmt = select(UserProfiles.id).where(UserProfiles.id == user_id).limit(1)
+        async with read_scope() as session:
+            value = await session.scalar(stmt)
+        return value is not None
 
     async def update(
         self, user_id: str, changes: dict[str, Any]
     ) -> Optional[dict[str, Any]]:
-        client = await self._client()
-        result = await (
-            client.table(self.TABLE).update(changes).eq("id", user_id).execute()
+        """UPDATE user_profiles by id; COMMITS via write_scope(). Returns the full
+        updated row (REST returned ``result.data[0]``) or None when no row matched."""
+        if not changes:
+            return None
+        values = {_UP_N2A.get(k, k): v for k, v in changes.items()}
+        stmt = (
+            sa_update(UserProfiles)
+            .where(UserProfiles.id == user_id)
+            .values(**values)
+            .returning(UserProfiles)
         )
-        return result.data[0] if result.data else None
+        async with write_scope() as session:
+            result = await session.execute(stmt)
+            obj = result.scalars().first()
+        return _row(obj) if obj is not None else None
 
     async def set_banned(
         self, user_id: str, is_banned: bool
@@ -80,27 +169,9 @@ class AdminUsersRepository:
 
 
 def get_admin_users_repository() -> "AdminUsersRepository":
-    """Return the right AdminUsersRepository implementation per env.
+    """Return the AdminUsersRepository (SQLAlchemy 2.0 ORM).
 
-    ORM when ``USE_ORM_ADMIN_USERS`` is set AND the SQLAlchemy engine is
-    configured; otherwise the legacy supabase-py REST path. A flag-on but
-    engine-missing deploy logs once and falls back to REST (never crashes).
-    """
-    from app.core.config import settings
-
-    if settings.USE_ORM_ADMIN_USERS:
-        from app.db.engine import is_configured
-
-        if is_configured():
-            from app.repositories.admin.users_repository_orm import (
-                AdminUsersRepositoryOrm,
-            )
-
-            return AdminUsersRepositoryOrm()
-        from loguru import logger
-
-        logger.warning(
-            "USE_ORM_ADMIN_USERS=true but SUPAVISOR_DATABASE_URL is empty "
-            "— falling back to supabase-py path"
-        )
+    The per-domain rollout flag and the legacy supabase-py REST path have been
+    retired post-rollout; this now unconditionally returns the ORM
+    implementation."""
     return AdminUsersRepository()

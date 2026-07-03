@@ -1,4 +1,4 @@
-"""Integration tests for AdminTranscodeRepositoryOrm (Phase 2 admin wave) vs real PG.
+"""Integration tests for the ORM AdminTranscodeRepository (Phase 2 admin wave) vs real PG.
 
 resource_versions / resources / parsed_media reads + system_settings read/upsert.
 
@@ -9,7 +9,7 @@ Proves REST → ORM swap invisibility + strategy-C parity:
   - COUNT → native int; value (jsonb) → native dict
   - mime_type LIKE 'video/%' + status null/eq + min_size_mb filters reproduced
   - mark_pending UPDATE + upsert_setting ON CONFLICT WRITE + COMMIT
-  - factory on/off
+  - factory (ORM-only, post-rollout)
 
     source /tmp/orm2_integration.env
     uv run pytest tests/integration/test_admin_transcode_repository_orm.py -v
@@ -84,11 +84,9 @@ async def seed(integration_db_url):
 
 
 def _repo():
-    from app.repositories.admin.transcode_repository_orm import (
-        AdminTranscodeRepositoryOrm,
-    )
+    from app.repositories.admin.transcode_repository import AdminTranscodeRepository
 
-    return AdminTranscodeRepositoryOrm()
+    return AdminTranscodeRepository()
 
 
 async def test_list_versions_shape_and_parity(integration_db_url, patched_engine, seed):
@@ -227,27 +225,12 @@ async def test_settings_upsert_and_load(integration_db_url, patched_engine):
             await conn.close()
 
 
-# ─── factory parity ─────────────────────────────────────────────────────
+# ─── Factory (ORM-only, post-rollout) ───────────────────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    from app.core.config import settings
+async def test_factory_returns_orm_repository():
+    """Per-domain rollout flag retired → factory unconditionally returns the
+    ORM-backed AdminTranscodeRepository."""
     from app.repositories.admin import transcode_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_ADMIN_TRANSCODE", False)
     assert type(mod.get_admin_transcode_repository()) is mod.AdminTranscodeRepository
-
-
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories.admin import transcode_repository as mod
-    from app.repositories.admin.transcode_repository_orm import (
-        AdminTranscodeRepositoryOrm,
-    )
-
-    monkeypatch.setattr(settings, "USE_ORM_ADMIN_TRANSCODE", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    assert isinstance(mod.get_admin_transcode_repository(), AdminTranscodeRepositoryOrm)
