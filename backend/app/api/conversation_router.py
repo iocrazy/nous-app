@@ -53,7 +53,7 @@ async def _summon_runner(
         logger.error(f"[conversations] summon dispatch failed: {exc}")
 
 
-@router.get("/", response_model=list[ConversationOut])
+@router.get("", response_model=list[ConversationOut])
 async def list_my_conversations(auth: AuthDep):
     svc = get_conversation_service()
     try:
@@ -63,7 +63,7 @@ async def list_my_conversations(auth: AuthDep):
     return rows
 
 
-@router.post("/", response_model=ConversationOut)
+@router.post("", response_model=ConversationOut)
 async def create_conversation(payload: ConversationCreate, auth: AuthDep):
     svc = get_conversation_service()
     try:
