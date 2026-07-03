@@ -257,27 +257,6 @@ class Settings(BaseSettings):
         "parity, NOT re-raise); delete returns False on failure. Writes commit "
         "via write_scope(). Inert — flip back to false to roll back.",
     )
-    USE_ORM_PERMISSION: bool = Field(
-        default=False,
-        description="Route PermissionRepository (the ReBAC effective-role read "
-        "surface: five read-only lookups over access_overrides / folders / "
-        "libraries / team_members / resource_items) through the SQLAlchemy 2.0 "
-        "ORM session layer (Phase 2 M batch). READ-ONLY repo → no write paths, "
-        "all reads on read_scope(). Strategy C value-type parity: bigint ids / "
-        "FKs (folders.id/parent_id/scope_id, resource_items.scope_id/folder_id, "
-        "libraries.id) stay NATIVE int (the 5.3 trap — folder.parent_id / "
-        "scope.folder_id recurse into bigint folders.id lookups); the ONLY "
-        "ORM-specific coercion is get_access_override str()ing its object_id "
-        "param (a TEXT column) so a native-int folder id binds — reproducing "
-        "PostgREST's int→text cast exactly. access_overrides.* uuids (id / "
-        "user_id / granted_by) → str for shape parity (consumer reads only "
-        "['role']); created_at → ISO str. libraries.scope_id is TEXT (native "
-        "str). visibility ('restricted') and role compares are str==str. No date "
-        "range filters → no timestamptz<VARCHAR hazard. Every method swallows + "
-        "returns None on failure (legacy parity). Inert — flip back to false to "
-        "roll back.",
-    )
-
     USE_ORM_AI: bool = Field(
         default=False,
         description="Route AIRepository (resource_transcripts / "

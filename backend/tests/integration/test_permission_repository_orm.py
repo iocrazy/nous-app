@@ -1,4 +1,4 @@
-"""Integration tests for PermissionRepositoryOrm (Phase 2 M batch) vs real PG.
+"""Integration tests for the ORM-backed PermissionRepository vs real PG.
 
 Proves the REST → ORM swap is invisible on the ReBAC read surface
 (access_overrides / folders / libraries / team_members / resource_items) AND
@@ -176,9 +176,9 @@ async def seed(integration_db_url):
 
 
 def _repo():
-    from app.repositories.permission_repository_orm import PermissionRepositoryOrm
+    from app.repositories.permission_repository import PermissionRepository
 
-    return PermissionRepositoryOrm()
+    return PermissionRepository()
 
 
 # ─── Reads + strategy-C parity ──────────────────────────────────────────
@@ -273,30 +273,13 @@ async def test_access_override_missing_returns_none(
     assert got is None  # no override on the child folder
 
 
-# ─── Factory flag wiring ────────────────────────────────────────────────
+# ─── Factory wiring ─────────────────────────────────────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    from app.core.config import settings
+def test_factory_returns_orm_repository():
+    """The USE_ORM_PERMISSION flag is retired — the factory unconditionally
+    returns the collapsed ORM-backed PermissionRepository."""
     from app.repositories import permission_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_PERMISSION", False)
     repo = mod.get_permission_repository()
     assert type(repo) is mod.PermissionRepository
-    from app.repositories.permission_repository_orm import PermissionRepositoryOrm
-
-    assert not isinstance(repo, PermissionRepositoryOrm)
-
-
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories import permission_repository as mod
-    from app.repositories.permission_repository_orm import PermissionRepositoryOrm
-
-    monkeypatch.setattr(settings, "USE_ORM_PERMISSION", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    repo = mod.get_permission_repository()
-    assert isinstance(repo, PermissionRepositoryOrm)
