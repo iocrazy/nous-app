@@ -313,27 +313,6 @@ class Settings(BaseSettings):
         "date range filters. Reads return []/None; create raises; writes commit via "
         "write_scope(). Inert — flip back to false to roll back.",
     )
-    USE_ORM_SKILL: bool = Field(
-        default=False,
-        description="Route SkillRepository (the AI-Library skill surface — skills "
-        "CRUD + skill_files multi-file CRUD + skill_versions/skill_file_versions "
-        "snapshots + the agent_skills reverse index) through the SQLAlchemy 2.0 "
-        "ORM session layer (Phase 2 M batch). 15 callsites, all routed through "
-        "get_skill_repository(). ID TYPES: skills.id is BIGINT → native int (5.3 "
-        "trap; every consumer int()s it). skill_files.id is UUID → str for SHAPE "
-        "parity (SkillFileOut.id: UUID accepts str or native; NO consumer does "
-        "UUID()/==/dict-key on a file id — audited). skills.created_by / "
-        "default_agent_id (uuid) → str. timestamps → ISO str; frontmatter_json / "
-        "input_schema (jsonb) → native dict; trigger_keywords (text[]) → native "
-        "list; status/category/file_type are CHECK-text NOT Enum (no _plain). "
-        "upsert_file reproduces the (skill_id,path) ON CONFLICT DO UPDATE "
-        "(ux_skill_files_path); the versioned writes keep the legacy "
-        "snapshot-then-update two-step (now inside one write_scope() — no "
-        "half-commit, behavior preserved, documented non-atomicity not 'repaired'). "
-        "No date range filters. Reads swallow + return None/[]; writes raise. "
-        "Writes commit via write_scope(). Inert — flip back to false to roll back.",
-    )
-
     USE_ORM_TEAM: bool = Field(
         default=False,
         description="Route TeamRepository (CROWN JEWEL — the team authorization "
