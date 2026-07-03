@@ -281,24 +281,6 @@ class Settings(BaseSettings):
         "parity, NOT re-raise); delete returns False on failure. Writes commit "
         "via write_scope(). Inert — flip back to false to roll back.",
     )
-    USE_ORM_SESSION_MEMORY: bool = Field(
-        default=False,
-        description="Route SessionMemoryRepository (ai_session_memory — one "
-        "markdown-body row per ai_sessions row) through the SQLAlchemy 2.0 ORM "
-        "session layer (Phase 2 M batch). The repo returns a SessionMemoryRow "
-        "dataclass whose inherited _row_to_obj constructor already normalises "
-        "every field (session_id → str, last_updated_at → _parse_ts datetime, "
-        "counters → int), so strategy-C parity is handled by the dataclass — the "
-        "ORM just feeds it a native-typed row dict. The ONLY ORM-specific "
-        "coercion: session_id is a BIGINT (FK → ai_sessions.id snowflake) but "
-        "callers pass it as a str, so binds are int-coerced (_bigint) — asyncpg "
-        "int8 codec is strict. upsert reproduces ON CONFLICT (session_id) DO "
-        "UPDATE with the legacy load-then-bump-version logic; now() is written "
-        "native UTC datetime. No phantom columns, no date range filters. load / "
-        "upsert swallow + return None (must not crash the chat path); delete "
-        "returns False on failure. Writes commit via write_scope(). Inert — flip "
-        "back to false to roll back.",
-    )
     USE_ORM_PERMISSION: bool = Field(
         default=False,
         description="Route PermissionRepository (the ReBAC effective-role read "
