@@ -347,30 +347,6 @@ class Settings(BaseSettings):
         "Writes commit via write_scope(). Inert — flip back to false to roll back.",
     )
 
-    USE_ORM_REVIEW: bool = Field(
-        default=False,
-        description="Route ReviewRepository (the review system — review_comments "
-        "threaded comments/replies + review_annotations + review_status "
-        "approvals) through the SQLAlchemy 2.0 ORM session layer (Phase 2 H "
-        "batch — authz-sensitive). UUID AUTHZ HOT SPOT: review_comments.author_id "
-        "is str()'d because review_service.update_comment / delete_comment gate "
-        "on ``comment['author_id'] != user_id`` (a STRING auth subject) — a "
-        "native uuid.UUID would compare unequal forever (silent wrong-DENY: the "
-        "author locked out of their own comment, no error/log). "
-        "review_status.reviewer_id → str for shape parity (only consumed in a log "
-        "f-string, no ==/!= consumer). All bigint ids/FKs (id / resource_id / "
-        "parent_id / version_id / comment_id) stay NATIVE int (the 5.3 trap). "
-        "status is CHECK/plain VARCHAR NOT Enum (no _plain unwrap); timecode "
-        "(double) / frame_number (int) / data (jsonb) native; timestamps → ISO "
-        "str. TEMPORAL-WRITE: the legacy stamps updated_at='now()' (a PostgREST "
-        "sentinel) — the ORM substitutes datetime.now(utc) at the write boundary "
-        "(asyncpg can't bind the literal 'now()'). upsert_review_status "
-        "reproduces the read-then-branch upsert (no DB unique on the "
-        "resource/reviewer/version triple) inside one write_scope(). No date "
-        "range filters. Reads return None/[]; writes commit via write_scope(). "
-        "Inert — flip back to false to roll back.",
-    )
-
     USE_ORM_TEAM: bool = Field(
         default=False,
         description="Route TeamRepository (CROWN JEWEL — the team authorization "
