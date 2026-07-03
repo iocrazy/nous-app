@@ -36,6 +36,17 @@ const DouyinIcon = () => (
 );
 
 
+/**
+ * Auth errors from gateway hiccups (5xx with non-JSON bodies) can surface with
+ * useless messages ("{}", "[object Object]", empty). Never render those to the
+ * user — fall back to a readable line instead.
+ */
+const readableAuthError = (raw: unknown, fallback: string): string => {
+  const m = typeof raw === 'string' ? raw.trim() : '';
+  if (!m || m === '{}' || m === '[object Object]') return fallback;
+  return m;
+};
+
 export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) => {
   const { t } = useTranslation();
 
@@ -96,7 +107,7 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
         if (error) {
           setError(loginMode === 'phone' && error.message === 'Invalid login credentials'
             ? 'Phone number or password is incorrect'
-            : error.message);
+            : readableAuthError(error.message, 'Login failed. Please try again.'));
           return;
         }
         if (data.user) {
@@ -106,7 +117,7 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
           onLogin({ email: displayEmail, id: data.user.id });
         }
       } catch (err: any) {
-        setError(err.message || 'Login failed');
+        setError(readableAuthError(err?.message, 'Login failed. Please try again.'));
       } finally {
         setLoading(false);
       }
@@ -163,7 +174,7 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
           options: metadata ? { data: metadata } : undefined,
         });
         if (error) {
-          setError(error.message);
+          setError(readableAuthError(error.message, 'Registration failed. Please try again.'));
           return;
         }
         alert(t('auth.registerSuccess'));
@@ -171,7 +182,7 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
         setPassword('');
         setConfirmPassword('');
       } catch (err: any) {
-        setError(err.message || 'Registration failed');
+        setError(readableAuthError(err?.message, 'Registration failed. Please try again.'));
       } finally {
         setLoading(false);
       }
