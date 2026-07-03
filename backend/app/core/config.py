@@ -278,27 +278,6 @@ class Settings(BaseSettings):
         "roll back.",
     )
 
-    USE_ORM_INVITE: bool = Field(
-        default=False,
-        description="Route InviteRepository (team_invites + the team_members "
-        "membership checks accept/delete walk) through the SQLAlchemy 2.0 ORM "
-        "session layer (Phase 2 M batch). Strategy C value-type parity: id / "
-        "team_id (BIGINT snowflake) stay NATIVE int (the 5.3 trap; router wraps "
-        "them in str() for the str InviteResponse fields, accept_invite str()s "
-        "team_id at the AcceptInviteResponse boundary); created_by (uuid) → str "
-        "(REQUIRED — InviteResponse.created_by is a str field, pydantic v2 "
-        "rejects a native UUID); expires_at → ISO str (REQUIRED — the inherited "
-        "accept_invite expiry check calls .replace()/fromisoformat() on it, a "
-        "native datetime would AttributeError); created_at → ISO str; max_uses / "
-        "use_count native int. get_invite_by_code reproduces the PostgREST "
-        "teams(id,name) embed as a nested dict. Callers pass team_id as a STR → "
-        "_bigint int-coerces every bigint bind; created_by/user_id are uuid "
-        "strings (asyncpg Uuid codec accepts). No date range filters. Reads "
-        "return []/None; create_invite raises on failure; accept_invite raises "
-        "the same message strings the router pattern-matches (incl. the 23505 → "
-        "'Already a member' path). Writes commit via write_scope(). Inert — flip "
-        "back to false to roll back.",
-    )
     USE_ORM_AI: bool = Field(
         default=False,
         description="Route AIRepository (resource_transcripts / "
