@@ -1,4 +1,4 @@
-"""Integration tests for LogsRepositoryOrm (Batch L2) against real PG.
+"""Integration tests for the ORM LogsRepository (Batch L2) against real PG.
 
 Proves the REST → ORM swap is invisible AND that STRATEGY-C value-type parity
 holds for the user_logs viewer/export surface:
@@ -93,9 +93,9 @@ async def _seed_log(conn, user_id, **overrides) -> dict:
 
 
 def _repo():
-    from app.repositories.logs_repository_orm import LogsRepositoryOrm
+    from app.repositories.logs_repository import LogsRepository
 
-    return LogsRepositoryOrm()
+    return LogsRepository()
 
 
 # ─── Reads + strategy-C parity ──────────────────────────────────────────
@@ -324,30 +324,12 @@ async def test_get_logs_date_window_boundary(
     assert after["id"] not in returned  # day after end excluded
 
 
-# ─── Flag-off legacy parity ─────────────────────────────────────────────
+# ─── Factory (ORM-only, post-rollout) ───────────────────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    from app.core.config import settings
+async def test_factory_returns_orm_repository():
+    """Per-domain rollout flag retired → factory unconditionally returns the
+    ORM-backed LogsRepository."""
     from app.repositories import logs_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_LOGS", False)
-    repo = mod.get_logs_repository()
-    assert type(repo) is mod.LogsRepository
-    from app.repositories.logs_repository_orm import LogsRepositoryOrm
-
-    assert not isinstance(repo, LogsRepositoryOrm)
-
-
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories import logs_repository as mod
-    from app.repositories.logs_repository_orm import LogsRepositoryOrm
-
-    monkeypatch.setattr(settings, "USE_ORM_LOGS", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    repo = mod.get_logs_repository()
-    assert isinstance(repo, LogsRepositoryOrm)
+    assert type(mod.get_logs_repository()) is mod.LogsRepository

@@ -1,45 +1,110 @@
-"""Repository for User Logs data access.
+"""Repository for the user-facing ``user_logs`` viewer / CSV-export surface.
 
-ORM 2.0 migration (Batch L2): ``LogsRepository`` is the legacy supabase-py REST
-implementation; ``LogsRepositoryOrm`` (in ``logs_repository_orm.py``) is the
-SQLAlchemy 2.0 ORM successor. Call sites go through ``get_logs_repository()``
-(bottom of this file) which picks the ORM subclass when ``USE_ORM_LOGS`` is on
-AND the engine is configured.
+ORM 2.0 (post-rollout, Batch L2 collapsed): ``LogsRepository`` is the SQLAlchemy
+2.0 ORM implementation of the user-facing logs viewer/export (get_logs /
+get_logs_for_export reads + create_log / delete_logs writes). The former
+supabase-py REST bodies and the ``USE_ORM_LOGS`` routing flag are retired;
+``get_logs_repository()`` (bottom of this file) unconditionally returns this
+class. Writes commit via ``write_scope()`` (the silent-rollback P0 lesson).
 
-NOTE: the ``user_logs`` table is ALSO served by ``UserLogsRepository`` (the
-append-only writer + distinct reads) — disjoint method sets, both live, each
-with its own ORM subclass.
+TWO REPOS, ONE TABLE: the ``user_logs`` table is ALSO served by
+``UserLogsRepository`` (the append-only writer + get_recent / get_paginated /
+get_by_aweme_id reads) — disjoint method sets, both live; each keeps its own
+repo over the same ``UserLogs`` model.
+
+STRATEGY-C VALUE-TYPE PARITY (per-field, exact legacy REST shape)
+================================================================
+  user_logs.id : bigint → STAYS native int (the 5.3 trap; the LogEntry response
+    model declares ``id: int``).
+  user_logs.user_id : uuid → STR for shape parity. Consumer audit: logs_router's
+    LogEntry response model does NOT include user_id, and no consumer does
+    ``UUID(log["user_id"])`` or a ``log["user_id"] == ...`` compare — user_id is
+    input-only on the read side. Coercion is shape-parity only (cheap, matches
+    the REST SELECT * which returned a str).
+  user_logs.created_at : timestamptz → ``.isoformat()`` ALWAYS. CONSUMED: the
+    CSV export does ``str(log["created_at"])`` (idempotent on an ISO str, but a
+    native datetime's ``str()`` uses a SPACE separator ≠ the ISO ``T``); the
+    LogEntry model takes ``created_at: datetime`` which parses an ISO str fine.
+  status / action / message / aweme_id (text) → native str; details (JSONB) →
+    native dict.
+
+Date bounds bind as tz-aware ``datetime`` objects (NOT ``.isoformat()`` strings):
+comparing the ``timestamptz`` column against a bare VARCHAR makes PG raise
+``operator does not exist: timestamp with time zone < character varying`` (the
+REST/PostgREST layer auto-coerced the string; the typed ORM column does not).
 """
 
 from __future__ import annotations
 
-from datetime import date, datetime
-from typing import TYPE_CHECKING, List, Optional, Union
+from datetime import date, datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
+from sqlalchemy import delete, func, insert, select
 
-from app.db.supabase_client import get_async_supabase_admin
+from app.db.session import read_scope, write_scope
+from app.models import UserLogs
+from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
 
-if TYPE_CHECKING:
-    from app.repositories.logs_repository_orm import LogsRepositoryOrm
+_USER_LOGS_NAME_TO_ATTR: Dict[str, str] = _name_to_attr(UserLogs)
+
+
+def _log_to_dict(obj: Any) -> Dict[str, Any]:
+    """SELECT *-shaped dict for a ``user_logs`` ORM row with strategy-C parity:
+    bigint id stays native int, user_id uuid → str, created_at → ISO str. NULLs
+    pass through unchanged."""
+    out = _orm_obj_to_dict(obj, _USER_LOGS_NAME_TO_ATTR)
+    val = out.get("user_id")
+    if val is not None:
+        out["user_id"] = str(val)
+    for key, value in out.items():
+        if isinstance(value, datetime):
+            out[key] = value.isoformat()
+    return out
+
+
+def _apply_filters(
+    stmt,
+    user_id: str,
+    levels: Optional[List[str]],
+    start_date: Optional[date],
+    end_date: Optional[date],
+    search: Optional[str],
+):
+    """Apply the shared user/level/date/search filters to a SELECT, mirroring
+    the REST query construction exactly (status IN levels, created_at range with
+    the end-of-day end bound, ilike message search).
+
+    The date bounds are bound as tz-aware ``datetime`` objects (NOT
+    ``.isoformat()`` strings): comparing the ``timestamptz`` column against a
+    bare VARCHAR makes PG raise ``operator does not exist: timestamp with time
+    zone < character varying`` (PostgREST auto-coerced the string; the typed ORM
+    column does not). The bounds carry an explicit ``tzinfo=timezone.utc`` to
+    match the canonical sibling (``resources_repository_orm`` created_after/
+    created_before) and remove the latent "engine session is UTC" dependency."""
+    stmt = stmt.where(UserLogs.user_id == user_id)
+    if levels:
+        stmt = stmt.where(UserLogs.status.in_(levels))
+    if start_date:
+        stmt = stmt.where(
+            UserLogs.created_at
+            >= datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
+        )
+    if end_date:
+        end_dt = datetime.combine(end_date, datetime.max.time(), tzinfo=timezone.utc)
+        stmt = stmt.where(UserLogs.created_at <= end_dt)
+    if search:
+        stmt = stmt.where(UserLogs.message.ilike(f"%{search}%"))
+    return stmt
 
 
 class LogsRepository:
-    """Repository for user logs CRUD operations."""
+    """ORM-backed repository for the user-facing user_logs viewer / export."""
 
     TABLE_NAME = "user_logs"
 
     def __init__(self):
         pass
-
-    async def _get_client(self):
-        """Get async client (loop-aware, safe for Celery workers)."""
-        return await get_async_supabase_admin()
-
-    async def _get_table(self):
-        """Get table reference."""
-        client = await self._get_client()
-        return client.table(self.TABLE_NAME)
 
     async def get_logs(
         self,
@@ -50,67 +115,24 @@ class LogsRepository:
         search: Optional[str] = None,
         page: int = 1,
         page_size: int = 50,
-    ) -> tuple[List[dict], int]:
-        """
-        Get user logs with filtering and pagination.
-
-        Args:
-            user_id: User ID to filter logs
-            levels: List of status levels to filter (success, info, warning, error, pending)
-            start_date: Start date filter
-            end_date: End date filter
-            search: Search keyword in message field
-            page: Page number (1-indexed)
-            page_size: Items per page (50, 100, 200)
-
-        Returns:
-            Tuple of (logs list, total count)
-        """
-        table = await self._get_table()
-
-        # Build query for data
-        query = table.select("*").eq("user_id", user_id)
-
-        # Apply level filter
-        if levels:
-            query = query.in_("status", levels)
-
-        # Apply date range filter
-        if start_date:
-            query = query.gte("created_at", start_date.isoformat())
-        if end_date:
-            # Add one day to include the end date fully
-            end_datetime = datetime.combine(end_date, datetime.max.time())
-            query = query.lte("created_at", end_datetime.isoformat())
-
-        # Apply search filter
-        if search:
-            query = query.ilike("message", f"%{search}%")
-
-        # Get total count first
-        count_query = table.select("*", count="exact").eq("user_id", user_id)
-        if levels:
-            count_query = count_query.in_("status", levels)
-        if start_date:
-            count_query = count_query.gte("created_at", start_date.isoformat())
-        if end_date:
-            end_datetime = datetime.combine(end_date, datetime.max.time())
-            count_query = count_query.lte("created_at", end_datetime.isoformat())
-        if search:
-            count_query = count_query.ilike("message", f"%{search}%")
-
-        count_result = await count_query.execute()
-        total = count_result.count or 0
-
-        # Apply pagination and ordering
-        offset = (page - 1) * page_size
-        query = query.order("created_at", desc=True).range(
-            offset, offset + page_size - 1
+    ) -> Tuple[List[dict], int]:
+        """Filtered + paginated logs for a user, newest-first, with an exact
+        total count. Returns (logs, total) — same tuple shape as REST."""
+        base = _apply_filters(
+            select(UserLogs), user_id, levels, start_date, end_date, search
         )
-
-        result = await query.execute()
-
-        return result.data, total
+        offset = (page - 1) * page_size
+        async with read_scope() as session:
+            total = await session.scalar(
+                select(func.count()).select_from(base.subquery())
+            )
+            result = await session.execute(
+                base.order_by(UserLogs.created_at.desc())
+                .offset(offset)
+                .limit(page_size)
+            )
+            logs = [_log_to_dict(r) for r in result.scalars().all()]
+        return logs, (total or 0)
 
     async def get_logs_for_export(
         self,
@@ -121,38 +143,16 @@ class LogsRepository:
         search: Optional[str] = None,
         limit: int = 10000,
     ) -> List[dict]:
-        """
-        Get all logs matching filters for export (no pagination).
-
-        Args:
-            user_id: User ID to filter logs
-            levels: List of status levels to filter
-            start_date: Start date filter
-            end_date: End date filter
-            search: Search keyword in message field
-            limit: Maximum number of logs to export
-
-        Returns:
-            List of log entries
-        """
-        table = await self._get_table()
-
-        query = table.select("*").eq("user_id", user_id)
-
-        if levels:
-            query = query.in_("status", levels)
-        if start_date:
-            query = query.gte("created_at", start_date.isoformat())
-        if end_date:
-            end_datetime = datetime.combine(end_date, datetime.max.time())
-            query = query.lte("created_at", end_datetime.isoformat())
-        if search:
-            query = query.ilike("message", f"%{search}%")
-
-        query = query.order("created_at", desc=True).limit(limit)
-
-        result = await query.execute()
-        return result.data
+        """All logs matching the filters (no pagination), newest-first, capped
+        at ``limit`` — for CSV/JSON export."""
+        base = _apply_filters(
+            select(UserLogs), user_id, levels, start_date, end_date, search
+        )
+        async with read_scope() as session:
+            result = await session.execute(
+                base.order_by(UserLogs.created_at.desc()).limit(limit)
+            )
+            return [_log_to_dict(r) for r in result.scalars().all()]
 
     async def create_log(
         self,
@@ -162,83 +162,52 @@ class LogsRepository:
         status: str = "info",
         aweme_id: Optional[str] = None,
         details: Optional[dict] = None,
-    ) -> dict:
-        """
-        Create a new log entry.
-
-        Args:
-            user_id: User ID
-            action: Action type (fetch, download, delete, etc.)
-            message: Log message
-            status: Status level (success, info, warning, error, pending)
-            aweme_id: Optional related video ID
-            details: Optional additional details (JSON)
-
-        Returns:
-            Created log entry
-        """
-        table = await self._get_table()
-
-        data = {
+    ) -> Optional[dict]:
+        """Insert a log entry; returns the inserted row dict (or None if no row
+        came back — REST-contract parity). Committing."""
+        data: Dict[str, Any] = {
             "user_id": user_id,
             "action": action,
             "message": message,
             "status": status,
         }
-
         if aweme_id:
             data["aweme_id"] = aweme_id
         if details:
             data["details"] = details
 
-        result = await table.insert(data).execute()
+        async with write_scope() as session:
+            result = await session.execute(
+                insert(UserLogs).values(**data).returning(UserLogs)
+            )
+            row = result.scalars().first()
+            out = _log_to_dict(row) if row else None
         logger.info(f"Created log for user {user_id}: {action} - {message}")
-        return result.data[0] if result.data else None
+        return out
 
     async def delete_logs(
         self, user_id: str, before_date: Optional[date] = None
     ) -> int:
-        """
-        Delete logs for a user, optionally before a specific date.
-
-        Args:
-            user_id: User ID
-            before_date: Delete logs before this date (optional)
-
-        Returns:
-            Number of deleted logs
-        """
-        table = await self._get_table()
-
-        query = table.delete().eq("user_id", user_id)
-
+        """Delete a user's logs (optionally only those before ``before_date``).
+        Returns the number deleted. Committing."""
+        stmt = delete(UserLogs).where(UserLogs.user_id == user_id)
         if before_date:
-            query = query.lt("created_at", before_date.isoformat())
-
-        result = await query.execute()
-        deleted_count = len(result.data) if result.data else 0
+            # Bind the bound as a tz-aware datetime, not an ISO string — comparing
+            # the timestamptz column to a VARCHAR raises in PG (see _apply_filters).
+            stmt = stmt.where(
+                UserLogs.created_at
+                < datetime.combine(
+                    before_date, datetime.min.time(), tzinfo=timezone.utc
+                )
+            )
+        async with write_scope() as session:
+            result = await session.execute(stmt)
+            deleted_count = result.rowcount or 0
         logger.info(f"Deleted {deleted_count} logs for user {user_id}")
         return deleted_count
 
 
-def get_logs_repository() -> Union["LogsRepository", "LogsRepositoryOrm"]:
-    """Return the right LogsRepository implementation per env.
-
-    ORM when ``USE_ORM_LOGS`` is set AND the SQLAlchemy engine is configured;
-    otherwise the legacy supabase-py REST path. A flag-on but engine-missing
-    deploy logs once and falls back to REST (never crashes).
-    """
-    from app.core.config import settings
-
-    if settings.USE_ORM_LOGS:
-        from app.db.engine import is_configured
-
-        if is_configured():
-            from app.repositories.logs_repository_orm import LogsRepositoryOrm
-
-            return LogsRepositoryOrm()
-        logger.warning(
-            "USE_ORM_LOGS=true but SUPAVISOR_DATABASE_URL is empty "
-            "— falling back to supabase-py path"
-        )
+def get_logs_repository() -> "LogsRepository":
+    """Return the ORM-backed LogsRepository (per-domain rollout flag retired —
+    prod runs 100% ORM)."""
     return LogsRepository()

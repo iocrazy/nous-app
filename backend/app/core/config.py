@@ -152,19 +152,6 @@ class Settings(BaseSettings):
         "get_by_script / list_by_script / list_by_chapter / list_by_storyboard "
         "(writes commit via write_scope()).",
     )
-    USE_ORM_LOGS: bool = Field(
-        default=False,
-        description="Route LogsRepository (the user-facing user_logs viewer / "
-        "CSV export) through the SQLAlchemy 2.0 ORM session layer (Batch L2). "
-        "Strategy C: bigint id stays native int (the 5.3 trap); user_id uuid → "
-        "str for shape parity (the LogEntry response model has no user_id field "
-        "and no consumer reads it type-sensitively); created_at → ISO str "
-        "(CONSUMED — the CSV export does str(created_at)). Covers get_logs / "
-        "get_logs_for_export reads + create_log / delete_logs writes (commit "
-        "via write_scope()). NOTE: user_logs is also served by "
-        "UserLogsRepository (ORM-only, per-domain flag retired) — disjoint "
-        "method sets, both live.",
-    )
     SCOPE_ENFORCE_RESOURCES: bool = Field(
         default=False,
         description="Activate the app-layer tenant-scope choke point "
