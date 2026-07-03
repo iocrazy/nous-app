@@ -1,45 +1,157 @@
-"""Repository for admin task center (task_tracking table)."""
+"""Admin task-center repository — data access for the ``task_tracking`` table.
+
+ORM 2.0 (post-rollout cleanup): ``AdminTasksRepository`` is the SQLAlchemy 2.0
+implementation for the admin Task Center, which reads (and, for cancel / retry,
+WRITES) the ``task_tracking`` table. The legacy supabase-py REST path and its
+per-domain rollout flag have been retired; call sites go through
+``get_admin_tasks_repository()`` (bottom of this file) which now unconditionally
+returns this repository.
+
+MODEL: ``app.models.TaskTracking`` (table ``task_tracking``) — verified reflected.
+The PK is ``dbos_workflow_id`` (text; equals dbos.workflow_status.workflow_uuid).
+The old ``id`` column was dropped in migration 180.
+
+★ task_tracking DISCIPLINE (CLAUDE.md route-C) — READ + WRITE present ★
+======================================================================
+``task_tracking`` is the UI source of truth. ``phase / status / progress /
+started_at / completed_at / error_msg`` are TRIGGER-OWNED for DBOS-workflow rows
+(``mirror_dbos_lifecycle_to_tracking`` mirrors them one-way from
+dbos.workflow_status); business code is NOT supposed to PATCH them directly.
+
+HOWEVER — the LEGACY admin repo's ``update()`` already wrote exactly those
+trigger-owned columns:
+  - cancel  → ``{"status": "cancelled", "phase": "cancelled"}``
+  - retry   → ``{"status": "pending", "phase": "queued", "progress": 0,
+                "error_msg": None, "error_code": None, "started_at": None,
+                "completed_at": None}``
+Per the migration's INERT discipline, this ORM implementation REPRODUCES the
+legacy behaviour BYTE-FOR-BYTE — it does NOT "fix" the discipline violation by
+filtering out trigger-owned columns (that would change observable behaviour). So
+``update()`` writes whatever ``changes`` dict it is handed, verbatim, via a
+generic UPDATE inside ``write_scope()`` (which COMMITS — the silent-rollback P0
+lesson). This pre-existing discipline violation is flagged as a CONCERN for
+follow-up; it is NOT introduced here and NOT repaired here.
+
+★ UUID AUDIT (admin reads-across-all-users; service_role scope) ★
+=================================================================
+``task_tracking.user_id`` (uuid) → **str**. CONSUMED: the list router builds the
+distinct set ``{r["user_id"] for r in rows}`` to feed ``batch_get_user_auth_info``
+AND then looks the email up with ``email_map.get(str(row["user_id"]))`` — i.e.
+``user_id`` is used BOTH raw (set membership / batch arg) and str()'d (dict key
+lookup). The dict-key trap (admin-A audit_logs precedent): if ``user_id`` were a
+native ``uuid.UUID``, the set would carry UUIDs while the lookup key is a str → the
+email lookup silently misses and every row renders email=None. We str() user_id so
+both sides are consistently str. ``AdminTaskResponse.user_id`` is also a ``str``
+field. The PK ``dbos_workflow_id`` is a TEXT column (native str, not uuid) — no
+coercion. ``group_id`` (uuid) is NOT in the projection → never returned.
+
+STRATEGY-C VALUE-TYPE PARITY (per-field)
+----------------------------------------
+  created_at / started_at / completed_at (timestamptz) → **.isoformat()** ALWAYS.
+    CONSUMED: ``AdminTaskResponse.created_at: str`` / ``started_at: Optional[str]``
+    / ``completed_at: Optional[str]`` are str Pydantic fields.
+  metadata (jsonb, mapped to the renamed attribute ``metadata_``) → native dict,
+    keyed back as ``"metadata"`` in the result dict (the canonical rename trap —
+    ``AdminTaskResponse.metadata: Optional[dict]``).
+  status / phase (text/varchar — NOT SQLAlchemy Enum) → native str. No ``_plain``
+    unwrap is load-bearing here.
+  progress (smallint) / speed / total_bytes (bigint) / cost_cents (int) → native
+    int. resource_id / media_id (text) → native str (router str()s them).
+  count_total / count_by_status → exact COUNT(*) → native int (the 5.3 trap;
+    AdminTaskStatsResponse fields are int).
+
+SEARCH (list())
+---------------
+The search matches title / subtitle / error_msg / dbos_workflow_id ILIKE
+``*search*`` AND ``metadata->>original_url`` ILIKE; plus, when ``search.isdigit()``,
+``media_id == search`` OR ``resource_id == search`` (numeric snowflake hits on
+related-table id columns). Built via ``sqlalchemy.or_`` with ``ilike`` on each text
+column, ``TaskTracking.metadata_["original_url"].astext.ilike(...)`` for the JSONB
+extraction, and equality on media_id / resource_id for the digit case.
+
+NO date-range filter exists in this repo (sort is by a chosen column; no
+``WHERE ts >/<`` predicate). Sort field is validated by the router against
+VALID_SORT_FIELDS before reaching here; the column name is mapped to its ORM attr.
+"""
 
 from __future__ import annotations
 
-from typing import Any, Optional
+import uuid as _uuid
+from datetime import datetime
+from typing import Any, Dict, Optional
 
-from app.db import get_async_supabase_admin
+from sqlalchemy import func, or_, select, update
+
+from app.db.session import read_scope, write_scope
+from app.models import TaskTracking
+from app.repositories._orm_helpers import _name_to_attr
+
+# DB-column-name → mapped-attribute-name (e.g. "metadata" → "metadata_"), so an
+# UPDATE payload keyed by DB column name (the legacy contract) binds the right
+# ORM attribute in .values().
+_TASK_N2A: Dict[str, str] = _name_to_attr(TaskTracking)
+
+# The exact column projection the legacy LIST_COLUMNS string selected, in order,
+# as (result-dict KEY, ORM attribute). ``metadata`` maps to the renamed attr
+# ``metadata_`` (SQLAlchemy reserves ``metadata`` on declarative classes).
+_LIST_FIELDS: tuple[tuple[str, str], ...] = (
+    ("dbos_workflow_id", "dbos_workflow_id"),
+    ("user_id", "user_id"),
+    ("task_type", "task_type"),
+    ("status", "status"),
+    ("phase", "phase"),
+    ("title", "title"),
+    ("subtitle", "subtitle"),
+    ("progress", "progress"),
+    ("speed", "speed"),
+    ("total_bytes", "total_bytes"),
+    ("error_msg", "error_msg"),
+    ("error_code", "error_code"),
+    ("resource_id", "resource_id"),
+    ("media_id", "media_id"),
+    ("cost_cents", "cost_cents"),
+    ("metadata", "metadata_"),
+    ("created_at", "created_at"),
+    ("started_at", "started_at"),
+    ("completed_at", "completed_at"),
+)
+
+
+def _coerce(value: Any) -> Any:
+    """Strategy-C value coercion at the read boundary: uuid → str, datetime → ISO
+    str. NULL / other types pass through unchanged."""
+    if isinstance(value, _uuid.UUID):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value
+
+
+def _list_row(obj: Any) -> Dict[str, Any]:
+    """Build the LIST_COLUMNS-shaped dict from a TaskTracking row, applying the
+    strategy-C coercions and the metadata rename (attr ``metadata_`` → key
+    ``"metadata"``)."""
+    return {key: _coerce(getattr(obj, attr)) for key, attr in _LIST_FIELDS}
 
 
 class AdminTasksRepository:
+    """ORM-backed admin Task Center repository (task_tracking reads + cancel/retry)."""
+
     TABLE = "task_tracking"
 
-    # `id` removed in migration 180 — PK is now dbos_workflow_id (UUID
-    # string, equals dbos.workflow_status.workflow_uuid).
-    LIST_COLUMNS = (
-        "dbos_workflow_id, user_id, task_type, status, phase, title, "
-        "subtitle, progress, speed, total_bytes, error_msg, error_code, "
-        "resource_id, media_id, cost_cents, metadata, "
-        "created_at, started_at, completed_at"
-    )
-
-    async def _client(self):
-        return await get_async_supabase_admin()
-
     async def count_total(self) -> int:
-        client = await self._client()
-        result = (
-            await client.table(self.TABLE)
-            .select("dbos_workflow_id", count="exact")
-            .execute()
-        )
-        return result.count or 0
+        async with read_scope() as session:
+            total = await session.scalar(select(func.count()).select_from(TaskTracking))
+        return total or 0
 
     async def count_by_status(self, status: str) -> int:
-        client = await self._client()
-        result = (
-            await client.table(self.TABLE)
-            .select("dbos_workflow_id", count="exact")
-            .eq("status", status)
-            .execute()
-        )
-        return result.count or 0
+        async with read_scope() as session:
+            total = await session.scalar(
+                select(func.count())
+                .select_from(TaskTracking)
+                .where(TaskTracking.status == status)
+            )
+        return total or 0
 
     async def list(
         self,
@@ -52,92 +164,90 @@ class AdminTasksRepository:
         sort_by: str = "created_at",
         sort_desc: bool = True,
     ) -> tuple[list[dict[str, Any]], int]:
-        client = await self._client()
-        query = client.table(self.TABLE).select(self.LIST_COLUMNS, count="exact")
+        """Return (rows, total). Exact count over the SAME predicate set, sorted by
+        ``sort_by`` (validated by the router), paginated. Reproduces the legacy
+        ``or_`` search verbatim."""
+        base = select(TaskTracking)
         if status:
-            query = query.eq("status", status)
+            base = base.where(TaskTracking.status == status)
         if task_type:
-            query = query.eq("task_type", task_type)
+            base = base.where(TaskTracking.task_type == task_type)
         if search:
-            pat = f"*{search}*"
-            or_clauses = [
-                f"title.ilike.{pat}",
-                f"subtitle.ilike.{pat}",
-                f"error_msg.ilike.{pat}",
-                f"dbos_workflow_id.ilike.{pat}",
-                f"metadata->>original_url.ilike.{pat}",
+            pat = f"%{search}%"
+            clauses = [
+                TaskTracking.title.ilike(pat),
+                TaskTracking.subtitle.ilike(pat),
+                TaskTracking.error_msg.ilike(pat),
+                TaskTracking.dbos_workflow_id.ilike(pat),
+                TaskTracking.metadata_["original_url"].astext.ilike(pat),
             ]
-            # numeric search hits BIGINT id columns on related tables.
             if search.isdigit():
-                or_clauses += [
-                    f"media_id.eq.{search}",
-                    f"resource_id.eq.{search}",
-                ]
-            query = query.or_(",".join(or_clauses))
+                clauses.append(TaskTracking.media_id == search)
+                clauses.append(TaskTracking.resource_id == search)
+            base = base.where(or_(*clauses))
 
-        query = query.order(sort_by, desc=sort_desc)
+        # Map the validated sort column name to its ORM attribute.
+        sort_attr = getattr(TaskTracking, sort_by, TaskTracking.created_at)
+        order_col = sort_attr.desc() if sort_desc else sort_attr.asc()
 
         offset = (page - 1) * page_size
-        query = query.range(offset, offset + page_size - 1)
-
-        result = await query.execute()
-        return result.data or [], result.count or 0
+        async with read_scope() as session:
+            total = await session.scalar(
+                select(func.count()).select_from(base.subquery())
+            )
+            result = await session.execute(
+                base.order_by(order_col).offset(offset).limit(page_size)
+            )
+            rows = [_list_row(o) for o in result.scalars().all()]
+        return rows, (total or 0)
 
     async def get(self, task_id: str) -> Optional[dict[str, Any]]:
-        client = await self._client()
-        result = (
-            await client.table(self.TABLE)
-            .select("dbos_workflow_id, status, task_type")
-            .eq("dbos_workflow_id", task_id)
-            .maybe_single()
-            .execute()
+        """{dbos_workflow_id, status, task_type} for ``task_id`` (maybe_single
+        parity — returns None when absent). status/task_type are plain str."""
+        stmt = (
+            select(
+                TaskTracking.dbos_workflow_id,
+                TaskTracking.status,
+                TaskTracking.task_type,
+            )
+            .where(TaskTracking.dbos_workflow_id == task_id)
+            .limit(1)
         )
-        return result.data
+        async with read_scope() as session:
+            result = await session.execute(stmt)
+            row = result.first()
+        if row is None:
+            return None
+        return {
+            "dbos_workflow_id": row.dbos_workflow_id,
+            "status": row.status,
+            "task_type": row.task_type,
+        }
 
     async def update(self, task_id: str, changes: dict[str, Any]) -> None:
-        client = await self._client()
-        await (
-            client.table(self.TABLE)
-            .update(changes)
-            .eq("dbos_workflow_id", task_id)
-            .execute()
-        )
+        """UPDATE task_tracking by ``dbos_workflow_id`` with the EXACT ``changes``
+        dict (verbatim — including trigger-owned columns; see the module docstring's
+        task_tracking-discipline CONCERN). COMMITS via write_scope(). Reproduces
+        the legacy ``.update(changes).eq("dbos_workflow_id", task_id)``."""
+        if not changes:
+            return
+        # Resolve attribute names so a renamed column (e.g. "metadata" →
+        # "metadata_") binds correctly; the legacy's keys are real DB column names.
+        values: Dict[str, Any] = {
+            _TASK_N2A.get(key, key): value for key, value in changes.items()
+        }
+        async with write_scope() as session:
+            await session.execute(
+                update(TaskTracking)
+                .where(TaskTracking.dbos_workflow_id == task_id)
+                .values(**values)
+            )
 
 
 def get_admin_tasks_repository() -> "AdminTasksRepository":
-    """Return the right AdminTasksRepository implementation per env.
+    """Return the AdminTasksRepository (SQLAlchemy 2.0 ORM).
 
-    ORM when ``USE_ORM_ADMIN_TASKS`` is set AND the SQLAlchemy engine is
-    configured; otherwise the legacy supabase-py REST path. A flag-on but
-    engine-missing deploy logs once and falls back to REST (never crashes).
-    """
-    from app.core.config import settings
-    from app.db.engine import is_configured
-
-    if settings.USE_ORM_ADMIN_TASKS:
-        if is_configured():
-            from app.repositories.admin.tasks_repository_orm import (
-                AdminTasksRepositoryOrm,
-            )
-
-            return AdminTasksRepositoryOrm()
-        from loguru import logger
-
-        logger.warning(
-            "USE_ORM_ADMIN_TASKS=true but SUPAVISOR_DATABASE_URL is empty "
-            "— falling back to supabase-py path"
-        )
-
-    from app.db.shadow_compare import shadow_enabled
-
-    if shadow_enabled("admin_tasks") and is_configured():
-        from app.db.shadow_compare import ShadowRepo
-        from app.repositories.admin.tasks_repository_orm import (
-            AdminTasksRepositoryOrm,
-        )
-
-        return ShadowRepo(
-            AdminTasksRepository(), AdminTasksRepositoryOrm(), "admin_tasks"
-        )
-
+    The per-domain rollout flag and the legacy supabase-py REST path have been
+    retired post-rollout; this now unconditionally returns the ORM
+    implementation."""
     return AdminTasksRepository()

@@ -1,4 +1,4 @@
-"""Integration tests for AdminVideosRepositoryOrm (Phase 2 admin wave) vs real PG.
+"""Integration tests for the ORM AdminVideosRepository (Phase 2 admin wave) vs real PG.
 
 parsed_media admin video management — reads + delete/reset-for-retry writes.
 
@@ -84,9 +84,9 @@ async def _seed(conn, **overrides):
 
 
 def _repo():
-    from app.repositories.admin.videos_repository_orm import AdminVideosRepositoryOrm
+    from app.repositories.admin.videos_repository import AdminVideosRepository
 
-    return AdminVideosRepositoryOrm()
+    return AdminVideosRepository()
 
 
 async def test_list_shape_and_enum_parity(
@@ -199,22 +199,9 @@ async def test_reset_for_retry_commits(
 # ─── factory parity ─────────────────────────────────────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    from app.core.config import settings
+async def test_factory_returns_orm_repository():
+    """Per-domain rollout flag retired → factory unconditionally returns the
+    ORM-backed AdminVideosRepository."""
     from app.repositories.admin import videos_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_ADMIN_VIDEOS", False)
     assert type(mod.get_admin_videos_repository()) is mod.AdminVideosRepository
-
-
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories.admin import videos_repository as mod
-    from app.repositories.admin.videos_repository_orm import AdminVideosRepositoryOrm
-
-    monkeypatch.setattr(settings, "USE_ORM_ADMIN_VIDEOS", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    assert isinstance(mod.get_admin_videos_repository(), AdminVideosRepositoryOrm)

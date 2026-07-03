@@ -1,11 +1,90 @@
-"""Repository for HLS transcode admin views (resource_versions + system_settings)."""
+"""Transcode admin repository — data access for the HLS-transcode console.
+
+ORM 2.0 (post-rollout cleanup): ``AdminTranscodeRepository`` is the SQLAlchemy 2.0
+implementation for the HLS-transcode admin console
+(``app/api/admin/transcode_router.py``), which reads ``resource_versions`` /
+``resources`` / ``parsed_media`` and reads+WRITES ``system_settings``. The legacy
+supabase-py REST path and its per-domain rollout flag (``USE_ORM_ADMIN_TRANSCODE``)
+have been retired; call sites go through ``get_admin_transcode_repository()`` (bottom
+of this file) which now unconditionally returns this repository.
+
+MODELS (all verified reflected + exported from ``app.models``):
+  - ``ResourceVersions`` (table ``resource_versions``) — PK ``id`` BIGINT.
+  - ``Resources``        (table ``resources``)         — PK ``id`` BIGINT;
+    ``media_id`` BIGINT.
+  - ``ParsedMedia``      (table ``parsed_media``)      — PK ``id`` BIGINT.
+  - ``SystemSettings``   (table ``system_settings``)   — PK ``key`` text;
+    ``value`` JSONB.
+
+★ UUID AUDIT — NO load-bearing uuid in any consumed path ★
+==========================================================
+Every id/FK this repo reads is BIGINT (resource_versions.id / .resource_id;
+resources.id / .media_id; parsed_media.id), and system_settings is keyed by a TEXT
+``key``. Per-column dict-key/compare evidence (from transcode_router.py):
+
+  - ``resource_versions.id`` (BIGINT) → **native int**. Router str()s it
+    (``id=str(row["id"])``, ``vid = str(v["id"])``). ``str(native_int)`` round-trips.
+  - ``resource_versions.resource_id`` (BIGINT) → **native int**. DICT-KEY EVIDENCE:
+    ``resource_ids = list({r["resource_id"] for r in rows})`` (SET) → fed to
+    ``resources_to_media`` + later ``media_info_map.get(str(r["resource_id"]))``.
+    The maps key by ``str(...)``; ``str(native_int)`` round-trips, so it STAYS int.
+  - ``resources.id`` / ``resources.media_id`` / ``parsed_media.id`` (BIGINT) →
+    **native int**, str()'d into the returned maps (``{str(r["id"]): str(r["media_id"])}``
+    / ``{str(m["id"]): m}``) — exact REST shape.
+  - The ONLY uuid columns on these tables (``resource_versions.uploaded_by``,
+    ``resources.creator_id``, ``system_settings.updated_by``) are NEVER selected by
+    any method here (the explicit projections exclude them). So uuid coercion is NOT
+    load-bearing in this repo; the defensive ``_parity`` sweep (uuid→str) is kept for
+    safety but is a no-op on every projection.
+
+STRATEGY-C VALUE-TYPE PARITY (per-field)
+----------------------------------------
+  created_at / transcode_at (resource_versions, timestamptz) → **ISO str** (CONSUMED:
+    ``AdminTranscodeVersionResponse.created_at`` / ``transcode_at`` read
+    ``row.get("created_at")`` / ``row.get("transcode_at")``). file_size_bytes (bigint)
+    / version_number (int) → native int. transcode_status / mime_type / filename /
+    hls_path (text) → native str (transcode_status is a plain ``String(20)`` with a
+    comment, NOT a SQLAlchemy Enum → no ``_plain`` needed). count_* → exact COUNT →
+    native int (the 5.3 trap). cover_urls (parsed_media, jsonb) → native list/dict
+    (router does ``(media.get("cover_urls") or [None])[0]``). title / author /
+    source_platform / cover_download_path → native str.
+
+NUMERIC AUDIT: no cost/duration NUMERIC columns are SELECTED by this repo
+(``resource_versions.duration_seconds`` is Integer and NOT projected;
+``resource_versions.confidence`` does not exist — that's on resource_tags). So no
+NUMERIC→Decimal parity concern arises here.
+
+LIST FILTERS / SEARCH (reproduced exactly)
+------------------------------------------
+  ``mime_type LIKE 'video/%'`` on every versions query. status_filter: "null" →
+    ``transcode_status IS NULL``; else eq. min_size_mb>0 → ``file_size_bytes >=
+    min_size_mb*1024*1024``. sort_by validated vs VALID_SORT_FIELDS (else
+    "created_at"), desc/asc. Paginated via offset/limit. count_by_status / batch use
+    eq / IS NULL the same way. NO date-range filter exists → no timestamptz<VARCHAR
+    hazard.
+
+WRITES (the silent-rollback P0 lesson) — ALL commit via write_scope()
+---------------------------------------------------------------------
+  mark_pending(version_id) → UPDATE resource_versions SET transcode_status='pending'
+    WHERE id=… ; upsert_setting(key, value, updated_by) → pg_insert ON CONFLICT
+    (key) DO UPDATE SET value, updated_by (reproduces the supabase ``.upsert`` on the
+    ``key`` PK). PHANTOM SCREEN: key / value / updated_by are all real
+    system_settings columns. Both commit via write_scope().
+"""
 
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Optional
+import uuid as _uuid
+from datetime import datetime
+from typing import Any, Dict, Optional
 
-from app.db import get_async_supabase_admin
+from sqlalchemy import func, select
+from sqlalchemy import update as sa_update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+from app.db.session import read_scope, write_scope
+from app.models import ParsedMedia, Resources, ResourceVersions, SystemSettings
 
 # Cap on versions returned per batch-transcode call. Replaces an unbounded
 # SELECT that PostgREST silently truncated at 1000. The caller marks each
@@ -13,53 +92,83 @@ from app.db import get_async_supabase_admin
 # re-runnable to drain a larger backlog over successive calls.
 BATCH_VERSIONS_LIMIT = 2000
 
+# Ordered (result-dict KEY, ORM attribute) for the versions list projection.
+_LIST_FIELDS: tuple[tuple[str, str], ...] = (
+    ("id", "id"),
+    ("resource_id", "resource_id"),
+    ("version_number", "version_number"),
+    ("filename", "filename"),
+    ("file_size_bytes", "file_size_bytes"),
+    ("mime_type", "mime_type"),
+    ("transcode_status", "transcode_status"),
+    ("hls_path", "hls_path"),
+    ("transcode_at", "transcode_at"),
+    ("created_at", "created_at"),
+)
+
+
+def _bigint(value: Any) -> int:
+    """Coerce a snowflake id (version_id / resource_id / media_id) to a native int
+    for a BIGINT bind. asyncpg's int8 codec is STRICT — ids arrive as STR (path
+    params + the str-keyed maps the router builds) but the legacy PostgREST path
+    silently coerced them; we int-coerce at every bigint .eq/.in_ bind."""
+    if isinstance(value, int):
+        return value
+    return int(str(value))
+
+
+def _parity(value: Any) -> Any:
+    """Strategy-C read coercion: datetime → ISO str; uuid → str (defensive no-op —
+    no uuid is selected here). bigint/int/text/jsonb pass through unchanged."""
+    if isinstance(value, _uuid.UUID):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value
+
+
+def _version_row(obj: Any) -> Dict[str, Any]:
+    """Build the versions-list-shaped dict from a ResourceVersions row."""
+    return {key: _parity(getattr(obj, attr)) for key, attr in _LIST_FIELDS}
+
 
 class AdminTranscodeRepository:
-    VERSIONS_TABLE = "resource_versions"
-    RESOURCES_TABLE = "resources"
-    MEDIA_TABLE = "parsed_media"
-    SETTINGS_TABLE = "system_settings"
+    """ORM-backed HLS-transcode admin repository (reads + writes over PG)."""
 
     VALID_SORT_FIELDS = frozenset(
         {"created_at", "file_size_bytes", "transcode_at", "resource_id"}
     )
 
-    async def _client(self):
-        return await get_async_supabase_admin()
-
     # ─── Stats ─────────────────────────────────────────────────────────
 
     async def count_total_video_versions(self) -> int:
-        client = await self._client()
-        result = (
-            await client.table(self.VERSIONS_TABLE)
-            .select("id", count="exact")
-            .like("mime_type", "video/%")
-            .execute()
+        stmt = (
+            select(func.count())
+            .select_from(ResourceVersions)
+            .where(ResourceVersions.mime_type.like("video/%"))
         )
-        return result.count or 0
+        async with read_scope() as session:
+            total = await session.scalar(stmt)
+        return total or 0
 
     async def count_by_status(self, status: str) -> int:
-        client = await self._client()
-        result = (
-            await client.table(self.VERSIONS_TABLE)
-            .select("id", count="exact")
-            .like("mime_type", "video/%")
-            .eq("transcode_status", status)
-            .execute()
+        stmt = (
+            select(func.count())
+            .select_from(ResourceVersions)
+            .where(
+                ResourceVersions.mime_type.like("video/%"),
+                ResourceVersions.transcode_status == status,
+            )
         )
-        return result.count or 0
+        async with read_scope() as session:
+            total = await session.scalar(stmt)
+        return total or 0
 
     async def status_counts(self, statuses: list[str]) -> dict[str, int]:
         results = await asyncio.gather(*[self.count_by_status(s) for s in statuses])
         return dict(zip(statuses, results))
 
     # ─── List ──────────────────────────────────────────────────────────
-
-    LIST_COLUMNS = (
-        "id, resource_id, version_number, filename, file_size_bytes, "
-        "mime_type, transcode_status, hls_path, transcode_at, created_at"
-    )
 
     async def list_video_versions(
         self,
@@ -71,154 +180,171 @@ class AdminTranscodeRepository:
         sort_by: str = "created_at",
         sort_desc: bool = True,
     ) -> tuple[list[dict[str, Any]], int]:
-        client = await self._client()
-        query = (
-            client.table(self.VERSIONS_TABLE)
-            .select(self.LIST_COLUMNS, count="exact")
-            .like("mime_type", "video/%")
+        base = select(ResourceVersions).where(
+            ResourceVersions.mime_type.like("video/%")
         )
 
         if status_filter == "null":
-            query = query.is_("transcode_status", "null")
+            base = base.where(ResourceVersions.transcode_status.is_(None))
         elif status_filter:
-            query = query.eq("transcode_status", status_filter)
+            base = base.where(ResourceVersions.transcode_status == status_filter)
 
         if min_size_mb and min_size_mb > 0:
-            query = query.gte("file_size_bytes", min_size_mb * 1024 * 1024)
+            base = base.where(
+                ResourceVersions.file_size_bytes >= min_size_mb * 1024 * 1024
+            )
 
         sort_field = sort_by if sort_by in self.VALID_SORT_FIELDS else "created_at"
-        query = query.order(sort_field, desc=sort_desc)
+        sort_attr = getattr(ResourceVersions, sort_field, ResourceVersions.created_at)
+        order_col = sort_attr.desc() if sort_desc else sort_attr.asc()
 
         offset = (page - 1) * page_size
-        query = query.range(offset, offset + page_size - 1)
-
-        result = await query.execute()
-        return result.data or [], result.count or 0
+        async with read_scope() as session:
+            total = await session.scalar(
+                select(func.count()).select_from(base.subquery())
+            )
+            result = await session.execute(
+                base.order_by(order_col).offset(offset).limit(page_size)
+            )
+            rows = [_version_row(o) for o in result.scalars().all()]
+        return rows, (total or 0)
 
     async def resources_to_media(self, resource_ids: list[str]) -> dict[str, str]:
-        """resource_id → media_id map for a batch."""
+        """{str(resource_id): str(media_id)} for resources with a non-null media_id."""
         if not resource_ids:
             return {}
-        client = await self._client()
-        result = (
-            await client.table(self.RESOURCES_TABLE)
-            .select("id, media_id")
-            .in_("id", resource_ids)
-            .execute()
+        stmt = select(Resources.id, Resources.media_id).where(
+            Resources.id.in_([_bigint(r) for r in resource_ids])
         )
-        return {
-            str(r["id"]): str(r["media_id"])
-            for r in (result.data or [])
-            if r.get("media_id")
-        }
+        async with read_scope() as session:
+            result = await session.execute(stmt)
+            return {str(rid): str(mid) for rid, mid in result.all() if mid is not None}
 
     async def media_info_bulk(self, media_ids: list[str]) -> dict[str, dict[str, Any]]:
-        """Lookup parsed_media rows for cover/title/author display."""
+        """{str(media_id): {id, title, cover_urls, cover_download_path,
+        source_platform, author}} for cover/title/author display."""
         if not media_ids:
             return {}
-        client = await self._client()
-        result = (
-            await client.table(self.MEDIA_TABLE)
-            .select(
-                "id, title, cover_urls, cover_download_path, " "source_platform, author"
-            )
-            .in_("id", media_ids)
-            .execute()
-        )
-        return {str(m["id"]): m for m in (result.data or [])}
+        stmt = select(
+            ParsedMedia.id,
+            ParsedMedia.title,
+            ParsedMedia.cover_urls,
+            ParsedMedia.cover_download_path,
+            ParsedMedia.source_platform,
+            ParsedMedia.author,
+        ).where(ParsedMedia.id.in_([_bigint(m) for m in media_ids]))
+        async with read_scope() as session:
+            result = await session.execute(stmt)
+            out: dict[str, dict[str, Any]] = {}
+            for row in result.all():
+                out[str(row.id)] = {
+                    "id": row.id,
+                    "title": row.title,
+                    "cover_urls": row.cover_urls,
+                    "cover_download_path": row.cover_download_path,
+                    "source_platform": row.source_platform,
+                    "author": row.author,
+                }
+        return out
 
-    # ─── Mutations ─────────────────────────────────────────────────────
+    # ─── Mutations / single reads ──────────────────────────────────────
 
     async def get_version(self, version_id: str) -> Optional[dict[str, Any]]:
-        client = await self._client()
-        try:
-            result = (
-                await client.table(self.VERSIONS_TABLE)
-                .select("id, resource_id, mime_type")
-                .eq("id", version_id)
-                .maybe_single()
-                .execute()
+        """{id, resource_id, mime_type} for one version, or None (maybe_single
+        parity — the legacy swallowed any error to None)."""
+        stmt = (
+            select(
+                ResourceVersions.id,
+                ResourceVersions.resource_id,
+                ResourceVersions.mime_type,
             )
-            return result.data
-        except Exception:
+            .where(ResourceVersions.id == _bigint(version_id))
+            .limit(1)
+        )
+        async with read_scope() as session:
+            result = await session.execute(stmt)
+            row = result.first()
+        if row is None:
             return None
+        return {
+            "id": row.id,
+            "resource_id": row.resource_id,
+            "mime_type": row.mime_type,
+        }
 
     async def mark_pending(self, version_id: str) -> None:
-        client = await self._client()
-        await (
-            client.table(self.VERSIONS_TABLE)
-            .update({"transcode_status": "pending"})
-            .eq("id", version_id)
-            .execute()
-        )
+        async with write_scope() as session:
+            await session.execute(
+                sa_update(ResourceVersions)
+                .where(ResourceVersions.id == _bigint(version_id))
+                .values(transcode_status="pending")
+            )
 
     async def list_versions_for_batch(
         self, action: str, limit: int = BATCH_VERSIONS_LIMIT
     ) -> list[dict[str, Any]]:
-        """`retry_failed` returns failed videos; `transcode_new` returns untranscoded.
+        """retry_failed → failed videos; transcode_new → untranscoded (status NULL).
+        Returns {id, resource_id, mime_type} rows (native int ids; router str()s).
 
-        Returns at most ``limit`` rows ordered by id. The caller marks each
-        version ``pending`` (so it leaves the failed/NULL set), making the batch
-        re-runnable to drain past one call — replacing the unbounded SELECT that
-        PostgREST silently capped at 1000.
+        Bounded + ordered to match the REST twin: at most ``limit`` rows by id.
+        The caller marks each ``pending`` so it leaves the set, making the batch
+        re-runnable to drain past one call.
         """
-        client = await self._client()
-        query = (
-            client.table(self.VERSIONS_TABLE)
-            .select("id, resource_id, mime_type")
-            .like("mime_type", "video/%")
+        base = (
+            select(
+                ResourceVersions.id,
+                ResourceVersions.resource_id,
+                ResourceVersions.mime_type,
+            )
+            .where(ResourceVersions.mime_type.like("video/%"))
+            .order_by(ResourceVersions.id.asc())
+            .limit(limit)
         )
         if action == "retry_failed":
-            query = query.eq("transcode_status", "failed")
+            base = base.where(ResourceVersions.transcode_status == "failed")
         else:  # transcode_new
-            query = query.is_("transcode_status", "null")
+            base = base.where(ResourceVersions.transcode_status.is_(None))
 
-        result = await query.order("id", desc=False).limit(limit).execute()
-        return result.data or []
+        async with read_scope() as session:
+            result = await session.execute(base)
+            return [
+                {
+                    "id": row.id,
+                    "resource_id": row.resource_id,
+                    "mime_type": row.mime_type,
+                }
+                for row in result.all()
+            ]
 
     # ─── Settings ──────────────────────────────────────────────────────
 
     async def load_settings(self) -> dict[str, Any]:
-        client = await self._client()
-        result = await (
-            client.table(self.SETTINGS_TABLE)
-            .select("key, value")
-            .like("key", "transcode_%")
-            .execute()
+        """{key: value} for keys LIKE 'transcode_%' (value is JSONB → native)."""
+        stmt = select(SystemSettings.key, SystemSettings.value).where(
+            SystemSettings.key.like("transcode_%")
         )
-        return {row["key"]: row["value"] for row in (result.data or [])}
+        async with read_scope() as session:
+            result = await session.execute(stmt)
+            return {key: value for key, value in result.all()}
 
     async def upsert_setting(self, key: str, value: Any, updated_by: str) -> None:
-        client = await self._client()
-        await (
-            client.table(self.SETTINGS_TABLE)
-            .upsert({"key": key, "value": value, "updated_by": updated_by})
-            .execute()
+        """Reproduce the supabase ``.upsert`` on the ``key`` PK: INSERT … ON CONFLICT
+        (key) DO UPDATE SET value, updated_by. COMMITS via write_scope()."""
+        stmt = pg_insert(SystemSettings).values(
+            key=key, value=value, updated_by=updated_by
         )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[SystemSettings.key],
+            set_={"value": stmt.excluded.value, "updated_by": stmt.excluded.updated_by},
+        )
+        async with write_scope() as session:
+            await session.execute(stmt)
 
 
 def get_admin_transcode_repository() -> "AdminTranscodeRepository":
-    """Return the right AdminTranscodeRepository implementation per env.
+    """Return the AdminTranscodeRepository (SQLAlchemy 2.0 ORM).
 
-    ORM when ``USE_ORM_ADMIN_TRANSCODE`` is set AND the SQLAlchemy engine is
-    configured; otherwise the legacy supabase-py REST path. A flag-on but
-    engine-missing deploy logs once and falls back to REST (never crashes).
-    """
-    from app.core.config import settings
-
-    if settings.USE_ORM_ADMIN_TRANSCODE:
-        from app.db.engine import is_configured
-
-        if is_configured():
-            from app.repositories.admin.transcode_repository_orm import (
-                AdminTranscodeRepositoryOrm,
-            )
-
-            return AdminTranscodeRepositoryOrm()
-        from loguru import logger
-
-        logger.warning(
-            "USE_ORM_ADMIN_TRANSCODE=true but SUPAVISOR_DATABASE_URL is empty "
-            "— falling back to supabase-py path"
-        )
+    The per-domain rollout flag (``USE_ORM_ADMIN_TRANSCODE``) and the legacy
+    supabase-py REST path have been retired post-rollout; this now unconditionally
+    returns the ORM implementation."""
     return AdminTranscodeRepository()

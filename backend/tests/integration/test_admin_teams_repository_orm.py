@@ -1,4 +1,4 @@
-"""Integration tests for AdminTeamsRepositoryOrm (Phase 2 admin wave) vs real PG.
+"""Integration tests for the ORM AdminTeamsRepository (Phase 2 admin wave) vs real PG.
 
 teams / team_members / team_quotas / collections admin reads + writes.
 
@@ -9,7 +9,7 @@ Proves REST → ORM swap invisibility + strategy-C parity:
   - kind plain str (NOT Enum)
   - update / delete / update_member_role / delete_member WRITE + COMMIT
   - get() / get_member() return None on absent (router None-guard → 404)
-  - factory on/off
+  - factory returns the collapsed ORM repository (flag retired)
 
     source /tmp/orm2_integration.env
     uv run pytest tests/integration/test_admin_teams_repository_orm.py -v
@@ -93,9 +93,9 @@ async def seed_team(integration_db_url):
 
 
 def _repo():
-    from app.repositories.admin.teams_repository_orm import AdminTeamsRepositoryOrm
+    from app.repositories.admin.teams_repository import AdminTeamsRepository
 
-    return AdminTeamsRepositoryOrm()
+    return AdminTeamsRepository()
 
 
 async def test_list_teams_shape_and_parity(
@@ -201,25 +201,12 @@ async def test_update_team_commit(integration_db_url, patched_engine, seed_team)
         await conn.close()
 
 
-# ─── factory parity ─────────────────────────────────────────────────────
+# ─── Factory (ORM-only, post-rollout) ───────────────────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    from app.core.config import settings
+async def test_factory_returns_orm_repository():
+    """Per-domain rollout flag retired → factory unconditionally returns the
+    ORM-backed AdminTeamsRepository."""
     from app.repositories.admin import teams_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_ADMIN_TEAMS", False)
     assert type(mod.get_admin_teams_repository()) is mod.AdminTeamsRepository
-
-
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories.admin import teams_repository as mod
-    from app.repositories.admin.teams_repository_orm import AdminTeamsRepositoryOrm
-
-    monkeypatch.setattr(settings, "USE_ORM_ADMIN_TEAMS", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    assert isinstance(mod.get_admin_teams_repository(), AdminTeamsRepositoryOrm)

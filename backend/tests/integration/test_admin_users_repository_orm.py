@@ -1,4 +1,4 @@
-"""Integration tests for AdminUsersRepositoryOrm (Phase 2 admin wave) vs real PG.
+"""Integration tests for the ORM AdminUsersRepository (Phase 2 admin wave) vs real PG.
 
 user_profiles admin user-management reads + update/ban writes.
 
@@ -8,7 +8,7 @@ Proves REST → ORM swap invisibility + strategy-C parity:
   - created_at / updated_at (timestamptz) → ISO STR
   - display_id (bigint) → native int
   - update() / set_banned() WRITE + COMMIT, return the full row
-  - factory on/off
+  - factory returns the ORM-only repository (per-domain flag retired)
 
     source /tmp/orm2_integration.env
     uv run pytest tests/integration/test_admin_users_repository_orm.py -v
@@ -75,9 +75,9 @@ async def seed_user(integration_db_url):
 
 
 def _repo():
-    from app.repositories.admin.users_repository_orm import AdminUsersRepositoryOrm
+    from app.repositories.admin.users_repository import AdminUsersRepository
 
-    return AdminUsersRepositoryOrm()
+    return AdminUsersRepository()
 
 
 async def test_list_shape_and_parity(integration_db_url, patched_engine, seed_user):
@@ -156,25 +156,12 @@ async def test_update_absent_returns_none(integration_db_url, patched_engine):
     assert await _repo().update(str(uuid.uuid4()), {"is_banned": True}) is None
 
 
-# ─── factory parity ─────────────────────────────────────────────────────
+# ─── Factory (ORM-only, post-rollout) ───────────────────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    from app.core.config import settings
+async def test_factory_returns_orm_repository():
+    """Per-domain rollout flag retired → factory unconditionally returns the
+    ORM-backed AdminUsersRepository."""
     from app.repositories.admin import users_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_ADMIN_USERS", False)
     assert type(mod.get_admin_users_repository()) is mod.AdminUsersRepository
-
-
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories.admin import users_repository as mod
-    from app.repositories.admin.users_repository_orm import AdminUsersRepositoryOrm
-
-    monkeypatch.setattr(settings, "USE_ORM_ADMIN_USERS", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    assert isinstance(mod.get_admin_users_repository(), AdminUsersRepositoryOrm)

@@ -1,8 +1,10 @@
-"""Integration tests for AdminTasksRepositoryOrm (Phase 2 admin wave) vs real PG.
+"""Integration tests for the ORM AdminTasksRepository (Phase 2 admin wave) vs real PG.
 
 task_tracking admin Task Center reads + cancel/retry writes.
 
-Proves REST → ORM swap invisibility + strategy-C parity:
+Post-rollout the per-domain flag + legacy REST path are retired; the collapsed
+AdminTasksRepository is the SQLAlchemy 2.0 implementation. Proves strategy-C
+parity:
   - user_id (uuid) → STR (DICT-KEY trap)
   - created_at / started_at / completed_at (timestamptz) → ISO STR
   - metadata (renamed metadata_) → native dict keyed as "metadata"
@@ -104,9 +106,9 @@ async def _seed(conn, seed_user, **overrides):
 
 
 def _repo():
-    from app.repositories.admin.tasks_repository_orm import AdminTasksRepositoryOrm
+    from app.repositories.admin.tasks_repository import AdminTasksRepository
 
-    return AdminTasksRepositoryOrm()
+    return AdminTasksRepository()
 
 
 async def test_list_shape_and_parity(
@@ -255,25 +257,12 @@ async def test_get_absent_returns_none(integration_db_url, patched_engine):
     assert await _repo().get(f"{_PREFIX}does-not-exist-{uuid.uuid4().hex}") is None
 
 
-# ─── factory parity ─────────────────────────────────────────────────────
+# ─── Factory (ORM-only, post-rollout) ───────────────────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    from app.core.config import settings
+async def test_factory_returns_orm_repository():
+    """Per-domain rollout flag retired → factory unconditionally returns the
+    ORM-backed AdminTasksRepository."""
     from app.repositories.admin import tasks_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_ADMIN_TASKS", False)
     assert type(mod.get_admin_tasks_repository()) is mod.AdminTasksRepository
-
-
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories.admin import tasks_repository as mod
-    from app.repositories.admin.tasks_repository_orm import AdminTasksRepositoryOrm
-
-    monkeypatch.setattr(settings, "USE_ORM_ADMIN_TASKS", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    assert isinstance(mod.get_admin_tasks_repository(), AdminTasksRepositoryOrm)
