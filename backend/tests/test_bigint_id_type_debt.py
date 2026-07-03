@@ -40,10 +40,31 @@ def test_session_out_accepts_bigint_id_as_str_and_int():
 @pytest.mark.unit
 def test_message_out_accepts_bigint_session_id():
     msg_uuid = uuid4()
-    # ai_messages.id is still a real UUID; session_id is the bigint FK.
+    # ai_messages.id is still a real UUID under LegacyAiStore; session_id is
+    # the bigint FK.
     out = MessageOut(id=msg_uuid, session_id=_BIGINT_INT, role="user", content="hi")
     assert out.session_id == _BIGINT_STR
     assert str(out.id) == str(msg_uuid)
+
+
+@pytest.mark.unit
+def test_message_out_id_widened_to_str_accepts_both_uuid_and_bigint():
+    """P2 Task 4: ai_messages.id is UUID under LegacyAiStore but a BIGINT
+    Snowflake (public.messages.id) under ConversationsAiStore — MessageOut.id
+    must validate + coerce to str for both shapes, never raising a
+    ResponseValidationError regardless of which store produced the row."""
+    msg_uuid = uuid4()
+    out_uuid = MessageOut(
+        id=msg_uuid, session_id=_BIGINT_STR, role="user", content="hi"
+    )
+    assert out_uuid.id == str(msg_uuid)
+    assert isinstance(out_uuid.id, str)
+
+    out_bigint = MessageOut(
+        id=_BIGINT_INT, session_id=_BIGINT_STR, role="assistant", content="ok"
+    )
+    assert out_bigint.id == _BIGINT_STR
+    assert isinstance(out_bigint.id, str)
 
 
 @pytest.mark.unit

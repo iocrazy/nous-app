@@ -483,27 +483,270 @@ async def test_bump_counters_writes_given_absolutes_not_increment() -> None:
     assert captured["params"]["cid"] == _CONV_ID
 
 
-# ── Message half deferred to Task 4 ─────────────────────────────────────────
+# ── Messages (Task 4) ────────────────────────────────────────────────────────
+
+_MSG_ID = 9001
 
 
 @pytest.mark.asyncio
-async def test_message_methods_raise_not_implemented() -> None:
+async def test_append_user_message_maps_role_and_content() -> None:
+    """append_user_message must delegate to ConversationRepository.send_message
+    with sender_type='user', type='text', body={'text': content}, and map the
+    returned row into the legacy shape (role='user', content passthrough,
+    no tokens/agent_id/metadata)."""
+    captured: dict = {}
+
+    async def fake_send_message(**kwargs: Any) -> dict:
+        captured.update(kwargs)
+        return {
+            "id": _MSG_ID,
+            "conversation_id": _CONV_ID,
+            "seq": 1,
+            "created_at": "2026-07-03T00:00:00",
+        }
+
     store = _store()
-    with pytest.raises(NotImplementedError):
-        await store.get_messages(session_id=_CONV_ID)
-    with pytest.raises(NotImplementedError):
-        await store.append_user_message(
-            session_id=_CONV_ID, user_id=_USER_ID, content="hi"
+    fake_repo = type("R", (), {"send_message": staticmethod(fake_send_message)})()
+    with patch(
+        "app.repositories.conversation_repository.get_conversation_repository",
+        return_value=fake_repo,
+    ):
+        result = await store.append_user_message(
+            session_id=_CONV_ID, user_id=_USER_ID, content="hello"
         )
-    with pytest.raises(NotImplementedError):
-        await store.append_assistant_message(
+
+    assert captured["conversation_id"] == _CONV_ID
+    assert captured["sender_id"] == _USER_ID
+    assert captured["sender_type"] == "user"
+    assert captured["type"] == "text"
+    assert captured["body"] == {"text": "hello"}
+    assert captured["parent_id"] is None
+
+    assert result["id"] == _MSG_ID
+    assert result["session_id"] == _CONV_ID
+    assert result["role"] == "user"
+    assert result["content"] == "hello"
+    assert result["agent_id"] is None
+    assert result["prompt_tokens"] is None
+    assert result["completion_tokens"] is None
+    assert result["metadata_json"] is None
+
+
+@pytest.mark.asyncio
+async def test_append_assistant_message_metadata_round_trip_via_return_value() -> None:
+    """append_assistant_message's own return must carry metadata_json EXACTLY
+    as passed by the caller (run_id / tool_calls / awaiting_approval intact),
+    with agent_id/tokens/from_agent_id decorated into body['meta'] for send_message."""
+    captured: dict = {}
+    metadata = {
+        "run_id": "r1",
+        "tool_calls": [{"a": 1}],
+        "awaiting_approval": True,
+    }
+
+    async def fake_send_message(**kwargs: Any) -> dict:
+        captured.update(kwargs)
+        return {
+            "id": _MSG_ID,
+            "conversation_id": _CONV_ID,
+            "seq": 2,
+            "created_at": "2026-07-03T00:01:00",
+        }
+
+    store = _store()
+    fake_repo = type("R", (), {"send_message": staticmethod(fake_send_message)})()
+    with patch(
+        "app.repositories.conversation_repository.get_conversation_repository",
+        return_value=fake_repo,
+    ):
+        result = await store.append_assistant_message(
             session_id=_CONV_ID,
             agent_id=_AGENT_ID,
+            content="the answer",
+            prompt_tokens=10,
+            completion_tokens=20,
+            metadata=metadata,
+        )
+
+    # send_message call must decorate body.meta with agent_id/tokens PLUS the
+    # caller's metadata keys, and pass from_agent_id explicitly.
+    assert captured["sender_id"] is None
+    assert captured["sender_type"] == "agent"
+    assert captured["from_agent_id"] == _AGENT_ID
+    body = captured["body"]
+    assert body["text"] == "the answer"
+    assert body["meta"]["agent_id"] == _AGENT_ID
+    assert body["meta"]["prompt_tokens"] == 10
+    assert body["meta"]["completion_tokens"] == 20
+    assert body["meta"]["run_id"] == "r1"
+    assert body["meta"]["tool_calls"] == [{"a": 1}]
+    assert body["meta"]["awaiting_approval"] is True
+
+    # Legacy-shape return: metadata_json is EXACTLY the caller's dict.
+    assert result["role"] == "assistant"
+    assert result["content"] == "the answer"
+    assert result["agent_id"] == _AGENT_ID
+    assert result["prompt_tokens"] == 10
+    assert result["completion_tokens"] == 20
+    assert result["metadata_json"] == metadata
+    assert result["metadata_json"] is metadata
+
+
+@pytest.mark.asyncio
+async def test_append_assistant_message_handles_none_agent_id() -> None:
+    async def fake_send_message(**kwargs: Any) -> dict:
+        return {
+            "id": _MSG_ID,
+            "conversation_id": _CONV_ID,
+            "seq": 3,
+            "created_at": "2026-07-03T00:02:00",
+        }
+
+    store = _store()
+    fake_repo = type("R", (), {"send_message": staticmethod(fake_send_message)})()
+    with patch(
+        "app.repositories.conversation_repository.get_conversation_repository",
+        return_value=fake_repo,
+    ):
+        result = await store.append_assistant_message(
+            session_id=_CONV_ID,
+            agent_id=None,
             content="hi",
             prompt_tokens=1,
             completion_tokens=1,
             metadata={},
         )
+
+    assert result["agent_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_messages_sql_orders_by_seq_asc_and_excludes_deleted() -> None:
+    captured: dict = {}
+
+    async def fake_fetch_all(sql: str, params: dict | None = None) -> list:
+        captured["sql"] = sql
+        captured["params"] = params
+        return []
+
+    store = _store()
+    with patch("app.db.engine.fetch_all", fake_fetch_all):
+        await store.get_messages(session_id=_CONV_ID, limit=50)
+
+    sql = captured["sql"]
+    assert "public.messages" in sql
+    assert "conversation_id = :cid" in sql
+    assert "deleted_at IS NULL" in sql
+    assert "ORDER BY seq ASC" in sql
+    assert "LIMIT :limit" in sql
+    assert captured["params"]["cid"] == _CONV_ID
+    assert captured["params"]["limit"] == 50
+
+
+@pytest.mark.asyncio
+async def test_get_messages_maps_role_content_and_strips_meta_decoration() -> None:
+    """The decoration keys (agent_id/prompt_tokens/completion_tokens) written
+    into body.meta by append_assistant_message must be unpacked into their own
+    fields AND stripped back out of metadata_json — reconstructing exactly
+    the metadata dict the caller originally passed."""
+    rows = [
+        {
+            "id": 1,
+            "conversation_id": _CONV_ID,
+            "seq": 1,
+            "sender_type": "user",
+            "sender_id": _USER_ID,
+            "from_agent_id": None,
+            "type": "text",
+            "body": {"text": "hi there"},
+            "created_at": "2026-07-03T00:00:00",
+        },
+        {
+            "id": 2,
+            "conversation_id": _CONV_ID,
+            "seq": 2,
+            "sender_type": "agent",
+            "sender_id": None,
+            "from_agent_id": _AGENT_ID,
+            "type": "text",
+            "body": {
+                "text": "the answer",
+                "meta": {
+                    "agent_id": _AGENT_ID,
+                    "prompt_tokens": 10,
+                    "completion_tokens": 20,
+                    "run_id": "r1",
+                    "tool_calls": [{"a": 1}],
+                    "awaiting_approval": True,
+                },
+            },
+            "created_at": "2026-07-03T00:01:00",
+        },
+    ]
+
+    async def fake_fetch_all(sql: str, params: dict | None = None) -> list:
+        return rows
+
+    store = _store()
+    with patch("app.db.engine.fetch_all", fake_fetch_all):
+        result = await store.get_messages(session_id=_CONV_ID)
+
+    assert len(result) == 2
+
+    user_msg = result[0]
+    assert user_msg["role"] == "user"
+    assert user_msg["content"] == "hi there"
+    assert user_msg["agent_id"] is None
+    assert user_msg["prompt_tokens"] is None
+    assert user_msg["completion_tokens"] is None
+    assert user_msg["metadata_json"] is None
+    assert user_msg["id"] == 1
+    assert user_msg["session_id"] == _CONV_ID
+
+    asst_msg = result[1]
+    assert asst_msg["role"] == "assistant"
+    assert asst_msg["content"] == "the answer"
+    assert asst_msg["agent_id"] == _AGENT_ID
+    assert asst_msg["prompt_tokens"] == 10
+    assert asst_msg["completion_tokens"] == 20
+    # metadata_json must be EXACTLY the original caller metadata — no
+    # agent_id/prompt_tokens/completion_tokens leaking through.
+    assert asst_msg["metadata_json"] == {
+        "run_id": "r1",
+        "tool_calls": [{"a": 1}],
+        "awaiting_approval": True,
+    }
+    assert "agent_id" not in asst_msg["metadata_json"]
+    assert "prompt_tokens" not in asst_msg["metadata_json"]
+    assert "completion_tokens" not in asst_msg["metadata_json"]
+
+
+@pytest.mark.asyncio
+async def test_get_messages_defensive_json_loads_when_body_is_str() -> None:
+    """Defends against a driver variance where JSONB body arrives as raw text
+    instead of an already-decoded dict."""
+    rows = [
+        {
+            "id": 1,
+            "conversation_id": _CONV_ID,
+            "seq": 1,
+            "sender_type": "user",
+            "sender_id": _USER_ID,
+            "from_agent_id": None,
+            "type": "text",
+            "body": '{"text": "raw json text"}',
+            "created_at": "2026-07-03T00:00:00",
+        }
+    ]
+
+    async def fake_fetch_all(sql: str, params: dict | None = None) -> list:
+        return rows
+
+    store = _store()
+    with patch("app.db.engine.fetch_all", fake_fetch_all):
+        result = await store.get_messages(session_id=_CONV_ID)
+
+    assert result[0]["content"] == "raw json text"
 
 
 # ── store_kind ───────────────────────────────────────────────────────────────
@@ -660,3 +903,68 @@ async def test_smoke_create_list_rename_get_delete(smoke_ctx: dict) -> None:
 
     gone = await store.get_session(session_id=session_id)
     assert gone is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_smoke_append_and_get_messages_round_trip(smoke_ctx: dict) -> None:
+    """Real-DB smoke: create session -> append user + decorated assistant
+    message -> get_messages returns both chronological with decoration
+    intact byte-for-byte -> each row constructs a valid MessageOut (proving
+    serializer compatibility end-to-end, incl. the widened `id: str`)."""
+    from app.schemas.ai_library_chat import MessageOut
+
+    store = smoke_ctx["store"]
+
+    created = await store.create_session(
+        user_id=_SMOKE_CREATOR_ID,
+        agent_slug=smoke_ctx["agent_slug"],
+        agent_id=smoke_ctx["agent_id"],
+        title="__smoke_ai_store_messages_test__",
+        project_id=None,
+        team_id=smoke_ctx["team_id"],
+        context_type="script",
+        context_id="smoke-msg-1",
+    )
+    session_id = created["id"]
+    smoke_ctx["conv_ids"].append(session_id)
+
+    user_msg = await store.append_user_message(
+        session_id=session_id, user_id=_SMOKE_CREATOR_ID, content="hello agent"
+    )
+    assert user_msg["role"] == "user"
+    assert user_msg["content"] == "hello agent"
+
+    metadata = {
+        "run_id": "smoke-run-1",
+        "tool_calls": [{"name": "Skill", "iteration": 1, "args": {}, "result": {}}],
+        "awaiting_approval": {"approval_id": "abc", "hook": "h", "reason": "r"},
+    }
+    asst_msg = await store.append_assistant_message(
+        session_id=session_id,
+        agent_id=smoke_ctx["agent_id"],
+        content="hello human",
+        prompt_tokens=7,
+        completion_tokens=13,
+        metadata=metadata,
+    )
+    assert asst_msg["metadata_json"] == metadata
+
+    messages = await store.get_messages(session_id=session_id)
+    assert len(messages) == 2
+    assert [m["role"] for m in messages] == ["user", "assistant"]
+    assert messages[0]["content"] == "hello agent"
+    assert messages[1]["content"] == "hello human"
+    assert messages[1]["agent_id"] == str(smoke_ctx["agent_id"])
+    assert messages[1]["prompt_tokens"] == 7
+    assert messages[1]["completion_tokens"] == 13
+    # Decoration must survive the DB round trip byte-for-byte.
+    assert messages[1]["metadata_json"] == metadata
+
+    # Serializer-compatibility proof: every returned row constructs a valid
+    # MessageOut, including the widened `id: str` (native BIGINT from this
+    # store, not a UUID).
+    for row in messages:
+        mo = MessageOut(**row)
+        assert mo.id == str(row["id"])
+        assert mo.session_id == str(session_id)

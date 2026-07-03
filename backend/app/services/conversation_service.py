@@ -148,6 +148,7 @@ class ConversationService:
             conversation_id=conversation_id,
             before_seq=before_seq,
             limit=min(max(limit, 1), 100),
+            for_user_id=user_id,
         )
 
     async def mark_read(

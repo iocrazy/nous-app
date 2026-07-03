@@ -2,12 +2,13 @@
 ``conversations`` / ``conversation_members`` / ``conversation_ai_meta``
 tables (migration 327 + 332), a.k.a. the Unified Conversations schema.
 
-This is the strangler-fig replacement for ``LegacyAiStore``. Task 3 ships
-the SESSION half only (``create_session`` / ``list_sessions`` /
-``get_session`` / ``rename_session`` / ``soft_delete_session`` /
-``bump_counters``); the MESSAGE half (``get_messages`` /
-``append_user_message`` / ``append_assistant_message``) is deferred to
-Task 4 and raises ``NotImplementedError`` here.
+This is the strangler-fig replacement for ``LegacyAiStore``. Task 3 shipped
+the SESSION half (``create_session`` / ``list_sessions`` / ``get_session`` /
+``rename_session`` / ``soft_delete_session`` / ``bump_counters``); Task 4
+ships the MESSAGE half (``get_messages`` / ``append_user_message`` /
+``append_assistant_message``), reusing ``ConversationRepository.send_message``
+for the writes (atomic seq allocation) and a direct ``public.messages``
+SELECT for reads.
 
 Physical → legacy mapping
 --------------------------
@@ -68,12 +69,21 @@ ONE ``eng.begin()`` transaction (mirroring
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
 
 from app.db import engine as db_engine
 from app.services.library.resources_service import _resolve_personal_team_id
+
+# public.messages.sender_type -> legacy ai_messages.role
+_ROLE_MAP = {"agent": "assistant", "user": "user", "system": "system"}
+
+# Decoration keys folded into body["meta"] by append_assistant_message that
+# must be stripped back out on read to reconstruct the caller's original
+# `metadata` dict byte-for-byte (see get_messages / _to_legacy_message_shape).
+_META_DECORATION_KEYS = ("agent_id", "prompt_tokens", "completion_tokens")
 
 
 def _bigint(v: Any) -> int:
@@ -351,16 +361,103 @@ class ConversationsAiStore:
     # ------------------------------------------------------------------
     # Messages (Task 4)
     # ------------------------------------------------------------------
+    #
+    # Physical -> legacy mapping (ai_messages row keys, see message_store.py
+    # Protocol docstring): id, session_id, role, content, agent_id,
+    # prompt_tokens, completion_tokens, metadata_json, created_at.
+    #
+    #   ai_messages.id                 -> messages.id          (native, not stringified —
+    #                                      same id-shape convention as the session half)
+    #   ai_messages.session_id         -> messages.conversation_id (native)
+    #   ai_messages.role               <- sender_type ('agent'->'assistant', else passthrough)
+    #   ai_messages.content            <- body['text']
+    #   ai_messages.agent_id           <- body['meta']['agent_id']  (decoration)
+    #   ai_messages.prompt_tokens      <- body['meta']['prompt_tokens']  (decoration)
+    #   ai_messages.completion_tokens  <- body['meta']['completion_tokens']  (decoration)
+    #   ai_messages.metadata_json      <- body['meta'] MINUS the 3 decoration keys above —
+    #                                      this reconstructs the caller's original
+    #                                      `metadata` dict passed to append_assistant_message
+    #                                      byte-for-byte (run_id / tool_calls / awaiting_approval
+    #                                      MUST survive the round trip).
+    #
+    # User messages never carry a 'meta' key, so decoration fields are always
+    # None/{} for role='user' rows — matching LegacyAiStore (which never wrote
+    # agent_id/tokens/metadata_json for user messages either).
+
+    @staticmethod
+    def _to_legacy_message_shape(row: Dict[str, Any]) -> Dict[str, Any]:
+        """Map a public.messages row (keys: id, conversation_id, seq,
+        sender_type, sender_id, from_agent_id, type, body, created_at) into
+        the legacy ai_messages row shape."""
+        body = row.get("body") or {}
+        # asyncpg/SQLAlchemy normally hands JSONB back as a decoded dict
+        # (proven for `body` in Phase 1.5's conversation_memory_service /
+        # conversation_agent_turn readers) — but defend against a driver
+        # returning the raw JSON text.
+        if isinstance(body, str):
+            body = json.loads(body)
+        meta = body.get("meta") or {}
+        metadata_json = {
+            k: v for k, v in meta.items() if k not in _META_DECORATION_KEYS
+        }
+        sender_type = row.get("sender_type")
+        return {
+            "id": row["id"],
+            "session_id": row.get("conversation_id"),
+            "role": _ROLE_MAP.get(sender_type, sender_type),
+            "content": body.get("text", ""),
+            "agent_id": meta.get("agent_id"),
+            "prompt_tokens": meta.get("prompt_tokens"),
+            "completion_tokens": meta.get("completion_tokens"),
+            "metadata_json": metadata_json or None,
+            "created_at": row.get("created_at"),
+        }
 
     async def get_messages(
         self, *, session_id: int, limit: int = 200
     ) -> List[Dict[str, Any]]:
-        raise NotImplementedError("Task 4")
+        """Chronological (seq ASC), non-deleted messages for a conversation."""
+        rows = await db_engine.fetch_all(
+            """
+            SELECT id, conversation_id, seq, sender_type, sender_id,
+                   from_agent_id, type, body, created_at
+              FROM public.messages
+             WHERE conversation_id = :cid AND deleted_at IS NULL
+             ORDER BY seq ASC
+             LIMIT :limit
+            """,
+            {"cid": _bigint(session_id), "limit": limit},
+        )
+        return [self._to_legacy_message_shape(r) for r in rows]
 
     async def append_user_message(
         self, *, session_id: int, user_id: str, content: str
     ) -> Dict[str, Any]:
-        raise NotImplementedError("Task 4")
+        """Insert a user-role message via the shared ConversationRepository
+        (atomic seq allocation + read-cursor advance)."""
+        from app.repositories.conversation_repository import (
+            get_conversation_repository,
+        )
+
+        row = await get_conversation_repository().send_message(
+            conversation_id=_bigint(session_id),
+            sender_id=user_id,
+            sender_type="user",
+            type="text",
+            body={"text": content},
+            parent_id=None,
+        )
+        return {
+            "id": row["id"],
+            "session_id": row.get("conversation_id"),
+            "role": "user",
+            "content": content,
+            "agent_id": None,
+            "prompt_tokens": None,
+            "completion_tokens": None,
+            "metadata_json": None,
+            "created_at": row.get("created_at"),
+        }
 
     async def append_assistant_message(
         self,
@@ -372,4 +469,38 @@ class ConversationsAiStore:
         completion_tokens: int,
         metadata: dict,
     ) -> Dict[str, Any]:
-        raise NotImplementedError("Task 4")
+        """Insert an agent-role message. Usage + caller metadata fold into
+        ``body['meta']`` (the ``messages`` table has no dedicated columns for
+        them); ``get_messages`` unpacks that sidecar back into the legacy
+        agent_id/prompt_tokens/completion_tokens/metadata_json fields."""
+        from app.repositories.conversation_repository import (
+            get_conversation_repository,
+        )
+
+        agent_id_str = str(agent_id) if agent_id is not None else None
+        meta = {
+            "agent_id": agent_id_str,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            **(metadata or {}),
+        }
+        row = await get_conversation_repository().send_message(
+            conversation_id=_bigint(session_id),
+            sender_id=None,
+            sender_type="agent",
+            type="text",
+            body={"text": content, "meta": meta},
+            parent_id=None,
+            from_agent_id=agent_id_str,
+        )
+        return {
+            "id": row["id"],
+            "session_id": row.get("conversation_id"),
+            "role": "assistant",
+            "content": content,
+            "agent_id": agent_id_str,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "metadata_json": metadata,
+            "created_at": row.get("created_at"),
+        }

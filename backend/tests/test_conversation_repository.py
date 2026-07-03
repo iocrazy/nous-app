@@ -392,6 +392,72 @@ async def test_messages_in_range_bounds_and_excludes_deleted() -> None:
     assert params["cid"] == 1
 
 
+# ── list_messages (joined-gate carryover, Phase-1 final review) ────────────────
+
+
+@pytest.mark.asyncio
+async def test_list_messages_no_joined_gate_when_for_user_id_omitted() -> None:
+    """The historical (Phase 1) shape is unchanged when for_user_id is not
+    passed: no join on conversations, no history_mode/joined_at predicate."""
+    from app.repositories.conversation_repository import ConversationRepository
+
+    captured: dict = {}
+
+    async def fake_fetch_all(sql: str, params: dict | None = None) -> list:
+        captured["sql"] = sql
+        captured["params"] = params
+        return [_MSG_ROW]
+
+    repo = ConversationRepository()
+    with patch("app.db.engine.fetch_all", fake_fetch_all):
+        result = await repo.list_messages(
+            conversation_id=_CONV_ID, before_seq=None, limit=10
+        )
+
+    assert result == [_MSG_ROW]
+    sql = captured["sql"]
+    assert "history_mode" not in sql
+    assert "joined_at" not in sql
+    assert "JOIN public.conversations" not in sql
+    assert "ORDER BY seq DESC" in sql
+    assert "for_uid" not in captured["params"]
+
+
+@pytest.mark.asyncio
+async def test_list_messages_applies_joined_gate_when_for_user_id_given() -> None:
+    """for_user_id given must add the mig-328 messages_select RLS-mirroring
+    predicate: shared mode passes through unconditionally, joined mode is cut
+    off at the caller's own conversation_members.joined_at."""
+    from app.repositories.conversation_repository import ConversationRepository
+
+    captured: dict = {}
+
+    async def fake_fetch_all(sql: str, params: dict | None = None) -> list:
+        captured["sql"] = sql
+        captured["params"] = params
+        return [_MSG_ROW]
+
+    repo = ConversationRepository()
+    with patch("app.db.engine.fetch_all", fake_fetch_all):
+        result = await repo.list_messages(
+            conversation_id=_CONV_ID,
+            before_seq=None,
+            limit=10,
+            for_user_id=_SENDER_ID,
+        )
+
+    assert result == [_MSG_ROW]
+    sql = captured["sql"]
+    assert "JOIN public.conversations c" in sql
+    assert "c.history_mode = 'shared'" in sql
+    assert "conversation_members cm" in sql
+    assert "cm.member_type = 'user'" in sql
+    assert "cm.user_id = :for_uid" in sql
+    assert "m.created_at >=" in sql
+    assert captured["params"]["for_uid"] == _SENDER_ID
+    assert captured["params"]["cid"] == _CONV_ID
+
+
 # ── name / title bridge ───────────────────────────────────────────────────────
 
 

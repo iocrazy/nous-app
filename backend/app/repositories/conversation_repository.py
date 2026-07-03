@@ -288,28 +288,68 @@ class ConversationRepository:
         conversation_id: int,
         before_seq: Optional[int],
         limit: int,
+        for_user_id: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         """Return messages in descending seq order with optional keyset cutoff.
 
         CAST(:before AS bigint) is required to prevent asyncpg AmbiguousParameterError
         when before_seq is None (the driver cannot infer the type of a NULL literal
         from a plain :before bind).
+
+        ``for_user_id`` (Phase-1 final-review carryover): when given, apply the
+        same ``history_mode='joined'`` cutoff as the ``messages_select`` RLS
+        policy in migration 328 — a joined-mode member only sees messages
+        created at/after their own ``conversation_members.joined_at``.
+        ``shared``-mode conversations (and every call that omits
+        ``for_user_id``, e.g. the agent-turn context builders) are unaffected.
         """
+        if for_user_id is None:
+            rows = await db_engine.fetch_all(
+                """
+                SELECT id, conversation_id, seq, sender_id, sender_type,
+                       type, body, parent_id, edited_at, deleted_at, created_at
+                  FROM public.messages
+                 WHERE conversation_id = :cid
+                   AND deleted_at IS NULL
+                   AND (CAST(:before AS bigint) IS NULL OR seq < CAST(:before AS bigint))
+                 ORDER BY seq DESC
+                 LIMIT :limit
+                """,
+                {
+                    "cid": _bigint(conversation_id),
+                    "before": before_seq,
+                    "limit": limit,
+                },
+            )
+            return [dict(r) for r in rows]
+
         rows = await db_engine.fetch_all(
             """
-            SELECT id, conversation_id, seq, sender_id, sender_type,
-                   type, body, parent_id, edited_at, deleted_at, created_at
-              FROM public.messages
-             WHERE conversation_id = :cid
-               AND deleted_at IS NULL
-               AND (CAST(:before AS bigint) IS NULL OR seq < CAST(:before AS bigint))
-             ORDER BY seq DESC
+            SELECT m.id, m.conversation_id, m.seq, m.sender_id, m.sender_type,
+                   m.type, m.body, m.parent_id, m.edited_at, m.deleted_at, m.created_at
+              FROM public.messages m
+              JOIN public.conversations c ON c.id = m.conversation_id
+             WHERE m.conversation_id = :cid
+               AND m.deleted_at IS NULL
+               AND (CAST(:before AS bigint) IS NULL OR m.seq < CAST(:before AS bigint))
+               AND (
+                     c.history_mode = 'shared'
+                     OR m.created_at >= (
+                          SELECT cm.joined_at
+                            FROM public.conversation_members cm
+                           WHERE cm.conversation_id = m.conversation_id
+                             AND cm.member_type = 'user'
+                             AND cm.user_id = :for_uid
+                        )
+                   )
+             ORDER BY m.seq DESC
              LIMIT :limit
             """,
             {
                 "cid": _bigint(conversation_id),
                 "before": before_seq,
                 "limit": limit,
+                "for_uid": for_user_id,
             },
         )
         return [dict(r) for r in rows]
