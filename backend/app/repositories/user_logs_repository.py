@@ -1,50 +1,83 @@
 # backend/app/repositories/user_logs_repository.py
 
-"""
-用户日志仓库
+"""用户日志仓库
 
 提供用户操作日志的存储和查询功能。
-使用异步 Supabase 客户端。
 
-ORM 2.0 migration (Batch L2): ``UserLogsRepository`` is the legacy supabase-py
-REST implementation; ``UserLogsRepositoryOrm`` (in
-``user_logs_repository_orm.py``) is the SQLAlchemy 2.0 ORM successor. Call sites
-(and the module-level ``log_user_action`` helper) go through
-``get_user_logs_repository()`` which picks the ORM subclass when
-``USE_ORM_USER_LOGS`` is on AND the engine is configured.
+ORM 2.0 (post-rollout, Batch L2 collapsed): ``UserLogsRepository`` is the
+SQLAlchemy 2.0 ORM implementation of the append-only ``user_logs`` write path
+plus the get_recent / get_paginated / get_by_aweme_id read surface. The former
+supabase-py REST bodies and the ``USE_ORM_USER_LOGS`` routing flag are retired;
+``get_user_logs_repository()`` (and the module-level ``log_user_action`` helper)
+unconditionally return this class. Writes commit via ``write_scope()``.
 
-NOTE: the ``user_logs`` table is ALSO served by ``LogsRepository`` (the
-user-facing viewer/export) — disjoint method sets, both live.
+TWO REPOS, ONE TABLE: the ``user_logs`` table is ALSO served by
+``LogsRepository`` (the user-facing viewer/export) — disjoint method sets, both
+live; each keeps its own repo over the same ``UserLogs`` model.
+
+PRESERVED LEGACY GUARD — create() skips on a missing user_id: Celery retry paths
+(scheduled_tasks.retry_failed_downloads) can pull rows with a NULL user_id from
+legacy/system downloads; ``create(None, ...)`` used to raise a 23502 NOT-NULL
+violation and spam ERROR logs once per orphan. The guard soft-skips (returns
+None) when user_id is missing, BEFORE opening any session.
+
+STRATEGY-C VALUE-TYPE PARITY (per-field, exact legacy REST shape)
+=================================================================
+  user_logs.id : bigint → STAYS native int (the 5.3 trap).
+  user_logs.user_id : uuid → STR for shape parity. Consumer audit: the callers
+    (log_user_action fire-and-forget; media/auth routers; downloader) treat
+    create()'s result as fire-and-forget (return value ignored) and the read
+    methods feed dicts to HTTP/UI; none does ``UUID(log["user_id"])`` or a
+    ``log["user_id"] == ...`` compare. Coercion is shape-parity only.
+  user_logs.created_at : timestamptz → ``.isoformat()`` ALWAYS (the template
+    rule; get_paginated/get_recent surface created_at to the UI as an ISO
+    string in the REST baseline).
+  status / action / message / aweme_id (text) → native str; details (JSONB) →
+    native dict.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
+from sqlalchemy import func, insert, select
 
-from app.db.supabase_client import get_async_supabase_admin
+from app.db.session import read_scope, write_scope
+from app.models import UserLogs
+from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
 
-if TYPE_CHECKING:
-    from app.repositories.user_logs_repository_orm import UserLogsRepositoryOrm
+_USER_LOGS_NAME_TO_ATTR: Dict[str, str] = _name_to_attr(UserLogs)
+
+
+def _as_utc(dt: datetime) -> datetime:
+    """Attach UTC tzinfo to a naive ISO-parsed datetime (a tz-aware one passes
+    through). Binding a tz-aware bound against the timestamptz column matches the
+    canonical sibling and avoids relying on the engine session's UTC setting."""
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
+def _log_to_dict(obj: Any) -> Dict[str, Any]:
+    """SELECT *-shaped dict for a ``user_logs`` ORM row with strategy-C parity:
+    bigint id stays native int, user_id uuid → str, created_at → ISO str."""
+    out = _orm_obj_to_dict(obj, _USER_LOGS_NAME_TO_ATTR)
+    val = out.get("user_id")
+    if val is not None:
+        out["user_id"] = str(val)
+    for key, value in out.items():
+        if isinstance(value, datetime):
+            out[key] = value.isoformat()
+    return out
 
 
 class UserLogsRepository:
-    """用户日志仓库 (异步)"""
+    """用户日志仓库 (异步, ORM-backed — append-only writer + reads)"""
 
     TABLE_NAME = "user_logs"
 
     def __init__(self):
         pass
-
-    async def _get_client(self):
-        """Get async client (loop-aware, safe for Celery workers)."""
-        return await get_async_supabase_admin()
-
-    async def _get_table(self):
-        """获取表引用"""
-        client = await self._get_client()
-        return client.table(self.TABLE_NAME)
 
     async def create(
         self,
@@ -67,7 +100,7 @@ class UserLogsRepository:
             details: 额外详情（可选）
 
         Returns:
-            创建的日志记录
+            创建的日志记录（parity dict：id int, user_id str, created_at ISO str）
 
         Skips writes when ``user_id`` is missing — Celery retry paths
         (scheduled_tasks.retry_failed_downloads) can pull rows with a
@@ -75,7 +108,8 @@ class UserLogsRepository:
         calling create(None, ...) used to fail loudly with 23502 NOT
         NULL violation, spamming ERROR logs once per orphan download.
         Soft-skip is correct: if there's no user, there's no per-user
-        log to create.
+        log to create. (PRESERVED LEGACY GUARD — see module docstring;
+        the check runs BEFORE opening any session.)
         """
         if not user_id or str(user_id).lower() in ("none", "null"):
             logger.debug(
@@ -84,26 +118,26 @@ class UserLogsRepository:
             )
             return None
         try:
-            data = {
+            data: Dict[str, Any] = {
                 "user_id": user_id,
                 "action": action,
                 "message": message,
                 "status": status,
             }
-
             if aweme_id:
                 data["aweme_id"] = aweme_id
             if details:
                 data["details"] = details
 
-            table = await self._get_table()
-            result = await table.insert(data).execute()
-
-            if result.data:
+            async with write_scope() as session:
+                result = await session.execute(
+                    insert(UserLogs).values(**data).returning(UserLogs)
+                )
+                row = result.scalars().first()
+                out = _log_to_dict(row) if row else None
+            if out:
                 logger.debug(f"日志记录创建成功: {action} - {message}")
-                return result.data[0]
-            return None
-
+            return out
         except Exception as e:
             logger.error(f"创建日志记录失败: {e}")
             return None
@@ -112,7 +146,7 @@ class UserLogsRepository:
         self, user_id: str, limit: int = 20, action: Optional[str] = None
     ) -> List[Dict]:
         """
-        获取最近的日志记录
+        获取最近的日志记录（newest-first, limit honored, optional action filter）
 
         Args:
             user_id: 用户 ID
@@ -123,20 +157,17 @@ class UserLogsRepository:
             日志记录列表
         """
         try:
-            table = await self._get_table()
-            query = (
-                table.select("*")
-                .eq("user_id", user_id)
-                .order("created_at", desc=True)
+            stmt = (
+                select(UserLogs)
+                .where(UserLogs.user_id == user_id)
+                .order_by(UserLogs.created_at.desc())
                 .limit(limit)
             )
-
             if action:
-                query = query.eq("action", action)
-
-            result = await query.execute()
-            return result.data or []
-
+                stmt = stmt.where(UserLogs.action == action)
+            async with read_scope() as session:
+                result = await session.execute(stmt)
+                return [_log_to_dict(r) for r in result.scalars().all()]
         except Exception as e:
             logger.error(f"获取日志记录失败: {e}")
             return []
@@ -156,60 +187,54 @@ class UserLogsRepository:
         Get paginated and filtered logs.
 
         Returns:
-            Dict with 'logs', 'total', 'page', 'page_size', 'total_pages'
+            Dict with 'logs', 'total', 'page', 'page_size', 'total_pages'; on
+            failure returns the empty envelope (parity with the legacy except
+            path).
         """
-        from datetime import datetime, timedelta
-
         try:
-            table = await self._get_table()
+            base = select(UserLogs).where(UserLogs.user_id == user_id)
 
-            # Count query
-            count_query = table.select("id", count="exact").eq("user_id", user_id)
-            # Data query
-            data_query = (
-                table.select("*").eq("user_id", user_id).order("created_at", desc=True)
-            )
-
-            # Filter by status/level
             if level and level != "all":
-                count_query = count_query.eq("status", level)
-                data_query = data_query.eq("status", level)
+                base = base.where(UserLogs.status == level)
 
-            # Filter by date range
+            # date_from / end_date are ISO STRINGS at the API boundary; comparing
+            # the timestamptz column against a bare VARCHAR raises in PG (the
+            # typed ORM column does not auto-coerce like PostgREST did). Parse to
+            # tz-aware UTC datetimes before binding — explicit tzinfo matches the
+            # canonical sibling (resources_repository) and drops the latent
+            # "engine session is UTC" dependency.
             date_from = None
             if date_range and date_range != "custom":
                 days_map = {"24h": 1, "7days": 7, "30days": 30, "90days": 90}
                 days = days_map.get(date_range)
                 if days:
-                    date_from = (datetime.utcnow() - timedelta(days=days)).isoformat()
+                    date_from = datetime.now(timezone.utc) - timedelta(days=days)
             elif start_date:
-                date_from = start_date
+                date_from = _as_utc(datetime.fromisoformat(start_date))
 
             if date_from:
-                count_query = count_query.gte("created_at", date_from)
-                data_query = data_query.gte("created_at", date_from)
-
+                base = base.where(UserLogs.created_at >= date_from)
             if end_date:
-                count_query = count_query.lte("created_at", end_date)
-                data_query = data_query.lte("created_at", end_date)
-
-            # Search filter
+                base = base.where(
+                    UserLogs.created_at <= _as_utc(datetime.fromisoformat(end_date))
+                )
             if search:
-                count_query = count_query.ilike("message", f"%{search}%")
-                data_query = data_query.ilike("message", f"%{search}%")
+                base = base.where(UserLogs.message.ilike(f"%{search}%"))
 
-            # Execute count
-            count_result = await count_query.execute()
-            total = count_result.count if count_result.count is not None else 0
-
-            # Pagination
             offset = (page - 1) * page_size
-            data_query = data_query.range(offset, offset + page_size - 1)
+            async with read_scope() as session:
+                total = await session.scalar(
+                    select(func.count()).select_from(base.subquery())
+                )
+                total = total or 0
+                result = await session.execute(
+                    base.order_by(UserLogs.created_at.desc())
+                    .offset(offset)
+                    .limit(page_size)
+                )
+                logs = [_log_to_dict(r) for r in result.scalars().all()]
 
-            result = await data_query.execute()
-            logs = result.data or []
             total_pages = max(1, (total + page_size - 1) // page_size)
-
             return {
                 "logs": logs,
                 "total": total,
@@ -217,7 +242,6 @@ class UserLogsRepository:
                 "page_size": page_size,
                 "total_pages": total_pages,
             }
-
         except Exception as e:
             logger.error(f"获取分页日志失败: {e}")
             return {
@@ -243,44 +267,23 @@ class UserLogsRepository:
             日志记录列表
         """
         try:
-            table = await self._get_table()
-            result = await (
-                table.select("*")
-                .eq("user_id", user_id)
-                .eq("aweme_id", aweme_id)
-                .order("created_at", desc=True)
-                .limit(limit)
-                .execute()
-            )
-            return result.data or []
-
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(UserLogs)
+                    .where(UserLogs.user_id == user_id)
+                    .where(UserLogs.aweme_id == aweme_id)
+                    .order_by(UserLogs.created_at.desc())
+                    .limit(limit)
+                )
+                return [_log_to_dict(r) for r in result.scalars().all()]
         except Exception as e:
             logger.error(f"获取视频日志失败: {e}")
             return []
 
 
-def get_user_logs_repository() -> Union["UserLogsRepository", "UserLogsRepositoryOrm"]:
-    """Return the right UserLogsRepository implementation per env.
-
-    ORM when ``USE_ORM_USER_LOGS`` is set AND the SQLAlchemy engine is
-    configured; otherwise the legacy supabase-py REST path. A flag-on but
-    engine-missing deploy logs once and falls back to REST (never crashes).
-    """
-    from app.core.config import settings
-
-    if settings.USE_ORM_USER_LOGS:
-        from app.db.engine import is_configured
-
-        if is_configured():
-            from app.repositories.user_logs_repository_orm import (
-                UserLogsRepositoryOrm,
-            )
-
-            return UserLogsRepositoryOrm()
-        logger.warning(
-            "USE_ORM_USER_LOGS=true but SUPAVISOR_DATABASE_URL is empty "
-            "— falling back to supabase-py path"
-        )
+def get_user_logs_repository() -> "UserLogsRepository":
+    """Return the ORM-backed UserLogsRepository (per-domain rollout flag retired
+    — prod runs 100% ORM)."""
     return UserLogsRepository()
 
 

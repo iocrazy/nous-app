@@ -1,4 +1,4 @@
-"""Integration tests for UserLogsRepositoryOrm (Batch L2) against real PG.
+"""Integration tests for the ORM UserLogsRepository (Batch L2) against real PG.
 
 Proves the REST → ORM swap is invisible AND that STRATEGY-C value-type parity
 holds for the append-only user_logs writer + read surface:
@@ -92,9 +92,9 @@ async def _seed_log(conn, user_id, **overrides) -> dict:
 
 
 def _repo():
-    from app.repositories.user_logs_repository_orm import UserLogsRepositoryOrm
+    from app.repositories.user_logs_repository import UserLogsRepository
 
-    return UserLogsRepositoryOrm()
+    return UserLogsRepository()
 
 
 # ─── create + the preserved missing-user_id guard ───────────────────────
@@ -304,30 +304,12 @@ async def test_get_by_aweme_id(integration_db_url, patched_engine, cleanup_test_
     assert all(r["aweme_id"] == aweme for r in rows)
 
 
-# ─── Flag-off legacy parity ─────────────────────────────────────────────
+# ─── Factory (ORM-only, post-rollout) ───────────────────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    from app.core.config import settings
+async def test_factory_returns_orm_repository():
+    """Per-domain rollout flag retired → factory unconditionally returns the
+    ORM-backed UserLogsRepository."""
     from app.repositories import user_logs_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_USER_LOGS", False)
-    repo = mod.get_user_logs_repository()
-    assert type(repo) is mod.UserLogsRepository
-    from app.repositories.user_logs_repository_orm import UserLogsRepositoryOrm
-
-    assert not isinstance(repo, UserLogsRepositoryOrm)
-
-
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories import user_logs_repository as mod
-    from app.repositories.user_logs_repository_orm import UserLogsRepositoryOrm
-
-    monkeypatch.setattr(settings, "USE_ORM_USER_LOGS", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    repo = mod.get_user_logs_repository()
-    assert isinstance(repo, UserLogsRepositoryOrm)
+    assert type(mod.get_user_logs_repository()) is mod.UserLogsRepository

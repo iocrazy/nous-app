@@ -162,19 +162,8 @@ class Settings(BaseSettings):
         "(CONSUMED — the CSV export does str(created_at)). Covers get_logs / "
         "get_logs_for_export reads + create_log / delete_logs writes (commit "
         "via write_scope()). NOTE: user_logs is also served by "
-        "UserLogsRepository (USE_ORM_USER_LOGS) — disjoint method sets, both "
-        "live.",
-    )
-    USE_ORM_USER_LOGS: bool = Field(
-        default=False,
-        description="Route UserLogsRepository (the append-only user_logs writer "
-        "+ get_recent / get_paginated / get_by_aweme_id reads) through the "
-        "SQLAlchemy 2.0 ORM session layer (Batch L2). Strategy C: bigint id "
-        "stays native int; user_id uuid → str (shape parity); created_at → ISO "
-        "str. PRESERVES the legacy create() soft-skip on a missing user_id "
-        "(Celery orphan-download NOT-NULL spam guard). Writes commit via "
-        "write_scope(). NOTE: shares the user_logs table with LogsRepository "
-        "(USE_ORM_LOGS).",
+        "UserLogsRepository (ORM-only, per-domain flag retired) — disjoint "
+        "method sets, both live.",
     )
     SCOPE_ENFORCE_RESOURCES: bool = Field(
         default=False,
