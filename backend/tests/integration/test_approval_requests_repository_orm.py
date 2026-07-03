@@ -1,4 +1,4 @@
-"""Integration tests for ApprovalRequestsRepositoryOrm (Phase 2 H batch) vs PG.
+"""Integration tests for the ORM ApprovalRequestsRepository (Phase 2 H batch) vs PG.
 
 THE FROZEN-DATACLASS PARITY PROOF — the INVERSE-uuid case. This repo's dataclass
 fields id / user_id / agent_id / decided_by are typed ``uuid.UUID`` (NOT str),
@@ -92,11 +92,11 @@ async def cleanup_approvals(integration_db_url):
 
 
 def _repo():
-    from app.repositories.approval_requests_repository_orm import (
-        ApprovalRequestsRepositoryOrm,
+    from app.repositories.approval_requests_repository import (
+        ApprovalRequestsRepository,
     )
 
-    return ApprovalRequestsRepositoryOrm()
+    return ApprovalRequestsRepository()
 
 
 def _hook() -> str:
@@ -259,34 +259,14 @@ async def test_mark_expired_boundary(
     assert still_pending.status == "pending"
 
 
-# ─── factory on/off ─────────────────────────────────────────────────────
+# ─── factory (ORM-only, post-rollout) ───────────────────────────────────
 
 
-def test_factory_off_returns_legacy():
-    from unittest.mock import patch
+async def test_factory_returns_orm_repository():
+    """Per-domain rollout flag retired → factory unconditionally returns the
+    ORM-backed ApprovalRequestsRepository."""
+    from app.repositories import approval_requests_repository as mod
 
-    from app.repositories.approval_requests_repository import (
-        ApprovalRequestsRepository,
-        get_approval_requests_repository,
+    assert (
+        type(mod.get_approval_requests_repository()) is mod.ApprovalRequestsRepository
     )
-
-    with patch("app.core.config.settings.USE_ORM_APPROVAL", False):
-        assert type(get_approval_requests_repository()) is ApprovalRequestsRepository
-
-
-def test_factory_on_returns_orm():
-    from unittest.mock import patch
-
-    from app.repositories.approval_requests_repository_orm import (
-        ApprovalRequestsRepositoryOrm,
-    )
-
-    with (
-        patch("app.core.config.settings.USE_ORM_APPROVAL", True),
-        patch("app.db.engine.is_configured", return_value=True),
-    ):
-        from app.repositories.approval_requests_repository import (
-            get_approval_requests_repository,
-        )
-
-        assert type(get_approval_requests_repository()) is ApprovalRequestsRepositoryOrm

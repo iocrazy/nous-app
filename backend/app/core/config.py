@@ -567,35 +567,6 @@ class Settings(BaseSettings):
         "swallows→None; list_* raise. Writes commit via write_scope(). Inert — "
         "flip back to false to roll back.",
     )
-    USE_ORM_APPROVAL: bool = Field(
-        default=False,
-        description="Route ApprovalRequestsRepository (agent_approval_requests — "
-        "the human-in-loop approval-gate state machine) through the SQLAlchemy 2.0 "
-        "ORM (Phase 2 H batch — FROZEN-DATACLASS parity). Returns the frozen "
-        "``ApprovalRequest`` dataclass, NOT a dict. PARITY APPROACH = builder "
-        "reuse: ORM rows → REST-shaped dict (uuid→str, datetime→ISO str, bigint "
-        "native int) → the UNCHANGED inherited ``ApprovalRequest.from_row(dict)`` "
-        "reconstructs the dataclass byte-identically (wrapping the uuid strings "
-        "back to native ``UUID``). UUID AUDIT: id/user_id/agent_id/decided_by are "
-        "wrapped to native uuid.UUID BY the builder (the dataclass fields ARE typed "
-        "UUID) → the router approve/reject authz check ``existing.user_id != "
-        "user_uuid`` is UUID==UUID (str()ing them would BREAK parity here — the "
-        "INVERSE of most H repos). session_id/run_id are BIGINT columns but STR "
-        "dataclass fields (mig 231/232 snowflakes) — the builder str()s them (kept "
-        "native int by _rest_row). status is plain Text (NOT Enum) → bare str; "
-        "router ``existing.status != 'pending'`` is str==str. v3 temporal: "
-        "mark_expired binds the NATIVE aware datetime cutoff (never the legacy ISO "
-        "string) in the expires_at range filter; decide / mark_expired "
-        "_coerce_temporal the ISO-string decided_at → aware datetime. create binds "
-        "a native aware expires_at (now+ttl). CONCERN (NOT repaired — inert "
-        "discipline): decide() returns True UNCONDITIONALLY on a clean execute "
-        "(does not check rowcount), replicating the legacy quirk — a 0-row no-op "
-        "still returns True (the router's prior get_by_id guard is the real gate). "
-        "Phantom screen: all insert/update keys are mapped columns. create raises "
-        "on exception; get_by_id/list swallow→None/[]; decide→False on exception; "
-        "mark_expired→0 on exception. Writes commit via write_scope(). Inert — "
-        "flip back to false to roll back.",
-    )
     USE_ORM_WORKFORCE: bool = Field(
         default=False,
         description="Route AgentWorkforceRepository (the M2 Persistent Workforce "
