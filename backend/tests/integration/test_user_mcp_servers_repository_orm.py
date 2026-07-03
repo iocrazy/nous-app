@@ -1,4 +1,4 @@
-"""Integration tests for UserMCPServersRepositoryOrm against real PG.
+"""Integration tests for the ORM-only UserMCPServersRepository against real PG.
 
 The public return shape is the frozen dataclass ``UserMCPServer`` with:
   - ``id`` / ``user_id`` as native ``uuid.UUID`` OBJECTS (strategy-C);
@@ -82,11 +82,11 @@ async def test_user(integration_db_url):
 
 
 def _repo():
-    from app.repositories.user_mcp_servers_repository_orm import (
-        UserMCPServersRepositoryOrm,
+    from app.repositories.user_mcp_servers_repository import (
+        UserMCPServersRepository,
     )
 
-    return UserMCPServersRepositoryOrm()
+    return UserMCPServersRepository()
 
 
 # ─── Strategy-C: return type is UserMCPServer with uuid.UUID fields ────────
@@ -418,37 +418,13 @@ async def test_delete_wrong_owner_does_not_remove(
     assert count == 1, "M3 VIOLATION: delete() with wrong owner removed the row"
 
 
-# ─── Factory flag parity ───────────────────────────────────────────────────
+# ─── Factory: ORM-only (flag retired, class collapsed) ─────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    """Flag=False → REST UserMCPServersRepository (not ORM)."""
-    from app.core.config import settings
+async def test_factory_returns_collapsed_repository():
+    """Post-collapse the factory unconditionally returns the (ORM-only)
+    UserMCPServersRepository — no flag branch, no ORM subclass."""
     from app.repositories import user_mcp_servers_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_USER_MCP_SERVERS", False)
     repo = mod.get_user_mcp_servers_repository()
     assert type(repo) is mod.UserMCPServersRepository
-
-    from app.repositories.user_mcp_servers_repository_orm import (
-        UserMCPServersRepositoryOrm,
-    )
-
-    assert not isinstance(repo, UserMCPServersRepositoryOrm)
-
-
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    """Flag=True + engine configured → ORM UserMCPServersRepositoryOrm."""
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories import user_mcp_servers_repository as mod
-    from app.repositories.user_mcp_servers_repository_orm import (
-        UserMCPServersRepositoryOrm,
-    )
-
-    monkeypatch.setattr(settings, "USE_ORM_USER_MCP_SERVERS", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    repo = mod.get_user_mcp_servers_repository()
-    assert isinstance(repo, UserMCPServersRepositoryOrm)

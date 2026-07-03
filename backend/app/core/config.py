@@ -152,30 +152,6 @@ class Settings(BaseSettings):
         "get_by_script / list_by_script / list_by_chapter / list_by_storyboard "
         "(writes commit via write_scope()).",
     )
-    USE_ORM_LOGS: bool = Field(
-        default=False,
-        description="Route LogsRepository (the user-facing user_logs viewer / "
-        "CSV export) through the SQLAlchemy 2.0 ORM session layer (Batch L2). "
-        "Strategy C: bigint id stays native int (the 5.3 trap); user_id uuid → "
-        "str for shape parity (the LogEntry response model has no user_id field "
-        "and no consumer reads it type-sensitively); created_at → ISO str "
-        "(CONSUMED — the CSV export does str(created_at)). Covers get_logs / "
-        "get_logs_for_export reads + create_log / delete_logs writes (commit "
-        "via write_scope()). NOTE: user_logs is also served by "
-        "UserLogsRepository (USE_ORM_USER_LOGS) — disjoint method sets, both "
-        "live.",
-    )
-    USE_ORM_USER_LOGS: bool = Field(
-        default=False,
-        description="Route UserLogsRepository (the append-only user_logs writer "
-        "+ get_recent / get_paginated / get_by_aweme_id reads) through the "
-        "SQLAlchemy 2.0 ORM session layer (Batch L2). Strategy C: bigint id "
-        "stays native int; user_id uuid → str (shape parity); created_at → ISO "
-        "str. PRESERVES the legacy create() soft-skip on a missing user_id "
-        "(Celery orphan-download NOT-NULL spam guard). Writes commit via "
-        "write_scope(). NOTE: shares the user_logs table with LogsRepository "
-        "(USE_ORM_LOGS).",
-    )
     SCOPE_ENFORCE_RESOURCES: bool = Field(
         default=False,
         description="Activate the app-layer tenant-scope choke point "
@@ -281,24 +257,6 @@ class Settings(BaseSettings):
         "parity, NOT re-raise); delete returns False on failure. Writes commit "
         "via write_scope(). Inert — flip back to false to roll back.",
     )
-    USE_ORM_SESSION_MEMORY: bool = Field(
-        default=False,
-        description="Route SessionMemoryRepository (ai_session_memory — one "
-        "markdown-body row per ai_sessions row) through the SQLAlchemy 2.0 ORM "
-        "session layer (Phase 2 M batch). The repo returns a SessionMemoryRow "
-        "dataclass whose inherited _row_to_obj constructor already normalises "
-        "every field (session_id → str, last_updated_at → _parse_ts datetime, "
-        "counters → int), so strategy-C parity is handled by the dataclass — the "
-        "ORM just feeds it a native-typed row dict. The ONLY ORM-specific "
-        "coercion: session_id is a BIGINT (FK → ai_sessions.id snowflake) but "
-        "callers pass it as a str, so binds are int-coerced (_bigint) — asyncpg "
-        "int8 codec is strict. upsert reproduces ON CONFLICT (session_id) DO "
-        "UPDATE with the legacy load-then-bump-version logic; now() is written "
-        "native UTC datetime. No phantom columns, no date range filters. load / "
-        "upsert swallow + return None (must not crash the chat path); delete "
-        "returns False on failure. Writes commit via write_scope(). Inert — flip "
-        "back to false to roll back.",
-    )
     USE_ORM_PERMISSION: bool = Field(
         default=False,
         description="Route PermissionRepository (the ReBAC effective-role read "
@@ -320,27 +278,6 @@ class Settings(BaseSettings):
         "roll back.",
     )
 
-    USE_ORM_INVITE: bool = Field(
-        default=False,
-        description="Route InviteRepository (team_invites + the team_members "
-        "membership checks accept/delete walk) through the SQLAlchemy 2.0 ORM "
-        "session layer (Phase 2 M batch). Strategy C value-type parity: id / "
-        "team_id (BIGINT snowflake) stay NATIVE int (the 5.3 trap; router wraps "
-        "them in str() for the str InviteResponse fields, accept_invite str()s "
-        "team_id at the AcceptInviteResponse boundary); created_by (uuid) → str "
-        "(REQUIRED — InviteResponse.created_by is a str field, pydantic v2 "
-        "rejects a native UUID); expires_at → ISO str (REQUIRED — the inherited "
-        "accept_invite expiry check calls .replace()/fromisoformat() on it, a "
-        "native datetime would AttributeError); created_at → ISO str; max_uses / "
-        "use_count native int. get_invite_by_code reproduces the PostgREST "
-        "teams(id,name) embed as a nested dict. Callers pass team_id as a STR → "
-        "_bigint int-coerces every bigint bind; created_by/user_id are uuid "
-        "strings (asyncpg Uuid codec accepts). No date range filters. Reads "
-        "return []/None; create_invite raises on failure; accept_invite raises "
-        "the same message strings the router pattern-matches (incl. the 23505 → "
-        "'Already a member' path). Writes commit via write_scope(). Inert — flip "
-        "back to false to roll back.",
-    )
     USE_ORM_AI: bool = Field(
         default=False,
         description="Route AIRepository (resource_transcripts / "
@@ -696,19 +633,6 @@ class Settings(BaseSettings):
         "write_scope(). Inert — flip back to false to roll back.",
     )
 
-    USE_ORM_USER_MCP_SERVERS: bool = Field(
-        default=False,
-        description="Route UserMcpServersRepository (user_mcp_servers CRUD) "
-        "through the SQLAlchemy 2.0 ORM (deferred-repo finish wave — ★ SECRETS ★). "
-        "The public return type is the frozen UserMCPServer dataclass with id/"
-        "user_id as uuid.UUID OBJECTS (NOT str) — the ORM impl rebuilds the SAME "
-        "dataclass via UserMCPServer.from_row over the ORM row's mapping, so "
-        "parity is structural. bearer_token stays ENCRYPTED at write "
-        "(_encrypt_secret) / DECRYPTED at read (_decrypt_secret) exactly as REST. "
-        "M3 defense-in-depth: update/delete keep WHERE user_id == owner_user_id. "
-        "Writes COMMIT via write_scope(). Table (re)created by mig 263; model + "
-        "repo validated against live dev DB. Inert; flip false to revert.",
-    )
     USE_ORM_ANALYSIS: bool = Field(
         default=False,
         description="Route AnalysisRepository (resource_analysis CRUD + pgvector "

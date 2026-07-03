@@ -3,29 +3,74 @@
 One row per ai_sessions row. Body is markdown source-of-truth + parsed
 sections_json for query convenience.
 
-ORM 2.0 migration (Phase 2, M batch): ``SessionMemoryRepository`` is the legacy
-supabase-py REST implementation; ``SessionMemoryRepositoryOrm`` (in
-``session_memory_repository_orm.py``) is the SQLAlchemy 2.0 ORM successor. Call
-sites go through ``get_session_memory_repository()`` (bottom of this file),
-which picks the ORM subclass when ``USE_ORM_SESSION_MEMORY`` is on AND the
-engine is configured.
+ORM 2.0 (Phase 2, M batch — post-rollout collapse): ``SessionMemoryRepository``
+is the SQLAlchemy 2.0 ORM implementation. The legacy supabase-py REST path and
+the ``USE_ORM_SESSION_MEMORY`` flag were retired once prod ran 100% ORM; call
+sites still route through ``get_session_memory_repository()`` (bottom of this
+file), which now unconditionally returns this class.
+
+VALUE-TYPE PARITY (why strategy-C is trivial here)
+==================================================
+Unlike the dict-returning repos, this repo returns a ``SessionMemoryRow``
+dataclass, and ``_row_to_obj`` ALREADY normalises every field at its boundary
+regardless of the source dict's value types:
+  session_id → ``str(row["session_id"])``   (bigint → str)
+  last_updated_at → ``_parse_ts(...)``       (datetime OR ISO str → datetime)
+  version / tokens / tool_calls / turns → ``int(... or 0)``
+  body_md → ``... or ""``   sections_json → ``... or {}``
+So feeding ``_row_to_obj`` a native-typed ORM row dict (datetime object, native
+int session_id, dict sections_json) produces the IDENTICAL ``SessionMemoryRow``
+the retired REST path produced from a str/ISO-typed dict — the dataclass
+constructor is the parity layer. We build a plain DB-column-keyed dict from the
+ORM row (via ``_orm_obj_to_dict``) and hand it to ``_row_to_obj``; no per-field
+coercion is needed here.
+
+BIGINT BIND COERCION (the only ORM-specific hazard)
+===================================================
+``ai_session_memory.session_id`` is a BIGINT (FK → ai_sessions.id, a snowflake
+bigint), but every caller passes ``session_id`` as a STR (UUID|str signature;
+in practice a snowflake-as-str). asyncpg's int8 codec is strict — binding a str
+to a BIGINT column raises. We coerce the lookup/write key to int via ``_bigint``
+at the query boundary. The PUBLIC contract is unchanged: ``_row_to_obj`` str()s
+session_id back on the way out.
+
+UPSERT semantics: ``upsert`` reproduces the legacy ``upsert(payload,
+on_conflict="session_id")`` as ``pg_insert(...).on_conflict_do_update(
+index_elements=["session_id"], set_={the non-PK columns})``. ``new_version`` is
+computed by loading the existing row first (load → +1 or 1). ``now()`` is
+written as a real native UTC datetime (asyncpg needs the native datetime;
+``_parse_ts`` reads it back identically). Writes commit via ``write_scope()``
+(silent-rollback P0). Reads use ``read_scope()``. Error handling: load swallows
++ returns None; upsert swallows + returns None (must not crash the chat path);
+delete swallows + returns False.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import Any, Optional
 from uuid import UUID
 
 from loguru import logger
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from app.db.supabase_client import get_async_supabase_admin
+from app.db.session import read_scope, write_scope
+from app.models import AiSessionMemory
+from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
 
-if TYPE_CHECKING:
-    from app.repositories.session_memory_repository_orm import (
-        SessionMemoryRepositoryOrm,
-    )
+_MEMORY_N2A = _name_to_attr(AiSessionMemory)
+
+
+def _bigint(value: UUID | str | int) -> int:
+    """Coerce a session_id to a native int for a BIGINT bind (asyncpg int8 codec
+    is strict — a str snowflake must be int-coerced). Accepts int / str / UUID
+    (UUID stringified then int-parsed defensively)."""
+    if isinstance(value, int):
+        return value
+    return int(str(value))
 
 
 @dataclass
@@ -43,10 +88,15 @@ class SessionMemoryRow:
 
 
 class SessionMemoryRepository:
-    TABLE = "ai_session_memory"
+    """SQLAlchemy 2.0 repository for ``ai_session_memory`` (ORM-only).
 
-    async def _get_client(self):
-        return await get_async_supabase_admin()
+    Overrides load / upsert / delete via ``read_scope()`` / ``write_scope()``.
+    The DOMAIN-OBJECT MAPPING (``_row_to_obj`` staticmethod) and ``_parse_ts``
+    are the parity layer — the ORM only changes HOW the row dict is
+    fetched/written, not how it becomes a ``SessionMemoryRow``.
+    """
+
+    TABLE = "ai_session_memory"
 
     @staticmethod
     def _row_to_obj(row: dict[str, Any]) -> SessionMemoryRow:
@@ -64,17 +114,16 @@ class SessionMemoryRepository:
     async def load(self, session_id: UUID | str) -> Optional[SessionMemoryRow]:
         """Return the row, or None if not yet created."""
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.TABLE)
-                .select("*")
-                .eq("session_id", str(session_id))
-                .maybe_single()
-                .execute()
-            )
-            if not (result and result.data):
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(AiSessionMemory)
+                    .where(AiSessionMemory.session_id == _bigint(session_id))
+                    .limit(1)
+                )
+                row = result.scalars().first()
+            if row is None:
                 return None
-            return self._row_to_obj(result.data)
+            return self._row_to_obj(_orm_obj_to_dict(row, _MEMORY_N2A))
         except Exception as exc:
             logger.error(f"session_memory load {session_id} failed: {exc}")
             return None
@@ -96,45 +145,48 @@ class SessionMemoryRepository:
         Returns the resulting row, or None on failure (logged + swallowed —
         background updater must not crash chat path)."""
         try:
-            client = await self._get_client()
-            now_iso = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(timezone.utc)
             existing = await self.load(session_id)
             new_version = (existing.version + 1) if (existing and bump_version) else 1
             payload = {
-                "session_id": str(session_id),
+                "session_id": _bigint(session_id),
                 "body_md": body_md,
                 "sections_json": sections_json or {},
                 "version": new_version,
-                "last_updated_at": now_iso,
+                "last_updated_at": now,
                 "tokens_at_last_update": int(tokens_at_update),
                 "tool_calls_at_last_update": int(tool_calls_at_update),
                 "turns_at_last_update": int(turns_at_update),
             }
-            result = (
-                await client.table(self.TABLE)
-                .upsert(payload, on_conflict="session_id")
-                .execute()
-            )
-            if not result.data:
+            stmt = pg_insert(AiSessionMemory).values(**payload)
+            # ON CONFLICT (session_id) DO UPDATE for every non-PK column.
+            update_cols = {k: v for k, v in payload.items() if k != "session_id"}
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[AiSessionMemory.session_id],
+                set_=update_cols,
+            ).returning(AiSessionMemory)
+            async with write_scope() as session:
+                result = await session.execute(stmt)
+                row = result.scalars().first()
+            if row is None:
                 return None
-            return self._row_to_obj(result.data[0])
+            return self._row_to_obj(_orm_obj_to_dict(row, _MEMORY_N2A))
         except Exception as exc:
             logger.error(f"session_memory upsert {session_id} failed: {exc}")
             return None
 
     async def delete(self, session_id: UUID | str) -> bool:
         """Hard-delete a session memory row. Returns True if a row was
-        removed (best-effort signal — Supabase client doesn't always
-        report delete row count reliably)."""
+        removed."""
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.TABLE)
-                .delete()
-                .eq("session_id", str(session_id))
-                .execute()
-            )
-            return bool(result.data)
+            async with write_scope() as session:
+                result = await session.execute(
+                    sa_delete(AiSessionMemory)
+                    .where(AiSessionMemory.session_id == _bigint(session_id))
+                    .returning(AiSessionMemory.session_id)
+                )
+                deleted = result.scalars().first()
+            return deleted is not None
         except Exception as exc:
             logger.error(f"session_memory delete {session_id} failed: {exc}")
             return False
@@ -153,30 +205,13 @@ def _parse_ts(value: Any) -> Optional[datetime]:
     return None
 
 
-def get_session_memory_repository() -> (
-    Union["SessionMemoryRepository", "SessionMemoryRepositoryOrm"]
-):
-    """Return the right SessionMemoryRepository implementation per env.
+def get_session_memory_repository() -> "SessionMemoryRepository":
+    """Return the SessionMemoryRepository (SQLAlchemy 2.0, ORM-only).
 
-    ORM when ``USE_ORM_SESSION_MEMORY`` is set AND the SQLAlchemy engine is
-    configured; otherwise the legacy supabase-py REST path. A flag-on but
-    engine-missing deploy logs once and falls back to REST (never crashes).
+    The legacy supabase-py REST path and the ``USE_ORM_SESSION_MEMORY`` flag
+    were retired post-rollout; prod runs 100% ORM. Kept as a factory so call
+    sites remain import-stable.
     """
-    from app.core.config import settings
-
-    if settings.USE_ORM_SESSION_MEMORY:
-        from app.db.engine import is_configured
-
-        if is_configured():
-            from app.repositories.session_memory_repository_orm import (
-                SessionMemoryRepositoryOrm,
-            )
-
-            return SessionMemoryRepositoryOrm()
-        logger.warning(
-            "USE_ORM_SESSION_MEMORY=true but SUPAVISOR_DATABASE_URL is empty "
-            "— falling back to supabase-py path"
-        )
     return SessionMemoryRepository()
 
 

@@ -1,4 +1,4 @@
-"""Integration tests for InviteRepositoryOrm (Phase 2 M batch) against real PG.
+"""Integration tests for the ORM InviteRepository (Phase 2 M batch) against real PG.
 
 Proves the REST → ORM swap is invisible AND that STRATEGY-C value-type parity
 holds on team_invites:
@@ -87,9 +87,9 @@ async def seed_team(integration_db_url):
 
 
 def _repo():
-    from app.repositories.invite_repository_orm import InviteRepositoryOrm
+    from app.repositories.invite_repository import InviteRepository
 
-    return InviteRepositoryOrm()
+    return InviteRepository()
 
 
 # ─── Create (COMMIT + parity) ───────────────────────────────────────────
@@ -247,30 +247,12 @@ async def test_check_user_can_manage(patched_engine, seed_team):
     )
 
 
-# ─── factory on/off ─────────────────────────────────────────────────────
+# ─── Factory (ORM-only, post-rollout) ───────────────────────────────────
 
 
-def test_factory_off_returns_legacy():
-    from unittest.mock import patch
+def test_factory_returns_orm_repository():
+    """Per-domain rollout flag retired → factory unconditionally returns the
+    ORM-backed InviteRepository."""
+    from app.repositories import invite_repository as mod
 
-    from app.repositories.invite_repository import (
-        InviteRepository,
-        get_invite_repository,
-    )
-
-    with patch("app.core.config.settings.USE_ORM_INVITE", False):
-        assert type(get_invite_repository()) is InviteRepository
-
-
-def test_factory_on_returns_orm(integration_db_url):
-    from unittest.mock import patch
-
-    from app.repositories.invite_repository_orm import InviteRepositoryOrm
-
-    with (
-        patch("app.core.config.settings.USE_ORM_INVITE", True),
-        patch("app.db.engine.is_configured", return_value=True),
-    ):
-        from app.repositories.invite_repository import get_invite_repository
-
-        assert type(get_invite_repository()) is InviteRepositoryOrm
+    assert type(mod.get_invite_repository()) is mod.InviteRepository

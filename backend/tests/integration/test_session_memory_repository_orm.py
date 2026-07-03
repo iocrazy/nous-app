@@ -1,4 +1,4 @@
-"""Integration tests for SessionMemoryRepositoryOrm (Phase 2 M batch) vs real PG.
+"""Integration tests for the ORM-only SessionMemoryRepository vs real PG.
 
 Proves the REST → ORM swap is invisible on ai_session_memory:
 
@@ -81,11 +81,11 @@ async def seeded_session(integration_db_url):
 
 
 def _repo():
-    from app.repositories.session_memory_repository_orm import (
-        SessionMemoryRepositoryOrm,
+    from app.repositories.session_memory_repository import (
+        SessionMemoryRepository,
     )
 
-    return SessionMemoryRepositoryOrm()
+    return SessionMemoryRepository()
 
 
 # ─── load / upsert / delete round-trip ──────────────────────────────────
@@ -213,34 +213,13 @@ async def test_delete_commit(integration_db_url, patched_engine, seeded_session)
     assert await _repo().delete(str(seeded_session)) is False
 
 
-# ─── Factory flag wiring ────────────────────────────────────────────────
+# ─── Factory: ORM-only (flag retired, class collapsed) ─────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    from app.core.config import settings
+async def test_factory_returns_collapsed_repository():
+    """Post-collapse the factory unconditionally returns the (ORM-only)
+    SessionMemoryRepository — no flag branch, no ORM subclass."""
     from app.repositories import session_memory_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_SESSION_MEMORY", False)
     repo = mod.get_session_memory_repository()
     assert type(repo) is mod.SessionMemoryRepository
-    from app.repositories.session_memory_repository_orm import (
-        SessionMemoryRepositoryOrm,
-    )
-
-    assert not isinstance(repo, SessionMemoryRepositoryOrm)
-
-
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories import session_memory_repository as mod
-    from app.repositories.session_memory_repository_orm import (
-        SessionMemoryRepositoryOrm,
-    )
-
-    monkeypatch.setattr(settings, "USE_ORM_SESSION_MEMORY", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    repo = mod.get_session_memory_repository()
-    assert isinstance(repo, SessionMemoryRepositoryOrm)
