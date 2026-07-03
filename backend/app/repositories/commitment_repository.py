@@ -255,7 +255,7 @@ class CommitmentRepository:
                 return self._to_obj(row)
         except Exception as exc:
             logger.error(
-                "Failed to mark commitment %s as %s: %s",
+                "Failed to mark commitment {} as {}: {}",
                 commitment_id,
                 new_status.value,
                 exc,
@@ -341,7 +341,7 @@ class CommitmentRepository:
                 return [self._to_obj(r) for r in result.scalars().all()]
         except Exception as exc:
             logger.error(
-                "Failed to list next-session commitments for agent=%s user=%s: %s",
+                "Failed to list next-session commitments for agent={} user={}: {}",
                 agent_id,
                 user_id,
                 exc,
