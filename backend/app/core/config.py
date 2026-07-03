@@ -696,19 +696,6 @@ class Settings(BaseSettings):
         "write_scope(). Inert — flip back to false to roll back.",
     )
 
-    USE_ORM_USER_MCP_SERVERS: bool = Field(
-        default=False,
-        description="Route UserMcpServersRepository (user_mcp_servers CRUD) "
-        "through the SQLAlchemy 2.0 ORM (deferred-repo finish wave — ★ SECRETS ★). "
-        "The public return type is the frozen UserMCPServer dataclass with id/"
-        "user_id as uuid.UUID OBJECTS (NOT str) — the ORM impl rebuilds the SAME "
-        "dataclass via UserMCPServer.from_row over the ORM row's mapping, so "
-        "parity is structural. bearer_token stays ENCRYPTED at write "
-        "(_encrypt_secret) / DECRYPTED at read (_decrypt_secret) exactly as REST. "
-        "M3 defense-in-depth: update/delete keep WHERE user_id == owner_user_id. "
-        "Writes COMMIT via write_scope(). Table (re)created by mig 263; model + "
-        "repo validated against live dev DB. Inert; flip false to revert.",
-    )
     USE_ORM_ANALYSIS: bool = Field(
         default=False,
         description="Route AnalysisRepository (resource_analysis CRUD + pgvector "

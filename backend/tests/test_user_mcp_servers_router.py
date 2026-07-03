@@ -238,87 +238,95 @@ async def test_delete_404s_when_not_owner():
     fake_repo.delete.assert_not_called()
 
 
-# ─── M3: defensive owner_user_id filter at repo level ───────────────
+# ─── M3: defensive owner_user_id filter at repo level (ORM 2.0) ─────
+#
+# Post-rollout the repo is the SQLAlchemy 2.0 implementation — writes go
+# through ``write_scope()`` with ``update(UserMcpServers)`` /
+# ``delete(UserMcpServers)`` statements. These tests mock ``write_scope`` with a
+# fake session that captures every emitted ``(sql, binds)`` pair, so the
+# compiled SQL shape (WHERE on both id AND user_id) + the ``owner_user_id`` bind
+# value are asserted WITHOUT a live database (the DSN-gated integration suite in
+# ``tests/integration/test_user_mcp_servers_repository_orm.py`` exercises the
+# real round-trip). This keeps fast, always-run coverage of the M3 SQL filter.
+
+
+class _FakeSession:
+    """Captures execute (compiled_sql, binds); returns a no-op result."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict]] = []
+
+    async def execute(self, stmt) -> MagicMock:
+        compiled = stmt.compile()
+        self.calls.append((str(compiled), dict(compiled.params)))
+        return MagicMock()
+
+
+class _ScopeCM:
+    def __init__(self, session: _FakeSession) -> None:
+        self._session = session
+
+    async def __aenter__(self) -> _FakeSession:
+        return self._session
+
+    async def __aexit__(self, *exc) -> bool:
+        return False
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_repo_delete_includes_owner_user_id_filter():
+async def test_repo_delete_includes_owner_user_id_filter(monkeypatch):
     """M3: even when called directly (bypassing endpoint ownership check)
-    the SQL filter on user_id ensures another user's row stays put."""
+    the SQL DELETE filters on BOTH id and user_id so another user's row
+    stays put."""
+    import app.repositories.user_mcp_servers_repository as mod
     from app.repositories.user_mcp_servers_repository import (
         UserMCPServersRepository,
     )
 
-    captured_filters: list[tuple[str, str]] = []
-
-    class _FakeQuery:
-        def __init__(self):
-            self.kind = None
-
-        def delete(self):
-            self.kind = "delete"
-            return self
-
-        def update(self, _patch):
-            self.kind = "update"
-            return self
-
-        def eq(self, col, val):
-            captured_filters.append((col, val))
-            return self
-
-        async def execute(self):
-            return MagicMock(data=[])
-
-    fake_client = MagicMock()
-    fake_client.table = MagicMock(return_value=_FakeQuery())
+    session = _FakeSession()
+    monkeypatch.setattr(mod, "write_scope", lambda: _ScopeCM(session))
 
     repo = UserMCPServersRepository()
-    repo._client = AsyncMock(return_value=fake_client)
-
     server_id = uuid4()
     owner = uuid4()
 
-    await repo.delete(server_id, owner_user_id=owner)
-    # Must have BOTH filters applied
-    cols = [c for c, _ in captured_filters]
-    assert "id" in cols
-    assert "user_id" in cols
-    user_filter_value = next(v for c, v in captured_filters if c == "user_id")
-    assert user_filter_value == str(owner)
+    ok = await repo.delete(server_id, owner_user_id=owner)
+    assert ok is True
+
+    assert len(session.calls) == 1
+    sql, binds = session.calls[0]
+    assert sql.startswith("DELETE FROM")
+    assert "user_mcp_servers.id =" in sql
+    assert "user_mcp_servers.user_id =" in sql
+    # The owner_user_id bind value must be present as a filter.
+    assert str(owner) in binds.values()
+    assert str(server_id) in binds.values()
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_repo_update_includes_owner_user_id_filter():
+async def test_repo_update_includes_owner_user_id_filter(monkeypatch):
+    import app.repositories.user_mcp_servers_repository as mod
     from app.repositories.user_mcp_servers_repository import (
         UserMCPServersRepository,
     )
 
-    captured_filters: list[tuple[str, str]] = []
-
-    class _FakeQuery:
-        def update(self, _patch):
-            return self
-
-        def eq(self, col, val):
-            captured_filters.append((col, val))
-            return self
-
-        async def execute(self):
-            return MagicMock(data=[])
-
-    fake_client = MagicMock()
-    fake_client.table = MagicMock(return_value=_FakeQuery())
+    session = _FakeSession()
+    monkeypatch.setattr(mod, "write_scope", lambda: _ScopeCM(session))
 
     repo = UserMCPServersRepository()
-    repo._client = AsyncMock(return_value=fake_client)
-
     server_id = uuid4()
     owner = uuid4()
 
-    await repo.update(server_id, owner_user_id=owner, enabled=False)
-    cols = [c for c, _ in captured_filters]
-    assert "id" in cols
-    assert "user_id" in cols
+    ok = await repo.update(server_id, owner_user_id=owner, enabled=False)
+    assert ok is True
+
+    assert len(session.calls) == 1
+    sql, binds = session.calls[0]
+    assert sql.startswith("UPDATE")
+    assert "SET enabled" in sql
+    assert "user_mcp_servers.id =" in sql
+    assert "user_mcp_servers.user_id =" in sql
+    assert str(owner) in binds.values()
+    assert str(server_id) in binds.values()
