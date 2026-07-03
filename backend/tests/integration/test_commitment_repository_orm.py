@@ -106,9 +106,9 @@ async def cleanup_commitments(integration_db_url):
 
 
 def _repo():
-    from app.repositories.commitment_repository_orm import CommitmentRepositoryOrm
+    from app.repositories.commitment_repository import CommitmentRepository
 
-    return CommitmentRepositoryOrm()
+    return CommitmentRepository()
 
 
 def _mk(agent_id, **over):
@@ -304,27 +304,12 @@ async def test_list_for_user_filters(patched_engine, cleanup_commitments, agent_
 # ─── factory on/off ─────────────────────────────────────────────────────
 
 
-def test_factory_off_returns_legacy():
-    from unittest.mock import patch
-
+def test_factory_returns_orm_repository():
+    """Post-rollout the per-domain flag is retired — the factory
+    unconditionally returns the collapsed ORM-backed CommitmentRepository."""
     from app.repositories.commitment_repository import (
         CommitmentRepository,
         get_commitment_repository,
     )
 
-    with patch("app.core.config.settings.USE_ORM_COMMITMENT", False):
-        assert type(get_commitment_repository()) is CommitmentRepository
-
-
-def test_factory_on_returns_orm():
-    from unittest.mock import patch
-
-    from app.repositories.commitment_repository_orm import CommitmentRepositoryOrm
-
-    with (
-        patch("app.core.config.settings.USE_ORM_COMMITMENT", True),
-        patch("app.db.engine.is_configured", return_value=True),
-    ):
-        from app.repositories.commitment_repository import get_commitment_repository
-
-        assert type(get_commitment_repository()) is CommitmentRepositoryOrm
+    assert type(get_commitment_repository()) is CommitmentRepository

@@ -4,16 +4,48 @@ Persistence for cross-session followups. The pure value object lives in
 ``app.agent_framework.commitments.Commitment``; this repo translates to
 and from the SQL row.
 
-Uses the service-role (admin) client because access control is enforced
-at the route layer via user-scoped clients (mirror agent_repository).
+ORM-only (post-rollout cleanup): the legacy supabase-py REST path has been
+removed — prod runs 100% SQLAlchemy 2.0. Access control is enforced at the
+route layer via user-scoped clients (mirror agent_repository); this repo runs
+on the admin engine.
+
+★★★ THE FROZEN-DATACLASS PARITY APPROACH ★★★
+Unlike the dict-returning repos, this repo returns the ``Commitment`` value
+object, built by ``_row_to_commitment(row_dict)``. That builder takes a
+REST-shaped row dict (uuid → str, bigint → int, timestamptz → ISO str) and
+constructs the dataclass with SPECIFIC Python field types. The ORM read methods
+fetch native-typed rows, convert each to a REST-shaped dict via ``_rest_row``
+(uuid → str, datetime → ISO str; bigint id / fulfillment_run_id stay NATIVE
+int), then feed that dict to the UNCHANGED inherited ``_row_to_commitment`` — so
+every dataclass field is byte-identical in type and value to what REST produced.
+
+UUID AUDIT: agent_id / user_id / session_id are all str()'d by the builder. The
+type-sensitive consumer is the router fulfill/cancel authz check
+``existing.user_id != str(auth.user_id)`` (str==str) — a native UUID would 404
+the owner. trigger_type / status are plain Text columns (NOT Enum) → bare str →
+``Commitment.__post_init__`` coerces to TriggerType / CommitmentStatus enums.
+fulfillment_run_id is BIGINT on the column but STR on the dataclass — the builder
+str()s it (kept native int by _rest_row). id (bigint) stays native int.
+
+v3 temporal: list_due_time / list_expired_pending bind the NATIVE aware datetime
+cutoff (never an ISO string) in the trigger_at / expires_at range filter; create
+/ _set_terminal_status _coerce_temporal the inherited ISO-string timestamps →
+aware datetime for the asyncpg bind. Writes commit via write_scope(); reads use
+read_scope(). Error handling: create raises on empty row; _set_terminal_status
+returns None on no-pending-row; get_by_id swallows → None; list_* raise.
 """
 
 from __future__ import annotations
 
+import datetime as _dt
+import uuid as _uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
+from sqlalchemy import insert as sa_insert
+from sqlalchemy import select
+from sqlalchemy import update as sa_update
 
 from app.agent_framework.commitments import (
     TERMINAL_STATUSES,
@@ -21,14 +53,54 @@ from app.agent_framework.commitments import (
     CommitmentStatus,
     TriggerType,
 )
-from app.db.supabase_client import get_async_supabase_admin
+from app.db.session import read_scope, write_scope
+from app.models import AgentCommitments
+from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
+
+_COMMITMENT_N2A: Dict[str, str] = _name_to_attr(AgentCommitments)
+
+# timestamptz columns. The _commitment_to_insert / _set_terminal_status
+# translators hand us ISO-STRINGS for these (REST/PostgREST accepted strings);
+# asyncpg binds to a real DateTime(True) column and REQUIRES a native aware
+# datetime, so we coerce ISO-str → datetime at the write boundary (v3 rule).
+_COMMITMENT_TS_COLS = frozenset(
+    {"trigger_at", "expires_at", "created_at", "fulfilled_at"}
+)
+
+
+def _coerce_temporal(key: str, value: Any) -> Any:
+    """ISO-string timestamptz patch value → native aware datetime for the
+    asyncpg bind. Leaves native datetimes / None / non-ts keys untouched."""
+    if key in _COMMITMENT_TS_COLS and isinstance(value, str):
+        dt = _dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_dt.timezone.utc)
+        return dt
+    return value
+
+
+def _rest_row(out: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert a SELECT *-shaped ORM dict into the REST-shaped row dict the
+    ``_row_to_commitment`` builder expects: uuid → str, datetime → ISO str.
+    Bigint id / fulfillment_run_id stay NATIVE int (the 5.3 trap — the builder
+    str()s fulfillment_run_id itself; id stays an int field). NULLs pass
+    through. The builder then reconstructs the frozen dataclass identically to
+    the REST path."""
+    for key, value in out.items():
+        if isinstance(value, _uuid.UUID):
+            out[key] = str(value)
+        elif isinstance(value, _dt.datetime):
+            out[key] = value.isoformat()
+        elif isinstance(value, _dt.date):
+            out[key] = value.isoformat()
+    return out
 
 
 class CommitmentRepository:
-    TABLE = "agent_commitments"
-
-    async def _get_client(self):
-        return await get_async_supabase_admin()
+    """ORM-backed repository for agent_commitments. Reuses the
+    ``_row_to_commitment`` / ``_commitment_to_insert`` builders so the frozen
+    ``Commitment`` dataclass is constructed byte-identically to the old REST
+    path."""
 
     # ------------------------------------------------------------------
     # Translators
@@ -61,8 +133,8 @@ class CommitmentRepository:
 
     @staticmethod
     def _commitment_to_insert(c: Commitment) -> Dict[str, Any]:
-        """Value object → dict for Supabase insert. Excludes server-managed
-        columns (id, created_at)."""
+        """Value object → dict for insert. Excludes server-managed columns
+        (id, created_at)."""
         out: Dict[str, Any] = {
             "agent_id": c.agent_id,
             "description": c.description,
@@ -82,18 +154,31 @@ class CommitmentRepository:
             out["expires_at"] = c.expires_at.isoformat()
         return out
 
+    def _to_obj(self, obj: Any) -> Commitment:
+        """Native ORM row → REST-shaped dict → inherited builder → dataclass."""
+        return self._row_to_commitment(
+            _rest_row(_orm_obj_to_dict(obj, _COMMITMENT_N2A))
+        )
+
     # ------------------------------------------------------------------
     # Writes
     # ------------------------------------------------------------------
 
     async def create(self, commitment: Commitment) -> Commitment:
         try:
-            client = await self._get_client()
+            # Reuse the value-object → insert-dict translator, then coerce its
+            # ISO-string timestamps to native datetimes for asyncpg.
             payload = self._commitment_to_insert(commitment)
-            result = await client.table(self.TABLE).insert(payload).execute()
-            if not result.data:
-                raise RuntimeError("commitment insert returned no row")
-            return self._row_to_commitment(result.data[0])
+            values = {k: _coerce_temporal(k, v) for k, v in payload.items()}
+            stmt = (
+                sa_insert(AgentCommitments).values(**values).returning(AgentCommitments)
+            )
+            async with write_scope() as session:
+                result = await session.execute(stmt)
+                row = result.scalars().first()
+                if not row:
+                    raise RuntimeError("commitment insert returned no row")
+                return self._to_obj(row)
         except Exception as exc:
             logger.error(f"Failed to create commitment: {exc}")
             raise
@@ -144,25 +229,30 @@ class CommitmentRepository:
                 f"_set_terminal_status called with non-terminal status {new_status}"
             )
         try:
-            client = await self._get_client()
             update: Dict[str, Any] = {"status": new_status.value}
             if set_fulfilled_at:
-                update["fulfilled_at"] = datetime.now(timezone.utc).isoformat()
+                update["fulfilled_at"] = datetime.now(timezone.utc)
             if fulfillment_run_id:
-                update["fulfillment_run_id"] = fulfillment_run_id
+                # fulfillment_run_id is a BIGINT column; callers pass a numeric
+                # STR (REST cast str→bigint). asyncpg's int8 codec is strict and
+                # rejects a str → int()-coerce for the bind (the bigint analog of
+                # _coerce_temporal).
+                update["fulfillment_run_id"] = int(fulfillment_run_id)
             if notes:
                 update["fulfillment_notes"] = notes
-            # Only flip rows still pending — terminal is sticky.
-            result = (
-                await client.table(self.TABLE)
-                .update(update)
-                .eq("id", commitment_id)
-                .eq("status", CommitmentStatus.PENDING.value)
-                .execute()
-            )
-            if not result.data:
-                return None
-            return self._row_to_commitment(result.data[0])
+            async with write_scope() as session:
+                result = await session.execute(
+                    sa_update(AgentCommitments)
+                    # Only flip rows still pending — terminal is sticky.
+                    .where(AgentCommitments.id == int(commitment_id))
+                    .where(AgentCommitments.status == CommitmentStatus.PENDING.value)
+                    .values(**update)
+                    .returning(AgentCommitments)
+                )
+                row = result.scalars().first()
+                if not row:
+                    return None
+                return self._to_obj(row)
         except Exception as exc:
             logger.error(
                 "Failed to mark commitment %s as %s: %s",
@@ -178,17 +268,14 @@ class CommitmentRepository:
 
     async def get_by_id(self, commitment_id: int) -> Optional[Commitment]:
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.TABLE)
-                .select("*")
-                .eq("id", commitment_id)
-                .maybe_single()
-                .execute()
-            )
-            if not (result and result.data):
-                return None
-            return self._row_to_commitment(result.data)
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(AgentCommitments)
+                    .where(AgentCommitments.id == int(commitment_id))
+                    .limit(1)
+                )
+                row = result.scalars().first()
+                return self._to_obj(row) if row else None
         except Exception as exc:
             logger.error(f"Failed to get commitment {commitment_id}: {exc}")
             return None
@@ -197,20 +284,19 @@ class CommitmentRepository:
         self, *, now: Optional[datetime] = None, limit: int = 100
     ) -> List[Commitment]:
         """Pending TIME triggers whose ``trigger_at <= now``. Sweeper input."""
-        cutoff = (now or datetime.now(timezone.utc)).isoformat()
+        # v3: bind the NATIVE aware datetime, never an ISO string.
+        cutoff = now or datetime.now(timezone.utc)
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.TABLE)
-                .select("*")
-                .eq("status", CommitmentStatus.PENDING.value)
-                .eq("trigger_type", TriggerType.TIME.value)
-                .lte("trigger_at", cutoff)
-                .order("trigger_at", desc=False)
-                .limit(limit)
-                .execute()
-            )
-            return [self._row_to_commitment(r) for r in (result.data or [])]
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(AgentCommitments)
+                    .where(AgentCommitments.status == CommitmentStatus.PENDING.value)
+                    .where(AgentCommitments.trigger_type == TriggerType.TIME.value)
+                    .where(AgentCommitments.trigger_at <= cutoff)
+                    .order_by(AgentCommitments.trigger_at.asc())
+                    .limit(limit)
+                )
+                return [self._to_obj(r) for r in result.scalars().all()]
         except Exception as exc:
             logger.error(f"Failed to list due time commitments: {exc}")
             raise
@@ -220,17 +306,15 @@ class CommitmentRepository:
     ) -> List[Commitment]:
         """Pending EVENT triggers matching ``event``. Event publisher input."""
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.TABLE)
-                .select("*")
-                .eq("status", CommitmentStatus.PENDING.value)
-                .eq("trigger_type", TriggerType.EVENT.value)
-                .eq("trigger_event", event)
-                .limit(limit)
-                .execute()
-            )
-            return [self._row_to_commitment(r) for r in (result.data or [])]
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(AgentCommitments)
+                    .where(AgentCommitments.status == CommitmentStatus.PENDING.value)
+                    .where(AgentCommitments.trigger_type == TriggerType.EVENT.value)
+                    .where(AgentCommitments.trigger_event == event)
+                    .limit(limit)
+                )
+                return [self._to_obj(r) for r in result.scalars().all()]
         except Exception as exc:
             logger.error(f"Failed to list event commitments for {event}: {exc}")
             raise
@@ -240,19 +324,21 @@ class CommitmentRepository:
     ) -> List[Commitment]:
         """Pending NEXT_SESSION triggers for (agent, user). Session-open hook."""
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.TABLE)
-                .select("*")
-                .eq("status", CommitmentStatus.PENDING.value)
-                .eq("trigger_type", TriggerType.NEXT_SESSION.value)
-                .eq("agent_id", agent_id)
-                .eq("user_id", user_id)
-                .order("created_at", desc=False)
-                .limit(limit)
-                .execute()
-            )
-            return [self._row_to_commitment(r) for r in (result.data or [])]
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(AgentCommitments)
+                    .where(AgentCommitments.status == CommitmentStatus.PENDING.value)
+                    .where(
+                        AgentCommitments.trigger_type == TriggerType.NEXT_SESSION.value
+                    )
+                    # agent_id / user_id are str; asyncpg's Uuid codec binds the
+                    # str to the Uuid column (matches the REST .eq).
+                    .where(AgentCommitments.agent_id == agent_id)
+                    .where(AgentCommitments.user_id == user_id)
+                    .order_by(AgentCommitments.created_at.asc())
+                    .limit(limit)
+                )
+                return [self._to_obj(r) for r in result.scalars().all()]
         except Exception as exc:
             logger.error(
                 "Failed to list next-session commitments for agent=%s user=%s: %s",
@@ -271,18 +357,17 @@ class CommitmentRepository:
     ) -> List[Commitment]:
         """User-facing 'my followups' list. Optional status filter."""
         try:
-            client = await self._get_client()
-            q = (
-                client.table(self.TABLE)
-                .select("*")
-                .eq("user_id", user_id)
-                .order("created_at", desc=True)
-                .limit(limit)
-            )
-            if status is not None:
-                q = q.eq("status", status.value)
-            result = await q.execute()
-            return [self._row_to_commitment(r) for r in (result.data or [])]
+            async with read_scope() as session:
+                stmt = (
+                    select(AgentCommitments)
+                    .where(AgentCommitments.user_id == user_id)
+                    .order_by(AgentCommitments.created_at.desc())
+                    .limit(limit)
+                )
+                if status is not None:
+                    stmt = stmt.where(AgentCommitments.status == status.value)
+                result = await session.execute(stmt)
+                return [self._to_obj(r) for r in result.scalars().all()]
         except Exception as exc:
             logger.error(f"Failed to list commitments for user {user_id}: {exc}")
             raise
@@ -292,19 +377,18 @@ class CommitmentRepository:
     ) -> List[Commitment]:
         """Pending rows whose ``expires_at`` has passed. Sweeper marks them
         EXPIRED before they go stale."""
-        cutoff = (now or datetime.now(timezone.utc)).isoformat()
+        # v3: bind the NATIVE aware datetime, never an ISO string.
+        cutoff = now or datetime.now(timezone.utc)
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.TABLE)
-                .select("*")
-                .eq("status", CommitmentStatus.PENDING.value)
-                .lte("expires_at", cutoff)
-                .not_.is_("expires_at", "null")
-                .limit(limit)
-                .execute()
-            )
-            return [self._row_to_commitment(r) for r in (result.data or [])]
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(AgentCommitments)
+                    .where(AgentCommitments.status == CommitmentStatus.PENDING.value)
+                    .where(AgentCommitments.expires_at <= cutoff)
+                    .where(AgentCommitments.expires_at.is_not(None))
+                    .limit(limit)
+                )
+                return [self._to_obj(r) for r in result.scalars().all()]
         except Exception as exc:
             logger.error(f"Failed to list expired commitments: {exc}")
             raise
@@ -330,27 +414,12 @@ def _parse_ts(value: Any) -> Optional[datetime]:
 
 
 def get_commitment_repository() -> "CommitmentRepository":
-    """Return the right CommitmentRepository implementation per env.
+    """Return the CommitmentRepository (ORM-backed, post-rollout).
 
-    ORM when ``USE_ORM_COMMITMENT`` is set AND the SQLAlchemy engine is
-    configured; otherwise the legacy supabase-py REST path. A flag-on but
-    engine-missing deploy logs once and falls back to REST (never crashes).
+    The per-domain USE_ORM_COMMITMENT rollout flag has been retired now that
+    prod runs 100% ORM — the factory unconditionally returns the collapsed
+    class.
     """
-    from app.core.config import settings
-
-    if settings.USE_ORM_COMMITMENT:
-        from app.db.engine import is_configured
-
-        if is_configured():
-            from app.repositories.commitment_repository_orm import (
-                CommitmentRepositoryOrm,
-            )
-
-            return CommitmentRepositoryOrm()
-        logger.warning(
-            "USE_ORM_COMMITMENT=true but SUPAVISOR_DATABASE_URL is empty "
-            "— falling back to supabase-py path"
-        )
     return CommitmentRepository()
 
 

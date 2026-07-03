@@ -541,32 +541,6 @@ class Settings(BaseSettings):
         "screen filters update data to mapped attrs. Writes commit via "
         "write_scope(). Inert — flip back to false to roll back.",
     )
-    USE_ORM_COMMITMENT: bool = Field(
-        default=False,
-        description="Route CommitmentRepository (agent_commitments — cross-session "
-        "agent followups) through the SQLAlchemy 2.0 ORM (Phase 2 H batch — "
-        "FROZEN-DATACLASS parity). Returns the frozen ``Commitment`` value object, "
-        "NOT a dict. PARITY APPROACH = builder reuse: ORM rows → REST-shaped dict "
-        "(uuid→str, datetime→ISO str, bigint native int) → the UNCHANGED inherited "
-        "``_row_to_commitment(dict)`` reconstructs the dataclass byte-identically "
-        "(structurally guaranteed). UUID AUDIT: agent_id/user_id/session_id are "
-        "str()'d BY the builder → Commitment.user_id is str and the router "
-        "fulfill/cancel authz check ``existing.user_id != str(auth.user_id)`` is "
-        "str==str (a native UUID would 404 the owner). trigger_type/status are "
-        "plain Text columns (NOT Enum) → bare str → __post_init__ coerces to "
-        "TriggerType/CommitmentStatus enums (no _plain unwrap needed). "
-        "fulfillment_run_id is BIGINT on the column but STR on the dataclass — the "
-        "builder str()s it (kept native int by _rest_row). id (bigint) native int "
-        "(5.3 trap). v3 temporal: list_due_time / list_expired_pending bind the "
-        "NATIVE aware datetime cutoff (never the legacy ISO string) in the "
-        "trigger_at/expires_at range filter; create / _set_terminal_status "
-        "_coerce_temporal the inherited ISO-string timestamps (trigger_at / "
-        "expires_at / fulfilled_at) → aware datetime for the asyncpg bind. Phantom "
-        "screen: all insert/update keys are mapped columns. create raises on empty "
-        "row; _set_terminal_status returns None on no-pending-row; get_by_id "
-        "swallows→None; list_* raise. Writes commit via write_scope(). Inert — "
-        "flip back to false to roll back.",
-    )
     USE_ORM_WORKFORCE: bool = Field(
         default=False,
         description="Route AgentWorkforceRepository (the M2 Persistent Workforce "
