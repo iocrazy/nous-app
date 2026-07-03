@@ -1,5 +1,6 @@
-"""Integration tests for AgentWorkforceRepositoryOrm (Phase 2 H batch, highest-
-risk) against real PG. The M2 Persistent Workforce: 5 tables in one repo.
+"""Integration tests for the ORM-only AgentWorkforceRepository (formerly the
+Phase 2 H batch, highest-risk) against real PG. The M2 Persistent Workforce:
+5 tables in one repo.
 
 THE H-BATCH CRASHER PROOF. ~17 bare ``UUID(row[...])`` consumers live across
 ``app/services/workforce/*``. ``UUID(native_uuid.UUID)`` raises ``TypeError``
@@ -16,7 +17,7 @@ We replay the EXACT crasher pattern from the real consumers:
 Plus: per-table value-type assertions, write round-trips (incl. a task_tracking
 business-column write that does NOT touch a trigger-owned workflow column —
 agent_task rows are app-owned), upsert ON CONFLICT, the v3 date-filter boundary
-(list_stale_workers heartbeat cutoff), and factory on/off.
+(list_stale_workers heartbeat cutoff), and the flag-free factory.
 
 Setup: requires INTEGRATION_DATABASE_URL. Skips cleanly otherwise:
 
@@ -131,11 +132,11 @@ async def cleanup(integration_db_url, agent_id):
 
 
 def _repo():
-    from app.repositories.agent_workforce_repository_orm import (
-        AgentWorkforceRepositoryOrm,
+    from app.repositories.agent_workforce_repository import (
+        AgentWorkforceRepository,
     )
 
-    return AgentWorkforceRepositoryOrm()
+    return AgentWorkforceRepository()
 
 
 def _title() -> str:
@@ -412,34 +413,15 @@ async def test_outbox_uuid_columns_are_str_for_UUID_consumer(
     assert await repo.mark_outbox_delivered(UUID(row["id"])) is True
 
 
-# ─── factory on/off ─────────────────────────────────────────────────────
+# ─── factory: ORM-only (flag retired, class collapsed) ──────────────────────
 
 
-def test_factory_off_returns_legacy():
-    from unittest.mock import patch
-
+async def test_factory_returns_orm_repository():
+    """Post-collapse the factory unconditionally returns the (ORM-only)
+    AgentWorkforceRepository — no flag branch, no ORM subclass."""
     from app.repositories.agent_workforce_repository import (
         AgentWorkforceRepository,
         get_agent_workforce_repository,
     )
 
-    with patch("app.core.config.settings.USE_ORM_WORKFORCE", False):
-        assert type(get_agent_workforce_repository()) is AgentWorkforceRepository
-
-
-def test_factory_on_returns_orm(integration_db_url):
-    from unittest.mock import patch
-
-    from app.repositories.agent_workforce_repository_orm import (
-        AgentWorkforceRepositoryOrm,
-    )
-
-    with (
-        patch("app.core.config.settings.USE_ORM_WORKFORCE", True),
-        patch("app.db.engine.is_configured", return_value=True),
-    ):
-        from app.repositories.agent_workforce_repository import (
-            get_agent_workforce_repository,
-        )
-
-        assert type(get_agent_workforce_repository()) is AgentWorkforceRepositoryOrm
+    assert type(get_agent_workforce_repository()) is AgentWorkforceRepository

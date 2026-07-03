@@ -7,50 +7,123 @@ Data access layer for the ReBAC permission system.
 Queries access_overrides, folders, libraries, and team_members
 to resolve effective roles.
 
-ORM 2.0 migration (Phase 2, M batch): ``PermissionRepository`` is the legacy
-supabase-py REST implementation; ``PermissionRepositoryOrm`` (in
-``permission_repository_orm.py``) is the SQLAlchemy 2.0 ORM successor. Call
-sites go through ``get_permission_repository()`` (bottom of this file), which
-picks the ORM subclass when ``USE_ORM_PERMISSION`` is on AND the engine is
-configured.
+ORM-only (post-rollout cleanup): the legacy supabase-py REST path has been
+removed — prod runs 100% SQLAlchemy 2.0. This is a READ-ONLY repo (five
+read-only lookups the ``PermissionService`` walks to resolve a user's effective
+role); there are NO write methods, so every query runs on ``read_scope()``.
+Error handling mirrors the legacy exactly: every method swallows on failure and
+returns None (or None role) — default-deny.
+
+STRATEGY C — VALUE-TYPE PARITY (per-field, exact REST shape)
+============================================================
+REST rendered JSON: bigint → int, uuid → str, timestamptz → ISO str, text →
+str. The ORM returns native types. Per-method consumer audit (every value below
+is traced through PermissionService):
+
+  access_overrides.* (get_access_override) — the returned dict is consumed ONLY
+    as ``override["role"]`` / ``parent_override["role"]`` / ``folder_override
+    ["role"]`` (a Text column → native str, OK). The other columns are pure
+    shape parity: id / user_id / granted_by (uuid) → str (no consumer compares
+    them type-sensitively); object_id (text) → str; created_at (timestamptz) →
+    ISO str. Applied via the generic uuid/datetime sweep in ``_parity``.
+
+  folders (get_folder_by_id) → {id, parent_id, scope_id, visibility}:
+      - id / parent_id / scope_id are BIGINT → STAY NATIVE int (the 5.3 trap).
+        CONSUMER AUDIT — ``folder["parent_id"]`` is fed back into
+        ``get_access_override("folder", folder["parent_id"], user_id)`` and into
+        the recursive ``_resolve_folder_role(user_id, folder["parent_id"], …)``
+        (→ ``get_folder_by_id(parent_id)``). The first is a bind against the
+        TEXT ``access_overrides.object_id`` column; the second a bind against
+        the BIGINT ``folders.id`` column. Keeping parent_id NATIVE int is
+        correct for the bigint lookup; the text lookup is handled by coercing
+        ``object_id`` to str AT the get_access_override bind boundary (see
+        OBJECT_ID BIND below) — NOT by str()ing parent_id (which would break the
+        bigint recursion). This mirrors REST exactly.
+      - visibility (text) → native str (not consumed for folders).
+
+  libraries (get_library_by_id) → {id, scope_type, scope_id, visibility}:
+      - id is BIGINT → native int (not consumed type-sensitively).
+      - scope_id is TEXT in this table (libraries.scope_id is text, unlike the
+        bigint scope_id on folders/resource_items) → native str.
+      - visibility (text) → native str, CONSUMED by ``== "restricted"``.
+
+  team_members.role (get_team_member_role) → returns the bare ``role`` STRING
+    (not a dict), CONSUMED by ``TEAM_ROLE_MAP.get(role, ...)`` — native str, OK.
+
+  resource_items (get_resource_item_scope) → {scope_id, folder_id}:
+      - both BIGINT → STAY NATIVE int (the 5.3 trap). CONSUMER AUDIT —
+        ``scope["folder_id"]`` is fed into ``get_access_override("folder",
+        scope["folder_id"], user_id)`` (TEXT object_id bind → str-coerced at
+        that boundary) and ``_resolve_folder_role(user_id, scope["folder_id"],
+        …)`` (BIGINT folders.id bind → native int). Same split as folders above.
+
+OBJECT_ID BIND (the only ORM-specific hazard)
+=============================================
+``access_overrides.object_id`` is TEXT. ``get_access_override`` is called with
+``object_id`` that is EITHER a str (router-supplied library/folder id string) OR
+a native int (a bigint ``folder.parent_id`` / ``scope.folder_id`` kept native
+per the 5.3 trap). asyncpg will NOT bind a native int to a TEXT column. Under
+REST this worked because PostgREST emitted ``object_id=eq.<n>`` and PG cast the
+literal to text. We reproduce that exact coercion by ``str(object_id)`` at the
+bind boundary — behavior-identical (the override row stores the stringified id)
+and the ONLY place a coercion is needed. No date/timestamp RANGE filters exist
+(every query is equality / limit), so there is no timestamptz<VARCHAR hazard.
 """
 
-from typing import TYPE_CHECKING, Any, Dict, Optional, Union
+from __future__ import annotations
+
+import datetime as _dt
+import uuid as _uuid
+from typing import Any, Dict, Optional
 
 from loguru import logger
+from sqlalchemy import select
 
-from app.db.supabase_client import get_async_supabase_admin
+from app.db.session import read_scope
+from app.models import AccessOverrides, Folders, Libraries, ResourceItems, TeamMembers
+from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
 
-if TYPE_CHECKING:
-    from app.repositories.permission_repository_orm import PermissionRepositoryOrm
+_OVERRIDES_N2A: Dict[str, str] = _name_to_attr(AccessOverrides)
+
+
+def _parity(out: Dict[str, Any]) -> Dict[str, Any]:
+    """Strategy-C value-type parity IN PLACE on a SELECT *-shaped dict:
+    uuid → str (REST shape), datetime → ISO str. Bigint ids / FKs and text stay
+    native (the 5.3 trap). NULLs pass through."""
+    for key, value in out.items():
+        if isinstance(value, _uuid.UUID):
+            out[key] = str(value)
+        elif isinstance(value, _dt.datetime):
+            out[key] = value.isoformat()
+        elif isinstance(value, _dt.date):
+            out[key] = value.isoformat()
+    return out
 
 
 class PermissionRepository:
-    """Permission data access (async)"""
+    """Permission data access (async, read-only ReBAC lookups)."""
 
     def __init__(self):
         pass
-
-    async def _get_client(self):
-        """Get async client (loop-aware, safe for Celery workers)."""
-        return await get_async_supabase_admin()
 
     async def get_access_override(
         self, object_type: str, object_id: str, user_id: str
     ) -> Optional[Dict[str, Any]]:
         """Get a direct access override for a specific object and user."""
         try:
-            client = await self._get_client()
-            result = (
-                await client.table("access_overrides")
-                .select("*")
-                .eq("object_type", object_type)
-                .eq("object_id", object_id)
-                .eq("user_id", user_id)
-                .limit(1)
-                .execute()
-            )
-            return result.data[0] if result.data else None
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(AccessOverrides)
+                    .where(AccessOverrides.object_type == object_type)
+                    # object_id is a TEXT column; callers may pass a native int
+                    # (a bigint folder.parent_id / scope.folder_id). str() it so
+                    # asyncpg binds it to text, matching REST's int→text cast.
+                    .where(AccessOverrides.object_id == str(object_id))
+                    .where(AccessOverrides.user_id == user_id)
+                    .limit(1)
+                )
+                row = result.scalars().first()
+                return _parity(_orm_obj_to_dict(row, _OVERRIDES_N2A)) if row else None
         except Exception as e:
             logger.error(f"Failed to get access override: {e}")
             return None
@@ -58,15 +131,21 @@ class PermissionRepository:
     async def get_folder_by_id(self, folder_id: str) -> Optional[Dict[str, Any]]:
         """Get folder with parent_id and scope info."""
         try:
-            client = await self._get_client()
-            result = (
-                await client.table("folders")
-                .select("id, parent_id, scope_id, visibility")
-                .eq("id", folder_id)
-                .limit(1)
-                .execute()
-            )
-            return result.data[0] if result.data else None
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(
+                        Folders.id,
+                        Folders.parent_id,
+                        Folders.scope_id,
+                        Folders.visibility,
+                    )
+                    .where(Folders.id == int(folder_id))
+                    .limit(1)
+                )
+                row = result.mappings().first()
+                # id / parent_id / scope_id are bigint → native int (5.3 trap);
+                # visibility is text. No uuid / datetime here → no _parity sweep.
+                return dict(row) if row else None
         except Exception as e:
             logger.error(f"Failed to get folder {folder_id}: {e}")
             return None
@@ -81,15 +160,21 @@ class PermissionRepository:
         instead so callers can resolve team/user/project ownership.
         """
         try:
-            client = await self._get_client()
-            result = (
-                await client.table("libraries")
-                .select("id, scope_type, scope_id, visibility")
-                .eq("id", library_id)
-                .limit(1)
-                .execute()
-            )
-            return result.data[0] if result.data else None
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(
+                        Libraries.id,
+                        Libraries.scope_type,
+                        Libraries.scope_id,
+                        Libraries.visibility,
+                    )
+                    .where(Libraries.id == int(library_id))
+                    .limit(1)
+                )
+                row = result.mappings().first()
+                # id bigint → native int; scope_type / scope_id (text) /
+                # visibility text. No uuid / datetime → no _parity sweep.
+                return dict(row) if row else None
         except Exception as e:
             logger.error(f"Failed to get library {library_id}: {e}")
             return None
@@ -97,18 +182,14 @@ class PermissionRepository:
     async def get_team_member_role(self, user_id: str, team_id: str) -> Optional[str]:
         """Get a user's role in a team (owner/admin/member)."""
         try:
-            client = await self._get_client()
-            result = (
-                await client.table("team_members")
-                .select("role")
-                .eq("user_id", user_id)
-                .eq("team_id", team_id)
-                .limit(1)
-                .execute()
-            )
-            if result.data:
-                return result.data[0]["role"]
-            return None
+            async with read_scope() as session:
+                role = await session.scalar(
+                    select(TeamMembers.role)
+                    .where(TeamMembers.user_id == user_id)
+                    .where(TeamMembers.team_id == int(team_id))
+                    .limit(1)
+                )
+            return role
         except Exception as e:
             logger.error(f"Failed to get team role for user {user_id}: {e}")
             return None
@@ -118,42 +199,26 @@ class PermissionRepository:
     ) -> Optional[Dict[str, Any]]:
         """Get the scope (team/personal) for a resource via resource_items."""
         try:
-            client = await self._get_client()
-            result = (
-                await client.table("resource_items")
-                .select("scope_id, folder_id")
-                .eq("resource_id", resource_id)
-                .limit(1)
-                .execute()
-            )
-            return result.data[0] if result.data else None
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(ResourceItems.scope_id, ResourceItems.folder_id)
+                    .where(ResourceItems.resource_id == int(resource_id))
+                    .limit(1)
+                )
+                row = result.mappings().first()
+                # scope_id / folder_id are bigint → native int (5.3 trap). No
+                # uuid / datetime → no _parity sweep.
+                return dict(row) if row else None
         except Exception as e:
             logger.error(f"Failed to get resource scope for {resource_id}: {e}")
             return None
 
 
-def get_permission_repository() -> (
-    Union["PermissionRepository", "PermissionRepositoryOrm"]
-):
-    """Return the right PermissionRepository implementation per env.
+def get_permission_repository() -> "PermissionRepository":
+    """Return the PermissionRepository (ORM-backed, post-rollout).
 
-    ORM when ``USE_ORM_PERMISSION`` is set AND the SQLAlchemy engine is
-    configured; otherwise the legacy supabase-py REST path. A flag-on but
-    engine-missing deploy logs once and falls back to REST (never crashes).
+    The per-domain USE_ORM_PERMISSION rollout flag has been retired now that
+    prod runs 100% ORM — the factory unconditionally returns the collapsed
+    class.
     """
-    from app.core.config import settings
-
-    if settings.USE_ORM_PERMISSION:
-        from app.db.engine import is_configured
-
-        if is_configured():
-            from app.repositories.permission_repository_orm import (
-                PermissionRepositoryOrm,
-            )
-
-            return PermissionRepositoryOrm()
-        logger.warning(
-            "USE_ORM_PERMISSION=true but SUPAVISOR_DATABASE_URL is empty "
-            "— falling back to supabase-py path"
-        )
     return PermissionRepository()

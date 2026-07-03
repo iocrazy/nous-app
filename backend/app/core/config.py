@@ -257,27 +257,6 @@ class Settings(BaseSettings):
         "parity, NOT re-raise); delete returns False on failure. Writes commit "
         "via write_scope(). Inert — flip back to false to roll back.",
     )
-    USE_ORM_PERMISSION: bool = Field(
-        default=False,
-        description="Route PermissionRepository (the ReBAC effective-role read "
-        "surface: five read-only lookups over access_overrides / folders / "
-        "libraries / team_members / resource_items) through the SQLAlchemy 2.0 "
-        "ORM session layer (Phase 2 M batch). READ-ONLY repo → no write paths, "
-        "all reads on read_scope(). Strategy C value-type parity: bigint ids / "
-        "FKs (folders.id/parent_id/scope_id, resource_items.scope_id/folder_id, "
-        "libraries.id) stay NATIVE int (the 5.3 trap — folder.parent_id / "
-        "scope.folder_id recurse into bigint folders.id lookups); the ONLY "
-        "ORM-specific coercion is get_access_override str()ing its object_id "
-        "param (a TEXT column) so a native-int folder id binds — reproducing "
-        "PostgREST's int→text cast exactly. access_overrides.* uuids (id / "
-        "user_id / granted_by) → str for shape parity (consumer reads only "
-        "['role']); created_at → ISO str. libraries.scope_id is TEXT (native "
-        "str). visibility ('restricted') and role compares are str==str. No date "
-        "range filters → no timestamptz<VARCHAR hazard. Every method swallows + "
-        "returns None on failure (legacy parity). Inert — flip back to false to "
-        "roll back.",
-    )
-
     USE_ORM_AI: bool = Field(
         default=False,
         description="Route AIRepository (resource_transcripts / "
@@ -366,30 +345,6 @@ class Settings(BaseSettings):
         "half-commit, behavior preserved, documented non-atomicity not 'repaired'). "
         "No date range filters. Reads swallow + return None/[]; writes raise. "
         "Writes commit via write_scope(). Inert — flip back to false to roll back.",
-    )
-
-    USE_ORM_REVIEW: bool = Field(
-        default=False,
-        description="Route ReviewRepository (the review system — review_comments "
-        "threaded comments/replies + review_annotations + review_status "
-        "approvals) through the SQLAlchemy 2.0 ORM session layer (Phase 2 H "
-        "batch — authz-sensitive). UUID AUTHZ HOT SPOT: review_comments.author_id "
-        "is str()'d because review_service.update_comment / delete_comment gate "
-        "on ``comment['author_id'] != user_id`` (a STRING auth subject) — a "
-        "native uuid.UUID would compare unequal forever (silent wrong-DENY: the "
-        "author locked out of their own comment, no error/log). "
-        "review_status.reviewer_id → str for shape parity (only consumed in a log "
-        "f-string, no ==/!= consumer). All bigint ids/FKs (id / resource_id / "
-        "parent_id / version_id / comment_id) stay NATIVE int (the 5.3 trap). "
-        "status is CHECK/plain VARCHAR NOT Enum (no _plain unwrap); timecode "
-        "(double) / frame_number (int) / data (jsonb) native; timestamps → ISO "
-        "str. TEMPORAL-WRITE: the legacy stamps updated_at='now()' (a PostgREST "
-        "sentinel) — the ORM substitutes datetime.now(utc) at the write boundary "
-        "(asyncpg can't bind the literal 'now()'). upsert_review_status "
-        "reproduces the read-then-branch upsert (no DB unique on the "
-        "resource/reviewer/version triple) inside one write_scope(). No date "
-        "range filters. Reads return None/[]; writes commit via write_scope(). "
-        "Inert — flip back to false to roll back.",
     )
 
     USE_ORM_TEAM: bool = Field(
@@ -541,98 +496,6 @@ class Settings(BaseSettings):
         "screen filters update data to mapped attrs. Writes commit via "
         "write_scope(). Inert — flip back to false to roll back.",
     )
-    USE_ORM_COMMITMENT: bool = Field(
-        default=False,
-        description="Route CommitmentRepository (agent_commitments — cross-session "
-        "agent followups) through the SQLAlchemy 2.0 ORM (Phase 2 H batch — "
-        "FROZEN-DATACLASS parity). Returns the frozen ``Commitment`` value object, "
-        "NOT a dict. PARITY APPROACH = builder reuse: ORM rows → REST-shaped dict "
-        "(uuid→str, datetime→ISO str, bigint native int) → the UNCHANGED inherited "
-        "``_row_to_commitment(dict)`` reconstructs the dataclass byte-identically "
-        "(structurally guaranteed). UUID AUDIT: agent_id/user_id/session_id are "
-        "str()'d BY the builder → Commitment.user_id is str and the router "
-        "fulfill/cancel authz check ``existing.user_id != str(auth.user_id)`` is "
-        "str==str (a native UUID would 404 the owner). trigger_type/status are "
-        "plain Text columns (NOT Enum) → bare str → __post_init__ coerces to "
-        "TriggerType/CommitmentStatus enums (no _plain unwrap needed). "
-        "fulfillment_run_id is BIGINT on the column but STR on the dataclass — the "
-        "builder str()s it (kept native int by _rest_row). id (bigint) native int "
-        "(5.3 trap). v3 temporal: list_due_time / list_expired_pending bind the "
-        "NATIVE aware datetime cutoff (never the legacy ISO string) in the "
-        "trigger_at/expires_at range filter; create / _set_terminal_status "
-        "_coerce_temporal the inherited ISO-string timestamps (trigger_at / "
-        "expires_at / fulfilled_at) → aware datetime for the asyncpg bind. Phantom "
-        "screen: all insert/update keys are mapped columns. create raises on empty "
-        "row; _set_terminal_status returns None on no-pending-row; get_by_id "
-        "swallows→None; list_* raise. Writes commit via write_scope(). Inert — "
-        "flip back to false to roll back.",
-    )
-    USE_ORM_APPROVAL: bool = Field(
-        default=False,
-        description="Route ApprovalRequestsRepository (agent_approval_requests — "
-        "the human-in-loop approval-gate state machine) through the SQLAlchemy 2.0 "
-        "ORM (Phase 2 H batch — FROZEN-DATACLASS parity). Returns the frozen "
-        "``ApprovalRequest`` dataclass, NOT a dict. PARITY APPROACH = builder "
-        "reuse: ORM rows → REST-shaped dict (uuid→str, datetime→ISO str, bigint "
-        "native int) → the UNCHANGED inherited ``ApprovalRequest.from_row(dict)`` "
-        "reconstructs the dataclass byte-identically (wrapping the uuid strings "
-        "back to native ``UUID``). UUID AUDIT: id/user_id/agent_id/decided_by are "
-        "wrapped to native uuid.UUID BY the builder (the dataclass fields ARE typed "
-        "UUID) → the router approve/reject authz check ``existing.user_id != "
-        "user_uuid`` is UUID==UUID (str()ing them would BREAK parity here — the "
-        "INVERSE of most H repos). session_id/run_id are BIGINT columns but STR "
-        "dataclass fields (mig 231/232 snowflakes) — the builder str()s them (kept "
-        "native int by _rest_row). status is plain Text (NOT Enum) → bare str; "
-        "router ``existing.status != 'pending'`` is str==str. v3 temporal: "
-        "mark_expired binds the NATIVE aware datetime cutoff (never the legacy ISO "
-        "string) in the expires_at range filter; decide / mark_expired "
-        "_coerce_temporal the ISO-string decided_at → aware datetime. create binds "
-        "a native aware expires_at (now+ttl). CONCERN (NOT repaired — inert "
-        "discipline): decide() returns True UNCONDITIONALLY on a clean execute "
-        "(does not check rowcount), replicating the legacy quirk — a 0-row no-op "
-        "still returns True (the router's prior get_by_id guard is the real gate). "
-        "Phantom screen: all insert/update keys are mapped columns. create raises "
-        "on exception; get_by_id/list swallow→None/[]; decide→False on exception; "
-        "mark_expired→0 on exception. Writes commit via write_scope(). Inert — "
-        "flip back to false to roll back.",
-    )
-    USE_ORM_WORKFORCE: bool = Field(
-        default=False,
-        description="Route AgentWorkforceRepository (the M2 Persistent Workforce "
-        "bounded context — FIVE tables in one repo: agent_workers / agent_inbox / "
-        "task_tracking[agent_task rows] / agent_state_history / agent_outbox) "
-        "through the SQLAlchemy 2.0 ORM (Phase 2 H batch — highest-risk). "
-        "THE H-BATCH CRASHER HOT SPOT: ~17 bare UUID(row[...]) consumers across "
-        "app/services/workforce/* (agent_worker / inbox_processor / "
-        "outbox_dispatcher / delegate_tool). UUID(native_uuid) raises TypeError, "
-        "so EVERY returned uuid MUST be a str. Defense = the GENERIC _parity "
-        "sweep (any uuid.UUID→str, any datetime/date→ISO str) over every returned "
-        "dict — structurally guaranteeing every uuid column is a str so every "
-        "UUID(returned) consumer works. Audited columns: agent_inbox.id / "
-        "task.agent_id / task.user_id / agent_outbox.id+recipient_agent_id+"
-        "sender_agent_id / agent_state_history refs — all uuid→str. task PK "
-        "dbos_workflow_id is TEXT (already str). NO ==/!= silent-killer authz "
-        "compares in the workforce consumers (they route uuids through UUID() = "
-        "crash not silent; the ==/in checks are uuid-vs-uuid AFTER UUID() wrap). "
-        "NO SQLAlchemy Enum columns (all state/status/kind/phase are plain Text "
-        "+ CHECK) → no _plain unwrap; the ONE renamed col task_tracking.metadata→"
-        "metadata_ is handled by _name_to_attr. task_tracking DISCIPLINE: this "
-        "repo touches ONLY task_kind='agent_task' rows, which the "
-        "mirror_dbos_lifecycle_to_tracking trigger does NOT mirror (app code is "
-        "the lifecycle source of truth per the model comment) — so writing "
-        "phase/status/started_at/completed_at/error_msg on agent_task rows is "
-        "CORRECT and reproduced verbatim from the legacy (NOT a discipline "
-        "violation; workflow rows are never touched). v3 temporal: "
-        "list_stale_workers binds the NATIVE aware stale_before datetime in the "
-        "heartbeat_at < cutoff filter; all timestamptz column writes bind native "
-        "datetime objects (not ISO strings) for the asyncpg DateTime(True) bind. "
-        "upsert_worker reproduces the ON CONFLICT (agent_id) via "
-        "pg_insert().on_conflict_do_update. No batch inserts. Every method "
-        "soft-fails to the legacy fallback (None/False/[]/{items:[],total:0}) — "
-        "the sweeper/state-machine layers depend on it. Writes commit via "
-        "write_scope(). Inert — flip back to false to roll back.",
-    )
-
     USE_ORM_ANALYSIS: bool = Field(
         default=False,
         description="Route AnalysisRepository (resource_analysis CRUD + pgvector "

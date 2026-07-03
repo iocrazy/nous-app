@@ -1,13 +1,27 @@
-"""Sprint 4 — CommitmentRepository unit tests (mock Supabase)."""
+"""Sprint 4 — CommitmentRepository unit tests (ORM 2.0, mocked session).
+
+Post-rollout the repo is the SQLAlchemy 2.0 implementation — reads go through
+``read_scope()`` (``select``) and writes through ``write_scope()``
+(``insert ... returning`` / ``update ... returning``). These tests mock those
+scopes with a fake session that returns scripted ORM row objects (so
+``_orm_obj_to_dict`` → ``_rest_row`` → the inherited ``_row_to_commitment``
+builder yields a real ``Commitment``), covering create / terminal-status /
+list behaviour and asserting the compiled SQL + binds — WITHOUT a live DB. The
+DSN-gated integration suite in
+``tests/integration/test_commitment_repository_orm.py`` exercises the real
+round-trip. The pure translator tests (``_row_to_commitment`` /
+``_commitment_to_insert``) stay client-free.
+"""
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, List, Optional
 from uuid import uuid4
 
 import pytest
 
+import app.repositories.commitment_repository as mod
 from app.agent_framework.commitments import (
     Commitment,
     CommitmentStatus,
@@ -15,53 +29,99 @@ from app.agent_framework.commitments import (
 )
 from app.repositories.commitment_repository import CommitmentRepository
 
-# ─── Fake Supabase plumbing (mirrors test_agent_repository.py style) ──
+# ─── Fake ORM session plumbing (mirrors test_session_memory_repository.py) ──
 
 
-class _FakeQuery:
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
-        self._data: Any = []
-        # Chain access for `.not_.is_("col", "null")` — see Supabase client
-        self.not_ = self  # noqa: A003
+class _FakeRow:
+    """Stand-in agent_commitments ORM row. ``_orm_obj_to_dict`` reads mapped
+    attributes off it by name, so exposing every DB column as an attribute is
+    enough for parity."""
 
-    def __getattr__(self, name: str):
-        def _capture(*args: Any, **kwargs: Any) -> "_FakeQuery":
-            self.calls.append((name, args, kwargs))
-            return self
+    def __init__(self, **cols: Any) -> None:
+        defaults = {
+            "id": 1,
+            "agent_id": str(uuid4()),
+            "user_id": None,
+            "session_id": None,
+            "description": "x",
+            "payload_json": {},
+            "trigger_type": "next_session",
+            "trigger_at": None,
+            "trigger_event": None,
+            "expires_at": None,
+            "status": "pending",
+            "created_at": datetime(2026, 5, 2, 12, 0, tzinfo=timezone.utc),
+            "fulfilled_at": None,
+            "fulfillment_run_id": None,
+            "fulfillment_notes": None,
+        }
+        for key, val in {**defaults, **cols}.items():
+            setattr(self, key, val)
 
-        return _capture
 
-    async def execute(self) -> Any:
-        class _R:
-            data = self._data
+class _FakeScalars:
+    def __init__(self, rows: List[_FakeRow]) -> None:
+        self._rows = rows
 
-        return _R()
+    def first(self) -> Optional[_FakeRow]:
+        return self._rows[0] if self._rows else None
+
+    def all(self) -> List[_FakeRow]:
+        return list(self._rows)
 
 
-class _FakeClient:
-    def __init__(self, query: _FakeQuery) -> None:
-        self._query = query
+class _FakeResult:
+    def __init__(self, rows: List[_FakeRow]) -> None:
+        self._rows = rows
 
-    def table(self, name: str) -> _FakeQuery:
-        self._query.calls.append(("table", (name,), {}))
-        return self._query
+    def scalars(self) -> _FakeScalars:
+        return _FakeScalars(self._rows)
+
+
+class _FakeSession:
+    """Returns a scripted row-list per execute() call (sequenced) and records
+    the compiled SQL + bind params of every statement it runs."""
+
+    def __init__(self, results: List[List[_FakeRow]]) -> None:
+        self._results = list(results)
+        self.statements: list[tuple[str, dict[str, Any]]] = []
+
+    async def execute(self, stmt) -> _FakeResult:
+        compiled = stmt.compile()
+        self.statements.append((str(compiled), dict(compiled.params)))
+        rows = self._results.pop(0) if self._results else []
+        return _FakeResult(rows)
+
+    # convenience accessors on the last-executed statement
+    @property
+    def last_sql(self) -> str:
+        return self.statements[-1][0]
+
+    @property
+    def last_params(self) -> dict[str, Any]:
+        return self.statements[-1][1]
+
+
+class _ScopeCM:
+    def __init__(self, session: _FakeSession) -> None:
+        self._session = session
+
+    async def __aenter__(self) -> _FakeSession:
+        return self._session
+
+    async def __aexit__(self, *exc) -> bool:
+        return False
+
+
+def _patch_scopes(monkeypatch, session: _FakeSession) -> None:
+    """Route both read_scope and write_scope to the same fake session."""
+    monkeypatch.setattr(mod, "read_scope", lambda: _ScopeCM(session))
+    monkeypatch.setattr(mod, "write_scope", lambda: _ScopeCM(session))
 
 
 @pytest.fixture
-def fake_query() -> _FakeQuery:
-    return _FakeQuery()
-
-
-@pytest.fixture
-def repo(fake_query: _FakeQuery) -> CommitmentRepository:
-    r = CommitmentRepository()
-
-    async def _get_client():
-        return _FakeClient(fake_query)
-
-    r._get_client = _get_client  # type: ignore[method-assign]
-    return r
+def repo() -> CommitmentRepository:
+    return CommitmentRepository()
 
 
 _AGENT = str(uuid4())
@@ -69,7 +129,7 @@ _USER = str(uuid4())
 _NOW = datetime(2026, 5, 2, 12, 0, 0, tzinfo=timezone.utc)
 
 
-# ─── Translators ──────────────────────────────────────────────────────
+# ─── Translators (client-free) ────────────────────────────────────────
 
 
 def test_row_to_commitment_parses_iso_timestamps():
@@ -123,20 +183,13 @@ def test_commitment_to_insert_omits_server_managed_columns():
 
 @pytest.mark.asyncio
 async def test_create_inserts_and_returns_value_object(
-    repo: CommitmentRepository, fake_query: _FakeQuery
+    repo: CommitmentRepository, monkeypatch
 ) -> None:
-    fake_query._data = [
-        {
-            "id": 42,
-            "agent_id": _AGENT,
-            "user_id": _USER,
-            "description": "x",
-            "trigger_type": "next_session",
-            "status": "pending",
-            "payload_json": {},
-            "created_at": "2026-05-02T12:00:00Z",
-        }
-    ]
+    session = _FakeSession(
+        [[_FakeRow(id=42, agent_id=_AGENT, user_id=_USER, status="pending")]]
+    )
+    _patch_scopes(monkeypatch, session)
+
     c = Commitment(
         agent_id=_AGENT,
         user_id=_USER,
@@ -147,71 +200,80 @@ async def test_create_inserts_and_returns_value_object(
     assert result.id == 42
     assert result.status == CommitmentStatus.PENDING
 
-    insert = next(c for c in fake_query.calls if c[0] == "insert")
-    assert insert[1][0]["agent_id"] == _AGENT
+    # Compiled INSERT carries the agent_id in its bind params.
+    sql, params = session.statements[-1]
+    assert sql.startswith("INSERT INTO public.agent_commitments")
+    assert params["agent_id"] == _AGENT
+
+
+@pytest.mark.asyncio
+async def test_create_raises_when_no_row(
+    repo: CommitmentRepository, monkeypatch
+) -> None:
+    session = _FakeSession([[]])  # RETURNING yields no row
+    _patch_scopes(monkeypatch, session)
+    with pytest.raises(RuntimeError, match="no row"):
+        await repo.create(
+            Commitment(
+                agent_id=_AGENT,
+                description="x",
+                trigger_type=TriggerType.NEXT_SESSION,
+            )
+        )
 
 
 @pytest.mark.asyncio
 async def test_mark_fulfilled_sets_status_and_run_id(
-    repo: CommitmentRepository, fake_query: _FakeQuery
+    repo: CommitmentRepository, monkeypatch
 ) -> None:
-    fake_query._data = [
-        {
-            "id": 42,
-            "agent_id": _AGENT,
-            "description": "x",
-            "trigger_type": "next_session",
-            "status": "fulfilled",
-            "payload_json": {},
-            "fulfillment_run_id": "run-1",
-        }
-    ]
-    result = await repo.mark_fulfilled(42, fulfillment_run_id="run-1")
+    session = _FakeSession([[_FakeRow(id=42, agent_id=_AGENT, status="fulfilled")]])
+    _patch_scopes(monkeypatch, session)
+
+    # fulfillment_run_id arrives as a numeric STR (REST cast str→bigint);
+    # the ORM int()-coerces it for asyncpg's strict int8 codec.
+    result = await repo.mark_fulfilled(42, fulfillment_run_id="777")
     assert result is not None
     assert result.status == CommitmentStatus.FULFILLED
 
-    update = next(c for c in fake_query.calls if c[0] == "update")
-    payload = update[1][0]
-    assert payload["status"] == "fulfilled"
-    assert payload["fulfillment_run_id"] == "run-1"
-    assert "fulfilled_at" in payload  # auto-stamped
-
-    # Compare-and-swap: must filter by status='pending' to be idempotent
-    eq_pairs = [c[1] for c in fake_query.calls if c[0] == "eq"]
-    assert ("status", "pending") in eq_pairs
-    assert ("id", 42) in eq_pairs
+    sql, params = session.statements[-1]
+    assert sql.startswith("UPDATE public.agent_commitments")
+    # SET status='fulfilled' + fulfilled_at auto-stamped + run id int-coerced.
+    assert params["status"] == "fulfilled"
+    assert params["fulfillment_run_id"] == 777
+    assert isinstance(params["fulfillment_run_id"], int)
+    assert "fulfilled_at" in params
+    # Compare-and-swap: WHERE filters by id AND status='pending' (idempotent).
+    assert 42 in params.values()
+    assert "pending" in params.values()
 
 
 @pytest.mark.asyncio
 async def test_mark_fulfilled_returns_none_when_not_pending(
-    repo: CommitmentRepository, fake_query: _FakeQuery
+    repo: CommitmentRepository, monkeypatch
 ) -> None:
-    """Already-terminal row → no update happens → None returned."""
-    fake_query._data = []
+    """Already-terminal row → no matching pending row → None."""
+    session = _FakeSession([[]])
+    _patch_scopes(monkeypatch, session)
     result = await repo.mark_fulfilled(42)
     assert result is None
 
 
 @pytest.mark.asyncio
 async def test_mark_cancelled_does_not_set_fulfilled_at(
-    repo: CommitmentRepository, fake_query: _FakeQuery
+    repo: CommitmentRepository, monkeypatch
 ) -> None:
-    fake_query._data = [
-        {
-            "id": 42,
-            "agent_id": _AGENT,
-            "description": "x",
-            "trigger_type": "next_session",
-            "status": "cancelled",
-            "payload_json": {},
-        }
-    ]
+    session = _FakeSession([[_FakeRow(id=42, agent_id=_AGENT, status="cancelled")]])
+    _patch_scopes(monkeypatch, session)
+
     await repo.mark_cancelled(42, notes="user dismissed")
-    update = next(c for c in fake_query.calls if c[0] == "update")
-    payload = update[1][0]
-    assert payload["status"] == "cancelled"
-    assert "fulfilled_at" not in payload
-    assert payload["fulfillment_notes"] == "user dismissed"
+    sql, params = session.statements[-1]
+    assert sql.startswith("UPDATE public.agent_commitments")
+    assert params["status"] == "cancelled"
+    assert params["fulfillment_notes"] == "user dismissed"
+    # No fulfilled_at stamp on the cancel path.
+    assert "fulfilled_at" not in params
+    # Still a compare-and-swap on pending.
+    assert "pending" in params.values()
 
 
 @pytest.mark.asyncio
@@ -228,68 +290,79 @@ async def test_set_terminal_status_rejects_pending(
 
 @pytest.mark.asyncio
 async def test_list_due_time_filters_by_trigger_at(
-    repo: CommitmentRepository, fake_query: _FakeQuery
+    repo: CommitmentRepository, monkeypatch
 ) -> None:
-    fake_query._data = []
+    session = _FakeSession([[]])
+    _patch_scopes(monkeypatch, session)
     await repo.list_due_time(now=_NOW, limit=50)
-    eq_pairs = [c[1] for c in fake_query.calls if c[0] == "eq"]
-    lte_pairs = [c[1] for c in fake_query.calls if c[0] == "lte"]
-    assert ("status", "pending") in eq_pairs
-    assert ("trigger_type", "time") in eq_pairs
-    assert ("trigger_at", _NOW.isoformat()) in lte_pairs
+    sql, params = session.statements[-1]
+    assert sql.startswith("SELECT")
+    assert "pending" in params.values()
+    assert "time" in params.values()
+    # v3: the cutoff is bound as a NATIVE aware datetime, never an ISO string.
+    assert _NOW in params.values()
 
 
 @pytest.mark.asyncio
 async def test_list_pending_event_filters_by_event_name(
-    repo: CommitmentRepository, fake_query: _FakeQuery
+    repo: CommitmentRepository, monkeypatch
 ) -> None:
-    fake_query._data = []
+    session = _FakeSession([[]])
+    _patch_scopes(monkeypatch, session)
     await repo.list_pending_event("pr.merged:142")
-    eq_pairs = [c[1] for c in fake_query.calls if c[0] == "eq"]
-    assert ("trigger_type", "event") in eq_pairs
-    assert ("trigger_event", "pr.merged:142") in eq_pairs
+    _, params = session.statements[-1]
+    assert "event" in params.values()
+    assert "pr.merged:142" in params.values()
 
 
 @pytest.mark.asyncio
 async def test_list_next_session_filters_by_agent_and_user(
-    repo: CommitmentRepository, fake_query: _FakeQuery
+    repo: CommitmentRepository, monkeypatch
 ) -> None:
-    fake_query._data = []
+    session = _FakeSession([[]])
+    _patch_scopes(monkeypatch, session)
     await repo.list_next_session(agent_id=_AGENT, user_id=_USER)
-    eq_pairs = [c[1] for c in fake_query.calls if c[0] == "eq"]
-    assert ("trigger_type", "next_session") in eq_pairs
-    assert ("agent_id", _AGENT) in eq_pairs
-    assert ("user_id", _USER) in eq_pairs
+    _, params = session.statements[-1]
+    assert "next_session" in params.values()
+    assert _AGENT in params.values()
+    assert _USER in params.values()
 
 
 @pytest.mark.asyncio
 async def test_list_for_user_optional_status_filter(
-    repo: CommitmentRepository, fake_query: _FakeQuery
+    repo: CommitmentRepository, monkeypatch
 ) -> None:
-    fake_query._data = []
+    session = _FakeSession([[]])
+    _patch_scopes(monkeypatch, session)
     await repo.list_for_user(_USER, status=CommitmentStatus.FULFILLED)
-    eq_pairs = [c[1] for c in fake_query.calls if c[0] == "eq"]
-    assert ("user_id", _USER) in eq_pairs
-    assert ("status", "fulfilled") in eq_pairs
+    _, params = session.statements[-1]
+    assert _USER in params.values()
+    assert "fulfilled" in params.values()
 
 
 @pytest.mark.asyncio
 async def test_list_for_user_no_status_filter(
-    repo: CommitmentRepository, fake_query: _FakeQuery
+    repo: CommitmentRepository, monkeypatch
 ) -> None:
-    fake_query._data = []
+    session = _FakeSession([[]])
+    _patch_scopes(monkeypatch, session)
     await repo.list_for_user(_USER)
-    eq_pairs = [c[1] for c in fake_query.calls if c[0] == "eq"]
-    statuses = [v for (k, v) in eq_pairs if k == "status"]
-    assert statuses == []  # no status filter
+    _, params = session.statements[-1]
+    assert _USER in params.values()
+    # No status filter → no CommitmentStatus value bound.
+    assert not any(v in {s.value for s in CommitmentStatus} for v in params.values())
 
 
 @pytest.mark.asyncio
 async def test_list_expired_pending_filters_by_expires_at(
-    repo: CommitmentRepository, fake_query: _FakeQuery
+    repo: CommitmentRepository, monkeypatch
 ) -> None:
-    fake_query._data = []
+    session = _FakeSession([[]])
+    _patch_scopes(monkeypatch, session)
     later = _NOW + timedelta(hours=1)
     await repo.list_expired_pending(now=later)
-    lte_pairs = [c[1] for c in fake_query.calls if c[0] == "lte"]
-    assert ("expires_at", later.isoformat()) in lte_pairs
+    sql, params = session.statements[-1]
+    # v3: the cutoff is bound as a NATIVE aware datetime, never an ISO string.
+    assert later in params.values()
+    # expires_at IS NOT NULL guard present.
+    assert "IS NOT NULL" in sql

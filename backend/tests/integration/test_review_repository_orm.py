@@ -1,4 +1,4 @@
-"""Integration tests for ReviewRepositoryOrm (Phase 2 H batch) against real PG.
+"""Integration tests for the ORM-backed ReviewRepository against real PG.
 
 THE REVIEW AUTHZ HOT SPOT. Proves the REST → ORM swap is invisible AND that
 STRATEGY-C value-type parity holds on review_comments / review_annotations /
@@ -122,9 +122,9 @@ async def cleanup_reviews(integration_db_url):
 
 
 def _repo():
-    from app.repositories.review_repository_orm import ReviewRepositoryOrm
+    from app.repositories.review_repository import ReviewRepository
 
-    return ReviewRepositoryOrm()
+    return ReviewRepository()
 
 
 def _content() -> str:
@@ -366,30 +366,15 @@ async def test_upsert_review_status_insert_then_update(
             await conn.close()
 
 
-# ─── factory on/off ─────────────────────────────────────────────────────
+# ─── factory wiring ─────────────────────────────────────────────────────
 
 
-def test_factory_off_returns_legacy():
-    from unittest.mock import patch
-
+def test_factory_returns_orm_repository():
+    """The USE_ORM_REVIEW flag is retired — the factory unconditionally returns
+    the collapsed ORM-backed ReviewRepository."""
     from app.repositories.review_repository import (
         ReviewRepository,
         get_review_repository,
     )
 
-    with patch("app.core.config.settings.USE_ORM_REVIEW", False):
-        assert type(get_review_repository()) is ReviewRepository
-
-
-def test_factory_on_returns_orm(integration_db_url):
-    from unittest.mock import patch
-
-    from app.repositories.review_repository_orm import ReviewRepositoryOrm
-
-    with (
-        patch("app.core.config.settings.USE_ORM_REVIEW", True),
-        patch("app.db.engine.is_configured", return_value=True),
-    ):
-        from app.repositories.review_repository import get_review_repository
-
-        assert type(get_review_repository()) is ReviewRepositoryOrm
+    assert type(get_review_repository()) is ReviewRepository

@@ -1,5 +1,5 @@
-"""Repository for the M2 Persistent Workforce: workers / inbox / tasks /
-state_history / outbox.
+"""SQLAlchemy 2.0 ORM data access for the M2 Persistent Workforce: workers /
+inbox / tasks / state_history / outbox.
 
 Five tables form one bounded context (the workforce lifecycle), so they
 share a single repository. Sections below mirror the migration:
@@ -10,30 +10,137 @@ share a single repository. Sections below mirror the migration:
     4. state_history       — audit trail for state transitions
     5. outbox              — outgoing messages (Realtime delivery + audit)
 
-Writes go through the admin client (RLS bypass — workforce dispatch is
-service-role logic). Read paths can be called either by service code (admin)
-or via user-scoped clients (RLS enforces ownership).
+Post-rollout the ORM path is the only path — the ``USE_ORM_WORKFORCE`` flag and
+the legacy supabase-py REST bodies have been retired (prod ran 100% ORM). All
+writes commit via ``write_scope()`` (RLS-bypassing admin session — workforce
+dispatch is service-role logic); reads use ``read_scope()``.
+``get_agent_workforce_repository()`` unconditionally returns
+``AgentWorkforceRepository``.
 
 The state-machine logic lives ONE LEVEL UP in
 ``app.services.workforce.state_machine`` — this repo only exposes the raw
 DB primitives. Advisory locks are held by the state machine, not here.
+
+★★★ THE CRASHER HOT SPOT — ~17 bare ``UUID(row[...])`` consumers ★★★
+=====================================================================
+The dicts this repo returns are consumed by ``UUID(...)`` calls ALL OVER
+``app/services/workforce/*``. ``UUID(native_uuid_obj)`` raises ``TypeError``
+(``UUID()`` wants str/bytes/int, NOT a uuid.UUID). So if the repo returned a
+native ``uuid.UUID`` for any consumed column, the consumer would CRASH.
+
+Defense: the generic ``_parity`` sweep stringifies ANY ``uuid.UUID`` and
+ISO-formats ANY ``datetime`` / ``date`` over EVERY returned dict (same
+structural guarantee as ``issue_repository._parity``). This makes every
+uuid column a ``str`` so every ``UUID(returned)`` consumer gets a str and works.
+
+Per-table PK / uuid / bigint map (audited against the models + migrations):
+  agent_workers:        PK agent_id (UUID). uuid: agent_id, current_task_id.
+                        int: worker_pid (Integer). NO bigint id.
+  agent_inbox:          PK id (UUID, server gen_random_uuid). uuid: id,
+                        recipient_agent_id, sender_user_id, sender_agent_id,
+                        task_id, reply_to_message_id. int: priority (SmallInt).
+  task_tracking:        PK dbos_workflow_id (TEXT — NOT a uuid, NOT bigint).
+                        uuid: user_id, agent_id, inbox_message_id, group_id,
+                        flow_id. TEXT: dbos_workflow_id / parent_task_id /
+                        root_task_id / resource_id / media_id. bigint: issue_id
+                        / speed / total_bytes (NOT exposed by the shape mapper).
+                        int: progress / cost_cents.
+  agent_state_history:  PK id (UUID). uuid: id, agent_id, task_id.
+  agent_outbox:         PK id (UUID). uuid: id, sender_agent_id,
+                        recipient_user_id, recipient_agent_id, task_id.
+
+==/!= AUTHZ COMPARES (silent killers): NONE found in the workforce consumers.
+The workforce layer routes uuids through ``UUID(...)`` (crash, not silent) — no
+``row["x"] == some_str`` authz gate like the issues M-batch had. ``==`` compares
+that DO exist are uuid-vs-uuid (e.g. delegate_tool ``target_agent_id ==
+self.caller_agent_id`` AFTER both are ``UUID(...)``-wrapped) — unaffected by the
+returned dict's str shape. The dedup-collision path compares ``"duplicate" in
+str(e).lower()`` on the exception text — preserved verbatim below.
+
+NON-uuid type-sensitive columns
+--------------------------------
+  dbos_workflow_id / parent_task_id / root_task_id / resource_id / media_id
+    (TEXT) → native str (unchanged; these were str under REST too).
+  task_tracking.issue_id / speed / total_bytes (BIGINT) → would stay native int
+    (5.3 trap) — but the task-shape mapper does NOT expose them, so they never
+    surface. NO str() applied to bigints anywhere (the _parity sweep only
+    touches uuid/datetime/date — int passes through untouched).
+  priority / progress / cost_cents (SmallInt/Int) → native int (untouched).
+  ALL timestamptz → ``.isoformat()`` (heartbeat_at, created_at, started_at,
+    completed_at, processed_at, expires_at, reading_claimed_at, delivered_at,
+    changed_at, state_changed_at, updated_at). The shape mapper / list dicts feed
+    these to pydantic / JSON, so ISO str is the parity shape. There are NO date
+    (date-only) columns in the 5 tables.
+  payload / metadata / metadata_json / subscribers (JSONB) → native dict/list.
+
+Enum / model-quirk scan
+-----------------------
+  NO SQLAlchemy ``Enum`` columns on any of the 5 models — worker.state /
+  inbox.status / inbox.message_type / inbox.sender_kind / task.phase /
+  task.status / outbox.recipient_kind are all plain ``Text`` / ``String`` with
+  DB CHECK constraints. So NO ``_plain`` unwrap is needed — reads return bare
+  strings already. We still route reads through ``_orm_obj_to_dict`` (which
+  applies ``_plain`` harmlessly) for the ONE renamed column:
+  ``task_tracking.metadata`` is mapped to the Python attr ``metadata_``
+  (SQLAlchemy reserves ``metadata`` on declarative classes), so the value MUST
+  be read via the mapped attr. ``_name_to_attr`` handles this and re-keys the
+  dict back to the DB name ``"metadata"`` — exactly the key the shape mapper
+  (``tt_row_to_task_shape``) reads.
+
+task_tracking WRITE-COLUMN DISCIPLINE (CLAUDE.md)
+=================================================
+For ``task_kind='workflow'`` rows, phase/status/progress/started_at/
+completed_at/error_msg are owned by the ``mirror_dbos_lifecycle_to_tracking``
+trigger and business code must NOT write them. BUT this repo ONLY ever touches
+``task_kind='agent_task'`` rows (EVERY query carries the ``task_kind`` filter),
+which the trigger does NOT mirror — application code IS the source of truth for
+their phase/status. So writing phase/status/started_at/completed_at/error_msg on
+agent_task rows is CORRECT (NOT a discipline violation; workflow rows are never
+touched). The write set is reproduced column-for-column from the legacy.
+
+DATE/TIMESTAMPTZ FILTER BINDING (the v3 rule)
+=============================================
+ONE timestamptz range FILTER: ``list_stale_workers`` does
+``WHERE heartbeat_at < stale_before``. ``stale_before`` arrives as a NATIVE
+aware ``datetime`` → bound DIRECTLY (never an ISO string, never naive). All
+timestamptz column WRITES bind native aware ``datetime`` objects (built with
+``datetime.now(timezone.utc)``, not ``.isoformat()``) so the asyncpg bind gets a
+real ``DateTime(True)`` value. ``expires_at`` arrives as a native datetime →
+bound directly.
+
+BULK / UPSERT
+=============
+upsert_worker is the only ON CONFLICT path → ``pg_insert(AgentWorkers)
+.on_conflict_do_update(index_elements=["agent_id"], set_=...)`` (the legacy PK
+upsert). No batch inserts (state_history / inbox / outbox insert one row/call).
+
+Every method swallows exceptions and returns the legacy fallback (None / False /
+[] / {"items": [], "total": 0}) at the same log level — the workforce
+sweeper/state-machine layers depend on these soft-fail contracts.
 """
 
 from __future__ import annotations
 
+import datetime as _dt
 import uuid
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from loguru import logger
+from sqlalchemy import func, select
+from sqlalchemy import update as sa_update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-if TYPE_CHECKING:
-    from app.repositories.agent_workforce_repository_orm import (
-        AgentWorkforceRepositoryOrm,
-    )
-
-from app.db.supabase_client import get_async_supabase_admin
+from app.db.session import read_scope, write_scope
+from app.models import (
+    AgentInbox,
+    AgentOutbox,
+    AgentStateHistory,
+    AgentWorkers,
+    TaskTracking,
+)
+from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
 
 # ─────────────────────────────────────────────────────────────────
 # Type aliases for clarity at call-sites
@@ -114,18 +221,77 @@ def tt_row_to_task_shape(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, An
 _tt_row_to_task_shape = tt_row_to_task_shape
 
 
+# ─────────────────────────────────────────────────────────────────
+# Strategy-C parity layer (DB-name-keyed dicts → REST-shaped dicts)
+# ─────────────────────────────────────────────────────────────────
+# DB-column-name → mapped-attribute-name maps (built once). The only column
+# that differs (name != attr) is task_tracking.metadata → metadata_.
+_WORKERS_N2A: Dict[str, str] = _name_to_attr(AgentWorkers)
+_INBOX_N2A: Dict[str, str] = _name_to_attr(AgentInbox)
+_TASK_N2A: Dict[str, str] = _name_to_attr(TaskTracking)
+_HISTORY_N2A: Dict[str, str] = _name_to_attr(AgentStateHistory)
+_OUTBOX_N2A: Dict[str, str] = _name_to_attr(AgentOutbox)
+
+
+def _parity(out: Dict[str, Any]) -> Dict[str, Any]:
+    """Strategy-C value-type parity IN PLACE on a SELECT *-shaped dict.
+
+    Generic sweep (the crasher defense): uuid → str (so every
+    ``UUID(returned)`` consumer gets a str, never a native uuid.UUID →
+    TypeError), datetime → ISO str, date → ISO str. Bigint ids/FKs and other
+    ints pass through NATIVE (the 5.3 trap — no str() on int). TEXT PKs
+    (dbos_workflow_id, parent/root) are already str. JSONB stays native
+    dict/list. NULLs pass through."""
+    for key, value in out.items():
+        if isinstance(value, uuid.UUID):
+            out[key] = str(value)
+        elif isinstance(value, _dt.datetime):
+            out[key] = value.isoformat()
+        elif isinstance(value, _dt.date):
+            out[key] = value.isoformat()
+    return out
+
+
+def _worker_row(obj: Any) -> Dict[str, Any]:
+    return _parity(_orm_obj_to_dict(obj, _WORKERS_N2A))
+
+
+def _inbox_row(obj: Any) -> Dict[str, Any]:
+    return _parity(_orm_obj_to_dict(obj, _INBOX_N2A))
+
+
+def _history_row(obj: Any) -> Dict[str, Any]:
+    return _parity(_orm_obj_to_dict(obj, _HISTORY_N2A))
+
+
+def _outbox_row(obj: Any) -> Dict[str, Any]:
+    return _parity(_orm_obj_to_dict(obj, _OUTBOX_N2A))
+
+
+def _task_raw(obj: Any) -> Dict[str, Any]:
+    """SELECT *-shaped, parity'd dict for one task_tracking row (DB-name keyed,
+    metadata via the metadata_ attr). Feed this to ``tt_row_to_task_shape`` so
+    the shape mapper reads STR uuids (agent_id/user_id) and a str
+    dbos_workflow_id."""
+    return _parity(_orm_obj_to_dict(obj, _TASK_N2A))
+
+
+def _task_shape(obj: Optional[Any]) -> Optional[Dict[str, Any]]:
+    """Full task_tracking ORM row → agent_tasks-style shape (parity'd)."""
+    if obj is None:
+        return None
+    return tt_row_to_task_shape(_task_raw(obj))
+
+
 class AgentWorkforceRepository:
-    """Data access layer for the persistent workforce (M2)."""
+    """Data access layer for the persistent workforce (M2, ORM 2.0)."""
 
-    WORKERS_TABLE = "agent_workers"
+    # Physical table name still read by an out-of-repo consumer:
+    # app.services.workforce.agent_worker._lookup_inbox_message reaches through
+    # ``workforce.INBOX_TABLE`` to do a best-effort supabase-py inbox read.
+    # Kept for that caller (the other four REST-only table constants were
+    # dropped with the legacy bodies).
     INBOX_TABLE = "agent_inbox"
-    # A4: agent_tasks 合并入 task_tracking (task_kind='agent_task')
-    TASKS_TABLE = "task_tracking"
-    STATE_HISTORY_TABLE = "agent_state_history"
-    OUTBOX_TABLE = "agent_outbox"
-
-    async def _get_client(self):
-        return await get_async_supabase_admin()
 
     # ═════════════════════════════════════════════════════════════
     # 1. Workers
@@ -133,15 +299,14 @@ class AgentWorkforceRepository:
 
     async def get_worker(self, agent_id: UUID) -> Optional[Dict[str, Any]]:
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.WORKERS_TABLE)
-                .select("*")
-                .eq("agent_id", str(agent_id))
-                .maybe_single()
-                .execute()
-            )
-            return result.data if result and result.data else None
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(AgentWorkers)
+                    .where(AgentWorkers.agent_id == str(agent_id))
+                    .limit(1)
+                )
+                row = result.scalars().first()
+                return _worker_row(row) if row else None
         except Exception as e:
             logger.error(f"Failed to get worker {agent_id}: {e}")
             return None
@@ -155,23 +320,35 @@ class AgentWorkforceRepository:
         worker_hostname: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Register or refresh a worker. Idempotent on agent_id (PK)."""
-        now_iso = datetime.now(timezone.utc).isoformat()
-        payload = {
+        now = datetime.now(timezone.utc)
+        values = {
             "agent_id": str(agent_id),
             "state": state,
             "worker_pid": worker_pid,
             "worker_hostname": worker_hostname,
-            "heartbeat_at": now_iso,
-            "state_changed_at": now_iso,
+            "heartbeat_at": now,
+            "state_changed_at": now,
         }
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.WORKERS_TABLE)
-                .upsert(payload, on_conflict="agent_id")
-                .execute()
+            stmt = (
+                pg_insert(AgentWorkers)
+                .values(**values)
+                .on_conflict_do_update(
+                    index_elements=["agent_id"],
+                    set_={
+                        "state": values["state"],
+                        "worker_pid": values["worker_pid"],
+                        "worker_hostname": values["worker_hostname"],
+                        "heartbeat_at": values["heartbeat_at"],
+                        "state_changed_at": values["state_changed_at"],
+                    },
+                )
+                .returning(AgentWorkers)
             )
-            return (result.data or [None])[0]
+            async with write_scope() as session:
+                result = await session.execute(stmt)
+                row = result.scalars().first()
+                return _worker_row(row) if row else None
         except Exception as e:
             logger.error(f"Failed to upsert worker {agent_id}: {e}")
             return None
@@ -184,23 +361,23 @@ class AgentWorkforceRepository:
         current_task_id: Optional[UUID] = None,
         bump_heartbeat: bool = True,
     ) -> bool:
-        now_iso = datetime.now(timezone.utc).isoformat()
-        payload: Dict[str, Any] = {
+        now = datetime.now(timezone.utc)
+        values: Dict[str, Any] = {
             "state": state,
-            "state_changed_at": now_iso,
+            "state_changed_at": now,
             "current_task_id": str(current_task_id) if current_task_id else None,
         }
         if bump_heartbeat:
-            payload["heartbeat_at"] = now_iso
+            values["heartbeat_at"] = now
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.WORKERS_TABLE)
-                .update(payload)
-                .eq("agent_id", str(agent_id))
-                .execute()
-            )
-            return bool(result.data)
+            async with write_scope() as session:
+                result = await session.execute(
+                    sa_update(AgentWorkers)
+                    .where(AgentWorkers.agent_id == str(agent_id))
+                    .values(**values)
+                    .returning(AgentWorkers.agent_id)
+                )
+                return result.scalars().first() is not None
         except Exception as e:
             logger.error(f"Failed to update worker state {agent_id}: {e}")
             return False
@@ -208,14 +385,14 @@ class AgentWorkforceRepository:
     async def heartbeat(self, agent_id: UUID) -> bool:
         """Lightweight heartbeat refresh — no state change."""
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.WORKERS_TABLE)
-                .update({"heartbeat_at": datetime.now(timezone.utc).isoformat()})
-                .eq("agent_id", str(agent_id))
-                .execute()
-            )
-            return bool(result.data)
+            async with write_scope() as session:
+                result = await session.execute(
+                    sa_update(AgentWorkers)
+                    .where(AgentWorkers.agent_id == str(agent_id))
+                    .values(heartbeat_at=datetime.now(timezone.utc))
+                    .returning(AgentWorkers.agent_id)
+                )
+                return result.scalars().first() is not None
         except Exception as e:
             logger.error(f"Failed heartbeat {agent_id}: {e}")
             return False
@@ -223,19 +400,19 @@ class AgentWorkforceRepository:
     async def list_stale_workers(
         self, *, stale_before: datetime
     ) -> List[Dict[str, Any]]:
-        """Workers whose heartbeat is older than `stale_before` and still in
-        an active state. Sweeper marks them terminated and re-queues their
-        in-flight task."""
+        """Workers whose heartbeat is older than `stale_before` and still in an
+        active state. ``stale_before`` is a NATIVE aware datetime → bound
+        directly (v3 temporal-filter rule)."""
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.WORKERS_TABLE)
-                .select("*")
-                .in_("state", ["idle", "working", "waiting_for_other"])
-                .lt("heartbeat_at", stale_before.isoformat())
-                .execute()
-            )
-            return result.data or []
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(AgentWorkers)
+                    .where(
+                        AgentWorkers.state.in_(["idle", "working", "waiting_for_other"])
+                    )
+                    .where(AgentWorkers.heartbeat_at < stale_before)
+                )
+                return [_worker_row(r) for r in result.scalars().all()]
         except Exception as e:
             logger.error(f"Failed to list stale workers: {e}")
             return []
@@ -264,7 +441,7 @@ class AgentWorkforceRepository:
         on dedup_key swallows the insert). On unique-violation we look up the
         existing row so callers can still reply to the original message id.
         """
-        record: Dict[str, Any] = {
+        values: Dict[str, Any] = {
             "recipient_agent_id": str(recipient_agent_id),
             "sender_kind": sender_kind,
             "sender_user_id": str(sender_user_id) if sender_user_id else None,
@@ -276,12 +453,17 @@ class AgentWorkforceRepository:
             "reply_to_message_id": (
                 str(reply_to_message_id) if reply_to_message_id else None
             ),
-            "expires_at": expires_at.isoformat() if expires_at else None,
+            # Bind a NATIVE aware datetime (asyncpg → DateTime(True)); the legacy
+            # passed expires_at.isoformat() to PostgREST.
+            "expires_at": expires_at,
         }
         try:
-            client = await self._get_client()
-            result = await client.table(self.INBOX_TABLE).insert(record).execute()
-            return (result.data or [None])[0]
+            async with write_scope() as session:
+                result = await session.execute(
+                    pg_insert(AgentInbox).values(**values).returning(AgentInbox)
+                )
+                row = result.scalars().first()
+                return _inbox_row(row) if row else None
         except Exception as e:
             # Dedup collision → resolve to the existing row instead of failing.
             if dedup_key and "duplicate" in str(e).lower():
@@ -298,17 +480,16 @@ class AgentWorkforceRepository:
         self, *, recipient_agent_id: UUID, dedup_key: str
     ) -> Optional[Dict[str, Any]]:
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.INBOX_TABLE)
-                .select("*")
-                .eq("recipient_agent_id", str(recipient_agent_id))
-                .eq("dedup_key", dedup_key)
-                .in_("status", ["unread", "reading"])
-                .limit(1)
-                .execute()
-            )
-            return (result.data or [None])[0]
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(AgentInbox)
+                    .where(AgentInbox.recipient_agent_id == str(recipient_agent_id))
+                    .where(AgentInbox.dedup_key == dedup_key)
+                    .where(AgentInbox.status.in_(["unread", "reading"]))
+                    .limit(1)
+                )
+                row = result.scalars().first()
+                return _inbox_row(row) if row else None
         except Exception as e:
             logger.error(f"Failed inbox dedup lookup: {e}")
             return None
@@ -320,43 +501,35 @@ class AgentWorkforceRepository:
         claimed_by: str,
     ) -> Optional[Dict[str, Any]]:
         """Atomic claim: pick the highest-priority unread message and flip
-        status to 'reading' in one round-trip.
-
-        The state machine layer holds the per-agent advisory lock around this
-        call so the read-then-update window is safe. Returns None when the
-        inbox is empty.
-        """
+        status to 'reading' in one round-trip (CAS guard against double-claim).
+        The state machine holds the per-agent advisory lock around this call."""
         try:
-            client = await self._get_client()
-            # Highest priority, oldest first
-            picked = (
-                await client.table(self.INBOX_TABLE)
-                .select("id")
-                .eq("recipient_agent_id", str(recipient_agent_id))
-                .eq("status", "unread")
-                .order("priority", desc=True)
-                .order("created_at", desc=False)
-                .limit(1)
-                .execute()
-            )
-            if not picked.data:
-                return None
-            message_id = picked.data[0]["id"]
-
-            updated = (
-                await client.table(self.INBOX_TABLE)
-                .update(
-                    {
-                        "status": "reading",
-                        "reading_claimed_at": datetime.now(timezone.utc).isoformat(),
-                        "reading_claimed_by": claimed_by,
-                    }
+            async with write_scope() as session:
+                # Highest priority, oldest first.
+                picked = await session.execute(
+                    select(AgentInbox.id)
+                    .where(AgentInbox.recipient_agent_id == str(recipient_agent_id))
+                    .where(AgentInbox.status == "unread")
+                    .order_by(AgentInbox.priority.desc(), AgentInbox.created_at.asc())
+                    .limit(1)
                 )
-                .eq("id", message_id)
-                .eq("status", "unread")  # CAS guard against double-claim
-                .execute()
-            )
-            return (updated.data or [None])[0]
+                message_id = picked.scalars().first()
+                if message_id is None:
+                    return None
+
+                updated = await session.execute(
+                    sa_update(AgentInbox)
+                    .where(AgentInbox.id == message_id)
+                    .where(AgentInbox.status == "unread")  # CAS guard
+                    .values(
+                        status="reading",
+                        reading_claimed_at=datetime.now(timezone.utc),
+                        reading_claimed_by=claimed_by,
+                    )
+                    .returning(AgentInbox)
+                )
+                row = updated.scalars().first()
+                return _inbox_row(row) if row else None
         except Exception as e:
             logger.error(f"Failed to claim unread (agent={recipient_agent_id}): {e}")
             return None
@@ -369,21 +542,21 @@ class AgentWorkforceRepository:
         status: str = "processed",
     ) -> bool:
         """Finalise an inbox message: 'processed' / 'dismissed' / 'expired'."""
-        payload: Dict[str, Any] = {
+        values: Dict[str, Any] = {
             "status": status,
-            "processed_at": datetime.now(timezone.utc).isoformat(),
+            "processed_at": datetime.now(timezone.utc),
         }
         if task_id is not None:
-            payload["task_id"] = str(task_id)
+            values["task_id"] = str(task_id)
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.INBOX_TABLE)
-                .update(payload)
-                .eq("id", str(message_id))
-                .execute()
-            )
-            return bool(result.data)
+            async with write_scope() as session:
+                result = await session.execute(
+                    sa_update(AgentInbox)
+                    .where(AgentInbox.id == str(message_id))
+                    .values(**values)
+                    .returning(AgentInbox.id)
+                )
+                return result.scalars().first() is not None
         except Exception as e:
             logger.error(f"Failed to mark inbox {message_id} {status}: {e}")
             return False
@@ -397,26 +570,30 @@ class AgentWorkforceRepository:
         offset: int = 0,
     ) -> Dict[str, Any]:
         try:
-            client = await self._get_client()
-            base = (
-                client.table(self.INBOX_TABLE)
-                .select("*", count="exact")
-                .eq("recipient_agent_id", str(recipient_agent_id))
-            )
-            if status:
-                base = base.eq("status", status)
-            result = (
-                await base.order("created_at", desc=True)
-                .range(offset, offset + limit - 1)
-                .execute()
-            )
-            return {"items": result.data or [], "total": result.count or 0}
+            async with read_scope() as session:
+                base = select(AgentInbox).where(
+                    AgentInbox.recipient_agent_id == str(recipient_agent_id)
+                )
+                if status:
+                    base = base.where(AgentInbox.status == status)
+
+                count_stmt = select(func.count()).select_from(base.subquery())
+                total = await session.scalar(count_stmt) or 0
+
+                page_stmt = (
+                    base.order_by(AgentInbox.created_at.desc())
+                    .offset(offset)
+                    .limit(limit)
+                )
+                result = await session.execute(page_stmt)
+                items = [_inbox_row(r) for r in result.scalars().all()]
+            return {"items": items, "total": total}
         except Exception as e:
             logger.error(f"Failed to list inbox {recipient_agent_id}: {e}")
             return {"items": [], "total": 0}
 
     # ═════════════════════════════════════════════════════════════
-    # 3. Tasks  (A4: 物理表 task_tracking WHERE task_kind='agent_task')
+    # 3. Tasks  (physical table task_tracking WHERE task_kind='agent_task')
     # ═════════════════════════════════════════════════════════════
     #
     # 命名映射（agent_tasks → task_tracking）：
@@ -429,9 +606,6 @@ class AgentWorkforceRepository:
     #   error_message   → error_msg
     #   ended_at        → completed_at
     #   assigned_at     → metadata.assigned_at
-    #
-    # task_tracking.task_type 是业务标签 (VARCHAR 20)；agent task 行用
-    # 'agent_task' 标。task_kind 列用作"哪个事实源管 status"的 dispatch。
 
     async def create_task(
         self,
@@ -451,8 +625,7 @@ class AgentWorkforceRepository:
             if root_task_id
             else (str(parent_task_id) if parent_task_id else new_id)
         )
-        # task_tracking PK 是 TEXT，parent/root 列也是 TEXT（A4 加的列）。
-        record: Dict[str, Any] = {
+        values: Dict[str, Any] = {
             "dbos_workflow_id": new_id,
             "task_kind": TASK_KIND_AGENT,
             "task_type": TASK_TYPE_AGENT,
@@ -462,58 +635,56 @@ class AgentWorkforceRepository:
             "status": "pending",
             "phase": "queued",
             "progress": 0,
-            "metadata": {
-                "agent_payload": payload,
-            },
+            # JSONB metadata — mapped Python attr is metadata_ (DB name metadata).
+            "metadata_": {"agent_payload": payload},
             "parent_task_id": str(parent_task_id) if parent_task_id else None,
             "root_task_id": root_id_str,
             "inbox_message_id": str(inbox_message_id) if inbox_message_id else None,
         }
         try:
-            client = await self._get_client()
-            result = await client.table(self.TASKS_TABLE).insert(record).execute()
-            row = (result.data or [None])[0]
-            return _tt_row_to_task_shape(row)
+            async with write_scope() as session:
+                result = await session.execute(
+                    pg_insert(TaskTracking).values(**values).returning(TaskTracking)
+                )
+                row = result.scalars().first()
+                return _task_shape(row)
         except Exception as e:
             logger.exception(f"Failed to create task (agent={agent_id}): {e}")
             return None
 
     async def claim_next_queued(self, *, agent_id: UUID) -> Optional[Dict[str, Any]]:
-        """Atomic claim: pick the oldest queued task for this agent and flip
-        to 'assigned'. Caller (state machine) holds the advisory lock so the
-        read-then-update gap is safe."""
+        """Atomic claim: pick the oldest queued task for this agent and flip to
+        'assigned' (CAS guard on phase). Caller holds the advisory lock."""
         now_iso = datetime.now(timezone.utc).isoformat()
         try:
-            client = await self._get_client()
-            picked = (
-                await client.table(self.TASKS_TABLE)
-                .select("dbos_workflow_id, metadata")
-                .eq("task_kind", TASK_KIND_AGENT)
-                .eq("agent_id", str(agent_id))
-                .eq("phase", "queued")
-                .order("created_at", desc=False)
-                .limit(1)
-                .execute()
-            )
-            if not picked.data:
-                return None
-            task_id = picked.data[0]["dbos_workflow_id"]
-            existing_md = picked.data[0].get("metadata") or {}
-            existing_md["assigned_at"] = now_iso
-            updated = (
-                await client.table(self.TASKS_TABLE)
-                .update(
-                    {
-                        "phase": "assigned",
-                        "status": LIFECYCLE_TO_STATUS["assigned"],
-                        "metadata": existing_md,
-                    }
+            async with write_scope() as session:
+                picked = await session.execute(
+                    select(TaskTracking.dbos_workflow_id, TaskTracking.metadata_)
+                    .where(TaskTracking.task_kind == TASK_KIND_AGENT)
+                    .where(TaskTracking.agent_id == str(agent_id))
+                    .where(TaskTracking.phase == "queued")
+                    .order_by(TaskTracking.created_at.asc())
+                    .limit(1)
                 )
-                .eq("dbos_workflow_id", task_id)
-                .eq("phase", "queued")  # CAS guard
-                .execute()
-            )
-            return _tt_row_to_task_shape((updated.data or [None])[0])
+                first = picked.first()
+                if first is None:
+                    return None
+                task_id = first[0]
+                existing_md: Dict[str, Any] = dict(first[1] or {})
+                existing_md["assigned_at"] = now_iso
+
+                updated = await session.execute(
+                    sa_update(TaskTracking)
+                    .where(TaskTracking.dbos_workflow_id == task_id)
+                    .where(TaskTracking.phase == "queued")  # CAS guard
+                    .values(
+                        phase="assigned",
+                        status=LIFECYCLE_TO_STATUS["assigned"],
+                        metadata_=existing_md,
+                    )
+                    .returning(TaskTracking)
+                )
+                return _task_shape(updated.scalars().first())
         except Exception as e:
             logger.exception(f"Failed to claim queued task (agent={agent_id}): {e}")
             return None
@@ -529,62 +700,54 @@ class AgentWorkforceRepository:
         error_code: Optional[str] = None,
         error_message: Optional[str] = None,
     ) -> bool:
-        """Generic status update. The state machine validates legal transitions;
-        this just persists the result.
-
-        For terminal statuses ('done' | 'failed' | 'cancelled') sets completed_at;
-        for 'in_progress' sets started_at; metadata is read-modify-write because
-        Supabase JS client doesn't support jsonb merge — we read existing
-        metadata, splice in the new fields, write back."""
-        now_iso = datetime.now(timezone.utc).isoformat()
+        """Generic status update for an agent_task row. Read-modify-write the
+        JSONB metadata (so unrelated keys survive), then persist phase/status
+        (+ conditional started_at/completed_at/error_msg) — reproducing the
+        legacy write set exactly."""
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
         task_id_str = str(task_id)
-        client = await self._get_client()
-
-        # Read-modify-write metadata to avoid blowing away unrelated keys.
-        try:
-            existing = (
-                await client.table(self.TASKS_TABLE)
-                .select("metadata")
-                .eq("task_kind", TASK_KIND_AGENT)
-                .eq("dbos_workflow_id", task_id_str)
-                .maybe_single()
-                .execute()
-            )
-            md: Dict[str, Any] = (existing.data or {}).get("metadata") or {}
-        except Exception as e:
-            logger.exception(f"Failed to read metadata for {task_id_str}: {e}")
-            md = {}
-
-        if current_run_id is not None:
-            md["current_run_id"] = str(current_run_id)
-        if result is not None:
-            md["agent_result"] = result
-        if error_code is not None:
-            md["error_code"] = error_code
-        if lifecycle_status == "assigned":
-            md["assigned_at"] = now_iso
-
-        payload: Dict[str, Any] = {
-            "phase": lifecycle_status,
-            "status": LIFECYCLE_TO_STATUS.get(lifecycle_status, "pending"),
-            "metadata": md,
-        }
-        if error_message is not None:
-            payload["error_msg"] = error_message
-        if lifecycle_status == "in_progress":
-            payload["started_at"] = now_iso
-        if lifecycle_status in ("done", "failed", "cancelled"):
-            payload["completed_at"] = now_iso
 
         try:
-            result_resp = (
-                await client.table(self.TASKS_TABLE)
-                .update(payload)
-                .eq("task_kind", TASK_KIND_AGENT)
-                .eq("dbos_workflow_id", task_id_str)
-                .execute()
-            )
-            return bool(result_resp.data)
+            async with write_scope() as session:
+                existing = await session.execute(
+                    select(TaskTracking.metadata_)
+                    .where(TaskTracking.task_kind == TASK_KIND_AGENT)
+                    .where(TaskTracking.dbos_workflow_id == task_id_str)
+                    .limit(1)
+                )
+                md_row = existing.first()
+                md: Dict[str, Any] = dict((md_row[0] if md_row else None) or {})
+
+                if current_run_id is not None:
+                    md["current_run_id"] = str(current_run_id)
+                if result is not None:
+                    md["agent_result"] = result
+                if error_code is not None:
+                    md["error_code"] = error_code
+                if lifecycle_status == "assigned":
+                    md["assigned_at"] = now_iso
+
+                values: Dict[str, Any] = {
+                    "phase": lifecycle_status,
+                    "status": LIFECYCLE_TO_STATUS.get(lifecycle_status, "pending"),
+                    "metadata_": md,
+                }
+                if error_message is not None:
+                    values["error_msg"] = error_message
+                if lifecycle_status == "in_progress":
+                    values["started_at"] = now
+                if lifecycle_status in ("done", "failed", "cancelled"):
+                    values["completed_at"] = now
+
+                upd = await session.execute(
+                    sa_update(TaskTracking)
+                    .where(TaskTracking.task_kind == TASK_KIND_AGENT)
+                    .where(TaskTracking.dbos_workflow_id == task_id_str)
+                    .values(**values)
+                    .returning(TaskTracking.dbos_workflow_id)
+                )
+                return upd.scalars().first() is not None
         except Exception as e:
             logger.exception(
                 f"Failed to update task {task_id_str} → {lifecycle_status}: {e}"
@@ -593,17 +756,14 @@ class AgentWorkforceRepository:
 
     async def get_task(self, task_id: UUID) -> Optional[Dict[str, Any]]:
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.TASKS_TABLE)
-                .select("*")
-                .eq("task_kind", TASK_KIND_AGENT)
-                .eq("dbos_workflow_id", str(task_id))
-                .maybe_single()
-                .execute()
-            )
-            row = result.data if result and result.data else None
-            return _tt_row_to_task_shape(row)
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(TaskTracking)
+                    .where(TaskTracking.task_kind == TASK_KIND_AGENT)
+                    .where(TaskTracking.dbos_workflow_id == str(task_id))
+                    .limit(1)
+                )
+                return _task_shape(result.scalars().first())
         except Exception as e:
             logger.exception(f"Failed to get task {task_id}: {e}")
             return None
@@ -618,69 +778,64 @@ class AgentWorkforceRepository:
         offset: int = 0,
     ) -> Dict[str, Any]:
         try:
-            client = await self._get_client()
-            base = (
-                client.table(self.TASKS_TABLE)
-                .select("*", count="exact")
-                .eq("task_kind", TASK_KIND_AGENT)
-            )
-            if agent_id:
-                base = base.eq("agent_id", str(agent_id))
-            if user_id:
-                base = base.eq("user_id", str(user_id))
-            if statuses:
-                # Filter on phase column (preserves 8-state lifecycle precision).
-                base = base.in_("phase", statuses)
-            result = (
-                await base.order("created_at", desc=True)
-                .range(offset, offset + limit - 1)
-                .execute()
-            )
-            items = [_tt_row_to_task_shape(r) for r in (result.data or [])]
-            return {"items": items, "total": result.count or 0}
+            async with read_scope() as session:
+                base = select(TaskTracking).where(
+                    TaskTracking.task_kind == TASK_KIND_AGENT
+                )
+                if agent_id:
+                    base = base.where(TaskTracking.agent_id == str(agent_id))
+                if user_id:
+                    base = base.where(TaskTracking.user_id == str(user_id))
+                if statuses:
+                    # Filter on phase (preserves 8-state lifecycle precision).
+                    base = base.where(TaskTracking.phase.in_(statuses))
+
+                count_stmt = select(func.count()).select_from(base.subquery())
+                total = await session.scalar(count_stmt) or 0
+
+                page_stmt = (
+                    base.order_by(TaskTracking.created_at.desc())
+                    .offset(offset)
+                    .limit(limit)
+                )
+                result = await session.execute(page_stmt)
+                items = [_task_shape(r) for r in result.scalars().all()]
+            return {"items": items, "total": total}
         except Exception as e:
             logger.exception(f"Failed to list tasks: {e}")
             return {"items": [], "total": 0}
 
     async def requeue_task(self, task_id: UUID) -> bool:
-        """Sweeper helper: when a worker is reaped mid-flight, send its task
-        back to the queue. Wipes assigned/started timestamps so it looks fresh."""
+        """Sweeper helper: send a reaped task back to the queue. Wipes
+        assigned/started timestamps so it looks fresh."""
         task_id_str = str(task_id)
-        client = await self._get_client()
-        # Wipe metadata.current_run_id + metadata.assigned_at via read-modify-write.
         try:
-            existing = (
-                await client.table(self.TASKS_TABLE)
-                .select("metadata")
-                .eq("task_kind", TASK_KIND_AGENT)
-                .eq("dbos_workflow_id", task_id_str)
-                .maybe_single()
-                .execute()
-            )
-            md: Dict[str, Any] = (existing.data or {}).get("metadata") or {}
-        except Exception as e:
-            logger.exception(f"Failed to read metadata for requeue {task_id_str}: {e}")
-            md = {}
-        md.pop("current_run_id", None)
-        md.pop("assigned_at", None)
-
-        try:
-            result = (
-                await client.table(self.TASKS_TABLE)
-                .update(
-                    {
-                        "phase": "queued",
-                        "status": LIFECYCLE_TO_STATUS["queued"],
-                        "started_at": None,
-                        "metadata": md,
-                    }
+            async with write_scope() as session:
+                existing = await session.execute(
+                    select(TaskTracking.metadata_)
+                    .where(TaskTracking.task_kind == TASK_KIND_AGENT)
+                    .where(TaskTracking.dbos_workflow_id == task_id_str)
+                    .limit(1)
                 )
-                .eq("task_kind", TASK_KIND_AGENT)
-                .eq("dbos_workflow_id", task_id_str)
-                .in_("phase", ["assigned", "in_progress"])
-                .execute()
-            )
-            return bool(result.data)
+                md_row = existing.first()
+                md: Dict[str, Any] = dict((md_row[0] if md_row else None) or {})
+                md.pop("current_run_id", None)
+                md.pop("assigned_at", None)
+
+                upd = await session.execute(
+                    sa_update(TaskTracking)
+                    .where(TaskTracking.task_kind == TASK_KIND_AGENT)
+                    .where(TaskTracking.dbos_workflow_id == task_id_str)
+                    .where(TaskTracking.phase.in_(["assigned", "in_progress"]))
+                    .values(
+                        phase="queued",
+                        status=LIFECYCLE_TO_STATUS["queued"],
+                        started_at=None,
+                        metadata_=md,
+                    )
+                    .returning(TaskTracking.dbos_workflow_id)
+                )
+                return upd.scalars().first() is not None
         except Exception as e:
             logger.exception(f"Failed to requeue task {task_id_str}: {e}")
             return False
@@ -699,7 +854,7 @@ class AgentWorkforceRepository:
         task_id: Optional[UUID] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        record = {
+        values = {
             "agent_id": str(agent_id),
             "from_state": from_state,
             "to_state": to_state,
@@ -708,11 +863,13 @@ class AgentWorkforceRepository:
             "metadata_json": metadata or {},
         }
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.STATE_HISTORY_TABLE).insert(record).execute()
-            )
-            return bool(result.data)
+            async with write_scope() as session:
+                result = await session.execute(
+                    pg_insert(AgentStateHistory)
+                    .values(**values)
+                    .returning(AgentStateHistory.id)
+                )
+                return result.scalars().first() is not None
         except Exception as e:
             logger.error(f"Failed to log state transition for {agent_id}: {e}")
             return False
@@ -724,16 +881,14 @@ class AgentWorkforceRepository:
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.STATE_HISTORY_TABLE)
-                .select("*")
-                .eq("agent_id", str(agent_id))
-                .order("changed_at", desc=True)
-                .limit(limit)
-                .execute()
-            )
-            return result.data or []
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(AgentStateHistory)
+                    .where(AgentStateHistory.agent_id == str(agent_id))
+                    .order_by(AgentStateHistory.changed_at.desc())
+                    .limit(limit)
+                )
+                return [_history_row(r) for r in result.scalars().all()]
         except Exception as e:
             logger.error(f"Failed to list state history {agent_id}: {e}")
             return []
@@ -753,10 +908,12 @@ class AgentWorkforceRepository:
         recipient_agent_id: Optional[UUID] = None,
         task_id: Optional[UUID] = None,
     ) -> Optional[Dict[str, Any]]:
-        record = {
+        values = {
             "sender_agent_id": str(sender_agent_id),
             "recipient_kind": recipient_kind,
-            "recipient_user_id": str(recipient_user_id) if recipient_user_id else None,
+            "recipient_user_id": (
+                str(recipient_user_id) if recipient_user_id else None
+            ),
             "recipient_agent_id": (
                 str(recipient_agent_id) if recipient_agent_id else None
             ),
@@ -765,28 +922,29 @@ class AgentWorkforceRepository:
             "task_id": str(task_id) if task_id else None,
         }
         try:
-            client = await self._get_client()
-            result = await client.table(self.OUTBOX_TABLE).insert(record).execute()
-            return (result.data or [None])[0]
+            async with write_scope() as session:
+                result = await session.execute(
+                    pg_insert(AgentOutbox).values(**values).returning(AgentOutbox)
+                )
+                row = result.scalars().first()
+                return _outbox_row(row) if row else None
         except Exception as e:
             logger.error(f"Failed to enqueue outbox from {sender_agent_id}: {e}")
             return None
 
     async def mark_outbox_delivered(self, message_id: UUID) -> bool:
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.OUTBOX_TABLE)
-                .update(
-                    {
-                        "delivered": True,
-                        "delivered_at": datetime.now(timezone.utc).isoformat(),
-                    }
+            async with write_scope() as session:
+                result = await session.execute(
+                    sa_update(AgentOutbox)
+                    .where(AgentOutbox.id == str(message_id))
+                    .values(
+                        delivered=True,
+                        delivered_at=datetime.now(timezone.utc),
+                    )
+                    .returning(AgentOutbox.id)
                 )
-                .eq("id", str(message_id))
-                .execute()
-            )
-            return bool(result.data)
+                return result.scalars().first() is not None
         except Exception as e:
             logger.error(f"Failed to mark outbox {message_id} delivered: {e}")
             return False
@@ -797,44 +955,21 @@ class AgentWorkforceRepository:
         """Outbox dispatcher reads this every tick to push messages over
         Realtime to recipient_user_id channels and into recipient agent inboxes."""
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.OUTBOX_TABLE)
-                .select("*")
-                .eq("delivered", False)
-                .order("created_at", desc=False)
-                .limit(limit)
-                .execute()
-            )
-            return result.data or []
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(AgentOutbox)
+                    .where(AgentOutbox.delivered.is_(False))
+                    .order_by(AgentOutbox.created_at.asc())
+                    .limit(limit)
+                )
+                return [_outbox_row(r) for r in result.scalars().all()]
         except Exception as e:
             logger.error(f"Failed to list undelivered outbox: {e}")
             return []
 
 
-def get_agent_workforce_repository() -> (
-    Union["AgentWorkforceRepository", "AgentWorkforceRepositoryOrm"]
-):
-    """Return the right AgentWorkforceRepository implementation per env.
-
-    ORM (5-table workforce bounded context) when ``USE_ORM_WORKFORCE`` is set
-    AND the SQLAlchemy engine is configured; otherwise the legacy supabase-py
-    REST path. A flag-on but engine-missing deploy logs once and falls back to
-    REST (never crashes).
-    """
-    from app.core.config import settings
-
-    if settings.USE_ORM_WORKFORCE:
-        from app.db.engine import is_configured
-
-        if is_configured():
-            from app.repositories.agent_workforce_repository_orm import (
-                AgentWorkforceRepositoryOrm,
-            )
-
-            return AgentWorkforceRepositoryOrm()
-        logger.warning(
-            "USE_ORM_WORKFORCE=true but SUPAVISOR_DATABASE_URL is empty "
-            "— falling back to supabase-py path"
-        )
+def get_agent_workforce_repository() -> AgentWorkforceRepository:
+    """Return the AgentWorkforceRepository (ORM-only, 5-table workforce bounded
+    context). The ``USE_ORM_WORKFORCE`` flag and the legacy supabase-py REST path
+    have been retired post-rollout — prod runs 100% ORM."""
     return AgentWorkforceRepository()
