@@ -405,30 +405,6 @@ class Settings(BaseSettings):
         "stuck pending). Inert — flip back to false to roll back.",
     )
 
-    USE_ORM_COOKIES: bool = Field(
-        default=False,
-        description="Route CookiesRepository (SECRET — platform login cookies: "
-        "the user_cookies table) through the SQLAlchemy 2.0 ORM (Phase 2 H batch "
-        "— secret). SECRET-HANDLING: the cookie (cookie_text/cookie_file/"
-        "custom_headers, all Text) is stored and returned in PLAINTEXT — the "
-        "legacy does NO encryption and NO masking (no crypto helper imported), so "
-        "the ORM reproduces raw-write / raw-read identically (consumers — "
-        "abogus/ies/ytdlp/soda parsers — need the raw cookie to drive sessions). "
-        "Plaintext-at-rest is a reported CONCERN, NOT changed here. UUID sweep: "
-        "user_id → str on every return path (legacy supabase-py shape; consumers "
-        "index by platform so no authz == on the returned dict, but str() keeps "
-        "the dict byte-identical and is the WHERE-filter bind, adapted str→uuid). "
-        "id (bigint, server_default generate_snowflake_id()) → native int (5.3 "
-        "trap). is_valid (bool) native; created_at/updated_at → ISO str. NO Enum, "
-        "NO JSONB, NO renamed column, NO date RANGE filter (all WHERE are user_id/"
-        "platform equality). upsert reproduces ON CONFLICT (user_id, platform) DO "
-        "UPDATE (backed by user_cookies_user_id_platform_key) forcing is_valid="
-        "True + error_message=None + a fresh updated_at (native datetime, binds "
-        "directly); a stray data key is filtered to a silent no-op (phantom "
-        "screen). Reads return None/[]; writes commit via write_scope(); every "
-        "method swallows to the legacy fallback. Inert — flip back to false.",
-    )
-
     USE_ORM_ANALYSIS: bool = Field(
         default=False,
         description="Route AnalysisRepository (resource_analysis CRUD + pgvector "

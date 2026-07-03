@@ -88,9 +88,9 @@ async def cleanup_cookies(integration_db_url):
 
 
 def _repo():
-    from app.repositories.cookies_repository_orm import CookiesRepositoryOrm
+    from app.repositories.cookies_repository import CookiesRepository
 
-    return CookiesRepositoryOrm()
+    return CookiesRepository()
 
 
 def _platform() -> str:
@@ -208,30 +208,15 @@ async def test_mark_invalid_and_delete_commit(
     assert gone is None  # delete committed (no silent rollback)
 
 
-# ─── factory on/off ─────────────────────────────────────────────────────
+# ─── factory (flag-free after collapse) ──────────────────────────────────
 
 
-def test_factory_off_returns_legacy():
-    from unittest.mock import patch
-
+def test_factory_returns_collapsed_repo():
+    """Post-collapse the factory unconditionally returns the ORM-backed
+    CookiesRepository — no flag branch, no legacy REST sibling."""
     from app.repositories.cookies_repository import (
         CookiesRepository,
         get_cookies_repository,
     )
 
-    with patch("app.core.config.settings.USE_ORM_COOKIES", False):
-        assert type(get_cookies_repository()) is CookiesRepository
-
-
-def test_factory_on_returns_orm(integration_db_url):
-    from unittest.mock import patch
-
-    from app.repositories.cookies_repository_orm import CookiesRepositoryOrm
-
-    with (
-        patch("app.core.config.settings.USE_ORM_COOKIES", True),
-        patch("app.db.engine.is_configured", return_value=True),
-    ):
-        from app.repositories.cookies_repository import get_cookies_repository
-
-        assert type(get_cookies_repository()) is CookiesRepositoryOrm
+    assert type(get_cookies_repository()) is CookiesRepository
