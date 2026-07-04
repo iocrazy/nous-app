@@ -9,16 +9,13 @@ import { MessageSquare } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTeamContext } from '../contexts/TeamContext';
 import { useToast } from '../components/Toast';
-import { chatService } from '../services/chatService';
 import { conversationService } from '../services/conversationService';
 import { getResourceCoverUrl } from '../services/resourceService';
 import { getTeamMembers } from '../services/teamService';
 import { aiLibraryService } from '../services/aiLibraryService';
-import { useChannelRealtime } from '../hooks/useChannelRealtime';
 import { useConversationRealtime } from '../hooks/useConversationRealtime';
 import { useChannelPresence } from '../hooks/useChannelPresence';
 import { useMentionBadges } from '../hooks/useMentionBadges';
-import { conversations } from '../utils/featureFlags';
 import { validateFileBatch } from '../components/ChatAttachmentPicker.helpers';
 import { AIChatPanel } from '../components/AIChatPanel';
 import { ChatSidebar } from '../components/chat/ChatSidebar';
@@ -45,8 +42,7 @@ export function ChatPage(): React.ReactElement {
   const { addToast } = useToast();
   const { currentUserId, userProfile } = useAuth();
 
-  const featureConversations = conversations();
-  const svc = featureConversations ? conversationService : chatService;
+  const svc = conversationService;
 
   // ── State ──────────────────────────────────────────────────────────────────
 
@@ -403,22 +399,13 @@ export function ChatPage(): React.ReactElement {
   );
 
   // ── Realtime subscription ─────────────────────────────────────────────────
-  //
-  // Rules-of-hooks seam: both hooks are always called; the inactive one receives
-  // null so its useEffect no-ops (both hooks null-guard at the top of the effect).
-  // conversations() is a build-time constant, so the routing is stable across
-  // renders and there is no conditional hook invocation.
-
-  const _legacyId = featureConversations ? null : activeId;
-  const _convId = featureConversations ? activeId : null;
 
   const _onRealtimeInsert = (m: ChatMessage) => {
     appendMessage(m);
     if (activeId) scheduleMarkRead(activeId, m.seq);
   };
 
-  useChannelRealtime(_legacyId, _onRealtimeInsert, updateMessage, gapFill);
-  useConversationRealtime(_convId, _onRealtimeInsert, updateMessage, gapFill);
+  useConversationRealtime(activeId, _onRealtimeInsert, updateMessage, gapFill);
 
   // ── Presence + typing ─────────────────────────────────────────────────────
 
@@ -522,10 +509,6 @@ export function ChatPage(): React.ReactElement {
   const handleAttachFiles = useCallback(
     async (files: File[]) => {
       const channelId = activeIdRef.current;
-      if (!featureConversations) {
-        addToast(t('chat.image.unavailable'), 'error');
-        return;
-      }
       if (!channelId || !selectedTeamId || files.length === 0 || sending) return;
 
       const batchError = validateFileBatch(files);
@@ -570,7 +553,6 @@ export function ChatPage(): React.ReactElement {
       }
     },
     [
-      featureConversations,
       selectedTeamId,
       sending,
       appendMessage,
@@ -581,7 +563,6 @@ export function ChatPage(): React.ReactElement {
 
   const handleSaveImage = useCallback(
     async (generatedMediaId: string, scope: 'team' | 'personal') => {
-      if (!featureConversations) return;
       const targetScopeId = scope === 'team' ? selectedTeamId : personalTeamId;
       if (!targetScopeId) {
         addToast(t('chat.image.saveError'), 'error');
@@ -598,7 +579,7 @@ export function ChatPage(): React.ReactElement {
         addToast(t('chat.image.saveError'), 'error');
       }
     },
-    [featureConversations, selectedTeamId, personalTeamId, addToast, t],
+    [selectedTeamId, personalTeamId, addToast, t],
   );
 
   // ── Channel selection ─────────────────────────────────────────────────────
@@ -698,21 +679,15 @@ export function ChatPage(): React.ReactElement {
                   onDelete={handleDeleteMessage}
                   onSaveImage={handleSaveImage}
                   canSaveImageToTeam={
-                    featureConversations &&
-                    !!selectedTeamId &&
-                    selectedTeamId !== personalTeamId
+                    !!selectedTeamId && selectedTeamId !== personalTeamId
                   }
-                  canSaveImageToPersonal={
-                    featureConversations && !!personalTeamId
-                  }
+                  canSaveImageToPersonal={!!personalTeamId}
                 />
                 <TypingIndicator names={typingUsers.map((u) => u.name)} />
                 <Composer
                   onSend={handleSend}
                   onAttachMedia={() => setShowPicker(true)}
-                  onAttachFiles={
-                    featureConversations ? handleAttachFiles : undefined
-                  }
+                  onAttachFiles={handleAttachFiles}
                   onTyping={sendTyping}
                   disabled={sending || !activeId}
                   placeholder={
