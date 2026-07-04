@@ -205,7 +205,10 @@ async def test_get_session_uses_maybe_single_no_ownership_check() -> None:
     q.maybe_single.assert_called_once()
     # No .neq / user_id filter anywhere — ownership is not enforced here.
     assert not hasattr(q, "neq") or not q.neq.called
-    assert got == row
+    # Task 6: store_kind is stamped onto the returned dict (dispatch marker
+    # for RunRecorder's session_id vs conversation_id choice) — not a real
+    # ai_sessions column, so it's added on top of the raw row.
+    assert got == {**row, "store_kind": "legacy"}
 
 
 @pytest.mark.asyncio
@@ -404,6 +407,54 @@ async def test_append_assistant_message_includes_usage_and_metadata() -> None:
 def test_store_kind_is_legacy() -> None:
     """Task 6 dispatches on store_kind — must be 'legacy' for this store."""
     assert LegacyAiStore.store_kind == "legacy"
+
+
+@pytest.mark.asyncio
+async def test_create_session_return_dict_carries_store_kind_key() -> None:
+    """Task 6: create_session's returned row must carry a 'store_kind' key
+    (not just the class attribute) so the service can dispatch RunRecorder's
+    session_id vs conversation_id off the session row alone."""
+    client, store = _make_client_and_store()
+
+    table = MagicMock()
+
+    def _insert(payload):
+        chain = MagicMock()
+        chain.execute = AsyncMock(return_value=MagicMock(data=[{**payload, "id": "1"}]))
+        return chain
+
+    table.insert = _insert
+    client.table.return_value = table
+
+    row = await store.create_session(
+        user_id=str(uuid4()),
+        agent_slug="script_ai",
+        agent_id="agent-1",
+        title="New chat",
+        project_id=None,
+        team_id=None,
+        context_type=None,
+        context_id=None,
+    )
+
+    assert row["store_kind"] == "legacy"
+
+
+@pytest.mark.asyncio
+async def test_get_session_return_dict_carries_store_kind_key() -> None:
+    """Task 6: get_session's returned row must carry a 'store_kind' key."""
+    client, store = _make_client_and_store()
+
+    q = MagicMock()
+    q.select.return_value = q
+    q.eq.return_value = q
+    q.maybe_single.return_value = q
+    q.execute = AsyncMock(return_value=MagicMock(data={"id": "1", "user_id": "u1"}))
+    client.table.return_value = q
+
+    row = await store.get_session(session_id=1)
+
+    assert row["store_kind"] == "legacy"
 
 
 @pytest.mark.asyncio

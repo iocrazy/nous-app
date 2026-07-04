@@ -791,6 +791,48 @@ def test_store_kind_is_conversations() -> None:
     assert ConversationsAiStore.store_kind == "conversations"
 
 
+@pytest.mark.asyncio
+async def test_create_session_return_dict_carries_store_kind_key() -> None:
+    """Task 6: create_session's returned row must carry a 'store_kind' key
+    (not just the class attribute) so the service can dispatch RunRecorder's
+    session_id vs conversation_id choice off the session row alone."""
+    store = _store()
+    eng, conn = _make_engine(
+        _MappingResult(_CONV_ROW),
+        None,
+        None,
+        _MappingResult(_META_ROW),
+    )
+
+    with patch("app.db.engine.get_engine", return_value=eng):
+        result = await store.create_session(
+            user_id=_USER_ID,
+            agent_slug=_AGENT_SLUG,
+            agent_id=_AGENT_ID,
+            title="New Chat",
+            project_id=None,
+            team_id=_TEAM_ID,
+            context_type=None,
+            context_id=None,
+        )
+
+    assert result["store_kind"] == "conversations"
+
+
+@pytest.mark.asyncio
+async def test_get_session_return_dict_carries_store_kind_key() -> None:
+    """Task 6: get_session's returned row must carry a 'store_kind' key."""
+
+    async def fake_fetch_one(sql: str, params: dict | None = None) -> dict:
+        return _JOINED_ROW
+
+    store = _store()
+    with patch("app.db.engine.fetch_one", fake_fetch_one):
+        result = await store.get_session(session_id=_CONV_ID)
+
+    assert result["store_kind"] == "conversations"
+
+
 # ── Integration test (skippable without INTEGRATION_DATABASE_URL) ─────────────
 
 _INTEGRATION_DSN = os.environ.get("INTEGRATION_DATABASE_URL", "").strip()

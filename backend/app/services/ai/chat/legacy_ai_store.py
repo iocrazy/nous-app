@@ -83,7 +83,13 @@ class LegacyAiStore:
             row["context_id"] = context_id
 
         resp = await supabase.table("ai_sessions").insert(row).execute()
-        return resp.data[0] if resp.data else None
+        if not resp.data:
+            return None
+        # Task 6: stamp store_kind so downstream dispatch (RunRecorder's
+        # session_id vs conversation_id choice) can tell a legacy row from
+        # a conversations-backed row without a second lookup. Not a real
+        # ai_sessions column — added post-fetch, never sent to Supabase.
+        return {**resp.data[0], "store_kind": self.store_kind}
 
     async def list_sessions(
         self,
@@ -121,7 +127,10 @@ class LegacyAiStore:
             .maybe_single()
             .execute()
         )
-        return resp.data if resp and resp.data else None
+        if not (resp and resp.data):
+            return None
+        # Task 6: same store_kind stamp as create_session (see comment there).
+        return {**resp.data, "store_kind": self.store_kind}
 
     async def rename_session(self, *, session_id: int, title: str) -> Dict[str, Any]:
         """S4: update a session's title."""

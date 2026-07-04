@@ -121,6 +121,10 @@ class ConversationsAiStore:
             "context_id": row.get("context_id"),
             "created_at": row.get("created_at"),
             "updated_at": row.get("updated_at"),
+            # Task 6: dispatch marker — lets AILibraryChatService.chat tell a
+            # conversations-backed session apart from a legacy one (so it can
+            # route agent_runs.conversation_id vs .session_id correctly).
+            "store_kind": ConversationsAiStore.store_kind,
         }
 
     _JOIN_SELECT = """
@@ -262,6 +266,8 @@ class ConversationsAiStore:
             "context_id": context_id,
             "created_at": conv_row["created_at"],
             "updated_at": meta_row["updated_at"],
+            # Task 6: dispatch marker — see _to_legacy_shape.
+            "store_kind": self.store_kind,
         }
 
     async def list_sessions(

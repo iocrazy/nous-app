@@ -181,6 +181,17 @@ async def _write_honcho_turn(
 async def _resolve_team_workspace(session_id: str) -> Optional[str]:
     """Map the session's team to a Honcho workspace (Workspace=team).
 
+    Conversations-first, legacy ai_sessions fallback (Task 6 / parity
+    checklist S8, §3.6/§3.8). Snowflake ids are minted exactly once by
+    ``generate_snowflake_id()``, so a given ``session_id`` can never exist
+    as a row in BOTH ``conversations`` and ``ai_sessions`` — trying the new
+    store first and falling back on a missing row is unambiguous.
+
+    NOTE: the conversations column is ``scope_id`` (team/user/project scope
+    pointer), NOT ``team_id`` — ``ai_sessions`` is the one with a literal
+    ``team_id`` column. Aliased to ``team_id`` in the SELECT so the rest of
+    this function reads identically for either source table.
+
     Returns ``team-{team_id}`` when the session carries team context,
     None (→ deployment default workspace) when it doesn't or the
     lookup fails — never blocks the write on a metadata read.
@@ -189,10 +200,15 @@ async def _resolve_team_workspace(session_id: str) -> Optional[str]:
         from app.db import engine as db_engine
 
         row = await db_engine.fetch_one(
-            "SELECT team_id FROM public.ai_sessions WHERE id = :sid",
+            "SELECT scope_id AS team_id FROM public.conversations WHERE id = :sid",
             # BIGINT snowflake carried as str — coerce for asyncpg (mig 232)
             {"sid": int(session_id)},
         )
+        if row is None:
+            row = await db_engine.fetch_one(
+                "SELECT team_id FROM public.ai_sessions WHERE id = :sid",
+                {"sid": int(session_id)},
+            )
         team_id = row.get("team_id") if row else None
         return f"team-{team_id}" if team_id else None
     except Exception:  # noqa: BLE001

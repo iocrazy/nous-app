@@ -786,12 +786,21 @@ class AILibraryChatService:
         # from "after model finishes" to "as model emits". Tool-using
         # turns still work (stream_turn executes tool_calls between
         # iterations and re-streams).
+        # Task 6: agent_runs.session_id FKs ai_sessions (mig 231) — a
+        # conversations.id would violate that FK. agent_runs.conversation_id
+        # (mig 331) is the structural link for new-store sessions. Dispatch
+        # off the session row's store_kind marker (stamped by LegacyAiStore /
+        # ConversationsAiStore — see Task 6 report) so a conversations-backed
+        # session links via conversation_id and a legacy session keeps its
+        # exact byte-identical session_id behavior.
+        _is_conv_store = session.get("store_kind") == "conversations"
         try:
             async with RunRecorder(
                 agent_id=composed.agent_id,
                 user_id=user_id,
                 trigger=trigger,
-                session_id=session_id,
+                session_id=None if _is_conv_store else session_id,
+                conversation_id=int(session_id) if _is_conv_store else None,
                 team_id=session.get("team_id"),
                 project_id=session.get("project_id"),
                 model=model or None,
