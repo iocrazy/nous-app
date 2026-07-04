@@ -1582,7 +1582,6 @@
       "uploading": "正在上传图片…",
       "uploadError": "图片上传失败",
       "onlyImages": "这里只能发送图片文件",
-      "unavailable": "当前无法上传图片",
       "dropHint": "拖拽图片以发送",
       "close": "关闭图片",
       "alt": "聊天图片",
