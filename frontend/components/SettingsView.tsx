@@ -100,6 +100,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
         key_id: k.key_id,
         key_prefix: k.key_prefix,
         key_value: k.key_value || undefined,
+        key_value_set: k.key_value_set,
         name: k.name,
         description: k.description || undefined,
         status: k.status as 'active' | 'revoked',
@@ -634,14 +635,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                           </td>
                           <td className="px-6 py-4 font-mono text-xs">
                              <div className="flex items-center gap-2">
-                                <span className="opacity-70 bg-ink-950 px-2 py-1 rounded border border-ink-800 select-all">{key.key_prefix}</span>
-                                <button
-                                  onClick={() => handleCopyKey(key.key_value || key.key_prefix, key.id.toString())}
-                                  className={`transition-colors flex-shrink-0 ${copiedKeyId === key.id.toString() ? 'text-green-500' : 'text-ink-500 hover:text-indigo-400'}`}
-                                  title="Copy full key"
-                                >
-                                   {copiedKeyId === key.id.toString() ? <CheckCircle size={14} /> : <Copy size={14} />}
-                                </button>
+                                <span
+                                   className="opacity-70 bg-ink-950 px-2 py-1 rounded border border-ink-800 select-all"
+                                   title="The full key is shown only once, at creation time. Only the prefix is kept for display."
+                                >{key.key_prefix}</span>
+                                <span className="text-[10px] text-ink-600 italic whitespace-nowrap flex-shrink-0">shown once at creation</span>
                              </div>
                           </td>
                           <td className="px-6 py-4">

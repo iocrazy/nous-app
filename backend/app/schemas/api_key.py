@@ -83,7 +83,16 @@ class ApiKeyResponse(BaseModel):
     id: int = Field(..., description="密钥 ID")
     key_id: str = Field(..., description="密钥公开标识符")
     key_prefix: str = Field(..., description="密钥前缀（如 dk_xxxx...）")
-    key_value: Optional[str] = Field(None, description="完整密钥")
+    key_value: Optional[str] = Field(
+        None,
+        description=(
+            "Masked key display form (prefix + …). The full key is encrypted "
+            "at rest and only revealed once, at creation. Not the full key."
+        ),
+    )
+    key_value_set: bool = Field(
+        False, description="Whether a full key is stored for this record"
+    )
     name: str = Field(..., description="密钥名称")
     description: Optional[str] = Field(None, description="密钥描述")
     scopes: List[str] = Field(..., description="权限范围")
@@ -116,7 +125,8 @@ class ApiKeyCreateResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    # Full key (also stored in key_value for persistent access)
+    # Full key — ONE-SHOT reveal at creation only. At rest key_value is
+    # Fernet-encrypted; list/get/update responses return a masked value.
     secret_key: str = Field(..., description="完整密钥")
 
 
