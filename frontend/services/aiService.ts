@@ -399,6 +399,9 @@ export const getAISettings = async (): Promise<AISettings> => {
       image_generation: data.task_assignment?.image_generation ?? '',
       script_generation: data.task_assignment?.script_generation ?? '',
     },
+    // Persisted per-provider connection-test results (restores the Test
+    // Connection status/detail across reloads).
+    provider_health: data.provider_health ?? {},
   } as AISettings;
 };
 
@@ -472,6 +475,30 @@ export const testAIConnection = async (
   }
 
   return response.json();
+};
+
+/**
+ * Report a browser-direct local-provider (Ollama / LM Studio) connection-test
+ * outcome so it persists across reloads. Cloud providers are persisted
+ * server-side by /ai/test-connection and need no client report.
+ *
+ * Fire-and-forget: the caller does not await this; failures are best-effort
+ * telemetry and must not affect the Test Connection UX.
+ */
+export const reportProviderHealth = async (
+  providerKey: string,
+  status: 'ok' | 'fail',
+  detail = ''
+): Promise<void> => {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/ai/provider-health`, {
+    method: 'POST',
+    headers: await getAuthHeaders(),
+    body: JSON.stringify({ provider_key: providerKey, status, detail }),
+  });
+  if (!response.ok) {
+    throw new Error(`POST /ai/provider-health failed: HTTP ${response.status}`);
+  }
 };
 
 // --- AI Config Governance ---

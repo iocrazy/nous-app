@@ -558,6 +558,16 @@ export interface AISettings {
     image_generation?: string;  // storyboard image provider
     script_generation?: string;  // storyboard script/prompt LLM
   };
+  // Last BYOK connection-test result per provider slug — persisted server-side
+  // so the Settings UI restores it across reloads. Read-only from the client's
+  // perspective (written via /ai/test-connection + /ai/provider-health).
+  provider_health?: Record<string, ProviderHealthEntry>;
+}
+
+export interface ProviderHealthEntry {
+  status: 'ok' | 'fail';
+  detail?: string;
+  tested_at?: string;  // ISO-8601 UTC
 }
 
 /**
