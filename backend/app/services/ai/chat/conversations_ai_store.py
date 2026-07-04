@@ -304,6 +304,12 @@ class ConversationsAiStore:
         as invisible — same as legacy's ``status='deleted'`` filtering —
         so the service's ``get_session`` 404s instead of leaking a
         soft-deleted row. Ownership stays with the service.
+
+        NOTE (deliberate store asymmetry): LegacyAiStore's direct GET does
+        NOT filter by status, so it still returns soft-deleted sessions if
+        looked up directly by id; this store is stricter by design and
+        returns None for archived rows. This is safe because the UI never
+        re-GETs a session it just deleted.
         """
         return await self._fetch_by_id(session_id)
 
@@ -413,6 +419,12 @@ class ConversationsAiStore:
         metadata_json = {
             k: v for k, v in meta.items() if k not in _META_DECORATION_KEYS
         }
+        # NOTE (empty-metadata asymmetry): on append, a caller passing an
+        # empty metadata dict gets it echoed back as `{}` (see
+        # append_assistant_message); on reload here, an empty (or
+        # decoration-only) `meta` reconstructs to `None` via the
+        # `metadata_json or None` below. Nothing distinguishes "caller
+        # passed {}" from "caller passed nothing" after the round trip.
         sender_type = row.get("sender_type")
         return {
             "id": row["id"],

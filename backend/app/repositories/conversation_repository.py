@@ -180,6 +180,9 @@ class ConversationRepository:
              WHERE cm.member_type = 'user'
                AND cm.user_id = :uid
                AND c.archived_at IS NULL
+               -- direct_agent = 1:1 AI chat threads (Phase 2); they have
+               -- their own surface and must not appear in the team-chat sidebar.
+               AND c.type <> 'direct_agent'
                AND cm.open = true
              ORDER BY c.last_seq DESC
             """,

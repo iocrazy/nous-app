@@ -249,6 +249,32 @@ async def test_is_member_filters_member_type_user() -> None:
     assert "user_id" in sql
 
 
+# ── get_my_conversations (final review — direct_agent exclusion) ──────────────
+
+
+@pytest.mark.asyncio
+async def test_get_my_conversations_excludes_direct_agent() -> None:
+    """get_my_conversations must exclude type='direct_agent' rows so 1:1 AI
+    session threads (Phase 2) don't leak into the team-chat sidebar list."""
+    from app.repositories.conversation_repository import ConversationRepository
+
+    captured: dict = {}
+
+    async def fake_fetch_all(sql: str, params: dict | None = None) -> list:
+        captured["sql"] = sql
+        captured["params"] = params
+        return []
+
+    repo = ConversationRepository()
+    with patch("app.db.engine.fetch_all", fake_fetch_all):
+        result = await repo.get_my_conversations(_SENDER_ID)
+
+    assert result == []
+    sql = captured["sql"]
+    assert "c.archived_at IS NULL" in sql
+    assert "c.type <> 'direct_agent'" in sql
+
+
 # ── add_agent_member ──────────────────────────────────────────────────────────
 
 
