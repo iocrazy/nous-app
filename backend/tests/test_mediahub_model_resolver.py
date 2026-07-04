@@ -28,9 +28,10 @@ async def test_resolve_nous_returns_none_for_non_nous_name():
     repo = MagicMock()
     repo.get_by_name = AsyncMock(return_value=None)
     with patch(
-        "app.repositories.nous_repository.get_nous_repository", return_value=repo
+        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        return_value=repo,
     ):
-        result = await h.resolve_nous_model("gpt-4o", "visual_analysis")
+        result = await h.resolve_mediahub_model("gpt-4o", "visual_analysis")
     assert result is None
 
 
@@ -41,13 +42,14 @@ async def test_resolve_nous_returns_platform_config_when_enabled_and_allowed():
     repo = MagicMock()
     repo.get_by_name = AsyncMock(return_value=_enabled_row())
     with patch(
-        "app.repositories.nous_repository.get_nous_repository", return_value=repo
+        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        return_value=repo,
     ):
         with patch(
             "app.services.ai.governance.ai_governance.is_nous_allowed",
             new=AsyncMock(return_value=True),
         ):
-            provider_key, cfg, model = await h.resolve_nous_model(
+            provider_key, cfg, model = await h.resolve_mediahub_model(
                 "nous-llm", "visual_analysis"
             )
     assert provider_key == "doubao"
@@ -66,14 +68,15 @@ async def test_resolve_nous_fail_closed_when_disabled():
     repo = MagicMock()
     repo.get_by_name = AsyncMock(return_value=row)
     with patch(
-        "app.repositories.nous_repository.get_nous_repository", return_value=repo
+        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        return_value=repo,
     ):
         with patch(
             "app.services.ai.governance.ai_governance.is_nous_allowed",
             new=AsyncMock(return_value=True),
         ):
             with pytest.raises(RuntimeError, match="no longer available"):
-                await h.resolve_nous_model("nous-llm", "visual_analysis")
+                await h.resolve_mediahub_model("nous-llm", "visual_analysis")
 
 
 @pytest.mark.asyncio
@@ -83,14 +86,15 @@ async def test_resolve_nous_fail_closed_when_gate_off():
     repo = MagicMock()
     repo.get_by_name = AsyncMock(return_value=_enabled_row())
     with patch(
-        "app.repositories.nous_repository.get_nous_repository", return_value=repo
+        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        return_value=repo,
     ):
         with patch(
             "app.services.ai.governance.ai_governance.is_nous_allowed",
             new=AsyncMock(return_value=False),
         ):
             with pytest.raises(RuntimeError, match="disabled for this feature"):
-                await h.resolve_nous_model("nous-llm", "visual_analysis")
+                await h.resolve_mediahub_model("nous-llm", "visual_analysis")
 
 
 @pytest.mark.asyncio
@@ -120,7 +124,7 @@ async def test_agent_path_uses_nous_platform_config_and_keeps_slug():
             ):
                 with patch.object(
                     h,
-                    "resolve_nous_model",
+                    "resolve_mediahub_model",
                     new=AsyncMock(
                         return_value=(
                             "doubao",
@@ -175,7 +179,7 @@ async def test_transcription_nous_ref_routes_to_platform_config():
             side_effect=[fake_media_row, fake_settings_row],
         ):
             with patch(
-                "app.services.ai.providers.ai_provider_helpers.resolve_nous_model",
+                "app.services.ai.providers.ai_provider_helpers.resolve_mediahub_model",
                 new=AsyncMock(
                     return_value=(
                         "volcengine",
@@ -210,7 +214,8 @@ async def test_resolve_platform_model_ignores_nous_gate():
     repo = MagicMock()
     repo.get_by_name = AsyncMock(return_value=_enabled_row())
     with patch(
-        "app.repositories.nous_repository.get_nous_repository", return_value=repo
+        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        return_value=repo,
     ):
         # is_nous_allowed patched to False — must NOT matter for the admin path.
         with patch(
@@ -231,7 +236,8 @@ async def test_resolve_platform_model_none_for_unknown_name():
     repo = MagicMock()
     repo.get_by_name = AsyncMock(return_value=None)
     with patch(
-        "app.repositories.nous_repository.get_nous_repository", return_value=repo
+        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        return_value=repo,
     ):
         assert await h.resolve_platform_model("gpt-4o") is None
 
@@ -244,7 +250,8 @@ async def test_resolve_platform_model_raises_when_disabled():
     repo = MagicMock()
     repo.get_by_name = AsyncMock(return_value=row)
     with patch(
-        "app.repositories.nous_repository.get_nous_repository", return_value=repo
+        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        return_value=repo,
     ):
         with pytest.raises(RuntimeError):
             await h.resolve_platform_model("nous-llm")

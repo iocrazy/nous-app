@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-from app.schemas.nous import NousModelCreate
+from app.schemas.mediahub_model import MediahubModelCreate
 
 
 def _body(**over):
@@ -21,12 +21,12 @@ def _body(**over):
         base_url="http://10.0.0.10:8000/v1",
     )
     base.update(over)
-    return NousModelCreate(**base)
+    return MediahubModelCreate(**base)
 
 
 @pytest.mark.asyncio
 async def test_create_inherits_sibling_key_when_blank():
-    from app.api.admin.nous_router import create_nous_model
+    from app.api.admin.mediahub_model_router import create_mediahub_model
 
     repo = MagicMock()
     repo.list_all = AsyncMock(
@@ -49,8 +49,11 @@ async def test_create_inherits_sibling_key_when_blank():
     fake_auth = MagicMock()
     fake_auth.user_id = "a"
 
-    with patch("app.api.admin.nous_router.get_nous_repository", return_value=repo):
-        await create_nous_model(_body(), fake_auth)
+    with patch(
+        "app.api.admin.mediahub_model_router.get_mediahub_model_repository",
+        return_value=repo,
+    ):
+        await create_mediahub_model(_body(), fake_auth)
 
     assert created["api_key"] == "stored-key"
     assert created["app_id"] == "sib-app"
@@ -58,7 +61,7 @@ async def test_create_inherits_sibling_key_when_blank():
 
 @pytest.mark.asyncio
 async def test_create_400_when_blank_key_and_no_sibling():
-    from app.api.admin.nous_router import create_nous_model
+    from app.api.admin.mediahub_model_router import create_mediahub_model
 
     repo = MagicMock()
     repo.list_all = AsyncMock(return_value=[])  # no sibling to inherit from
@@ -66,9 +69,12 @@ async def test_create_400_when_blank_key_and_no_sibling():
     fake_auth = MagicMock()
     fake_auth.user_id = "a"
 
-    with patch("app.api.admin.nous_router.get_nous_repository", return_value=repo):
+    with patch(
+        "app.api.admin.mediahub_model_router.get_mediahub_model_repository",
+        return_value=repo,
+    ):
         with pytest.raises(HTTPException) as exc:
-            await create_nous_model(_body(), fake_auth)
+            await create_mediahub_model(_body(), fake_auth)
 
     assert exc.value.status_code == 400
     repo.create.assert_not_called()
@@ -76,7 +82,7 @@ async def test_create_400_when_blank_key_and_no_sibling():
 
 @pytest.mark.asyncio
 async def test_create_uses_explicit_key_without_lookup():
-    from app.api.admin.nous_router import create_nous_model
+    from app.api.admin.mediahub_model_router import create_mediahub_model
 
     repo = MagicMock()
     repo.list_all = AsyncMock(return_value=[])
@@ -90,8 +96,11 @@ async def test_create_uses_explicit_key_without_lookup():
     fake_auth = MagicMock()
     fake_auth.user_id = "a"
 
-    with patch("app.api.admin.nous_router.get_nous_repository", return_value=repo):
-        await create_nous_model(_body(api_key="explicit-key"), fake_auth)
+    with patch(
+        "app.api.admin.mediahub_model_router.get_mediahub_model_repository",
+        return_value=repo,
+    ):
+        await create_mediahub_model(_body(api_key="explicit-key"), fake_auth)
 
     assert created["api_key"] == "explicit-key"
     repo.list_all.assert_not_called()  # explicit key → no sibling lookup

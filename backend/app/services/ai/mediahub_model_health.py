@@ -1,10 +1,10 @@
-# backend/app/services/ai/nous_health.py
+# backend/app/services/ai/mediahub_model_health.py
 
 """Connectivity probe for admin-configured platform (Nous) AI models.
 
 Single source of truth for "is this platform model actually reachable" — used
-by BOTH the manual admin ``POST /admin/nous-models/{id}/test`` endpoint and the
-scheduled health poll (``scheduled_health.probe_nous_models_step``). Keeping one
+by BOTH the manual admin ``POST /admin/mediahub-models/{id}/test`` endpoint and the
+scheduled health poll (``scheduled_health.probe_mediahub_models_step``). Keeping one
 implementation avoids the two drifting apart.
 
 The probe performs a real minimal inference per model TYPE (chat / embedding /
@@ -22,7 +22,7 @@ from app.services.ai.providers.ai_provider import AIProviderFactory
 from app.services.ai.providers.embedding_config import _is_multimodal
 
 
-async def probe_nous_model(row: Dict[str, Any]) -> Dict[str, Any]:
+async def probe_mediahub_model(row: Dict[str, Any]) -> Dict[str, Any]:
     """Real connectivity probe for one platform model, by type.
 
     Returns ``{ok, detail, error, dims}``. Never raises — a transport/HTTP

@@ -1,4 +1,4 @@
-"""Unit tests for NousRepository (ORM 2.0, model-backed).
+"""Unit tests for MediahubModelRepository (ORM 2.0, model-backed).
 
 Post-rollout the repository is the SQLAlchemy 2.0 implementation — reads go
 through ``read_scope()`` and writes through ``write_scope()`` with
@@ -9,7 +9,7 @@ every emitted ``(sql, binds)`` pair and returns in-memory model instances, so th
 compiled SQL shape + bind params AND the STRATEGY-C value-type parity (BIGINT id
 → native int; Numeric pricing_value → native Decimal; timestamptz → ISO str) are
 asserted WITHOUT a live database (the DSN-gated integration suite in
-``tests/integration/test_nous_repository_orm.py`` exercises the real round-trip).
+``tests/integration/test_mediahub_model_repository_orm.py`` exercises the real round-trip).
 """
 
 from __future__ import annotations
@@ -20,9 +20,9 @@ from typing import Any
 
 import pytest
 
-import app.repositories.nous_repository as mod
-from app.models import NousModels
-from app.repositories.nous_repository import NousRepository
+import app.repositories.mediahub_model_repository as mod
+from app.models import MediahubModels
+from app.repositories.mediahub_model_repository import MediahubModelRepository
 
 
 class _FakeScalars:
@@ -87,8 +87,8 @@ def fake_session(monkeypatch: pytest.MonkeyPatch) -> _FakeSession:
 
 
 @pytest.fixture
-def repo() -> NousRepository:
-    return NousRepository()
+def repo() -> MediahubModelRepository:
+    return MediahubModelRepository()
 
 
 # ─── list_enabled ──────────────────────────────────────────────────
@@ -96,21 +96,21 @@ def repo() -> NousRepository:
 
 @pytest.mark.asyncio
 async def test_list_enabled_filters_is_enabled_true(
-    repo: NousRepository, fake_session: _FakeSession
+    repo: MediahubModelRepository, fake_session: _FakeSession
 ) -> None:
     fake_session.mapping_rows = [{"id": 1, "name": "nous-base"}]
     rows = await repo.list_enabled()
     assert rows == [{"id": 1, "name": "nous-base"}]
 
     sql, _ = fake_session.calls[-1]
-    assert "nous_models" in sql
+    assert "mediahub_models" in sql
     assert "is_enabled" in sql
     assert "ORDER BY" in sql and "sort_order" in sql
 
 
 @pytest.mark.asyncio
 async def test_list_enabled_with_type_filter_applies_extra_where(
-    repo: NousRepository, fake_session: _FakeSession
+    repo: MediahubModelRepository, fake_session: _FakeSession
 ) -> None:
     fake_session.mapping_rows = []
     await repo.list_enabled("llm")
@@ -122,7 +122,7 @@ async def test_list_enabled_with_type_filter_applies_extra_where(
 
 @pytest.mark.asyncio
 async def test_list_enabled_hides_secret_columns(
-    repo: NousRepository, fake_session: _FakeSession
+    repo: MediahubModelRepository, fake_session: _FakeSession
 ) -> None:
     """The public projection selects display columns only — never api_key."""
     fake_session.mapping_rows = []
@@ -136,7 +136,7 @@ async def test_list_enabled_hides_secret_columns(
 
 @pytest.mark.asyncio
 async def test_list_enabled_returns_empty_on_error(
-    repo: NousRepository, fake_session: _FakeSession
+    repo: MediahubModelRepository, fake_session: _FakeSession
 ) -> None:
     fake_session.raises = RuntimeError("boom")
     assert await repo.list_enabled() == []
@@ -147,10 +147,10 @@ async def test_list_enabled_returns_empty_on_error(
 
 @pytest.mark.asyncio
 async def test_get_by_name_returns_full_row(
-    repo: NousRepository, fake_session: _FakeSession
+    repo: MediahubModelRepository, fake_session: _FakeSession
 ) -> None:
     fake_session.scalar_rows = [
-        NousModels(id=123456789012345678, name="nous-base", api_key="sk")
+        MediahubModels(id=123456789012345678, name="nous-base", api_key="sk")
     ]
     row = await repo.get_by_name("nous-base")
     assert row is not None
@@ -159,13 +159,13 @@ async def test_get_by_name_returns_full_row(
     assert row["id"] == 123456789012345678 and type(row["id"]) is int
 
     sql, binds = fake_session.calls[-1]
-    assert "nous_models" in sql
+    assert "mediahub_models" in sql
     assert "nous-base" in binds.values()
 
 
 @pytest.mark.asyncio
 async def test_get_by_name_none_on_error(
-    repo: NousRepository, fake_session: _FakeSession
+    repo: MediahubModelRepository, fake_session: _FakeSession
 ) -> None:
     fake_session.raises = RuntimeError("boom")
     assert await repo.get_by_name("nous-base") is None
@@ -176,19 +176,19 @@ async def test_get_by_name_none_on_error(
 
 @pytest.mark.asyncio
 async def test_list_all_orders_by_sort_order(
-    repo: NousRepository, fake_session: _FakeSession
+    repo: MediahubModelRepository, fake_session: _FakeSession
 ) -> None:
-    fake_session.scalar_rows = [NousModels(id=1, name="m1")]
+    fake_session.scalar_rows = [MediahubModels(id=1, name="m1")]
     await repo.list_all()
 
     sql, _ = fake_session.calls[-1]
-    assert "nous_models" in sql
+    assert "mediahub_models" in sql
     assert "ORDER BY" in sql and "sort_order" in sql
 
 
 @pytest.mark.asyncio
 async def test_list_all_no_is_enabled_filter(
-    repo: NousRepository, fake_session: _FakeSession
+    repo: MediahubModelRepository, fake_session: _FakeSession
 ) -> None:
     fake_session.scalar_rows = []
     await repo.list_all()
@@ -198,7 +198,9 @@ async def test_list_all_no_is_enabled_filter(
 
 
 @pytest.mark.asyncio
-async def test_list_all_empty(repo: NousRepository, fake_session: _FakeSession) -> None:
+async def test_list_all_empty(
+    repo: MediahubModelRepository, fake_session: _FakeSession
+) -> None:
     fake_session.scalar_rows = []
     assert await repo.list_all() == []
 
@@ -208,14 +210,14 @@ async def test_list_all_empty(repo: NousRepository, fake_session: _FakeSession) 
 
 @pytest.mark.asyncio
 async def test_create_filters_to_mapped_attrs_and_returns_row(
-    repo: NousRepository, fake_session: _FakeSession
+    repo: MediahubModelRepository, fake_session: _FakeSession
 ) -> None:
-    fake_session.scalar_rows = [NousModels(id=1, name="nous-new")]
+    fake_session.scalar_rows = [MediahubModels(id=1, name="nous-new")]
     created = await repo.create({"name": "nous-new", "not_a_column": "dropped"})
     assert created == {"id": 1, "name": "nous-new"} or created["name"] == "nous-new"
 
     sql, binds = fake_session.calls[-1]
-    assert "INSERT INTO public.nous_models" in sql
+    assert "INSERT INTO public.mediahub_models" in sql
     values = set(binds.values())
     assert "nous-new" in values
     assert "dropped" not in values  # phantom column never bound
@@ -223,7 +225,7 @@ async def test_create_filters_to_mapped_attrs_and_returns_row(
 
 @pytest.mark.asyncio
 async def test_create_none_on_empty(
-    repo: NousRepository, fake_session: _FakeSession
+    repo: MediahubModelRepository, fake_session: _FakeSession
 ) -> None:
     fake_session.scalar_rows = []
     assert await repo.create({"name": "x"}) is None
@@ -231,15 +233,15 @@ async def test_create_none_on_empty(
 
 @pytest.mark.asyncio
 async def test_update_drops_now_sentinel_uses_func_now(
-    repo: NousRepository, fake_session: _FakeSession
+    repo: MediahubModelRepository, fake_session: _FakeSession
 ) -> None:
     """The legacy 'updated_at=now()' string sentinel is dropped; updated_at is
     set via SQL func.now() (binding the literal string would error)."""
-    fake_session.scalar_rows = [NousModels(id=1, name="m1")]
+    fake_session.scalar_rows = [MediahubModels(id=1, name="m1")]
     await repo.update("1", {"display_name": "Renamed", "updated_at": "now()"})
 
     sql, binds = fake_session.calls[-1]
-    assert "UPDATE public.nous_models" in sql
+    assert "UPDATE public.mediahub_models" in sql
     values = list(binds.values())
     assert "Renamed" in values
     assert 1 in values  # str model_id "1" → int (bigint bind)
@@ -250,7 +252,7 @@ async def test_update_drops_now_sentinel_uses_func_now(
 
 @pytest.mark.asyncio
 async def test_update_none_on_empty(
-    repo: NousRepository, fake_session: _FakeSession
+    repo: MediahubModelRepository, fake_session: _FakeSession
 ) -> None:
     fake_session.scalar_rows = []
     assert await repo.update("1", {"display_name": "y"}) is None
@@ -258,14 +260,14 @@ async def test_update_none_on_empty(
 
 @pytest.mark.asyncio
 async def test_record_test_result_writes_test_columns_only(
-    repo: NousRepository, fake_session: _FakeSession
+    repo: MediahubModelRepository, fake_session: _FakeSession
 ) -> None:
     """record_test_result sets last_test_* + last_tested_at, NOT updated_at."""
-    fake_session.scalar_rows = [NousModels(id=1, name="m1")]
+    fake_session.scalar_rows = [MediahubModels(id=1, name="m1")]
     await repo.record_test_result("1", "ok", "200 OK")
 
     sql, binds = fake_session.calls[-1]
-    assert "UPDATE public.nous_models" in sql
+    assert "UPDATE public.mediahub_models" in sql
     values = list(binds.values())
     assert "ok" in values and "200 OK" in values
     assert 1 in values  # str model_id → int (bigint bind)
@@ -278,12 +280,12 @@ async def test_record_test_result_writes_test_columns_only(
 
 @pytest.mark.asyncio
 async def test_update_parity_bigint_numeric_timestamp(
-    repo: NousRepository, fake_session: _FakeSession
+    repo: MediahubModelRepository, fake_session: _FakeSession
 ) -> None:
     """Returned row honours strategy-C parity: bigint id native int, Numeric
     pricing_value native Decimal, timestamptz ISO str."""
     fake_session.scalar_rows = [
-        NousModels(
+        MediahubModels(
             id=123456789012345678,
             name="m1",
             pricing_value=_decimal.Decimal("8"),
@@ -302,18 +304,18 @@ async def test_update_parity_bigint_numeric_timestamp(
 
 @pytest.mark.asyncio
 async def test_delete_returns_true_on_success(
-    repo: NousRepository, fake_session: _FakeSession
+    repo: MediahubModelRepository, fake_session: _FakeSession
 ) -> None:
     assert await repo.delete("1") is True
 
     sql, binds = fake_session.calls[-1]
-    assert "DELETE FROM public.nous_models" in sql
+    assert "DELETE FROM public.mediahub_models" in sql
     assert 1 in binds.values()  # str model_id "1" → int (bigint bind)
 
 
 @pytest.mark.asyncio
 async def test_delete_returns_false_on_exception(
-    repo: NousRepository, fake_session: _FakeSession
+    repo: MediahubModelRepository, fake_session: _FakeSession
 ) -> None:
     fake_session.raises = RuntimeError("boom")
     assert await repo.delete("1") is False
@@ -324,5 +326,5 @@ async def test_delete_returns_false_on_exception(
 
 def test_factory_returns_collapsed_repo() -> None:
     """Post-rollout the factory unconditionally returns the collapsed ORM repo."""
-    repo = mod.get_nous_repository()
-    assert type(repo) is NousRepository
+    repo = mod.get_mediahub_model_repository()
+    assert type(repo) is MediahubModelRepository

@@ -4,7 +4,7 @@ Pins the four resolution branches of the transcription user-path resolver
 (lifted out of ai_transcription.load_transcribe_inputs) and the ResolvedAIConfig
 each produces. Mocks the SAME seams the workflow SQL tests mock:
 ``get_module_governance`` / ``resolve_platform_model`` (governance gate) and the
-module-level ``resolve_nous_model`` (gated nous pick). No DB.
+module-level ``resolve_mediahub_model`` (gated nous pick). No DB.
 """
 
 from __future__ import annotations
@@ -62,7 +62,7 @@ async def test_origin_governance_from_catalog():
 
 
 async def test_origin_platform_from_nous_pick():
-    """User picks nous:<model> → gated resolve_nous_model → origin=platform;
+    """User picks nous:<model> → gated resolve_mediahub_model → origin=platform;
     model carries the normalized 'provider:model' descriptor."""
     settings = _settings(
         {
@@ -77,7 +77,7 @@ async def test_origin_platform_from_nous_pick():
             AsyncMock(return_value=_unlocked()),
         ),
         patch(
-            "app.services.ai.providers.ai_provider_helpers.resolve_nous_model",
+            "app.services.ai.providers.ai_provider_helpers.resolve_mediahub_model",
             AsyncMock(return_value=nous),
         ),
     ):
@@ -143,8 +143,8 @@ async def test_raises_when_no_user_settings():
             await helpers.resolve_transcription_config("u", settings_json=None)
 
 
-async def test_raises_on_unknown_nous_model():
-    """nous:<model> that resolve_nous_model can't find → RuntimeError, never a
+async def test_raises_on_unknown_mediahub_model():
+    """nous:<model> that resolve_mediahub_model can't find → RuntimeError, never a
     silent BYOK fallback."""
     settings = _settings({"task_assignment": {"transcription": "nous:ghost"}})
     with (
@@ -153,7 +153,7 @@ async def test_raises_on_unknown_nous_model():
             AsyncMock(return_value=_unlocked()),
         ),
         patch(
-            "app.services.ai.providers.ai_provider_helpers.resolve_nous_model",
+            "app.services.ai.providers.ai_provider_helpers.resolve_mediahub_model",
             AsyncMock(return_value=None),
         ),
     ):

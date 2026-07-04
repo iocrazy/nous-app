@@ -109,7 +109,7 @@ export function MemorySettings() {
     const token = session?.access_token
     if (!token) return
     const apiBase = import.meta.env.VITE_API_URL || ''
-    fetch(`${apiBase}/api/v1/admin/nous-models`, {
+    fetch(`${apiBase}/api/v1/admin/mediahub-models`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => (r.ok ? r.json() : []))

@@ -153,7 +153,7 @@ export function AIModelsPage() {
   const fetchModels = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch(`${apiBase}/api/v1/admin/nous-models`, { headers })
+      const res = await fetch(`${apiBase}/api/v1/admin/mediahub-models`, { headers })
       if (res.ok) setModels(await res.json())
     } catch {
       Message.error('Failed to fetch models')
@@ -209,7 +209,7 @@ export function AIModelsPage() {
   // the per-model Test and the provider "Test all" button.
   const runModelTest = async (m: NousModel): Promise<boolean> => {
     try {
-      const res = await fetch(`${apiBase}/api/v1/admin/nous-models/${m.id}/test`, {
+      const res = await fetch(`${apiBase}/api/v1/admin/mediahub-models/${m.id}/test`, {
         method: 'POST',
         headers,
       })
@@ -287,7 +287,7 @@ export function AIModelsPage() {
     }
     setProbeLoading(true)
     try {
-      const res = await fetch(`${apiBase}/api/v1/admin/nous-models/probe-models`, {
+      const res = await fetch(`${apiBase}/api/v1/admin/mediahub-models/probe-models`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -353,7 +353,7 @@ export function AIModelsPage() {
         sort_order: 0,
       }
       try {
-        const res = await fetch(`${apiBase}/api/v1/admin/nous-models`, {
+        const res = await fetch(`${apiBase}/api/v1/admin/mediahub-models`, {
           method: 'POST',
           headers,
           body: JSON.stringify(payload),
@@ -372,7 +372,7 @@ export function AIModelsPage() {
   }
 
   const handleDeleteModel = async (id: string) => {
-    const res = await fetch(`${apiBase}/api/v1/admin/nous-models/${id}`, { method: 'DELETE', headers })
+    const res = await fetch(`${apiBase}/api/v1/admin/mediahub-models/${id}`, { method: 'DELETE', headers })
     if (res.ok) {
       Message.success('Model removed')
       fetchModels()
@@ -382,7 +382,7 @@ export function AIModelsPage() {
   }
 
   const handleToggleEnabled = async (record: NousModel) => {
-    const res = await fetch(`${apiBase}/api/v1/admin/nous-models/${record.id}`, {
+    const res = await fetch(`${apiBase}/api/v1/admin/mediahub-models/${record.id}`, {
       method: 'PUT',
       headers,
       body: JSON.stringify({ is_enabled: !record.is_enabled }),
