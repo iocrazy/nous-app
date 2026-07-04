@@ -17,6 +17,7 @@ from typing import Any
 from app.services.ai.ai_health_runtime import fetch_runtime_summary
 from app.services.ai.providers.ai_provider_helpers import (
     get_ai_settings,
+    resolve_summarization_config,
     resolve_task_provider_config,
 )
 
@@ -128,9 +129,24 @@ async def get_capability_health(user_id: str) -> list[dict[str, Any]]:
     for task_key, default_slug, label, needs_vision, task_type in _CAPABILITIES:
         assigned = bool((assignments.get(task_key) or "").strip())
         try:
-            provider_key, _config, model, slug = await resolve_task_provider_config(
-                user_id, task_key, default_slug
-            )
+            if task_key == "summarization":
+                # Summarization does NOT run through the agent-slug resolver:
+                # its real workflow (ai_summary.load_summary_inputs) scans a
+                # hardcoded provider priority + default_summary_model, with no
+                # agent and no user nous-pick. Reporting it via
+                # resolve_task_provider_config (audit finding D) showed a
+                # model/provider the feature never uses. Resolve through the
+                # TRUE path so the board is honest. Pass the already-loaded
+                # settings (avoids a second read + the resolver's no-settings
+                # raise); agent_slug is always "" here.
+                cfg = await resolve_summarization_config(
+                    user_id, settings_json={"ai_settings": ai_settings}
+                )
+                provider_key, model, slug = cfg.provider_key, cfg.model, cfg.agent_slug
+            else:
+                provider_key, _config, model, slug = await resolve_task_provider_config(
+                    user_id, task_key, default_slug
+                )
             status, hint = _evaluate(
                 provider_key=provider_key,
                 model=model,
