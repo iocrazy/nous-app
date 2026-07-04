@@ -35,6 +35,8 @@ import type {
   CreateChatSessionPayload,
   CreateSkillPayload,
   UsageAggregate,
+  UsageDailySummary,
+  UsageRunsPage,
   UsageScope,
 } from '../types';
 
@@ -361,6 +363,35 @@ export const aiLibraryService = {
       headers: await getAuthHeaders(),
     });
     return handle<UsageAggregate>(resp);
+  },
+
+  /** Caller's own per-call usage rows (last N days), paginated. */
+  async getUsageRuns(opts: {
+    page?: number;
+    pageSize?: number;
+    model?: string;
+    status?: string;
+    days?: number;
+  } = {}): Promise<UsageRunsPage> {
+    const qs = new URLSearchParams({
+      page: String(opts.page ?? 1),
+      page_size: String(opts.pageSize ?? 25),
+      days: String(opts.days ?? 30),
+    });
+    if (opts.model) qs.set('model', opts.model);
+    if (opts.status) qs.set('status', opts.status);
+    const resp = await fetch(`${base()}/usage/runs?${qs.toString()}`, {
+      headers: await getAuthHeaders(),
+    });
+    return handle<UsageRunsPage>(resp);
+  },
+
+  /** Caller's own daily × model rollup (for the usage charts). */
+  async getUsageDaily(days = 30): Promise<UsageDailySummary> {
+    const resp = await fetch(`${base()}/usage/daily?days=${days}`, {
+      headers: await getAuthHeaders(),
+    });
+    return handle<UsageDailySummary>(resp);
   },
 
   // ─── Chat sessions + messages ─────────────────────────────────────────────

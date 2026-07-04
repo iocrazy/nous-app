@@ -1749,6 +1749,130 @@ async def get_usage(
     }
 
 
+@router.get(
+    "/usage/runs",
+    summary="Caller's own per-call usage detail (paginated)",
+)
+async def get_usage_runs(
+    auth: AuthDep,
+    page: int = 1,
+    page_size: int = 25,
+    model: str | None = None,
+    status: str | None = None,
+    days: int = 30,
+) -> Dict[str, Any]:
+    """Row-level usage for the AI Usage page: every run the CALLER made —
+    time / agent / model / provider / tokens / cost / status / duration.
+
+    Hard-scoped to the authenticated user (the repo filter is forced to
+    ``auth.user_id`` — there is no way to read another user's runs here).
+    ``days`` windows to the last N days (default 30, max 365)."""
+    if page < 1 or not (1 <= page_size <= 100):
+        raise HTTPException(status_code=400, detail="bad page/page_size")
+    if not (1 <= days <= 365):
+        raise HTTPException(status_code=400, detail="days must be 1..365")
+
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    runs_repo = get_agent_runs_repository()
+    result = await runs_repo.list_runs_admin(
+        user_id=user_uuid,  # forced — user scope, never cross-user
+        model=model,
+        status=status,
+        started_after=datetime.now(timezone.utc) - timedelta(days=days),
+        offset=(page - 1) * page_size,
+        limit=page_size,
+    )
+    rows = result["items"]
+
+    # Enrich agent_id → slug/name (bounded: unique agents on one page).
+    agent_repo, _ = _repos()
+    agent_names: Dict[str, Dict[str, Any]] = {}
+    for aid in {str(r["agent_id"]) for r in rows if r.get("agent_id")}:
+        try:
+            agent = await agent_repo.get_by_id(UUID(aid))
+            if agent:
+                agent_names[aid] = {
+                    "agent_slug": agent.get("slug"),
+                    "agent_name": agent.get("name"),
+                }
+        except Exception as exc:  # noqa: BLE001 — enrichment is best-effort
+            logger.warning(f"[usage/runs] agent enrich failed for {aid}: {exc}")
+
+    def _dur_ms(r: Dict[str, Any]) -> int | None:
+        s, e = r.get("started_at"), r.get("ended_at")
+        if not s or not e:
+            return None
+        try:
+            s_dt = s if isinstance(s, datetime) else datetime.fromisoformat(str(s))
+            e_dt = e if isinstance(e, datetime) else datetime.fromisoformat(str(e))
+            ms = (e_dt - s_dt).total_seconds() * 1000.0
+            return int(ms) if ms >= 0 else None
+        except (ValueError, TypeError):
+            return None
+
+    items = [
+        {
+            "id": str(r.get("id")),
+            "agent_id": str(r["agent_id"]) if r.get("agent_id") else None,
+            **agent_names.get(str(r.get("agent_id")), {}),
+            "model": r.get("model"),
+            "provider": r.get("provider"),
+            "status": r.get("status", ""),
+            "trigger": r.get("trigger"),
+            "prompt_tokens": int(r.get("prompt_tokens") or 0),
+            "completion_tokens": int(r.get("completion_tokens") or 0),
+            "total_tokens": int(r.get("total_tokens") or 0),
+            "cost_cents": float(r.get("cost_cents") or 0.0),
+            "duration_ms": _dur_ms(r),
+            "started_at": str(r["started_at"]) if r.get("started_at") else None,
+            "error_code": r.get("error_code"),
+        }
+        for r in rows
+    ]
+    return {
+        "items": items,
+        "total": result["total"],
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+@router.get(
+    "/usage/daily",
+    summary="Caller's own daily × model usage rollup (for charts)",
+)
+async def get_usage_daily(auth: AuthDep, days: int = 30) -> Dict[str, Any]:
+    """Daily × model buckets powering the usage charts (requests / tokens /
+    cost per day, stacked by model). Hard-scoped to the caller."""
+    if not (1 <= days <= 365):
+        raise HTTPException(status_code=400, detail="days must be 1..365")
+
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    runs_repo = get_agent_runs_repository()
+    rows = await runs_repo.daily_usage_by_model(
+        started_after=datetime.now(timezone.utc) - timedelta(days=days),
+        user_id=user_uuid,
+    )
+    daily = [
+        {
+            "date": str(r.get("date")),
+            "model": r.get("model"),
+            "provider": r.get("provider"),
+            "requests": int(r.get("requests") or 0),
+            "total_tokens": int(r.get("total_tokens") or 0),
+            "cost_cents": float(r.get("cost_cents") or 0.0),
+        }
+        for r in rows
+    ]
+    return {
+        "days": days,
+        "total_requests": sum(d["requests"] for d in daily),
+        "total_tokens": sum(d["total_tokens"] for d in daily),
+        "total_cost_cents": sum(d["cost_cents"] for d in daily),
+        "daily": daily,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Chat sessions (replaces legacy /api/v1/ai/sessions + /api/v1/ai/agents/{id}/call)
 # ---------------------------------------------------------------------------
@@ -1955,10 +2079,9 @@ async def admin_telemetry(
         raise HTTPException(status_code=400, detail="days must be 1..30")
 
     from datetime import datetime as _dt
-    from datetime import timedelta as _td
 
     end = _dt.now(timezone.utc)
-    start = end - _td(days=days)
+    start = end - timedelta(days=days)
 
     client = await get_async_supabase_admin()
     result = (

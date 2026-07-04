@@ -1346,6 +1346,51 @@ export interface UsageAggregate {
   per_agent: UsagePerAgent[];
 }
 
+// Row-level usage detail — GET /api/v1/ai-library/usage/runs (caller-scoped).
+export interface UsageRunItem {
+  id: string;
+  agent_id: string | null;
+  agent_slug?: string | null;
+  agent_name?: string | null;
+  model: string | null;
+  provider: string | null;
+  status: string;
+  trigger: string | null;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  /** Fractional cents — same convention as agent_runs.cost_cents. */
+  cost_cents: number;
+  duration_ms: number | null;
+  started_at: string | null;
+  error_code: string | null;
+}
+
+export interface UsageRunsPage {
+  items: UsageRunItem[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+// Daily × model rollup — GET /api/v1/ai-library/usage/daily (caller-scoped).
+export interface UsageDailyRow {
+  date: string;
+  model: string | null;
+  provider: string | null;
+  requests: number;
+  total_tokens: number;
+  cost_cents: number;
+}
+
+export interface UsageDailySummary {
+  days: number;
+  total_requests: number;
+  total_tokens: number;
+  total_cost_cents: number;
+  daily: UsageDailyRow[];
+}
+
 // ─── AI Library chat ────────────────────────────────────────────────────────
 // Mirror of backend/app/schemas/ai_library_chat.py. One session = one agent
 // binding; messages + run telemetry flow through AgentRunner + RunRecorder.
