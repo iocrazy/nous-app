@@ -214,32 +214,6 @@ class Settings(BaseSettings):
         "(both cold/uncalled in app today, migrated for completeness). Writes "
         "commit via write_scope(). Inert — flip back to false to roll back.",
     )
-    USE_ORM_ISSUE: bool = Field(
-        default=False,
-        description="Route IssueRepository (the issues table — top-level "
-        "user-visible 'thing') through the SQLAlchemy 2.0 ORM session layer "
-        "(Phase 2 M batch). THE M-BATCH UUID HOT SPOT: created_by_user_id and "
-        "assignee_user_id are str()'d because THREE app-layer call sites "
-        "(issues_router._assert_visibility, issue_messages_router."
-        "_assert_issue_visible, ws_router._resolve_issue_ws_user) compare them "
-        "==/in a STRING user_id for authz — a native uuid.UUID would compare "
-        "unequal forever (silent 404/4001 for the legitimate owner, no error/no "
-        "log). created_by_agent_id / assignee_agent_id → str for shape parity. "
-        "ai_session_id + all bigint ids/FKs (id / issue_number / team_id / "
-        "project_id / parent_id / goal_id) stay NATIVE int (5.3 trap; "
-        "ai_session_id is fed to a supabase .eq that coerces). status / priority "
-        "/ origin_kind are plain Text columns (CHECK-constrained, NOT SQLAlchemy "
-        "Enum) → native str, no _plain unwrap. timestamps → ISO str; "
-        "execution_state (jsonb) → native dict. atomic_create keeps the "
-        "counter-UPDATE+INSERT atomic by calling the SAME issue_create_atomic "
-        "SECURITY DEFINER proc (mig 173) via SELECT * FROM "
-        "issue_create_atomic(CAST(:payload AS jsonb)) inside write_scope(). "
-        "list_for_user reproduces the own-OR-assignee OR filter + count='exact'. "
-        "No date range filters. get_* return None; update raises ValueError on "
-        "not-found/no-op; atomic_create raises RuntimeError on empty result. "
-        "Writes commit via write_scope(). Inert — flip back to false to roll "
-        "back.",
-    )
     USE_ORM_TEAM: bool = Field(
         default=False,
         description="Route TeamRepository (CROWN JEWEL — the team authorization "
