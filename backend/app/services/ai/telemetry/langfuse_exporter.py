@@ -7,11 +7,16 @@ already aggregates everything worth tracing (model, tokens, cost,
 summaries), so the exporter is a thin fire-and-forget mapper on top of
 the run it just finished.
 
-Configuration (env, default OFF):
+Configuration (env, default OFF; bootstrap fallback — see from_settings):
     FEATURE_LANGFUSE      — master flag
     LANGFUSE_HOST         — e.g. http://192.168.50.9:3100
     LANGFUSE_PUBLIC_KEY   — project public key (pk-lf-…)
     LANGFUSE_SECRET_KEY   — project secret key (sk-lf-…)
+
+env→DB migration wave 2 (mirrors HonchoMemoryConfig / GraphMemoryConfig):
+the admin-manageable + secret-bearing config now lives in system_settings
+(``telemetry.langfuse.*``, DB wins when present) with the env vars above as
+the bootstrap fallback — see ``from_settings``.
 
 Safety contract (same as every telemetry path): never raises, never
 blocks the caller — RunRecorder schedules ``export_run`` as a background
@@ -34,6 +39,34 @@ logger = logging.getLogger(__name__)
 _TRUTHY = {"1", "true", "yes", "on"}
 _REQUEST_TIMEOUT_S = 10.0
 
+# system_settings key (admin-set, DB) → env-var fallback. Lets the Langfuse
+# gate + connection config be configured from an admin UI instead of editing
+# prod compose env (which Watchtower does not reload). Mirrors
+# _HONCHO_SETTINGS_MAP / graph_memory.py's _SETTINGS_MAP.
+_LANGFUSE_SETTINGS_MAP: dict[str, tuple[str, str]] = {
+    "enabled": ("telemetry.langfuse.enabled", "FEATURE_LANGFUSE"),
+    "host": ("telemetry.langfuse.host", "LANGFUSE_HOST"),
+    "public_key": ("telemetry.langfuse.public_key", "LANGFUSE_PUBLIC_KEY"),
+    "secret_key": ("telemetry.langfuse.secret_key", "LANGFUSE_SECRET_KEY"),
+}
+
+
+async def _langfuse_settings_reader(key: str) -> Optional[object]:
+    """Read one system_settings JSONB value (service-role engine). None on
+    miss/error. Returns the native JSONB-deserialised value — a stored JSON
+    ``true`` comes back as Python ``True``, not the string ``"true"``."""
+    try:
+        from app.db import engine as db_engine
+
+        if not db_engine.is_configured():
+            return None
+        return await db_engine.fetch_val(
+            "SELECT value FROM public.system_settings WHERE key = :k", {"k": key}
+        )
+    except Exception:  # noqa: BLE001 — settings read must never raise
+        logger.warning(f"[langfuse] system_settings read failed: {key}")
+        return None
+
 
 @dataclass(frozen=True)
 class LangfuseConfig:
@@ -51,6 +84,49 @@ class LangfuseConfig:
             secret_key=os.getenv("LANGFUSE_SECRET_KEY", "").strip(),
         )
 
+    @classmethod
+    async def from_settings(cls, *, reader=None, env=None) -> "LangfuseConfig":
+        """Resolve from system_settings with per-field env fallback (DB > env >
+        default). Behaviour-neutral when the telemetry.langfuse.* keys are
+        absent: every field falls back to the same env var from_env() reads.
+        Never raises."""
+        read = reader if reader is not None else _langfuse_settings_reader
+        environ = env if env is not None else os.environ
+
+        async def read_db(field_key: str):
+            db_key, _env_key = _LANGFUSE_SETTINGS_MAP[field_key]
+            try:
+                return await read(db_key)
+            except Exception:  # noqa: BLE001
+                logger.warning(f"[langfuse] settings read failed: {db_key}")
+                return None
+
+        async def resolve_str(field_key: str) -> str:
+            db_val = await read_db(field_key)
+            if db_val is not None and str(db_val).strip():
+                return str(db_val).strip()
+            _db_key, env_key = _LANGFUSE_SETTINGS_MAP[field_key]
+            env_val = environ.get(env_key)
+            return env_val.strip() if isinstance(env_val, str) else ""
+
+        async def resolve_enabled() -> bool:
+            db_val = await read_db("enabled")
+            if isinstance(db_val, bool):
+                return db_val  # native JSONB bool — including explicit False
+            if isinstance(db_val, str) and db_val.strip():
+                return db_val.strip().lower() in _TRUTHY
+            _db_key, env_key = _LANGFUSE_SETTINGS_MAP["enabled"]
+            env_val = environ.get(env_key)
+            return isinstance(env_val, str) and env_val.strip().lower() in _TRUTHY
+
+        enabled = await resolve_enabled()
+        host = (await resolve_str("host")).rstrip("/")
+        public_key = await resolve_str("public_key")
+        secret_key = await resolve_str("secret_key")
+        return cls(
+            enabled=enabled, host=host, public_key=public_key, secret_key=secret_key
+        )
+
     def operative(self) -> bool:
         return self.enabled and bool(self.host and self.public_key and self.secret_key)
 
@@ -61,6 +137,37 @@ class LangfuseExporter:
 
     config: LangfuseConfig = field(default_factory=LangfuseConfig.from_env)
     client: Optional[httpx.AsyncClient] = None
+    # Whether config has been (re)loaded from system_settings. The env-sourced
+    # default_factory keeps construction cheap; the DB load happens once on
+    # first real async use via _ensure_config — mirrors HonchoMemoryService /
+    # GraphMemoryService.
+    _config_loaded: bool = False
+
+    async def _ensure_config(self) -> None:
+        """Swap the env-default config for the DB-sourced one on first use.
+        Skipped when a client is injected (tests set their own config) or
+        after the first load. Never raises — a failed settings load keeps env
+        config."""
+        if self.client is not None or self._config_loaded:
+            return
+        self._config_loaded = True  # set first: no retry-storm, no double-load
+        try:
+            self.config = await LangfuseConfig.from_settings()
+        except Exception:  # noqa: BLE001
+            logger.warning("[langfuse] from_settings failed; keeping env config")
+
+    async def reload(self) -> None:
+        """Drop the cached httpx client + config-loaded flag so the next call
+        re-reads system_settings and reconnects with fresh host/keys — mirrors
+        HonchoMemoryService/GraphMemoryService reload semantics (an admin
+        config edit applies without a process restart). Never raises."""
+        if self.client is not None:
+            try:
+                await self.client.aclose()
+            except Exception:  # noqa: BLE001
+                logger.warning("[langfuse] client close failed during reload")
+            self.client = None
+        self._config_loaded = False
 
     def _get_client(self) -> Optional[httpx.AsyncClient]:
         if not self.config.operative():
@@ -93,6 +200,7 @@ class LangfuseExporter:
     ) -> bool:
         """One trace + one generation for a finished run. Returns True
         when Langfuse accepted the batch; False otherwise (and logs)."""
+        await self._ensure_config()
         client = self._get_client()
         if client is None:
             return False
