@@ -242,7 +242,6 @@ def split_script_step(
 async def persist_split_scenes_step(
     project_id: str, scenes: list[dict[str, Any]]
 ) -> list[str]:
-    from app.core.config import settings
     from app.db.engine import is_configured
     from app.db.session import maybe_unit_of_work
     from app.repositories.storyboard_repository import (
@@ -254,10 +253,10 @@ async def persist_split_scenes_step(
     frame_repo = get_storyboard_frame_repository()
     created_nodes: list[str] = []
     # Atomicity: every node + its frame commit together (no orphan node if a
-    # frame insert fails). Active only when the storyboard repos are ORM-backed
-    # (they join the ambient unit_of_work via write_scope); inert/byte-identical
-    # with USE_ORM_STORYBOARD off.
-    async with maybe_unit_of_work(settings.USE_ORM_STORYBOARD and is_configured()):
+    # frame insert fails). The storyboard repos are ORM-backed and join the
+    # ambient unit_of_work via write_scope() when the engine is configured; a
+    # no-op nullcontext otherwise.
+    async with maybe_unit_of_work(is_configured()):
         for idx, scene in enumerate(scenes):
             position = _grid_position(idx)
             node_data = {
@@ -337,7 +336,6 @@ def analyze_video_step(video_path: str) -> list[dict[str, Any]]:
 async def persist_video_scenes_step(
     project_id: str, scenes: list[dict[str, Any]]
 ) -> list[str]:
-    from app.core.config import settings
     from app.db.engine import is_configured
     from app.db.session import maybe_unit_of_work
     from app.repositories.storyboard_repository import (
@@ -348,9 +346,10 @@ async def persist_video_scenes_step(
     node_repo = get_storyboard_node_repository()
     frame_repo = get_storyboard_frame_repository()
     created_nodes: list[str] = []
-    # Atomicity: node + frame commit together (no orphan node). Active only when
-    # the storyboard repos are ORM-backed; inert with USE_ORM_STORYBOARD off.
-    async with maybe_unit_of_work(settings.USE_ORM_STORYBOARD and is_configured()):
+    # Atomicity: node + frame commit together (no orphan node). The ORM-backed
+    # storyboard repos join the ambient unit_of_work via write_scope() when the
+    # engine is configured; a no-op nullcontext otherwise.
+    async with maybe_unit_of_work(is_configured()):
         for idx, scene in enumerate(scenes):
             position = _grid_position(idx)
             node_data = {
