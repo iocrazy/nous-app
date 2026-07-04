@@ -305,23 +305,22 @@ async def build_agent_runner_stack(
     # used the global-only get_adapter — that meant any agent on a
     # provider without a global env key (like Doubao here) would 401.
     #
-    # Governance gate: when an admin locks the chat module, skip the user
-    # provider lookup entirely.  get_adapter_for_user with an empty user_cfg
-    # falls back to platform settings keys (DOUBAO_API_KEY, LLM_API_KEY,
-    # etc.) — chat DOES go through get_adapter_for_user, so the env fallback
-    # is real and no admin api_key field is needed for the chat module.
-    from app.services.ai.governance.ai_governance import get_module_governance as _gov
+    # Chat resolution is unified through resolve_chat_config (Phase A4). Chat's
+    # governance is a pure toggle: locked → empty user_cfg → get_adapter_for_user
+    # falls back to platform env keys; allowed → the user's BYOK ai_providers
+    # dict flows in. The agent owns the model (primary_model), so the resolver
+    # only tags the credential origin; the dict it returns is byte-identical to
+    # the old inline branch. The load is injected so it happens ONLY on the
+    # allowed path (a locked module must skip the user BYOK read entirely).
+    from app.services.ai.providers.ai_provider_helpers import resolve_chat_config
 
-    _chat_governance = await _gov("chat")
-    if not _chat_governance.allowed:
-        logger.info(
-            "[governance] chat locked by admin for user %s; "
-            "skipping user BYO keys — using platform provider keys",
-            user_id,
-        )
-        user_provider_config: dict = {}
-    else:
-        user_provider_config = await _load_user_provider_config(user_id)
+    _chat_cfg = await resolve_chat_config(
+        user_id,
+        model=primary_model,
+        load_user_config=lambda: _load_user_provider_config(user_id),
+        agent_slug=agent.get("slug") or "",
+    )
+    user_provider_config = _chat_cfg.provider_config
 
     def _adapter_factory(model: str):
         return get_adapter_for_user(model, user_provider_config, settings)

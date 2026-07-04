@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
 
 from loguru import logger
 
@@ -514,6 +514,89 @@ async def resolve_summarization_config(
         model=model,
         agent_slug="",
         origin=_byok_origin(provider_config),
+    )
+
+
+async def resolve_chat_config(
+    user_id: Any,
+    *,
+    model: str,
+    load_user_config: Callable[[], Awaitable[Dict[str, Any]]],
+    agent_slug: str = "",
+) -> ResolvedAIConfig:
+    """Resolve the chat module's provider config for one agent turn.
+
+    Behaviour-preserving lift of the governance block that lived inline in
+    ``ai_library_chat_wiring.build_agent_runner_stack`` — chat now resolves
+    through the SAME typed :class:`ResolvedAIConfig` as the task and
+    transcription resolvers (the unification point).
+
+    Chat differs from every other governed module in two ways that shape this
+    function's contract:
+
+    1. **Governance is a pure toggle — there is NO admin model/key path.**
+       The ``chat`` module only carries ``user_allowed``; an admin cannot pin a
+       model or key for it.  So this resolver consults ``get_module_governance``
+       DIRECTLY and must NOT route through ``resolve_locked_module_config`` (that
+       shared gate fails closed when a locked module has no admin api_key — which
+       is always true for chat).  When locked, the user's BYOK lookup is skipped
+       and ``get_adapter_for_user`` later receives an empty dict, falling back to
+       platform env credentials.  The DECISION was governance, so
+       ``origin="governance"`` even though the ultimate credentials are env.
+
+    2. **The agent owns the model.**  Chat's model is the assigned agent's
+       ``model`` field, resolved by the caller (``primary_model``) and threaded
+       straight into ``get_adapter_for_user`` / ``LLMFallbackChain`` — this
+       resolver does NOT select it.  ``ResolvedAIConfig.model`` is therefore left
+       ``""``; the ``model`` argument here is used only to derive ``provider_key``
+       (the credential set that will serve the turn) and to classify ``origin``.
+
+    ``provider_config`` is the user's FULL ``ai_providers`` dict (NOT a single
+    provider's narrowed config like the task resolvers return) because
+    ``get_adapter_for_user`` does its own per-model narrowing.  It is ``{}`` when
+    locked.  The dict is loaded via the injected ``load_user_config`` awaitable
+    ONLY on the allowed path — locking must skip the load entirely (a user BYOK
+    read has cost, and the lock means "ignore user config").  Injecting the
+    loader keeps this helper free of a dependency on the chat-wiring module and
+    preserves the exact seam the governance tests patch.
+
+    origin mapping:
+      - locked                                          → ``"governance"``
+      - allowed + model's provider has a BYOK api_key   → ``"byok"``
+      - allowed + no BYOK key for the model's provider  → ``"env"``
+    """
+    from app.services.ai.adapters.factory import provider_key_for_model
+    from app.services.ai.governance.ai_governance import get_module_governance
+
+    try:
+        provider_key = provider_key_for_model(model)
+    except ValueError:
+        provider_key = ""
+
+    governance = await get_module_governance("chat")
+    if not governance.allowed:
+        logger.info(
+            "[governance] chat locked by admin for user {}; skipping user BYO "
+            "keys — using platform provider keys",
+            user_id,
+        )
+        return ResolvedAIConfig(
+            provider_key=provider_key,
+            provider_config={},
+            model="",
+            agent_slug=agent_slug,
+            origin="governance",
+        )
+
+    providers = await load_user_config()
+    raw_entry = (providers or {}).get(provider_key) if provider_key else None
+    entry = raw_entry if isinstance(raw_entry, dict) else {}
+    return ResolvedAIConfig(
+        provider_key=provider_key,
+        provider_config=providers,
+        model="",
+        agent_slug=agent_slug,
+        origin=_byok_origin(entry),
     )
 
 
