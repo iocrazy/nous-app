@@ -5,14 +5,20 @@ issue unbounded SELECTs that PostgREST silently truncated at 1000 rows (and whos
 ORM twins fetched the whole set into RAM). They must now apply a deterministic
 ORDER BY + an explicit LIMIT so a backlog drains over successive sweeper runs
 instead of being clipped.
+
+Post-collapse these run on the ORM: a scope-mock fake session captures the
+built SQLAlchemy statement and we compile it (literal binds) to assert the
+ORDER BY column/direction and the LIMIT value.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from contextlib import asynccontextmanager
+from typing import Any, List
 
 import pytest
 
+from app.repositories import resources_repository as repo_mod
 from app.repositories.resources_repository import (
     EXPIRED_TRASH_BATCH,
     UNTRANSCODED_BATCH,
@@ -20,47 +26,42 @@ from app.repositories.resources_repository import (
 )
 
 
-class _FakeQuery:
-    """Chainable query stub that records every method call."""
+class _Result:
+    def mappings(self):
+        return self
 
-    def __init__(self, data: Any = None) -> None:
-        self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
-        self._data = data if data is not None else []
-
-    def __getattr__(self, name: str):
-        # supabase-py exposes `.not_` as a chained namespace (`q.not_.is_(...)`);
-        # return self so the trailing call still records + chains.
-        if name == "not_":
-            return self
-
-        def _capture(*args: Any, **kwargs: Any) -> "_FakeQuery":
-            self.calls.append((name, args, kwargs))
-            return self
-
-        return _capture
-
-    async def execute(self) -> Any:
-        return type("_R", (), {"data": self._data})()
-
-    def order_call(self) -> tuple[Any, ...] | None:
-        return next((c for c in self.calls if c[0] == "order"), None)
-
-    def limit_call(self) -> tuple[Any, ...] | None:
-        return next((c for c in self.calls if c[0] == "limit"), None)
+    def all(self) -> List[dict]:
+        return []
 
 
-def _repo_with(query: _FakeQuery) -> ResourcesRepository:
-    repo = ResourcesRepository()
+class _CapSession:
+    def __init__(self) -> None:
+        self.stmt: Any = None
 
-    class _Client:
-        def table(self, _name: str) -> _FakeQuery:
-            return query
+    async def execute(self, stmt: Any, params: Any = None) -> _Result:
+        self.stmt = stmt
+        return _Result()
 
-    async def _get_client() -> Any:
-        return _Client()
 
-    repo._get_client = _get_client  # type: ignore[method-assign]
-    return repo
+def _repo_with(session: _CapSession) -> ResourcesRepository:
+    @asynccontextmanager
+    async def _fake_read_scope():
+        yield session
+
+    repo_mod.read_scope = _fake_read_scope  # type: ignore[assignment]
+    return ResourcesRepository()
+
+
+def _compiled(session: _CapSession) -> str:
+    assert session.stmt is not None, "expected a statement to be executed"
+    return str(session.stmt.compile(compile_kwargs={"literal_binds": True})).lower()
+
+
+@pytest.fixture(autouse=True)
+def _restore_read_scope():
+    original = repo_mod.read_scope
+    yield
+    repo_mod.read_scope = original  # type: ignore[assignment]
 
 
 # ─── get_expired_trashed_resources ──────────────────────────────────
@@ -68,29 +69,24 @@ def _repo_with(query: _FakeQuery) -> ResourcesRepository:
 
 @pytest.mark.asyncio
 async def test_expired_trash_default_is_bounded_and_ordered() -> None:
-    q = _FakeQuery()
-    repo = _repo_with(q)
+    session = _CapSession()
+    repo = _repo_with(session)
 
     await repo.get_expired_trashed_resources()
 
-    order = q.order_call()
-    assert order is not None
-    assert order[1] == ("trashed_at",)
-    assert order[2] == {"desc": False}  # oldest-trashed first
-
-    limit = q.limit_call()
-    assert limit is not None
-    assert limit[1] == (EXPIRED_TRASH_BATCH,)
+    sql = _compiled(session)
+    assert "order by public.resources.trashed_at asc" in sql  # oldest-trashed first
+    assert f"limit {EXPIRED_TRASH_BATCH}" in sql
 
 
 @pytest.mark.asyncio
 async def test_expired_trash_respects_custom_limit() -> None:
-    q = _FakeQuery()
-    repo = _repo_with(q)
+    session = _CapSession()
+    repo = _repo_with(session)
 
     await repo.get_expired_trashed_resources(older_than_days=15, limit=100)
 
-    assert q.limit_call()[1] == (100,)
+    assert "limit 100" in _compiled(session)
 
 
 # ─── get_untranscoded_video_versions ────────────────────────────────
@@ -98,26 +94,21 @@ async def test_expired_trash_respects_custom_limit() -> None:
 
 @pytest.mark.asyncio
 async def test_untranscoded_default_is_bounded_and_ordered() -> None:
-    q = _FakeQuery()
-    repo = _repo_with(q)
+    session = _CapSession()
+    repo = _repo_with(session)
 
     await repo.get_untranscoded_video_versions()
 
-    order = q.order_call()
-    assert order is not None
-    assert order[1] == ("id",)
-    assert order[2] == {"desc": False}
-
-    limit = q.limit_call()
-    assert limit is not None
-    assert limit[1] == (UNTRANSCODED_BATCH,)
+    sql = _compiled(session)
+    assert "order by public.resource_versions.id asc" in sql
+    assert f"limit {UNTRANSCODED_BATCH}" in sql
 
 
 @pytest.mark.asyncio
 async def test_untranscoded_respects_custom_limit() -> None:
-    q = _FakeQuery()
-    repo = _repo_with(q)
+    session = _CapSession()
+    repo = _repo_with(session)
 
     await repo.get_untranscoded_video_versions(limit=25)
 
-    assert q.limit_call()[1] == (25,)
+    assert "limit 25" in _compiled(session)

@@ -1,4 +1,4 @@
-"""Unit tests for strategy-C value-type parity in ``ResourcesRepositoryOrm``.
+"""Unit tests for strategy-C value-type parity in ``ResourcesRepository``.
 
 AUTHZ-CRITICAL pin. The ORM read helpers (``_orm_obj_to_dict`` / RETURNING
 ``.mappings()``) return NATIVE Python types — ``uuid.UUID`` for uuid columns
@@ -19,7 +19,7 @@ import datetime as dt
 import uuid
 
 from app.models import Resources
-from app.repositories.resources_repository_orm import (
+from app.repositories.resources_repository import (
     _resources_row_to_dict,
     _rest_parity,
     _to_rest_value,

@@ -1,5 +1,5 @@
 """Integration tests for the A2.5 flip-blocker repo refactor: the four
-``Resources``-table Core-DML methods on ``ResourcesRepositoryOrm`` converted to
+``Resources``-table Core-DML methods on ``ResourcesRepository`` converted to
 the sanctioned load-then-modify ORM path + the global GC reference count.
 
 Companion to ``test_resources_scope_activation.py`` (which exercises the choke
@@ -55,7 +55,7 @@ from app.db.scope import (
 )
 from app.db.session import read_scope
 from app.models.media import Resources
-from app.repositories.resources_repository_orm import ResourcesRepositoryOrm
+from app.repositories.resources_repository import ResourcesRepository
 
 # ── Module-level skip gate ──────────────────────────────────────────────
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -106,8 +106,8 @@ def enforce_off():
 
 
 @pytest.fixture
-def repo() -> ResourcesRepositoryOrm:
-    return ResourcesRepositoryOrm()
+def repo() -> ResourcesRepository:
+    return ResourcesRepository()
 
 
 # ── Seed scaffolding ────────────────────────────────────────────────────
@@ -222,7 +222,7 @@ async def _row_in_db(res_id: int) -> dict | None:
 
 
 async def test_flag_off_create_update_delete_no_raise(
-    seeded: _Ids, repo: ResourcesRepositoryOrm, enforce_off
+    seeded: _Ids, repo: ResourcesRepository, enforce_off
 ):
     """FLAG OFF: create (creator=B, no scope), update + delete by id all work
     regardless of owner and never raise — legacy behaviour."""
@@ -253,7 +253,7 @@ async def test_flag_off_create_update_delete_no_raise(
 
 
 async def test_flag_off_count_is_cross_user(
-    seeded: _Ids, repo: ResourcesRepositoryOrm, enforce_off
+    seeded: _Ids, repo: ResourcesRepository, enforce_off
 ):
     """FLAG OFF: count sees BOTH A's and B's resource for the shared media."""
     ids = seeded
@@ -267,7 +267,7 @@ async def test_flag_off_count_is_cross_user(
 
 
 async def test_flag_on_create_own_owner_succeeds(
-    seeded: _Ids, repo: ResourcesRepositoryOrm, enforce_on
+    seeded: _Ids, repo: ResourcesRepository, enforce_on
 ):
     """FLAG ON: create with creator_id=A under scope A → ORM add + before_insert
     stamp/assert passes, row created."""
@@ -290,7 +290,7 @@ async def test_flag_on_create_own_owner_succeeds(
 
 
 async def test_flag_on_create_foreign_owner_raises(
-    seeded: _Ids, repo: ResourcesRepositoryOrm, enforce_on
+    seeded: _Ids, repo: ResourcesRepository, enforce_on
 ):
     """FLAG ON: create with creator_id=B under scope A → before_insert asserts
     creator != scope → UnscopedQueryError. Nothing persists."""
@@ -312,7 +312,7 @@ async def test_flag_on_create_foreign_owner_raises(
 
 
 async def test_flag_on_system_scope_create_and_update_on_behalf_of_user(
-    seeded: _Ids, repo: ResourcesRepositoryOrm, enforce_on
+    seeded: _Ids, repo: ResourcesRepository, enforce_on
 ):
     """FLAG ON / SYSTEM ambient scope: the LIVE system-download / sweeper path.
 
@@ -355,7 +355,7 @@ async def test_flag_on_system_scope_create_and_update_on_behalf_of_user(
 
 
 async def test_flag_on_update_own_row_succeeds(
-    seeded: _Ids, repo: ResourcesRepositoryOrm, enforce_on
+    seeded: _Ids, repo: ResourcesRepository, enforce_on
 ):
     """FLAG ON: update A's own row under scope A → loads, mutates, returns dict."""
     ids = seeded
@@ -367,7 +367,7 @@ async def test_flag_on_update_own_row_succeeds(
 
 
 async def test_flag_on_update_foreign_row_returns_empty_unchanged(
-    seeded: _Ids, repo: ResourcesRepositoryOrm, enforce_on
+    seeded: _Ids, repo: ResourcesRepository, enforce_on
 ):
     """FLAG ON: update B's row under scope A → session.get injects creator==A →
     loads None → returns {} → B's row is UNCHANGED."""
@@ -382,7 +382,7 @@ async def test_flag_on_update_foreign_row_returns_empty_unchanged(
 
 
 async def test_flag_on_delete_own_row(
-    seeded: _Ids, repo: ResourcesRepositoryOrm, enforce_on
+    seeded: _Ids, repo: ResourcesRepository, enforce_on
 ):
     """FLAG ON: delete A's own row under scope A → row gone, returns True."""
     ids = seeded
@@ -393,7 +393,7 @@ async def test_flag_on_delete_own_row(
 
 
 async def test_flag_on_delete_foreign_row_is_noop(
-    seeded: _Ids, repo: ResourcesRepositoryOrm, enforce_on
+    seeded: _Ids, repo: ResourcesRepository, enforce_on
 ):
     """FLAG ON: delete B's row under scope A → session.get injects creator==A →
     loads None → no-op → returns True (idempotent) and B's row still present."""
@@ -405,7 +405,7 @@ async def test_flag_on_delete_foreign_row_is_noop(
 
 
 async def test_flag_on_count_is_global_dataloss_regression(
-    seeded: _Ids, repo: ResourcesRepositoryOrm, enforce_on
+    seeded: _Ids, repo: ResourcesRepository, enforce_on
 ):
     """FLAG ON / THE DATA-LOSS REGRESSION: under USER scope A,
     ``count_resources_by_media_id`` MUST return 2 (global — A's + B's resources
@@ -441,7 +441,7 @@ async def test_flag_on_count_is_global_dataloss_regression(
 
 
 async def test_flag_on_no_scope_create_raises(
-    seeded: _Ids, repo: ResourcesRepositoryOrm, enforce_on
+    seeded: _Ids, repo: ResourcesRepository, enforce_on
 ):
     """FLAG ON + no scope: ORM-instance insert of a scoped model → before_insert
     raises (fail-closed)."""
@@ -461,7 +461,7 @@ async def test_flag_on_no_scope_create_raises(
 
 
 async def test_flag_on_no_scope_update_raises(
-    seeded: _Ids, repo: ResourcesRepositoryOrm, enforce_on
+    seeded: _Ids, repo: ResourcesRepository, enforce_on
 ):
     """FLAG ON + no scope: update → the session.get load on a scoped model with no
     scope fails closed."""
@@ -473,7 +473,7 @@ async def test_flag_on_no_scope_update_raises(
 
 
 async def test_flag_on_no_scope_delete_raises(
-    seeded: _Ids, repo: ResourcesRepositoryOrm, enforce_on
+    seeded: _Ids, repo: ResourcesRepository, enforce_on
 ):
     """FLAG ON + no scope: delete → the session.get load fails closed."""
     ids = seeded
@@ -483,7 +483,7 @@ async def test_flag_on_no_scope_delete_raises(
 
 
 async def test_flag_on_no_scope_count_works(
-    seeded: _Ids, repo: ResourcesRepositoryOrm, enforce_on
+    seeded: _Ids, repo: ResourcesRepository, enforce_on
 ):
     """FLAG ON + no scope: count still works — it sets SYSTEM internally via
     ``system_request_scope``, so it does not fail-closed and stays global."""
@@ -498,7 +498,7 @@ async def test_flag_on_no_scope_count_works(
 
 
 async def test_count_reraises_on_error_never_returns_zero(
-    repo: ResourcesRepositoryOrm,
+    repo: ResourcesRepository,
 ):
     """DATA-LOSS HARDENING: a DB error inside the refcount query must PROPAGATE
     (re-raise), NOT be swallowed into a fabricated ``0`` — a fake 0 would let the
@@ -513,7 +513,7 @@ async def test_count_reraises_on_error_never_returns_zero(
 
     # Patch the session.scalar used inside the count query to raise. The method
     # must re-raise (not return 0).
-    import app.repositories.resources_repository_orm as orm_mod
+    import app.repositories.resources_repository as orm_mod
 
     real_read_scope = orm_mod.read_scope
 
@@ -551,7 +551,7 @@ async def test_count_reraises_on_error_never_returns_zero(
 # can point at as the single regression gate.
 
 
-async def test_lifecycle_under_both_flags(seeded: _Ids, repo: ResourcesRepositoryOrm):
+async def test_lifecycle_under_both_flags(seeded: _Ids, repo: ResourcesRepository):
     ids = seeded
 
     # ─── FLAG OFF: full lifecycle, legacy byte-for-byte ──────────────────
@@ -706,12 +706,12 @@ class _FakeScopeCtx:
 
 @pytest.mark.parametrize("enforced", [False, True])
 async def test_internal_system_wrap_gated_on_enforcement(
-    repo: ResourcesRepositoryOrm, enforced: bool
+    repo: ResourcesRepository, enforced: bool
 ):
     """Flag-OFF: NONE of create/update/count enter ``system_request_scope`` (no
     ``orm-refresh-own-write`` / ``media-refcount-gc`` audit log). Flag-ON: all
     three DO enter it — the A2.5 behaviour is preserved exactly when enforced."""
-    import app.repositories.resources_repository_orm as orm_mod
+    import app.repositories.resources_repository as orm_mod
 
     entered: list[str] = []
 
