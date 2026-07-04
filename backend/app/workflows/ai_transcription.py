@@ -48,77 +48,41 @@ async def load_transcribe_inputs(parsed_media_id: int, user_id: str) -> dict[str
     if not audio_path:
         raise RuntimeError(f"no audio_path for parsed_media={parsed_media_id}")
 
-    # ── Governance gate (shared helper — platform-catalog first) ────────
-    # Check BEFORE consulting user settings so a locked module short-circuits
-    # without depending on the user having settings configured. The shared
-    # resolver tries the platform catalog first, then the admin's manual
-    # config; unknown/absent model prefix falls back to "openai" (Whisper API),
-    # matching the volcengine/whisper dispatch below.
-    from app.services.ai.governance.ai_governance import resolve_locked_module_config
-
-    locked = await resolve_locked_module_config(
-        "transcription", default_provider_key="openai"
+    # Resolve the provider config through the shared typed resolver (A2 lift).
+    # It owns the governance gate (platform-catalog first), the "no
+    # user_settings" raise, the gated nous:<model> path, and the BYOK fallback.
+    # The transcription model-selection STRING (provider:model / raw picker) is
+    # carried on ResolvedAIConfig.model — it becomes this dict's task_assignment,
+    # threaded downstream to run_whisper. `settings_row["settings_json"]` is
+    # passed to avoid a second DB read.
+    from app.services.ai.providers.ai_provider_helpers import (
+        resolve_transcription_config,
     )
-    if locked is not None:
-        return {
-            "audio_path": audio_path,
-            "resource_id": str(media_row["resource_id"]),
-            "platform_id": media_row["platform_id"],
-            "provider_key": locked.provider_key,
-            "provider_config": locked.provider_config,
-            "language": "auto",
-            "task_assignment": "",
-        }
-    # ── End governance gate ─────────────────────────────────────────────
 
-    if not settings_row:
-        raise RuntimeError(f"no user_settings for {user_id}")
-    settings = settings_row["settings_json"]
-    if isinstance(settings, str):
-        settings = json.loads(settings)
-    ai_settings = settings.get("ai_settings", {})
-    providers = ai_settings.get("ai_providers", {}) or {}
-    whisper_provider = ai_settings.get("whisper_provider", "openai")
-    provider_cfg = providers.get(whisper_provider) or {}
+    cfg = await resolve_transcription_config(
+        user_id,
+        settings_json=(settings_row.get("settings_json") if settings_row else None),
+    )
 
-    # task_assignment.transcription carries the model selection like
-    # 'volcengine:bigasr' or 'volcengine:seed-asr'. Required for the
-    # Volcengine path because the API key may only have one resource
-    # granted — picking the wrong one returns 45000030 'resource not
-    # granted'. master read this same field in ai_tasks.py.
-    task_assignment = ai_settings.get("task_assignment", {}).get("transcription") or ""
-
-    # Nous platform ASR: task_assignment.transcription = 'nous:<model_name>'.
-    # Resolve to the platform provider config and route through the SAME ASR
-    # dispatch (a volcengine nous model → _run_volcengine_asr automatically).
-    if task_assignment.startswith("nous:"):
-        from app.services.ai.providers.ai_provider_helpers import resolve_nous_model
-
-        nous_name = task_assignment.split(":", 1)[1]
-        nous = await resolve_nous_model(nous_name, "transcription")
-        if nous is None:
-            raise RuntimeError(
-                f"transcription references unknown platform model '{nous_name}'"
-            )
-        n_provider_key, n_provider_config, n_model = nous
-        return {
-            "audio_path": audio_path,
-            "resource_id": str(media_row["resource_id"]),
-            "platform_id": media_row["platform_id"],
-            "provider_key": n_provider_key,
-            "provider_config": n_provider_config,
-            "language": ai_settings.get("preferred_language", "auto"),
-            "task_assignment": f"{n_provider_key}:{n_model}",
-        }
+    # language: governance short-circuits to "auto" (user settings not
+    # consulted); the user path reads preferred_language from the same settings
+    # row (guaranteed present here — the resolver raises otherwise).
+    if cfg.origin == "governance":
+        language = "auto"
+    else:
+        settings = settings_row["settings_json"]
+        if isinstance(settings, str):
+            settings = json.loads(settings)
+        language = settings.get("ai_settings", {}).get("preferred_language", "auto")
 
     return {
         "audio_path": audio_path,
         "resource_id": str(media_row["resource_id"]),
         "platform_id": media_row["platform_id"],
-        "provider_key": whisper_provider,
-        "provider_config": provider_cfg,
-        "language": ai_settings.get("preferred_language", "auto"),
-        "task_assignment": task_assignment,
+        "provider_key": cfg.provider_key,
+        "provider_config": cfg.provider_config,
+        "language": language,
+        "task_assignment": cfg.model,
     }
 
 
