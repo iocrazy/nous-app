@@ -321,6 +321,14 @@ class AgentRunner:
         # P1: per-run loop guard same as run_turn
         loop_guard = ToolCallLoopGuard(repeat_threshold=3, window=5)
 
+        # Bugfix (was silently dropped): trace of every tool executed this
+        # turn, mirroring run_turn's ``tool_call_trace`` exactly (same keys
+        # — "name" / "args" / "result" / "iteration" — so callers like
+        # extract_issue_outcome() work identically regardless of which path
+        # ran). Surfaced to the caller via the terminal StreamChunk's
+        # ``tool_call_trace`` field (see StreamChunk in adapters/base.py).
+        tool_call_trace: list[dict[str, Any]] = []
+
         # G3: discover MCP tools once + augment composed.tools (mirrors
         # run_turn's logic). Failures isolated — discovery error skips
         # MCP for this turn but the stream proceeds.
@@ -379,6 +387,7 @@ class AgentRunner:
                     ),
                     finish_reason="length",
                     usage={"warning": "timeout_sec_exceeded"},
+                    tool_call_trace=tool_call_trace,
                 )
                 return
             if abort is not None and abort.is_aborted():
@@ -462,6 +471,7 @@ class AgentRunner:
                     delta_text=strip_reasoning(msg.get("content") or ""),
                     finish_reason=resp["choices"][0].get("finish_reason") or "stop",
                     usage=resp.get("usage"),
+                    tool_call_trace=tool_call_trace,
                 )
                 return
 
@@ -472,9 +482,15 @@ class AgentRunner:
                 # No tool calls — turn complete. Always yield terminal
                 # finish chunk (inner loop's finish chunk wasn't yielded
                 # when it lacked delta_text/tool_call_delta).
+                # Bugfix: carry the accumulated tool_call_trace on this
+                # terminal chunk — this is the chunk callers see after a
+                # FinishIssue call (the model declares, then answers with
+                # no further tool calls), so this is the seam that matters
+                # most for issue lifecycle routing.
                 yield StreamChunk(
                     finish_reason=final_finish or "stop",
                     usage=final_usage,
+                    tool_call_trace=tool_call_trace,
                 )
                 return
 
@@ -526,6 +542,7 @@ class AgentRunner:
                             ),
                             finish_reason="stop",
                             usage={"hook_decision": "abort"},
+                            tool_call_trace=tool_call_trace,
                         )
                         return
                     if pre_result.decision == "await_approval":
@@ -537,6 +554,7 @@ class AgentRunner:
                             ),
                             finish_reason="stop",
                             usage={"hook_decision": "await_approval"},
+                            tool_call_trace=tool_call_trace,
                         )
                         return
                     if pre_result.decision == "modify" and pre_result.modified_args:
@@ -633,6 +651,23 @@ class AgentRunner:
                     }
                 )
 
+                # Bugfix: trace this dispatch — same shape as run_turn's
+                # tool_call_trace (see extract_issue_outcome, which reads
+                # call["name"] / call["result"]["outcome"]). Previously
+                # stream_turn built no trace at all, so every FinishIssue
+                # declaration made on the streaming path (100% of issue
+                # turns — run_issue_agent always streams) vanished and
+                # issue_lifecycle silently fell back to its in_review
+                # default.
+                tool_call_trace.append(
+                    {
+                        "name": tool_name,
+                        "args": args,
+                        "result": result,
+                        "iteration": iteration,
+                    }
+                )
+
                 # P3 transcript (mig 285): mirror of run_turn's tool event.
                 if recorder is not None and hasattr(recorder, "record_event"):
                     await recorder.record_event(
@@ -665,6 +700,7 @@ class AgentRunner:
                             ),
                             finish_reason="stop",
                             usage={"hook_decision": "abort"},
+                            tool_call_trace=tool_call_trace,
                         )
                         return
                     if post_result.decision == "await_approval":
@@ -676,6 +712,7 @@ class AgentRunner:
                             ),
                             finish_reason="stop",
                             usage={"hook_decision": "await_approval"},
+                            tool_call_trace=tool_call_trace,
                         )
                         return
 
@@ -693,6 +730,7 @@ class AgentRunner:
         yield StreamChunk(
             finish_reason="length",
             usage={"warning": "max_stream_iterations_exceeded"},
+            tool_call_trace=tool_call_trace,
         )
 
     async def _dispatch_finish_issue(self, args: dict) -> dict:

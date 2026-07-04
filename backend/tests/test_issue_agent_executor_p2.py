@@ -27,31 +27,42 @@ contract) also holds for this trigger.
 Why this calls ``run_session_turn`` directly instead of through
 ``run_issue_agent()``: ``run_issue_agent`` always passes a ``chunk_callback``,
 which routes ``_run_session_turn_inner`` down the STREAMING branch
-(``runner.stream_turn``). That branch currently discards structured
-``tool_call_delta`` chunks (see ``ai_library_chat_service.py``, the
-``if chunk.tool_call_delta: pass`` line) — a pre-existing characteristic of
-the streaming path, unrelated to store routing and out of scope to change
-here. Calling ``run_session_turn`` without a ``chunk_callback`` takes the
-buffered ``runner.run_turn`` branch instead, which is what
-test_task6_run_recorder_store_dispatch.py already relies on and is the
-faithful way to observe the FinishIssue-injection / RunRecorder-kwargs
-contract that Task 6 established.
+(``runner.stream_turn``). Calling ``run_session_turn`` without a
+``chunk_callback`` takes the buffered ``runner.run_turn`` branch instead,
+which is what test_task6_run_recorder_store_dispatch.py already relies on
+and is the faithful way to observe the FinishIssue-injection /
+RunRecorder-kwargs contract that Task 6 established.
 
 ``run_issue_agent()``'s OWN logic (nudge/content selection, trigger
 forwarding, FinishIssue outcome extraction via the real
 ``extract_issue_outcome``) never read the routing flag and is already
 covered mode-agnostically by tests/test_issue_agent_executor.py — that
 coverage isn't duplicated here.
+
+Bugfix regression (see ``test_issue_agent_run_through_real_streaming_path_
+surfaces_finish_issue`` below): the STREAMING branch previously discarded
+structured ``tool_call_delta`` chunks entirely — ``stream_turn`` never built
+a ``tool_call_trace`` and ``ai_library_chat_service`` hard-coded
+``tool_calls_trace = []`` in that branch, never appending. Since
+``run_issue_agent`` ALWAYS streams, this meant 100% of real issue turns lost
+their FinishIssue declaration — ``extract_issue_outcome`` always saw ``[]``
+and returned ``(None, None)``, so issue lifecycle routing (auto-close /
+needs_input / bounded continuation) silently degraded to the ``in_review``
+default. That test drives ``run_issue_agent()`` through the REAL streaming
+path (a real ``AgentRunner.stream_turn`` wired to a fake adapter, not a
+mocked ``run_session_turn``) to prove the fix.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
+from app.services.ai.adapters.base import StreamChunk
 from app.services.ai.tools.finish_issue_tool import (
     extract_issue_outcome,
     finish_issue_handler,
@@ -327,3 +338,247 @@ async def test_issue_session_and_turn_link_via_conversation_id(
     outcome, reason = extract_issue_outcome(result.get("tool_calls"))
     assert outcome == "completed"
     assert reason == "shipped"
+
+
+class _FinishIssueStreamingAdapter:
+    """Scripted adapter: emits a FinishIssue tool_call in iteration 1 (via
+    tool_call_delta, the real streaming shape), then a plain no-tool-call
+    reply in iteration 2 -- a realistic "declare, then answer" issue turn.
+    """
+
+    def __init__(self) -> None:
+        self.iter = 0
+
+    async def call(self, composed: Any, messages: Any) -> dict:
+        # Non-streaming fallback -- unused by this test (stream() always
+        # exists here) but required by the adapter contract.
+        return {"choices": [{"message": {"content": "fallback"}}]}
+
+    async def stream(self, composed: Any, messages: Any):
+        self.iter += 1
+        if self.iter == 1:
+            yield StreamChunk(
+                tool_call_delta={
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "id": "call-1",
+                            "function": {"name": "FinishIssue", "arguments": ""},
+                        },
+                    ]
+                }
+            )
+            yield StreamChunk(
+                tool_call_delta={
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "function": {
+                                "arguments": json.dumps(
+                                    {
+                                        "outcome": "completed",
+                                        "reason": "shipped it",
+                                    }
+                                ),
+                            },
+                        },
+                    ]
+                }
+            )
+            yield StreamChunk(
+                finish_reason="tool_calls",
+                usage={"prompt_tokens": 10, "completion_tokens": 3},
+            )
+        else:
+            yield StreamChunk(delta_text="Done — shipped it.")
+            yield StreamChunk(
+                finish_reason="stop",
+                usage={"prompt_tokens": 20, "completion_tokens": 5},
+            )
+
+
+async def test_issue_agent_run_through_real_streaming_path_surfaces_finish_issue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """THE regression test for the streaming tool_call_trace bug.
+
+    ``run_issue_agent`` ALWAYS passes a ``chunk_callback`` (it streams tokens
+    to Redis as they arrive), so production issue turns run exclusively
+    through ``runner.stream_turn`` -- never ``run_turn``. This drives that
+    real path end to end: real ``get_or_create_issue_session``, a real
+    ``AgentRunner`` instance (not mocked) wired to a fake adapter whose
+    ``stream()`` emits a FinishIssue tool_call, and the real
+    ``run_session_turn`` / streaming branch of ``ai_library_chat_service``.
+    Only ``build_agent_runner_stack`` / ``PromptComposer`` / ``RunRecorder``
+    are stubbed (same seam test_task6_run_recorder_store_dispatch.py and the
+    sibling test above use) -- ``run_session_turn`` itself is never mocked.
+
+    Before the fix: ``result["tool_calls"]`` was always ``[]`` on this path,
+    so ``extract_issue_outcome`` returned ``(None, None)`` even though the
+    agent DID call FinishIssue -- the declaration was silently dropped
+    between ``stream_turn`` and the chat service's streaming branch.
+    """
+    from app.db import engine as db_engine_module
+    from app.schemas.ai_library import ComposedSystemPrompt
+    from app.services.ai.chat import ai_library_chat_service as chat_service_module
+    from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
+    from app.services.ai.runner.agent_runner import AgentRunner
+    from app.services.issues import issue_agent_executor as executor_module
+    from app.services.issues import issue_session as session_module
+
+    agent_id = uuid4()
+    user_id = uuid4()
+    issue_id = 4343
+    session_id_int = 666666
+
+    session_row = {
+        "id": session_id_int,
+        "user_id": str(user_id),
+        "agent_slug": "issue_agent",
+        "agent_id": str(agent_id),
+        "title": "Ship the thing",
+        "total_tokens": 0,
+        "message_count": 0,
+        "team_id": None,
+        "project_id": None,
+        "store_kind": "conversations",
+    }
+    store = _FakeStore(session_row)
+
+    def _service_factory(*_a: Any, **_kw: Any) -> AILibraryChatService:
+        return AILibraryChatService(store=store)
+
+    # issue_session.py's seam (existing pattern, sibling test above) --
+    # AND issue_agent_executor.py's OWN seam: it hardcodes
+    # ``AILibraryChatService()`` with no injectable store param (unlike
+    # issue_session.py, this wasn't previously patched because the sibling
+    # test above deliberately bypasses run_issue_agent() and calls
+    # run_session_turn directly). Patching both symbols is what makes it
+    # possible to drive run_issue_agent() itself against the fake store.
+    monkeypatch.setattr(session_module, "AILibraryChatService", _service_factory)
+    monkeypatch.setattr(executor_module, "AILibraryChatService", _service_factory)
+
+    issue_row = {
+        "ai_session_id": None,
+        "title": "Ship the thing",
+        "assignee_agent_id": str(agent_id),
+        "created_by_user_id": str(user_id),
+        "assignee_user_id": None,
+    }
+
+    async def _fake_fetch_one(
+        sql: str, params: Optional[dict] = None
+    ) -> Optional[dict]:
+        assert "public.issues" in sql
+        return dict(issue_row)
+
+    async def _fake_execute(sql: str, params: Optional[dict] = None) -> int:
+        return 1
+
+    monkeypatch.setattr(db_engine_module, "fetch_one", _fake_fetch_one)
+    monkeypatch.setattr(db_engine_module, "execute", _fake_execute)
+
+    fake_agent_record = {
+        "id": str(agent_id),
+        "slug": "issue_agent",
+        "model": "qwen-max",
+        "budget_per_run_cents": None,
+        "fallback_models": [],
+    }
+    fake_agent_repo = MagicMock()
+    fake_agent_repo.get_by_id = AsyncMock(return_value=fake_agent_record)
+    fake_agent_repo.get_by_slug = AsyncMock(return_value=fake_agent_record)
+    monkeypatch.setattr(session_module, "get_agent_repository", lambda: fake_agent_repo)
+    monkeypatch.setattr(
+        chat_service_module, "get_agent_repository", lambda: fake_agent_repo
+    )
+
+    composed = ComposedSystemPrompt(
+        agent_id=agent_id,
+        agent_slug="issue_agent",
+        model="qwen-max",
+        temperature=0.7,
+        max_tokens=4096,
+        system_message="You are the issue agent.",
+        tools=[],
+        skill_manifest=[],
+        cache_fingerprint="fp-issue-stream",
+    )
+    composer = MagicMock()
+    composer.compose = AsyncMock(return_value=composed)
+
+    # A REAL AgentRunner -- not a mock -- driven by the fake adapter above.
+    # This is the crux of the test: it exercises stream_turn's actual
+    # tool-execution loop, not a stand-in.
+    real_runner = AgentRunner(adapter=_FinishIssueStreamingAdapter(), skill_tool=None)
+
+    recorder = MagicMock()
+    recorder.run_id = uuid4()
+    recorder.prompt_tokens = 3
+    recorder.completion_tokens = 5
+    recorder.set_summaries = MagicMock()
+    recorder.heartbeat = AsyncMock()
+    recorder.check_cancelled = AsyncMock(return_value=False)
+    recorder.record_usage = MagicMock()
+    recorder.record_event = AsyncMock()
+
+    captured_kwargs: Dict[str, Any] = {}
+
+    def _fake_run_recorder(**kwargs: Any) -> _RunRecorderCM:
+        captured_kwargs.update(kwargs)
+        return _RunRecorderCM(recorder)
+
+    fake_stack = MagicMock()
+    fake_stack.runner = real_runner
+    fake_stack.graph_facts = []
+    fake_stack.user_context = None
+    fake_stack.agent_memory_facts = []
+    fake_stack.primary_model = "qwen-max"
+    fake_stack.fallback_chain_active = False
+
+    published_chunks: List[str] = []
+    published_messages: List[Dict[str, Any]] = []
+
+    with (
+        patch(
+            "app.services.ai.chat.ai_library_chat_service.build_agent_runner_stack",
+            AsyncMock(return_value=fake_stack),
+        ),
+        patch(
+            "app.services.ai.chat.ai_library_chat_service.PromptComposer",
+            return_value=composer,
+        ),
+        patch(
+            "app.services.ai.chat.ai_library_chat_service.RunRecorder",
+            side_effect=_fake_run_recorder,
+        ),
+        patch.object(
+            executor_module,
+            "publish_chunk",
+            AsyncMock(side_effect=lambda iid, d: published_chunks.append(d)),
+        ),
+        patch.object(
+            executor_module,
+            "publish_message",
+            AsyncMock(side_effect=lambda iid, row, **k: published_messages.append(row)),
+        ),
+        patch.object(executor_module, "publish_status", AsyncMock()),
+    ):
+        session_id = await session_module.get_or_create_issue_session(issue_id)
+        assert session_id == str(session_id_int)
+
+        result = await executor_module.run_issue_agent(
+            issue={"id": issue_id, "title": "Ship the thing", "description": ""},
+            agent_id=str(agent_id),
+            user_id=str(user_id),
+        )
+
+    assert captured_kwargs["trigger"] == "issue_dispatch"
+    assert published_chunks, "chunk_callback must have really fired (streaming path)"
+    assert published_messages and "Done" in published_messages[0]["content"]
+
+    # THE bug, fixed: the streaming path now surfaces the FinishIssue
+    # declaration instead of losing it to an empty tool_calls_trace.
+    assert result["outcome"] == "completed"
+    assert result["reason"] == "shipped it"
+    assert "Done" in result["content"]

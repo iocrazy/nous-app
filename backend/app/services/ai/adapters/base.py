@@ -36,6 +36,14 @@ class StreamChunk:
     tool_call_delta: Optional[Dict[str, Any]] = None
     finish_reason: Optional[str] = None
     usage: Optional[Dict[str, Any]] = None
+    # AgentRunner.stream_turn seam (bugfix): the executed-tool-call trace
+    # accumulated over the turn, mirroring run_turn's ``tool_call_trace``
+    # shape (``{"name", "args", "result", "iteration"}`` per entry). Only
+    # populated on stream_turn's terminal chunks — None everywhere else,
+    # including on every chunk an adapter yields directly. Without this,
+    # the streaming path had no way to surface FinishIssue (or any other
+    # tool) outcomes to callers like issue_agent_executor.
+    tool_call_trace: Optional[List[Dict[str, Any]]] = None
 
 
 class AIAdapter(Protocol):
