@@ -145,3 +145,115 @@ async def test_unknown_model_prefix_degrades_provider_key_to_env():
     assert cfg.provider_key == ""
     assert cfg.origin == "env"
     assert cfg.provider_config is providers
+
+
+# ── platform.ai_providers (DB-stored platform credentials) ─────────────
+# Convention: ALL AI keys live in the database (user BYOK, ai_module.*,
+# catalog). platform.ai_providers is the platform-level slot in the same
+# BYOK shape; env vars are only the adapter factory's bootstrap fallback.
+
+
+def _platform(providers):
+    return patch(
+        "app.services.ai.governance.ai_governance.get_platform_ai_providers",
+        AsyncMock(return_value=providers),
+    )
+
+
+async def test_origin_platform_when_db_platform_key_and_no_byok():
+    loader = AsyncMock(return_value={})
+    with (
+        patch(
+            "app.services.ai.governance.ai_governance.get_module_governance",
+            AsyncMock(return_value=_allowed()),
+        ),
+        _platform({"doubao": {"api_key": "ark-platform", "base_url": ""}}),
+    ):
+        cfg = await helpers.resolve_chat_config(
+            "u",
+            model="doubao-seed-2-0-lite-260428",
+            load_user_config=loader,
+            agent_slug="script_ai",
+        )
+
+    assert cfg.origin == "platform"
+    assert cfg.provider_config["doubao"]["api_key"] == "ark-platform"
+
+
+async def test_user_byok_wins_over_platform_entry():
+    loader = AsyncMock(return_value={"doubao": {"api_key": "user-key"}})
+    with (
+        patch(
+            "app.services.ai.governance.ai_governance.get_module_governance",
+            AsyncMock(return_value=_allowed()),
+        ),
+        _platform({"doubao": {"api_key": "ark-platform"}}),
+    ):
+        cfg = await helpers.resolve_chat_config(
+            "u",
+            model="doubao-seed-2-0-lite-260428",
+            load_user_config=loader,
+            agent_slug="script_ai",
+        )
+
+    assert cfg.origin == "byok"
+    assert cfg.provider_config["doubao"]["api_key"] == "user-key"
+
+
+async def test_locked_chat_uses_platform_providers_not_empty():
+    """Admin lock must still serve PLATFORM (DB) credentials — previously the
+    locked path returned {} and silently depended on env vars."""
+    loader = AsyncMock(return_value={"doubao": {"api_key": "user-key"}})
+    with (
+        patch(
+            "app.services.ai.governance.ai_governance.get_module_governance",
+            AsyncMock(return_value=_locked()),
+        ),
+        _platform({"doubao": {"api_key": "ark-platform"}}),
+    ):
+        cfg = await helpers.resolve_chat_config(
+            "u",
+            model="doubao-seed-2-0-lite-260428",
+            load_user_config=loader,
+            agent_slug="script_ai",
+        )
+
+    assert cfg.origin == "governance"
+    assert cfg.provider_config == {"doubao": {"api_key": "ark-platform"}}
+    loader.assert_not_awaited()
+
+
+async def test_absent_platform_setting_keeps_env_behavior():
+    loader = AsyncMock(return_value={})
+    with (
+        patch(
+            "app.services.ai.governance.ai_governance.get_module_governance",
+            AsyncMock(return_value=_allowed()),
+        ),
+        _platform({}),
+    ):
+        cfg = await helpers.resolve_chat_config(
+            "u", model="qwen-max", load_user_config=loader, agent_slug="script_ai"
+        )
+
+    assert cfg.origin == "env"
+    assert cfg.provider_config == {}
+
+
+async def test_platform_entry_for_other_provider_does_not_flip_origin():
+    """A platform doubao key must not make a qwen-model turn claim origin
+    platform — origin is per the MODEL's provider entry."""
+    loader = AsyncMock(return_value={})
+    with (
+        patch(
+            "app.services.ai.governance.ai_governance.get_module_governance",
+            AsyncMock(return_value=_allowed()),
+        ),
+        _platform({"doubao": {"api_key": "ark-platform"}}),
+    ):
+        cfg = await helpers.resolve_chat_config(
+            "u", model="qwen-max", load_user_config=loader, agent_slug="script_ai"
+        )
+
+    assert cfg.origin == "env"
+    assert cfg.provider_config["doubao"]["api_key"] == "ark-platform"

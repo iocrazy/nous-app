@@ -166,6 +166,39 @@ async def _get_module_governance_inner(module: str) -> AIModuleGovernance:
     )
 
 
+PLATFORM_PROVIDERS_KEY = "platform.ai_providers"
+
+
+async def get_platform_ai_providers() -> dict:
+    """Platform-level provider credentials, stored in the DATABASE like every
+    other AI key in this system (user BYOK in ``user_settings``, module admin
+    keys in ``ai_module.*`` — env vars are legacy bootstrap only).
+
+    ``system_settings.platform.ai_providers`` holds a JSONB dict in the SAME
+    shape as a user's BYOK ``ai_providers``::
+
+        {"doubao": {"api_key": "...", "base_url": ""}, "qwen": {...}}
+
+    Chat resolution layers it beneath user BYOK (user wins per provider) and
+    above env fallbacks — see ``resolve_chat_config``. A single flat key per
+    module can't serve chat because the AGENT owns the model there: one turn
+    may be doubao, the next deepseek, so credentials must be per-provider.
+
+    Returns ``{}`` when absent, malformed, or the DB is unreachable — never
+    raises; degrading to env-only preserves pre-existing behaviour.
+    """
+    raw = await _read_raw(PLATFORM_PROVIDERS_KEY)
+    if not isinstance(raw, dict):
+        if raw is not None:
+            logger.warning(
+                "[governance] %s has unexpected type %s — ignoring",
+                PLATFORM_PROVIDERS_KEY,
+                type(raw).__name__,
+            )
+        return {}
+    return {k: v for k, v in raw.items() if isinstance(k, str) and isinstance(v, dict)}
+
+
 async def is_nous_globally_enabled() -> bool:
     """Master switch for the user-side Nous platform-provider feature.
 

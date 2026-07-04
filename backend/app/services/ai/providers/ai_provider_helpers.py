@@ -566,12 +566,22 @@ async def resolve_chat_config(
       - allowed + no BYOK key for the model's provider  → ``"env"``
     """
     from app.services.ai.adapters.factory import provider_key_for_model
-    from app.services.ai.governance.ai_governance import get_module_governance
+    from app.services.ai.governance.ai_governance import (
+        get_module_governance,
+        get_platform_ai_providers,
+    )
 
     try:
         provider_key = provider_key_for_model(model)
     except ValueError:
         provider_key = ""
+
+    # Platform credentials live in the DATABASE (system_settings
+    # ``platform.ai_providers``) like every other AI key in this system;
+    # env vars are only the last-resort bootstrap inside
+    # ``get_adapter_for_user``. Same dict shape as user BYOK, so it merges
+    # beneath it: user entry wins per provider.
+    platform_providers = await get_platform_ai_providers()
 
     governance = await get_module_governance("chat")
     if not governance.allowed:
@@ -582,21 +592,40 @@ async def resolve_chat_config(
         )
         return ResolvedAIConfig(
             provider_key=provider_key,
-            provider_config={},
+            provider_config=platform_providers,
             model="",
             agent_slug=agent_slug,
             origin="governance",
         )
 
     providers = await load_user_config()
-    raw_entry = (providers or {}).get(provider_key) if provider_key else None
+    # Preserve object identity when there are no platform creds — the
+    # pre-existing contract is that the user's ai_providers dict flows
+    # through untouched; only a real merge justifies a new dict.
+    merged = (
+        {**platform_providers, **(providers or {})}
+        if platform_providers
+        else (providers or {})
+    )
+    raw_entry = merged.get(provider_key) if provider_key else None
     entry = raw_entry if isinstance(raw_entry, dict) else {}
+    # origin classifies whose credentials serve the turn: "byok" only when
+    # the USER's own entry carries the key; a platform-DB entry is
+    # "platform"; neither → "env" (adapter factory bootstrap fallback).
+    raw_user_entry = (providers or {}).get(provider_key) if provider_key else None
+    user_entry = raw_user_entry if isinstance(raw_user_entry, dict) else {}
+    if (user_entry.get("api_key") or "") and str(user_entry.get("api_key")).strip():
+        origin = "byok"
+    elif (entry.get("api_key") or "") and str(entry.get("api_key")).strip():
+        origin = "platform"
+    else:
+        origin = "env"
     return ResolvedAIConfig(
         provider_key=provider_key,
-        provider_config=providers,
+        provider_config=merged,
         model="",
         agent_slug=agent_slug,
-        origin=_byok_origin(entry),
+        origin=origin,
     )
 
 

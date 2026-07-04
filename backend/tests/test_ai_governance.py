@@ -220,3 +220,58 @@ def test_governance_dataclass_api_key_present_derived():
 
     g_blank_key = AIModuleGovernance(allowed=False, api_key="   ")
     assert g_blank_key.api_key_present is False
+
+
+# ── get_platform_ai_providers (platform.ai_providers, DB-stored) ────────
+
+
+@pytest.mark.asyncio
+async def test_platform_providers_reads_dict():
+    async def patched(key: str):
+        assert key == "platform.ai_providers"
+        return {"doubao": {"api_key": "ark-1"}, "qwen": {"api_key": "q-1"}}
+
+    orig = gov_mod._read_raw
+    gov_mod._read_raw = patched
+    try:
+        out = await gov_mod.get_platform_ai_providers()
+    finally:
+        gov_mod._read_raw = orig
+    assert out == {"doubao": {"api_key": "ark-1"}, "qwen": {"api_key": "q-1"}}
+
+
+@pytest.mark.asyncio
+async def test_platform_providers_absent_is_empty():
+    async def patched(key: str):
+        return None
+
+    orig = gov_mod._read_raw
+    gov_mod._read_raw = patched
+    try:
+        assert await gov_mod.get_platform_ai_providers() == {}
+    finally:
+        gov_mod._read_raw = orig
+
+
+@pytest.mark.asyncio
+async def test_platform_providers_malformed_degrades_empty_and_filters():
+    async def patched(key: str):
+        # top-level wrong type
+        return "oops"
+
+    orig = gov_mod._read_raw
+    gov_mod._read_raw = patched
+    try:
+        assert await gov_mod.get_platform_ai_providers() == {}
+    finally:
+        gov_mod._read_raw = orig
+
+    async def patched2(key: str):
+        # non-dict entries filtered, dict entries kept
+        return {"doubao": {"api_key": "k"}, "bad": "str", 3: {"x": 1}}
+
+    gov_mod._read_raw = patched2
+    try:
+        assert await gov_mod.get_platform_ai_providers() == {"doubao": {"api_key": "k"}}
+    finally:
+        gov_mod._read_raw = orig
