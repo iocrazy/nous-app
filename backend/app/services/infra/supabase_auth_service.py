@@ -40,17 +40,17 @@ class SupabaseAuthService:
         """
         try:
             client = await self._get_client()
-            options = {}
+            # Omit the "options" key entirely when there is no metadata.
+            # ``"options": None`` crashes inside gotrue-py (it chains
+            # ``.get()`` off the value, and ``None.get`` raises
+            # AttributeError) — which 500'd every signup without a
+            # username while the router's except turned it into an
+            # opaque "'NoneType' object has no attribute 'get'".
+            credentials: Dict[str, Any] = {"email": email, "password": password}
             if metadata:
-                options["data"] = metadata
+                credentials["options"] = {"data": metadata}
 
-            response = await client.auth.sign_up(
-                {
-                    "email": email,
-                    "password": password,
-                    "options": options if options else None,
-                }
-            )
+            response = await client.auth.sign_up(credentials)
 
             if response.user:
                 logger.info(f"用户注册成功: {email}")
