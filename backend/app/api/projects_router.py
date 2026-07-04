@@ -33,8 +33,6 @@ from app.schemas.projects import (
     RenameFolderRequest,
     ReviewStatusUpdate,
     StyleProfileUpdate,
-    TaskCreateRequest,
-    TaskUpdateRequest,
     UpdateMemberRoleRequest,
 )
 from app.services.library.projects_service import ProjectsService
@@ -784,86 +782,6 @@ async def update_review_status(
     except Exception as e:
         logger.error(f"Failed to update review status for file {file_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to update review status")
-
-
-# ============================================
-# Task endpoints (Kanban board)
-# ============================================
-
-
-@router.get("/{project_id}/tasks")
-async def list_tasks(
-    project_id: str,
-    auth: AuthDep,
-    _project_guard: None = Depends(verify_project_read_access),
-):
-    """List all tasks for a project."""
-    try:
-        svc = ProjectsService()
-        tasks = await svc.list_tasks(project_id)
-        return {"success": True, "data": tasks}
-    except Exception as e:
-        logger.error(f"Failed to list tasks for project {project_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to list tasks")
-
-
-@router.post("/{project_id}/tasks")
-async def create_task(
-    project_id: str,
-    data: TaskCreateRequest,
-    auth: AuthDep,
-    _project_guard: None = Depends(verify_project_write_access),
-):
-    """Create a new task in a project."""
-    try:
-        svc = ProjectsService()
-        task = await svc.create_task(
-            project_id, data.model_dump(exclude_none=True), auth.user_id
-        )
-        return {"success": True, "data": task}
-    except Exception as e:
-        logger.error(f"Failed to create task in project {project_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to create task")
-
-
-@router.put("/{project_id}/tasks/{task_id}")
-async def update_task(
-    project_id: str,
-    task_id: str,
-    data: TaskUpdateRequest,
-    auth: AuthDep,
-    _project_guard: None = Depends(verify_project_write_access),
-):
-    """Update a task."""
-    try:
-        svc = ProjectsService()
-        task = await svc.update_task(
-            project_id, task_id, data.model_dump(exclude_none=True)
-        )
-        return {"success": True, "data": task}
-    except ValueError as e:
-        status = 400 if "No fields" in str(e) else 404
-        raise HTTPException(status_code=status, detail=str(e))
-    except Exception as e:
-        logger.error(f"Failed to update task {task_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to update task")
-
-
-@router.delete("/{project_id}/tasks/{task_id}")
-async def delete_task(
-    project_id: str,
-    task_id: str,
-    auth: AuthDep,
-    _project_guard: None = Depends(verify_project_write_access),
-):
-    """Delete a task."""
-    try:
-        svc = ProjectsService()
-        await svc.delete_task(project_id, task_id)
-        return {"success": True, "message": "Task deleted"}
-    except Exception as e:
-        logger.error(f"Failed to delete task {task_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to delete task")
 
 
 # ============================================

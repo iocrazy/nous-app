@@ -6,6 +6,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { Project } from '../types';
 import { updateProject, deleteProject } from '../services/projectsService';
+import { formatRelativeTime } from '../utils/relativeTime';
 import { ProjectCard } from './ProjectCard';
 import { ProjectContextMenu } from './ProjectContextMenu';
 import { ProjectSettingsPanel } from './ProjectSettingsPanel';
@@ -85,21 +86,6 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
     } catch (err) {
       console.error('Failed to set color label:', err);
     }
-  };
-
-  const formatRelativeTime = (dateStr: string): string => {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMinutes = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMinutes / 60);
-    const diffDays = Math.floor(diffHours / 24);
-
-    if (diffMinutes < 1) return 'just now';
-    if (diffMinutes < 60) return `${diffMinutes}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return date.toLocaleDateString();
   };
 
   const typeColors: Record<string, string> = {
@@ -208,7 +194,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
           <button
             onClick={() => setSortDir(d => d === 'desc' ? 'asc' : 'desc')}
             className="p-1.5 text-ink-400 hover:text-ink-200 hover:bg-ink-800 rounded-lg transition-colors"
-            title={sortDir === 'desc' ? 'Descending' : 'Ascending'}
+            title={sortDir === 'desc' ? t('projects.sort.descending') : t('projects.sort.ascending')}
           >
             <ArrowUpDown size={14} />
           </button>
@@ -330,7 +316,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
                     </button>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <span className="text-sm text-ink-500">{formatRelativeTime(project.updated_at)}</span>
+                    <span className="text-sm text-ink-500">{formatRelativeTime(project.updated_at, t)}</span>
                   </td>
                   <td className="px-2 py-3 text-center">
                     <button

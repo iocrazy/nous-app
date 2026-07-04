@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X, Copy, Check, Link2, Lock, Clock, Download } from 'lucide-react';
 import { ProjectFile } from '../types';
+import { useToast } from './Toast';
 
 interface ProjectShareModalProps {
   file: ProjectFile;
@@ -15,6 +16,7 @@ export const ProjectShareModal: React.FC<ProjectShareModalProps> = ({
   file, projectId, isOpen, onClose, onCreated,
 }) => {
   const { t } = useTranslation();
+  const { addToast } = useToast();
   const [shareType, setShareType] = useState<'link' | 'review'>('link');
   const [password, setPassword] = useState('');
   const [usePassword, setUsePassword] = useState(false);
@@ -39,8 +41,9 @@ export const ProjectShareModal: React.FC<ProjectShareModalProps> = ({
       });
       setCreatedShare(share);
       onCreated(share);
-    } catch {
-      // silent
+    } catch (err) {
+      console.error('Failed to create project share:', err);
+      addToast(t('projects.errors.createShareFailed'), 'error');
     } finally {
       setIsCreating(false);
     }

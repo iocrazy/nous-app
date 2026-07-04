@@ -3,6 +3,7 @@ import { X, Layers, Loader2, Upload } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { FileVersion } from '../types';
 import { fetchFileVersions, uploadNewVersion } from '../services/projectsService';
+import { useToast } from './Toast';
 
 interface ProjectVersionModalProps {
   isOpen: boolean;
@@ -47,6 +48,7 @@ export const ProjectVersionModal: React.FC<ProjectVersionModalProps> = ({
   onVersionUploaded,
 }) => {
   const { t } = useTranslation();
+  const { addToast } = useToast();
   const [versions, setVersions] = useState<FileVersion[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -60,8 +62,10 @@ export const ProjectVersionModal: React.FC<ProjectVersionModalProps> = ({
       const data = await fetchFileVersions(projectId, fileId);
       setVersions(data.sort((a, b) => b.version_number - a.version_number));
     } catch (err: unknown) {
+      console.error('Failed to load file versions:', err);
       const errorObj = err as { message?: string };
       setError(errorObj?.message || 'Failed to load versions');
+      addToast(t('projects.errors.loadVersionsFailed'), 'error');
     } finally {
       setIsLoading(false);
     }

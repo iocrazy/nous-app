@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X, Copy, Check, Inbox, Trash2, Calendar, FileType } from 'lucide-react';
 import { createProjectCollection, fetchProjectCollections, deleteProjectCollection } from '../services/projectsService';
+import { useToast } from './Toast';
 
 interface ProjectCollectModalProps {
   projectId: string;
@@ -13,6 +14,7 @@ export const ProjectCollectModal: React.FC<ProjectCollectModalProps> = ({
   projectId, isOpen, onClose,
 }) => {
   const { t } = useTranslation();
+  const { addToast } = useToast();
   const [collections, setCollections] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
@@ -31,7 +33,10 @@ export const ProjectCollectModal: React.FC<ProjectCollectModalProps> = ({
     try {
       const data = await fetchProjectCollections(projectId);
       setCollections(data);
-    } catch { /* silent */ }
+    } catch (err) {
+      console.error('Failed to load project collections:', err);
+      addToast(t('projects.errors.loadCollectionsFailed'), 'error');
+    }
     setIsLoading(false);
   };
 
@@ -48,7 +53,10 @@ export const ProjectCollectModal: React.FC<ProjectCollectModalProps> = ({
       setDeadline('');
       setShowCreate(false);
       await loadCollections();
-    } catch { /* silent */ }
+    } catch (err) {
+      console.error('Failed to create project collection:', err);
+      addToast(t('projects.errors.createCollectionFailed'), 'error');
+    }
     setIsCreating(false);
   };
 
@@ -56,7 +64,10 @@ export const ProjectCollectModal: React.FC<ProjectCollectModalProps> = ({
     try {
       await deleteProjectCollection(projectId, id);
       await loadCollections();
-    } catch { /* silent */ }
+    } catch (err) {
+      console.error('Failed to delete project collection:', err);
+      addToast(t('projects.errors.deleteCollectionFailed'), 'error');
+    }
   };
 
   const handleCopy = (code: string, id: string) => {

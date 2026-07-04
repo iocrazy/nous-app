@@ -161,7 +161,13 @@
     "all": "全部",
     "back": "返回",
     "creating": "创建中...",
-    "done": "完成"
+    "done": "完成",
+    "time": {
+      "justNow": "刚刚",
+      "minutesAgo": "{{count}} 分钟前",
+      "hoursAgo": "{{count}} 小时前",
+      "daysAgo": "{{count}} 天前"
+    }
   },
   "parser": {
     "title": "媒体解析",
@@ -895,25 +901,6 @@
       }
     }
   },
-  "kanban": {
-    "todo": "待办",
-    "inProgress": "进行中",
-    "done": "已完成",
-    "onHold": "暂停",
-    "addTask": "添加任务...",
-    "noTasks": "暂无任务",
-    "taskTypes": {
-      "general": "常规",
-      "storyboard": "分镜",
-      "script": "脚本",
-      "filming": "拍摄",
-      "editing": "剪辑",
-      "review": "审阅"
-    },
-    "dueDate": "截止",
-    "assignee": "负责人",
-    "overdue": "已逾期"
-  },
   "workforce": {
     "title": "工作团队",
     "subtitle": "常驻 Agent — 当前状态、队列深度和近期活动。",
@@ -1032,6 +1019,40 @@
   },
   "projects": {
     "title": "全部项目",
+    "view": {
+      "title": "视图",
+      "all": "全部",
+      "starred": "已收藏",
+      "recent": "最近",
+      "active": "活跃",
+      "archived": "已归档",
+      "folders": "文件夹"
+    },
+    "nav": {
+      "files": "文件",
+      "scripts": "脚本",
+      "storyboard": "分镜",
+      "output": "输出",
+      "trash": "回收站",
+      "settings": "设置",
+      "switchProject": "切换项目...",
+      "noProjectsFound": "未找到项目",
+      "allProjects": "全部项目",
+      "expandSidebar": "展开侧栏",
+      "collapseSidebar": "收起侧栏",
+      "created": "创建于",
+      "backToList": "返回项目列表"
+    },
+    "filterTitle": {
+      "starred": "收藏的项目",
+      "recent": "最近的项目",
+      "active": "活跃项目",
+      "archived": "已归档项目"
+    },
+    "sort": {
+      "ascending": "升序",
+      "descending": "降序"
+    },
     "sidebar": {
       "projectList": "项目列表",
       "starredProjects": "星标项目",
@@ -1163,8 +1184,7 @@
       "files": "文件",
       "scripts": "脚本",
       "storyboard": "分镜",
-      "output": "输出",
-      "tasks": "任务"
+      "output": "输出"
     },
     "collect": {
       "title": "文件收集",
@@ -1235,6 +1255,13 @@
       "current": "当前版本",
       "uploading": "上传中...",
       "upload": "上传新版本"
+    },
+    "errors": {
+      "loadCollectionsFailed": "加载收集链接失败",
+      "createCollectionFailed": "创建收集链接失败",
+      "deleteCollectionFailed": "删除收集链接失败",
+      "createShareFailed": "创建分享链接失败",
+      "loadVersionsFailed": "加载版本历史失败"
     }
   },
   "storyboard": {

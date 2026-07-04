@@ -14,7 +14,6 @@ import {
   FileText,
   Clapperboard,
   Download,
-  KanbanSquare,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 import type { ProjectTab } from '../../types';
@@ -58,11 +57,5 @@ export const TOOL_CATALOG: Record<string, ToolDef> = {
     labelKey: 'projects.tools.output',
     tab: 'output',
     icon: Download,
-  },
-  tasks: {
-    slug: 'tasks',
-    labelKey: 'projects.tools.tasks',
-    tab: 'tasks',
-    icon: KanbanSquare,
   },
 } as const;

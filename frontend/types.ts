@@ -904,7 +904,7 @@ export interface ScriptProjectSummary {
   chapter_count?: number;
 }
 
-export type ProjectTab = 'files' | 'scripts' | 'storyboard' | 'output' | 'tasks' | 'shares' | 'trash';
+export type ProjectTab = 'files' | 'scripts' | 'storyboard' | 'output' | 'shares' | 'trash';
 
 /** A single row from the global ``project_stages`` catalog (Phase 5b SOP). */
 export interface ProjectStage {
