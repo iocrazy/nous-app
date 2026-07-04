@@ -99,43 +99,39 @@ async def _real_user_id(conn):
 
 
 def _project_repo():
-    from app.repositories.storyboard_repository_orm import (
-        StoryboardProjectRepositoryOrm,
-    )
+    from app.repositories.storyboard_repository import StoryboardProjectRepository
 
-    return StoryboardProjectRepositoryOrm()
+    return StoryboardProjectRepository()
 
 
 def _node_repo():
-    from app.repositories.storyboard_repository_orm import StoryboardNodeRepositoryOrm
+    from app.repositories.storyboard_repository import StoryboardNodeRepository
 
-    return StoryboardNodeRepositoryOrm()
+    return StoryboardNodeRepository()
 
 
 def _edge_repo():
-    from app.repositories.storyboard_repository_orm import StoryboardEdgeRepositoryOrm
+    from app.repositories.storyboard_repository import StoryboardEdgeRepository
 
-    return StoryboardEdgeRepositoryOrm()
+    return StoryboardEdgeRepository()
 
 
 def _frame_repo():
-    from app.repositories.storyboard_repository_orm import StoryboardFrameRepositoryOrm
+    from app.repositories.storyboard_repository import StoryboardFrameRepository
 
-    return StoryboardFrameRepositoryOrm()
+    return StoryboardFrameRepository()
 
 
 def _character_repo():
-    from app.repositories.storyboard_repository_orm import (
-        StoryboardCharacterRepositoryOrm,
-    )
+    from app.repositories.storyboard_repository import StoryboardCharacterRepository
 
-    return StoryboardCharacterRepositoryOrm()
+    return StoryboardCharacterRepository()
 
 
 def _asset_repo():
-    from app.repositories.storyboard_repository_orm import StoryboardAssetRepositoryOrm
+    from app.repositories.storyboard_repository import StoryboardAssetRepository
 
-    return StoryboardAssetRepositoryOrm()
+    return StoryboardAssetRepository()
 
 
 async def _seed_project(repo, team_id, user_id) -> dict:
@@ -454,7 +450,7 @@ def test_node_bulk_upsert_phantom_column_compile_raises():
     from sqlalchemy.exc import CompileError
 
     from app.models import StoryboardNodes
-    from app.repositories.storyboard_repository_orm import _NODES_ATTRS, _known_only
+    from app.repositories.storyboard_repository import _NODES_ATTRS, _known_only
 
     row = {"node_type": "storyboard_split", "scene_number": 1}
     stmt = pg_insert(StoryboardNodes).values(**row)  # what _bulk_upsert_rows builds
@@ -475,7 +471,7 @@ def test_frame_bulk_upsert_phantom_column_compile_raises():
     from sqlalchemy.exc import CompileError
 
     from app.models import StoryboardFrames
-    from app.repositories.storyboard_repository_orm import _FRAMES_ATTRS, _known_only
+    from app.repositories.storyboard_repository import _FRAMES_ATTRS, _known_only
 
     row = {"order_index": 0, "prompt": "x", "status": "pending"}
     stmt = pg_insert(StoryboardFrames).values(**row)  # what _bulk_upsert_rows builds
@@ -561,14 +557,15 @@ async def test_asset_crud_and_dedup(
     assert await repo.find_by_hash(str(proj["id"]), file_hash) is None
 
 
-# ─── Factory flag wiring ────────────────────────────────────────────────
+# ─── Factory wiring (post-collapse: unconditional, no flag, no DSN) ─────────
 
 
-def test_factory_off_returns_rest(monkeypatch):
-    from app.core.config import settings
+def test_factories_return_collapsed_repos():
+    """The six factories now unconditionally return the collapsed (ORM-backed)
+    repo classes — the USE_ORM_STORYBOARD flag and the *Orm subclasses are
+    gone."""
     from app.repositories import storyboard_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_STORYBOARD", False)
     assert (
         type(mod.get_storyboard_project_repository()) is mod.StoryboardProjectRepository
     )
@@ -580,36 +577,3 @@ def test_factory_off_returns_rest(monkeypatch):
         is mod.StoryboardCharacterRepository
     )
     assert type(mod.get_storyboard_asset_repository()) is mod.StoryboardAssetRepository
-
-
-def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories import storyboard_repository as mod
-    from app.repositories.storyboard_repository_orm import (
-        StoryboardAssetRepositoryOrm,
-        StoryboardCharacterRepositoryOrm,
-        StoryboardEdgeRepositoryOrm,
-        StoryboardFrameRepositoryOrm,
-        StoryboardNodeRepositoryOrm,
-        StoryboardProjectRepositoryOrm,
-    )
-
-    monkeypatch.setattr(settings, "USE_ORM_STORYBOARD", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    assert isinstance(
-        mod.get_storyboard_project_repository(), StoryboardProjectRepositoryOrm
-    )
-    assert isinstance(mod.get_storyboard_node_repository(), StoryboardNodeRepositoryOrm)
-    assert isinstance(mod.get_storyboard_edge_repository(), StoryboardEdgeRepositoryOrm)
-    assert isinstance(
-        mod.get_storyboard_frame_repository(), StoryboardFrameRepositoryOrm
-    )
-    assert isinstance(
-        mod.get_storyboard_character_repository(), StoryboardCharacterRepositoryOrm
-    )
-    assert isinstance(
-        mod.get_storyboard_asset_repository(), StoryboardAssetRepositoryOrm
-    )
