@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # BIGINT Snowflake ids (ai_sessions.id, agent_runs.id, ai_messages.session_id)
 # arrive from the DB as JSON numbers / Python ints but are modelled as str.
@@ -74,9 +74,13 @@ class MessageOut(BaseModel):
 
     model_config = _COERCE_IDS
 
-    # ai_messages.id is still UUID (its own PK), but session_id FKs
-    # ai_sessions.id which became BIGINT Snowflake (mig 231) → numeric string.
-    id: UUID
+    # ai_messages.id: under LegacyAiStore this is a real UUID PK; under
+    # ConversationsAiStore (Task 4) it's public.messages.id, a BIGINT
+    # Snowflake — same dual-shape story as ai_sessions.id (mig 231). Widened
+    # to str + an explicit `mode="before"` coercion (mirrors
+    # schemas/conversation.py::MessageOut._coerce_bigint_str) so both shapes
+    # validate without ever losing BIGINT precision through a UUID cast.
+    id: str
     session_id: str
     role: Literal["user", "assistant", "system"]
     content: str
@@ -85,6 +89,11 @@ class MessageOut(BaseModel):
     completion_tokens: Optional[int] = None
     metadata_json: Optional[dict[str, Any]] = None
     created_at: Optional[datetime] = None
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def _coerce_id_str(cls, v: Any) -> str:
+        return str(v)
 
 
 class SessionWithMessages(SessionOut):

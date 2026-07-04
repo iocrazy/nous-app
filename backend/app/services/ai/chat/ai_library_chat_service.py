@@ -23,12 +23,16 @@ from fastapi import HTTPException, status
 from loguru import logger
 
 from app.core.config import settings
-from app.db.supabase_client import get_async_supabase_admin
+from app.db.supabase_client import (  # noqa: F401  read dynamically by LegacyAiStore._client()
+    get_async_supabase_admin,
+)
 from app.repositories.agent_repository import get_agent_repository
 from app.repositories.skill_repository import get_skill_repository
 from app.services.ai.adapters.factory import get_adapter, provider_key_for_model
 from app.services.ai.chat.ai_library_chat_wiring import build_agent_runner_stack
+from app.services.ai.chat.message_store import MessageStore
 from app.services.ai.chat.resource_ref_resolver import resolve_resource_refs
+from app.services.ai.chat.store_router import RoutedAiStore
 from app.services.ai.prompts.prompt_composer import (
     ComposerInput,
     PromptComposer,
@@ -63,6 +67,9 @@ class AILibraryChatService:
     references it against row.user_id on every op.
     """
 
+    def __init__(self, store: Optional[MessageStore] = None) -> None:
+        self._store = store or RoutedAiStore()
+
     # ------------------------------------------------------------------
     # Sessions
     # ------------------------------------------------------------------
@@ -91,33 +98,23 @@ class AILibraryChatService:
                 detail=f"agent not found: {agent_slug}",
             )
 
-        supabase = await get_async_supabase_admin()
-        row: Dict[str, Any] = {
-            "user_id": str(user_id),
-            "agent_id": agent["id"],
-            "agent_slug": agent_slug,
-            "title": title,
-            "status": "active",
-            "total_tokens": 0,
-            "message_count": 0,
-        }
-        if project_id is not None:
-            row["project_id"] = project_id
-        if team_id is not None:
-            row["team_id"] = team_id
-        if context_type is not None:
-            row["context_type"] = context_type
-        if context_id is not None:
-            row["context_id"] = context_id
-
-        resp = await supabase.table("ai_sessions").insert(row).execute()
-        if not resp.data:
+        row = await self._store.create_session(
+            user_id=str(user_id),
+            agent_slug=agent_slug,
+            agent_id=agent["id"],
+            title=title,
+            project_id=project_id,
+            team_id=team_id,
+            context_type=context_type,
+            context_id=context_id,
+        )
+        if not row:
             logger.error(f"[ChatService] create_session failed for user={user_id}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to create AI session",
             )
-        return resp.data[0]
+        return row
 
     async def list_sessions(
         self,
@@ -133,34 +130,16 @@ class AILibraryChatService:
         agent_slug + project_id narrow the result set to what the UI is
         currently viewing.
         """
-        supabase = await get_async_supabase_admin()
-        query = (
-            supabase.table("ai_sessions")
-            .select("*")
-            .eq("user_id", str(user_id))
-            .neq("status", "deleted")
-            .order("updated_at", desc=True)
-            .limit(limit)
+        return await self._store.list_sessions(
+            user_id=str(user_id),
+            agent_slug=agent_slug,
+            project_id=project_id,
+            limit=limit,
         )
-        if agent_slug is not None:
-            query = query.eq("agent_slug", agent_slug)
-        if project_id is not None:
-            query = query.eq("project_id", project_id)
-
-        resp = await query.execute()
-        return resp.data or []
 
     async def get_session(self, session_id: str, *, user_id: UUID) -> Dict[str, Any]:
         """Fetch a single session, enforcing ownership."""
-        supabase = await get_async_supabase_admin()
-        resp = (
-            await supabase.table("ai_sessions")
-            .select("*")
-            .eq("id", str(session_id))
-            .maybe_single()
-            .execute()
-        )
-        session = resp.data if resp and resp.data else None
+        session = await self._store.get_session(session_id=session_id)
         if not session:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="session not found"
@@ -177,16 +156,7 @@ class AILibraryChatService:
     ) -> List[Dict[str, Any]]:
         """Fetch messages for a session in chronological order."""
         await self.get_session(session_id, user_id=user_id)
-        supabase = await get_async_supabase_admin()
-        resp = (
-            await supabase.table("ai_messages")
-            .select("*")
-            .eq("session_id", str(session_id))
-            .order("created_at", desc=False)
-            .limit(limit)
-            .execute()
-        )
-        return resp.data or []
+        return await self._store.get_messages(session_id=session_id, limit=limit)
 
     async def update_session(
         self,
@@ -202,29 +172,15 @@ class AILibraryChatService:
             updates["title"] = title
         if not updates:
             return await self.get_session(session_id, user_id=user_id)
-        supabase = await get_async_supabase_admin()
-        resp = (
-            await supabase.table("ai_sessions")
-            .update(updates)
-            .eq("id", str(session_id))
-            .execute()
+        row = await self._store.rename_session(
+            session_id=session_id, title=updates["title"]
         )
-        return (
-            resp.data[0]
-            if resp.data
-            else await self.get_session(session_id, user_id=user_id)
-        )
+        return row or await self.get_session(session_id, user_id=user_id)
 
     async def delete_session(self, session_id: str, *, user_id: UUID) -> None:
         """Soft-delete a session (status='deleted'). Messages stay for audit."""
         await self.get_session(session_id, user_id=user_id)
-        supabase = await get_async_supabase_admin()
-        await (
-            supabase.table("ai_sessions")
-            .update({"status": "deleted"})
-            .eq("id", str(session_id))
-            .execute()
-        )
+        await self._store.soft_delete_session(session_id=session_id)
 
     # ------------------------------------------------------------------
     # Chat
@@ -444,23 +400,12 @@ class AILibraryChatService:
 
         history = await self.get_messages(session_id, user_id=user_id)
 
-        supabase = await get_async_supabase_admin()
-
         # Persist the user turn BEFORE calling the model so partial
         # failures (LLM timeout, budget pause) still leave a record of
         # what the user tried to ask.
-        user_msg_resp = (
-            await supabase.table("ai_messages")
-            .insert(
-                {
-                    "session_id": str(session_id),
-                    "role": "user",
-                    "content": content,
-                }
-            )
-            .execute()
+        user_msg = await self._store.append_user_message(
+            session_id=session_id, user_id=str(user_id), content=content
         )
-        user_msg = user_msg_resp.data[0] if user_msg_resp.data else None
 
         # M1.5 wiring: load agent record so we can read budget/fallback,
         # then build the full runner stack (HookRegistry pre-populated,
@@ -841,12 +786,21 @@ class AILibraryChatService:
         # from "after model finishes" to "as model emits". Tool-using
         # turns still work (stream_turn executes tool_calls between
         # iterations and re-streams).
+        # Task 6: agent_runs.session_id FKs ai_sessions (mig 231) — a
+        # conversations.id would violate that FK. agent_runs.conversation_id
+        # (mig 331) is the structural link for new-store sessions. Dispatch
+        # off the session row's store_kind marker (stamped by LegacyAiStore /
+        # ConversationsAiStore — see Task 6 report) so a conversations-backed
+        # session links via conversation_id and a legacy session keeps its
+        # exact byte-identical session_id behavior.
+        _is_conv_store = session.get("store_kind") == "conversations"
         try:
             async with RunRecorder(
                 agent_id=composed.agent_id,
                 user_id=user_id,
                 trigger=trigger,
-                session_id=session_id,
+                session_id=None if _is_conv_store else session_id,
+                conversation_id=int(session_id) if _is_conv_store else None,
                 team_id=session.get("team_id"),
                 project_id=session.get("project_id"),
                 model=model or None,
@@ -990,22 +944,14 @@ class AILibraryChatService:
                 "hook": str(result.get("hook_name") or ""),
                 "reason": str(result.get("approval_reason") or ""),
             }
-        asst_resp = (
-            await supabase.table("ai_messages")
-            .insert(
-                {
-                    "session_id": str(session_id),
-                    "role": "assistant",
-                    "content": assistant_content,
-                    "agent_id": str(composed.agent_id),
-                    "prompt_tokens": usage_snapshot["prompt_tokens"],
-                    "completion_tokens": usage_snapshot["completion_tokens"],
-                    "metadata_json": asst_metadata,
-                }
-            )
-            .execute()
+        asst_msg = await self._store.append_assistant_message(
+            session_id=session_id,
+            agent_id=composed.agent_id,
+            content=assistant_content,
+            prompt_tokens=usage_snapshot["prompt_tokens"],
+            completion_tokens=usage_snapshot["completion_tokens"],
+            metadata=asst_metadata,
         )
-        asst_msg = asst_resp.data[0] if asst_resp.data else None
 
         # Bump session counters. Cheap single update; ignore ON CONFLICT
         # since this session is owned by this user and exists.
@@ -1014,16 +960,10 @@ class AILibraryChatService:
         )
         prior_total = int(session.get("total_tokens") or 0)
         prior_count = int(session.get("message_count") or 0)
-        await (
-            supabase.table("ai_sessions")
-            .update(
-                {
-                    "total_tokens": prior_total + turn_tokens,
-                    "message_count": prior_count + 2,
-                }
-            )
-            .eq("id", str(session_id))
-            .execute()
+        await self._store.bump_counters(
+            session_id=session_id,
+            add_tokens=prior_total + turn_tokens,
+            add_messages=prior_count + 2,
         )
 
         # Wave 5b (B4): fire-and-forget session-memory updater. Doesn't

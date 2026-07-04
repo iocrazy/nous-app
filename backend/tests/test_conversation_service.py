@@ -735,6 +735,31 @@ async def test_get_messages_requires_membership():
 
 
 @pytest.mark.asyncio
+async def test_get_messages_passes_for_user_id_to_repo():
+    """ConversationService.get_messages must forward the caller's user_id as
+    for_user_id so the repository can apply the joined-mode history cutoff
+    (Phase-1 final-review carryover, mig 328 messages_select RLS parity)."""
+    repo = _make_repo()
+
+    from app.services.conversation_service import ConversationService
+
+    svc = ConversationService(repo)
+    await svc.get_messages(
+        conversation_id=1,
+        user_id="u1",
+        before_seq=None,
+        limit=50,
+    )
+
+    repo.list_messages.assert_awaited_once_with(
+        conversation_id=1,
+        before_seq=None,
+        limit=50,
+        for_user_id="u1",
+    )
+
+
+@pytest.mark.asyncio
 async def test_edit_message_not_found_raises():
     """edit_message raises PermissionError when repo returns None."""
     repo = _make_repo()
