@@ -41,6 +41,53 @@ async def test_get_ai_settings_extracts_nested_ai_settings():
     repo.get_by_user_id.assert_awaited_once_with("u-1")
 
 
+async def test_get_ai_settings_reveals_encrypted_api_key(monkeypatch):
+    """secret-at-rest Phase 2: a stored enc:v1: api_key is decrypted before
+    reaching every task resolver that reads through get_ai_settings."""
+    from cryptography.fernet import Fernet
+
+    monkeypatch.setenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    monkeypatch.delenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY_OLD", raising=False)
+    from app.core.secure_settings import encrypt_marked
+
+    ciphertext = encrypt_marked("sk-real-secret")
+    repo = MagicMock()
+    repo.get_by_user_id = AsyncMock(
+        return_value={
+            "settings_json": {
+                "ai_settings": {
+                    "ai_providers": {
+                        "openai": {"api_key": ciphertext, "base_url": "https://x"}
+                    }
+                }
+            }
+        }
+    )
+    with patch(
+        "app.repositories.user_settings_repository.UserSettingsRepository",
+        return_value=repo,
+    ):
+        out = await helpers.get_ai_settings("u-1")
+
+    assert out["ai_providers"]["openai"]["api_key"] == "sk-real-secret"
+    assert out["ai_providers"]["openai"]["base_url"] == "https://x"
+
+
+async def test_get_ai_settings_no_ai_providers_key_untouched():
+    """When ai_settings has no ai_providers subtree at all, get_ai_settings
+    must not add one (reveal is only invoked when the key is present)."""
+    repo = MagicMock()
+    repo.get_by_user_id = AsyncMock(
+        return_value={"settings_json": {"ai_settings": {"whisper_provider": "x"}}}
+    )
+    with patch(
+        "app.repositories.user_settings_repository.UserSettingsRepository",
+        return_value=repo,
+    ):
+        out = await helpers.get_ai_settings("u-1")
+    assert out == {"whisper_provider": "x"}
+
+
 async def test_get_ai_settings_empty_when_no_row():
     repo = MagicMock()
     repo.get_by_user_id = AsyncMock(return_value=None)

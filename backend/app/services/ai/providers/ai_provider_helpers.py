@@ -53,14 +53,29 @@ class ResolvedAIConfig:
 
 
 async def get_ai_settings(user_id: str) -> dict:
-    """Load user's AI settings from the database."""
+    """Load user's AI settings from the database.
+
+    ``ai_providers`` api_key values are REVEALED (decrypted) here — the sole
+    read chokepoint feeding every task resolver in this module — so no
+    downstream consumer (adapter factory, resolve_task_ai_config, ...) needs
+    to know about the ``enc:v1:`` marker scheme. Fail-soft: an undecryptable
+    marked value degrades to ``""`` (see ``secure_settings.reveal_byok_providers``),
+    it never raises.
+    """
+    from app.core.secure_settings import reveal_byok_providers
     from app.repositories.user_settings_repository import UserSettingsRepository
 
     repo = UserSettingsRepository()
     settings = await repo.get_by_user_id(user_id)
-    if settings and settings.get("settings_json"):
-        return settings["settings_json"].get("ai_settings", {})
-    return {}
+    if not settings or not settings.get("settings_json"):
+        return {}
+    ai_settings = settings["settings_json"].get("ai_settings", {})
+    if isinstance(ai_settings, dict) and "ai_providers" in ai_settings:
+        ai_settings = {
+            **ai_settings,
+            "ai_providers": reveal_byok_providers(ai_settings.get("ai_providers")),
+        }
+    return ai_settings
 
 
 def get_provider_config(ai_settings: dict, provider_key: str) -> dict:
@@ -378,7 +393,11 @@ async def resolve_transcription_config(
     if isinstance(settings, str):
         settings = json.loads(settings)
     ai_settings = settings.get("ai_settings", {})
-    providers = ai_settings.get("ai_providers", {}) or {}
+    # This reads raw settings_json directly (not via get_ai_settings) — reveal
+    # here so the returned provider_cfg carries the plaintext api_key.
+    from app.core.secure_settings import reveal_byok_providers
+
+    providers = reveal_byok_providers(ai_settings.get("ai_providers", {}) or {})
     whisper_provider = ai_settings.get("whisper_provider", "openai")
     provider_cfg = providers.get(whisper_provider) or {}
 
@@ -487,7 +506,11 @@ async def resolve_summarization_config(
     if isinstance(settings, str):
         settings = json.loads(settings)
     ai_settings = settings.get("ai_settings", {})
-    providers = ai_settings.get("ai_providers", {}) or {}
+    # This reads raw settings_json directly (not via get_ai_settings) — reveal
+    # here so the chosen provider's config carries the plaintext api_key.
+    from app.core.secure_settings import reveal_byok_providers
+
+    providers = reveal_byok_providers(ai_settings.get("ai_providers", {}) or {})
 
     chosen_key: Optional[str] = None
     chosen_cfg: Dict[str, Any] = {}

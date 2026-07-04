@@ -112,6 +112,35 @@ async def test_origin_byok_when_api_key_present():
     assert cfg.model == "openai:whisper-1"
 
 
+async def test_byok_reveals_encrypted_api_key(monkeypatch):
+    """secret-at-rest Phase 2: an enc:v1: api_key stored in ai_providers is
+    decrypted before it reaches provider_config — this resolver reads raw
+    settings_json directly (not via get_ai_settings), so it needs its own
+    reveal chokepoint."""
+    from cryptography.fernet import Fernet
+
+    monkeypatch.setenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    monkeypatch.delenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY_OLD", raising=False)
+    from app.core.secure_settings import encrypt_marked
+
+    ciphertext = encrypt_marked("sk-plaintext-asr")
+    settings = _settings(
+        {
+            "whisper_provider": "openai",
+            "ai_providers": {"openai": {"api_key": ciphertext, "model": "whisper-1"}},
+            "task_assignment": {"transcription": "openai:whisper-1"},
+        }
+    )
+    with patch(
+        "app.services.ai.governance.ai_governance.get_module_governance",
+        AsyncMock(return_value=_unlocked()),
+    ):
+        cfg = await helpers.resolve_transcription_config("u", settings_json=settings)
+
+    assert cfg.origin == "byok"
+    assert cfg.provider_config["api_key"] == "sk-plaintext-asr"
+
+
 async def test_origin_env_when_no_api_key():
     """User whisper_provider with no configured provider entry → empty config →
     origin=env (adapter factory falls back to env credentials)."""
