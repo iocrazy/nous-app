@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -201,13 +201,164 @@ async def is_nous_allowed(module: str) -> bool:
     return True
 
 
+@dataclass(frozen=True)
+class LockedModuleConfig:
+    """Resolved provider config for an admin-locked AI module.
+
+    Returned by :func:`resolve_locked_module_config` when a module is locked
+    (``governance.allowed is False``); ``None`` from that function means the
+    module is NOT locked and the caller should proceed down its own user path.
+
+    ``provider_config`` always carries the four keys the adapter factory reads
+    — ``api_key`` / ``base_url`` / ``model`` / ``app_id`` — so consumers can
+    ``.get`` uniformly regardless of whether the config came from the platform
+    catalog or the admin's manual fields.
+    """
+
+    provider_key: str
+    provider_config: Dict[str, Any]
+    model: str
+
+
+async def resolve_locked_module_config(
+    module: str, *, default_provider_key: str = ""
+) -> Optional[LockedModuleConfig]:
+    """Resolve the admin config for a governed AI ``module`` — the shared gate.
+
+    Single source of truth for the "module is admin-locked" branch that used to
+    live (triplicated + subtly divergent) in ``resolve_task_provider_config``,
+    ``ai_transcription.load_transcribe_inputs`` and
+    ``ai_summary.load_summary_inputs``.
+
+    Resolution order:
+
+    1. ``get_module_governance(module)``; if ``governance.allowed`` → return
+       ``None`` (module not locked — the caller proceeds down its user path).
+    2. **Platform-catalog model FIRST** (#857 order). If ``governance.model`` is
+       set, look it up in the platform catalog via ``resolve_platform_model``
+       (lazily imported to avoid the ai_provider_helpers ↔ governance cycle):
+         - a catalog hit returns ``(provider, config, model)`` → wrap in a
+           ``LockedModuleConfig`` and return it (catalog models carry their own
+           credentials, so the admin's manual api_key may be blank).
+         - not a catalog name (``None``) → fall through to the manual path.
+         - found-but-disabled (``RuntimeError``): if the admin ALSO configured a
+           manual api_key, warn and fall through to the manual path (the manual
+           key still works); otherwise re-raise the informative "no longer
+           available" error instead of the generic no-key one below.
+    3. Manual path — the admin's ``base_url`` / ``model`` / ``api_key`` fields.
+       If no admin api_key is configured → fail closed (RuntimeError): the
+       whisper / analysis / summarize services call the provider factory
+       directly with no env fallback, so a missing key would fail late and
+       cryptically; surface it early.
+    4. Otherwise derive the provider key from the model prefix (falling back to
+       ``default_provider_key`` when the model is absent or its prefix is
+       unknown) and return the manual admin config.
+
+    Deliberate behaviour change (#857 generalised): the shared task resolver
+    previously checked ``api_key_present`` fail-closed BEFORE consulting the
+    platform catalog, so a module locked to a catalog model with a blank manual
+    key failed closed even though catalog models carry their own credentials.
+    That is the exact bug #857 fixed for transcription + summarization; folding
+    all three call sites onto this platform-first helper fixes the same latent
+    bug for the five shared-resolver modules (visual_analysis / classification /
+    caption / translation / script_generation).
+    """
+    governance = await get_module_governance(module)
+    if governance.allowed:
+        return None  # not locked — caller proceeds down its own user path.
+
+    # ── Platform-catalog model FIRST (#857 order) ─────────────────────────────
+    # Admin may lock a module directly TO a platform-catalog model (picked from
+    # the governance dropdown). Use the UNGATED lookup — this is admin config,
+    # not a user pick, so the user-facing nous switches do not apply. Lazy import
+    # avoids the ai_provider_helpers → ai_governance import cycle.
+    if governance.model:
+        from app.services.ai.providers.ai_provider_helpers import (
+            resolve_platform_model,
+        )
+
+        try:
+            platform = await resolve_platform_model(governance.model)
+        except RuntimeError:
+            # Found-but-disabled catalog model. If the admin also set a manual
+            # api_key, fall through and use it; otherwise surface the informative
+            # "no longer available" error rather than the generic no-key one.
+            if not governance.api_key_present:
+                raise
+            logger.warning(
+                "[governance] %s locked to platform model %r which is no longer "
+                "available; falling back to admin manual config",
+                module,
+                governance.model,
+            )
+            platform = None
+        if platform is not None:
+            p_key, p_cfg, p_model = platform
+            logger.info(
+                "[governance] %s locked to platform model %r → provider %r",
+                module,
+                governance.model,
+                p_key,
+            )
+            return LockedModuleConfig(
+                provider_key=p_key, provider_config=p_cfg, model=p_model
+            )
+        # Not a catalog name → fall through to the manual path below.
+
+    # ── Manual admin config (base_url / model / api_key) ──────────────────────
+    if not governance.api_key_present:
+        logger.error(
+            "[governance] %s is admin-locked but no admin api_key is configured; "
+            "failing closed — the AI service has no env fallback",
+            module,
+        )
+        raise RuntimeError(
+            f"AI module '{module}' is admin-locked but no admin API key is "
+            "configured. Contact your platform administrator."
+        )
+
+    # Derive provider_key from the admin-set model prefix; unknown/absent prefix
+    # falls back to default_provider_key (e.g. "openai" for the whisper path, ""
+    # for the generic OpenAI-compatible adapter).
+    from app.services.ai.adapters.factory import provider_key_for_model
+
+    if governance.model:
+        try:
+            derived_key = provider_key_for_model(governance.model)
+        except ValueError:
+            derived_key = default_provider_key
+    else:
+        derived_key = default_provider_key
+
+    provider_config: Dict[str, Any] = {
+        "api_key": governance.api_key,
+        "base_url": governance.base_url,
+        "model": governance.model,
+        "app_id": "",
+    }
+    logger.info(
+        "[governance] %s locked by admin; using admin config "
+        "(provider_key=%r model=%r)",
+        module,
+        derived_key,
+        governance.model,
+    )
+    return LockedModuleConfig(
+        provider_key=derived_key,
+        provider_config=provider_config,
+        model=governance.model,
+    )
+
+
 __all__ = [
     "AIModuleGovernance",
     "ALL_MODULES",
     "CHAT_MODULE",
+    "LockedModuleConfig",
     "NOUS_GLOBAL_KEY",
     "TASK_MODULES",
     "get_module_governance",
+    "resolve_locked_module_config",
     "is_nous_allowed",
     "is_nous_globally_enabled",
 ]

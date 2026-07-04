@@ -16,7 +16,6 @@ import json
 from typing import Any, Optional
 
 from dbos import DBOS
-from loguru import logger
 
 
 @DBOS.step()
@@ -39,69 +38,20 @@ async def load_summary_inputs(parsed_media_id: int, user_id: str) -> dict[str, A
             f"no transcript for parsed_media={parsed_media_id} user={user_id}"
         )
 
-    # ── Governance gate ─────────────────────────────────────────────────────
+    # ── Governance gate (shared helper — platform-catalog first) ────────────
     # Check BEFORE consulting user settings so a locked module short-circuits
-    # without depending on the user having settings configured.
-    from app.services.ai.adapters.factory import provider_key_for_model
-    from app.services.ai.governance.ai_governance import get_module_governance
+    # without depending on the user having settings configured. The shared
+    # resolver tries the platform catalog first, then the admin's manual config.
+    from app.services.ai.governance.ai_governance import resolve_locked_module_config
 
-    governance = await get_module_governance("summarization")
-    if not governance.allowed:
-        # Admin may have locked summarization TO a platform-catalog model (picked
-        # via the governance dropdown). Resolve it ungated — base_url/key come
-        # from the catalog, so api_key_present (the manual field) is blank.
-        if governance.model:
-            from app.services.ai.providers.ai_provider_helpers import (
-                resolve_platform_model,
-            )
-
-            try:
-                platform = await resolve_platform_model(governance.model)
-            except RuntimeError:
-                platform = None
-            if platform is not None:
-                p_key, p_cfg, _p_model = platform
-                logger.info(
-                    f"[governance] summarization locked to platform model "
-                    f"{governance.model!r} → provider {p_key!r}"
-                )
-                return {
-                    "transcript": row["transcript"],
-                    "title": row.get("title") or "",
-                    "resource_id": str(row["resource_id"]),
-                    "provider_key": p_key,
-                    "provider_config": p_cfg,
-                }
-        if not governance.api_key_present:
-            logger.error(
-                "[governance] summarization is admin-locked but no admin api_key "
-                "is configured; failing closed — SummarizeService has no env fallback"
-            )
-            raise RuntimeError(
-                "AI module 'summarization' is admin-locked but no admin API key "
-                "is configured. Contact your platform administrator."
-            )
-        try:
-            admin_provider_key = (
-                provider_key_for_model(governance.model) if governance.model else ""
-            )
-        except ValueError:
-            admin_provider_key = ""
-        logger.info(
-            f"[governance] summarization locked by admin; using admin config "
-            f"(provider_key={admin_provider_key!r} model={governance.model!r})"
-        )
+    locked = await resolve_locked_module_config("summarization")
+    if locked is not None:
         return {
             "transcript": row["transcript"],
             "title": row.get("title") or "",
             "resource_id": str(row["resource_id"]),
-            "provider_key": admin_provider_key,
-            "provider_config": {
-                "api_key": governance.api_key,
-                "base_url": governance.base_url,
-                "app_id": "",
-                "model": governance.model,
-            },
+            "provider_key": locked.provider_key,
+            "provider_config": locked.provider_config,
         }
     # ── End governance gate ─────────────────────────────────────────────────
 

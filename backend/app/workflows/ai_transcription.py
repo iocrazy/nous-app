@@ -48,74 +48,24 @@ async def load_transcribe_inputs(parsed_media_id: int, user_id: str) -> dict[str
     if not audio_path:
         raise RuntimeError(f"no audio_path for parsed_media={parsed_media_id}")
 
-    # ── Governance gate ─────────────────────────────────────────────────
+    # ── Governance gate (shared helper — platform-catalog first) ────────
     # Check BEFORE consulting user settings so a locked module short-circuits
-    # without depending on the user having settings configured.
-    from app.services.ai.adapters.factory import provider_key_for_model
-    from app.services.ai.governance.ai_governance import get_module_governance
+    # without depending on the user having settings configured. The shared
+    # resolver tries the platform catalog first, then the admin's manual
+    # config; unknown/absent model prefix falls back to "openai" (Whisper API),
+    # matching the volcengine/whisper dispatch below.
+    from app.services.ai.governance.ai_governance import resolve_locked_module_config
 
-    governance = await get_module_governance("transcription")
-    if not governance.allowed:
-        # Admin may have locked transcription TO a platform-catalog model (picked
-        # via the governance dropdown). Resolve it ungated — base_url/key/app_id
-        # come from the catalog, so api_key_present (the manual field) is blank.
-        if governance.model:
-            from app.services.ai.providers.ai_provider_helpers import (
-                resolve_platform_model,
-            )
-
-            try:
-                platform = await resolve_platform_model(governance.model)
-            except RuntimeError:
-                platform = None
-            if platform is not None:
-                p_key, p_cfg, _p_model = platform
-                logger.info(
-                    f"[governance] transcription locked to platform model "
-                    f"{governance.model!r} → provider {p_key!r}"
-                )
-                return {
-                    "audio_path": audio_path,
-                    "resource_id": str(media_row["resource_id"]),
-                    "platform_id": media_row["platform_id"],
-                    "provider_key": p_key,
-                    "provider_config": p_cfg,
-                    "language": "auto",
-                    "task_assignment": "",
-                }
-        if not governance.api_key_present:
-            logger.error(
-                "[governance] transcription is admin-locked but no admin api_key "
-                "is configured; failing closed — WhisperService has no env fallback"
-            )
-            raise RuntimeError(
-                "AI module 'transcription' is admin-locked but no admin API key "
-                "is configured. Contact your platform administrator."
-            )
-        # Derive provider key from admin model prefix.  Volcengine is a special
-        # ASR path; unknown prefix falls back to "openai" (Whisper API).
-        try:
-            admin_provider_key = (
-                provider_key_for_model(governance.model)
-                if governance.model
-                else "openai"
-            )
-        except ValueError:
-            admin_provider_key = "openai"
-        logger.info(
-            f"[governance] transcription locked by admin; using admin config "
-            f"(provider_key={admin_provider_key!r} model={governance.model!r})"
-        )
+    locked = await resolve_locked_module_config(
+        "transcription", default_provider_key="openai"
+    )
+    if locked is not None:
         return {
             "audio_path": audio_path,
             "resource_id": str(media_row["resource_id"]),
             "platform_id": media_row["platform_id"],
-            "provider_key": admin_provider_key,
-            "provider_config": {
-                "api_key": governance.api_key,
-                "base_url": governance.base_url,
-                "model": governance.model,
-            },
+            "provider_key": locked.provider_key,
+            "provider_config": locked.provider_config,
             "language": "auto",
             "task_assignment": "",
         }
