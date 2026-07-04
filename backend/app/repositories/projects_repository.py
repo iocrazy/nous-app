@@ -618,6 +618,9 @@ class ProjectsRepository:
 
         parsed_media has no ownership column (dropped in migration 083);
         ownership lives on resources.creator_id via resources.media_id.
+
+        This backs a security check, so it FAILS CLOSED: raises on lookup
+        failure — callers must not treat an error as an ownership pass.
         """
         try:
             async with read_scope() as session:
@@ -629,7 +632,7 @@ class ProjectsRepository:
                 return str(creator) if creator else None
         except Exception as e:
             logger.error(f"Failed to get media creator for {media_id}: {e}")
-            return None
+            raise
 
     # ------------------------------------------------------------------ #
     # File versions

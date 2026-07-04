@@ -132,8 +132,6 @@ async def update_project(
         return {"success": True, "data": project}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except PermissionError as e:
-        raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to update project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to update project")

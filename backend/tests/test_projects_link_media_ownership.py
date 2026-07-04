@@ -82,6 +82,20 @@ async def test_link_media_creator_match_is_allowed() -> None:
     create_file.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_link_media_creator_lookup_failure_fails_closed() -> None:
+    """A DB error during the ownership lookup must NOT read as 'orphan media':
+    the exception propagates out of link_media (router → 500) and no
+    project_files row is created. Security checks fail closed."""
+    svc, create_file = _svc_with_mocks(media_creator=None)
+    svc.repo.get_media_creator = AsyncMock(side_effect=RuntimeError("db blip"))
+    with pytest.raises(RuntimeError):
+        await svc.link_media(
+            project_id=_PROJECT_ID, media_id=_MEDIA_ID, user_id=_OTHER_ID
+        )
+    create_file.assert_not_awaited()
+
+
 # ── repository: emitted statement targets resources.creator_id ──────────
 
 
@@ -131,3 +145,17 @@ async def test_get_media_creator_returns_none_when_no_resource_row() -> None:
     session = _ScalarSession(None)
     with patch.object(orm_mod, "read_scope", lambda: _ScopeCtx(session)):
         assert await ProjectsRepository().get_media_creator(_MEDIA_ID) is None
+
+
+class _FailingSession:
+    async def scalar(self, stmt):
+        raise RuntimeError("connection reset")
+
+
+@pytest.mark.asyncio
+async def test_get_media_creator_db_error_raises_not_none() -> None:
+    """FAIL CLOSED: a lookup failure must raise, never return None — None
+    means 'orphan media, allow', and a DB blip must not grant access."""
+    with patch.object(orm_mod, "read_scope", lambda: _ScopeCtx(_FailingSession())):
+        with pytest.raises(RuntimeError):
+            await ProjectsRepository().get_media_creator(_MEDIA_ID)
