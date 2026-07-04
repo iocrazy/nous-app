@@ -136,6 +136,7 @@ from app.models.storyboard import (  # noqa: F401
 from app.models.teams import (  # noqa: F401
     FileVersions,
     MemberQuotas,
+    ProjectFileComments,
     ProjectFiles,
     ProjectFolders,
     ProjectMembers,
@@ -266,6 +267,7 @@ __all__ = [
     # teams
     "FileVersions",
     "MemberQuotas",
+    "ProjectFileComments",
     "ProjectFiles",
     "ProjectFolders",
     "ProjectMembers",
