@@ -30,9 +30,9 @@ from app.repositories.agent_repository import get_agent_repository
 from app.repositories.skill_repository import get_skill_repository
 from app.services.ai.adapters.factory import get_adapter, provider_key_for_model
 from app.services.ai.chat.ai_library_chat_wiring import build_agent_runner_stack
-from app.services.ai.chat.legacy_ai_store import LegacyAiStore
 from app.services.ai.chat.message_store import MessageStore
 from app.services.ai.chat.resource_ref_resolver import resolve_resource_refs
+from app.services.ai.chat.store_router import RoutedAiStore
 from app.services.ai.prompts.prompt_composer import (
     ComposerInput,
     PromptComposer,
@@ -68,7 +68,7 @@ class AILibraryChatService:
     """
 
     def __init__(self, store: Optional[MessageStore] = None) -> None:
-        self._store = store or LegacyAiStore()
+        self._store = store or RoutedAiStore()
 
     # ------------------------------------------------------------------
     # Sessions
