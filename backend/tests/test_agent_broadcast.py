@@ -1,12 +1,19 @@
-"""Unit tests for ChatBroadcastRepository (Task 1: Agent Broadcast).
+"""Unit tests for ChatBroadcastRepository (Task 1: Agent Broadcast; P3 W0 repoint).
 
 Tests cover:
-  - list_broadcast_candidate_channels: joins agent_channels + channels (non-archived),
-    groups agent_ids per channel.
+  - list_broadcast_candidate_channels: joins conversation_members + conversations
+    (member_type='agent', non-archived, excludes 1:1 direct_agent), groups
+    agent_ids per conversation. Output dict key names are retained from the
+    pre-Phase-3 legacy-table shape ("channel_id"/"team_id") even though the
+    values now come from conversations — see chat_broadcast_repository.py
+    docstring for the rationale (keeps the service layer's send_message call
+    the only Phase-3 touch point besides this query).
   - completed_workflow_counts_since: filters status='completed', task_kind='workflow',
     completed_at > :since; scopes to team via JOIN team_members on team_id (no array-bind).
+    Unchanged by Phase 3 (reads task_tracking/team_members only, no channel FK).
   - get_watermark / set_watermark: read/write system_settings under
-    broadcast_watermark_channel_{id} key.
+    broadcast_watermark_channel_{id} key. Unchanged by Phase 3 (system_settings
+    has no FK to channels; the key is an opaque string built from an id).
 
 Mocking follows the pattern in test_chat_edit_delete.py and test_chat_user_mention.py:
 patch("app.db.engine.<method>", fake_async_fn).
@@ -43,9 +50,11 @@ _SINCE = datetime(2026, 6, 26, 12, 0, 0, tzinfo=timezone.utc)
 
 
 @pytest.mark.asyncio
-async def test_candidate_channels_sql_joins_agent_channels_and_channels():
-    """SQL must JOIN agent_channels with channels, filter is_archived=false,
-    and aggregate agent_ids per channel."""
+async def test_candidate_channels_sql_joins_conversation_members_and_conversations():
+    """SQL must JOIN conversation_members with conversations, filter on
+    member_type='agent', archived_at IS NULL, exclude type='direct_agent'
+    (1:1 agent DMs never broadcast into), and aggregate agent_ids per
+    conversation. Legacy agent_channels/channels tables must NOT appear."""
     captured: dict = {}
 
     async def fake_fetch_all(sql, params=None):
@@ -62,13 +71,19 @@ async def test_candidate_channels_sql_joins_agent_channels_and_channels():
         result = await _REPO.list_broadcast_candidate_channels()
 
     sql = captured["sql"]
-    assert "agent_channels" in sql, "SQL must reference agent_channels"
-    assert "channels" in sql, "SQL must JOIN channels"
-    assert "is_archived" in sql, "SQL must filter on is_archived"
+    assert "conversation_members" in sql, "SQL must reference conversation_members"
+    assert "conversations" in sql, "SQL must JOIN conversations"
+    assert "member_type" in sql, "SQL must filter on member_type='agent'"
+    assert "archived_at" in sql, "SQL must filter on archived_at IS NULL"
+    assert "direct_agent" in sql, "SQL must exclude type='direct_agent' (1:1 DMs)"
     assert "agent_id" in sql, "SQL must select/aggregate agent_id"
+    assert "agent_channels" not in sql, "Legacy agent_channels table must be gone"
+    assert "is_archived" not in sql, "Legacy is_archived column must be gone"
 
     assert len(result) == 1
     ch = result[0]
+    # Field names retained from the legacy shape ("channel_id"/"team_id") —
+    # the value is now a conversations.id / conversations.scope_id.
     assert ch["channel_id"] == _CHAN_ID
     assert ch["team_id"] == _TEAM_ID
     assert _AGENT_ID_1 in ch["agent_ids"]
@@ -395,10 +410,14 @@ def _make_repos(
     watermark=_WM_TS,
     counts_ret=None,
 ):
-    """Return (broadcast_repo_mock, chat_repo_mock, agent_repo_mock).
+    """Return (broadcast_repo_mock, conversation_repo_mock, agent_repo_mock).
 
     Note: team_member_ids is no longer called by the service — the repo now
     JOINs team_members internally via completed_workflow_counts_since(team_id, wm).
+
+    P3 W0: the message write now goes through ConversationRepository.send_message
+    (conversation_id/type/parent_id/from_agent_id) instead of the legacy
+    ChatRepository.send_message (channel_id/content_type/reply_to_id/from_bot_agent_id).
     """
     broadcast_repo = MagicMock()
     broadcast_repo.list_broadcast_candidate_channels = AsyncMock(
@@ -410,14 +429,14 @@ def _make_repos(
     )
     broadcast_repo.set_watermark = AsyncMock()
 
-    chat_repo = MagicMock()
-    chat_repo.send_message = AsyncMock(return_value={"id": 999, "seq": 1})
+    conv_repo = MagicMock()
+    conv_repo.send_message = AsyncMock(return_value={"id": 999, "seq": 1})
 
     agent_repo = MagicMock()
     _agent_val = agent if agent is not None else _agent(auto_broadcast=True)
     agent_repo.get_by_id = AsyncMock(return_value=_agent_val)
 
-    return broadcast_repo, chat_repo, agent_repo
+    return broadcast_repo, conv_repo, agent_repo
 
 
 _SVC = "app.services.chat.agent_broadcast"
@@ -433,7 +452,7 @@ async def test_perm11_auto_broadcast_false_skips_post():
 
     with (
         patch(f"{_SVC}.get_broadcast_repository", return_value=br),
-        patch(f"{_SVC}.get_chat_repository", return_value=cr),
+        patch(f"{_SVC}.get_conversation_repository", return_value=cr),
         patch(f"{_SVC}.get_agent_repository", return_value=ar),
     ):
         result = await scan_and_broadcast()
@@ -453,18 +472,18 @@ async def test_happy_path_eligible_agent_posts_once():
 
     with (
         patch(f"{_SVC}.get_broadcast_repository", return_value=br),
-        patch(f"{_SVC}.get_chat_repository", return_value=cr),
+        patch(f"{_SVC}.get_conversation_repository", return_value=cr),
         patch(f"{_SVC}.get_agent_repository", return_value=ar),
     ):
         result = await scan_and_broadcast()
 
     cr.send_message.assert_called_once()
     call_kwargs = cr.send_message.call_args.kwargs
-    assert call_kwargs["channel_id"] == _BC_CHAN_ID
+    assert call_kwargs["conversation_id"] == _BC_CHAN_ID
     assert call_kwargs["sender_id"] is None
     assert call_kwargs["sender_type"] == "agent"
-    assert call_kwargs["content_type"] == "text"
-    assert call_kwargs["from_bot_agent_id"] == _BC_AGENT_ID
+    assert call_kwargs["type"] == "text"
+    assert call_kwargs["from_agent_id"] == _BC_AGENT_ID
     assert "text" in call_kwargs["body"]
 
     assert result["channels_scanned"] == 1
@@ -481,7 +500,7 @@ async def test_no_backfill_first_run_sets_watermark_no_post():
 
     with (
         patch(f"{_SVC}.get_broadcast_repository", return_value=br),
-        patch(f"{_SVC}.get_chat_repository", return_value=cr),
+        patch(f"{_SVC}.get_conversation_repository", return_value=cr),
         patch(f"{_SVC}.get_agent_repository", return_value=ar),
     ):
         result = await scan_and_broadcast()
@@ -520,7 +539,7 @@ async def test_no_double_post_zero_counts_no_send():
 
     with (
         patch(f"{_SVC}.get_broadcast_repository", return_value=br),
-        patch(f"{_SVC}.get_chat_repository", return_value=cr),
+        patch(f"{_SVC}.get_conversation_repository", return_value=cr),
         patch(f"{_SVC}.get_agent_repository", return_value=ar),
     ):
         result = await scan_and_broadcast()
@@ -589,7 +608,7 @@ async def test_watermark_advances_to_max_completed_at_after_post():
 
     with (
         patch(f"{_SVC}.get_broadcast_repository", return_value=br),
-        patch(f"{_SVC}.get_chat_repository", return_value=cr),
+        patch(f"{_SVC}.get_conversation_repository", return_value=cr),
         patch(f"{_SVC}.get_agent_repository", return_value=ar),
     ):
         await scan_and_broadcast()
@@ -648,7 +667,7 @@ async def test_one_bad_channel_does_not_abort_scan():
 
     with (
         patch(f"{_SVC}.get_broadcast_repository", return_value=br),
-        patch(f"{_SVC}.get_chat_repository", return_value=cr),
+        patch(f"{_SVC}.get_conversation_repository", return_value=cr),
         patch(f"{_SVC}.get_agent_repository", return_value=ar),
     ):
         result = await scan_and_broadcast()
@@ -656,7 +675,7 @@ async def test_one_bad_channel_does_not_abort_scan():
     # Channel B must have been processed despite channel A failing
     cr.send_message.assert_called_once()
     send_kwargs = cr.send_message.call_args.kwargs
-    assert send_kwargs["channel_id"] == _CHAN_B
+    assert send_kwargs["conversation_id"] == _CHAN_B
 
     assert result["channels_scanned"] == 2
     assert result["messages_posted"] == 1

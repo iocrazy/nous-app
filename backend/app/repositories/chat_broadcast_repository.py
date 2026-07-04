@@ -1,10 +1,25 @@
 """Read-only broadcast queries + per-channel watermark for Agent Broadcast.
 
 Provides data access for the DBOS broadcast scanner:
-  - Candidate channels (non-archived channels that have ≥1 agent in agent_channels)
+  - Candidate conversations (non-archived, non-1:1 conversations that have ≥1
+    agent member in conversation_members) — repointed in Phase 3 W0 from the
+    legacy agent_channels ⋈ channels tables (mig 333 drops those tables).
   - Team member user_ids
   - Completed workflow counts since a watermark timestamp (READ ONLY on task_tracking)
   - Watermark get/set in system_settings
+
+Phase 3 W0 note (candidate query only):
+  list_broadcast_candidate_channels() now reads conversations/conversation_members
+  instead of channels/agent_channels. The returned dict keys ("channel_id",
+  "team_id", "agent_ids") are intentionally UNCHANGED from the legacy shape —
+  "channel_id" now carries a conversations.id and "team_id" a
+  conversations.scope_id — so the broadcast service loop and its watermark/
+  dedup handling stay untouched. Only the message-send call in
+  services/chat/agent_broadcast.py was updated, to target
+  ConversationRepository.send_message (conversations/messages are the only
+  write path left once channel_messages is retired). completed_workflow_counts_since
+  and get_watermark/set_watermark are unaffected: they never referenced
+  channels/agent_channels (task_tracking + team_members + system_settings only).
 
 Security note (SEC-AGENT-05):
   completed_workflow_counts_since() returns ONLY aggregate counts + task_kind enum.
@@ -42,19 +57,27 @@ class ChatBroadcastRepository:
     """Read-only broadcast queries + per-channel watermark."""
 
     async def list_broadcast_candidate_channels(self) -> list[dict]:
-        """Return non-archived channels that have ≥1 agent in agent_channels.
+        """Return non-archived group/public conversations with ≥1 agent member.
 
         Each entry: {"channel_id": int, "team_id": int, "agent_ids": list[str]}
+        ("channel_id" holds a conversations.id, "team_id" a conversations.scope_id
+        — field names retained from the pre-Phase-3 shape, see module docstring).
+
+        Excludes type='direct_agent' (1:1 agent DMs): broadcast only targets
+        shared team conversations, matching the pre-Phase-3 semantics where
+        agent_channels/channels had no 1:1 concept at all.
         """
         rows = await db_engine.fetch_all(
             """
-            SELECT ac.channel_id,
-                   c.team_id,
-                   array_agg(ac.agent_id::text) AS agent_ids
-              FROM public.agent_channels ac
-              JOIN public.channels c ON c.id = ac.channel_id
-             WHERE c.is_archived = false
-             GROUP BY ac.channel_id, c.team_id
+            SELECT c.id AS channel_id,
+                   c.scope_id AS team_id,
+                   array_agg(cm.agent_id::text) AS agent_ids
+              FROM public.conversation_members cm
+              JOIN public.conversations c ON c.id = cm.conversation_id
+             WHERE cm.member_type = 'agent'
+               AND c.archived_at IS NULL
+               AND c.type <> 'direct_agent'
+             GROUP BY c.id, c.scope_id
             """
         )
         result = []
