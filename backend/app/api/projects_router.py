@@ -14,7 +14,10 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from loguru import logger
 
 from app.core.deps import AuthDep
-from app.core.scope_guards import verify_project_write_access
+from app.core.scope_guards import (
+    verify_project_read_access,
+    verify_project_write_access,
+)
 from app.schemas.projects import (
     AddMemberRequest,
     CreateCollectionRequest,
@@ -94,7 +97,11 @@ async def create_project(data: ProjectCreate, auth: AuthDep):
 
 
 @router.get("/{project_id}")
-async def get_project(project_id: str, auth: AuthDep):
+async def get_project(
+    project_id: str,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_read_access),
+):
     """Get a single project by ID with file count."""
     try:
         svc = ProjectsService()
@@ -108,8 +115,13 @@ async def get_project(project_id: str, auth: AuthDep):
 
 
 @router.put("/{project_id}")
-async def update_project(project_id: str, data: ProjectUpdate, auth: AuthDep):
-    """Update a project. Only the owner can update."""
+async def update_project(
+    project_id: str,
+    data: ProjectUpdate,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
+    """Update a project. Owner, team member, or manager/editor project member."""
     try:
         svc = ProjectsService()
         project = await svc.update_project(
@@ -128,7 +140,11 @@ async def update_project(project_id: str, data: ProjectUpdate, auth: AuthDep):
 
 
 @router.delete("/{project_id}")
-async def delete_project(project_id: str, auth: AuthDep):
+async def delete_project(
+    project_id: str,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
     """Delete a project and all its files. Only the owner can delete."""
     try:
         svc = ProjectsService()
@@ -152,12 +168,11 @@ async def delete_project(project_id: str, auth: AuthDep):
 async def get_style_profile(
     project_id: str,
     auth: AuthDep,
-    _project_guard: None = Depends(verify_project_write_access),
+    _project_guard: None = Depends(verify_project_read_access),
 ):
     """The project's style profile, or null when none has been saved yet.
 
-    Access: project owner or a member of the project's team (the guard
-    despite its name checks membership, which is also the read rule)."""
+    Access: owner, team member, or any project_members role (read guard)."""
     from app.repositories.project_style_profile_repository import (
         get_project_style_profile_repository,
     )
@@ -224,7 +239,7 @@ async def list_stage_catalog(auth: AuthDep):
 async def get_current_stage(
     project_id: str,
     auth: AuthDep,
-    _project_guard: None = Depends(verify_project_write_access),
+    _project_guard: None = Depends(verify_project_read_access),
 ):
     """The project's current SOP stage, or null when none has been set."""
     from app.repositories.project_stages_repository import (
@@ -272,7 +287,7 @@ async def put_current_stage(
 async def get_stage_history(
     project_id: str,
     auth: AuthDep,
-    _project_guard: None = Depends(verify_project_write_access),
+    _project_guard: None = Depends(verify_project_read_access),
 ):
     """Append-only SOP stage transition history for a project."""
     from app.repositories.project_stages_repository import (
@@ -302,6 +317,7 @@ async def list_files(
     auth: AuthDep,
     include_trashed: bool = Query(False, description="Include trashed files"),
     folder_id: Optional[str] = Query(None, description="Filter by folder ID"),
+    _project_guard: None = Depends(verify_project_read_access),
 ):
     """List files in a project, optionally filtered by folder."""
     try:
@@ -355,7 +371,12 @@ async def upload_file(
 
 
 @router.post("/{project_id}/files/link-media")
-async def link_media(project_id: str, data: LinkMediaRequest, auth: AuthDep):
+async def link_media(
+    project_id: str,
+    data: LinkMediaRequest,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
     """Link an existing media item from the library to this project."""
     try:
         svc = ProjectsService()
@@ -367,13 +388,20 @@ async def link_media(project_id: str, data: LinkMediaRequest, auth: AuthDep):
         return {"success": True, "data": result}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to link media to project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to link media")
 
 
 @router.get("/{project_id}/files/{file_id}")
-async def get_file_info(project_id: str, file_id: str, auth: AuthDep):
+async def get_file_info(
+    project_id: str,
+    file_id: str,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_read_access),
+):
     """Get detailed info for a single file."""
     try:
         svc = ProjectsService()
@@ -388,7 +416,11 @@ async def get_file_info(project_id: str, file_id: str, auth: AuthDep):
 
 @router.put("/{project_id}/files/{file_id}")
 async def update_file(
-    project_id: str, file_id: str, data: ProjectFileUpdate, auth: AuthDep
+    project_id: str,
+    file_id: str,
+    data: ProjectFileUpdate,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
 ):
     """Update file metadata (rename, add notes, trash/restore)."""
     try:
@@ -405,7 +437,12 @@ async def update_file(
 
 
 @router.put("/{project_id}/files/{file_id}/restore")
-async def restore_file(project_id: str, file_id: str, auth: AuthDep):
+async def restore_file(
+    project_id: str,
+    file_id: str,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
     """Restore a trashed file."""
     try:
         svc = ProjectsService()
@@ -419,7 +456,11 @@ async def restore_file(project_id: str, file_id: str, auth: AuthDep):
 
 
 @router.get("/{project_id}/shares")
-async def list_project_shares(project_id: str, auth: AuthDep):
+async def list_project_shares(
+    project_id: str,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_read_access),
+):
     """List all shares for files in this project."""
     try:
         svc = ProjectsService()
@@ -431,7 +472,12 @@ async def list_project_shares(project_id: str, auth: AuthDep):
 
 
 @router.post("/{project_id}/shares")
-async def create_share(project_id: str, data: CreateShareRequest, auth: AuthDep):
+async def create_share(
+    project_id: str,
+    data: CreateShareRequest,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
     """Create a share link for a project file."""
     try:
         svc = ProjectsService()
@@ -458,6 +504,7 @@ async def list_folders(
     parent_id: Optional[str] = Query(
         None, description="Parent folder ID, null for root"
     ),
+    _project_guard: None = Depends(verify_project_read_access),
 ):
     """List folders in a project."""
     try:
@@ -470,7 +517,12 @@ async def list_folders(
 
 
 @router.post("/{project_id}/folders")
-async def create_folder(project_id: str, data: CreateFolderRequest, auth: AuthDep):
+async def create_folder(
+    project_id: str,
+    data: CreateFolderRequest,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
     """Create a new folder in a project."""
     try:
         svc = ProjectsService()
@@ -485,7 +537,11 @@ async def create_folder(project_id: str, data: CreateFolderRequest, auth: AuthDe
 
 @router.put("/{project_id}/folders/{folder_id}")
 async def rename_folder(
-    project_id: str, folder_id: str, data: RenameFolderRequest, auth: AuthDep
+    project_id: str,
+    folder_id: str,
+    data: RenameFolderRequest,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
 ):
     """Rename a folder."""
     try:
@@ -500,7 +556,12 @@ async def rename_folder(
 
 
 @router.delete("/{project_id}/folders/{folder_id}")
-async def delete_folder(project_id: str, folder_id: str, auth: AuthDep):
+async def delete_folder(
+    project_id: str,
+    folder_id: str,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
     """Delete a folder (files inside are moved to parent)."""
     try:
         svc = ProjectsService()
@@ -515,7 +576,11 @@ async def delete_folder(project_id: str, folder_id: str, auth: AuthDep):
 
 @router.put("/{project_id}/files/{file_id}/move")
 async def move_file(
-    project_id: str, file_id: str, data: MoveFileRequest, auth: AuthDep
+    project_id: str,
+    file_id: str,
+    data: MoveFileRequest,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
 ):
     """Move a file to a different folder."""
     try:
@@ -530,7 +595,12 @@ async def move_file(
 
 
 @router.delete("/{project_id}/files/{file_id}")
-async def delete_file(project_id: str, file_id: str, auth: AuthDep):
+async def delete_file(
+    project_id: str,
+    file_id: str,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
     """Permanently delete a file record."""
     try:
         svc = ProjectsService()
@@ -549,7 +619,12 @@ async def delete_file(project_id: str, file_id: str, auth: AuthDep):
 
 
 @router.get("/{project_id}/files/{file_id}/versions")
-async def list_versions(project_id: str, file_id: str, auth: AuthDep):
+async def list_versions(
+    project_id: str,
+    file_id: str,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_read_access),
+):
     """List all versions of a file."""
     try:
         svc = ProjectsService()
@@ -609,6 +684,7 @@ async def list_comments(
     file_id: str,
     auth: AuthDep,
     version_id: Optional[str] = Query(None, description="Filter by version ID"),
+    _project_guard: None = Depends(verify_project_read_access),
 ):
     """List comments on a file."""
     try:
@@ -628,6 +704,7 @@ async def add_comment(
     file_id: str,
     data: CreateCommentRequest,
     auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
 ):
     """Add a comment to a file."""
     try:
@@ -650,7 +727,13 @@ async def add_comment(
 
 
 @router.delete("/{project_id}/files/{file_id}/comments/{comment_id}")
-async def delete_comment(project_id: str, file_id: str, comment_id: str, auth: AuthDep):
+async def delete_comment(
+    project_id: str,
+    file_id: str,
+    comment_id: str,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
     """Delete a comment. Only the author can delete their own comment."""
     try:
         svc = ProjectsService()
@@ -672,7 +755,11 @@ async def delete_comment(project_id: str, file_id: str, comment_id: str, auth: A
 
 @router.put("/{project_id}/files/{file_id}/review-status")
 async def update_review_status(
-    project_id: str, file_id: str, data: ReviewStatusUpdate, auth: AuthDep
+    project_id: str,
+    file_id: str,
+    data: ReviewStatusUpdate,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
 ):
     """Update the review status of a file."""
     try:
@@ -697,7 +784,11 @@ async def update_review_status(
 
 
 @router.get("/{project_id}/tasks")
-async def list_tasks(project_id: str, auth: AuthDep):
+async def list_tasks(
+    project_id: str,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_read_access),
+):
     """List all tasks for a project."""
     try:
         svc = ProjectsService()
@@ -709,7 +800,12 @@ async def list_tasks(project_id: str, auth: AuthDep):
 
 
 @router.post("/{project_id}/tasks")
-async def create_task(project_id: str, data: TaskCreateRequest, auth: AuthDep):
+async def create_task(
+    project_id: str,
+    data: TaskCreateRequest,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
     """Create a new task in a project."""
     try:
         svc = ProjectsService()
@@ -724,7 +820,11 @@ async def create_task(project_id: str, data: TaskCreateRequest, auth: AuthDep):
 
 @router.put("/{project_id}/tasks/{task_id}")
 async def update_task(
-    project_id: str, task_id: str, data: TaskUpdateRequest, auth: AuthDep
+    project_id: str,
+    task_id: str,
+    data: TaskUpdateRequest,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
 ):
     """Update a task."""
     try:
@@ -742,7 +842,12 @@ async def update_task(
 
 
 @router.delete("/{project_id}/tasks/{task_id}")
-async def delete_task(project_id: str, task_id: str, auth: AuthDep):
+async def delete_task(
+    project_id: str,
+    task_id: str,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
     """Delete a task."""
     try:
         svc = ProjectsService()
@@ -759,7 +864,11 @@ async def delete_task(project_id: str, task_id: str, auth: AuthDep):
 
 
 @router.get("/{project_id}/members")
-async def list_members(project_id: str, auth: AuthDep):
+async def list_members(
+    project_id: str,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_read_access),
+):
     """List all members of a project."""
     try:
         svc = ProjectsService()
@@ -771,7 +880,12 @@ async def list_members(project_id: str, auth: AuthDep):
 
 
 @router.post("/{project_id}/members")
-async def add_member(project_id: str, data: AddMemberRequest, auth: AuthDep):
+async def add_member(
+    project_id: str,
+    data: AddMemberRequest,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
     """Add a member to a project."""
     try:
         svc = ProjectsService()
@@ -789,7 +903,11 @@ async def add_member(project_id: str, data: AddMemberRequest, auth: AuthDep):
 
 @router.put("/{project_id}/members/{member_id}")
 async def update_member_role(
-    project_id: str, member_id: str, data: UpdateMemberRoleRequest, auth: AuthDep
+    project_id: str,
+    member_id: str,
+    data: UpdateMemberRoleRequest,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
 ):
     """Update a member's role."""
     try:
@@ -804,7 +922,12 @@ async def update_member_role(
 
 
 @router.delete("/{project_id}/members/{member_id}")
-async def remove_member(project_id: str, member_id: str, auth: AuthDep):
+async def remove_member(
+    project_id: str,
+    member_id: str,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
     """Remove a member from a project."""
     try:
         svc = ProjectsService()
@@ -821,7 +944,11 @@ async def remove_member(project_id: str, member_id: str, auth: AuthDep):
 
 
 @router.get("/{project_id}/collections")
-async def list_collections(project_id: str, auth: AuthDep):
+async def list_collections(
+    project_id: str,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_read_access),
+):
     """List all collection links for a project."""
     try:
         svc = ProjectsService()
@@ -834,7 +961,10 @@ async def list_collections(project_id: str, auth: AuthDep):
 
 @router.post("/{project_id}/collections")
 async def create_collection(
-    project_id: str, data: CreateCollectionRequest, auth: AuthDep
+    project_id: str,
+    data: CreateCollectionRequest,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
 ):
     """Create a collection link for external file uploads."""
     try:
@@ -849,7 +979,12 @@ async def create_collection(
 
 
 @router.delete("/{project_id}/collections/{collection_id}")
-async def delete_collection(project_id: str, collection_id: str, auth: AuthDep):
+async def delete_collection(
+    project_id: str,
+    collection_id: str,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
     """Delete a collection link."""
     try:
         svc = ProjectsService()

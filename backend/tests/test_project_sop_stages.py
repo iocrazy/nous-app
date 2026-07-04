@@ -271,7 +271,10 @@ def client(monkeypatch: pytest.MonkeyPatch):
 
     pr = importlib.import_module("app.api.projects_router")
     from app.core.deps import AuthContext, get_auth
-    from app.core.scope_guards import verify_project_write_access
+    from app.core.scope_guards import (
+        verify_project_read_access,
+        verify_project_write_access,
+    )
 
     app = FastAPI()
     app.include_router(pr.router, prefix="/api/v1")
@@ -280,6 +283,7 @@ def client(monkeypatch: pytest.MonkeyPatch):
         auth_type="jwt",
     )
     app.dependency_overrides[verify_project_write_access] = lambda: None
+    app.dependency_overrides[verify_project_read_access] = lambda: None
     return TestClient(app)
 
 
