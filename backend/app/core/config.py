@@ -89,14 +89,6 @@ class Settings(BaseSettings):
         "ORM background diff) for parity validation. Independent of USE_ORM_*. "
         "Empty = no shadowing (fully inert).",
     )
-    USE_ORM_AGENT_RUNS: bool = Field(
-        default=False,
-        description="Route AgentRunsRepository through the SQLAlchemy 2.0 ORM "
-        "session layer (Task 5.3 — replaces the asyncpg agent_runs path; fixes "
-        "the silent-rollback P0 by committing writes via write_scope(). Covers "
-        "list_by_agent / get_by_id / list_children reads + request_cancel / "
-        "mark_heartbeat_lost writes + monthly_usage_by_agent aggregation)",
-    )
     USE_ORM_AGENTS: bool = Field(
         default=False,
         description="Route AgentRepository through the SQLAlchemy 2.0 ORM "
