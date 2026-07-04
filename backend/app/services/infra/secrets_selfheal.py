@@ -19,6 +19,13 @@ material that is either:
 4. ``user_mcp_servers.bearer_token`` (raw Fernet, no ``enc:v1:`` marker —
    that repo's own scheme; healed dev-keyed → real-keyed, and legacy
    plaintext → encrypted)
+5. ``user_settings.settings_json['ai_settings']['ai_providers']`` per-provider
+   ``api_key`` (secret-at-rest Phase 2, BYOK) — ``api_key`` may be a plain
+   ``str`` OR a ``list[str]`` (Sprint 2 multi-key rotation); each element is
+   healed independently. Written back with a TARGETED ``jsonb_set`` on the
+   ``{ai_settings,ai_providers}`` path only — never a whole-column replace —
+   so sibling ``settings_json`` keys (``parse_mode``, General settings, other
+   ``ai_settings`` fields) are untouched (the #485 clobber rule).
 
 Idempotent: values already decryptable under the real key (marker check +
 strict decrypt probe) are skipped, so a second pass rewrites 0 rows. Emits
@@ -199,6 +206,74 @@ async def _heal_mediahub_models() -> int:
     return rewritten
 
 
+def _heal_byok_field(value: Any) -> Optional[Any]:
+    """Healed replacement for one BYOK ``api_key`` field (``str`` or
+    ``list[str]`` — Sprint 2 multi-key rotation), or ``None`` when nothing in
+    it needs rewriting.
+
+    List elements are healed independently via ``_heal_marked_value``; a list
+    with a mix of already-healthy and needs-healing elements returns a NEW
+    list with only the needing elements replaced (the rest carried over
+    byte-for-byte)."""
+    if isinstance(value, list):
+        healed_elems = [
+            _heal_marked_value(v) if isinstance(v, str) else None for v in value
+        ]
+        if not any(h is not None for h in healed_elems):
+            return None
+        return [
+            healed if healed is not None else original
+            for healed, original in zip(healed_elems, value)
+        ]
+    return _heal_marked_value(value)
+
+
+async def _heal_user_settings_ai_providers() -> int:
+    """Rewrite plaintext/dev-keyed BYOK ``api_key`` fields inside
+    ``user_settings.settings_json.ai_settings.ai_providers``, one row at a
+    time. Counts rewritten FIELDS (matching ``_heal_platform_providers``).
+
+    Uses a TARGETED ``jsonb_set`` on the ``{ai_settings,ai_providers}`` path
+    — never a whole-``settings_json`` replace — so every other top-level key
+    (``parse_mode``, General settings) and every other ``ai_settings`` field
+    (``whisper_provider``, ``task_assignment``, ...) survives untouched (the
+    #485 clobber rule)."""
+    from app.db import engine as db_engine
+
+    rows = await db_engine.fetch_all(
+        "SELECT user_id, settings_json -> 'ai_settings' -> 'ai_providers' "
+        "AS ai_providers FROM public.user_settings "
+        "WHERE settings_json -> 'ai_settings' -> 'ai_providers' IS NOT NULL"
+    )
+    total_rewritten = 0
+    for row in rows:
+        raw = row["ai_providers"]
+        if not isinstance(raw, dict):
+            continue
+        merged: Dict[str, Any] = {}
+        row_rewritten = 0
+        for name, entry in raw.items():
+            if not isinstance(entry, dict):
+                merged[name] = entry
+                continue
+            new_entry = dict(entry)
+            if "api_key" in new_entry:
+                healed = _heal_byok_field(new_entry["api_key"])
+                if healed is not None:
+                    new_entry["api_key"] = healed
+                    row_rewritten += 1
+            merged[name] = new_entry
+        if row_rewritten:
+            await db_engine.execute(
+                "UPDATE public.user_settings SET settings_json = jsonb_set("
+                "settings_json, '{ai_settings,ai_providers}', CAST(:v AS jsonb)"
+                ") WHERE user_id = :uid",
+                {"v": json.dumps(merged), "uid": row["user_id"]},
+            )
+            total_rewritten += row_rewritten
+    return total_rewritten
+
+
 async def _heal_user_mcp_servers() -> int:
     from app.db import engine as db_engine
 
@@ -245,6 +320,7 @@ async def run_secrets_selfheal() -> Dict[str, Any]:
         ("platform_ai_providers", _heal_platform_providers),
         ("mediahub_models", _heal_mediahub_models),
         ("user_mcp_servers", _heal_user_mcp_servers),
+        ("user_settings_ai_providers", _heal_user_settings_ai_providers),
     ):
         try:
             summary[label] = await fn()
@@ -254,11 +330,13 @@ async def run_secrets_selfheal() -> Dict[str, Any]:
             summary["errors"] += 1
     logger.info(
         "[secrets-selfheal] done — system_settings={} platform_ai_providers={} "
-        "mediahub_models={} user_mcp_servers={} errors={}",
+        "mediahub_models={} user_mcp_servers={} user_settings_ai_providers={} "
+        "errors={}",
         summary["system_settings"],
         summary["platform_ai_providers"],
         summary["mediahub_models"],
         summary["user_mcp_servers"],
+        summary["user_settings_ai_providers"],
         summary["errors"],
     )
     return summary

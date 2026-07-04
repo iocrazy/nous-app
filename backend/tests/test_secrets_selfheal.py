@@ -37,6 +37,9 @@ class _FakeDB:
         self.system_settings: dict[str, Any] = {}
         self.mediahub_models: dict[int, str] = {}  # id → api_key
         self.user_mcp_servers: dict[int, str] = {}  # id → bearer_token
+        # user_id → full settings_json blob (mirrors the real jsonb column —
+        # used to assert the healer's jsonb_set touches ONLY ai_providers).
+        self.user_settings: dict[str, dict[str, Any]] = {}
         self.writes = 0
 
     def is_configured(self) -> bool:
@@ -61,6 +64,13 @@ class _FakeDB:
                 for i, v in self.user_mcp_servers.items()
                 if v
             ]
+        if "FROM public.user_settings" in sql:
+            rows = []
+            for uid, blob in self.user_settings.items():
+                providers = (blob.get("ai_settings") or {}).get("ai_providers")
+                if providers is not None:
+                    rows.append({"user_id": uid, "ai_providers": providers})
+            return rows
         raise AssertionError(f"unexpected fetch_all: {sql}")
 
     async def fetch_val(self, sql: str, params: dict | None = None):
@@ -82,6 +92,13 @@ class _FakeDB:
             return 1
         if "UPDATE public.user_mcp_servers" in sql:
             self.user_mcp_servers[params["id"]] = params["v"]
+            return 1
+        if "UPDATE public.user_settings" in sql:
+            # Emulates jsonb_set(settings_json, '{ai_settings,ai_providers}', v)
+            # — replaces ONLY that subtree, every sibling key survives.
+            blob = self.user_settings.setdefault(params["uid"], {})
+            ai_settings = blob.setdefault("ai_settings", {})
+            ai_settings["ai_providers"] = json.loads(params["v"])
             return 1
         raise AssertionError(f"unexpected execute: {sql}")
 
@@ -219,6 +236,98 @@ async def test_old_key_rotation_counts_as_healthy(monkeypatch, fake_db: _FakeDB)
     summary = await run_secrets_selfheal()
     assert summary["system_settings"] == 0
     assert fake_db.system_settings["graph_extractor_api_key"] == ct
+
+
+# ── user_settings.ai_providers (BYOK, secret-at-rest Phase 2) ──────
+
+
+@pytest.mark.asyncio
+async def test_user_settings_ai_providers_mixed_rows_healed(real_key, fake_db: _FakeDB):
+    """Plaintext, dev-keyed, real-keyed (skip), and multi-key list rows all
+    heal correctly; sibling settings_json keys (parse_mode, whisper_provider)
+    survive untouched — the targeted jsonb_set never whole-blob replaces."""
+    already_good = encrypt_marked("already-fine")
+    fake_db.user_settings = {
+        "user-1": {
+            "parse_mode": "auto",
+            "ai_settings": {
+                "whisper_provider": "openai",
+                "ai_providers": {
+                    "openai": {"api_key": "plain-openai", "base_url": "https://x"},
+                    "doubao": {"api_key": already_good, "enabled": True},
+                },
+            },
+        },
+        "user-2": {
+            "ai_settings": {
+                "ai_providers": {
+                    "qwen": {
+                        "api_key": [
+                            "plain-a",
+                            MARKER + _dev_encrypt("dev-b"),
+                            already_good,
+                        ]
+                    },
+                },
+            },
+        },
+        "user-3": {
+            # no ai_providers at all → not touched, not even fetched as a row
+            "ai_settings": {"whisper_provider": "local"},
+        },
+    }
+
+    summary = await run_secrets_selfheal()
+
+    assert summary["errors"] == 0
+    # Counts rewritten FIELDS (matching _heal_platform_providers), not list
+    # elements: user-1.openai.api_key (1; doubao.api_key already real-keyed,
+    # skipped) + user-2.qwen.api_key (1 field, even though 2 of its 3 list
+    # elements needed healing).
+    assert summary["user_settings_ai_providers"] == 2
+
+    u1 = fake_db.user_settings["user-1"]
+    assert u1["parse_mode"] == "auto"  # sibling top-level key untouched
+    assert u1["ai_settings"]["whisper_provider"] == "openai"  # sibling untouched
+    prov1 = u1["ai_settings"]["ai_providers"]
+    assert prov1["openai"]["api_key"].startswith(MARKER)
+    assert reveal(prov1["openai"]["api_key"]) == "plain-openai"
+    assert prov1["openai"]["base_url"] == "https://x"
+    assert prov1["doubao"]["api_key"] == already_good  # untouched, not re-encrypted
+    assert prov1["doubao"]["enabled"] is True
+
+    prov2 = fake_db.user_settings["user-2"]["ai_settings"]["ai_providers"]["qwen"][
+        "api_key"
+    ]
+    assert reveal(prov2[0]) == "plain-a"
+    assert reveal(prov2[1]) == "dev-b"
+    assert prov2[2] == already_good  # already real-keyed element, untouched
+
+    assert fake_db.user_settings["user-3"] == {
+        "ai_settings": {"whisper_provider": "local"}
+    }
+
+
+@pytest.mark.asyncio
+async def test_user_settings_ai_providers_second_pass_zero(real_key, fake_db: _FakeDB):
+    fake_db.user_settings = {
+        "user-1": {"ai_settings": {"ai_providers": {"openai": {"api_key": "plain"}}}},
+    }
+    first = await run_secrets_selfheal()
+    assert first["user_settings_ai_providers"] == 1
+
+    writes_after_first = fake_db.writes
+    second = await run_secrets_selfheal()
+    assert second["user_settings_ai_providers"] == 0
+    assert fake_db.writes == writes_after_first
+
+
+@pytest.mark.asyncio
+async def test_user_settings_ai_providers_no_rows_is_zero(real_key, fake_db: _FakeDB):
+    fake_db.user_settings = {}
+    summary = await run_secrets_selfheal()
+    assert summary["user_settings_ai_providers"] == 0
+    assert summary["errors"] == 0
 
 
 # ── POST /admin/settings/encrypt-secrets ───────────────────────────
