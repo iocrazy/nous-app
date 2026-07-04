@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Globe, Lock, X } from 'lucide-react';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { fetchTeamMembers } from '../../services/teamService';
-import { chatService } from '../../services/chatService';
+import { conversationService } from '../../services/conversationService';
 import { useToast } from '../Toast';
 import type { AILibraryAgent, Channel, TeamMember } from '../../types';
 
@@ -128,7 +128,7 @@ export default function CreateGroupModal({ teamId, open, onClose, onCreated }: P
 
     setCreating(true);
     try {
-      const ch = await chatService.createChannel({
+      const ch = await conversationService.createChannel({
         type: visibility,
         team_id: teamId,
         name: trimmed,
@@ -140,7 +140,7 @@ export default function CreateGroupModal({ teamId, open, onClose, onCreated }: P
       const selectedAgents = agents.filter(a => selectedAgentSlugs.has(a.slug));
       for (const agent of selectedAgents) {
         try {
-          await chatService.addAgent(ch.id, agent.slug);
+          await conversationService.addAgent(ch.id, agent.slug);
         } catch (err) {
           console.error('[CreateGroupModal] failed to add agent:', agent.slug, err);
           addToast(t('chat.createGroup.agentAddFailed', { name: agent.name }), 'error');

@@ -1,9 +1,10 @@
 /**
- * useMentionBadges — subscribes to real-time UPDATE events on `channel_members`
- * filtered to the current user, firing `onChange` whenever the server bumps
- * (or resets) `mention_count` for any channel the user belongs to.
+ * useMentionBadges — subscribes to real-time UPDATE events on
+ * `conversation_members` filtered to the current user, firing `onChange`
+ * whenever the server bumps (or resets) `mention_count` for any conversation
+ * the user belongs to.
  *
- * Mirrors the ref + lifecycle + null-guard pattern of useChannelRealtime.
+ * Mirrors the ref + lifecycle + null-guard pattern of useConversationRealtime.
  */
 
 import { useEffect, useRef } from 'react';
@@ -30,13 +31,13 @@ export function useMentionBadges(
         {
           event: 'UPDATE',
           schema: 'public',
-          table: 'channel_members',
+          table: 'conversation_members',
           filter: `user_id=eq.${userId}`,
         },
         (payload) => {
-          const row = payload.new as { channel_id: unknown; mention_count: unknown };
+          const row = payload.new as { conversation_id: unknown; mention_count: unknown };
           cbRef.current(
-            String(row.channel_id),
+            String(row.conversation_id),
             typeof row.mention_count === 'number' ? row.mention_count : 0,
           );
         },

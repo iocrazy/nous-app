@@ -7,8 +7,14 @@ Provides:
     boundary is enforced by the function signature itself.
 
   scan_and_broadcast() -> {"channels_scanned": int, "messages_posted": int}
-    Scans all candidate channels, gates on PERM-11 (auto_broadcast cap),
-    posts at most ONE templated summary per channel since the last watermark.
+    Scans all candidate conversations (group/public, excludes 1:1 agent DMs),
+    gates on PERM-11 (auto_broadcast cap), posts at most ONE templated summary
+    per conversation since the last watermark.
+
+  P3 W0: candidates now come from conversations/conversation_members (see
+  chat_broadcast_repository.list_broadcast_candidate_channels) and the message
+  write goes through ConversationRepository.send_message — the legacy
+  ChatRepository/channel_messages write path is no longer used here.
 
 Design invariants:
   - PERM-11: only agents with auto_broadcast=True AND enabled=True AND
@@ -18,7 +24,7 @@ Design invariants:
   - Idempotent: watermark advances to max_completed_at ONLY after a
     successful send. A crash before the post leaves watermark unchanged so
     the next scan re-evaluates the same window.
-  - Anti-loop: messages carry from_bot_agent_id → dispatch_summons returns
+  - Anti-loop: messages carry from_agent_id → dispatch_summons returns
     [] immediately for bot-authored messages (no agent recursion).
   - Bounded: at most ONE summary per channel per scan, regardless of how
     many tasks completed.
@@ -35,7 +41,7 @@ from loguru import logger
 
 from app.repositories.agent_repository import get_agent_repository
 from app.repositories.chat_broadcast_repository import get_broadcast_repository
-from app.repositories.chat_repository import get_chat_repository
+from app.repositories.conversation_repository import get_conversation_repository
 from app.services.ai.permissions.agent_chat_caps import agent_chat_caps
 
 # ── SEC-AGENT-05 containment boundary ────────────────────────────────────────
@@ -73,7 +79,7 @@ async def scan_and_broadcast() -> dict[str, Any]:
     idempotent watermark, anti-loop, per-channel isolation).
     """
     repo = get_broadcast_repository()
-    chat_repo = get_chat_repository()
+    conv_repo = get_conversation_repository()
     ar = get_agent_repository()
 
     channels_scanned = 0
@@ -83,6 +89,8 @@ async def scan_and_broadcast() -> dict[str, Any]:
 
     for ch in candidates:
         channels_scanned += 1
+        # ch["channel_id"] is a conversations.id (P3 W0 candidate query); the
+        # dict key name is retained from the pre-Phase-3 legacy-table shape.
         channel_id: int = ch["channel_id"]
         team_id: int = ch["team_id"]
         agent_ids: list[str] = ch["agent_ids"]
@@ -121,17 +129,17 @@ async def scan_and_broadcast() -> dict[str, Any]:
             text = build_broadcast_summary(counts["total"], counts["by_kind"])
 
             # ── Post once, authored by the first eligible broadcast agent ─
-            # from_bot_agent_id → dispatch_summons returns [] immediately
-            # (anti-loop guard in chat_service.dispatch_summons).
+            # from_agent_id → dispatch_summons returns [] immediately
+            # (anti-loop guard for bot-authored messages).
             agent = bc_agents[0]
-            await chat_repo.send_message(
-                channel_id=channel_id,
+            await conv_repo.send_message(
+                conversation_id=channel_id,
                 sender_id=None,
                 sender_type="agent",
-                content_type="text",
+                type="text",
                 body={"text": text},
-                reply_to_id=None,
-                from_bot_agent_id=str(agent["id"]),
+                parent_id=None,
+                from_agent_id=str(agent["id"]),
             )
 
             # ── Advance watermark ONLY after successful post ──────────────

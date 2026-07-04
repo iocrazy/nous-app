@@ -24,6 +24,29 @@ Dedup: fingerprint-keyed on normalised title (existing_fingerprints lookup),
 scoped to the same context (team_id / project_id).
 Best-effort: per-context failures are caught + logged, never abort the run.
 DBOS steps do NOT dispatch nested workflows.
+
+Store (Conversations Phase 3, Task 2 — 2026-07-04): Phase 2 flipped
+FEATURE_DIRECT_CONVERSATIONS on, so ALL new 1:1 direct_agent traffic lands
+in ``conversations`` / ``messages`` — the legacy ``ai_sessions`` /
+``ai_messages`` tables no longer receive new session activity. Phase 3 will
+DROP those legacy tables entirely (migration 333, Wave 2), so this workflow
+reads the canonical store ONLY (no dual-read fallback — there is nothing
+left to fall back to once the tables are dropped, and until then any
+lingering legacy-only session is simply not re-consolidated by /dream).
+
+Mapping (mirrors ``ConversationsAiStore`` / mig 327 + 332):
+  ai_sessions.user_id  → conversation_members.user_id (member_type='user')
+  ai_sessions.agent_id → conversation_ai_meta.agent_id
+  ai_sessions.team_id  → conversations.scope_id, EXCEPT a personal team
+                         (teams.kind='personal') maps back to NULL so the
+                         'agent_user' vs 'team' scope split in
+                         _derive_scope stays identical to the legacy
+                         behaviour (a personal 1:1 chat always resolves to
+                         a personal team row under Phase 2, never NULL
+                         scope_id on the conversations row itself).
+  ai_sessions.project_id → conversations.project_id
+  ai_messages.role     ← messages.sender_type ('agent' → 'assistant')
+  ai_messages.content  ← messages.body->>'text'
 """
 
 from __future__ import annotations
@@ -56,35 +79,59 @@ _LOOKBACK_DAYS = 7
 # Distinct active (user, agent, team, project) contexts with their recent
 # message count.  Filtered in Python after fetch so MIN_NEW_MESSAGES stays a
 # module constant rather than embedded in SQL.
+#
+# Conversations-only (P3 Task 2): reads public.conversations +
+# conversation_ai_meta (agent binding, mig 332) + conversation_members
+# (owning user, member_type='user') + public.messages. teams.kind='personal'
+# maps a personal 1:1 chat's scope_id back to NULL team_id so scope
+# derivation (_derive_scope) matches legacy ai_sessions semantics exactly.
 _ACTIVE_PAIRS_SQL = f"""
 SELECT
-    s.user_id::text     AS user_id,
-    s.agent_id::text    AS agent_id,
-    s.team_id,
-    s.project_id,
-    COUNT(m.id)::int    AS msg_count
-FROM public.ai_sessions s
-JOIN public.ai_messages m ON m.session_id = s.id
-WHERE s.updated_at  >= now() - interval '{_LOOKBACK_DAYS} days'
-  AND s.agent_id    IS NOT NULL
-  AND s.user_id     IS NOT NULL
-  AND m.created_at  >= now() - interval '{_LOOKBACK_DAYS} days'
-GROUP BY s.user_id, s.agent_id, s.team_id, s.project_id
+    cm.user_id::text  AS user_id,
+    m.agent_id::text  AS agent_id,
+    CASE WHEN t.kind = 'personal' THEN NULL ELSE c.scope_id END AS team_id,
+    c.project_id      AS project_id,
+    COUNT(msg.id)::int AS msg_count
+FROM public.conversations c
+JOIN public.conversation_ai_meta m ON m.conversation_id = c.id
+JOIN public.conversation_members cm
+    ON cm.conversation_id = c.id AND cm.member_type = 'user'
+JOIN public.teams t ON t.id = c.scope_id
+JOIN public.messages msg
+    ON msg.conversation_id = c.id AND msg.deleted_at IS NULL
+WHERE c.type        = 'direct_agent'
+  AND c.archived_at IS NULL
+  AND m.updated_at  >= now() - interval '{_LOOKBACK_DAYS} days'
+  AND m.agent_id    IS NOT NULL
+  AND cm.user_id    IS NOT NULL
+  AND msg.created_at >= now() - interval '{_LOOKBACK_DAYS} days'
+GROUP BY cm.user_id, m.agent_id, t.kind, c.scope_id, c.project_id
 """
 
 # Recent messages for one (user, agent, team, project) context, ascending,
 # capped at 40 to bound the prompt size.  NULL-safe context match via
-# IS NOT DISTINCT FROM so a NULL-team session only loads NULL-team rows.
+# IS NOT DISTINCT FROM so a NULL-team context only loads NULL-team rows.
+# role/content mapping mirrors write_memory.py::load_recent_messages_step
+# (sender_type='agent' -> 'assistant', body->>'text' -> content).
 _RECENT_MESSAGES_SQL = f"""
-SELECT m.role, m.content
-FROM public.ai_messages m
-JOIN public.ai_sessions s ON s.id = m.session_id
-WHERE s.user_id    = :user_id
-  AND s.agent_id   = :agent_id
-  AND s.team_id    IS NOT DISTINCT FROM :team_id
-  AND s.project_id IS NOT DISTINCT FROM :project_id
-  AND m.created_at >= now() - interval '{_LOOKBACK_DAYS} days'
-ORDER BY m.created_at ASC
+SELECT
+    CASE WHEN msg.sender_type = 'agent' THEN 'assistant' ELSE msg.sender_type END AS role,
+    COALESCE(msg.body->>'text', '') AS content
+FROM public.messages msg
+JOIN public.conversations c ON c.id = msg.conversation_id
+JOIN public.conversation_ai_meta m ON m.conversation_id = c.id
+JOIN public.conversation_members cm
+    ON cm.conversation_id = c.id AND cm.member_type = 'user'
+JOIN public.teams t ON t.id = c.scope_id
+WHERE c.type     = 'direct_agent'
+  AND cm.user_id = :user_id
+  AND m.agent_id = :agent_id
+  AND (CASE WHEN t.kind = 'personal' THEN NULL ELSE c.scope_id END)
+      IS NOT DISTINCT FROM :team_id
+  AND c.project_id  IS NOT DISTINCT FROM :project_id
+  AND msg.deleted_at IS NULL
+  AND msg.created_at >= now() - interval '{_LOOKBACK_DAYS} days'
+ORDER BY msg.created_at ASC
 LIMIT 40
 """
 
@@ -109,11 +156,21 @@ LIMIT 50
 
 # Distinct contexts for a (user, agent) pair — used by _consolidate_pair
 # (admin manual trigger) to enumerate what to consolidate.
+# Conversations-only (P3 Task 2) — see _ACTIVE_PAIRS_SQL for the join shape
+# and the personal-team → NULL team_id mapping rationale.
 _PAIR_CONTEXTS_SQL = """
-SELECT DISTINCT team_id, project_id
-FROM public.ai_sessions
-WHERE user_id  = :user_id
-  AND agent_id = :agent_id
+SELECT DISTINCT
+    CASE WHEN t.kind = 'personal' THEN NULL ELSE c.scope_id END AS team_id,
+    c.project_id AS project_id
+FROM public.conversations c
+JOIN public.conversation_ai_meta m ON m.conversation_id = c.id
+JOIN public.conversation_members cm
+    ON cm.conversation_id = c.id AND cm.member_type = 'user'
+JOIN public.teams t ON t.id = c.scope_id
+WHERE c.type       = 'direct_agent'
+  AND c.archived_at IS NULL
+  AND cm.user_id   = :user_id
+  AND m.agent_id   = :agent_id
 """
 
 
