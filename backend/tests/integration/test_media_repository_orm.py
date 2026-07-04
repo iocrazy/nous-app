@@ -135,9 +135,9 @@ async def _fetch_title_raw(integration_db_url: str, platform_id: str):
 
 
 def _repo():
-    from app.repositories.media_repository_orm import MediaRepositoryOrm
+    from app.repositories.media_repository import MediaRepository
 
-    return MediaRepositoryOrm()
+    return MediaRepository()
 
 
 # ─── Reads ─────────────────────────────────────────────────────────────
