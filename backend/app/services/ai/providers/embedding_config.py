@@ -89,8 +89,15 @@ async def resolve_embedding_config() -> Optional["EmbeddingConfig"]:
 
 
 async def _read_settings() -> Dict[str, Any]:
-    """Return the graph_embedder_* system_settings as a dict. Never raises."""
+    """Return the graph_embedder_* system_settings as a dict. Never raises.
+
+    SECRETS: each value passes through ``secure_settings.reveal`` — a no-op
+    for the non-secret keys in ``_KEYS`` (base_url/model/dimensions), but
+    transparently decrypts ``graph_embedder_api_key`` (encrypted at write
+    time by ``SystemSettingsRepository``). Fail-soft — see ``reveal``'s
+    docstring."""
     try:
+        from app.core.secure_settings import reveal
         from app.db import engine as db_engine
 
         if not db_engine.is_configured():
@@ -102,7 +109,7 @@ async def _read_settings() -> Dict[str, Any]:
             f"WHERE key IN ({placeholders})",
             params,
         )
-        return {r["key"]: r["value"] for r in rows}
+        return {r["key"]: reveal(r["value"]) for r in rows}
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning(f"[embedding_config] settings read failed: {exc}")
         return {}

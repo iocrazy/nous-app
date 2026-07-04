@@ -70,15 +70,26 @@ def _fernet(*, allow_dev_fallback: bool = True) -> Optional[MultiFernet]:
     return MultiFernet([Fernet(k) for k in keys])
 
 
-def encrypt(plaintext: Optional[str]) -> Optional[str]:
+def encrypt(
+    plaintext: Optional[str], *, allow_dev_fallback: bool = True
+) -> Optional[str]:
     """Encrypt a string. ``None`` passes through unchanged so callers
     can preserve "no token" semantics.
 
     Raises SecretBoxNotConfigured if no key is configured.
+
+    ``allow_dev_fallback=False`` (used by ``app.core.secure_settings`` for
+    system_settings / mediahub_models secret material) restricts key
+    resolution to the REAL configured env key(s) only — the public
+    ``DEV_TOKEN_ENCRYPTION_KEY`` below is never used, so a write with no
+    real key configured fails LOUD instead of silently landing in the DB
+    encrypted under a key that ships in this public repo. Default stays
+    ``True`` so existing callers (``user_mcp_servers_repository``) keep
+    their current dev-convenience behaviour unchanged.
     """
     if plaintext is None:
         return None
-    f = _fernet()
+    f = _fernet(allow_dev_fallback=allow_dev_fallback)
     if f is None:
         raise SecretBoxNotConfigured(
             "MEDIAHUB_TOKEN_ENCRYPTION_KEY not set; cannot encrypt secret"
@@ -86,7 +97,9 @@ def encrypt(plaintext: Optional[str]) -> Optional[str]:
     return f.encrypt(plaintext.encode()).decode()
 
 
-def decrypt(ciphertext: Optional[str]) -> Optional[str]:
+def decrypt(
+    ciphertext: Optional[str], *, allow_dev_fallback: bool = True
+) -> Optional[str]:
     """Decrypt a string previously produced by ``encrypt``.
 
     Returns None when input is None. Raises SecretBoxNotConfigured if
@@ -97,13 +110,18 @@ def decrypt(ciphertext: Optional[str]) -> Optional[str]:
     callers transparently read legacy plaintext rows during the
     migration window. Once all rows are encrypted, this branch never
     fires.
+
+    ``allow_dev_fallback=False`` restricts decryption to the REAL
+    configured env key(s) only (no dev-key fallback) — used by the
+    secrets self-heal migration to test whether a ciphertext is ALREADY
+    decryptable under the real key alone (i.e. does not need rewriting).
     """
     if ciphertext is None:
         return None
     if not ciphertext.startswith("gAAAAA"):
         # Looks like legacy plain-text — return as-is for back-compat
         return ciphertext
-    f = _fernet()
+    f = _fernet(allow_dev_fallback=allow_dev_fallback)
     if f is None:
         raise SecretBoxNotConfigured(
             "MEDIAHUB_TOKEN_ENCRYPTION_KEY not set; cannot decrypt secret"

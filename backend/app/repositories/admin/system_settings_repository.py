@@ -58,6 +58,7 @@ from loguru import logger
 from sqlalchemy import select
 from sqlalchemy import update as sa_update
 
+from app.core.secure_settings import conceal_for_key
 from app.db.session import read_scope, write_scope
 from app.models import SystemSettings
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
@@ -109,12 +110,24 @@ class SystemSettingsRepository:
     ) -> Optional[dict[str, Any]]:
         """Update value + updated_by for ``key``; COMMITS via write_scope().
         Returns the updated row dict (parity-coerced) or None if no row matched
-        (REST-contract parity)."""
+        (REST-contract parity).
+
+        SECRETS / secret-at-rest hardening: ``value`` passes through
+        ``conceal_for_key`` FIRST — a no-op for the vast majority of
+        (non-secret) keys, but for a registered secret key
+        (``SECRET_SETTING_KEYS`` / ``JSONB_SECRET_KEYS`` in
+        ``app.core.secure_settings``) it is encrypted (``enc:v1:`` marker)
+        before it ever reaches the DB. Raises
+        ``secret_box.SecretBoxNotConfigured`` when the real
+        ``MEDIAHUB_TOKEN_ENCRYPTION_KEY`` isn't set — a secret write fails
+        closed rather than silently landing under the public dev key.
+        """
+        concealed = conceal_for_key(key, value)
         async with write_scope() as session:
             result = await session.execute(
                 sa_update(SystemSettings)
                 .where(SystemSettings.key == key)
-                .values(value=value, updated_by=updated_by)
+                .values(value=concealed, updated_by=updated_by)
                 .returning(SystemSettings)
             )
             row = result.scalars().first()
@@ -128,22 +141,26 @@ class SystemSettingsRepository:
 
         Safe for first-time writes where the row may not exist yet (no seed
         migration required).  Commits via ``write_scope()``.
+
+        SECRETS: same ``conceal_for_key`` chokepoint as ``update`` (see its
+        docstring) — applied before the INSERT/ON CONFLICT UPDATE.
         """
         from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+        concealed = conceal_for_key(key, value)
         async with write_scope() as session:
             stmt = (
                 pg_insert(SystemSettings)
-                .values(key=key, value=value, updated_by=updated_by)
+                .values(key=key, value=concealed, updated_by=updated_by)
                 .on_conflict_do_update(
                     index_elements=["key"],
-                    set_={"value": value, "updated_by": updated_by},
+                    set_={"value": concealed, "updated_by": updated_by},
                 )
                 .returning(SystemSettings)
             )
             result = await session.execute(stmt)
             row = result.scalars().first()
-        return _row(row) if row else {"key": key, "value": value}
+        return _row(row) if row else {"key": key, "value": concealed}
 
 
 def get_system_settings_repository() -> "SystemSettingsRepository":

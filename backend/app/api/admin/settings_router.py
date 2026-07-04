@@ -5,6 +5,7 @@ from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
 from app.core.config import settings
+from app.core.secure_settings import JSONB_SECRET_KEYS, is_secret_key
 from app.repositories.admin.system_settings_repository import (
     get_system_settings_repository,
 )
@@ -32,6 +33,9 @@ from app.schemas.admin import (
     MemorySlotStatus,
     MemorySlotUpdate,
     MemoryStatsResponse,
+    PlatformAiProvidersResponse,
+    PlatformAiProviderStatus,
+    PlatformAiProvidersUpdate,
     PromotionItem,
     PromotionListResponse,
     SystemSettingResponse,
@@ -106,10 +110,30 @@ _SECRET_FIELDS = {"extractor_api_key", "embedder_api_key"}
 _EMBEDDER_DIM_MAX = 4096
 
 
+def _secret_present(value: object) -> bool:
+    """Presence check for a masked secret value — works for both the flat
+    string keys (non-blank str) and the platform.ai_providers dict."""
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, dict):
+        return bool(value)
+    return value is not None
+
+
 def _to_response(row: dict) -> SystemSettingResponse:
+    """Row → response, MASKING registered secret keys server-side.
+
+    For a key in secure_settings' registry (ai_module.*.api_key,
+    telemetry.langfuse.*_key, graph_*_api_key, platform.ai_providers) the
+    value is replaced by ``{"set": bool}`` — neither the plaintext nor the
+    ``enc:v1:`` ciphertext ever leaves the server. Applies to the list GET
+    and the PATCH echo alike (both route through here)."""
+    value = row["value"]
+    if is_secret_key(row["key"]):
+        value = {"set": _secret_present(value)}
     return SystemSettingResponse(
         key=row["key"],
-        value=row["value"],
+        value=value,
         description=row.get("description"),
         updated_at=row["updated_at"],
         updated_by=row.get("updated_by"),
@@ -546,6 +570,129 @@ async def update_ai_governance_settings(
     return await _read_governance_settings()
 
 
+# ── Platform AI Providers (platform.ai_providers, masked) ───────────────────
+
+_PLATFORM_PROVIDERS_KEY = "platform.ai_providers"
+# Per-provider fields that carry secret material (mirrors
+# secure_settings.JSONB_SECRET_KEYS[_PLATFORM_PROVIDERS_KEY]).
+_PROVIDER_SECRET_FIELDS = ("api_key", "app_id")
+
+
+async def _read_platform_providers_masked() -> PlatformAiProvidersResponse:
+    """Masked platform.ai_providers bundle — secrets become presence booleans.
+
+    Reads the RAW stored row (which may hold ``enc:v1:`` ciphertext for
+    api_key/app_id); presence is a non-empty check, so it works identically
+    for legacy plaintext and encrypted values. Raw values never leave the
+    server."""
+    repo = get_system_settings_repository()
+    rows = await repo.list_non_transcode()
+    raw = next(
+        (r.get("value") for r in rows if r.get("key") == _PLATFORM_PROVIDERS_KEY),
+        None,
+    )
+    if not isinstance(raw, dict):
+        return PlatformAiProvidersResponse(providers={})
+    providers: dict[str, PlatformAiProviderStatus] = {}
+    for name, entry in raw.items():
+        if not isinstance(name, str) or not isinstance(entry, dict):
+            continue
+        providers[name] = PlatformAiProviderStatus(
+            base_url=str(entry.get("base_url") or ""),
+            model=str(entry.get("model") or ""),
+            api_key_set=bool(str(entry.get("api_key") or "").strip()),
+            app_id_set=bool(str(entry.get("app_id") or "").strip()),
+        )
+    return PlatformAiProvidersResponse(providers=providers)
+
+
+@router.get("/platform-ai-providers", response_model=PlatformAiProvidersResponse)
+async def get_platform_ai_providers_settings(auth: AdminAuthDep):
+    """Platform provider credentials for the admin panel — MASKED: only
+    ``api_key_set`` / ``app_id_set`` booleans, never raw keys or ciphertext."""
+    return await _read_platform_providers_masked()
+
+
+@router.put("/platform-ai-providers", response_model=PlatformAiProvidersResponse)
+async def update_platform_ai_providers_settings(
+    update: PlatformAiProvidersUpdate,
+    auth: AdminAuthDep,
+    request: Request,
+):
+    """Write platform.ai_providers with the /ai-governance PUT semantics:
+    only providers present in the payload are touched; within an entry,
+    ``api_key`` / ``app_id`` are written only when NON-BLANK (blank or
+    omitted = keep the stored secret). Returns the masked bundle."""
+    repo = get_system_settings_repository()
+    rows = await repo.list_non_transcode()
+    raw = next(
+        (r.get("value") for r in rows if r.get("key") == _PLATFORM_PROVIDERS_KEY),
+        None,
+    )
+    merged: dict = dict(raw) if isinstance(raw, dict) else {}
+
+    written: list[str] = []
+    for name, entry_update in update.providers.items():
+        existing = merged.get(name)
+        entry: dict = dict(existing) if isinstance(existing, dict) else {}
+        data = entry_update.model_dump(exclude_unset=True)
+        for field_name in ("base_url", "model"):
+            if field_name in data and data[field_name] is not None:
+                entry[field_name] = data[field_name]
+                written.append(f"{name}.{field_name}")
+        for field_name in _PROVIDER_SECRET_FIELDS:
+            value = data.get(field_name)
+            if isinstance(value, str) and value.strip():
+                entry[field_name] = value.strip()
+                written.append(f"{name}.{field_name}")
+        merged[name] = entry
+
+    # upsert_setting routes through the conceal chokepoint: new plaintext
+    # secrets are encrypted; pre-existing enc:v1: ciphertext passes through
+    # idempotently (marker check).
+    await repo.upsert_setting(_PLATFORM_PROVIDERS_KEY, merged, auth.user_id)
+
+    client_ip = request.client.host if request.client else None
+    await create_audit_log(
+        admin_id=auth.user_id,
+        action="update_platform_ai_providers",
+        target_type="system_setting",
+        target_id=_PLATFORM_PROVIDERS_KEY,
+        # Never log raw secret values — only which fields changed.
+        details={
+            "fields": [f for f in written if not f.endswith(_PROVIDER_SECRET_FIELDS)]
+        },
+        ip_address=client_ip,
+    )
+    logger.info(
+        f"Platform AI providers updated by admin {auth.user_id}: {sorted(written)}"
+    )
+    return await _read_platform_providers_masked()
+
+
+@router.post("/encrypt-secrets")
+async def encrypt_secrets(auth: AdminAuthDep):
+    """Manually re-run the secret-at-rest self-heal sweep (same code path the
+    startup task runs): re-encrypts plaintext / dev-keyed secrets in
+    system_settings, platform.ai_providers, mediahub_models.api_key and
+    user_mcp_servers.bearer_token under the real env key. Idempotent —
+    a repeat run rewrites 0 rows. 409 when no real encryption key is set."""
+    from app.core import secret_box
+    from app.services.infra.secrets_selfheal import run_secrets_selfheal
+
+    if not secret_box.is_configured():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "MEDIAHUB_TOKEN_ENCRYPTION_KEY is not configured — set a real "
+                "encryption key before running the self-heal sweep"
+            ),
+        )
+    summary = await run_secrets_selfheal()
+    logger.info(f"[Admin] encrypt-secrets run by {auth.user_id}: {summary}")
+    return summary
+
+
 @router.patch("/{key}", response_model=SystemSettingResponse)
 async def update_setting(
     key: str,
@@ -555,6 +702,20 @@ async def update_setting(
 ):
     """Update a system setting by key."""
     repo = get_system_settings_repository()
+
+    # Review finding (secret-hardening): conceal_for_key only encrypts a
+    # JSONB_SECRET_KEYS entry when the value is a dict — a non-dict write
+    # through this generic path would land in PLAINTEXT, and the self-heal
+    # scanner skips non-dict shapes so it would never be encrypted after
+    # the fact. Reject the shape outright; these keys have dedicated
+    # typed endpoints.
+    if key in JSONB_SECRET_KEYS and not isinstance(update.value, dict):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Setting '{key}' must be a JSON object " "(use its dedicated endpoint)"
+            ),
+        )
 
     if not await repo.exists(key):
         raise HTTPException(
@@ -575,7 +736,8 @@ async def update_setting(
         action="update_setting",
         target_type="system_setting",
         target_id=key,
-        details={"value": update.value},
+        # Never write raw secret material into the audit log.
+        details={"value": "***" if is_secret_key(key) else update.value},
         ip_address=client_ip,
     )
 
