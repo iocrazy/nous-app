@@ -89,20 +89,30 @@ class AIModuleGovernance:
 async def _read_raw(key: str) -> Optional[object]:
     """Read one ``system_settings`` JSONB value via the SQLAlchemy engine
     (service-role, bypasses RLS).  Returns the native Python value
-    (bool / str / int / None) or None when the key is absent or the DB
-    is unavailable.  Never raises.
+    (bool / str / int / dict / None) or None when the key is absent or the
+    DB is unavailable.  Never raises.
 
     Note: ``fetch_val`` returns the raw JSONB-deserialised value — a stored
     JSON ``true`` comes back as Python ``True``, NOT as the string ``"true"``.
+
+    SECRETS: the value is passed through ``secure_settings.reveal`` before
+    returning — a no-op for non-secret keys (bool/int/plain str/absent
+    marker), but for a registered secret key (``ai_module.*.api_key``,
+    ``platform.ai_providers``) it transparently decrypts the ``enc:v1:``
+    ciphertext written by ``SystemSettingsRepository``'s conceal chokepoint.
+    Fail-soft: a marked value that can't be decrypted logs an ERROR inside
+    ``reveal`` and resolves to ``""`` rather than raising here.
     """
     try:
+        from app.core.secure_settings import reveal
         from app.db import engine as db_engine
 
         if not db_engine.is_configured():
             return None
-        return await db_engine.fetch_val(
+        value = await db_engine.fetch_val(
             "SELECT value FROM public.system_settings WHERE key = :k", {"k": key}
         )
+        return reveal(value) if value is not None else None
     except Exception:  # noqa: BLE001
         logger.warning("[governance] system_settings read failed for key: %s", key)
         return None

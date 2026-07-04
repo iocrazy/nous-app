@@ -110,8 +110,16 @@ async def _default_settings_reader(key: str) -> Optional[str]:
     """Read one system_settings value via the SQLAlchemy engine (service-role,
     bypasses RLS). Returns None when unset / DB unavailable. Note: the extractor
     api_key lives here, so system_settings must stay admin/service-role-only —
-    never exposed to the anon PostgREST surface."""
+    never exposed to the anon PostgREST surface.
+
+    SECRETS: the raw value is passed through ``secure_settings.reveal`` before
+    the final ``str()`` coercion — a no-op passthrough for the non-secret
+    graph_* keys read through this same function, but transparently decrypts
+    ``graph_extractor_api_key`` / ``graph_embedder_api_key`` (encrypted at
+    write time by ``SystemSettingsRepository``). Fail-soft — see
+    ``reveal``'s docstring."""
     try:
+        from app.core.secure_settings import reveal
         from app.db import engine as db_engine
 
         if not db_engine.is_configured():
@@ -119,6 +127,9 @@ async def _default_settings_reader(key: str) -> Optional[str]:
         value = await db_engine.fetch_val(
             "SELECT value FROM public.system_settings WHERE key = :k", {"k": key}
         )
+        if value is None:
+            return None
+        value = reveal(value)
         return None if value is None else str(value)
     except Exception:  # noqa: BLE001 — settings read must never raise
         logger.warning("[graph_memory] system_settings read failed: %s", key)

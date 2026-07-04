@@ -54,15 +54,23 @@ _LANGFUSE_SETTINGS_MAP: dict[str, tuple[str, str]] = {
 async def _langfuse_settings_reader(key: str) -> Optional[object]:
     """Read one system_settings JSONB value (service-role engine). None on
     miss/error. Returns the native JSONB-deserialised value — a stored JSON
-    ``true`` comes back as Python ``True``, not the string ``"true"``."""
+    ``true`` comes back as Python ``True``, not the string ``"true"``.
+
+    SECRETS: the value passes through ``secure_settings.reveal`` before
+    returning — a no-op for ``enabled``/``host``, but transparently decrypts
+    ``telemetry.langfuse.public_key`` / ``telemetry.langfuse.secret_key``
+    (encrypted at write time by ``SystemSettingsRepository``). Fail-soft —
+    see ``reveal``'s docstring."""
     try:
+        from app.core.secure_settings import reveal
         from app.db import engine as db_engine
 
         if not db_engine.is_configured():
             return None
-        return await db_engine.fetch_val(
+        value = await db_engine.fetch_val(
             "SELECT value FROM public.system_settings WHERE key = :k", {"k": key}
         )
+        return reveal(value) if value is not None else None
     except Exception:  # noqa: BLE001 — settings read must never raise
         logger.warning(f"[langfuse] system_settings read failed: {key}")
         return None
