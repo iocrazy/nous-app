@@ -25,6 +25,8 @@ from app.schemas.admin import (
     GraphMemorySettingsUpdate,
     HonchoConnectionResponse,
     HonchoConnectionUpdate,
+    LangfuseConnectionResponse,
+    LangfuseConnectionUpdate,
     MemoryControlResponse,
     MemoryReloadResponse,
     MemorySlotStatus,
@@ -43,6 +45,10 @@ from app.schemas.admin import (
 from app.services.ai.memory import registry as memory_registry
 from app.services.ai.memory.graph_memory import STRUCTURED_OUTPUT_MODES
 from app.services.ai.memory.honcho_memory import HonchoMemoryConfig
+from app.services.ai.telemetry.langfuse_exporter import (
+    LangfuseConfig,
+    get_langfuse_exporter,
+)
 from app.services.topics.content_fetcher import (
     CONTENT_FETCH_CONFIG_KEY,
     content_fetch_payload,
@@ -679,6 +685,58 @@ async def put_honcho_connection(update: HonchoConnectionUpdate, auth: AdminAuthD
     cfg = await HonchoMemoryConfig.from_settings()
     return HonchoConnectionResponse(
         enabled=cfg.enabled, base_url=cfg.base_url, workspace_id=cfg.workspace_id
+    )
+
+
+# ── Langfuse Telemetry Connection (env→DB migration wave 2) ─────────────────
+#
+# Mirrors the Honcho Connection section above, with one difference: Langfuse
+# has no memory_registry slot to plug into (it's a telemetry exporter, not a
+# pluggable L2/L3 provider), so there is no separate manual "Reload" step —
+# the PUT handler reloads the live exporter singleton directly.
+
+# Maps LangfuseConnectionUpdate fields → system_settings keys (mirrors
+# _LANGFUSE_SETTINGS_MAP in langfuse_exporter.py; the DB-key half only).
+_LANGFUSE_CONN_KEY = {
+    "enabled": "telemetry.langfuse.enabled",
+    "host": "telemetry.langfuse.host",
+    "public_key": "telemetry.langfuse.public_key",
+    "secret_key": "telemetry.langfuse.secret_key",
+}
+
+
+@router.get("/memory/langfuse-connection", response_model=LangfuseConnectionResponse)
+async def get_langfuse_connection(auth: AdminAuthDep):
+    """Effective Langfuse connection config (settings with env fallback);
+    the secret key is masked to a presence boolean."""
+    cfg = await LangfuseConfig.from_settings()
+    return LangfuseConnectionResponse(
+        enabled=cfg.enabled,
+        host=cfg.host,
+        public_key=cfg.public_key,
+        secret_key_set=bool(cfg.secret_key),
+    )
+
+
+@router.put("/memory/langfuse-connection", response_model=LangfuseConnectionResponse)
+async def put_langfuse_connection(update: LangfuseConnectionUpdate, auth: AdminAuthDep):
+    """Upsert the provided connection fields and reload the live exporter
+    singleton so the change applies without a backend restart. ``enabled`` is
+    stored as a native JSONB bool (unlike Honcho's "true"/"false" string)."""
+    repo = get_system_settings_repository()
+    fields = update.model_dump(exclude_unset=True)
+    for field_name, value in fields.items():
+        key = _LANGFUSE_CONN_KEY[field_name]
+        stored = value if field_name == "enabled" else str(value)
+        await repo.upsert_setting(key, stored, auth.user_id)
+    logger.info(f"[Admin] langfuse connection updated: {sorted(fields)}")
+    await get_langfuse_exporter().reload()
+    cfg = await LangfuseConfig.from_settings()
+    return LangfuseConnectionResponse(
+        enabled=cfg.enabled,
+        host=cfg.host,
+        public_key=cfg.public_key,
+        secret_key_set=bool(cfg.secret_key),
     )
 
 

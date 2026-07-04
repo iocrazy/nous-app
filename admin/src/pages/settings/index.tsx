@@ -111,7 +111,21 @@ export function Settings() {
   //   graph_*                      → Memory (Graphiti) panel
   //   ai_module.* / nous.*         → AI Config Governance panel (lock + per-module
   //                                  base_url/model/api_key, embedding included)
-  const HIDDEN_PREFIXES = ['graph_', 'ai_module.', 'nous.']
+  //   telemetry.langfuse.secret_key / .public_key → secret-bearing Langfuse
+  //                                  keys (env→DB migration wave 2); this generic
+  //                                  page has no masking control (SettingRow renders
+  //                                  raw plaintext), so only the two secret/public
+  //                                  keys are hidden here — host/enabled have no
+  //                                  dedicated panel yet and stay visible, same
+  //                                  treatment as Honcho's honcho_base_url/
+  //                                  honcho_workspace_id (no secret → left generic)
+  const HIDDEN_PREFIXES = [
+    'graph_',
+    'ai_module.',
+    'nous.',
+    'telemetry.langfuse.secret_key',
+    'telemetry.langfuse.public_key',
+  ]
   const generic = (settings || []).filter(
     (s) => !HIDDEN_PREFIXES.some((p) => s.key.startsWith(p)),
   )

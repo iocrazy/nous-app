@@ -792,6 +792,26 @@ class HonchoConnectionResponse(BaseModel):
     workspace_id: str
 
 
+class LangfuseConnectionResponse(BaseModel):
+    """Effective Langfuse telemetry config (env→DB migration wave 2). The
+    secret key is MASKED — only a ``secret_key_set`` boolean is returned,
+    never the raw key (mirrors GraphMemorySettingsResponse's *_api_key_set
+    pattern). The public key is not secret (Stripe-style pk-/sk- pair) so it
+    is returned as-is, same treatment as Honcho's base_url/workspace_id."""
+
+    enabled: bool
+    host: str
+    public_key: str
+    secret_key_set: bool
+
+
+class LangfuseConnectionUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    host: Optional[str] = None
+    public_key: Optional[str] = None
+    secret_key: Optional[str] = None
+
+
 class HonchoConnectionUpdate(BaseModel):
     enabled: Optional[bool] = None
     base_url: Optional[str] = None
