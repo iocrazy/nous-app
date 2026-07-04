@@ -230,29 +230,6 @@ class MoveFileRequest(BaseModel):
     folder_id: Optional[str] = None
 
 
-class TaskCreateRequest(BaseModel):
-    """Request body for creating a project task"""
-
-    title: str
-    description: Optional[str] = None
-    task_type: Optional[str] = "general"
-    assignee_id: Optional[str] = None
-    due_date: Optional[str] = None
-    status: Optional[str] = "todo"
-
-
-class TaskUpdateRequest(BaseModel):
-    """Request body for updating a project task"""
-
-    title: Optional[str] = None
-    description: Optional[str] = None
-    task_type: Optional[str] = None
-    assignee_id: Optional[str] = None
-    due_date: Optional[str] = None
-    status: Optional[str] = None
-    sort_order: Optional[int] = None
-
-
 class CreateCollectionRequest(BaseModel):
     """Request body for creating a collection link"""
 

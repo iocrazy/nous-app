@@ -607,39 +607,6 @@ class ProjectsService:
         return await self.repo.create_share(share_data)
 
     # ------------------------------------------------------------------ #
-    # Tasks
-    # ------------------------------------------------------------------ #
-
-    async def list_tasks(self, project_id: str) -> list:
-        """List all tasks for a project."""
-        return await self.repo.get_tasks(project_id)
-
-    async def create_task(self, project_id: str, data: dict, user_id: str) -> dict:
-        """Create a new task in a project."""
-        insert_data: dict = {
-            "project_id": project_id,
-            "title": data["title"],
-            "created_by": user_id,
-        }
-        for field in ("description", "task_type", "assignee_id", "due_date", "status"):
-            if data.get(field) is not None:
-                insert_data[field] = data[field]
-        return await self.repo.create_task(insert_data)
-
-    async def update_task(self, project_id: str, task_id: str, data: dict) -> dict:
-        """Update a task."""
-        if not data:
-            raise ValueError("No fields to update")
-        result = await self.repo.update_task(task_id, project_id, data)
-        if not result:
-            raise ValueError("Task not found")
-        return result
-
-    async def delete_task(self, project_id: str, task_id: str) -> bool:
-        """Delete a task."""
-        return await self.repo.delete_task(task_id, project_id)
-
-    # ------------------------------------------------------------------ #
     # Members
     # ------------------------------------------------------------------ #
 

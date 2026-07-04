@@ -1,8 +1,8 @@
 # app/repositories/projects_repository.py
 
 """Projects Repository — SQLAlchemy 2.0 ORM data access for the MediaTrack
-project system (10 tables: projects / project_files / project_folders /
-project_members / project_tasks / file_versions / review_comments /
+project system (9 tables: projects / project_files / project_folders /
+project_members / file_versions / review_comments /
 parsed_media / shares / project_collections).
 
 ORM-only (post-rollout collapse — the ``USE_ORM_PROJECTS`` flag and the separate
@@ -45,7 +45,7 @@ date → 'YYYY-MM-DD' str, numeric → str, jsonb → dict. The ORM returns nati
 types. We coerce ONLY where it matters, to the exact REST shape:
 
   bigint ids (projects.id / project_files.id / project_folders.id /
-    project_tasks.id / file_versions.id / shares.id / project_collections.id /
+    file_versions.id / shares.id / project_collections.id /
     project_members.project_id / parsed_media.id, plus every bigint FK such as
     project_id / media_id / folder_id / parent_id / file_id / project_file_id /
     file_size_bytes) → STAY NATIVE int (the 5.3 trap — these flow into scope /
@@ -57,9 +57,11 @@ types. We coerce ONLY where it matters, to the exact REST shape:
     frontend) parse ISO; ``==`` / ordering on a native datetime vs an ISO str
     would diverge.
 
-  date (project_tasks.due_date) → ``.isoformat()`` → 'YYYY-MM-DD'. The datetime
-    sweep runs FIRST and ``datetime`` is a subclass of ``date``, so we check
-    ``datetime`` before ``date``.
+  date columns: none remain in this repo's scope (the sole one,
+    ``project_tasks.due_date``, was removed with the table in migration 176 —
+    see PR-A3). ``_coerce_temporal`` still narrows a ``datetime`` bound to a
+    ``date`` column defensively (``datetime`` sweep runs before ``date``) in
+    case a future table reintroduces one.
 
   uuid columns → str (REST returned str). CONSUMED type-sensitively:
     projects.owner_id (``owner_id != user_id`` ownership checks in update_project
@@ -122,7 +124,6 @@ from app.models import (
     ProjectFolders,
     ProjectMembers,
     Projects,
-    ProjectTasks,
     Resources,
     Shares,
 )
@@ -135,7 +136,6 @@ _PROJECTS_N2A: Dict[str, str] = _name_to_attr(Projects)
 _FILES_N2A: Dict[str, str] = _name_to_attr(ProjectFiles)
 _FOLDERS_N2A: Dict[str, str] = _name_to_attr(ProjectFolders)
 _MEMBERS_N2A: Dict[str, str] = _name_to_attr(ProjectMembers)
-_TASKS_N2A: Dict[str, str] = _name_to_attr(ProjectTasks)
 _VERSIONS_N2A: Dict[str, str] = _name_to_attr(FileVersions)
 _MEDIA_N2A: Dict[str, str] = _name_to_attr(ParsedMedia)
 _SHARES_N2A: Dict[str, str] = _name_to_attr(Shares)
@@ -148,7 +148,6 @@ _COMMENTS_N2A: Dict[str, str] = _name_to_attr(ProjectFileComments)
 _PROJECTS_ATTRS = {p.key for p in Projects.__mapper__.column_attrs}
 _FILES_ATTRS = {p.key for p in ProjectFiles.__mapper__.column_attrs}
 _FOLDERS_ATTRS = {p.key for p in ProjectFolders.__mapper__.column_attrs}
-_TASKS_ATTRS = {p.key for p in ProjectTasks.__mapper__.column_attrs}
 _MEMBERS_ATTRS = {p.key for p in ProjectMembers.__mapper__.column_attrs}
 _VERSIONS_ATTRS = {p.key for p in FileVersions.__mapper__.column_attrs}
 _SHARES_ATTRS = {p.key for p in Shares.__mapper__.column_attrs}
@@ -181,7 +180,6 @@ def _temporal_kinds(model: Any) -> Dict[str, str]:
     return out
 
 
-_TASKS_TEMPORAL = _temporal_kinds(ProjectTasks)
 _FILES_TEMPORAL = _temporal_kinds(ProjectFiles)
 _COLLECTIONS_TEMPORAL = _temporal_kinds(ProjectCollections)
 _SHARES_TEMPORAL = _temporal_kinds(Shares)
@@ -219,8 +217,10 @@ def _parity(out: Dict[str, Any]) -> Dict[str, Any]:
       consumers do ``== user_id`` / dict-key lookups that break on native UUID).
     - any ``datetime`` → ``.isoformat()`` (REST ISO; ``==``/ordering/``str()``
       footgun). Checked BEFORE ``date`` because ``datetime`` ⊂ ``date``.
-    - any ``date`` (e.g. project_tasks.due_date) → ``.isoformat()`` →
-      'YYYY-MM-DD' (REST shape).
+    - any ``date`` → ``.isoformat()`` → 'YYYY-MM-DD' (REST shape). No mapped
+      column in this repo's current scope is a bare ``date`` (the sole prior
+      example, project_tasks.due_date, was removed with the table in
+      migration 176), but the sweep stays generic for future columns.
     - bigint ids / FKs and numeric (Decimal/float) → LEFT NATIVE (the 5.3 trap
       + the iron rule). NULLs pass through.
     """
@@ -282,7 +282,7 @@ def _known_only(
 class ProjectsRepository:
     """Projects and project files data access (async, SQLAlchemy 2.0 ORM).
 
-    Every genuine DB-touching method on the 10 project tables runs on the ORM
+    Every genuine DB-touching method on the 9 project tables runs on the ORM
     session layer. Only the auth-admin methods (enrich_members_with_email /
     get_user_email) stay on the legacy supabase path — see the module
     docstring."""
@@ -294,7 +294,6 @@ class ProjectsRepository:
     TABLE_COMMENTS = "project_file_comments"
     TABLE_FOLDERS = "project_folders"
     TABLE_SHARES = "shares"
-    TABLE_TASKS = "project_tasks"
     TABLE_MEMBERS = "project_members"
     TABLE_COLLECTIONS = "project_collections"
 
@@ -1034,87 +1033,6 @@ class ProjectsRepository:
                 return _row(row, _SHARES_N2A) if row else {}
         except Exception as e:
             logger.error(f"Failed to create share: {e}")
-            raise
-
-    # ------------------------------------------------------------------ #
-    # Tasks
-    # ------------------------------------------------------------------ #
-
-    async def get_tasks(self, project_id: str) -> List[Dict[str, Any]]:
-        """Get all tasks for a project, ordered by sort_order."""
-        try:
-            async with read_scope() as session:
-                result = await session.execute(
-                    select(ProjectTasks)
-                    .where(ProjectTasks.project_id == int(project_id))
-                    .order_by(ProjectTasks.sort_order)
-                )
-                return [_row(r, _TASKS_N2A) for r in result.scalars().all()]
-        except Exception as e:
-            logger.error(f"Failed to get tasks for project {project_id}: {e}")
-            return []
-
-    async def create_task(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Create a new task."""
-        try:
-            values = _known_only(data, _TASKS_ATTRS, _TASKS_TEMPORAL)
-            async with write_scope() as session:
-                result = await session.execute(
-                    insert(ProjectTasks).values(**values).returning(ProjectTasks)
-                )
-                row = result.scalars().first()
-                return _row(row, _TASKS_N2A) if row else {}
-        except Exception as e:
-            logger.error(f"Failed to create task: {e}")
-            raise
-
-    async def update_task(
-        self, task_id: str, project_id: str, data: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
-        """Update a task, scoped to project."""
-        try:
-            values = _known_only(data, _TASKS_ATTRS, _TASKS_TEMPORAL)
-            if not values:
-                async with read_scope() as session:
-                    row = (
-                        (
-                            await session.execute(
-                                select(ProjectTasks)
-                                .where(ProjectTasks.id == int(task_id))
-                                .where(ProjectTasks.project_id == int(project_id))
-                                .limit(1)
-                            )
-                        )
-                        .scalars()
-                        .first()
-                    )
-                    return _row(row, _TASKS_N2A) if row else None
-            async with write_scope() as session:
-                result = await session.execute(
-                    update(ProjectTasks)
-                    .where(ProjectTasks.id == int(task_id))
-                    .where(ProjectTasks.project_id == int(project_id))
-                    .values(**values)
-                    .returning(ProjectTasks)
-                )
-                row = result.scalars().first()
-                return _row(row, _TASKS_N2A) if row else None
-        except Exception as e:
-            logger.error(f"Failed to update task {task_id}: {e}")
-            raise
-
-    async def delete_task(self, task_id: str, project_id: str) -> bool:
-        """Delete a task, scoped to project."""
-        try:
-            async with write_scope() as session:
-                await session.execute(
-                    delete(ProjectTasks)
-                    .where(ProjectTasks.id == int(task_id))
-                    .where(ProjectTasks.project_id == int(project_id))
-                )
-            return True
-        except Exception as e:
-            logger.error(f"Failed to delete task {task_id}: {e}")
             raise
 
     # ------------------------------------------------------------------ #

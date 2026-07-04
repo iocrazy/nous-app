@@ -1163,8 +1163,7 @@
       "files": "Files",
       "scripts": "Scripts",
       "storyboard": "Storyboard",
-      "output": "Output",
-      "tasks": "Tasks"
+      "output": "Output"
     },
     "collect": {
       "title": "File Collection",

@@ -11,7 +11,6 @@ import { ProjectNavSidebar } from '../components/project/ProjectNavSidebar';
 import { ProjectFilesView } from '../components/ProjectFilesView';
 import { VideoReviewPage } from '../components/VideoReviewPage';
 import { CreateProjectModal } from '../components/CreateProjectModal';
-import { KanbanBoard } from '../components/KanbanBoard';
 import { ProjectTrashView } from '../components/ProjectTrashView';
 import { ProjectSharesView } from '../components/ProjectSharesView';
 import { ProjectStoryboardTab } from '../components/project/ProjectStoryboardTab';
@@ -26,7 +25,6 @@ const TAB_TO_SECTION: Record<string, string> = {
   scripts: 'scripts',
   storyboard: 'storyboard',
   output: 'output',
-  tasks: 'tasks',
   shares: 'shares',
   trash: 'trash',
 };
@@ -227,7 +225,6 @@ export function ProjectsPage() {
             {activeTab === 'scripts' && <ProjectScriptsTab projectId={selectedProject.id} />}
             {activeTab === 'storyboard' && <ProjectStoryboardTab projectId={selectedProject.id} />}
             {activeTab === 'output' && <ProjectOutputTab projectId={selectedProject.id} />}
-            {activeTab === 'tasks' && <KanbanBoard projectId={selectedProject.id} teamId={selectedTeamId || undefined} />}
             {activeTab === 'shares' && <ProjectSharesView projectId={selectedProject.id} onCountChange={setShareCount} />}
             {activeTab === 'trash' && <ProjectTrashView projectId={selectedProject.id} onCountChange={setTrashCount} />}
           </div>

@@ -1163,8 +1163,7 @@
       "files": "文件",
       "scripts": "脚本",
       "storyboard": "分镜",
-      "output": "输出",
-      "tasks": "任务"
+      "output": "输出"
     },
     "collect": {
       "title": "文件收集",

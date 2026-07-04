@@ -11,7 +11,6 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
-    Date,
     DateTime,
     Float,
     ForeignKeyConstraint,
@@ -524,85 +523,6 @@ class ProjectMembers(Base):
     )
     project_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     invited_by: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid)
-
-
-class ProjectTasks(Base):
-    __tablename__ = "project_tasks"
-    __table_args__ = (
-        CheckConstraint(
-            "status::text = ANY (ARRAY['todo'::character varying::text,"
-            " 'in_progress'::character varying::text,"
-            " 'done'::character varying::text,"
-            " 'cancelled'::character varying::text,"
-            " 'on_hold'::character varying::text])",
-            name="project_tasks_status_check",
-        ),
-        CheckConstraint(
-            "task_type::text = ANY (ARRAY['general'::character varying::text,"
-            " 'storyboard'::character varying::text,"
-            " 'script'::character varying::text,"
-            " 'filming'::character varying::text,"
-            " 'editing'::character varying::text,"
-            " 'review'::character varying::text])",
-            name="project_tasks_task_type_check",
-        ),
-        ForeignKeyConstraint(
-            ["project_id"],
-            ["public.projects.id"],
-            ondelete="CASCADE",
-            name="project_tasks_project_id_fkey",
-        ),
-        ForeignKeyConstraint(
-            ["workflow_node_id"],
-            ["public.workflow_nodes.id"],
-            ondelete="SET NULL",
-            name="project_tasks_workflow_node_id_fkey",
-        ),
-        PrimaryKeyConstraint("id", name="project_tasks_pkey"),
-        Index("idx_project_tasks_assignee_id", "assignee_id"),
-        Index("idx_project_tasks_created_by", "created_by"),
-        Index("idx_project_tasks_status", "project_id", "status"),
-        Index("idx_project_tasks_workflow_node_id", "workflow_node_id"),
-        Index(
-            "project_tasks_issue_id_idx",
-            "issue_id",
-            postgresql_where="(issue_id IS NOT NULL)",
-        ),
-        {"schema": "public"},
-    )
-
-    title: Mapped[str] = mapped_column(String(500), nullable=False)
-    task_type: Mapped[str] = mapped_column(
-        String(30), nullable=False, server_default=text("'general'::character varying")
-    )
-    sort_order: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("0")
-    )
-    status: Mapped[str] = mapped_column(
-        String(20), nullable=False, server_default=text("'todo'::character varying")
-    )
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(True), nullable=False, server_default=text("now()")
-    )
-    updated_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(True), nullable=False, server_default=text("now()")
-    )
-    id: Mapped[int] = mapped_column(
-        BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")
-    )
-    project_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    workflow_node_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid)
-    description: Mapped[Optional[str]] = mapped_column(Text)
-    assignee_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid)
-    due_date: Mapped[Optional[datetime.date]] = mapped_column(Date)
-    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid)
-    issue_id: Mapped[Optional[int]] = mapped_column(
-        BigInteger,
-        comment=(
-            "Back-reference to issues.id. Set during PR-D6 dual-write window; NULL for "
-            "tasks that pre-date the migration. Frontend may read either side."
-        ),
-    )
 
 
 class FileVersions(Base):

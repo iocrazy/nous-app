@@ -1,17 +1,17 @@
 """Integration tests for the ORM-backed ProjectsRepository against real PG.
 
 Proves STRATEGY-C value-type parity holds across the MediaTrack project surface
-(10 tables) after the post-rollout collapse to ORM-only:
+(9 tables — project_tasks was dropped in migration 176 and its repository
+surface removed in PR-A3) after the post-rollout collapse to ORM-only:
 
   - bigint ids + FKs (projects.id / project_files.id / project_folders.id /
-    project_tasks.id / file_versions.id / shares.id / project_collections.id /
+    file_versions.id / shares.id / project_collections.id /
     project_id / media_id / folder_id / parent_id / file_id) → STAY native int
     (the 5.3 trap).
   - uuid columns (owner_id / uploaded_by / created_by / author_id /
     project_members.user_id / …) → STR (REST parity; CONSUMED by owner /
     membership / author compares).
   - timestamptz (created_at / updated_at / trashed_at / joined_at / …) → ISO STR.
-  - date (project_tasks.due_date) → 'YYYY-MM-DD' STR.
   - EXCEPTION: project_file_comments.id / file_id / version_id (PR-A2, Task 5)
     are stringified — this surface's wire contract (``CommentResponse`` /
     frontend ``ReviewComment``) expects string ids, unlike every other bigint
@@ -22,8 +22,8 @@ a fresh asyncpg read proves no silent rollback.
 
 NOTE: there are NO date/timestamp RANGE filters in this repo (every query is
 equality / IN / bool / ordering), so unlike LogsRepositoryOrm there is no
-timestamptz<VARCHAR boundary to pin. The due_date round-trip below still
-exercises the date → ISO-string parity path.
+timestamptz<VARCHAR boundary to pin. The former date → ISO-string parity path
+(project_tasks.due_date) was removed along with the table in PR-A3.
 
 Setup: requires INTEGRATION_DATABASE_URL. Skips cleanly otherwise:
 
@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import date, timedelta
 
 import asyncpg
 import pytest
@@ -307,45 +306,6 @@ async def test_folder_crud_and_reparent(
     assert moved_file["folder_id"] is None
     moved_child = await _repo().get_folder(str(child["id"]), str(proj["id"]))
     assert moved_child["parent_id"] is None
-
-
-async def test_task_crud_with_due_date_parity(
-    integration_db_url, patched_engine, cleanup_test_rows
-):
-    """create_task / get_tasks / update_task — due_date (date) round-trips as a
-    'YYYY-MM-DD' ISO string (strategy-C date parity)."""
-    conn = await asyncpg.connect(integration_db_url)
-    try:
-        user_id = await _real_user_id(conn)
-        proj = await _seed_project(conn, user_id)
-    finally:
-        await conn.close()
-
-    due = (date.today() + timedelta(days=3)).isoformat()
-    t = await _repo().create_task(
-        {
-            "project_id": proj["id"],
-            "title": "shoot",
-            "created_by": str(user_id),
-            "due_date": due,
-            "status": "todo",
-        }
-    )
-    assert type(t["id"]) is int
-    assert t["created_by"] == str(user_id)
-    # date → ISO 'YYYY-MM-DD' str (not a datetime.date object).
-    assert type(t["due_date"]) is str
-    assert t["due_date"] == due
-    assert "T" not in t["due_date"]  # bare date, no time component
-
-    tasks = await _repo().get_tasks(str(proj["id"]))
-    assert {x["id"] for x in tasks} == {t["id"]}
-
-    upd = await _repo().update_task(str(t["id"]), str(proj["id"]), {"status": "done"})
-    assert upd["status"] == "done"
-
-    assert await _repo().delete_task(str(t["id"]), str(proj["id"])) is True
-    assert await _repo().get_tasks(str(proj["id"])) == []
 
 
 async def test_member_create_and_list_composite_pk(
