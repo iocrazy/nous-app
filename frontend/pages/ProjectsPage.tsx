@@ -156,10 +156,10 @@ export function ProjectsPage() {
 
   const filterTitle = useMemo(() => {
     switch (activeFilter) {
-      case 'starred': return 'Starred Projects';
-      case 'recent': return 'Recent Projects';
-      case 'active': return 'Active Projects';
-      case 'archived': return 'Archived Projects';
+      case 'starred': return t('projects.filterTitle.starred');
+      case 'recent': return t('projects.filterTitle.recent');
+      case 'active': return t('projects.filterTitle.active');
+      case 'archived': return t('projects.filterTitle.archived');
       default:
         if (folders.includes(activeFilter)) return activeFilter;
         return t('projects.title', 'All Projects');

@@ -18,7 +18,9 @@ import {
   Calendar,
   Tag,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Project } from '../../types';
+import { formatDateShort } from '../../utils/formatDate';
 
 interface ProjectNavSidebarProps {
   project: Project;
@@ -39,14 +41,14 @@ const AVATAR_COLORS = [
 ] as const;
 
 const NAV_SECTIONS = [
-  { key: 'files', label: 'Files', icon: FolderOpen, iconColor: '' },
-  { key: 'scripts', label: 'Scripts', icon: FileText, iconColor: '' },
-  { key: 'storyboard', label: 'Storyboard', icon: Clapperboard, iconColor: '' },
-  { key: 'output', label: 'Output', icon: Download, iconColor: '' },
-  { key: 'divider-1', label: '', icon: null, iconColor: '' },
-  { key: 'trash', label: 'Trash', icon: Trash2, iconColor: '' },
-  { key: 'divider-2', label: '', icon: null, iconColor: '' },
-  { key: 'settings', label: 'Settings', icon: Settings, iconColor: '' },
+  { key: 'files', labelKey: 'projects.nav.files', icon: FolderOpen, iconColor: '' },
+  { key: 'scripts', labelKey: 'projects.nav.scripts', icon: FileText, iconColor: '' },
+  { key: 'storyboard', labelKey: 'projects.nav.storyboard', icon: Clapperboard, iconColor: '' },
+  { key: 'output', labelKey: 'projects.nav.output', icon: Download, iconColor: '' },
+  { key: 'divider-1', labelKey: '', icon: null, iconColor: '' },
+  { key: 'trash', labelKey: 'projects.nav.trash', icon: Trash2, iconColor: '' },
+  { key: 'divider-2', labelKey: '', icon: null, iconColor: '' },
+  { key: 'settings', labelKey: 'projects.nav.settings', icon: Settings, iconColor: '' },
 ] as const;
 
 function getAvatarColor(name: string): string {
@@ -77,6 +79,7 @@ export function ProjectNavSidebar({
   collapsed = false,
   onToggleCollapse,
 }: ProjectNavSidebarProps) {
+  const { t } = useTranslation();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -135,7 +138,7 @@ export function ProjectNavSidebar({
   const filteredStarred = filterProjects(starredProjects);
   const filteredRecent = filterProjects(recentProjects);
   const fileCount = project.file_count ?? 0;
-  const metaText = `${fileCount} files`;
+  const metaText = `${fileCount} ${t('mediatrack.files')}`;
 
   if (collapsed) {
     return (
@@ -144,7 +147,7 @@ export function ProjectNavSidebar({
           <button
             onClick={onToggleCollapse}
             className="absolute top-1/2 -translate-y-1/2 left-0 z-10 w-4 h-10 flex items-center justify-center rounded-r-md bg-ink-800/80 text-ink-500 hover:text-ink-200 hover:bg-ink-700 transition-colors"
-            title="Expand sidebar"
+            title={t('projects.nav.expandSidebar')}
           >
             <ChevronRight size={12} />
           </button>
@@ -160,7 +163,7 @@ export function ProjectNavSidebar({
         <button
           onClick={onToggleCollapse}
           className="absolute top-1/2 -translate-y-1/2 right-0 z-10 w-4 h-10 flex items-center justify-center rounded-l-md bg-ink-800/80 text-ink-500 hover:text-ink-200 hover:bg-ink-700 transition-colors opacity-0 group-hover:opacity-100"
-          title="Collapse sidebar"
+          title={t('projects.nav.collapseSidebar')}
         >
           <ChevronLeft size={12} />
         </button>
@@ -172,7 +175,7 @@ export function ProjectNavSidebar({
           <button
             onClick={onBackToList}
             className="p-1 rounded hover:bg-ink-700 text-ink-400 hover:text-ink-200 transition-colors duration-120"
-            title="Back to projects"
+            title={t('projects.nav.backToList')}
           >
             <ArrowLeft size={16} />
           </button>
@@ -201,7 +204,7 @@ export function ProjectNavSidebar({
                   type="text"
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
-                  placeholder="Switch project..."
+                  placeholder={t('projects.nav.switchProject')}
                   className="flex-1 bg-transparent text-sm text-ink-200 placeholder-ink-500 outline-none"
                 />
               </div>
@@ -210,7 +213,7 @@ export function ProjectNavSidebar({
             <div className="max-h-64 overflow-y-auto py-1">
               {/* Starred */}
               {filteredStarred.length > 0 && (
-                <DropdownSection icon={<Star size={12} />} label="Starred">
+                <DropdownSection icon={<Star size={12} />} label={t('projects.view.starred')}>
                   {filteredStarred.map(p => (
                     <DropdownItem key={p.id} project={p} onClick={() => handleProjectClick(p)} />
                   ))}
@@ -219,7 +222,7 @@ export function ProjectNavSidebar({
 
               {/* Recent */}
               {filteredRecent.length > 0 && (
-                <DropdownSection icon={<Clock size={12} />} label="Recent">
+                <DropdownSection icon={<Clock size={12} />} label={t('projects.view.recent')}>
                   {filteredRecent.map(p => (
                     <DropdownItem key={p.id} project={p} onClick={() => handleProjectClick(p)} />
                   ))}
@@ -227,7 +230,7 @@ export function ProjectNavSidebar({
               )}
 
               {filteredStarred.length === 0 && filteredRecent.length === 0 && (
-                <div className="px-3 py-4 text-center text-xs text-ink-500">No projects found</div>
+                <div className="px-3 py-4 text-center text-xs text-ink-500">{t('projects.nav.noProjectsFound')}</div>
               )}
             </div>
 
@@ -238,7 +241,7 @@ export function ProjectNavSidebar({
                 className="flex items-center gap-2 w-full px-3 py-2 text-sm text-ink-400 hover:text-ink-200 hover:bg-ink-800 transition-colors duration-120"
               >
                 <LayoutGrid size={14} />
-                All Projects
+                {t('projects.nav.allProjects')}
               </button>
             </div>
           </div>
@@ -265,7 +268,7 @@ export function ProjectNavSidebar({
               }`}
             >
               <Icon size={16} className={`shrink-0 ${!isActive && section.iconColor ? section.iconColor : ''}`} />
-              <span className="flex-1 text-left">{section.label}</span>
+              <span className="flex-1 text-left">{t(section.labelKey)}</span>
               {count != null && count > 0 && (
                 <span className="text-[10px] min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-ink-800 text-ink-400 font-medium">
                   {count}
@@ -312,10 +315,7 @@ function DropdownItem({ project, onClick }: { project: Project; onClick: () => v
 }
 
 function ProjectInfoFooter({ project }: { project: Project }) {
-  const created = new Date(project.created_at);
-  const month = created.toLocaleString('en', { month: 'short' });
-  const day = created.getDate();
-  const year = created.getFullYear();
+  const { t } = useTranslation();
 
   return (
     <div className="px-3 py-3 border-t border-ink-800/40">
@@ -327,16 +327,16 @@ function ProjectInfoFooter({ project }: { project: Project }) {
       <div className="space-y-1.5">
         <div className="flex items-center gap-2 text-[11px] text-ink-600">
           <Calendar size={12} className="shrink-0" />
-          <span>Created {month} {day}, {year}</span>
+          <span>{t('projects.nav.created')} {formatDateShort(project.created_at)}</span>
         </div>
         <div className="flex items-center gap-2 text-[11px] text-ink-600">
           <Tag size={12} className="shrink-0" />
-          <span>{project.project_type === 'external' ? 'External' : 'Internal'}</span>
+          <span>{t(`mediatrack.${project.project_type === 'external' ? 'external' : 'internal'}`)}</span>
         </div>
         {project.is_starred && (
           <div className="flex items-center gap-2 text-[11px] text-yellow-600/60">
             <Star size={12} className="shrink-0" />
-            <span>Starred</span>
+            <span>{t('projects.view.starred')}</span>
           </div>
         )}
       </div>

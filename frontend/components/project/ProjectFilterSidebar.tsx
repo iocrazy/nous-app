@@ -2,6 +2,7 @@ import {
   LayoutGrid, Star, Clock, Zap, Archive,
   FolderOpen, ChevronLeft, ChevronRight,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 interface ProjectFilterSidebarProps {
   activeFilter: string;
@@ -21,11 +22,11 @@ interface ProjectFilterSidebarProps {
 }
 
 const VIEW_FILTERS = [
-  { key: 'all', label: 'All', icon: LayoutGrid },
-  { key: 'starred', label: 'Starred', icon: Star },
-  { key: 'recent', label: 'Recent', icon: Clock },
-  { key: 'active', label: 'Active', icon: Zap },
-  { key: 'archived', label: 'Archived', icon: Archive },
+  { key: 'all', labelKey: 'projects.view.all', icon: LayoutGrid },
+  { key: 'starred', labelKey: 'projects.view.starred', icon: Star },
+  { key: 'recent', labelKey: 'projects.view.recent', icon: Clock },
+  { key: 'active', labelKey: 'projects.view.active', icon: Zap },
+  { key: 'archived', labelKey: 'projects.view.archived', icon: Archive },
 ] as const;
 
 const iconBtnClass = 'rounded p-1 text-ink-500 transition-colors hover:text-ink-300';
@@ -67,13 +68,15 @@ export function ProjectFilterSidebar({
   activeFilter, onFilterChange, folders, projectCounts,
   folderCounts, onCreateProject, collapsed, onToggleCollapse,
 }: ProjectFilterSidebarProps) {
+  const { t } = useTranslation();
+
   if (collapsed) {
     return (
       <div className="relative w-4 flex-shrink-0">
         <button
           onClick={onToggleCollapse}
           className="absolute top-1/2 -translate-y-1/2 left-0 z-10 w-4 h-10 flex items-center justify-center rounded-r-md bg-ink-800/80 text-ink-500 hover:text-ink-200 hover:bg-ink-700 transition-colors"
-          title="Expand sidebar"
+          title={t('projects.nav.expandSidebar')}
         >
           <ChevronRight size={12} />
         </button>
@@ -85,18 +88,18 @@ export function ProjectFilterSidebar({
     <div className={`group relative flex w-52 flex-col border-r border-ink-800/40`}>
       {/* Header */}
       <div className="px-4 pt-4 pb-3">
-        <span className="text-sm font-semibold text-ink-200">Projects</span>
+        <span className="text-sm font-semibold text-ink-200">{t('mediatrack.projects')}</span>
       </div>
 
       {/* View filters */}
       <div className="px-2">
-        <SectionLabel>View</SectionLabel>
+        <SectionLabel>{t('projects.view.title')}</SectionLabel>
         <div className="mt-1 flex flex-col gap-0.5">
-          {VIEW_FILTERS.map(({ key, label, icon }) => (
+          {VIEW_FILTERS.map(({ key, labelKey, icon }) => (
             <FilterItem
               key={key}
               icon={icon}
-              label={label}
+              label={t(labelKey)}
               count={projectCounts[key]}
               active={activeFilter === key}
               onClick={() => onFilterChange(key)}
@@ -110,7 +113,7 @@ export function ProjectFilterSidebar({
         <>
           <div className="mx-3 my-2 border-t border-ink-800/80" />
           <div className="px-2 pb-2 space-y-0.5">
-            <SectionLabel>Folders</SectionLabel>
+            <SectionLabel>{t('projects.view.folders')}</SectionLabel>
             <div className="mt-1 flex flex-col gap-0.5">
               {folders.map((folder) => (
                 <FilterItem
@@ -131,7 +134,7 @@ export function ProjectFilterSidebar({
       <button
         onClick={onToggleCollapse}
         className="absolute top-1/2 -translate-y-1/2 right-0 z-10 w-4 h-10 flex items-center justify-center rounded-l-md bg-ink-800/80 text-ink-500 hover:text-ink-200 hover:bg-ink-700 transition-colors opacity-0 group-hover:opacity-100"
-        title="Collapse sidebar"
+        title={t('projects.nav.collapseSidebar')}
       >
         <ChevronLeft size={12} />
       </button>

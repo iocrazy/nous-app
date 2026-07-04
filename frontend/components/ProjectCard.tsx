@@ -2,6 +2,7 @@ import React from 'react';
 import { Star, Clock, FileText, MoreVertical } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Project } from '../types';
+import { formatRelativeTime } from '../utils/relativeTime';
 
 interface ProjectCardProps {
   project: Project;
@@ -24,21 +25,6 @@ const colorLabelBorders: Record<string, string> = {
   blue: 'border-l-blue-500',
   purple: 'border-l-purple-500',
   pink: 'border-l-pink-500',
-};
-
-const formatRelativeTime = (dateStr: string): string => {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMinutes = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMinutes / 60);
-  const diffDays = Math.floor(diffHours / 24);
-
-  if (diffMinutes < 1) return 'just now';
-  if (diffMinutes < 60) return `${diffMinutes}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return date.toLocaleDateString();
 };
 
 export const ProjectCard: React.FC<ProjectCardProps> = ({ project, onClick, onToggleStar, onContextMenu }) => {
@@ -87,7 +73,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project, onClick, onTo
 
       <div className="flex items-center gap-3 mt-4">
         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${colors.badge}`}>
-          {t(`mediatrack.${project.project_type}`) || colors.text}
+          {t(`mediatrack.${project.project_type}`, colors.text)}
         </span>
         {project.project_group && (
           <span className="text-xs text-ink-500 bg-ink-700/50 px-2 py-0.5 rounded-full">
@@ -103,7 +89,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project, onClick, onTo
         </div>
         <div className="flex items-center gap-1">
           <Clock size={12} />
-          <span>{formatRelativeTime(project.updated_at)}</span>
+          <span>{formatRelativeTime(project.updated_at, t)}</span>
         </div>
       </div>
     </div>
