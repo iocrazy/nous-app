@@ -22,7 +22,10 @@ from fastapi import APIRouter, HTTPException, Path
 from loguru import logger
 
 from app.core.deps import AuthDep
-from app.core.scope_guards import verify_project_write_access
+from app.core.scope_guards import (
+    verify_project_read_access,
+    verify_project_write_access,
+)
 from app.schemas.canvas import (
     CanvasConflictResponse,
     CanvasCreate,
@@ -74,10 +77,19 @@ async def _gate_canvas_write(canvas_id: str, auth: AuthDep) -> str:
 
 
 async def _gate_canvas_read(canvas_id: str, auth: AuthDep) -> str:
-    # Read access = project membership = same guard as write today;
-    # split into a separate verify_project_read_access if mediahub grows
-    # a viewer-only role later.
-    return await _gate_canvas_write(canvas_id, auth)
+    """Resolve canvas → project, then run the read guard. Returns project_id.
+
+    Read = owner, or team member, or any project_members row (any role) —
+    see ``verify_project_read_access``. Viewer-role project members can
+    reach this but fail ``_gate_canvas_write``, which requires
+    manager/editor.
+    """
+    svc = CanvasService()
+    project_id = await svc.get_project_id(canvas_id)
+    if project_id is None:
+        raise HTTPException(status_code=404, detail="canvas not found")
+    await verify_project_read_access(project_id=project_id, auth=auth)
+    return project_id
 
 
 # ============================================================
