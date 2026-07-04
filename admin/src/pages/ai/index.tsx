@@ -84,6 +84,12 @@ function aggregateStatus(models: NousModel[]): 'ok' | 'fail' | undefined {
   return undefined
 }
 
+// Failing models with their persisted probe reason (e.g. "HTTP 402: ..."),
+// so the card can SHOW why a dot is red instead of hiding it in a hover.
+function failingModels(models: NousModel[]): NousModel[] {
+  return models.filter((m) => m.last_test_status === 'fail')
+}
+
 // Connectivity dot from the LAST persisted Test: green = reachable, red =
 // failed, gray = untested. Tooltip carries the detail + when it was tested.
 function StatusDot({
@@ -423,7 +429,12 @@ export function AIModelsPage() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
                 <div>
                   <div style={{ fontWeight: 600, fontSize: 15, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <StatusDot status={aggregateStatus(g.models)} />
+                    <StatusDot
+                      status={aggregateStatus(g.models)}
+                      detail={failingModels(g.models)
+                        .map((m) => `${m.actual_model}: ${m.last_test_detail || 'failed'}`)
+                        .join(' | ') || undefined}
+                    />
                     {g.provider}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--color-text-3)', fontFamily: 'monospace' }}>
@@ -447,6 +458,26 @@ export function AIModelsPage() {
                       </div>
                     ) : null
                   })()}
+                  {/* WHY a dot is red, visible at a glance — the persisted probe
+                      reason (e.g. "HTTP 402: Insufficient Balance") used to hide
+                      in an 8px-dot hover tooltip only. Full text stays on title. */}
+                  {failingModels(g.models).map((m) => (
+                    <div
+                      key={`fail-${m.id}`}
+                      title={m.last_test_detail || undefined}
+                      style={{
+                        fontSize: 12,
+                        color: '#f53f3f',
+                        marginTop: 2,
+                        maxWidth: 560,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      ✕ {m.actual_model} — {m.last_test_detail || 'connectivity test failed'}
+                    </div>
+                  ))}
                 </div>
                 <Space>
                   {(() => {
