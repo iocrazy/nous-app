@@ -13,11 +13,16 @@ service-role admin client bypasses RLS, so this router re-checks
 visibility in Python via the same pattern as issues_router.
 
 Spec-1a (Task 5): GET /{issue_id}/messages has a dual read path.
-  - Session path: when issues.ai_session_id is set, read ai_messages for that
-    session and map each row to IssueMessage shape so the frontend needs no
-    change.
+  - Session path: when issues.ai_session_id is set, read the session's
+    messages through ``ConversationsAiStore`` (the sole ``MessageStore``
+    implementation since Conversations Phase 3 Task 6 — canonical
+    ``conversations``/``messages`` tables, mig 327+332) and map each row to
+    IssueMessage shape so the frontend needs no change. The legacy
+    ``ai_sessions``/``ai_messages`` tables this used to read directly are
+    retired in mig 333 (same PR) — no dual-read against them.
   - Legacy path: when ai_session_id is NULL, fall back to the issue_messages
-    table unchanged (covers issues predating the ai_session wiring).
+    table unchanged (covers issues predating the ai_session wiring). This is
+    a distinct, still-live table — unrelated to the mig 333 drop above.
 """
 
 from __future__ import annotations
@@ -41,11 +46,18 @@ from app.schemas.issue_message import (
     IssueMessagePost,
     IssueMessagePostResponse,
 )
+from app.services.ai.chat.conversations_ai_store import ConversationsAiStore
 from app.services.issues.issue_message_mapper import map_ai_message_to_issue_message
 from app.services.issues.issue_session import get_or_create_issue_session
 from app.workflows.issue_lifecycle import respond_to_issue_reply
 
 router = APIRouter(prefix="/issues", tags=["Issue Messages"])
+
+# The old direct-ai_messages query had no LIMIT (returned the whole thread);
+# ConversationsAiStore.get_messages defaults to 200. Pass an explicit high
+# ceiling here so the GET endpoint's contract (full thread, oldest first)
+# doesn't silently regress into pagination for long-running issue chats.
+_SESSION_MESSAGES_LIMIT = 10_000
 
 
 def _dispatch_respond_to_issue_reply(
@@ -117,36 +129,33 @@ async def _assert_issue_visible(issue_id: int, auth) -> dict:
 async def list_issue_messages(issue_id: int, auth: AuthDep) -> IssueMessageList:
     """Fetch the chat thread for an issue, oldest first.
 
-    Dual-path (Spec-1a Task 5):
-    - Session path: when the issue has ai_session_id set, reads ai_messages for
-      that session and maps each row to IssueMessage shape.
+    Dual-path (Spec-1a Task 5, repointed onto ConversationsAiStore in the
+    P3 Task 6 fix-up):
+    - Session path: when the issue has ai_session_id set, reads the session's
+      messages through ``ConversationsAiStore`` and maps each row to
+      IssueMessage shape.
     - Legacy path: when ai_session_id is None, reads issue_messages directly
       (unchanged behaviour for issues predating the ai_session wiring).
     """
     issue_row = await _assert_issue_visible(issue_id, auth)
     ai_session_id: Optional[str] = issue_row.get("ai_session_id")
 
-    sb = await get_async_supabase_admin()
-
     # ── Session path ──────────────────────────────────────────────────────
     if ai_session_id:
-        # Fetch the session's user_id once (needed for user-role message mapping).
+        store = ConversationsAiStore()
+
+        # Fetch the session's user_id once (needed for user-role message
+        # mapping) via the store — same legacy-shaped row the AI Library
+        # chat service consumes, so `user_id` is already a plain string.
         try:
-            session_resp = (
-                await sb.table("ai_sessions")
-                .select("id,user_id")
-                .eq("id", ai_session_id)
-                .maybe_single()
-                .execute()
-            )
+            session_row = await store.get_session(session_id=int(ai_session_id))
         except Exception as exc:
             logger.exception(
-                f"fetch ai_session failed (issue_id={issue_id}, "
+                f"fetch conversations session failed (issue_id={issue_id}, "
                 f"session_id={ai_session_id}): {exc}"
             )
             raise HTTPException(500, "failed to fetch session")
 
-        session_row = session_resp.data if session_resp else None
         session_user_id: Optional[UUID] = None
         if session_row and session_row.get("user_id"):
             try:
@@ -154,23 +163,19 @@ async def list_issue_messages(issue_id: int, auth: AuthDep) -> IssueMessageList:
             except (ValueError, AttributeError):
                 pass
 
-        # Read ai_messages for this session, oldest first.
+        # Read the session's messages, oldest first (store's own SELECT is
+        # ordered by `seq ASC`, matching the old `created_at ASC` ordering).
         try:
-            msgs_resp = (
-                await sb.table("ai_messages")
-                .select("*")
-                .eq("session_id", ai_session_id)
-                .order("created_at", desc=False)
-                .execute()
+            rows = await store.get_messages(
+                session_id=int(ai_session_id), limit=_SESSION_MESSAGES_LIMIT
             )
         except Exception as exc:
             logger.exception(
-                f"fetch ai_messages failed (issue_id={issue_id}, "
+                f"fetch conversations messages failed (issue_id={issue_id}, "
                 f"session_id={ai_session_id}): {exc}"
             )
             raise HTTPException(500, "failed to list messages")
 
-        rows = msgs_resp.data or []
         messages = [
             map_ai_message_to_issue_message(
                 r, issue_id=issue_id, session_user_id=session_user_id
@@ -181,6 +186,9 @@ async def list_issue_messages(issue_id: int, auth: AuthDep) -> IssueMessageList:
 
     # ── Legacy path (no ai_session) ───────────────────────────────────────
     # Unchanged: read issue_messages table so old issues render correctly.
+    # (issue_messages is a distinct, still-live table — not one of the 6
+    # dropped by mig 333.)
+    sb = await get_async_supabase_admin()
     try:
         result = (
             await sb.table("issue_messages")

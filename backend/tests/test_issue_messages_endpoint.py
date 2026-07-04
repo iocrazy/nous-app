@@ -1,12 +1,26 @@
 """Tests for GET /issues/{issue_id}/messages — dual-path (session vs legacy).
 
 Task 5 (Spec-1a): when an issue has ai_session_id set, the endpoint reads
-ai_messages and maps them to IssueMessage shape. When ai_session_id is None
-it falls back to the legacy issue_messages table.
+the session's messages. Fix-up (Conversations Phase 3, Task 6 review):
+the session path was repointed from the retired ``ai_sessions``/
+``ai_messages`` tables onto ``ConversationsAiStore`` — mig 333 (same PR)
+drops the legacy tables, so a test still mocking ``sb.table("ai_sessions")``
+would pass for the wrong reason (it never exercised the real read path).
+These tests now mock ``ConversationsAiStore`` directly, with REALISTIC
+BIGINT snowflake ids (not convenient UUID-shaped strings) and real
+``datetime`` timestamps — the actual shape ``ConversationsAiStore``
+hands back — per the project lesson that type-homogeneous fakes mask
+cross-store id-type bugs (this is what let the UUID()-on-bigint crash
+ship in the first place).
+
+When ai_session_id is None the endpoint still falls back to the legacy
+``issue_messages`` table (a distinct, still-live table — unaffected by
+this fix-up).
 """
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -64,41 +78,47 @@ def _chain_builder(data, count=None):
     return b
 
 
-# ─── path A: ai_session present ─────────────────────────────────────────
+def _fake_conversations_store(session_row, message_rows):
+    """Stand in for ConversationsAiStore, returning pre-canned legacy-shaped
+    rows from get_session/get_messages exactly as the real store would
+    (BIGINT ids un-stringified, datetime objects for created_at)."""
+    store = MagicMock()
+    store.get_session = AsyncMock(return_value=session_row)
+    store.get_messages = AsyncMock(return_value=message_rows)
+    return store
+
+
+# ─── path A: ai_session present (ConversationsAiStore) ──────────────────
 
 
 async def test_session_path_user_message_maps_to_comment():
-    """A user ai_message maps to kind='comment' with author_user_id from session."""
+    """A user message row maps to kind='comment' with author_user_id from
+    the session, reading through ConversationsAiStore with a realistic
+    BIGINT snowflake message id + a real datetime created_at."""
     issue_id = 42
-    session_id = uuid4()
-    msg_id = uuid4()
+    session_id = 987654321012345  # realistic BIGINT snowflake, not a UUID
+    msg_id = 323848780659604  # realistic BIGINT snowflake
     session_user_id = uuid4()
+    created_at = datetime.now(timezone.utc)
 
     issue_row = _fake_issue(ai_session_id=session_id, user_id=session_user_id)
-    session_row = {"id": str(session_id), "user_id": str(session_user_id)}
+    session_row = {"id": session_id, "user_id": str(session_user_id)}
 
-    ai_messages = [
+    message_rows = [
         {
-            "id": str(msg_id),
-            "session_id": str(session_id),
+            "id": msg_id,
+            "session_id": session_id,
             "role": "user",
             "content": "Hello agent",
             "agent_id": None,
             "metadata_json": {},
             "prompt_tokens": 10,
             "completion_tokens": 0,
-            "created_at": _dt(),
+            "created_at": created_at,
         }
     ]
 
-    def _tables(tbl):
-        if tbl == "ai_sessions":
-            return _chain_builder(session_row)
-        if tbl == "ai_messages":
-            return _chain_builder(ai_messages)
-        raise AssertionError(f"unexpected table access: {tbl}")
-
-    sb = _make_sb_client(_tables)
+    store = _fake_conversations_store(session_row, message_rows)
 
     with (
         patch(
@@ -106,8 +126,8 @@ async def test_session_path_user_message_maps_to_comment():
             AsyncMock(return_value=issue_row),
         ),
         patch(
-            "app.api.issue_messages_router.get_async_supabase_admin",
-            AsyncMock(return_value=sb),
+            "app.api.issue_messages_router.ConversationsAiStore",
+            return_value=store,
         ),
     ):
         auth = _make_auth(user_id=session_user_id)
@@ -115,49 +135,46 @@ async def test_session_path_user_message_maps_to_comment():
 
     assert result.total == 1
     msg = result.messages[0]
-    assert str(msg.id) == str(msg_id)
+    assert msg.id == str(msg_id)  # str, never UUID-parsed
     assert msg.issue_id == issue_id
     assert msg.kind.value == "comment"
     assert msg.author_user_id == session_user_id
     assert msg.author_agent_id is None
     assert msg.body == "Hello agent"
+    store.get_session.assert_awaited_once_with(session_id=session_id)
+    store.get_messages.assert_awaited_once()
 
 
 async def test_session_path_assistant_message_maps_to_agent_run():
-    """An assistant ai_message maps to kind='agent_run' with author_agent_id."""
+    """An assistant message row maps to kind='agent_run' with author_agent_id,
+    reading through ConversationsAiStore with realistic BIGINT ids."""
     issue_id = 42
-    session_id = uuid4()
-    msg_id = uuid4()
+    session_id = 555000111222333
+    msg_id = 323848780659604
     agent_uuid = uuid4()
     # agent_runs.id is a BIGINT Snowflake since mig 232 → numeric string.
     run_bigint = "310819108761487"
     session_user_id = uuid4()
+    created_at = datetime.now(timezone.utc)
 
     issue_row = _fake_issue(ai_session_id=session_id, user_id=session_user_id)
-    session_row = {"id": str(session_id), "user_id": str(session_user_id)}
+    session_row = {"id": session_id, "user_id": str(session_user_id)}
 
-    ai_messages = [
+    message_rows = [
         {
-            "id": str(msg_id),
-            "session_id": str(session_id),
+            "id": msg_id,
+            "session_id": session_id,
             "role": "assistant",
             "content": "I can help with that",
             "agent_id": str(agent_uuid),
             "metadata_json": {"run_id": run_bigint},
             "prompt_tokens": 100,
             "completion_tokens": 50,
-            "created_at": _dt(),
+            "created_at": created_at,
         }
     ]
 
-    def _tables(tbl):
-        if tbl == "ai_sessions":
-            return _chain_builder(session_row)
-        if tbl == "ai_messages":
-            return _chain_builder(ai_messages)
-        raise AssertionError(f"unexpected table access: {tbl}")
-
-    sb = _make_sb_client(_tables)
+    store = _fake_conversations_store(session_row, message_rows)
 
     with (
         patch(
@@ -165,8 +182,8 @@ async def test_session_path_assistant_message_maps_to_agent_run():
             AsyncMock(return_value=issue_row),
         ),
         patch(
-            "app.api.issue_messages_router.get_async_supabase_admin",
-            AsyncMock(return_value=sb),
+            "app.api.issue_messages_router.ConversationsAiStore",
+            return_value=store,
         ),
     ):
         auth = _make_auth(user_id=session_user_id)
@@ -174,6 +191,7 @@ async def test_session_path_assistant_message_maps_to_agent_run():
 
     assert result.total == 1
     msg = result.messages[0]
+    assert msg.id == str(msg_id)
     assert msg.kind.value == "agent_run"
     assert msg.author_agent_id == agent_uuid
     assert msg.author_user_id is None
@@ -182,19 +200,21 @@ async def test_session_path_assistant_message_maps_to_agent_run():
 
 
 async def test_session_path_system_message_maps_to_system_status():
-    """A system ai_message maps to kind='system_status' with from/to_status."""
+    """A system message row maps to kind='system_status' with from/to_status,
+    reading through ConversationsAiStore with a realistic BIGINT id."""
     issue_id = 42
-    session_id = uuid4()
-    msg_id = uuid4()
+    session_id = 444555666777888
+    msg_id = 323848780659604
     session_user_id = uuid4()
+    created_at = datetime.now(timezone.utc)
 
     issue_row = _fake_issue(ai_session_id=session_id, user_id=session_user_id)
-    session_row = {"id": str(session_id), "user_id": str(session_user_id)}
+    session_row = {"id": session_id, "user_id": str(session_user_id)}
 
-    ai_messages = [
+    message_rows = [
         {
-            "id": str(msg_id),
-            "session_id": str(session_id),
+            "id": msg_id,
+            "session_id": session_id,
             "role": "system",
             "content": "Status changed",
             "agent_id": None,
@@ -205,18 +225,11 @@ async def test_session_path_system_message_maps_to_system_status():
             },
             "prompt_tokens": 0,
             "completion_tokens": 0,
-            "created_at": _dt(),
+            "created_at": created_at,
         }
     ]
 
-    def _tables(tbl):
-        if tbl == "ai_sessions":
-            return _chain_builder(session_row)
-        if tbl == "ai_messages":
-            return _chain_builder(ai_messages)
-        raise AssertionError(f"unexpected table access: {tbl}")
-
-    sb = _make_sb_client(_tables)
+    store = _fake_conversations_store(session_row, message_rows)
 
     with (
         patch(
@@ -224,8 +237,8 @@ async def test_session_path_system_message_maps_to_system_status():
             AsyncMock(return_value=issue_row),
         ),
         patch(
-            "app.api.issue_messages_router.get_async_supabase_admin",
-            AsyncMock(return_value=sb),
+            "app.api.issue_messages_router.ConversationsAiStore",
+            return_value=store,
         ),
     ):
         auth = _make_auth(user_id=session_user_id)
@@ -233,6 +246,7 @@ async def test_session_path_system_message_maps_to_system_status():
 
     assert result.total == 1
     msg = result.messages[0]
+    assert msg.id == str(msg_id)
     assert msg.kind.value == "system_status"
     assert msg.from_status == "backlog"
     assert msg.to_status == "in_progress"

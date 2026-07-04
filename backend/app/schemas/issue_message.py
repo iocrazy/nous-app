@@ -11,7 +11,7 @@ from enum import Enum
 from typing import Any, List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.ai_library_chat import AttachmentRequest
 
@@ -27,7 +27,13 @@ class IssueMessage(BaseModel):
     # deliver it as an int, so opt into int→str coercion.
     model_config = ConfigDict(coerce_numbers_to_str=True)
 
-    id: UUID
+    # `id` was a real UUID PK under the retired Supabase-backed ai_messages
+    # store; under ConversationsAiStore (the sole store since Conversations
+    # Phase 3 Task 6) it's public.messages.id, a BIGINT snowflake. Widened
+    # to str (mirrors MessageOut.id in schemas/ai_library_chat.py) so both
+    # shapes validate — the legacy path (issue_messages table, still a real
+    # UUID PK) and optimistic rows (uuid.uuid4()) keep working unchanged.
+    id: str
     issue_id: int
     kind: IssueMessageKind
     author_user_id: Optional[UUID] = None
@@ -40,6 +46,14 @@ class IssueMessage(BaseModel):
     from_status: Optional[str] = None
     to_status: Optional[str] = None
     created_at: datetime
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def _coerce_id(cls, v: Any) -> str:
+        # coerce_numbers_to_str handles bigint ints; this covers the other
+        # shape callers still pass — a real uuid.UUID object (legacy rows /
+        # the optimistic-comment placeholder in issue_messages_router.py).
+        return str(v)
 
 
 class IssueMessageList(BaseModel):
