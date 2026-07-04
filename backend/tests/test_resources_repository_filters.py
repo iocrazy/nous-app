@@ -534,6 +534,22 @@ async def test_resource_ids_with_all_tags_builds_having_query(
     assert params["n"] == 2
 
 
+@pytest.mark.asyncio
+async def test_resource_ids_with_all_tags_returns_empty_on_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A DB error inside the intersection query is swallowed → [] (the
+    defensive ``except`` branch must NOT propagate)."""
+
+    def _boom():
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(repo_mod, "read_scope", _boom)
+    repo = ResourcesRepository()
+
+    assert await repo._resource_ids_with_all_tags(["tag-a"]) == []
+
+
 # ─── _resource_ids_for_platforms (ORM two-step) ───────────────────────
 
 
@@ -578,3 +594,19 @@ async def test_resource_ids_for_platforms_no_media_short_circuits(
     result = await repo._resource_ids_for_platforms(["douyin"])
     assert result == []
     assert len(session.calls) == 1  # only parsed_media probed
+
+
+@pytest.mark.asyncio
+async def test_resource_ids_for_platforms_returns_empty_on_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A DB error inside the platform lookup is swallowed → [] (the defensive
+    ``except`` branch must NOT propagate)."""
+
+    def _boom():
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(repo_mod, "read_scope", _boom)
+    repo = ResourcesRepository()
+
+    assert await repo._resource_ids_for_platforms(["douyin"]) == []
