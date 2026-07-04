@@ -71,7 +71,7 @@ vi.mock('../hooks/useGridVirtualizer', () => ({
       // measureElement is passed as a ref callback to each row div
       measureElement: vi.fn(),
     },
-    containerRef: { current: null },
+    containerRef: vi.fn(),
     totalSize: 70000,
   })),
 }));
