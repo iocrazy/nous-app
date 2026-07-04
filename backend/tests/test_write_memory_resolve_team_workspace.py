@@ -1,14 +1,12 @@
-"""Task 6 / S8: ``write_memory._resolve_team_workspace`` conversations-first,
-ai_sessions-fallback lookup (parity checklist §3.6/§3.8).
+"""``write_memory._resolve_team_workspace`` — conversations-only lookup.
 
-Snowflake ids are minted exactly once by ``generate_snowflake_id()``, so a
-given ``session_id`` can never exist as a row in BOTH ``conversations`` and
-``ai_sessions`` — the conversations query is tried first and short-circuits
-on a hit; a miss falls back to the legacy ai_sessions lookup.
+Conversations Phase 3, Task 6 collapsed the compatibility layer: the
+legacy ``ai_sessions`` fallback this function used to try after a
+conversations miss is gone (the legacy table itself is dropped in Wave 2).
 
 The conversations column is ``scope_id`` (aliased ``AS team_id`` in the
-SELECT), NOT a literal ``team_id`` column — that's the ai_sessions-only
-column name (checklist risk #3).
+SELECT), NOT a literal ``team_id`` column — that was the ai_sessions-only
+column name.
 """
 
 from __future__ import annotations
@@ -17,7 +15,7 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_resolve_team_workspace_tries_conversations_first(
+async def test_resolve_team_workspace_reads_conversations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from app.workflows import write_memory
@@ -40,41 +38,27 @@ async def test_resolve_team_workspace_tries_conversations_first(
 
 
 @pytest.mark.asyncio
-async def test_resolve_team_workspace_falls_back_to_ai_sessions_when_no_conversations_row(
+async def test_resolve_team_workspace_returns_none_when_no_team(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from app.workflows import write_memory
 
-    calls: list[dict] = []
-
     async def fake_fetch_one(sql: str, params=None):
-        calls.append({"sql": sql, "params": params})
-        if "public.conversations" in sql:
-            return None
-        return {"team_id": 42}
+        return {"team_id": None}
 
     monkeypatch.setattr("app.db.engine.fetch_one", fake_fetch_one)
 
-    workspace = await write_memory._resolve_team_workspace("888")
-
-    assert workspace == "team-42"
-    assert len(calls) == 2
-    assert "public.conversations" in calls[0]["sql"]
-    assert "public.ai_sessions" in calls[1]["sql"]
-    assert "team_id" in calls[1]["sql"]
-    assert calls[1]["params"] == {"sid": 888}
+    assert await write_memory._resolve_team_workspace("888") is None
 
 
 @pytest.mark.asyncio
-async def test_resolve_team_workspace_returns_none_when_neither_table_has_team(
+async def test_resolve_team_workspace_returns_none_when_session_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from app.workflows import write_memory
 
     async def fake_fetch_one(sql: str, params=None):
-        if "public.conversations" in sql:
-            return None
-        return {"team_id": None}
+        return None
 
     monkeypatch.setattr("app.db.engine.fetch_one", fake_fetch_one)
 

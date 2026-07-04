@@ -10,7 +10,9 @@ Goal: prove the full chain fires once a chat turn completes —
           session_memory updater dispatched (background task)
 
 We mock at three boundaries:
-  1. Supabase client (so no real DB writes)
+  1. The MessageStore (a hand-rolled fake injected via the constructor —
+     Conversations Phase 3 Task 6 retired the legacy Supabase-backed
+     store, so there is no Supabase client to mock here anymore)
   2. AgentRunner.run_turn (so no real LLM calls)
   3. AgentRepository.get_by_slug + build_agent_runner_stack
      (so no real prompt composition / fallback chain build)
@@ -31,10 +33,68 @@ unit tests would not.
 from __future__ import annotations
 
 import asyncio
+from typing import Any, Dict, List, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+
+
+class _FakeStore:
+    """Minimal MessageStore stub — see tests/test_ai_library_chat.py."""
+
+    def __init__(self, session_row: Dict[str, Any]) -> None:
+        self._session_row = session_row
+        self.appended: List[Dict[str, Any]] = []
+        self.bumps: List[Dict[str, Any]] = []
+
+    async def get_session(self, *, session_id: Any) -> Optional[Dict[str, Any]]:
+        return dict(self._session_row)
+
+    async def get_messages(
+        self, *, session_id: Any, limit: int = 200
+    ) -> List[Dict[str, Any]]:
+        return []
+
+    async def append_user_message(
+        self, *, session_id: Any, user_id: str, content: str
+    ) -> Dict[str, Any]:
+        row = {
+            "id": str(uuid4()),
+            "session_id": session_id,
+            "role": "user",
+            "content": content,
+        }
+        self.appended.append(row)
+        return row
+
+    async def append_assistant_message(
+        self,
+        *,
+        session_id: Any,
+        agent_id: Optional[str],
+        content: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        metadata: dict,
+    ) -> Dict[str, Any]:
+        row = {
+            "id": str(uuid4()),
+            "session_id": session_id,
+            "role": "assistant",
+            "content": content,
+            "agent_id": agent_id,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "metadata_json": metadata,
+        }
+        self.appended.append(row)
+        return row
+
+    async def bump_counters(
+        self, *, session_id: Any, add_tokens: int, add_messages: int
+    ) -> None:
+        self.bumps.append({"total_tokens": add_tokens, "message_count": add_messages})
 
 
 @pytest.mark.integration
@@ -42,13 +102,9 @@ import pytest
 async def test_chat_full_pipeline_fires_all_side_effects() -> None:
     from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
 
-    # ── Set up fake supabase ─────────────────────────────────────────
     user_id = uuid4()
     session_id = uuid4()
     agent_id = uuid4()
-
-    inserted: list[tuple[str, dict]] = []
-    updated: list[tuple[str, dict]] = []
 
     session_row = {
         "id": str(session_id),
@@ -60,46 +116,7 @@ async def test_chat_full_pipeline_fires_all_side_effects() -> None:
         "team_id": None,
         "project_id": None,
     }
-
-    def _make_table(name: str):
-        if name == "ai_sessions":
-            q = MagicMock()
-            q.select.return_value = q
-            q.eq.return_value = q
-            q.maybe_single.return_value = q
-            q.execute = AsyncMock(return_value=MagicMock(data=session_row))
-            upd_chain = MagicMock()
-
-            def _upd(payload):
-                updated.append((name, payload))
-                return upd_chain
-
-            q.update = _upd
-            upd_chain.eq.return_value = upd_chain
-            upd_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
-            return q
-        if name == "ai_messages":
-            q = MagicMock()
-            q.select.return_value = q
-            q.eq.return_value = q
-            q.order.return_value = q
-            q.limit.return_value = q
-            q.execute = AsyncMock(return_value=MagicMock(data=[]))
-
-            def _ins(payload):
-                inserted.append((name, payload))
-                ins_chain = MagicMock()
-                ins_chain.execute = AsyncMock(
-                    return_value=MagicMock(data=[{**payload, "id": str(uuid4())}])
-                )
-                return ins_chain
-
-            q.insert = _ins
-            return q
-        return MagicMock()
-
-    client = MagicMock()
-    client.table.side_effect = _make_table
+    store = _FakeStore(session_row)
 
     # ── Track background-task dispatches ─────────────────────────────
     bg_tasks: list[str] = []
@@ -164,10 +181,6 @@ async def test_chat_full_pipeline_fires_all_side_effects() -> None:
 
     with (
         patch(
-            "app.services.ai.chat.ai_library_chat_service.get_async_supabase_admin",
-            AsyncMock(return_value=client),
-        ),
-        patch(
             "app.services.ai.chat.ai_library_chat_service.get_agent_repository",
             return_value=fake_agent_repo,
         ),
@@ -200,7 +213,7 @@ async def test_chat_full_pipeline_fires_all_side_effects() -> None:
             side_effect=_spy_create_task,
         ),
     ):
-        svc = AILibraryChatService()
+        svc = AILibraryChatService(store=store)
         out = await svc.chat(session_id, user_id=user_id, content="smoke test")
         # Give the background tasks a tick to start so they show up
         # in our spy list (we don't actually await them; they're
@@ -210,17 +223,17 @@ async def test_chat_full_pipeline_fires_all_side_effects() -> None:
     # ── Assertions ───────────────────────────────────────────────────
 
     # 1. Both messages persisted in correct order
-    user_inserts = [p for t, p in inserted if p.get("role") == "user"]
-    asst_inserts = [p for t, p in inserted if p.get("role") == "assistant"]
+    user_inserts = [m for m in store.appended if m.get("role") == "user"]
+    asst_inserts = [m for m in store.appended if m.get("role") == "assistant"]
     assert len(user_inserts) == 1, "user message must be persisted"
     assert len(asst_inserts) == 1, "assistant message must be persisted"
     assert user_inserts[0]["content"] == "smoke test"
     assert asst_inserts[0]["content"] == "smoke output"
 
     # 2. Session counters bumped (0 → 16 tokens, 0 → 2 messages)
-    assert len(updated) == 1
-    assert updated[0][1]["total_tokens"] == 16
-    assert updated[0][1]["message_count"] == 2
+    assert len(store.bumps) == 1
+    assert store.bumps[0]["total_tokens"] == 16
+    assert store.bumps[0]["message_count"] == 2
 
     # 3. Background tasks dispatched
     assert any(

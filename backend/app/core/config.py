@@ -303,13 +303,6 @@ class Settings(BaseSettings):
         "summary + agent_memory recall into conversation agent turns, and "
         "compact after turns. Off (default) = Phase 1 behavior (20-msg tail).",
     )
-    FEATURE_DIRECT_CONVERSATIONS: str = Field(
-        default="off",
-        description="1:1 chat storage routing: 'off' = legacy ai_* only; "
-        "'shadow' = legacy authoritative + mirror writes to the conversations "
-        "store with read-diff logging; 'on' = new sessions on the "
-        "conversations store (existing legacy sessions keep serving from ai_*).",
-    )
 
     # ============================================
     # 下载设置

@@ -10,12 +10,16 @@ Tests verify that:
 6. Binary attachments (kind != 'resource_ref') still go through the
    existing ``resolve_attachments`` path.
 
-We mock at the module boundary so no Supabase / LLM calls are made.
+We mock at the module boundary so no LLM calls are made. ``get_session`` /
+``get_messages`` are patched directly on the service instance, and the
+storage seam (``self._store``) is a hand-rolled fake injected via the
+constructor — Conversations Phase 3 Task 6 retired the legacy
+Supabase-backed store, so there is no Supabase client to mock here anymore.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Dict, List, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -36,30 +40,55 @@ def _make_fake_session() -> dict:
     }
 
 
-def _make_fake_supabase() -> MagicMock:
-    """Build a sync MagicMock Supabase client where only `.execute()` is async.
+class _FakeStore:
+    """Minimal MessageStore stub for the append/bump calls ``chat()`` makes
+    after ``get_session``/``get_messages`` (patched directly on the service
+    instance in these tests, so the store itself is never asked for
+    either of those)."""
 
-    Supabase fluent API: ``await supabase.table(...).insert({...}).execute()``
-    — the intermediate calls are synchronous; only ``.execute()`` is awaited.
-    """
-    execute_mock = AsyncMock(
-        return_value=MagicMock(data=[{"id": "msg-1", "role": "user", "content": "hi"}])
-    )
-    chain = MagicMock()
-    chain.execute = execute_mock
-    # Support any depth of chaining: table / insert / select / eq / update / delete
-    chain.insert = MagicMock(return_value=chain)
-    chain.select = MagicMock(return_value=chain)
-    chain.eq = MagicMock(return_value=chain)
-    chain.update = MagicMock(return_value=chain)
-    chain.delete = MagicMock(return_value=chain)
-    chain.in_ = MagicMock(return_value=chain)
-    chain.order = MagicMock(return_value=chain)
-    chain.limit = MagicMock(return_value=chain)
+    async def get_session(self, *, session_id: Any) -> Optional[Dict[str, Any]]:
+        return None
 
-    supabase = MagicMock()
-    supabase.table = MagicMock(return_value=chain)
-    return supabase
+    async def get_messages(
+        self, *, session_id: Any, limit: int = 200
+    ) -> List[Dict[str, Any]]:
+        return []
+
+    async def append_user_message(
+        self, *, session_id: Any, user_id: str, content: str
+    ) -> Dict[str, Any]:
+        return {
+            "id": "msg-1",
+            "session_id": session_id,
+            "role": "user",
+            "content": content,
+        }
+
+    async def append_assistant_message(
+        self,
+        *,
+        session_id: Any,
+        agent_id: Optional[str],
+        content: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        metadata: dict,
+    ) -> Dict[str, Any]:
+        return {
+            "id": "msg-2",
+            "session_id": session_id,
+            "role": "assistant",
+            "content": content,
+            "agent_id": agent_id,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "metadata_json": metadata,
+        }
+
+    async def bump_counters(
+        self, *, session_id: Any, add_tokens: int, add_messages: int
+    ) -> None:
+        return None
 
 
 def _make_fake_composed(extra_system: str = "") -> Any:
@@ -146,8 +175,7 @@ async def test_resource_ref_wiring_calls_resolver_and_registers_tool():
     composed = _make_fake_composed()
     stack = _make_fake_stack(runner, composed)
 
-    fake_supabase = _make_fake_supabase()
-    svc = AILibraryChatService()
+    svc = AILibraryChatService(store=_FakeStore())
 
     with (
         patch.object(
@@ -156,10 +184,6 @@ async def test_resource_ref_wiring_calls_resolver_and_registers_tool():
         patch.object(svc, "get_messages", new=AsyncMock(return_value=[])),
         patch.object(
             svc, "_maybe_compact", new=AsyncMock(side_effect=lambda msgs, **kw: msgs)
-        ),
-        patch(
-            "app.services.ai.chat.ai_library_chat_service.get_async_supabase_admin",
-            new=AsyncMock(return_value=fake_supabase),
         ),
         patch(
             "app.services.ai.chat.ai_library_chat_service.build_agent_runner_stack",
@@ -282,8 +306,7 @@ async def test_ref_warnings_prepended_to_user_message():
     composed = _make_fake_composed()
     stack = _make_fake_stack(runner, composed)
 
-    fake_supabase = _make_fake_supabase()
-    svc = AILibraryChatService()
+    svc = AILibraryChatService(store=_FakeStore())
 
     with (
         patch.object(
@@ -292,10 +315,6 @@ async def test_ref_warnings_prepended_to_user_message():
         patch.object(svc, "get_messages", new=AsyncMock(return_value=[])),
         patch.object(
             svc, "_maybe_compact", new=AsyncMock(side_effect=lambda msgs, **kw: msgs)
-        ),
-        patch(
-            "app.services.ai.chat.ai_library_chat_service.get_async_supabase_admin",
-            new=AsyncMock(return_value=fake_supabase),
         ),
         patch(
             "app.services.ai.chat.ai_library_chat_service.build_agent_runner_stack",
@@ -393,8 +412,7 @@ async def test_binary_attachments_still_use_existing_resolver():
     composed = _make_fake_composed()
     stack = _make_fake_stack(runner, composed)
 
-    fake_supabase = _make_fake_supabase()
-    svc = AILibraryChatService()
+    svc = AILibraryChatService(store=_FakeStore())
 
     with (
         patch.object(
@@ -403,10 +421,6 @@ async def test_binary_attachments_still_use_existing_resolver():
         patch.object(svc, "get_messages", new=AsyncMock(return_value=[])),
         patch.object(
             svc, "_maybe_compact", new=AsyncMock(side_effect=lambda msgs, **kw: msgs)
-        ),
-        patch(
-            "app.services.ai.chat.ai_library_chat_service.get_async_supabase_admin",
-            new=AsyncMock(return_value=fake_supabase),
         ),
         patch(
             "app.services.ai.chat.ai_library_chat_service.build_agent_runner_stack",
@@ -549,8 +563,7 @@ async def test_split_loop_handles_pydantic_attachment_request():
     runner = _make_fake_runner(captured)
     composed = _make_fake_composed()
     stack = _make_fake_stack(runner, composed)
-    fake_supabase = _make_fake_supabase()
-    svc = AILibraryChatService()
+    svc = AILibraryChatService(store=_FakeStore())
 
     with (
         patch.object(
@@ -559,10 +572,6 @@ async def test_split_loop_handles_pydantic_attachment_request():
         patch.object(svc, "get_messages", new=AsyncMock(return_value=[])),
         patch.object(
             svc, "_maybe_compact", new=AsyncMock(side_effect=lambda msgs, **kw: msgs)
-        ),
-        patch(
-            "app.services.ai.chat.ai_library_chat_service.get_async_supabase_admin",
-            new=AsyncMock(return_value=fake_supabase),
         ),
         patch(
             "app.services.ai.chat.ai_library_chat_service.build_agent_runner_stack",

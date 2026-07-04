@@ -152,6 +152,8 @@ async def test_resolve_session_project_rejects_non_numeric_ids() -> None:
 async def test_resolve_session_project_binds_int(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Conversations-only lookup (Task 6 collapsed the compatibility layer —
+    the legacy ai_sessions fallback this used to try is gone)."""
     from app.services.ai.chat import ai_library_chat_wiring as wiring
 
     calls: list[dict] = []
@@ -162,61 +164,17 @@ async def test_resolve_session_project_binds_int(
 
     monkeypatch.setattr("app.db.engine.fetch_one", fake_fetch_one)
     assert await wiring._resolve_session_project("888") == "777"
-    assert calls[0]["params"] == {"sid": 888}
-
-
-@pytest.mark.asyncio
-async def test_resolve_session_project_tries_conversations_first(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Task 6 / S7: conversations-first lookup — a row found on
-    ``conversations`` is used directly, no ai_sessions fallback query at all."""
-    from app.services.ai.chat import ai_library_chat_wiring as wiring
-
-    calls: list[dict] = []
-
-    async def fake_fetch_one(sql: str, params=None):
-        calls.append({"sql": sql, "params": params})
-        return {"project_id": 42}
-
-    monkeypatch.setattr("app.db.engine.fetch_one", fake_fetch_one)
-    assert await wiring._resolve_session_project("888") == "42"
     assert len(calls) == 1
     assert "public.conversations" in calls[0]["sql"]
     assert calls[0]["params"] == {"sid": 888}
 
 
 @pytest.mark.asyncio
-async def test_resolve_session_project_falls_back_to_ai_sessions_when_no_conversations_row(
+async def test_resolve_session_project_returns_none_when_null_project(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Task 6 / S7: a missing conversations row (legacy session id) falls
-    back to the existing ai_sessions lookup."""
-    from app.services.ai.chat import ai_library_chat_wiring as wiring
-
-    calls: list[dict] = []
-
-    async def fake_fetch_one(sql: str, params=None):
-        calls.append({"sql": sql, "params": params})
-        if "public.conversations" in sql:
-            return None
-        return {"project_id": 777}
-
-    monkeypatch.setattr("app.db.engine.fetch_one", fake_fetch_one)
-    assert await wiring._resolve_session_project("888") == "777"
-    assert len(calls) == 2
-    assert "public.conversations" in calls[0]["sql"]
-    assert "public.ai_sessions" in calls[1]["sql"]
-    assert calls[1]["params"] == {"sid": 888}
-
-
-@pytest.mark.asyncio
-async def test_resolve_session_project_conversations_row_with_null_project_short_circuits(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Task 6 / S7: a FOUND conversations row with project_id=NULL is
-    authoritative (real "no project" answer) — must NOT fall back to
-    ai_sessions."""
+    """A found conversations row with project_id=NULL is a real "no
+    project" answer."""
     from app.services.ai.chat import ai_library_chat_wiring as wiring
 
     calls: list[dict] = []
@@ -229,6 +187,19 @@ async def test_resolve_session_project_conversations_row_with_null_project_short
     assert await wiring._resolve_session_project("888") is None
     assert len(calls) == 1
     assert "public.conversations" in calls[0]["sql"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_session_project_returns_none_when_session_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services.ai.chat import ai_library_chat_wiring as wiring
+
+    async def fake_fetch_one(sql: str, params=None):
+        return None
+
+    monkeypatch.setattr("app.db.engine.fetch_one", fake_fetch_one)
+    assert await wiring._resolve_session_project("888") is None
 
 
 @pytest.mark.asyncio

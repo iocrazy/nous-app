@@ -40,37 +40,30 @@ async def _get_session_team_id(session_id: str) -> Optional[int]:
     function so it follows the same lazy-import convention used across all
     DBOS step and workflow modules.
 
-    Conversations-first, ai_sessions-fallback (Task 1 W0 / mirrors
-    ``write_memory._resolve_team_workspace``, PR #960). Snowflake ids are
-    minted exactly once by ``generate_snowflake_id()``, so a given
-    ``session_id`` can never exist as a row in BOTH ``conversations`` and
-    ``ai_sessions`` — probing the new store first and falling back on a
-    missing row is unambiguous.
+    Conversations-only (Conversations Phase 3, Task 6 collapsed the
+    compatibility layer — the legacy ``ai_sessions`` fallback this used to
+    try after a conversations miss is gone; the legacy table itself is
+    dropped in Wave 2).
 
     The conversations column is ``scope_id`` (aliased ``AS team_id``
-    below), NOT a literal ``team_id`` column — that name only exists on
-    ai_sessions. A ``conversations`` row for a ``direct_agent`` session
-    ALWAYS has a non-NULL ``scope_id`` (Phase 2 assigns the user's
-    personal-team scope at create time), so a hit here always lands on the
-    "team-scoped" branch of ``resolve_chat_scope`` below — that is CORRECT:
-    the personal-team snowflake IS the team_id for a personal conversation,
-    not a signal that the session is legacy-personal.
+    below), NOT a literal ``team_id`` column — that name only existed on
+    the legacy ``ai_sessions`` table. A ``conversations`` row for a
+    ``direct_agent`` session ALWAYS has a non-NULL ``scope_id`` (Phase 2
+    assigns the user's personal-team scope at create time), so a hit here
+    always lands on the "team-scoped" branch of ``resolve_chat_scope``
+    below — that is CORRECT: the personal-team snowflake IS the team_id
+    for a personal conversation, not a signal that the session is
+    legacy-personal.
     """
     from app.db import engine as db_engine  # deferred — matches codebase convention
 
     sid = int(session_id)
-    # ai_sessions.id / conversations.id are BIGINT snowflakes carried as str
-    # (mig 232) — asyncpg rejects str binds on int8.
+    # conversations.id is a BIGINT snowflake carried as str (mig 232) —
+    # asyncpg rejects str binds on int8.
     row = await db_engine.fetch_one(
         "SELECT scope_id AS team_id FROM public.conversations WHERE id = :id",
         {"id": sid},
     )
-    if row is None:
-        # Existing ai_sessions query — byte-unchanged fallback for legacy ids.
-        row = await db_engine.fetch_one(
-            "SELECT team_id FROM public.ai_sessions WHERE id = :id",
-            {"id": sid},
-        )
     if row is None:
         logger.debug(f"[chat_upload] session {session_id!r} not found")
         return None
@@ -88,7 +81,7 @@ async def resolve_chat_scope(
     Returns a ``(scope_type, scope_id)`` tuple:
 
     * ``("team", str(team_id))`` — when *session_id* resolves to a
-      team-scoped session (``ai_sessions.team_id IS NOT NULL``).
+      team-scoped session (``conversations.scope_id IS NOT NULL``).
     * ``("personal", str(personal_team_id))`` — for personal sessions or
       when no session context is available.
 

@@ -1,4 +1,4 @@
-"""AI Library chat service — thin layer over AgentRunner + ai_sessions/ai_messages.
+"""AI Library chat service — thin layer over AgentRunner + the conversations store.
 
 Replaces the legacy ``AgentService`` + ``AISessionService`` pair. Every
 chat turn goes through the exact same AgentRunner + RunRecorder stack
@@ -10,8 +10,13 @@ that powers script_ai / summarize / storyboard, so:
 - skills bound to the agent are callable mid-conversation via the Skill
   tool loop
 
-Session storage still lives in the shared ``ai_sessions`` /
-``ai_messages`` tables; only the execution path moved.
+Session storage (Conversations Phase 3, Task 6): the 1:1 compatibility
+layer (the Supabase-backed legacy store + the dual-store router) has
+been retired — ``ConversationsAiStore`` (``conversations`` /
+``conversation_members`` / ``conversation_ai_meta`` / ``messages``,
+migration 327 + 332) is now the sole ``MessageStore`` implementation.
+Only the execution path moved; the row shape a caller sees is unchanged
+(see ``message_store.py``'s Protocol docstring).
 """
 
 from __future__ import annotations
@@ -23,16 +28,13 @@ from fastapi import HTTPException, status
 from loguru import logger
 
 from app.core.config import settings
-from app.db.supabase_client import (  # noqa: F401  read dynamically by LegacyAiStore._client()
-    get_async_supabase_admin,
-)
 from app.repositories.agent_repository import get_agent_repository
 from app.repositories.skill_repository import get_skill_repository
 from app.services.ai.adapters.factory import get_adapter, provider_key_for_model
 from app.services.ai.chat.ai_library_chat_wiring import build_agent_runner_stack
+from app.services.ai.chat.conversations_ai_store import ConversationsAiStore
 from app.services.ai.chat.message_store import MessageStore
 from app.services.ai.chat.resource_ref_resolver import resolve_resource_refs
-from app.services.ai.chat.store_router import RoutedAiStore
 from app.services.ai.prompts.prompt_composer import (
     ComposerInput,
     PromptComposer,
@@ -60,15 +62,14 @@ def _media_tools_enabled() -> bool:
 class AILibraryChatService:
     """Session + chat operations bound to the AI Library framework.
 
-    Stateless — instantiated per request. Reads/writes flow through the
-    Supabase admin client because server-side ownership checks (user_id
-    match) happen inline; RLS on ai_sessions would add a second layer
-    but isn't required when the service admits a user_id and cross-
-    references it against row.user_id on every op.
+    Stateless — instantiated per request. Reads/writes flow through
+    ``ConversationsAiStore`` (the sole ``MessageStore`` implementation);
+    server-side ownership checks (user_id match) happen inline in this
+    service on every op.
     """
 
     def __init__(self, store: Optional[MessageStore] = None) -> None:
-        self._store = store or RoutedAiStore()
+        self._store = store or ConversationsAiStore()
 
     # ------------------------------------------------------------------
     # Sessions
@@ -786,13 +787,15 @@ class AILibraryChatService:
         # from "after model finishes" to "as model emits". Tool-using
         # turns still work (stream_turn executes tool_calls between
         # iterations and re-streams).
-        # Task 6: agent_runs.session_id FKs ai_sessions (mig 231) — a
-        # conversations.id would violate that FK. agent_runs.conversation_id
-        # (mig 331) is the structural link for new-store sessions. Dispatch
-        # off the session row's store_kind marker (stamped by LegacyAiStore /
-        # ConversationsAiStore — see Task 6 report) so a conversations-backed
-        # session links via conversation_id and a legacy session keeps its
-        # exact byte-identical session_id behavior.
+        # P3 Task 6: agent_runs.session_id still FKs the (soon to be
+        # dropped, Wave 2) ai_sessions table — a conversations.id would
+        # violate that FK. agent_runs.conversation_id (mig 331) is the
+        # structural link for conversations-backed sessions. Dispatch off
+        # the session row's store_kind marker (stamped by
+        # ConversationsAiStore._to_legacy_shape) so a conversations-backed
+        # session links via conversation_id. Defensive default: a row with
+        # no store_kind key (shouldn't happen post-collapse) keeps the
+        # byte-identical session_id path.
         _is_conv_store = session.get("store_kind") == "conversations"
         try:
             async with RunRecorder(

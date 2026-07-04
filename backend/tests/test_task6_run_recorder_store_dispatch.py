@@ -13,9 +13,8 @@ Approach: drive the smallest real turn path (``AILibraryChatService.chat``)
 with a hand-rolled fake ``MessageStore`` injected via the constructor
 (``AILibraryChatService(store=...)``), so this test exercises the actual
 dispatch line in the service rather than re-asserting the store's own
-row-shape (already covered by test_legacy_ai_store.py /
-test_conversations_ai_store.py). Runner/composer/agent-repo wiring is
-patched the same way test_ai_library_chat.py's
+row-shape (already covered by test_conversations_ai_store.py). Runner/
+composer/agent-repo wiring is patched the same way test_ai_library_chat.py's
 ``test_chat_persists_both_messages_and_bumps_counters`` does — this test is
 NOT re-testing that coordination logic, only the RunRecorder kwargs it
 computes off the session row.
