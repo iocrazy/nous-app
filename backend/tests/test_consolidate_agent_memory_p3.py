@@ -2,10 +2,10 @@
 canonical conversations/messages store instead of legacy ai_sessions/
 ai_messages.
 
-Phase 2 flipped FEATURE_DIRECT_CONVERSATIONS on, so ALL new 1:1 direct_agent
-traffic lands in conversations/messages — the legacy tables get no new
-activity. Phase 3 will DROP the legacy tables entirely, so this workflow is
-rewritten conversations-ONLY (no dual-read fallback).
+ALL 1:1 direct_agent traffic lands in conversations/messages now — the
+legacy ai_sessions/ai_messages store and its compatibility layer have been
+retired (Task 6). Phase 3 Wave 2 will DROP the legacy tables entirely, so
+this workflow is rewritten conversations-ONLY (no dual-read fallback).
 
 Covers:
   (a) the three SQL constants target conversations/messages, never

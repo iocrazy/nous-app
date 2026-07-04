@@ -74,12 +74,14 @@ class MessageOut(BaseModel):
 
     model_config = _COERCE_IDS
 
-    # ai_messages.id: under LegacyAiStore this is a real UUID PK; under
-    # ConversationsAiStore (Task 4) it's public.messages.id, a BIGINT
-    # Snowflake — same dual-shape story as ai_sessions.id (mig 231). Widened
-    # to str + an explicit `mode="before"` coercion (mirrors
+    # ai_messages.id: historically a real UUID PK under the retired
+    # Supabase-backed store; under ConversationsAiStore (Task 4, the sole
+    # store since P3 Task 6) it's public.messages.id, a BIGINT Snowflake.
+    # Widened to str + an explicit `mode="before"` coercion (mirrors
     # schemas/conversation.py::MessageOut._coerce_bigint_str) so both shapes
-    # validate without ever losing BIGINT precision through a UUID cast.
+    # validate without ever losing BIGINT precision through a UUID cast —
+    # kept flexible since pre-collapse rows may still be read until the
+    # Wave 2 migration drops the legacy tables.
     id: str
     session_id: str
     role: Literal["user", "assistant", "system"]

@@ -29,41 +29,25 @@ _RECENT_TURNS_PER_CHANNEL = 10
 async def load_recent_messages_step(session_id: str) -> dict[str, list[str]]:
     """Pull last N user + N assistant messages for a session.
 
-    Phase 2 (store fold): a "session id" may be a `conversations.id`
-    (direct_agent, FEATURE_DIRECT_CONVERSATIONS=on) or a legacy
-    `ai_sessions.id`. Snowflake ids are minted once, so an id exists in
-    only one of the two tables — probe conversations first, mirroring the
-    S7/S8 scope lookups. Conversations rows map sender_type→role and
-    body->>'text'→content so the downstream shape stays identical.
+    Conversations-only (Conversations Phase 3, Task 6 collapsed the
+    compatibility layer — the legacy ``ai_messages`` fallback arm this
+    step used to try when a session id wasn't found on ``conversations``
+    is gone; the legacy table itself is dropped in Wave 2). Rows map
+    sender_type→role and body->>'text'→content so the downstream shape
+    stays identical to what the legacy table used to hand back.
     """
     from app.db import engine as db_engine
 
     sid = int(session_id)
-    is_conversation = (
-        await db_engine.fetch_one(
-            "SELECT 1 AS x FROM public.conversations WHERE id = :sid",
-            {"sid": sid},
-        )
-        is not None
+    rows = await db_engine.fetch_all(
+        "SELECT CASE WHEN sender_type = 'agent' THEN 'assistant' "
+        "            ELSE sender_type END AS role, "
+        "       COALESCE(body->>'text', '') AS content "
+        "FROM public.messages "
+        "WHERE conversation_id = :sid AND deleted_at IS NULL "
+        "ORDER BY seq DESC LIMIT :lim",
+        {"sid": sid, "lim": _RECENT_TURNS_PER_CHANNEL * 4},
     )
-    if is_conversation:
-        rows = await db_engine.fetch_all(
-            "SELECT CASE WHEN sender_type = 'agent' THEN 'assistant' "
-            "            ELSE sender_type END AS role, "
-            "       COALESCE(body->>'text', '') AS content "
-            "FROM public.messages "
-            "WHERE conversation_id = :sid AND deleted_at IS NULL "
-            "ORDER BY seq DESC LIMIT :lim",
-            {"sid": sid, "lim": _RECENT_TURNS_PER_CHANNEL * 4},
-        )
-    else:
-        rows = await db_engine.fetch_all(
-            "SELECT role, content FROM public.ai_messages WHERE session_id = :sid "
-            "ORDER BY created_at DESC LIMIT :lim",
-            # session_id is a BIGINT snowflake (mig 232) carried as str — asyncpg
-            # rejects str binds on int8 ('str' object cannot be interpreted ...).
-            {"sid": sid, "lim": _RECENT_TURNS_PER_CHANNEL * 4},
-        )
     user_msgs: list[str] = []
     asst_msgs: list[str] = []
     for row in rows:
@@ -208,16 +192,14 @@ async def _write_honcho_turn(
 async def _resolve_team_workspace(session_id: str) -> Optional[str]:
     """Map the session's team to a Honcho workspace (Workspace=team).
 
-    Conversations-first, legacy ai_sessions fallback (Task 6 / parity
-    checklist S8, §3.6/§3.8). Snowflake ids are minted exactly once by
-    ``generate_snowflake_id()``, so a given ``session_id`` can never exist
-    as a row in BOTH ``conversations`` and ``ai_sessions`` — trying the new
-    store first and falling back on a missing row is unambiguous.
+    Conversations-only (Conversations Phase 3, Task 6 collapsed the
+    compatibility layer — the legacy ``ai_sessions`` fallback this
+    function used to try after a conversations miss is gone; the legacy
+    table itself is dropped in Wave 2).
 
     NOTE: the conversations column is ``scope_id`` (team/user/project scope
-    pointer), NOT ``team_id`` — ``ai_sessions`` is the one with a literal
-    ``team_id`` column. Aliased to ``team_id`` in the SELECT so the rest of
-    this function reads identically for either source table.
+    pointer); aliased to ``team_id`` in the SELECT so the rest of this
+    function reads the same as it did against the legacy table.
 
     Returns ``team-{team_id}`` when the session carries team context,
     None (→ deployment default workspace) when it doesn't or the
@@ -231,16 +213,11 @@ async def _resolve_team_workspace(session_id: str) -> Optional[str]:
             # BIGINT snowflake carried as str — coerce for asyncpg (mig 232)
             {"sid": int(session_id)},
         )
-        if row is None:
-            row = await db_engine.fetch_one(
-                "SELECT team_id FROM public.ai_sessions WHERE id = :sid",
-                {"sid": int(session_id)},
-            )
         team_id = row.get("team_id") if row else None
         return f"team-{team_id}" if team_id else None
     except Exception:  # noqa: BLE001
         logger.warning(
-            "[write_memory] team lookup failed for session %s; "
+            "[write_memory] team lookup failed for session {}; "
             "falling back to default workspace",
             session_id,
         )

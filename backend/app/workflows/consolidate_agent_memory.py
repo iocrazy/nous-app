@@ -25,14 +25,14 @@ scoped to the same context (team_id / project_id).
 Best-effort: per-context failures are caught + logged, never abort the run.
 DBOS steps do NOT dispatch nested workflows.
 
-Store (Conversations Phase 3, Task 2 — 2026-07-04): Phase 2 flipped
-FEATURE_DIRECT_CONVERSATIONS on, so ALL new 1:1 direct_agent traffic lands
-in ``conversations`` / ``messages`` — the legacy ``ai_sessions`` /
-``ai_messages`` tables no longer receive new session activity. Phase 3 will
-DROP those legacy tables entirely (migration 333, Wave 2), so this workflow
-reads the canonical store ONLY (no dual-read fallback — there is nothing
-left to fall back to once the tables are dropped, and until then any
-lingering legacy-only session is simply not re-consolidated by /dream).
+Store (Conversations Phase 3, Task 2/6 — 2026-07-04): ALL 1:1 direct_agent
+traffic lands in ``conversations`` / ``messages`` now — the legacy
+``ai_sessions`` / ``ai_messages`` store and its compatibility layer have
+been retired. Phase 3 Wave 2 will DROP those legacy tables entirely
+(migration 333), so this workflow reads the canonical store ONLY (no
+dual-read fallback — there is nothing left to fall back to once the
+tables are dropped, and any lingering legacy-only session is simply not
+re-consolidated by /dream).
 
 Mapping (mirrors ``ConversationsAiStore`` / mig 327 + 332):
   ai_sessions.user_id  → conversation_members.user_id (member_type='user')

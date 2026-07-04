@@ -2,7 +2,10 @@
 ``conversations`` / ``conversation_members`` / ``conversation_ai_meta``
 tables (migration 327 + 332), a.k.a. the Unified Conversations schema.
 
-This is the strangler-fig replacement for ``LegacyAiStore``. Task 3 shipped
+This was the strangler-fig replacement for the legacy Supabase-backed
+``ai_sessions`` / ``ai_messages`` store (Conversations Phase 3, Task 6
+retired that store and the dual-store router that once sat in front of
+it — this is now the sole ``MessageStore`` implementation). Task 3 shipped
 the SESSION half (``create_session`` / ``list_sessions`` / ``get_session`` /
 ``rename_session`` / ``soft_delete_session`` / ``bump_counters``); Task 4
 ships the MESSAGE half (``get_messages`` / ``append_user_message`` /
@@ -45,19 +48,16 @@ personal team exists for the user; that propagates unchanged — the
 router layer already maps bare ``ValueError`` → 400.
 
 id shapes returned — a deliberate parity choice (see report): this store
-does NOT stringify ``conversations.id`` / ``scope_id`` / ``project_id``.
-``LegacyAiStore`` returns whatever ``resp.data`` handed back from
-supabase-py, i.e. Python ints for BIGINT columns (PostgREST serializes
-BIGINT as a JSON number, and Python ints don't lose precision the way
-JS numbers do) — so the SessionOut schema's ``coerce_numbers_to_str``
-already does the int→str conversion for the router response, and this
-store just needs to hand back the same "raw" shape LegacyAiStore does.
-UUID columns (``user_id`` / ``agent_id``) DO need an explicit
-``str(...)`` here though: PostgREST auto-serializes uuid columns to JSON
-strings, but asyncpg hands back native ``uuid.UUID`` objects — without
-the cast this store's dicts would carry a different Python type than
-LegacyAiStore's for the exact same logical field. This mirrors the
-``str(r["user_id"])`` pattern already used in
+does NOT stringify ``conversations.id`` / ``scope_id`` / ``project_id`` —
+they're handed back as native Python ints (matching what PostgREST used
+to serialize BIGINT columns to, and what Python ints preserve precision
+for) — so the SessionOut schema's ``coerce_numbers_to_str`` already does
+the int→str conversion for the router response, and this store just
+needs to hand back that same "raw" shape. UUID columns (``user_id`` /
+``agent_id``) DO need an explicit ``str(...)`` here though: asyncpg hands
+back native ``uuid.UUID`` objects, and the row-shape contract
+(``message_store.py``) requires plain strings for those fields. This
+mirrors the ``str(r["user_id"])`` pattern already used in
 ``conversation_repository.list_member_ids`` / ``list_conversation_agent_ids``.
 
 Transactionality — ``create_session`` does the conversations INSERT +
@@ -305,11 +305,12 @@ class ConversationsAiStore:
         so the service's ``get_session`` 404s instead of leaking a
         soft-deleted row. Ownership stays with the service.
 
-        NOTE (deliberate store asymmetry): LegacyAiStore's direct GET does
-        NOT filter by status, so it still returns soft-deleted sessions if
-        looked up directly by id; this store is stricter by design and
-        returns None for archived rows. This is safe because the UI never
-        re-GETs a session it just deleted.
+        NOTE (deliberate stricter-than-legacy behavior): the retired
+        Supabase-backed store's direct GET did not filter by status, so it
+        would still return soft-deleted sessions if looked up directly by
+        id; this store is stricter by design and returns None for archived
+        rows. This is safe because the UI never re-GETs a session it just
+        deleted.
         """
         return await self._fetch_by_id(session_id)
 
@@ -350,10 +351,9 @@ class ConversationsAiStore:
         (``prior + turn``), not deltas — see
         ``AILibraryChatService.chat`` (turn_tokens/prior_total math right
         before this call). An atomic ``total_tokens = total_tokens + :t``
-        SQL increment would be a strictly safer primitive, but diverging
-        from the exact write-what-you're-given contract LegacyAiStore
-        implements isn't worth it for parity's sake — this store writes
-        the given absolutes as-is, identical to LegacyAiStore.bump_counters.
+        SQL increment would be a strictly safer primitive, but this store
+        writes the given absolutes as-is per the Protocol's
+        write-what-you're-given contract.
         """
         await db_engine.execute(
             """
@@ -392,9 +392,9 @@ class ConversationsAiStore:
     #                                      byte-for-byte (run_id / tool_calls / awaiting_approval
     #                                      MUST survive the round trip).
     #
-    # User messages never carry a 'meta' key, so decoration fields are always
-    # None/{} for role='user' rows — matching LegacyAiStore (which never wrote
-    # agent_id/tokens/metadata_json for user messages either).
+    # User messages never carry a 'meta' key, so decoration fields are
+    # always None/{} for role='user' rows — user messages never carry
+    # agent_id/tokens/metadata_json.
 
     @staticmethod
     def _to_legacy_message_shape(row: Dict[str, Any]) -> Dict[str, Any]:

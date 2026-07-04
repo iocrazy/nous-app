@@ -582,20 +582,18 @@ async def _safe_recall_agent_memory(
 
 
 async def _resolve_session_project(session_id: Optional[str]) -> Optional[str]:
-    """project_id lookup for recall scoping — conversations-first, legacy
-    ai_sessions fallback (Task 6 / parity checklist S7, §3.6).
+    """project_id lookup for recall scoping — conversations-only.
 
-    Snowflake ids are minted exactly once by ``generate_snowflake_id()``, so
-    a given ``session_id`` can never exist as a row in BOTH ``conversations``
-    and ``ai_sessions`` — trying the new store first and falling back is
-    unambiguous, not a race. A row found on ``conversations`` is authoritative
-    even when its ``project_id`` is NULL (that's a real "no project" answer,
-    not a miss) — only a MISSING row triggers the legacy fallback.
+    Conversations Phase 3, Task 6 collapsed the compatibility layer: the
+    legacy ``ai_sessions`` fallback this used to try after a conversations
+    miss is gone (the legacy table itself is dropped in Wave 2). A missing
+    row and a row with a NULL ``project_id`` both resolve to None — the
+    caller only cares whether a project is in scope.
     """
     if not session_id:
         return None
     try:
-        # Both tables key on BIGINT — asyncpg rejects str binds on int8.
+        # BIGINT snowflake — asyncpg rejects str binds on int8.
         sid = int(session_id)
     except (TypeError, ValueError):
         return None
@@ -606,11 +604,6 @@ async def _resolve_session_project(session_id: Optional[str]) -> Optional[str]:
             "SELECT project_id FROM public.conversations WHERE id = :sid",
             {"sid": sid},
         )
-        if row is None:
-            row = await db_engine.fetch_one(
-                "SELECT project_id FROM public.ai_sessions WHERE id = :sid",
-                {"sid": sid},
-            )
         project_id = row.get("project_id") if row else None
         return str(project_id) if project_id else None
     except Exception:  # noqa: BLE001

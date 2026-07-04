@@ -1,51 +1,47 @@
-"""Task 7 (Conversations Phase 2): issue_agent_executor is the SECOND caller
-of the turn engine (``run_session_turn(trigger='issue_dispatch')``) — chat()
-is the first, covered by test_task6_run_recorder_store_dispatch.py. This
-proves the issue path is unaffected across all three ``FEATURE_DIRECT_
-CONVERSATIONS`` modes (off / shadow / on).
+"""issue_agent_executor is the SECOND caller of the turn engine
+(``run_session_turn(trigger='issue_dispatch')``) — chat() is the first,
+covered by test_task6_run_recorder_store_dispatch.py.
 
-Two groups of tests, at two different seams:
+Conversations Phase 3, Task 6 collapsed the 1:1 dual-store compatibility
+layer — ``ConversationsAiStore`` is now the sole ``MessageStore``
+implementation, so this file drives a single scenario instead of the old
+off/shadow/on parametrization.
 
-* **Group A (``Test*StoreRouting``)** — drives the REAL dispatch code:
-  ``issue_session.get_or_create_issue_session`` (real function) creates a
-  session through a REAL ``RoutedAiStore(legacy=AsyncMock(), new=AsyncMock())``
-  — same technique ``tests/test_store_router.py`` uses — injected by
-  monkeypatching the ``AILibraryChatService`` symbol ``issue_session.py``
-  imported into its own namespace (it constructs ``AILibraryChatService()``
-  with no injectable store param, so the store factory/class is the seam,
-  per the Task 7 brief). A second, separately-constructed
-  ``AILibraryChatService(store=RoutedAiStore(...))`` — matching production,
-  where each request builds its own service — then runs the REAL
-  ``run_session_turn(trigger="issue_dispatch")`` (buffered/no chunk_callback;
-  see the module-level note below on why) against that session id, wrapped
-  in the same runner/composer/RunRecorder mocks
-  test_task6_run_recorder_store_dispatch.py uses. This proves: session
-  creation lands on the store the mode dictates, the FinishIssue tool is
-  really injected into the composed prompt, ``trigger`` reaches the
-  RunRecorder kwargs unchanged, and the store-kind → session_id/
-  conversation_id dispatch (Task 6's contract) also holds for this trigger.
+The test below drives the REAL dispatch code: ``issue_session.
+get_or_create_issue_session`` (real function) creates a session through a
+hand-rolled fake ``MessageStore`` — injected by monkeypatching the
+``AILibraryChatService`` symbol ``issue_session.py`` imported into its own
+namespace (it constructs ``AILibraryChatService()`` with no injectable
+store param, so the store factory/class is the seam). A second,
+separately-constructed ``AILibraryChatService(store=fake_store)`` —
+matching production, where each request builds its own service — then runs
+the REAL ``run_session_turn(trigger="issue_dispatch")`` (buffered/no
+chunk_callback; see the note below on why) against that session id, wrapped
+in the same runner/composer/RunRecorder mocks
+test_task6_run_recorder_store_dispatch.py uses. This proves: session
+creation lands on the store, the FinishIssue tool is really injected into
+the composed prompt, ``trigger`` reaches the RunRecorder kwargs unchanged,
+and the store-kind → session_id/conversation_id dispatch (Task 6's
+contract) also holds for this trigger.
 
-* **Group B (``test_run_issue_agent_*``)** — drives the actual
-  ``run_issue_agent()`` entry point with a fake ``AILibraryChatService``
-  (same style as the existing ``test_issue_agent_executor.py`` harness),
-  parametrized across the three modes, proving the executor's OWN logic
-  (nudge/content selection, trigger forwarding, FinishIssue outcome
-  extraction via the real ``extract_issue_outcome``) is mode-agnostic — it
-  never reads the flag itself, so it must behave identically regardless.
-
-Why Group A calls ``run_session_turn`` directly instead of through
+Why this calls ``run_session_turn`` directly instead of through
 ``run_issue_agent()``: ``run_issue_agent`` always passes a ``chunk_callback``,
 which routes ``_run_session_turn_inner`` down the STREAMING branch
 (``runner.stream_turn``). That branch currently discards structured
 ``tool_call_delta`` chunks (see ``ai_library_chat_service.py``, the
 ``if chunk.tool_call_delta: pass`` line) — a pre-existing characteristic of
-the streaming path, unrelated to Phase-2 store routing and out of scope to
-change here. Calling ``run_session_turn`` without a ``chunk_callback`` takes
-the buffered ``runner.run_turn`` branch instead, which is what
+the streaming path, unrelated to store routing and out of scope to change
+here. Calling ``run_session_turn`` without a ``chunk_callback`` takes the
+buffered ``runner.run_turn`` branch instead, which is what
 test_task6_run_recorder_store_dispatch.py already relies on and is the
 faithful way to observe the FinishIssue-injection / RunRecorder-kwargs
-contract that Task 6 established and this task must prove still holds for
-``trigger="issue_dispatch"``. See the P2 Task 7 report for the full note.
+contract that Task 6 established.
+
+``run_issue_agent()``'s OWN logic (nudge/content selection, trigger
+forwarding, FinishIssue outcome extraction via the real
+``extract_issue_outcome``) never read the routing flag and is already
+covered mode-agnostically by tests/test_issue_agent_executor.py — that
+coverage isn't duplicated here.
 """
 
 from __future__ import annotations
@@ -64,11 +60,6 @@ from app.services.ai.tools.finish_issue_tool import (
 pytestmark = pytest.mark.asyncio
 
 
-# ---------------------------------------------------------------------------
-# Shared plumbing mocks (same boundary as test_task6_run_recorder_store_dispatch)
-# ---------------------------------------------------------------------------
-
-
 class _RunRecorderCM:
     """Async context manager standing in for RunRecorder(...)."""
 
@@ -80,6 +71,58 @@ class _RunRecorderCM:
 
     async def __aexit__(self, exc_type, exc, tb) -> bool:
         return False
+
+
+class _FakeStore:
+    """Minimal MessageStore stub — same shape as
+    test_task6_run_recorder_store_dispatch.py's ``_FakeStore``."""
+
+    def __init__(self, session_row: Dict[str, Any]) -> None:
+        self._session_row = session_row
+
+    async def create_session(self, **_kw: Any) -> Dict[str, Any]:
+        return self._session_row
+
+    async def get_session(self, *, session_id: int) -> Optional[Dict[str, Any]]:
+        return self._session_row
+
+    async def get_messages(
+        self, *, session_id: int, limit: int = 200
+    ) -> List[Dict[str, Any]]:
+        return []
+
+    async def append_user_message(
+        self, *, session_id: int, user_id: str, content: str
+    ) -> Dict[str, Any]:
+        return {
+            "id": "u-1",
+            "session_id": session_id,
+            "role": "user",
+            "content": content,
+        }
+
+    async def append_assistant_message(
+        self,
+        *,
+        session_id: int,
+        agent_id: Optional[str],
+        content: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        metadata: dict,
+    ) -> Dict[str, Any]:
+        return {
+            "id": "a-1",
+            "session_id": session_id,
+            "role": "assistant",
+            "content": content,
+            "metadata_json": metadata,
+        }
+
+    async def bump_counters(
+        self, *, session_id: int, add_tokens: int, add_messages: int
+    ) -> None:
+        return None
 
 
 def _default_tool_calls() -> List[Dict[str, Any]]:
@@ -96,42 +139,24 @@ def _default_tool_calls() -> List[Dict[str, Any]]:
     ]
 
 
-# ---------------------------------------------------------------------------
-# Group A — real RoutedAiStore + real run_session_turn(trigger="issue_dispatch")
-# ---------------------------------------------------------------------------
-
-
-async def _drive_store_routing(
-    monkeypatch: pytest.MonkeyPatch, mode: str
-) -> Dict[str, Any]:
-    """Create an issue session under `mode`, then run a real, buffered
-    ``run_session_turn(trigger="issue_dispatch")`` turn against it.
-
-    Returns everything the per-mode tests assert on: the two store mocks
-    (for call-site assertions), the captured RunRecorder kwargs, the turn
-    result, and the composed prompt's tools/handler captured at the moment
-    the runner was invoked (before the FinishIssue handler gets cleared in
-    the turn's ``finally`` block).
-    """
-    from app.core.config import settings
+async def test_issue_session_and_turn_link_via_conversation_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Real get_or_create_issue_session -> real create_session on a fake
+    ConversationsAiStore-shaped store -> real run_session_turn
+    (trigger="issue_dispatch", buffered) against that session id."""
     from app.db import engine as db_engine_module
     from app.schemas.ai_library import ComposedSystemPrompt
     from app.services.ai.chat import ai_library_chat_service as chat_service_module
     from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
-    from app.services.ai.chat.store_router import RoutedAiStore
     from app.services.issues import issue_session as session_module
-
-    monkeypatch.setattr(settings, "FEATURE_DIRECT_CONVERSATIONS", mode)
 
     agent_id = uuid4()
     user_id = uuid4()
     issue_id = 4242
     session_id_int = 555555
 
-    fake_legacy = AsyncMock()
-    fake_new = AsyncMock()
-
-    legacy_row = {
+    session_row = {
         "id": session_id_int,
         "user_id": str(user_id),
         "agent_slug": "issue_agent",
@@ -141,53 +166,19 @@ async def _drive_store_routing(
         "message_count": 0,
         "team_id": None,
         "project_id": None,
-        "store_kind": "legacy",
+        "store_kind": "conversations",
     }
-    conversations_row = {**legacy_row, "store_kind": "conversations"}
-
-    if mode == "on":
-        # Fresh session created directly on the new store; legacy never
-        # creates it. The probe inside RoutedAiStore._resolve_with_probe
-        # (mode == "on") asks legacy first and must miss.
-        fake_new.create_session.return_value = conversations_row
-        fake_legacy.get_session.return_value = None
-        fake_new.get_session.return_value = conversations_row
-        owning_row = conversations_row
-    else:
-        # off/shadow: legacy is authoritative for the create; shadow ALSO
-        # best-effort mirrors into new (never looked up by session_id).
-        fake_legacy.create_session.return_value = legacy_row
-        fake_new.create_session.return_value = conversations_row
-        fake_legacy.get_session.return_value = legacy_row
-        owning_row = legacy_row
-
-    owning_store = fake_new if mode == "on" else fake_legacy
-    owning_store.get_messages.return_value = []
-    owning_store.append_user_message.return_value = {
-        "id": "u-1",
-        "role": "user",
-        "content": "hi",
-    }
-    owning_store.append_assistant_message.return_value = {
-        "id": "a-1",
-        "role": "assistant",
-        "content": "did the thing",
-        "metadata_json": {},
-    }
-    owning_store.bump_counters.return_value = None
+    store = _FakeStore(session_row)
 
     def _service_factory(*_a: Any, **_kw: Any) -> AILibraryChatService:
-        # A fresh RoutedAiStore per construction — matches production (one
-        # AILibraryChatService() per call site) — wrapping the SAME
-        # underlying fake stores so state persists across call sites
-        # exactly like a real DB would.
-        return AILibraryChatService(
-            store=RoutedAiStore(legacy=fake_legacy, new=fake_new)
-        )
+        # A fresh AILibraryChatService per construction — matches production
+        # (one per call site) — wrapping the SAME fake store so state
+        # persists across call sites exactly like a real DB would.
+        return AILibraryChatService(store=store)
 
     # issue_session.py constructs its own AILibraryChatService() with no
     # injectable store param -- monkeypatch the symbol it resolved into its
-    # own namespace (the store-factory seam the Task 7 brief calls out).
+    # own namespace (the store-factory seam).
     monkeypatch.setattr(session_module, "AILibraryChatService", _service_factory)
 
     issue_row = {
@@ -229,7 +220,7 @@ async def _drive_store_routing(
     )
 
     # --- Step 1: real get_or_create_issue_session -> real create_session
-    # dispatch through RoutedAiStore. ---
+    # against the fake store. ---
     session_id = await session_module.get_or_create_issue_session(issue_id)
     assert session_id == str(session_id_int)
     assert executed, "backfill UPDATE should have run for a brand-new session"
@@ -309,9 +300,7 @@ async def _drive_store_routing(
             side_effect=_fake_run_recorder,
         ),
     ):
-        turn_service = AILibraryChatService(
-            store=RoutedAiStore(legacy=fake_legacy, new=fake_new)
-        )
+        turn_service = AILibraryChatService(store=store)
         result = await turn_service.run_session_turn(
             session_id,
             user_id=user_id,
@@ -319,151 +308,22 @@ async def _drive_store_routing(
             trigger="issue_dispatch",
         )
 
-    return {
-        "mode": mode,
-        "session_id": session_id,
-        "session_id_int": session_id_int,
-        "fake_legacy": fake_legacy,
-        "fake_new": fake_new,
-        "owning_row": owning_row,
-        "run_recorder_kwargs": captured_kwargs,
-        "captured_turn": captured_turn,
-        "result": result,
-    }
-
-
-@pytest.mark.parametrize("mode", ["off", "shadow"])
-async def test_off_shadow_session_and_turn_land_on_legacy(
-    monkeypatch: pytest.MonkeyPatch, mode: str
-) -> None:
-    out = await _drive_store_routing(monkeypatch, mode)
-
-    # Session creation authoritative store: legacy.
-    out["fake_legacy"].create_session.assert_awaited_once()
-    if mode == "off":
-        out["fake_new"].create_session.assert_not_awaited()
-    else:
-        # shadow: best-effort mirror into new ALSO happens, but never
-        # drives what the caller (issue_session) sees -- session_id above
-        # already asserted == the legacy id.
-        out["fake_new"].create_session.assert_awaited_once()
-
-    # Per-session ops (get_session/messages/append/bump) never touch the
-    # new store in off/shadow -- legacy is authoritative for every read.
-    out["fake_legacy"].get_session.assert_awaited()
-    out["fake_new"].get_session.assert_not_awaited()
-    out["fake_legacy"].append_user_message.assert_awaited_once()
-    out["fake_legacy"].append_assistant_message.assert_awaited_once()
-    out["fake_new"].append_user_message.assert_not_awaited()
-    out["fake_new"].append_assistant_message.assert_not_awaited()
-
-    # trigger reaches RunRecorder kwargs unchanged, and store_kind='legacy'
-    # keeps the byte-identical session_id path (Task 6 contract), not
-    # conversation_id.
-    kwargs = out["run_recorder_kwargs"]
-    assert kwargs["trigger"] == "issue_dispatch"
-    assert kwargs["session_id"] == out["session_id"]
-    assert kwargs["conversation_id"] is None
-
-    # FinishIssue tool actually injected for this trigger.
-    tool_names = [t["function"]["name"] for t in out["captured_turn"]["tools"]]
-    assert "FinishIssue" in tool_names
-    assert out["captured_turn"]["finish_issue_handler"] is finish_issue_handler
-    assert "FinishIssue" in out["captured_turn"]["system_message"]
-
-    # Outcome extraction from the returned tool_calls still works.
-    outcome, reason = extract_issue_outcome(out["result"].get("tool_calls"))
-    assert outcome == "completed"
-    assert reason == "shipped"
-
-
-async def test_on_mode_session_and_turn_land_on_new_store(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    out = await _drive_store_routing(monkeypatch, "on")
-
-    # A NEW session in 'on' mode is created directly on the conversations
-    # store; legacy never creates it.
-    out["fake_new"].create_session.assert_awaited_once()
-    out["fake_legacy"].create_session.assert_not_awaited()
-
-    # Per-session ops: the second AILibraryChatService instance (built for
-    # the turn) has an empty owner cache, so it must PROBE legacy first
-    # (miss) before routing reads to the new store -- exactly the
-    # dual-serving behavior test_store_router.py documents.
-    out["fake_legacy"].get_session.assert_awaited()
-    out["fake_new"].get_session.assert_awaited()
-    out["fake_new"].append_user_message.assert_awaited_once()
-    out["fake_new"].append_assistant_message.assert_awaited_once()
-    out["fake_legacy"].append_user_message.assert_not_awaited()
-    out["fake_legacy"].append_assistant_message.assert_not_awaited()
-
     # trigger reaches RunRecorder kwargs unchanged, and store_kind=
     # 'conversations' links via conversation_id, not session_id (Task 6
-    # contract -- agent_runs.session_id FKs ai_sessions, would 23503 on a
-    # conversations id).
-    kwargs = out["run_recorder_kwargs"]
-    assert kwargs["trigger"] == "issue_dispatch"
-    assert kwargs["session_id"] is None
-    assert kwargs["conversation_id"] == out["session_id_int"]
-    assert isinstance(kwargs["conversation_id"], int)
+    # contract -- agent_runs.session_id FKs the legacy ai_sessions table,
+    # would 23503 on a conversations id).
+    assert captured_kwargs["trigger"] == "issue_dispatch"
+    assert captured_kwargs["session_id"] is None
+    assert captured_kwargs["conversation_id"] == session_id_int
+    assert isinstance(captured_kwargs["conversation_id"], int)
 
-    tool_names = [t["function"]["name"] for t in out["captured_turn"]["tools"]]
+    # FinishIssue tool actually injected for this trigger.
+    tool_names = [t["function"]["name"] for t in captured_turn["tools"]]
     assert "FinishIssue" in tool_names
-    assert out["captured_turn"]["finish_issue_handler"] is finish_issue_handler
+    assert captured_turn["finish_issue_handler"] is finish_issue_handler
+    assert "FinishIssue" in captured_turn["system_message"]
 
-    outcome, reason = extract_issue_outcome(out["result"].get("tool_calls"))
+    # Outcome extraction from the returned tool_calls still works.
+    outcome, reason = extract_issue_outcome(result.get("tool_calls"))
     assert outcome == "completed"
     assert reason == "shipped"
-
-
-# ---------------------------------------------------------------------------
-# Group B — run_issue_agent() itself, mode-parametrized, fake chat service
-# (same seam test_issue_agent_executor.py already uses)
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("mode", ["off", "shadow", "on"])
-async def test_run_issue_agent_forwards_trigger_and_extracts_outcome_every_mode(
-    monkeypatch: pytest.MonkeyPatch, mode: str
-) -> None:
-    """run_issue_agent never reads FEATURE_DIRECT_CONVERSATIONS itself -- its
-    trigger-forwarding + FinishIssue outcome extraction must behave
-    identically in all three modes. Mocks at the AILibraryChatService
-    boundary, same as test_issue_agent_executor.py's existing tests."""
-    from app.core.config import settings
-
-    monkeypatch.setattr(settings, "FEATURE_DIRECT_CONVERSATIONS", mode)
-
-    from app.services.issues import issue_agent_executor as executor_module
-
-    monkeypatch.setattr(
-        executor_module,
-        "get_or_create_issue_session",
-        AsyncMock(return_value="sess-p2-1"),
-    )
-    chat_svc = AsyncMock()
-    chat_svc.run_session_turn = AsyncMock(
-        return_value={
-            "assistant_message": {"content": "did it"},
-            "tool_calls": _default_tool_calls(),
-        }
-    )
-    monkeypatch.setattr(executor_module, "AILibraryChatService", lambda: chat_svc)
-    monkeypatch.setattr(executor_module, "publish_chunk", AsyncMock())
-    monkeypatch.setattr(executor_module, "publish_message", AsyncMock())
-    monkeypatch.setattr(executor_module, "publish_status", AsyncMock())
-
-    out = await executor_module.run_issue_agent(
-        issue={"id": 909, "title": "do the thing", "description": "details"},
-        agent_id="agent-x",
-        user_id="user-x",
-    )
-
-    chat_svc.run_session_turn.assert_awaited_once()
-    call_kwargs = chat_svc.run_session_turn.await_args.kwargs
-    assert call_kwargs["trigger"] == "issue_dispatch"
-
-    assert out["content"] == "did it"
-    assert out["outcome"] == "completed"
-    assert out["reason"] == "shipped"

@@ -5,10 +5,19 @@ orchestration flow (user-message-first persistence, runner wiring,
 assistant message + counters). Runner + PromptComposer + RunRecorder
 are patched — we're testing the service's own coordination logic, not
 the third-party-ish wiring those classes own.
+
+Store seam (Conversations Phase 3, Task 6): ``AILibraryChatService`` now
+defaults to ``ConversationsAiStore`` (the sole surviving ``MessageStore``
+implementation — the legacy ai_sessions/ai_messages-backed store and its
+router were retired). These tests inject a hand-rolled ``_FakeStore``
+directly via the constructor's ``store=`` param instead of mocking a
+Supabase table client, mirroring the pattern
+``tests/test_task6_run_recorder_store_dispatch.py`` established.
 """
 
 from __future__ import annotations
 
+from typing import Any, Dict, List, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -16,18 +25,75 @@ import pytest
 from fastapi import HTTPException
 
 
-def _fake_maybe_single(row: dict | None):
-    """Build a chain-terminator that returns a result-like object with .data."""
-    result = MagicMock()
-    result.data = row
-    exec_mock = AsyncMock(return_value=result)
-    chain = MagicMock()
-    chain.select.return_value = chain
-    chain.eq.return_value = chain
-    chain.maybe_single.return_value = chain
-    chain.single.return_value = chain
-    chain.execute = exec_mock
-    return chain
+class _FakeStore:
+    """Minimal MessageStore stub — session lookup + message append/bump,
+    with lightweight call tracking for assertions."""
+
+    def __init__(self, session_row: Optional[Dict[str, Any]]) -> None:
+        self._session_row = session_row
+        self.appended: List[Dict[str, Any]] = []
+        self.bumps: List[Dict[str, Any]] = []
+
+    async def get_session(self, *, session_id: Any) -> Optional[Dict[str, Any]]:
+        return dict(self._session_row) if self._session_row is not None else None
+
+    async def get_messages(
+        self, *, session_id: Any, limit: int = 200
+    ) -> List[Dict[str, Any]]:
+        return []
+
+    async def append_user_message(
+        self, *, session_id: Any, user_id: str, content: str
+    ) -> Dict[str, Any]:
+        row = {
+            "id": str(uuid4()),
+            "session_id": session_id,
+            "role": "user",
+            "content": content,
+        }
+        self.appended.append(row)
+        return row
+
+    async def append_assistant_message(
+        self,
+        *,
+        session_id: Any,
+        agent_id: Optional[str],
+        content: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        metadata: dict,
+    ) -> Dict[str, Any]:
+        row = {
+            "id": str(uuid4()),
+            "session_id": session_id,
+            "role": "assistant",
+            "content": content,
+            "agent_id": agent_id,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "metadata_json": metadata,
+        }
+        self.appended.append(row)
+        return row
+
+    async def bump_counters(
+        self, *, session_id: Any, add_tokens: int, add_messages: int
+    ) -> None:
+        self.bumps.append({"total_tokens": add_tokens, "message_count": add_messages})
+
+
+class _RunRecorderCM:
+    """Async context manager standing in for RunRecorder(...)."""
+
+    def __init__(self, recorder: MagicMock) -> None:
+        self._recorder = recorder
+
+    async def __aenter__(self) -> MagicMock:
+        return self._recorder
+
+    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+        return False
 
 
 @pytest.mark.asyncio
@@ -39,15 +105,8 @@ async def test_get_session_returns_owned_row() -> None:
     session_id = uuid4()
     row = {"id": str(session_id), "user_id": str(user_id), "agent_slug": "foo"}
 
-    client = MagicMock()
-    client.table.return_value = _fake_maybe_single(row)
-
-    with patch(
-        "app.services.ai.chat.ai_library_chat_service.get_async_supabase_admin",
-        AsyncMock(return_value=client),
-    ):
-        svc = AILibraryChatService()
-        got = await svc.get_session(session_id, user_id=user_id)
+    svc = AILibraryChatService(store=_FakeStore(row))
+    got = await svc.get_session(session_id, user_id=user_id)
     assert got["user_id"] == str(user_id)
 
 
@@ -61,16 +120,9 @@ async def test_get_session_404_when_not_owner() -> None:
     session_id = uuid4()
     row = {"id": str(session_id), "user_id": str(other), "agent_slug": "foo"}
 
-    client = MagicMock()
-    client.table.return_value = _fake_maybe_single(row)
-
-    with patch(
-        "app.services.ai.chat.ai_library_chat_service.get_async_supabase_admin",
-        AsyncMock(return_value=client),
-    ):
-        svc = AILibraryChatService()
-        with pytest.raises(HTTPException) as exc:
-            await svc.get_session(session_id, user_id=user_id)
+    svc = AILibraryChatService(store=_FakeStore(row))
+    with pytest.raises(HTTPException) as exc:
+        await svc.get_session(session_id, user_id=user_id)
     assert exc.value.status_code == 404
 
 
@@ -78,16 +130,9 @@ async def test_get_session_404_when_not_owner() -> None:
 async def test_get_session_404_when_missing() -> None:
     from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
 
-    client = MagicMock()
-    client.table.return_value = _fake_maybe_single(None)
-
-    with patch(
-        "app.services.ai.chat.ai_library_chat_service.get_async_supabase_admin",
-        AsyncMock(return_value=client),
-    ):
-        svc = AILibraryChatService()
-        with pytest.raises(HTTPException) as exc:
-            await svc.get_session(uuid4(), user_id=uuid4())
+    svc = AILibraryChatService(store=_FakeStore(None))
+    with pytest.raises(HTTPException) as exc:
+        await svc.get_session(uuid4(), user_id=uuid4())
     assert exc.value.status_code == 404
 
 
@@ -110,56 +155,7 @@ async def test_chat_persists_both_messages_and_bumps_counters() -> None:
         "team_id": None,
         "project_id": None,
     }
-
-    # Track all table ops so we can assert sequence + payloads.
-    inserted: list[tuple[str, dict]] = []
-    updated: list[tuple[str, dict]] = []
-
-    def _make_table(name: str):
-        MagicMock()
-        if name == "ai_sessions":
-            # .select().eq().maybe_single().execute() → session_row
-            q = MagicMock()
-            q.select.return_value = q
-            q.eq.return_value = q
-            q.maybe_single.return_value = q
-            q.execute = AsyncMock(return_value=MagicMock(data=session_row))
-            # .update().eq().execute() — record
-            upd_chain = MagicMock()
-
-            def _upd(payload):
-                updated.append((name, payload))
-                return upd_chain
-
-            q.update = _upd
-            upd_chain.eq.return_value = upd_chain
-            upd_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
-            return q
-        if name == "ai_messages":
-            q = MagicMock()
-
-            # .select().eq().order().limit().execute() returns [] (no history)
-            q.select.return_value = q
-            q.eq.return_value = q
-            q.order.return_value = q
-            q.limit.return_value = q
-            q.execute = AsyncMock(return_value=MagicMock(data=[]))
-
-            # .insert(payload).execute() records + returns a fake id
-            def _ins(payload):
-                inserted.append((name, payload))
-                ins_chain = MagicMock()
-                ins_chain.execute = AsyncMock(
-                    return_value=MagicMock(data=[{**payload, "id": str(uuid4())}])
-                )
-                return ins_chain
-
-            q.insert = _ins
-            return q
-        return MagicMock()
-
-    client = MagicMock()
-    client.table.side_effect = _make_table
+    store = _FakeStore(session_row)
 
     # Stub ComposedSystemPrompt
     composed = MagicMock()
@@ -179,13 +175,6 @@ async def test_chat_persists_both_messages_and_bumps_counters() -> None:
     recorder.prompt_tokens = 42
     recorder.completion_tokens = 7
     recorder.set_summaries = MagicMock()
-
-    class _CM:
-        async def __aenter__(self_inner):
-            return recorder
-
-        async def __aexit__(self_inner, exc_type, exc, tb):
-            return False
 
     # M1.5 wiring: chat() now calls AgentRepository.get_by_slug then
     # build_agent_runner_stack. Patch both so the test stays focused on
@@ -210,10 +199,6 @@ async def test_chat_persists_both_messages_and_bumps_counters() -> None:
     fake_agent_repo_instance.get_by_slug = AsyncMock(return_value=fake_agent_record)
 
     with (
-        patch(
-            "app.services.ai.chat.ai_library_chat_service.get_async_supabase_admin",
-            AsyncMock(return_value=client),
-        ),
         patch(
             "app.services.ai.chat.ai_library_chat_service.get_agent_repository",
             return_value=fake_agent_repo_instance,
@@ -240,15 +225,15 @@ async def test_chat_persists_both_messages_and_bumps_counters() -> None:
         ),
         patch(
             "app.services.ai.chat.ai_library_chat_service.RunRecorder",
-            return_value=_CM(),
+            side_effect=lambda **kw: _RunRecorderCM(recorder),
         ),
     ):
-        svc = AILibraryChatService()
+        svc = AILibraryChatService(store=store)
         out = await svc.chat(session_id, user_id=user_id, content="Hello")
 
     # User message was inserted first (before the runner call) — find it.
-    user_inserts = [p for t, p in inserted if p.get("role") == "user"]
-    asst_inserts = [p for t, p in inserted if p.get("role") == "assistant"]
+    user_inserts = [m for m in store.appended if m.get("role") == "user"]
+    asst_inserts = [m for m in store.appended if m.get("role") == "assistant"]
     assert len(user_inserts) == 1
     assert user_inserts[0]["content"] == "Hello"
     assert len(asst_inserts) == 1
@@ -257,9 +242,9 @@ async def test_chat_persists_both_messages_and_bumps_counters() -> None:
     assert asst_inserts[0]["completion_tokens"] == 7
 
     # Session counters bumped: prior total (100) + 42+7 = 149; prior count (2) + 2 = 4.
-    assert len(updated) == 1
-    assert updated[0][1]["total_tokens"] == 149
-    assert updated[0][1]["message_count"] == 4
+    assert len(store.bumps) == 1
+    assert store.bumps[0]["total_tokens"] == 149
+    assert store.bumps[0]["message_count"] == 4
 
     # Response shape — what the router will return.
     assert out["usage"] == {"prompt_tokens": 42, "completion_tokens": 7}
@@ -291,44 +276,7 @@ async def test_chat_persists_tool_calls_into_metadata_json() -> None:
         "team_id": None,
         "project_id": None,
     }
-
-    inserted: list[tuple[str, dict]] = []
-
-    def _make_table(name: str):
-        MagicMock()
-        if name == "ai_sessions":
-            q = MagicMock()
-            q.select.return_value = q
-            q.eq.return_value = q
-            q.maybe_single.return_value = q
-            q.execute = AsyncMock(return_value=MagicMock(data=session_row))
-            upd_chain = MagicMock()
-            q.update = lambda payload: upd_chain
-            upd_chain.eq.return_value = upd_chain
-            upd_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
-            return q
-        if name == "ai_messages":
-            q = MagicMock()
-            q.select.return_value = q
-            q.eq.return_value = q
-            q.order.return_value = q
-            q.limit.return_value = q
-            q.execute = AsyncMock(return_value=MagicMock(data=[]))
-
-            def _ins(payload):
-                inserted.append((name, payload))
-                ins_chain = MagicMock()
-                ins_chain.execute = AsyncMock(
-                    return_value=MagicMock(data=[{**payload, "id": str(uuid4())}])
-                )
-                return ins_chain
-
-            q.insert = _ins
-            return q
-        return MagicMock()
-
-    client = MagicMock()
-    client.table.side_effect = _make_table
+    store = _FakeStore(session_row)
 
     composed = MagicMock()
     composed.agent_id = agent_id
@@ -357,13 +305,6 @@ async def test_chat_persists_tool_calls_into_metadata_json() -> None:
     recorder.completion_tokens = 3
     recorder.set_summaries = MagicMock()
 
-    class _CM:
-        async def __aenter__(self_inner):
-            return recorder
-
-        async def __aexit__(self_inner, exc_type, exc, tb):
-            return False
-
     fake_agent_record = {
         "id": str(agent_id),
         "slug": "coordinator",
@@ -381,10 +322,6 @@ async def test_chat_persists_tool_calls_into_metadata_json() -> None:
     fake_agent_repo_instance.get_by_slug = AsyncMock(return_value=fake_agent_record)
 
     with (
-        patch(
-            "app.services.ai.chat.ai_library_chat_service.get_async_supabase_admin",
-            AsyncMock(return_value=client),
-        ),
         patch(
             "app.services.ai.chat.ai_library_chat_service.get_agent_repository",
             return_value=fake_agent_repo_instance,
@@ -411,13 +348,13 @@ async def test_chat_persists_tool_calls_into_metadata_json() -> None:
         ),
         patch(
             "app.services.ai.chat.ai_library_chat_service.RunRecorder",
-            return_value=_CM(),
+            side_effect=lambda **kw: _RunRecorderCM(recorder),
         ),
     ):
-        svc = AILibraryChatService()
+        svc = AILibraryChatService(store=store)
         out = await svc.chat(session_id, user_id=user_id, content="route it")
 
-    asst_inserts = [p for t, p in inserted if p.get("role") == "assistant"]
+    asst_inserts = [m for m in store.appended if m.get("role") == "assistant"]
     assert len(asst_inserts) == 1
     meta = asst_inserts[0]["metadata_json"]
     assert meta["run_id"] == str(recorder.run_id)
@@ -448,44 +385,7 @@ async def test_chat_streams_chunks_via_callback() -> None:
         "team_id": None,
         "project_id": None,
     }
-
-    inserted: list[tuple[str, dict]] = []
-
-    def _make_table(name: str):
-        MagicMock()
-        if name == "ai_sessions":
-            q = MagicMock()
-            q.select.return_value = q
-            q.eq.return_value = q
-            q.maybe_single.return_value = q
-            q.execute = AsyncMock(return_value=MagicMock(data=session_row))
-            upd_chain = MagicMock()
-            q.update = MagicMock(return_value=upd_chain)
-            upd_chain.eq.return_value = upd_chain
-            upd_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
-            return q
-        if name == "ai_messages":
-            q = MagicMock()
-            q.select.return_value = q
-            q.eq.return_value = q
-            q.order.return_value = q
-            q.limit.return_value = q
-            q.execute = AsyncMock(return_value=MagicMock(data=[]))
-
-            def _ins(payload):
-                inserted.append((name, payload))
-                ins_chain = MagicMock()
-                ins_chain.execute = AsyncMock(
-                    return_value=MagicMock(data=[{**payload, "id": str(uuid4())}])
-                )
-                return ins_chain
-
-            q.insert = _ins
-            return q
-        return MagicMock()
-
-    client = MagicMock()
-    client.table.side_effect = _make_table
+    store = _FakeStore(session_row)
 
     composed = MagicMock()
     composed.agent_id = agent_id
@@ -516,13 +416,6 @@ async def test_chat_streams_chunks_via_callback() -> None:
     recorder.set_summaries = MagicMock()
     recorder.record_usage = MagicMock()
 
-    class _CM:
-        async def __aenter__(self_inner):
-            return recorder
-
-        async def __aexit__(self_inner, exc_type, exc, tb):
-            return False
-
     fake_agent_record = {
         "id": str(agent_id),
         "slug": "script_ai",
@@ -545,10 +438,6 @@ async def test_chat_streams_chunks_via_callback() -> None:
         chunks_received.append(text)
 
     with (
-        patch(
-            "app.services.ai.chat.ai_library_chat_service.get_async_supabase_admin",
-            AsyncMock(return_value=client),
-        ),
         patch(
             "app.services.ai.chat.ai_library_chat_service.get_agent_repository",
             return_value=fake_agent_repo_instance,
@@ -575,10 +464,10 @@ async def test_chat_streams_chunks_via_callback() -> None:
         ),
         patch(
             "app.services.ai.chat.ai_library_chat_service.RunRecorder",
-            return_value=_CM(),
+            side_effect=lambda **kw: _RunRecorderCM(recorder),
         ),
     ):
-        svc = AILibraryChatService()
+        svc = AILibraryChatService(store=store)
         out = await svc.chat(
             session_id,
             user_id=user_id,
@@ -594,7 +483,7 @@ async def test_chat_streams_chunks_via_callback() -> None:
     assert chunks_received == ["Hello ", "streaming ", "world"]
 
     # Persisted assistant message = concatenated streamed text
-    asst_inserts = [p for t, p in inserted if p.get("role") == "assistant"]
+    asst_inserts = [m for m in store.appended if m.get("role") == "assistant"]
     assert len(asst_inserts) == 1
     assert asst_inserts[0]["content"] == "Hello streaming world"
 
@@ -623,43 +512,7 @@ async def test_chat_chunk_callback_failure_does_not_abort_turn() -> None:
         "team_id": None,
         "project_id": None,
     }
-
-    inserted: list[tuple[str, dict]] = []
-
-    def _make_table(name: str):
-        if name == "ai_sessions":
-            q = MagicMock()
-            q.select.return_value = q
-            q.eq.return_value = q
-            q.maybe_single.return_value = q
-            q.execute = AsyncMock(return_value=MagicMock(data=session_row))
-            upd_chain = MagicMock()
-            q.update = MagicMock(return_value=upd_chain)
-            upd_chain.eq.return_value = upd_chain
-            upd_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
-            return q
-        if name == "ai_messages":
-            q = MagicMock()
-            q.select.return_value = q
-            q.eq.return_value = q
-            q.order.return_value = q
-            q.limit.return_value = q
-            q.execute = AsyncMock(return_value=MagicMock(data=[]))
-
-            def _ins(payload):
-                inserted.append((name, payload))
-                ins_chain = MagicMock()
-                ins_chain.execute = AsyncMock(
-                    return_value=MagicMock(data=[{**payload, "id": str(uuid4())}])
-                )
-                return ins_chain
-
-            q.insert = _ins
-            return q
-        return MagicMock()
-
-    client = MagicMock()
-    client.table.side_effect = _make_table
+    store = _FakeStore(session_row)
 
     composed = MagicMock()
     composed.agent_id = agent_id
@@ -687,13 +540,6 @@ async def test_chat_chunk_callback_failure_does_not_abort_turn() -> None:
     recorder.set_summaries = MagicMock()
     recorder.record_usage = MagicMock()
 
-    class _CM:
-        async def __aenter__(self_inner):
-            return recorder
-
-        async def __aexit__(self_inner, *a):
-            return False
-
     fake_stack = MagicMock()
     fake_stack.runner = runner
     fake_stack.graph_facts = []
@@ -715,10 +561,6 @@ async def test_chat_chunk_callback_failure_does_not_abort_turn() -> None:
         raise RuntimeError("downstream queue full")
 
     with (
-        patch(
-            "app.services.ai.chat.ai_library_chat_service.get_async_supabase_admin",
-            AsyncMock(return_value=client),
-        ),
         patch(
             "app.services.ai.chat.ai_library_chat_service.get_agent_repository",
             return_value=fake_agent_repo_instance,
@@ -745,10 +587,10 @@ async def test_chat_chunk_callback_failure_does_not_abort_turn() -> None:
         ),
         patch(
             "app.services.ai.chat.ai_library_chat_service.RunRecorder",
-            return_value=_CM(),
+            side_effect=lambda **kw: _RunRecorderCM(recorder),
         ),
     ):
-        svc = AILibraryChatService()
+        svc = AILibraryChatService(store=store)
         # Must NOT raise — callback failures are swallowed
         out = await svc.chat(
             session_id,
@@ -758,6 +600,6 @@ async def test_chat_chunk_callback_failure_does_not_abort_turn() -> None:
         )
 
     # Turn completed cleanly; full content persisted
-    asst_inserts = [p for t, p in inserted if p.get("role") == "assistant"]
+    asst_inserts = [m for m in store.appended if m.get("role") == "assistant"]
     assert asst_inserts[0]["content"] == "part1part2"
     assert out["assistant_message"]["content"] == "part1part2"

@@ -1,5 +1,14 @@
-"""Pure mapper: a raw ai_messages row → the IssueMessage UI shape.
-Shared by the messages GET endpoint and the WS chat-stream publisher."""
+"""Pure mapper: a raw ai_messages-shaped row → the IssueMessage UI shape.
+Shared by the messages GET endpoint and the WS chat-stream publisher.
+
+Row source (Conversations Phase 3, Task 6+): ``row`` is the legacy
+``ai_messages``-shaped dict produced by ``ConversationsAiStore``
+(``conversations_ai_store.py::_to_legacy_message_shape``), backed by the
+canonical ``public.messages`` table. ``row["id"]`` / ``row["session_id"]``
+are native BIGINT snowflake ids there (NOT UUIDs, unlike the retired
+Supabase-backed store's real ``ai_messages.id`` UUID PK) — see
+``IssueMessage.id: str`` in ``schemas/issue_message.py`` for the matching
+schema-side widening."""
 
 from __future__ import annotations
 
@@ -59,7 +68,9 @@ def map_ai_message_to_issue_message(
             to_status = None
 
     return IssueMessage(
-        id=UUID(str(row["id"])),
+        # row["id"] is a BIGINT snowflake under ConversationsAiStore (see
+        # module docstring) — never a UUID, so no UUID() parse here.
+        id=str(row["id"]),
         issue_id=issue_id,
         kind=kind,
         author_user_id=author_user_id,

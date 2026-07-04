@@ -1,28 +1,26 @@
-"""Phase 2 Task 8 (DONE-GATE) — Step 1: real-DB end-to-end sweep with
-``FEATURE_DIRECT_CONVERSATIONS='on'``.
+"""Conversations Phase 3, Task 6 — real-DB end-to-end sweep of
+``ConversationsAiStore``, the sole ``MessageStore`` implementation now
+that the 1:1 dual-store compatibility layer has been retired.
 
-Drives the REAL ``AILibraryChatService`` wired to a REAL ``RoutedAiStore``
-(both a real ``LegacyAiStore`` and a real ``ConversationsAiStore`` inside
-it — no store mocking anywhere) against the local Supabase Docker
-Postgres. The ONLY thing mocked is the LLM boundary: ``build_agent_runner_
-stack`` / ``PromptComposer`` / ``AgentRunner`` / ``get_adapter`` /
-``SkillToolService`` / ``RunRecorder`` — the exact same seam
-``test_task6_run_recorder_store_dispatch.py`` and
-``test_issue_agent_executor_p2.py`` use. Everything else — session
-creation, message persistence, counter bumps, ownership checks, rename,
-list ordering, soft-delete — is the real service running real SQL against
-real tables.
+Drives the REAL ``AILibraryChatService`` wired to a REAL
+``ConversationsAiStore`` (no store mocking anywhere) against the local
+Supabase Docker Postgres. The ONLY thing mocked is the LLM boundary:
+``build_agent_runner_stack`` / ``PromptComposer`` / ``AgentRunner`` /
+``get_adapter`` / ``SkillToolService`` / ``RunRecorder`` — the exact same
+seam ``test_task6_run_recorder_store_dispatch.py`` uses. Everything else —
+session creation, message persistence, counter bumps, ownership checks,
+rename, list ordering, soft-delete — is the real service running real SQL
+against real tables.
 
-With the flag ``on``, ``create_session`` lands directly on
-``ConversationsAiStore`` (migration 327/332's ``conversations`` /
-``conversation_members`` / ``conversation_ai_meta`` schema), scoped to a
-personal team created by this fixture (§3.8/3.9 in the parity checklist —
-the personal-DM-scope decision).
+``create_session`` lands on ``conversations`` (migration 327/332's
+``conversations`` / ``conversation_members`` / ``conversation_ai_meta``
+schema), scoped to a personal team created by this fixture (the
+personal-DM-scope decision from the Phase 2 parity checklist).
 
 Setup: requires INTEGRATION_DATABASE_URL. Skips cleanly otherwise::
 
     export INTEGRATION_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres
-    uv run pytest tests/integration/test_phase2_flag_on_e2e.py -v
+    uv run pytest tests/integration/test_conversations_ai_store_e2e.py -v
 """
 
 from __future__ import annotations
@@ -137,20 +135,17 @@ def _llm_boundary_patches(
 
 
 @pytest.fixture
-async def flag_on_ctx(monkeypatch: pytest.MonkeyPatch):
-    """Real-DB fixture: FEATURE_DIRECT_CONVERSATIONS='on', a resolved
-    personal team + the real ``script_ai`` agent for the smoke user, a raw
-    asyncpg connection for evidence assertions, and cleanup of every
-    conversation this test creates (cascade-deletes members/meta/messages)
-    plus any team this fixture had to create."""
+async def conv_ctx(monkeypatch: pytest.MonkeyPatch):
+    """Real-DB fixture: a resolved personal team + the real ``script_ai``
+    agent for the smoke user, a raw asyncpg connection for evidence
+    assertions, and cleanup of every conversation this test creates
+    (cascade-deletes members/meta/messages) plus any team this fixture had
+    to create."""
     if not _INTEGRATION_DSN:
         pytest.skip("INTEGRATION_DATABASE_URL not set — skipping integration tests")
 
-    from app.core.config import settings
     from app.db import engine as db_engine
     from app.db import session as db_session
-
-    monkeypatch.setattr(settings, "FEATURE_DIRECT_CONVERSATIONS", "on")
 
     db_engine._engine = None
     db_session.dispose_sessionmaker()
@@ -223,19 +218,17 @@ async def flag_on_ctx(monkeypatch: pytest.MonkeyPatch):
 
 
 def _build_service():
-    """A REAL AILibraryChatService wired to a REAL RoutedAiStore over REAL
-    LegacyAiStore + ConversationsAiStore — no store mocking."""
+    """A REAL AILibraryChatService wired to a REAL ConversationsAiStore —
+    no store mocking. ``AILibraryChatService()``'s own default is this same
+    store, but constructing it explicitly keeps this test independent of
+    that default."""
     from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
     from app.services.ai.chat.conversations_ai_store import ConversationsAiStore
-    from app.services.ai.chat.legacy_ai_store import LegacyAiStore
-    from app.services.ai.chat.store_router import RoutedAiStore
 
-    return AILibraryChatService(
-        store=RoutedAiStore(legacy=LegacyAiStore(), new=ConversationsAiStore())
-    )
+    return AILibraryChatService(store=ConversationsAiStore())
 
 
-async def test_flag_on_full_lifecycle_sweep(flag_on_ctx: dict) -> None:
+async def test_full_lifecycle_sweep(conv_ctx: dict) -> None:
     """The Step-1 real-DB E2E sweep: create (lands on conversations, scoped
     to the fixture's personal team) -> buffered chat turn (assert
     messages+decoration+counters+RunRecorder conversation_id) ->
@@ -244,12 +237,12 @@ async def test_flag_on_full_lifecycle_sweep(flag_on_ctx: dict) -> None:
     (archived, absent from list)."""
     from app.schemas.ai_library_chat import MessageOut, SessionOut, SessionWithMessages
 
-    conn: asyncpg.Connection = flag_on_ctx["conn"]
-    user_id = flag_on_ctx["user_id"]
-    agent_id = flag_on_ctx["agent_id"]
-    agent_slug = flag_on_ctx["agent_slug"]
-    team_id = flag_on_ctx["team_id"]
-    conv_ids = flag_on_ctx["conv_ids"]
+    conn: asyncpg.Connection = conv_ctx["conn"]
+    user_id = conv_ctx["user_id"]
+    agent_id = conv_ctx["agent_id"]
+    agent_slug = conv_ctx["agent_slug"]
+    team_id = conv_ctx["team_id"]
+    conv_ids = conv_ctx["conv_ids"]
 
     svc = _build_service()
 
@@ -445,8 +438,8 @@ async def test_flag_on_full_lifecycle_sweep(flag_on_ctx: dict) -> None:
     assert exc_info.value.status_code == 404
 
 
-async def test_flag_on_streaming_persists_one_final_assistant_row(
-    flag_on_ctx: dict,
+async def test_streaming_persists_one_final_assistant_row(
+    conv_ctx: dict,
 ) -> None:
     """Streaming path (chat_stream) must still: persist user+assistant
     messages (ONE final assistant row, not incremental), bump counters,
@@ -454,12 +447,12 @@ async def test_flag_on_streaming_persists_one_final_assistant_row(
     turn above."""
     from app.services.ai.adapters.base import StreamChunk
 
-    conn: asyncpg.Connection = flag_on_ctx["conn"]
-    user_id = flag_on_ctx["user_id"]
-    agent_id = flag_on_ctx["agent_id"]
-    agent_slug = flag_on_ctx["agent_slug"]
-    team_id = flag_on_ctx["team_id"]
-    conv_ids = flag_on_ctx["conv_ids"]
+    conn: asyncpg.Connection = conv_ctx["conn"]
+    user_id = conv_ctx["user_id"]
+    agent_id = conv_ctx["agent_id"]
+    agent_slug = conv_ctx["agent_slug"]
+    team_id = conv_ctx["team_id"]
+    conv_ids = conv_ctx["conv_ids"]
 
     svc = _build_service()
 

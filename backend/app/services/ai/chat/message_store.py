@@ -1,16 +1,20 @@
-"""MessageStore protocol — the strangler seam for AILibraryChatService storage.
+"""MessageStore protocol — the storage seam for AILibraryChatService.
 
-``AILibraryChatService`` today reads/writes the ``ai_sessions`` /
-``ai_messages`` tables directly. This Protocol carves those nine storage
-operations out into a swappable interface so a future store (Task 3/4,
-backed by the shared ``conversations`` / ``messages`` schema) can be
-substituted without touching the service's business logic (ownership
-checks, error mapping, hooks, counters math).
+This Protocol was carved out of ``AILibraryChatService`` (which used to
+read/write the legacy ``ai_sessions`` / ``ai_messages`` tables directly)
+so a swappable storage implementation could sit behind the service's
+business logic (ownership checks, error mapping, hooks, counters math)
+without touching it.
 
-``LegacyAiStore`` (``legacy_ai_store.py``) is the first — and today only
-— implementation: it is a byte-for-byte extraction of the existing
-Supabase calls, so swapping it in for the inline code is a zero
-behavior-change refactor.
+Single-store note (Conversations Phase 3, Task 6): the strangler is
+complete — the legacy Supabase-backed store and the dual-store router
+that once sat between them have both been retired.
+``ConversationsAiStore`` (``conversations_ai_store.py``, backed by the
+shared ``conversations`` / ``conversation_members`` /
+``conversation_ai_meta`` / ``messages`` schema) is now the sole
+``MessageStore`` implementation ``AILibraryChatService`` constructs by
+default. It maps its native rows into the legacy row shape documented
+below so callers (the service, the API schemas) never had to change.
 
 Row-shape contract
 -------------------
