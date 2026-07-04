@@ -526,7 +526,17 @@ export type VideoAnalysis = MediaAnalysis;
 // AI Provider settings
 export interface AIProviderConfig {
   enabled: boolean;
+  // WRITE-only: type a new key here to set/replace it. Leave blank (or
+  // omit) to keep whatever is already stored server-side — the backend
+  // never echoes a raw key back (encrypted at rest, secret-at-rest Phase 2),
+  // so after a GET/PUT round-trip this field is always empty again.
   api_key?: string;
+  // READ-only masking fields returned by GET/PUT instead of the raw key:
+  // whether a key is currently stored, its last-4-chars hint, and (for the
+  // multi-key BYOK rotation shape) how many keys are configured.
+  api_key_set?: boolean;
+  api_key_hint?: string;
+  api_key_count?: number;
   app_id?: string;
   base_url?: string;
   // Full catalog from "Test Connection" — typically 100+ entries.
