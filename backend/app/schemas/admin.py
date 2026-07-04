@@ -226,6 +226,40 @@ class SystemSettingUpdate(BaseModel):
     value: Any
 
 
+class PlatformAiProviderStatus(BaseModel):
+    """Masked per-provider entry for ``platform.ai_providers`` — secrets are
+    presence booleans only, never raw values (matching /ai-governance)."""
+
+    base_url: str = ""
+    model: str = ""
+    api_key_set: bool = False
+    app_id_set: bool = False
+
+
+class PlatformAiProvidersResponse(BaseModel):
+    """Masked ``platform.ai_providers`` bundle for the admin panel."""
+
+    providers: dict[str, PlatformAiProviderStatus] = {}
+
+
+class PlatformAiProviderEntryUpdate(BaseModel):
+    """Write shape for one provider entry. ``api_key`` / ``app_id`` are
+    write-only: blank (or omitted) means KEEP the stored secret unchanged
+    (the /ai-governance PUT pattern)."""
+
+    base_url: Optional[str] = None
+    model: Optional[str] = None
+    api_key: Optional[str] = None
+    app_id: Optional[str] = None
+
+
+class PlatformAiProvidersUpdate(BaseModel):
+    """Partial update — only providers present in the payload are written;
+    providers absent from the payload are left unchanged."""
+
+    providers: dict[str, PlatformAiProviderEntryUpdate] = {}
+
+
 class GraphMemorySettingsResponse(BaseModel):
     """Graphiti graph-memory config for the admin Memory panel. API keys are
     MASKED — only a ``*_set`` boolean is returned, never the raw key."""
