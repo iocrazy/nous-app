@@ -1234,6 +1234,13 @@
       "current": "Current",
       "uploading": "Uploading...",
       "upload": "Upload New Version"
+    },
+    "errors": {
+      "loadCollectionsFailed": "Failed to load collection links",
+      "createCollectionFailed": "Failed to create collection link",
+      "deleteCollectionFailed": "Failed to delete collection link",
+      "createShareFailed": "Failed to create share link",
+      "loadVersionsFailed": "Failed to load version history"
     }
   },
   "storyboard": {

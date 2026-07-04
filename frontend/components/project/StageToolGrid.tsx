@@ -7,34 +7,19 @@
  * with the corresponding ProjectTab.
  */
 
-import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { fetchCurrentStage } from '../../services/projectsService';
 import { TOOL_CATALOG } from '../../features/projects/stageTools';
 import type { ProjectStage, ProjectTab } from '../../types';
 
 interface StageToolGridProps {
   projectId: string;
   setActiveTab: (tab: ProjectTab) => void;
+  /** Current SOP stage, owned by the parent (fetched once per project). */
+  currentStage: ProjectStage | null;
 }
 
-export function StageToolGrid({ projectId, setActiveTab }: StageToolGridProps) {
+export function StageToolGrid({ setActiveTab, currentStage }: StageToolGridProps) {
   const { t } = useTranslation();
-  const [currentStage, setCurrentStage] = useState<ProjectStage | null>(null);
-
-  const load = useCallback(async () => {
-    if (!projectId) return;
-    try {
-      const stage = await fetchCurrentStage(projectId);
-      setCurrentStage(stage);
-    } catch (err) {
-      console.error('[StageToolGrid] failed to load current stage:', err);
-    }
-  }, [projectId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
 
   if (!currentStage) return null;
 

@@ -1234,6 +1234,13 @@
       "current": "当前版本",
       "uploading": "上传中...",
       "upload": "上传新版本"
+    },
+    "errors": {
+      "loadCollectionsFailed": "加载收集链接失败",
+      "createCollectionFailed": "创建收集链接失败",
+      "deleteCollectionFailed": "删除收集链接失败",
+      "createShareFailed": "创建分享链接失败",
+      "loadVersionsFailed": "加载版本历史失败"
     }
   },
   "storyboard": {

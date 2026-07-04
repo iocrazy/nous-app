@@ -10,7 +10,6 @@ import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   fetchStageCatalog,
-  fetchCurrentStage,
   setCurrentStage,
 } from '../../services/projectsService';
 import type { ProjectStage } from '../../types';
@@ -19,12 +18,15 @@ interface StageSelectorProps {
   projectId: string;
   /** When false the user may view but not transition stages. */
   canWrite?: boolean;
+  /** Current SOP stage, owned by the parent (fetched once per project). */
+  currentStage: ProjectStage | null;
+  /** Called with the new stage after a successful PUT. */
+  onStageChange: (stage: ProjectStage) => void;
 }
 
-export function StageSelector({ projectId, canWrite = true }: StageSelectorProps) {
+export function StageSelector({ projectId, canWrite = true, currentStage, onStageChange }: StageSelectorProps) {
   const { t } = useTranslation();
   const [catalog, setCatalog] = useState<ProjectStage[]>([]);
-  const [currentStage, setCurrentStageState] = useState<ProjectStage | null>(null);
   const [isPending, setIsPending] = useState(false);
 
   const loadCatalog = useCallback(async () => {
@@ -36,23 +38,9 @@ export function StageSelector({ projectId, canWrite = true }: StageSelectorProps
     }
   }, []);
 
-  const loadCurrentStage = useCallback(async () => {
-    if (!projectId) return;
-    try {
-      const stage = await fetchCurrentStage(projectId);
-      setCurrentStageState(stage);
-    } catch (err) {
-      console.error('[StageSelector] failed to load current stage:', err);
-    }
-  }, [projectId]);
-
   useEffect(() => {
     loadCatalog();
   }, [loadCatalog]);
-
-  useEffect(() => {
-    loadCurrentStage();
-  }, [loadCurrentStage]);
 
   if (catalog.length === 0) return null;
 
@@ -63,11 +51,10 @@ export function StageSelector({ projectId, canWrite = true }: StageSelectorProps
     setIsPending(true);
     try {
       const updated = await setCurrentStage(projectId, stage.id);
-      // Refresh current stage: if server returned null (no-op) we keep existing
+      // Server returns null when the project was already on the requested
+      // stage (no-op) — nothing to propagate in that case.
       if (updated) {
-        setCurrentStageState(updated);
-      } else {
-        await loadCurrentStage();
+        onStageChange(updated);
       }
     } catch (err) {
       console.error('[StageSelector] failed to set stage:', err);
