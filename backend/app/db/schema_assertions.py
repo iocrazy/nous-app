@@ -80,7 +80,7 @@ CRITICAL_MODELS: tuple[type, ...] = (
     ResourceVersions,  # USE_ORM_RESOURCES
     Folders,  # USE_ORM_RESOURCES
     AgentRuns,  # agent_runs
-    UserSettings,  # USE_ORM_USER_SETTINGS
+    UserSettings,  # user_settings (ORM-only)
 )
 
 

@@ -1,7 +1,6 @@
 """Integration tests for the UserSettingsRepository ORM path (Task 5.4).
 
-When ``USE_ORM_USER_SETTINGS`` is on (and the SQLAlchemy engine is
-configured), ``UserSettingsRepository`` routes its reads through
+``UserSettingsRepository`` routes its reads through
 ``read_scope()`` + ``select(UserSettings)`` and the canonical
 ``settings_json`` merge through ``write_scope()`` (the COMMITTING session)
 running the SAME ``COALESCE(existing,'{}'::jsonb) || CAST(:patch AS jsonb)``
@@ -57,8 +56,8 @@ def integration_db_url() -> str:
 @pytest.fixture
 async def patched_engine(integration_db_url):
     """Point the SQLAlchemy engine + sessionmaker at the test DSN so
-    read_scope()/write_scope() hit the test DB, and turn the flag ON.
-    Resets both singletons + the cache."""
+    read_scope()/write_scope() hit the test DB. Resets both singletons + the
+    cache."""
     from unittest.mock import patch
 
     from app.core.cache import user_settings_cache
@@ -67,16 +66,9 @@ async def patched_engine(integration_db_url):
 
     db_engine._engine = None
     db_session.dispose_sessionmaker()
-    with (
-        patch.object(db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url),
-        patch.object(db_engine.settings, "USE_ORM_USER_SETTINGS", True),
-    ):
-        # The repo reads settings via app.core.config.settings; patch there too.
-        from app.core import config as app_config
-
-        with patch.object(app_config.settings, "USE_ORM_USER_SETTINGS", True):
-            user_settings_cache.clear()
-            yield
+    with patch.object(db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url):
+        user_settings_cache.clear()
+        yield
     await db_engine.dispose_engine()
     db_engine._engine = None
     db_session.dispose_sessionmaker()
