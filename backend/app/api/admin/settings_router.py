@@ -58,7 +58,9 @@ from app.services.topics.keyword_filter import (
 from app.services.topics.module_config import (
     MODULE_CONFIG_KEY,
     is_module_enabled,
+    is_module_visible,
     parse_module_enabled,
+    parse_module_visible,
 )
 from app.services.topics.scoring import (
     SCORING_CONFIG_KEY,
@@ -168,8 +170,11 @@ async def update_topics_prefilter_config(
 
 @router.get("/topics-module", response_model=TopicModuleConfigResponse)
 async def get_topics_module_config(auth: AdminAuthDep):
-    """Global Topic Inspiration master switch."""
-    return TopicModuleConfigResponse(enabled=await is_module_enabled())
+    """Topic Inspiration switches: processing (enabled) + display (visible)."""
+    return TopicModuleConfigResponse(
+        enabled=await is_module_enabled(),
+        visible=await is_module_visible(),
+    )
 
 
 @router.put("/topics-module", response_model=TopicModuleConfigResponse)
@@ -177,10 +182,14 @@ async def update_topics_module_config(
     body: TopicModuleConfigResponse,
     auth: AdminAuthDep,
 ):
-    """Persist the module master switch to ``system_settings['topics.module']``.
-    Off = pause the whole feature (scheduled tick skipped) + the frontend hides
-    the page. Instant, no redeploy."""
-    payload = {"enabled": parse_module_enabled(body.model_dump())}
+    """Persist both module switches to ``system_settings['topics.module']``.
+    ``enabled`` off = pause the pipeline (scheduled tick skipped); ``visible``
+    off = hide the frontend nav entry + page. Independent. Instant, no redeploy."""
+    raw = body.model_dump()
+    payload = {
+        "enabled": parse_module_enabled(raw),
+        "visible": parse_module_visible(raw),
+    }
     repo = get_system_settings_repository()
     await repo.upsert_setting(MODULE_CONFIG_KEY, payload, auth.user_id)
     await create_audit_log(

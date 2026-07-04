@@ -290,10 +290,12 @@ export function useUpdateTopicPrefilterConfig() {
   })
 }
 
-// ── Topic Inspiration module master switch ────────────────────────────────
+// ── Topic Inspiration module switches (processing + visibility) ───────────
 export interface TopicModuleConfig {
-  /** Global on/off for the whole Topic Inspiration feature. */
+  /** Processing switch — off pauses the pipeline (fetch/score/embed/cluster). */
   enabled: boolean
+  /** Display switch — off hides the frontend nav entry + page. */
+  visible: boolean
 }
 
 const TOPIC_MODULE_URL = '/api/v1/admin/settings/topics-module'

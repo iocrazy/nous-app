@@ -122,7 +122,9 @@ class SourceMutationResponse(BaseModel):
 
 
 class ModuleStatusResponse(BaseModel):
-    """Whether the Topic Inspiration module is enabled (global master switch).
-    The frontend hides the page/nav when false."""
+    """Topic Inspiration module switches. ``visible`` controls whether the
+    frontend shows the nav entry + page; ``enabled`` reports whether the
+    backend pipeline is processing (the page shows a paused notice when off)."""
 
     enabled: bool = True
+    visible: bool = True

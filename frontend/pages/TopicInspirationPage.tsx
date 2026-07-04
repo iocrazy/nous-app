@@ -1,7 +1,7 @@
 // frontend/pages/TopicInspirationPage.tsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Lightbulb, Search, X } from 'lucide-react';
+import { Lightbulb, PauseCircle, Search, X } from 'lucide-react';
 import {
   getHotspots,
   getHotspotDates,
@@ -20,14 +20,14 @@ import { CurrentHotspots } from '../components/TopicInspiration/CurrentHotspots'
 import { SourceHealthBadge } from '../components/TopicInspiration/SourceHealthBadge';
 import { TopicFilterBar } from '../components/TopicInspiration/TopicFilterBar';
 import { topHotspots, partitionBySignal } from '../components/TopicInspiration/hotspotRanking';
-import { useTopicModuleEnabled } from '../hooks/useTopicModuleEnabled';
+import { useTopicModuleStatus } from '../hooks/useTopicModuleEnabled';
 
 const TOP_HOTSPOTS_COUNT = 5;
 
 export const TopicInspirationPage: React.FC = () => {
   const { t } = useTranslation();
   const { addToast } = useToast();
-  const moduleEnabled = useTopicModuleEnabled();
+  const { visible: moduleVisible, enabled: moduleEnabled } = useTopicModuleStatus();
   const [hotspots, setHotspots] = useState<Hotspot[]>([]);
   const [dates, setDates] = useState<string[]>([]);
   const [day, setDay] = useState<string | undefined>(undefined);
@@ -165,9 +165,10 @@ export const TopicInspirationPage: React.FC = () => {
   const cPrimary = 'text-content';
   const cSub = 'text-content-3';
 
-  // Global master switch (admin) — when off, hide the whole page (also blocks
-  // direct-URL access, not just the nav item).
-  if (!moduleEnabled) {
+  // Display switch (admin) — when not visible, hide the whole page (also
+  // blocks direct-URL access, not just the nav item). A paused pipeline
+  // (enabled=false) does NOT hide the page — it shows a notice below instead.
+  if (!moduleVisible) {
     return (
       <div className="max-w-[1180px] mx-auto px-6 py-24 text-center">
         <Lightbulb size={32} className={`mx-auto mb-3 text-content-4`} />
@@ -190,6 +191,15 @@ export const TopicInspirationPage: React.FC = () => {
         </div>
       </div>
       <p className={`text-xs mt-1 ${cSub}`}>{t('topic.subtitle')}</p>
+
+      {/* Processing paused (admin switch) — the surface stays browsable,
+          content just stops updating until the pipeline is re-enabled. */}
+      {!moduleEnabled && (
+        <div className="mt-3 flex items-center gap-1.5 text-xs text-content-3">
+          <PauseCircle size={14} className="shrink-0" />
+          <span>{t('topic.updatesPaused', 'Content updates are paused')}</span>
+        </div>
+      )}
 
       {/* Search box — server-side, debounced (only in the default "all" view) */}
       {view === 'all' && (
