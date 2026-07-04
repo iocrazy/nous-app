@@ -620,35 +620,25 @@ class ResourcesService:
 
     async def permanent_delete_folder(self, folder_id: str, user_id: str) -> dict:
         """Permanently delete a folder, all sub-folders, and their resources."""
-        # 1. Collect all descendant folder IDs
-        all_folder_ids = [folder_id]
-        queue = [folder_id]
-        while queue:
-            parent_id = queue.pop(0)
-            client = await self.repo._get_client()
-            result = await (
-                client.table("folders")
-                .select("id")
-                .eq("parent_id", parent_id)
-                .execute()
-            )
-            for row in result.data or []:
-                cid = str(row["id"])
-                all_folder_ids.append(cid)
-                queue.append(cid)
+        # 1. Collect the folder + all descendant folder IDs. include_trashed=True:
+        #    a permanent purge must reach trashed sub-folders too (the legacy REST
+        #    child-select had no is_trashed filter). The root is seeded here so a
+        #    nonexistent id is still counted/deleted (no-op) as before.
+        descendants = await self.repo.get_descendant_folder_ids(
+            folder_id, include_trashed=True
+        )
+        all_folder_ids = [folder_id] + descendants
 
-        # 2. Permanently delete resources in each folder
+        # 2. Permanently delete resources in each folder. include_trashed=True so
+        #    trashed resources in the tree are purged too (the legacy loop
+        #    selected resource_items regardless of the resource's trashed state).
         deleted_resources = 0
         for fid in all_folder_ids:
-            client = await self.repo._get_client()
-            items_result = await (
-                client.table("resource_items")
-                .select("resource_id")
-                .eq("folder_id", fid)
-                .execute()
+            resources = await self.repo.list_resources_in_folder(
+                fid, include_trashed=True
             )
-            for item in items_result.data or []:
-                rid = str(item["resource_id"])
+            for res in resources:
+                rid = str(res["id"])
                 try:
                     await self.permanent_delete(rid, user_id)
                     deleted_resources += 1

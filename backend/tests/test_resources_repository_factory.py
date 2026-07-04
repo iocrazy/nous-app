@@ -9,9 +9,9 @@ unconditionally. These tests pin:
      engine gate).
 
   2. ``ResourcesRepository`` inherits ``AsyncpgRepository`` (for ``_bigint`` /
-     ``_bigint_list``) and still exposes the conscious-keep legacy REST
-     methods (resource_tags trio, smart-folder group, ``find_by_hashes``, the
-     temp-sweeper helpers) so call sites are zero-touch.
+     ``_bigint_list``) and still exposes the former REST-straggler methods
+     (resource_tags trio, smart-folder group, ``find_by_hashes``, the
+     temp-sweeper helpers) — now ORM-ported — so call sites are zero-touch.
 
   3. The str→int boundary coercion helper still works.
 """
@@ -40,10 +40,10 @@ def test_repository_inherits_asyncpg_base():
     assert issubclass(ResourcesRepository, AsyncpgRepository)
 
 
-def test_conscious_keep_legacy_methods_are_present():
-    """The methods NOT ported to the ORM (they ran the legacy supabase-py REST
-    bodies via MRO pre-collapse) must still exist on the collapsed class so
-    every call site keeps working."""
+def test_ported_straggler_methods_are_present():
+    """The former REST-straggler methods (they ran the legacy supabase-py REST
+    bodies via MRO pre-collapse, now ORM-ported) must still exist on the class
+    so every call site keeps working."""
     from app.repositories.resources_repository import ResourcesRepository
 
     for name in (
@@ -57,10 +57,17 @@ def test_conscious_keep_legacy_methods_are_present():
         "list_resources_in_folder",
         "soft_delete_resource",
         "list_accessible_for_user",
-        # these use the async supabase admin client
-        "_get_client",
     ):
         assert callable(getattr(ResourcesRepository, name)), f"missing {name}"
+
+
+def test_supabase_admin_client_helper_removed():
+    """The port removed ``_get_client`` (the async supabase admin bypass): with
+    every straggler on the ORM session scopes it has zero callers. Its absence
+    is what lets the tenant-scope choke point govern these paths."""
+    from app.repositories.resources_repository import ResourcesRepository
+
+    assert not hasattr(ResourcesRepository, "_get_client")
 
 
 def test_bigint_helper_coerces_str_input():

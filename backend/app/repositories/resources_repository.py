@@ -12,24 +12,28 @@ Data access for the resource library: resources, resource_items,
 resource_versions, and folders. The 40 data-access methods on those four
 tables run on the ORM session scopes from ``app.db.session``.
 
-CONSCIOUS-KEEP — LEGACY REST (supabase-py) METHODS
-==================================================
-Six method groups were NEVER ported to the ORM: they ran the legacy
-supabase-py REST bodies in prod TODAY via Python MRO (the old
-``ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository)`` inherited
-them from the base). The collapse keeps them byte-identical rather than
-porting them in this PR — they stay on ``self._get_client()`` (async
-supabase admin) and are deliberately NOT touched:
+REST STRAGGLERS — NOW PORTED TO THE ORM (scope-enforce prerequisite)
+====================================================================
+Six method groups used to run the legacy supabase-py REST bodies in prod via
+Python MRO (the old ``ResourcesRepositoryOrm(AsyncpgRepository,
+ResourcesRepository)`` inherited them from the base). Those REST bodies were
+tenant-scope BYPASSES: the app-layer choke point only governs the ORM session
+layer, so ``self._get_client()`` (async supabase admin) reads/writes skipped
+enforcement entirely. To let ``SCOPE_ENFORCE_RESOURCES`` flip on later they are
+now rewritten on the ORM session scopes (reads via ``read_scope()`` +
+``select(...)``, writes via ``write_scope()``), Strategy-C value parity with
+the retired REST bodies preserved by the ``_rest_parity`` / ``_plain`` funnels:
   - ``find_by_hashes`` (batch hash lookup)
   - the resource_tags trio: ``add_resource_tag`` / ``remove_resource_tag`` /
     ``get_resource_tags``
   - the smart-folder group: ``get_smart_folders`` / ``create_smart_folder`` /
-    ``execute_smart_rules`` (+ helpers ``_apply_condition`` /
-    ``_condition_to_postgrest`` / ``_resolve_value`` / ``_filter_by_tags``)
+    ``execute_smart_rules`` (+ helpers ``_condition_to_sql_expr`` /
+    ``_coerce_smart_value`` / ``_resolve_value`` / ``_filter_by_tags``)
   - the temp-sweeper helpers: ``list_resources_in_folder`` /
     ``soft_delete_resource``
-``list_accessible_for_user`` is also unported but already runs pure SQL via
-``db_engine.fetch_all`` (not supabase-py) — left as-is.
+With the port, ``self._get_client()`` has zero callers and is removed; the
+async supabase admin import goes with it. ``list_accessible_for_user`` was
+already pure SQL via ``db_engine.fetch_all`` (never supabase-py) — left as-is.
 
 ⚠️ ``SCOPE_ENFORCE_RESOURCES`` is a SEPARATE flag/rollout concern (the
 app-layer tenant-scope choke point) and is INDEPENDENT of the retired
@@ -87,13 +91,19 @@ from typing import Any, Dict, List, Optional
 
 from loguru import logger
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import func, insert, select, text, update
+from sqlalchemy import func, insert, or_, select, text, update
 
 from app.db.repository_base import AsyncpgRepository
 from app.db.scope import is_enforced, scoped_sql, system_request_scope
 from app.db.session import read_scope, write_scope
-from app.db.supabase_client import get_async_supabase_admin
-from app.models import Folders, ResourceItems, Resources, ResourceVersions
+from app.models import (
+    Folders,
+    ResourceItems,
+    Resources,
+    ResourceTags,
+    ResourceVersions,
+    Tags,
+)
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict, _plain
 
 # Working-set caps for the batch sweepers in this repo. They replace
@@ -116,6 +126,24 @@ _RESOURCES_NAME_TO_ATTR: Dict[str, str] = _name_to_attr(Resources)
 _RESOURCE_ITEMS_NAME_TO_ATTR: Dict[str, str] = _name_to_attr(ResourceItems)
 _RESOURCE_VERSIONS_NAME_TO_ATTR: Dict[str, str] = _name_to_attr(ResourceVersions)
 _FOLDERS_NAME_TO_ATTR: Dict[str, str] = _name_to_attr(Folders)
+_RESOURCE_TAGS_NAME_TO_ATTR: Dict[str, str] = _name_to_attr(ResourceTags)
+_TAGS_NAME_TO_ATTR: Dict[str, str] = _name_to_attr(Tags)
+
+# The exact column projection the legacy PostgREST ``find_by_hashes`` selected.
+# We read the full ORM entity (the proven-injectable read shape) then project
+# down to these keys so the returned dict is byte-identical to the REST body
+# (no extra columns leak into the ``existing`` payload the caller echoes back).
+_FIND_BY_HASH_COLS = (
+    "id",
+    "filename",
+    "file_type",
+    "mime_type",
+    "file_size_bytes",
+    "thumbnail_path",
+    "cover_image_path",
+    "created_at",
+    "file_hash",
+)
 
 
 def _to_rest_value(value: Any) -> Any:
@@ -175,6 +203,16 @@ def _folder_row_to_dict(obj: Any) -> Dict[str, Any]:
     return _rest_parity(_orm_obj_to_dict(obj, _FOLDERS_NAME_TO_ATTR))
 
 
+def _resource_tag_row_to_dict(obj: Any) -> Dict[str, Any]:
+    """SELECT *-shaped dict for a ``resource_tags`` ORM row (value safe)."""
+    return _rest_parity(_orm_obj_to_dict(obj, _RESOURCE_TAGS_NAME_TO_ATTR))
+
+
+def _tag_row_to_dict(obj: Any) -> Dict[str, Any]:
+    """SELECT *-shaped dict for a ``tags`` ORM row (value safe)."""
+    return _rest_parity(_orm_obj_to_dict(obj, _TAGS_NAME_TO_ATTR))
+
+
 def _mappings_dict(row: Any) -> Dict[str, Any]:
     """Plain dict from a RETURNING ``.mappings()`` row, enum- and value-safe.
 
@@ -189,11 +227,11 @@ def _mappings_dict(row: Any) -> Dict[str, Any]:
 class ResourcesRepository(AsyncpgRepository):
     """Resource library data access (async, ORM-backed).
 
-    The 40 data-access methods on resources / resource_items /
-    resource_versions / folders run on the ORM. The resource_tags trio,
-    smart-folder group, ``find_by_hashes`` and the two temp-sweeper helpers
-    are conscious-kept legacy supabase-py REST bodies (see module docstring) —
-    they still use ``self._get_client()``. ``_bigint`` / ``_bigint_list`` come
+    All data-access methods on resources / resource_items / resource_versions /
+    folders / resource_tags run on the ORM session scopes — including the former
+    REST stragglers (resource_tags trio, smart-folder group, ``find_by_hashes``,
+    the two temp-sweeper helpers), ported off ``self._get_client()`` so the
+    tenant-scope choke point governs them. ``_bigint`` / ``_bigint_list`` come
     from ``AsyncpgRepository``."""
 
     TABLE = "resources"
@@ -206,13 +244,6 @@ class ResourcesRepository(AsyncpgRepository):
 
     def __init__(self):
         pass
-
-    async def _get_client(self):
-        """Async supabase admin client (loop-aware, safe for Celery workers).
-
-        Used ONLY by the conscious-keep legacy REST methods below (resource
-        tags / smart folders / find_by_hashes / temp-sweeper helpers)."""
-        return await get_async_supabase_admin()
 
     # ── Resources CRUD ──────────────────────────────────────────────
 
@@ -1363,24 +1394,36 @@ class ResourcesRepository(AsyncpgRepository):
             logger.error(f"Failed to delete folder {folder_id}: {e}")
             raise
 
-    async def get_descendant_folder_ids(self, folder_id: str) -> List[str]:
-        """Recursive descent into non-trashed children. Single CTE.
+    async def get_descendant_folder_ids(
+        self, folder_id: str, *, include_trashed: bool = False
+    ) -> List[str]:
+        """Recursive descent into children (excluding ``folder_id`` itself).
+        Single CTE.
+
+        By default only NON-trashed descendants (the folder-tree UI contract).
+        Pass ``include_trashed=True`` for a permanent purge
+        (``permanent_delete_folder``), which must reach EVERY descendant — the
+        trashed sub-folders and the subtrees hanging beneath them — so the CTE
+        recurses through trashed folders instead of stopping at them.
 
         Returns list[str] for legacy contract (some unmigrated paths pass it
         back to PostgREST); internal callers like ``count_folder_contents``
         re-coerce via ``_bigint_list``."""
+        # Helper-controlled literal fragments (no user input) — safe to splice.
+        base_filter = "" if include_trashed else " AND is_trashed = false"
+        rec_filter = "" if include_trashed else " WHERE f.is_trashed = false"
         try:
             async with read_scope() as session:
                 result = await session.execute(
                     text(
                         "WITH RECURSIVE descendants AS ("
                         "  SELECT id FROM folders "
-                        "    WHERE parent_id = :fid AND is_trashed = false "
+                        "    WHERE parent_id = :fid" + base_filter + " "
                         "  UNION ALL "
                         "  SELECT f.id FROM folders f "
-                        "    INNER JOIN descendants d ON f.parent_id = d.id "
-                        "    WHERE f.is_trashed = false"
-                        ") SELECT id FROM descendants"
+                        "    INNER JOIN descendants d ON f.parent_id = d.id"
+                        + rec_filter
+                        + ") SELECT id FROM descendants"
                     ),
                     {"fid": self._bigint(folder_id)},
                 )
@@ -1540,43 +1583,50 @@ class ResourcesRepository(AsyncpgRepository):
             raise
 
     # ══════════════════════════════════════════════════════════════════
-    # CONSCIOUS-KEEP — LEGACY REST (supabase-py) METHODS
+    # PORTED REST STRAGGLERS — now on the ORM session scopes
     # ══════════════════════════════════════════════════════════════════
     #
-    # Everything below ran the legacy supabase-py REST bodies in prod via MRO
-    # (inherited by the old ORM subclass) — NOT ported to the ORM in this PR.
-    # Kept byte-identical: they use ``self._get_client()`` (async supabase
-    # admin), not the ORM session scopes. Do NOT convert here — that is a
-    # separate follow-up. See the module docstring for the rationale.
+    # Everything below used to run the legacy supabase-py REST bodies in prod
+    # via MRO (inherited by the old ORM subclass), bypassing the tenant-scope
+    # choke point. Ported to ``read_scope()`` / ``write_scope()`` so the choke
+    # point governs them (the ``SCOPE_ENFORCE_RESOURCES`` prerequisite).
+    # Strategy-C value parity with the retired REST bodies is preserved via the
+    # ``_rest_parity`` / ``_plain`` funnels. See the module docstring.
 
-    # ── Hash-based batch duplicate lookup (legacy REST) ──────────────
+    # ── Hash-based batch duplicate lookup ────────────────────────────
 
     async def find_by_hashes(
         self, file_hashes: list[str], creator_id: str
     ) -> dict[str, dict]:
         """Find non-trashed resources matching any of the given hashes for a creator.
 
-        Issues a single PostgREST ``.in_`` query and returns a mapping of
+        Issues a single ``file_hash IN (...)`` query and returns a mapping of
         ``{file_hash: first_matching_row}``.  Never raises — returns ``{}`` on
         any error.  Caller is responsible for keeping ``file_hashes`` ≤ 100.
+
+        Reads the full ORM entity (the proven-injectable read shape — the choke
+        point can attach the tenant predicate) then projects down to the exact
+        column set the legacy PostgREST body selected (``_FIND_BY_HASH_COLS``)
+        so the ``existing`` payload the caller echoes back stays byte-identical
+        (id → int, created_at → ISO str via ``_rest_parity``).
         """
         if not file_hashes:
             return {}
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.TABLE_RESOURCES)
-                .select(
-                    "id, filename, file_type, mime_type, file_size_bytes, "
-                    "thumbnail_path, cover_image_path, created_at, file_hash"
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(Resources)
+                    .where(Resources.file_hash.in_(file_hashes))
+                    .where(Resources.creator_id == creator_id)
+                    .where(Resources.is_trashed.is_(False))
                 )
-                .in_("file_hash", file_hashes)
-                .eq("creator_id", creator_id)
-                .eq("is_trashed", False)
-                .execute()
-            )
-            rows: list[dict] = result.data or []
-            # Build hash→first-row map (first row per hash wins)
+                rows = [
+                    {k: full[k] for k in _FIND_BY_HASH_COLS}
+                    for full in (
+                        _resources_row_to_dict(obj) for obj in result.scalars().all()
+                    )
+                ]
+            # Build hash→first-row map (first row per hash wins).
             mapping: dict[str, dict] = {}
             for row in rows:
                 h = row.get("file_hash")
@@ -1587,40 +1637,58 @@ class ResourcesRepository(AsyncpgRepository):
             logger.error("Failed to find resources by hashes: {}", e)
             return {}
 
-    # ── Resource Tags (legacy REST) ─────────────────────────────────
+    # ── Resource Tags ────────────────────────────────────────────────
 
     async def add_resource_tag(
         self, resource_id: str, tag_id: str, tagged_by: str
     ) -> Dict[str, Any]:
+        """INSERT a resource_tags junction row, COMMITTING via write_scope.
+
+        ``resource_tags`` is NOT a scope-mixin model, so a Core ``insert().
+        returning()`` is permitted by the choke point (``_forbid_scoped_bulk_
+        dml`` no-ops when no scoped model is touched) — same shape as
+        ``create_folder``. RETURNING the full row reproduces the legacy REST
+        ``result.data[0]`` shape (server defaults ``created_at`` / ``source``
+        included; ``tagged_by`` uuid → str via ``_mappings_dict``)."""
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.TABLE_RESOURCE_TAGS)
-                .insert(
-                    {
-                        "resource_id": resource_id,
-                        "tag_id": tag_id,
-                        "tagged_by": tagged_by,
-                    }
+            async with write_scope() as session:
+                result = await session.execute(
+                    insert(ResourceTags)
+                    .values(
+                        resource_id=self._bigint(resource_id),
+                        tag_id=self._bigint(tag_id),
+                        tagged_by=tagged_by,
+                    )
+                    .returning(*ResourceTags.__table__.columns)
                 )
-                .execute()
-            )
+                row = result.mappings().first()
+                created = _mappings_dict(row) if row else {}
             logger.info(f"Tagged resource {resource_id} with tag {tag_id}")
-            return result.data[0] if result.data else {}
+            return created
         except Exception as e:
             logger.error(f"Failed to tag resource {resource_id}: {e}")
             raise
 
     async def remove_resource_tag(self, resource_id: str, tag_id: str) -> bool:
+        """DELETE a resource_tags junction row via load-then-delete.
+
+        Composite PK (resource_id, tag_id) → ``session.get`` by PK dict, then
+        ``session.delete(instance)`` (the sanctioned governed write path). A
+        missing row is a no-op that still returns ``True`` — the legacy REST
+        ``.delete().eq().eq()`` also succeeded with zero matched rows, keeping
+        the idempotent boolean contract."""
         try:
-            client = await self._get_client()
-            await (
-                client.table(self.TABLE_RESOURCE_TAGS)
-                .delete()
-                .eq("resource_id", resource_id)
-                .eq("tag_id", tag_id)
-                .execute()
-            )
+            async with write_scope() as session:
+                obj = await session.get(
+                    ResourceTags,
+                    {
+                        "resource_id": self._bigint(resource_id),
+                        "tag_id": self._bigint(tag_id),
+                    },
+                )
+                if obj is not None:
+                    await session.delete(obj)
+                    await session.flush()
             logger.info(f"Removed tag {tag_id} from resource {resource_id}")
             return True
         except Exception as e:
@@ -1628,15 +1696,27 @@ class ResourcesRepository(AsyncpgRepository):
             raise
 
     async def get_resource_tags(self, resource_id: str) -> List[Dict[str, Any]]:
+        """All resource_tags rows for a resource, each with its embedded ``tag``.
+
+        Reproduces the legacy PostgREST ``select("*, tag:tags(*)")`` embed: a
+        list of resource_tags dicts, each carrying a nested ``tag`` key = the
+        full tags row. The ``tag_id`` FK is a non-null composite PK with ON
+        DELETE CASCADE, so no orphan junction rows can exist — an INNER JOIN is
+        equivalent to the REST left-embed here (the ``tag`` is always present).
+        """
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.TABLE_RESOURCE_TAGS)
-                .select("*, tag:tags(*)")
-                .eq("resource_id", resource_id)
-                .execute()
-            )
-            return result.data or []
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(ResourceTags, Tags)
+                    .join(Tags, ResourceTags.tag_id == Tags.id)
+                    .where(ResourceTags.resource_id == self._bigint(resource_id))
+                )
+                out: List[Dict[str, Any]] = []
+                for rt_obj, tag_obj in result.all():
+                    row = _resource_tag_row_to_dict(rt_obj)
+                    row["tag"] = _tag_row_to_dict(tag_obj)
+                    out.append(row)
+                return out
         except Exception as e:
             logger.error(f"Failed to get tags for resource {resource_id}: {e}")
             return []
@@ -1649,30 +1729,40 @@ class ResourcesRepository(AsyncpgRepository):
         """Get all smart folders for a scope.
 
         PR-E Phase 1: scope_type accepted but unused (scope_id is unique).
+        Smart folders ARE ``folders`` rows with ``is_smart = true``; ordered by
+        ``sort_order`` ascending to match the legacy REST body.
         """
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.TABLE_FOLDERS)
-                .select("*")
-                .eq("scope_id", scope_id)
-                .eq("is_smart", True)
-                .eq("is_trashed", False)
-                .order("sort_order", desc=False)
-                .execute()
-            )
-            return result.data or []
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(Folders)
+                    .where(Folders.scope_id == self._bigint(scope_id))
+                    .where(Folders.is_smart.is_(True))
+                    .where(Folders.is_trashed.is_(False))
+                    .order_by(Folders.sort_order.asc())
+                )
+                return [_folder_row_to_dict(r) for r in result.scalars().all()]
         except Exception as e:
             logger.error(f"Failed to get smart folders: {e}")
             return []
 
     async def create_smart_folder(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Create a folder with is_smart=true."""
+        """Create a folder with is_smart=true, COMMITTING via write_scope.
+
+        ``folders`` is NOT a scope-mixin model, so a Core ``insert().returning()``
+        is permitted (same shape as ``create_folder``) — RETURNING the full row
+        reproduces the legacy REST ``result.data[0]`` shape with every server
+        default (snowflake ``id`` / ``created_at`` / ``sort_order`` / ``is_system``
+        / ``visibility`` / ``is_trashed``) materialized."""
         try:
-            client = await self._get_client()
-            result = await client.table(self.TABLE_FOLDERS).insert(data).execute()
+            async with write_scope() as session:
+                result = await session.execute(
+                    insert(Folders).values(**data).returning(*Folders.__table__.columns)
+                )
+                row = result.mappings().first()
+                created = _mappings_dict(row) if row else {}
             logger.info(f"Created smart folder: {data.get('name')}")
-            return result.data[0] if result.data else {}
+            return created
         except Exception as e:
             logger.error(f"Failed to create smart folder: {e}")
             raise
@@ -1680,129 +1770,172 @@ class ResourcesRepository(AsyncpgRepository):
     async def execute_smart_rules(
         self, scope_type: Optional[str], scope_id: str, rules: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
-        """
-        Execute smart folder rules against resource_items + resources.
+        """Execute smart folder rules against resource_items + resources (ORM).
 
-        Build a Supabase PostgREST query from the JSONB rules:
-        - For fields on resources table: use resource.{field} in the join
-        - For tags: use a subquery on resource_tags
-        - For relative dates: compute the absolute date
-        - Apply AND/OR logic
-        - Apply match/exclude logic
+        Ports the legacy PostgREST query builder to SQLAlchemy:
+        - resource-table fields → predicates on the ``Resources`` model, spliced
+          into the WHERE (AND mode) or OR-combined (OR mode);
+        - tags → post-filtered against ``resource_tags`` (``_filter_by_tags``);
+        - relative dates → resolved to absolute values by ``_resolve_value``;
+        - match / exclude → the exclude branch subtracts the matched set from
+          all (non-trashed, in-scope) items.
+
+        The base shape is an INNER JOIN ``resource_items ⋈ resources`` — the
+        exact equivalent of the REST ``resource:resources!inner(*)`` embed and a
+        choke-point-injectable read shape (the tenant predicate on ``resources``
+        reaches a filtering position). Ordering is on ``resource_items.created_at``
+        DESC, matching the REST root-table ``.order("created_at")``. Each row is
+        flattened to a ``resource_items`` dict with the full ``resources`` row
+        under a nested ``resource`` key (Strategy-C parity via the row helpers).
         """
         try:
-            client = await self._get_client()
             conditions = rules.get("conditions", [])
             operator = rules.get("operator", "AND")
             match = rules.get("match", True)
 
-            # Separate tag conditions from resource conditions
+            # Separate tag conditions from resource conditions.
             tag_conditions = [c for c in conditions if c["field"] == "tags"]
             resource_conditions = [c for c in conditions if c["field"] != "tags"]
 
-            # Base query: resource_items with joined resources
-            query = (
-                client.table(self.TABLE_ITEMS)
-                .select("*, resource:resources!inner(*)")
-                .eq("scope_id", scope_id)
-                .eq("resource.is_trashed", False)
-            )
+            async with read_scope() as session:
+                base = (
+                    select(ResourceItems, Resources)
+                    .join(Resources, ResourceItems.resource_id == Resources.id)
+                    .where(ResourceItems.scope_id == self._bigint(scope_id))
+                    .where(Resources.is_trashed.is_(False))
+                )
 
-            if operator == "AND":
-                # Apply each resource condition as a filter
-                for cond in resource_conditions:
-                    query = self._apply_condition(query, cond)
-            else:
-                # OR: use .or_() with PostgREST format
-                if resource_conditions:
-                    or_parts = []
+                stmt = base
+                if operator == "AND":
                     for cond in resource_conditions:
-                        part = self._condition_to_postgrest(cond)
-                        if part:
-                            or_parts.append(part)
-                    if or_parts:
-                        query = query.or_(
-                            ",".join(or_parts), reference_table="resources"
-                        )
+                        expr = self._condition_to_sql_expr(cond)
+                        if expr is not None:
+                            stmt = stmt.where(expr)
+                else:
+                    or_exprs = [
+                        expr
+                        for cond in resource_conditions
+                        if (expr := self._condition_to_sql_expr(cond)) is not None
+                    ]
+                    if or_exprs:
+                        stmt = stmt.where(or_(*or_exprs))
 
-            result = await query.order("created_at", desc=True).execute()
-            items = result.data or []
+                stmt = stmt.order_by(ResourceItems.created_at.desc())
+                result = await session.execute(stmt)
+                items = [
+                    self._smart_item_dict(item_obj, res_obj)
+                    for item_obj, res_obj in result.all()
+                ]
 
-            # Post-filter for tag conditions (tags live in resource_tags table)
-            if tag_conditions:
-                items = await self._filter_by_tags(
-                    items, tag_conditions, operator, client
-                )
+                # Post-filter for tag conditions (tags live in resource_tags).
+                if tag_conditions:
+                    items = await self._filter_by_tags(
+                        items, tag_conditions, operator, session
+                    )
 
-            # Apply match/exclude logic
-            if not match:
-                # Exclude mode: get ALL items and subtract the matched set
-                all_query = (
-                    client.table(self.TABLE_ITEMS)
-                    .select("*, resource:resources!inner(*)")
-                    .eq("scope_id", scope_id)
-                    .eq("resource.is_trashed", False)
-                    .order("created_at", desc=True)
-                )
-                all_result = await all_query.execute()
-                all_items = all_result.data or []
-                matched_ids = {item["id"] for item in items}
-                items = [item for item in all_items if item["id"] not in matched_ids]
+                # Match / exclude logic.
+                if not match:
+                    all_result = await session.execute(
+                        base.order_by(ResourceItems.created_at.desc())
+                    )
+                    all_items = [
+                        self._smart_item_dict(item_obj, res_obj)
+                        for item_obj, res_obj in all_result.all()
+                    ]
+                    matched_ids = {item["id"] for item in items}
+                    items = [
+                        item for item in all_items if item["id"] not in matched_ids
+                    ]
 
             return items
         except Exception as e:
             logger.error(f"Failed to execute smart rules: {e}")
             return []
 
-    def _apply_condition(self, query, cond: Dict[str, Any]):
-        """Apply a single condition as a PostgREST filter (AND mode)."""
+    @staticmethod
+    def _smart_item_dict(item_obj: Any, resource_obj: Any) -> Dict[str, Any]:
+        """Flatten a ``(resource_items, resources)`` join row to the legacy embed
+        shape: the resource_items dict with the full resources row nested under a
+        ``resource`` key (both Strategy-C value-parity coerced)."""
+        row = _resource_item_row_to_dict(item_obj)
+        row["resource"] = _resources_row_to_dict(resource_obj)
+        return row
+
+    @staticmethod
+    def _coerce_smart_value(col: Any, value: Any) -> Any:
+        """Coerce a resolved rule value to the target column's Python type.
+
+        PostgREST relied on Postgres casting an ``unknown`` string literal to the
+        column type; asyncpg's codec is strict and needs the typed Python value.
+        So an int column gets ``int(value)`` and a timestamptz column gets
+        ``datetime.fromisoformat(value)`` (the ISO string ``_resolve_value``
+        produces for relative dates parses straight back to the identical tz-aware
+        instant). Text columns and non-str values pass through unchanged. A value
+        that fails to parse is left as-is so the downstream query raises exactly
+        as the REST body's malformed filter would (→ swallowed to ``[]``).
+
+        The int / datetime coercion set is closed over the field types actually
+        reachable via the smart-rule schema (filename / file_type / file_size_bytes
+        / created_at / duration_seconds / resolution / source_type / mime_type):
+        no bool / UUID / date-only Resources column is reachable, so only int and
+        timestamptz need special-casing; every other type is text-like and passes
+        through. Extend this if a new coercible field is ever added to the schema."""
+        if not isinstance(value, str):
+            return value
+        try:
+            pytype = col.type.python_type
+        except Exception:  # noqa: BLE001 - unknown/computed type → no coercion
+            return value
+        if pytype is int:
+            try:
+                return int(value)
+            except ValueError:
+                return value
+        if pytype is datetime:
+            try:
+                return datetime.fromisoformat(value)
+            except ValueError:
+                return value
+        return value
+
+    def _condition_to_sql_expr(self, cond: Dict[str, Any]) -> Optional[Any]:
+        """Translate a single resource-field condition to a SQLAlchemy predicate
+        on the ``Resources`` model.
+
+        Supported operators (1:1 with the retired ``_apply_condition`` /
+        ``_condition_to_postgrest`` PostgREST translations):
+          eq → ``col == v`` · contains → ``col ILIKE %v%`` · starts_with →
+          ``col ILIKE v%`` · gt/lt/gte/lte → ``col > / < / >= / <= v`` · in →
+          ``col IN (v.split(","))``. Any other op (e.g. ``not_contains``, which is
+          a tags-only operator) → ``None`` = no predicate, exactly as the REST
+          helpers returned the query unchanged / ``None``.
+
+        The value goes through ``_resolve_value`` (relative-date magic) then
+        ``_coerce_smart_value`` for the comparison operators (ILIKE stays a text
+        match on the raw value). An unknown ``field`` raises ``AttributeError``
+        here, caught by ``execute_smart_rules`` → ``[]`` — the same terminal
+        outcome as PostgREST 400-ing on an unknown column."""
         field = cond["field"]
         op = cond["op"]
         value = self._resolve_value(cond["value"])
-
-        col = f"resource.{field}"
-
-        if op == "eq":
-            return query.eq(col, value)
-        elif op == "contains":
-            return query.ilike(col, f"%{value}%")
-        elif op == "starts_with":
-            return query.ilike(col, f"{value}%")
-        elif op == "gt":
-            return query.gt(col, value)
-        elif op == "lt":
-            return query.lt(col, value)
-        elif op == "gte":
-            return query.gte(col, value)
-        elif op == "lte":
-            return query.lte(col, value)
-        elif op == "in":
-            return query.in_(col, value.split(","))
-        return query
-
-    def _condition_to_postgrest(self, cond: Dict[str, Any]) -> Optional[str]:
-        """Convert a condition to PostgREST OR filter string."""
-        field = cond["field"]
-        op = cond["op"]
-        value = self._resolve_value(cond["value"])
+        col = getattr(Resources, _RESOURCES_NAME_TO_ATTR.get(field, field))
 
         if op == "eq":
-            return f"{field}.eq.{value}"
+            return col == self._coerce_smart_value(col, value)
         elif op == "contains":
-            return f"{field}.ilike.%{value}%"
+            return col.ilike(f"%{value}%")
         elif op == "starts_with":
-            return f"{field}.ilike.{value}%"
+            return col.ilike(f"{value}%")
         elif op == "gt":
-            return f"{field}.gt.{value}"
+            return col > self._coerce_smart_value(col, value)
         elif op == "lt":
-            return f"{field}.lt.{value}"
+            return col < self._coerce_smart_value(col, value)
         elif op == "gte":
-            return f"{field}.gte.{value}"
+            return col >= self._coerce_smart_value(col, value)
         elif op == "lte":
-            return f"{field}.lte.{value}"
+            return col <= self._coerce_smart_value(col, value)
         elif op == "in":
-            vals = value.replace(",", '","')
-            return f'{field}.in.("{vals}")'
+            return col.in_([self._coerce_smart_value(col, v) for v in value.split(",")])
         return None
 
     def _resolve_value(self, value: str) -> str:
@@ -1829,33 +1962,40 @@ class ResourcesRepository(AsyncpgRepository):
         items: List[Dict[str, Any]],
         tag_conditions: List[Dict[str, Any]],
         operator: str,
-        client,
+        session: Any,
     ) -> List[Dict[str, Any]]:
-        """Post-filter items by tag conditions using resource_tags table."""
+        """Post-filter items by tag conditions using the resource_tags table.
+
+        Runs inside the caller's ``execute_smart_rules`` read session. Reads the
+        tag NAMES for the candidate resources via an INNER JOIN
+        ``resource_tags ⋈ tags`` (neither table is scope-governed), builds a
+        ``resource_id → {lowercased tag names}`` map, and keeps each item whose
+        resource satisfies the tag conditions — ``contains`` / ``not_contains``
+        combined by the same AND/OR ``operator`` as the resource conditions
+        (set-membership semantics identical to the retired REST body)."""
         if not items:
             return items
 
-        # Get resource IDs from items
+        # Candidate resource ids from the items (bigint ints from the row dicts).
         resource_ids = list(
             {item.get("resource_id") for item in items if item.get("resource_id")}
         )
         if not resource_ids:
             return []
 
-        # Fetch all tags for these resources
-        tag_result = (
-            await client.table(self.TABLE_RESOURCE_TAGS)
-            .select("resource_id, tag:tags(name)")
-            .in_("resource_id", resource_ids)
-            .execute()
+        # Fetch all tag names for these resources.
+        result = await session.execute(
+            select(ResourceTags.resource_id, Tags.name)
+            .join(Tags, ResourceTags.tag_id == Tags.id)
+            .where(ResourceTags.resource_id.in_(resource_ids))
         )
-        tag_data = tag_result.data or []
+        tag_data = result.mappings().all()
 
-        # Build resource_id -> set of tag names
-        resource_tags: Dict[str, set] = {}
+        # Build resource_id -> set of tag names.
+        resource_tags: Dict[Any, set] = {}
         for row in tag_data:
             rid = row["resource_id"]
-            tag_name = row.get("tag", {}).get("name", "")
+            tag_name = row["name"] or ""
             if rid not in resource_tags:
                 resource_tags[rid] = set()
             resource_tags[rid].add(tag_name.lower())
@@ -1977,7 +2117,7 @@ class ResourcesRepository(AsyncpgRepository):
         rows = await db_engine.fetch_all("".join(sql_parts), params)
         return rows or []
 
-    # ── Temp-folder sweeper helpers (legacy REST) ───────────────────
+    # ── Temp-folder sweeper helpers ─────────────────────────────────
 
     async def list_resources_in_folder(
         self, folder_id: str, *, include_trashed: bool = False
@@ -1985,30 +2125,36 @@ class ResourcesRepository(AsyncpgRepository):
         """Return resources whose resource_items row references this folder.
 
         ``folder_id`` lives on ``resource_items``, not ``resources``, so we
-        join via the PostgREST embed syntax.  The result is flattened to
-        ``{"id": resource_id, "created_at": resources.created_at}`` so the
-        temp sweeper can compute expiry without knowing the schema detail.
-        """
+        INNER JOIN the two (the equivalent of the legacy ``resource:resources!
+        inner(...)`` embed). The result is flattened to
+        ``{"id": resource_id, "created_at": resources.created_at}`` so the temp
+        sweeper can compute expiry without knowing the schema detail.
+
+        ``created_at`` is returned as an ISO **string** (via ``_to_rest_value``)
+        — the sweeper's ``_is_expired`` calls ``.replace(...)`` on it, so a
+        native ``datetime`` would break it. Non-trashed rows only unless
+        ``include_trashed``. Re-raises on error (the legacy contract — NOT a
+        swallow-to-[])."""
         try:
-            client = await self._get_client()
-            result = await (
-                client.table("resource_items")
-                .select(
-                    "resource_id, resource:resources!inner(id, created_at, is_trashed)"
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(
+                        ResourceItems.resource_id,
+                        Resources.created_at,
+                        Resources.is_trashed,
+                    )
+                    .join(Resources, ResourceItems.resource_id == Resources.id)
+                    .where(ResourceItems.folder_id == self._bigint(folder_id))
                 )
-                .eq("folder_id", folder_id)
-                .execute()
-            )
-            rows = result.data or []
+                rows = result.mappings().all()
             out = []
             for row in rows:
-                res = row.get("resource") or {}
-                if not include_trashed and res.get("is_trashed"):
+                if not include_trashed and row["is_trashed"]:
                     continue
                 out.append(
                     {
                         "id": row["resource_id"],
-                        "created_at": res.get("created_at"),
+                        "created_at": _to_rest_value(row["created_at"]),
                     }
                 )
             return out
@@ -2019,22 +2165,22 @@ class ResourcesRepository(AsyncpgRepository):
     async def soft_delete_resource(self, resource_id: str) -> None:
         """Mark a resource as trashed without removing the file on disk.
 
-        File cleanup is handled by the existing trash-purge pipeline
-        (``cleanup_trashed_resources_workflow``), not by this method.
-        """
+        ``resources`` IS a scope-mixin model, so the write goes through the
+        sanctioned load-then-modify path (``session.get`` + attribute update),
+        NOT a Core UPDATE (forbidden under a user scope). ``trashed_at`` is set
+        as a tz-aware ``datetime`` (bound native, never isoformat). A missing id
+        is a no-op — the legacy REST ``.update().eq("id", ...)`` also matched
+        zero rows silently. The sweeper calls this under SYSTEM scope, so
+        ``session.get`` loads any owner's row. File cleanup is handled by the
+        existing trash-purge pipeline (``cleanup_trashed_resources_workflow``),
+        not by this method. Re-raises on error (legacy contract)."""
         try:
-            client = await self._get_client()
-            await (
-                client.table(self.TABLE_RESOURCES)
-                .update(
-                    {
-                        "is_trashed": True,
-                        "trashed_at": datetime.now(timezone.utc).isoformat(),
-                    }
-                )
-                .eq("id", resource_id)
-                .execute()
-            )
+            async with write_scope() as session:
+                obj = await session.get(Resources, self._bigint(resource_id))
+                if obj is not None:
+                    obj.is_trashed = True
+                    obj.trashed_at = datetime.now(timezone.utc)
+                    await session.flush()
             logger.info(f"[temp_sweeper] soft-deleted resource {resource_id}")
         except Exception as e:
             logger.error(f"Failed to soft-delete resource {resource_id}: {e}")
