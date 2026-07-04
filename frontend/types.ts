@@ -684,13 +684,14 @@ export interface Project {
 }
 
 export interface ProjectMember {
-  id: string;
+  // project_members has a composite PK (project_id, user_id) and NO id column;
+  // user_id is the member identifier used on the /members/{member_id} route.
   project_id: string;
   user_id: string;
   role: 'admin' | 'editor' | 'viewer';
   invited_by: string | null;
   email?: string;
-  created_at: string;
+  joined_at: string;
 }
 
 export interface ProjectFolder {

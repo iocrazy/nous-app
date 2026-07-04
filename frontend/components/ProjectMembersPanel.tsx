@@ -196,7 +196,7 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
                   const roleConfig = ROLE_CONFIG[member.role] || ROLE_CONFIG.viewer;
                   return (
                     <div
-                      key={member.id}
+                      key={member.user_id}
                       className="flex items-center gap-3 px-3 py-2.5 bg-ink-800/50 rounded-lg group"
                     >
                       <div className="w-8 h-8 rounded-full bg-ink-700 flex items-center justify-center text-xs font-bold text-ink-300">
@@ -214,7 +214,7 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <select
                           value={member.role}
-                          onChange={(e) => handleRoleChange(member.id, e.target.value)}
+                          onChange={(e) => handleRoleChange(member.user_id, e.target.value)}
                           className="text-xs bg-ink-700 border border-ink-600 rounded px-1.5 py-1 text-ink-300 focus:outline-none"
                         >
                           <option value="viewer">Viewer</option>
@@ -222,7 +222,7 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
                           <option value="admin">Admin</option>
                         </select>
                         <button
-                          onClick={() => handleRemove(member.id)}
+                          onClick={() => handleRemove(member.user_id)}
                           className="p-1 text-ink-500 hover:text-red-400 transition-colors"
                         >
                           <Trash2 size={12} />
