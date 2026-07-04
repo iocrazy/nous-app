@@ -1,7 +1,7 @@
-"""Integration tests for ProjectsRepositoryOrm (Phase 2 L-solo) against real PG.
+"""Integration tests for the ORM-backed ProjectsRepository against real PG.
 
-Proves the REST → ORM swap is invisible AND that STRATEGY-C value-type parity
-holds across the MediaTrack project surface (10 tables):
+Proves STRATEGY-C value-type parity holds across the MediaTrack project surface
+(10 tables) after the post-rollout collapse to ORM-only:
 
   - bigint ids + FKs (projects.id / project_files.id / project_folders.id /
     project_tasks.id / file_versions.id / shares.id / project_collections.id /
@@ -102,9 +102,9 @@ async def _seed_project(conn, owner_id, **overrides) -> dict:
 
 
 def _repo():
-    from app.repositories.projects_repository_orm import ProjectsRepositoryOrm
+    from app.repositories.projects_repository import ProjectsRepository
 
-    return ProjectsRepositoryOrm()
+    return ProjectsRepository()
 
 
 # ─── Reads + strategy-C parity ──────────────────────────────────────────
@@ -373,35 +373,37 @@ async def test_member_create_and_list_composite_pk(
     assert {x["user_id"] for x in members} == {str(user_id)}
 
 
-def test_member_update_delete_are_inherited_not_overridden():
-    """update_member / delete_member are NOT overridden — they INHERIT the
-    legacy REST parent so flag-ON preserves the legacy phantom-``id`` SILENT
-    NO-OP exactly as today (an inert parity migration must not repair the
-    surface). Asserted at the override-presence level rather than by executing
-    the inherited REST methods (which the integration harness can't reach).
-    See the projects_repository_orm module docstring (MEMBER_ID deferred
-    product decision)."""
+def test_member_update_delete_are_conscious_keep_on_supabase_path():
+    """update_member / delete_member are CONSCIOUS-KEEP on the legacy supabase
+    path (post-collapse: the ORM bodies live on ProjectsRepository, but these two
+    deliberately stay on the supabase client). They preserve the legacy phantom-
+    ``id`` SILENT NO-OP (an inert parity migration must not repair the surface).
+    Verified by source: they route through ``_get_client`` (supabase), while the
+    genuine DB ops (create_member / get_members) use the ORM ``write_scope`` /
+    ``read_scope``. See the MEMBER_ID note in the repository docstring."""
+    import inspect
+
     from app.repositories.projects_repository import ProjectsRepository
-    from app.repositories.projects_repository_orm import ProjectsRepositoryOrm
 
-    # NOT in the subclass __dict__ → inherited from the legacy parent.
-    assert "update_member" not in ProjectsRepositoryOrm.__dict__
-    assert "delete_member" not in ProjectsRepositoryOrm.__dict__
-    assert ProjectsRepositoryOrm.update_member is ProjectsRepository.update_member
-    assert ProjectsRepositoryOrm.delete_member is ProjectsRepository.delete_member
-    # The genuine DB ops ARE overridden.
-    assert "create_member" in ProjectsRepositoryOrm.__dict__
-    assert "get_members" in ProjectsRepositoryOrm.__dict__
+    for name in ("update_member", "delete_member"):
+        src = inspect.getsource(getattr(ProjectsRepository, name))
+        assert "_get_client" in src  # still on the supabase path
+        assert "write_scope" not in src and "read_scope" not in src
+
+    for name in ("create_member", "get_members"):
+        src = inspect.getsource(getattr(ProjectsRepository, name))
+        assert "_get_client" not in src  # genuine ORM DB op
 
 
-def test_comment_methods_are_inherited_not_overridden():
-    """The four review_comments methods are NOT overridden — they INHERIT the
-    legacy REST parent so flag-ON 500s identically to today (migration 062
-    dropped the 043 schema the legacy methods target; a parity migration must
-    reproduce that break, not repair it). See the projects_repository_orm module
-    docstring (COMMENT deferred product decision)."""
+def test_comment_methods_are_conscious_keep_on_supabase_path():
+    """The four review_comments methods are CONSCIOUS-KEEP on the legacy supabase
+    path (they 500 identically to today: migration 062 dropped the 043 schema
+    they target; a parity migration must reproduce that break, not repair it).
+    Verified by source: they route through ``_get_client`` (supabase), not the
+    ORM. See the COMMENT note in the repository docstring."""
+    import inspect
+
     from app.repositories.projects_repository import ProjectsRepository
-    from app.repositories.projects_repository_orm import ProjectsRepositoryOrm
 
     for name in (
         "get_comments_for_file",
@@ -409,8 +411,9 @@ def test_comment_methods_are_inherited_not_overridden():
         "get_comment_by_id",
         "delete_comment",
     ):
-        assert name not in ProjectsRepositoryOrm.__dict__
-        assert getattr(ProjectsRepositoryOrm, name) is getattr(ProjectsRepository, name)
+        src = inspect.getsource(getattr(ProjectsRepository, name))
+        assert "_get_client" in src  # still on the supabase path
+        assert "write_scope" not in src and "read_scope" not in src
 
 
 async def test_share_and_collection_commit(
@@ -482,30 +485,15 @@ async def test_review_status_update(
     assert persisted == "approved"
 
 
-# ─── Factory flag wiring ────────────────────────────────────────────────
+# ─── Factory wiring (flag retired — ORM-only) ───────────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    from app.core.config import settings
+def test_factory_returns_projects_repository():
+    """Post-collapse the factory is unconditional: it always returns a
+    ``ProjectsRepository`` (the ORM bodies live directly on the class; the
+    ``USE_ORM_PROJECTS`` flag and the ``ProjectsRepositoryOrm`` subclass are
+    retired)."""
     from app.repositories import projects_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_PROJECTS", False)
     repo = mod.get_projects_repository()
     assert type(repo) is mod.ProjectsRepository
-    from app.repositories.projects_repository_orm import ProjectsRepositoryOrm
-
-    assert not isinstance(repo, ProjectsRepositoryOrm)
-
-
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories import projects_repository as mod
-    from app.repositories.projects_repository_orm import ProjectsRepositoryOrm
-
-    monkeypatch.setattr(settings, "USE_ORM_PROJECTS", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    repo = mod.get_projects_repository()
-    assert isinstance(repo, ProjectsRepositoryOrm)
