@@ -79,6 +79,11 @@ def get_engine() -> AsyncEngine:
         poolclass=NullPool,
         connect_args={"statement_cache_size": 0},
         echo=False,
+        # Never echo bind parameters into exception messages/logs. Secret
+        # domains (user_cookies cookie_text, api_keys key_value) bind
+        # plaintext values; with the default (False) any DB error on those
+        # writes would leak the secret into application_logs.
+        hide_parameters=True,
     )
     logger.info("[engine] SQLAlchemy async engine ready (NullPool + asyncpg)")
     return _engine
