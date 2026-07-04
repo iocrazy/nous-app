@@ -19,6 +19,7 @@ workflow's own loop — no bridge, ORM-safe.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
@@ -294,6 +295,124 @@ async def resolve_task_ai_config(
         model=model,
         agent_slug=resolved_slug,
         origin=_byok_origin(provider_config),
+    )
+
+
+async def resolve_transcription_config(
+    user_id: str, settings_json: Optional[dict] = None
+) -> ResolvedAIConfig:
+    """Resolve the transcription (ASR) provider config for a user run.
+
+    Behaviour-preserving lift of the resolution section that lived inline in
+    ``app.workflows.ai_transcription.load_transcribe_inputs`` — moved here so
+    the transcription user path resolves through the SAME typed
+    :class:`ResolvedAIConfig` as :func:`resolve_task_ai_config` (the
+    unification point).
+
+    Unlike the agent-driven tasks, the transcription picker stores a
+    ``provider:model`` (or ``nous:<model>``) STRING in
+    ``task_assignment.transcription`` — NOT an AI Library agent slug. That
+    string is threaded downstream as ``run_whisper``'s ``task_assignment`` arg
+    (it derives the Volcengine API resource from it). To keep a single typed
+    carrier, this string is returned as :attr:`ResolvedAIConfig.model`:
+
+      - ``"governance"`` → ``model=""`` (the real model rides in
+        ``provider_config["model"]`` from the locked config, exactly as the
+        workflow returned ``task_assignment=""`` before).
+      - ``"platform"`` (a ``nous:<model>`` pick) → ``model="{provider}:{model}"``
+        — the normalized descriptor the workflow built.
+      - ``"byok"`` / ``"env"`` → ``model`` is the user's raw assignment string.
+
+    ``agent_slug`` is always ``""`` — transcription composes no agent prompt.
+
+    Resolution order (identical to the pre-lift workflow):
+
+    1. Governance gate — ``resolve_locked_module_config("transcription",
+       default_provider_key="openai")``. Locked → ``origin="governance"`` and
+       the user path is bypassed (user settings are not consulted).
+    2. User path — requires ``user_settings``; missing → ``RuntimeError("no
+       user_settings for ...")``. Reads ``whisper_provider`` +
+       ``task_assignment.transcription``. A ``nous:<model>`` selection resolves
+       through the GATED :func:`resolve_nous_model` (user-facing pick) and
+       fails (``RuntimeError``) on an unknown model — never silently falling
+       back. Otherwise the user's BYOK provider entry is used
+       (``origin="byok"`` when it carries an api_key, else ``"env"``).
+
+    ``settings_json`` is the user_settings ``settings_json`` value the workflow
+    already fetched (dict or JSON string); pass it to avoid a second DB read.
+    When ``None`` (and the module isn't governance-locked) the same SQL the
+    workflow used is issued here.
+    """
+    from app.services.ai.governance.ai_governance import resolve_locked_module_config
+
+    # ── Governance gate (shared helper — platform-catalog first) ──────────
+    # Check BEFORE consulting user settings so a locked module short-circuits
+    # without depending on the user having settings configured.
+    locked = await resolve_locked_module_config(
+        "transcription", default_provider_key="openai"
+    )
+    if locked is not None:
+        return ResolvedAIConfig(
+            provider_key=locked.provider_key,
+            provider_config=locked.provider_config,
+            model="",
+            agent_slug="",
+            origin="governance",
+        )
+
+    # ── User path — user_settings required from here on ───────────────────
+    if settings_json is None:
+        from app.db import engine as db_engine
+
+        settings_row = await db_engine.fetch_one(
+            "SELECT settings_json FROM public.user_settings WHERE user_id = :uid",
+            {"uid": user_id},
+        )
+        if not settings_row:
+            raise RuntimeError(f"no user_settings for {user_id}")
+        settings_json = settings_row["settings_json"]
+    if not settings_json:
+        raise RuntimeError(f"no user_settings for {user_id}")
+
+    settings = settings_json
+    if isinstance(settings, str):
+        settings = json.loads(settings)
+    ai_settings = settings.get("ai_settings", {})
+    providers = ai_settings.get("ai_providers", {}) or {}
+    whisper_provider = ai_settings.get("whisper_provider", "openai")
+    provider_cfg = providers.get(whisper_provider) or {}
+
+    # task_assignment.transcription carries the model selection like
+    # 'volcengine:bigasr' or 'volcengine:seed-asr'. Required for the Volcengine
+    # path because the API key may only have one resource granted — picking the
+    # wrong one returns 45000030 'resource not granted'.
+    task_assignment = ai_settings.get("task_assignment", {}).get("transcription") or ""
+
+    # Nous platform ASR: task_assignment.transcription = 'nous:<model_name>'.
+    # Resolve to the platform provider config (GATED — a user-facing pick) and
+    # route through the SAME ASR dispatch.
+    if task_assignment.startswith("nous:"):
+        nous_name = task_assignment.split(":", 1)[1]
+        nous = await resolve_nous_model(nous_name, "transcription")
+        if nous is None:
+            raise RuntimeError(
+                f"transcription references unknown platform model '{nous_name}'"
+            )
+        n_provider_key, n_provider_config, n_model = nous
+        return ResolvedAIConfig(
+            provider_key=n_provider_key,
+            provider_config=n_provider_config,
+            model=f"{n_provider_key}:{n_model}",
+            agent_slug="",
+            origin="platform",
+        )
+
+    return ResolvedAIConfig(
+        provider_key=whisper_provider,
+        provider_config=provider_cfg,
+        model=task_assignment,
+        agent_slug="",
+        origin=_byok_origin(provider_cfg),
     )
 
 
