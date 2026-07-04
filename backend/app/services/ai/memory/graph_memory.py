@@ -326,8 +326,52 @@ def _build_llm_and_embedder(config: "GraphMemoryConfig") -> tuple[Any, Any, Any]
         }
         if config.embedder_model:
             ecfg["embedding_model"] = config.embedder_model
-        embedder = OpenAIEmbedder(config=OpenAIEmbedderConfig(**ecfg))
+        embedder = _LoggingEmbedder(
+            OpenAIEmbedder(config=OpenAIEmbedderConfig(**ecfg)),
+            model=config.embedder_model or "<default>",
+            base_url=config.embedder_base_url or "<default>",
+        )
     return llm, embedder, cross_encoder
+
+
+class _LoggingEmbedder:
+    """Observability shim around Graphiti's embedder.
+
+    graphiti-core swallows embedding failures internally (empty search
+    results, dropped episode vectors) without surfacing them to our
+    wrapper's exception handlers — a misconfigured embedder (wrong
+    endpoint shape, dead self-hosted box) ran SILENTLY for a week in
+    prod (doubao-embedding-vision 400s, 2026-06-27→07-04) with zero
+    application_logs rows. This shim logs a WARNING on every failed
+    embed call, then re-raises so graphiti's own handling is unchanged.
+    Delegates everything else to the wrapped embedder.
+    """
+
+    def __init__(self, inner: Any, *, model: str, base_url: str) -> None:
+        self._inner = inner
+        self._model = model
+        self._base_url = base_url
+
+    def __getattr__(self, name: str) -> Any:
+        attr = getattr(self._inner, name)
+        if name.startswith("create") and callable(attr):
+            return self._wrap(attr, name)
+        return attr
+
+    def _wrap(self, fn: Any, name: str) -> Any:
+        async def _logged(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return await fn(*args, **kwargs)
+            except Exception as exc:  # noqa: BLE001 — log then re-raise
+                logger.warning(
+                    f"[graph_memory] embedder.{name} failed "
+                    f"(model={self._model} base={self._base_url}): {exc!r} "
+                    f"— graph memory is degraded; check the embedder "
+                    f"model/endpoint pairing in admin Memory settings"
+                )
+                raise
+
+        return _logged
 
 
 @dataclass
