@@ -1105,7 +1105,7 @@
       "addMember": "Add Member",
       "memberList": "Members",
       "noMembers": "No members yet",
-      "roleAdmin": "Admin",
+      "roleManager": "Manager",
       "roleEditor": "Editor",
       "roleViewer": "Viewer"
     },

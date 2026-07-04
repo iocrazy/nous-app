@@ -10,10 +10,14 @@ interface ProjectMembersPanelProps {
   onClose: () => void;
 }
 
+// Roles mirror the project_members DB check constraint (mig 047):
+// manager / editor / viewer / external. `external` is not offered as a
+// selectable option but can come back from the API, so it renders too.
 const ROLE_CONFIG: Record<string, { icon: React.ReactNode; label: string; color: string }> = {
-  admin: { icon: <Crown size={12} />, label: 'Admin', color: 'text-amber-400 bg-amber-500/10' },
+  manager: { icon: <Crown size={12} />, label: 'Manager', color: 'text-amber-400 bg-amber-500/10' },
   editor: { icon: <Pencil size={12} />, label: 'Editor', color: 'text-blue-400 bg-blue-500/10' },
   viewer: { icon: <Eye size={12} />, label: 'Viewer', color: 'text-ink-400 bg-ink-500/10' },
+  external: { icon: <Eye size={12} />, label: 'External', color: 'text-ink-400 bg-ink-500/10' },
 };
 
 export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
@@ -161,7 +165,7 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
               >
                 <option value="viewer">{t('projects.members.roleViewer', 'Viewer')}</option>
                 <option value="editor">{t('projects.members.roleEditor', 'Editor')}</option>
-                <option value="admin">{t('projects.members.roleAdmin', 'Admin')}</option>
+                <option value="manager">{t('projects.members.roleManager', 'Manager')}</option>
               </select>
             </div>
             <button
@@ -219,7 +223,7 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
                         >
                           <option value="viewer">Viewer</option>
                           <option value="editor">Editor</option>
-                          <option value="admin">Admin</option>
+                          <option value="manager">Manager</option>
                         </select>
                         <button
                           onClick={() => handleRemove(member.user_id)}

@@ -688,7 +688,7 @@ export interface ProjectMember {
   // user_id is the member identifier used on the /members/{member_id} route.
   project_id: string;
   user_id: string;
-  role: 'admin' | 'editor' | 'viewer';
+  role: 'manager' | 'editor' | 'viewer' | 'external';
   invited_by: string | null;
   email?: string;
   joined_at: string;
