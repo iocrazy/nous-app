@@ -108,9 +108,9 @@ async def cleanup_issues(integration_db_url):
 
 
 def _repo():
-    from app.repositories.issue_repository_orm import IssueRepositoryOrm
+    from app.repositories.issue_repository import IssueRepository
 
-    return IssueRepositoryOrm()
+    return IssueRepository()
 
 
 def _title() -> str:
@@ -278,30 +278,15 @@ async def test_list_for_user_validates_uuid(patched_engine):
         await _repo().list_for_user("not-a-uuid")
 
 
-# ─── factory on/off ─────────────────────────────────────────────────────
+# ─── factory (ORM-only) ─────────────────────────────────────────────────
 
 
-def test_factory_off_returns_legacy():
-    from unittest.mock import patch
-
+def test_factory_returns_issue_repository():
+    """The issue domain is ORM-only: the factory unconditionally returns the
+    (ORM-backed) IssueRepository — no flag routing."""
     from app.repositories.issue_repository import (
         IssueRepository,
         get_issue_repository,
     )
 
-    with patch("app.core.config.settings.USE_ORM_ISSUE", False):
-        assert type(get_issue_repository()) is IssueRepository
-
-
-def test_factory_on_returns_orm(integration_db_url):
-    from unittest.mock import patch
-
-    from app.repositories.issue_repository_orm import IssueRepositoryOrm
-
-    with (
-        patch("app.core.config.settings.USE_ORM_ISSUE", True),
-        patch("app.db.engine.is_configured", return_value=True),
-    ):
-        from app.repositories.issue_repository import get_issue_repository
-
-        assert type(get_issue_repository()) is IssueRepositoryOrm
+    assert type(get_issue_repository()) is IssueRepository
