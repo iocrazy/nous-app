@@ -719,3 +719,45 @@ async def test_stream_turn_mcp_transport_error_does_not_crash():
     # Did NOT crash; final text flowed through
     assert "acknowledged" in "".join(pieces)
     assert finish == "stop"
+
+
+# ─── Bugfix regression: stream_turn's tool_call_trace seam ────────────
+#
+# stream_turn executed tools (Skill / Delegate / FinishIssue / MCP) but never
+# built a trace of what it ran — run_turn's ``tool_call_trace`` had no
+# streaming counterpart. Downstream, ai_library_chat_service's streaming
+# branch hard-coded ``tool_calls_trace = []`` and never appended, so every
+# executed tool call on the streaming path (the primary ChatPanel route, and
+# the ONLY path issue_agent_executor.run_issue_agent uses) vanished from the
+# turn's result. For issue turns specifically this meant
+# extract_issue_outcome() always saw an empty list and returned
+# ``(None, None)`` — FinishIssue routing was dead 100% of the time. See
+# test_issue_agent_executor_p2.py's
+# test_issue_agent_run_through_real_streaming_path_surfaces_finish_issue for
+# the full run_issue_agent()-level regression test.
+
+
+@pytest.mark.asyncio
+async def test_stream_turn_terminal_chunk_carries_tool_call_trace():
+    """The terminal StreamChunk (finish_reason set, no more tool_calls) must
+    carry a tool_call_trace mirroring run_turn's shape: one dict per executed
+    tool call with 'name' / 'args' / 'result' / 'iteration' keys."""
+    runner = AgentRunner(
+        adapter=_StreamingAdapterWithToolCall(),
+        skill_tool=_StubSkillTool(),
+    )
+    terminal_chunk = None
+    async for chunk in runner.stream_turn(
+        _composed(), [{"role": "user", "content": "do foo"}]
+    ):
+        if chunk.finish_reason:
+            terminal_chunk = chunk
+    assert terminal_chunk is not None
+    assert terminal_chunk.finish_reason == "stop"
+    trace = terminal_chunk.tool_call_trace
+    assert trace is not None and len(trace) == 1
+    entry = trace[0]
+    assert entry["name"] == "Skill"
+    assert entry["args"] == {"skill": "foo"}
+    assert entry["result"] == {"skill": "foo", "prompt": "tool ran"}
+    assert entry["iteration"] == 1

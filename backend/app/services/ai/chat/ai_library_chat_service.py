@@ -845,6 +845,15 @@ class AILibraryChatService:
                                 # synthetic "→ Running X..." text comes
                                 # through delta_text on the next chunk
                                 pass
+                            # Bugfix: stream_turn's terminal chunk(s) carry
+                            # the executed-tool-call trace (see StreamChunk
+                            # in adapters/base.py). Without this the
+                            # streaming path always returned tool_calls=[]
+                            # — FinishIssue outcomes and any other tool
+                            # results were invisible to callers (issue
+                            # lifecycle routing, sub-task cards).
+                            if chunk.tool_call_trace is not None:
+                                tool_calls_trace = chunk.tool_call_trace
                         assistant_content = "".join(accumulated)
                 finally:
                     # Clear per-turn @-ref state so a subsequent turn on the
@@ -863,13 +872,15 @@ class AILibraryChatService:
                     "prompt_tokens": recorder.prompt_tokens,
                     "completion_tokens": recorder.completion_tokens,
                 }
-                # Tool call trace from this turn (Skill / Delegate
+                # Tool call trace from this turn (Skill / Delegate / FinishIssue
                 # dispatches in LLM emission order) — surfaced into the
-                # response so the chat UI can render sub-task cards
-                # inline. Empty list when the LLM answered directly.
-                # Note: stream_turn doesn't yet aggregate tool_calls into
-                # a final dict like run_turn does; tool calls are visible
-                # via the synthetic delta_text in the streaming path.
+                # response so the chat UI can render sub-task cards inline,
+                # and so callers like issue_agent_executor can read
+                # FinishIssue outcomes via extract_issue_outcome(). Empty
+                # list when the LLM answered directly. Populated identically
+                # on both the buffered path (result["tool_calls"] above) and
+                # the streaming path (stream_turn's terminal StreamChunk —
+                # see the tool_call_trace capture in the loop above).
                 if chunk_callback is None:
                     # tool_calls_trace already set from result above
                     pass
