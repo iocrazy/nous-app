@@ -168,12 +168,110 @@ def reveal(value: Any) -> Any:
     return value
 
 
+# ── User BYOK provider keys (Phase 2) ───────────────────────────────────
+#
+# ``user_settings.settings_json.ai_settings.ai_providers.<provider>.api_key``
+# is a SEPARATE table/column from ``system_settings`` — it needs its own
+# write/read chokepoints rather than a ``JSONB_SECRET_KEYS`` registry entry
+# (that registry is keyed by ``system_settings.key``, which this data never
+# has). Reuses the same ``enc:v1:`` marker + ``secret_box`` crypto so a value
+# is unambiguously ciphertext vs plaintext regardless of which table it came
+# from.
+#
+# REAL SHAPE: ``api_key`` may be a plain ``str`` OR a ``list[str]`` (Sprint 2
+# multi-key rotation — see ``app.services.ai.adapters.factory
+# .get_adapter_for_user``). Every element of the list is encrypted /
+# decrypted independently so ``RotatingAdapter`` keeps working unchanged.
+BYOK_SECRET_FIELDS: Tuple[str, ...] = ("api_key",)
+
+
+def _conceal_byok_scalar(value: Any) -> Any:
+    """Encrypt one secret scalar. Non-string values (should not normally
+    occur) pass through untouched rather than being coerced/encrypted, to
+    avoid corrupting an unexpected shape."""
+    if not isinstance(value, str):
+        return value
+    return _conceal_flat(value)
+
+
+def _conceal_byok_field(value: Any) -> Any:
+    """Encrypt a BYOK secret field that may be ``str`` or ``list[str]``."""
+    if isinstance(value, list):
+        return [_conceal_byok_scalar(v) for v in value]
+    return _conceal_byok_scalar(value)
+
+
+def conceal_byok_providers(providers: Any) -> Any:
+    """WRITE-side chokepoint for user BYOK ``ai_providers`` — call after
+    ``merge_ai_providers`` has merged the incoming payload, right before the
+    result is persisted to ``user_settings.settings_json``.
+
+    Encrypts each provider entry's ``api_key`` (``str`` or ``list[str]``);
+    every other field (``base_url``, ``model``, ``enabled``, ``app_id``, …)
+    and any unknown/non-dict entry passes through untouched. Fail-CLOSED,
+    like ``conceal_for_key``: raises ``secret_box.SecretBoxNotConfigured``
+    when no real encryption key is configured, so a write of a plaintext
+    BYOK key never silently lands in the DB unencrypted.
+    """
+    if not isinstance(providers, dict):
+        return providers
+    out: Dict[str, Any] = {}
+    for provider, entry in providers.items():
+        if not isinstance(entry, dict):
+            out[provider] = entry
+            continue
+        new_entry = dict(entry)
+        for field_name in BYOK_SECRET_FIELDS:
+            if field_name in new_entry:
+                new_entry[field_name] = _conceal_byok_field(new_entry[field_name])
+        out[provider] = new_entry
+    return out
+
+
+def _reveal_byok_scalar(value: Any) -> Any:
+    return _reveal_str(value) if isinstance(value, str) else value
+
+
+def _reveal_byok_field(value: Any) -> Any:
+    """Decrypt a BYOK secret field that may be ``str`` or ``list[str]``."""
+    if isinstance(value, list):
+        return [_reveal_byok_scalar(v) for v in value]
+    return _reveal_byok_scalar(value)
+
+
+def reveal_byok_providers(providers: Any) -> Any:
+    """READ-side counterpart of :func:`conceal_byok_providers` — call from
+    every internal reader of user BYOK ``ai_providers`` so every downstream
+    consumer (adapter factory, task resolvers, chat wiring) sees plaintext.
+
+    Fail-SOFT, like ``reveal``: a marked value that fails to decrypt logs an
+    ERROR and resolves to ``""`` rather than raising. Non-dict entries and
+    unmarked/non-secret fields pass through untouched.
+    """
+    if not isinstance(providers, dict):
+        return providers
+    out: Dict[str, Any] = {}
+    for provider, entry in providers.items():
+        if not isinstance(entry, dict):
+            out[provider] = entry
+            continue
+        new_entry = dict(entry)
+        for field_name in BYOK_SECRET_FIELDS:
+            if field_name in new_entry:
+                new_entry[field_name] = _reveal_byok_field(new_entry[field_name])
+        out[provider] = new_entry
+    return out
+
+
 __all__ = [
     "MARKER",
     "SECRET_SETTING_KEYS",
     "JSONB_SECRET_KEYS",
+    "BYOK_SECRET_FIELDS",
     "is_secret_key",
     "conceal_for_key",
     "encrypt_marked",
     "reveal",
+    "conceal_byok_providers",
+    "reveal_byok_providers",
 ]

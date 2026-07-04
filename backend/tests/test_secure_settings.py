@@ -28,9 +28,11 @@ from app.core.secure_settings import (
     JSONB_SECRET_KEYS,
     MARKER,
     SECRET_SETTING_KEYS,
+    conceal_byok_providers,
     conceal_for_key,
     is_secret_key,
     reveal,
+    reveal_byok_providers,
 )
 from app.models import SystemSettings
 from app.repositories.admin.system_settings_repository import (
@@ -142,6 +144,101 @@ def test_reveal_passthrough_non_marked(real_key):
     assert reveal(42) == 42
     assert reveal(None) is None
     assert reveal({"a": ["x", 1]}) == {"a": ["x", 1]}
+
+
+# ── BYOK ai_providers (user_settings, Phase 2) ─────────────────────
+
+
+@pytest.mark.unit
+def test_byok_str_roundtrip(real_key):
+    providers = {"openai": {"api_key": "sk-user-1", "base_url": "https://x"}}
+    out = conceal_byok_providers(providers)
+    assert out["openai"]["api_key"].startswith(MARKER)
+    assert out["openai"]["base_url"] == "https://x"
+    # original not mutated
+    assert providers["openai"]["api_key"] == "sk-user-1"
+    back = reveal_byok_providers(out)
+    assert back["openai"]["api_key"] == "sk-user-1"
+    assert back["openai"]["base_url"] == "https://x"
+
+
+@pytest.mark.unit
+def test_byok_list_roundtrip(real_key):
+    """api_key may be list[str] (Sprint 2 multi-key rotation) — every
+    element encrypts/decrypts independently."""
+    providers = {"qwen": {"api_key": ["sk-a", "sk-b", "sk-c"], "model": "qwen-max"}}
+    out = conceal_byok_providers(providers)
+    assert isinstance(out["qwen"]["api_key"], list)
+    assert all(k.startswith(MARKER) for k in out["qwen"]["api_key"])
+    assert out["qwen"]["model"] == "qwen-max"
+    back = reveal_byok_providers(out)
+    assert back["qwen"]["api_key"] == ["sk-a", "sk-b", "sk-c"]
+
+
+@pytest.mark.unit
+def test_byok_conceal_idempotent(real_key):
+    providers = {"openai": {"api_key": "sk-1"}}
+    once = conceal_byok_providers(providers)
+    twice = conceal_byok_providers(once)
+    assert twice == once
+    assert reveal_byok_providers(twice)["openai"]["api_key"] == "sk-1"
+
+
+@pytest.mark.unit
+def test_byok_passthrough_non_dict_entries_and_missing_api_key():
+    providers = {
+        "openai": {"base_url": "https://x"},  # no api_key at all
+        "weird": "not-a-dict",
+        "empty": {},
+    }
+    out = conceal_byok_providers(providers)
+    assert out == providers
+    assert reveal_byok_providers(providers) == providers
+    assert conceal_byok_providers("not-a-dict") == "not-a-dict"
+    assert reveal_byok_providers(None) is None
+
+
+@pytest.mark.unit
+def test_byok_blank_and_none_pass_through(real_key):
+    assert (
+        conceal_byok_providers({"openai": {"api_key": ""}})["openai"]["api_key"] == ""
+    )
+    assert (
+        conceal_byok_providers({"openai": {"api_key": None}})["openai"]["api_key"]
+        is None
+    )
+
+
+@pytest.mark.unit
+def test_byok_conceal_raises_without_real_key(no_key):
+    with pytest.raises(secret_box.SecretBoxNotConfigured):
+        conceal_byok_providers({"openai": {"api_key": "sk-secret"}})
+    with pytest.raises(secret_box.SecretBoxNotConfigured):
+        conceal_byok_providers({"qwen": {"api_key": ["sk-a", "sk-b"]}})
+
+
+@pytest.mark.unit
+def test_byok_reveal_fail_soft_on_wrong_key(monkeypatch):
+    key_a = Fernet.generate_key().decode()
+    monkeypatch.setenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY", key_a)
+    monkeypatch.delenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY_OLD", raising=False)
+    out = conceal_byok_providers({"openai": {"api_key": "sk-1"}})
+    monkeypatch.setenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    revealed = reveal_byok_providers(out)
+    assert revealed["openai"]["api_key"] == ""  # fail-soft, never raises
+
+
+@pytest.mark.unit
+def test_byok_reveal_fail_soft_list_partial(monkeypatch):
+    """A list with one undecryptable element degrades that element to ''
+    without failing the whole read."""
+    key_a = Fernet.generate_key().decode()
+    monkeypatch.setenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY", key_a)
+    monkeypatch.delenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY_OLD", raising=False)
+    out = conceal_byok_providers({"qwen": {"api_key": ["sk-a", "sk-b"]}})
+    monkeypatch.setenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    revealed = reveal_byok_providers(out)
+    assert revealed["qwen"]["api_key"] == ["", ""]
 
 
 # ── fail-closed write / fail-soft read ─────────────────────────────
