@@ -25,6 +25,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  Legend,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -39,7 +40,13 @@ import {
   RefreshCw,
   Zap,
 } from 'lucide-react';
-import type { UsageAggregate, UsagePerAgent, UsageScope } from '../types';
+import type {
+  UsageAggregate,
+  UsageDailyRow,
+  UsagePerAgent,
+  UsageRunItem,
+  UsageScope,
+} from '../types';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { useToast } from '../components/Toast';
 
@@ -75,9 +82,14 @@ export const UsagePage: React.FC = () => {
     setScope(defaultScope);
   }, [defaultScope]);
 
+  // Bumped by the Refresh button so the detail sections (daily chart /
+  // recent-calls table, which fetch independently) reload together.
+  const [refreshKey, setRefreshKey] = useState(0);
+
   const fetchUsage = useCallback(async (): Promise<void> => {
     setLoading(true);
     setError(null);
+    setRefreshKey((k) => k + 1);
     try {
       const resp = await aiLibraryService.getUsage(
         month,
@@ -186,6 +198,20 @@ export const UsagePage: React.FC = () => {
               <PerAgentChart perAgent={perAgent} />
               <PerAgentTable perAgent={perAgent} />
             </>
+          )}
+
+          {scope === 'user' ? (
+            <>
+              <DailyByModelChart refreshKey={refreshKey} />
+              <RecentRunsTable refreshKey={refreshKey} />
+            </>
+          ) : (
+            <div className="rounded-lg border border-dashed border-ink-800 bg-ink-900/40 px-4 py-6 text-center text-sm text-ink-500">
+              {t(
+                'aiUsage.detailTeamHint',
+                'Per-call detail and daily model charts are available in the My usage view.',
+              )}
+            </div>
           )}
         </>
       )}
@@ -475,6 +501,292 @@ const PerAgentTable: React.FC<{ perAgent: UsagePerAgent[] }> = ({ perAgent }) =>
   );
 };
 
+// ─── Detail sections (user scope, rolling last 30 days) ────────────────────
+
+type DailyMetric = 'total_tokens' | 'cost_cents' | 'requests';
+
+const DailyByModelChart: React.FC<{ refreshKey: number }> = ({ refreshKey }) => {
+  const { t } = useTranslation();
+  const [rows, setRows] = useState<UsageDailyRow[]>([]);
+  const [metric, setMetric] = useState<DailyMetric>('total_tokens');
+
+  useEffect(() => {
+    let cancelled = false;
+    aiLibraryService
+      .getUsageDaily(30)
+      .then((resp) => {
+        if (!cancelled) setRows(resp.daily);
+      })
+      .catch((err) => {
+        console.error('[UsagePage] getUsageDaily failed:', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshKey]);
+
+  // Pivot rows → one object per date with a key per model, so Recharts can
+  // render one stacked <Bar> per model.
+  const { chartData, models } = useMemo(() => {
+    const modelSet = new Set<string>();
+    const byDate = new Map<string, Record<string, number | string>>();
+    for (const r of rows) {
+      const model = r.model || 'unknown';
+      modelSet.add(model);
+      const bucket = byDate.get(r.date) ?? { date: r.date.slice(5) };
+      bucket[model] = Number(bucket[model] ?? 0) + Number(r[metric] ?? 0);
+      byDate.set(r.date, bucket);
+    }
+    return {
+      chartData: [...byDate.values()],
+      models: [...modelSet].sort(),
+    };
+  }, [rows, metric]);
+
+  if (rows.length === 0) return null;
+
+  const metricLabels: Record<DailyMetric, string> = {
+    total_tokens: t('aiUsage.metricTokens', 'Tokens'),
+    cost_cents: t('aiUsage.metricCost', 'Cost'),
+    requests: t('aiUsage.metricRequests', 'Requests'),
+  };
+
+  return (
+    <section className="rounded-xl border border-ink-800 bg-ink-900/60 p-5">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-ink-200">
+          {t('aiUsage.dailyTitle', 'Daily usage by model (last 30 days)')}
+        </h3>
+        <div className="inline-flex items-center rounded-md border border-ink-700 bg-ink-800 p-0.5">
+          {(Object.keys(metricLabels) as DailyMetric[]).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setMetric(m)}
+              className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
+                metric === m
+                  ? 'bg-indigo-500/15 text-indigo-300'
+                  : 'text-ink-400 hover:text-ink-200'
+              }`}
+            >
+              {metricLabels[m]}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="h-64 w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={chartData}>
+            <CartesianGrid
+              strokeDasharray="3 3"
+              stroke="#27272a"
+              vertical={false}
+            />
+            <XAxis
+              dataKey="date"
+              stroke="#a1a1aa"
+              tick={{ fill: '#a1a1aa', fontSize: 11 }}
+              axisLine={false}
+              tickLine={false}
+            />
+            <YAxis
+              stroke="#a1a1aa"
+              tick={{ fill: '#a1a1aa', fontSize: 11 }}
+              axisLine={false}
+              tickLine={false}
+              tickFormatter={(v) =>
+                metric === 'cost_cents'
+                  ? formatCost(Number(v))
+                  : formatTokens(Number(v))
+              }
+            />
+            <Tooltip
+              cursor={{ fill: '#27272a55' }}
+              contentStyle={{
+                backgroundColor: '#18181b',
+                border: '1px solid #3f3f46',
+                borderRadius: 8,
+                fontSize: 12,
+              }}
+              formatter={(v: number | string) =>
+                metric === 'cost_cents'
+                  ? formatCost(Number(v))
+                  : Number(v).toLocaleString()
+              }
+              labelStyle={{ color: '#e4e4e7' }}
+            />
+            <Legend wrapperStyle={{ fontSize: 11 }} />
+            {models.map((m, i) => (
+              <Bar
+                key={m}
+                dataKey={m}
+                stackId="daily"
+                fill={AGENT_BAR_COLORS[i % AGENT_BAR_COLORS.length]}
+              />
+            ))}
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </section>
+  );
+};
+
+const RUNS_PAGE_SIZE = 25;
+
+const RecentRunsTable: React.FC<{ refreshKey: number }> = ({ refreshKey }) => {
+  const { t } = useTranslation();
+  const [page, setPage] = useState(1);
+  const [items, setItems] = useState<UsageRunItem[]>([]);
+  const [total, setTotal] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    aiLibraryService
+      .getUsageRuns({ page, pageSize: RUNS_PAGE_SIZE, days: 30 })
+      .then((resp) => {
+        if (cancelled) return;
+        setItems(resp.items);
+        setTotal(resp.total);
+      })
+      .catch((err) => {
+        console.error('[UsagePage] getUsageRuns failed:', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [page, refreshKey]);
+
+  const from = total === 0 ? 0 : (page - 1) * RUNS_PAGE_SIZE + 1;
+  const to = Math.min(page * RUNS_PAGE_SIZE, total);
+
+  return (
+    <section className="overflow-hidden rounded-xl border border-ink-800 bg-ink-900/60">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-ink-800 px-5 py-3">
+        <h3 className="text-sm font-semibold text-ink-200">
+          {t('aiUsage.runsTitle', 'Recent calls (last 30 days)')}
+        </h3>
+        <div className="flex items-center gap-2 text-xs text-ink-400">
+          <span className="tabular-nums">
+            {t('aiUsage.pagination', '{{from}}–{{to}} of {{total}}', {
+              from,
+              to,
+              total,
+            })}
+          </span>
+          <button
+            type="button"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page <= 1}
+            className="rounded border border-ink-700 p-1 text-ink-300 hover:bg-ink-700 disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label={t('aiUsage.prevPage', 'Previous page')}
+          >
+            <ChevronLeft size={13} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setPage((p) => p + 1)}
+            disabled={page * RUNS_PAGE_SIZE >= total}
+            className="rounded border border-ink-700 p-1 text-ink-300 hover:bg-ink-700 disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label={t('aiUsage.nextPage', 'Next page')}
+          >
+            <ChevronRight size={13} />
+          </button>
+        </div>
+      </div>
+      {items.length === 0 ? (
+        <div className="px-4 py-8 text-center text-sm text-ink-500">
+          {t('aiUsage.runsEmpty', 'No calls in the last 30 days.')}
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-ink-900/80 text-xs font-medium uppercase tracking-wide text-ink-500">
+              <tr>
+                <th className="px-4 py-2">{t('aiUsage.colTime', 'Time')}</th>
+                <th className="px-4 py-2">{t('aiUsage.colAgent', 'Agent')}</th>
+                <th className="px-4 py-2">{t('aiUsage.colModel', 'Model')}</th>
+                <th className="px-4 py-2 text-right">
+                  {t('aiUsage.colTokens', 'Tokens')}
+                </th>
+                <th className="px-4 py-2 text-right">
+                  {t('aiUsage.colCost', 'Cost')}
+                </th>
+                <th className="px-4 py-2">{t('aiUsage.colStatus', 'Status')}</th>
+                <th className="px-4 py-2 text-right">
+                  {t('aiUsage.colDuration', 'Duration')}
+                </th>
+                <th className="px-4 py-2">
+                  {t('aiUsage.colTrigger', 'Trigger')}
+                </th>
+                <th className="px-4 py-2">{t('aiUsage.colError', 'Error')}</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-ink-800">
+              {items.map((r) => (
+                <tr key={r.id} className="transition-colors hover:bg-ink-900">
+                  <td className="whitespace-nowrap px-4 py-2 tabular-nums text-ink-300">
+                    {r.started_at ? formatRunTime(r.started_at) : '—'}
+                  </td>
+                  <td className="px-4 py-2 text-ink-200">
+                    {r.agent_name ?? r.agent_slug ?? '—'}
+                  </td>
+                  <td className="px-4 py-2">
+                    <div className="text-ink-200">{r.model ?? '—'}</div>
+                    {r.provider && (
+                      <div className="text-xs text-ink-500">{r.provider}</div>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums text-ink-100">
+                    {formatTokens(r.total_tokens)}
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums text-ink-100">
+                    {formatCost(r.cost_cents)}
+                  </td>
+                  <td className="px-4 py-2">
+                    <StatusPill status={r.status} />
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums text-ink-300">
+                    {formatDuration(r.duration_ms)}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-ink-400">
+                    {r.trigger ?? '—'}
+                  </td>
+                  <td className="px-4 py-2 text-xs">
+                    {r.error_code ? (
+                      <span className="text-red-300">{r.error_code}</span>
+                    ) : (
+                      <span className="text-ink-600">—</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+};
+
+const StatusPill: React.FC<{ status: string }> = ({ status }) => {
+  const styles: Record<string, string> = {
+    completed: 'bg-emerald-500/10 text-emerald-300',
+    running: 'bg-sky-500/10 text-sky-300',
+    failed: 'bg-red-500/10 text-red-300',
+    cancelled: 'bg-ink-700/60 text-ink-400',
+    heartbeat_lost: 'bg-amber-500/10 text-amber-300',
+  };
+  return (
+    <span
+      className={`rounded px-1.5 py-0.5 text-xs font-medium ${
+        styles[status] ?? 'bg-ink-700/60 text-ink-400'
+      }`}
+    >
+      {status.replace(/_/g, ' ')}
+    </span>
+  );
+};
+
 // ─── Formatters ────────────────────────────────────────────────────────────
 
 /** YYYY-MM in UTC (matches backend _month_bounds's month parsing). */
@@ -482,6 +794,20 @@ function formatMonth(d: Date): string {
   const y = d.getUTCFullYear();
   const m = String(d.getUTCMonth() + 1).padStart(2, '0');
   return `${y}-${m}`;
+}
+
+/** MM-DD HH:mm local time for the runs table. */
+function formatRunTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function formatDuration(ms: number | null): string {
+  if (ms == null || !Number.isFinite(ms)) return '—';
+  if (ms < 1000) return `${ms} ms`;
+  return `${(ms / 1000).toFixed(1)} s`;
 }
 
 function formatTokens(n: number): string {
