@@ -290,29 +290,6 @@ class Settings(BaseSettings):
         "Writes commit via write_scope(). Inert — flip back to false to roll "
         "back.",
     )
-    USE_ORM_TAGS: bool = Field(
-        default=False,
-        description="Route TagsRepository (the tag system — tags table CRUD + the "
-        "resource_tags M:N junction + tag_groups embed + RPC-backed counts) "
-        "through the SQLAlchemy 2.0 ORM session layer (Phase 2 M batch). ID-TYPE "
-        "FINDING: contrary to the brief's hint, tags.id is BIGINT (Snowflake), NOT "
-        "uuid — so every tag id stays NATIVE int (the 5.3 trap; every consumer "
-        "str()s it at the boundary / routes it through the SnowflakeId response "
-        "type). resource_tags PK is composite (resource_id, tag_id) BIGINT → no "
-        "mixed-PK bulk_upsert hazard; add/bulk_add reproduce the PostgREST ON "
-        "CONFLICT DO UPDATE via pg_insert().on_conflict_do_update in one "
-        "write_scope(). The ONLY uuid is tags.user_id → str (TagResponse.user_id "
-        "is a str field; pydantic rejects native UUID). created_at → ISO str; "
-        "confidence (double) native float; type is CHECK-text NOT Enum (no _plain "
-        "unwrap). get_all_tags / get_tag_counts reproduce the get_tag_counts_by_ids "
-        "/ get_user_tag_counts RPCs (DB-side GROUP BY) with the fallback. Two "
-        "schema-drift bugs were FIXED: _get_tag_counts_fallback now filters on the "
-        "real resources.creator_id (was the nonexistent resources.user_id → PG "
-        "42703); and the get_user_tag_counts RPC itself is repaired by migration "
-        "256 (was JOINing the dropped media_tags / parsed_media.user_id). No "
-        "date range filters. Reads return []/None; create raises; writes commit via "
-        "write_scope(). Inert — flip back to false to roll back.",
-    )
     USE_ORM_TEAM: bool = Field(
         default=False,
         description="Route TeamRepository (CROWN JEWEL — the team authorization "

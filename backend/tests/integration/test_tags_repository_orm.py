@@ -1,7 +1,7 @@
-"""Integration tests for TagsRepositoryOrm (Phase 2 M batch) against real PG.
+"""Integration tests for the collapsed TagsRepository (ORM-only) against real PG.
 
-Proves the REST → ORM swap is invisible AND that STRATEGY-C value-type parity
-holds on the tag system:
+Proves STRATEGY-C value-type parity of the collapsed ORM bodies holds on the
+tag system:
 
   - tags.id / scope_id / group_id (BIGINT) → native int (the 5.3 trap).
   - tags.user_id (uuid) → str (TagResponse.user_id is a str field).
@@ -83,9 +83,9 @@ async def cleanup(integration_db_url):
 
 
 def _repo():
-    from app.repositories.tags_repository_orm import TagsRepositoryOrm
+    from app.repositories.tags_repository import TagsRepository
 
-    return TagsRepositoryOrm()
+    return TagsRepository()
 
 
 def _name() -> str:
@@ -317,27 +317,12 @@ async def test_get_tag_counts_fallback_uses_creator_id(
             await conn.close()
 
 
-# ─── factory on/off ─────────────────────────────────────────────────────
+# ─── factory ─────────────────────────────────────────────────────────────
 
 
-def test_factory_off_returns_legacy():
-    from unittest.mock import patch
-
+def test_factory_returns_collapsed_repo():
+    """Post-rollout the factory unconditionally returns the (now ORM-only)
+    collapsed TagsRepository — no flag, no engine fallback."""
     from app.repositories.tags_repository import TagsRepository, get_tags_repository
 
-    with patch("app.core.config.settings.USE_ORM_TAGS", False):
-        assert type(get_tags_repository()) is TagsRepository
-
-
-def test_factory_on_returns_orm(integration_db_url):
-    from unittest.mock import patch
-
-    from app.repositories.tags_repository_orm import TagsRepositoryOrm
-
-    with (
-        patch("app.core.config.settings.USE_ORM_TAGS", True),
-        patch("app.db.engine.is_configured", return_value=True),
-    ):
-        from app.repositories.tags_repository import get_tags_repository
-
-        assert type(get_tags_repository()) is TagsRepositoryOrm
+    assert type(get_tags_repository()) is TagsRepository
