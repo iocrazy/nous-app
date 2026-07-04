@@ -11,6 +11,7 @@ import { ProjectNavSidebar } from '../components/project/ProjectNavSidebar';
 import { ProjectFilesView } from '../components/ProjectFilesView';
 import { VideoReviewPage } from '../components/VideoReviewPage';
 import { CreateProjectModal } from '../components/CreateProjectModal';
+import { ProjectSettingsPanel } from '../components/ProjectSettingsPanel';
 import { ProjectTrashView } from '../components/ProjectTrashView';
 import { ProjectSharesView } from '../components/ProjectSharesView';
 import { ProjectStoryboardTab } from '../components/project/ProjectStoryboardTab';
@@ -46,6 +47,7 @@ export function ProjectsPage() {
   const [trashCount, setTrashCount] = useState(0);
   const [activeFilter, setActiveFilter] = useState('all');
   const [currentStage, setCurrentStage] = useState<ProjectStage | null>(null);
+  const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
 
   // Active tab from URL
   const activeTab: ProjectTab = (searchParams.get('tab') as ProjectTab) || 'files';
@@ -194,6 +196,13 @@ export function ProjectsPage() {
   }, [selectedTeamId, personalTeamId]);
 
   const handleSectionChange = useCallback((section: string) => {
+    // ProjectSettingsPanel is a slide-over modal (fixed inset-0), not a
+    // detail-pane section — 'settings' isn't a valid ProjectTab. Open it
+    // instead of switching the active tab, which would render a blank pane.
+    if (section === 'settings') {
+      setIsSettingsPanelOpen(true);
+      return;
+    }
     setActiveTab(section as ProjectTab);
   }, [setActiveTab]);
 
@@ -271,6 +280,21 @@ export function ProjectsPage() {
             {activeTab === 'trash' && <ProjectTrashView projectId={selectedProject.id} onCountChange={setTrashCount} />}
           </div>
         </div>
+        <ProjectSettingsPanel
+          project={selectedProject}
+          isOpen={isSettingsPanelOpen}
+          onClose={() => setIsSettingsPanelOpen(false)}
+          onUpdated={(updated) => {
+            setSelectedProject(updated);
+            setIsSettingsPanelOpen(false);
+            refreshProjects();
+          }}
+          onDeleted={() => {
+            setIsSettingsPanelOpen(false);
+            handleBackToList();
+            refreshProjects();
+          }}
+        />
       </div>
     );
   }
