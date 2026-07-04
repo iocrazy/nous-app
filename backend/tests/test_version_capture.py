@@ -1,9 +1,14 @@
-"""Tests for the versioned repo methods (AgentRepository + SkillRepository).
+"""Tests for the AgentRepository versioned repo methods.
 
 These tests exercise the version-capture workflow: fetch current row, diff
-against incoming updates, insert old content into *_versions, bump
+against incoming updates, insert old content into ai_agent_versions, bump
 current_version on the live row. No real Supabase — fake client captures
 all operations so assertions can walk the call sequence.
+
+The SkillRepository versioned-write coverage moved to
+``tests/test_skill_repository.py`` when that domain collapsed to ORM-only
+(retire USE_ORM_SKILL); its writes now go through read_scope/write_scope, not
+the supabase-py ``_get_client`` faked here.
 """
 
 from __future__ import annotations
@@ -14,7 +19,6 @@ from uuid import uuid4
 import pytest
 
 from app.repositories.agent_repository import AgentRepository
-from app.repositories.skill_repository import SkillRepository
 
 # ─── Fake client plumbing ──────────────────────────────────────────────
 
@@ -258,196 +262,3 @@ async def test_agent_update_fields_versioned_missing_row_raises() -> None:
 
     with pytest.raises(ValueError, match="not found"):
         await repo.update_fields_versioned(uuid4(), {"identity_md": "x"})
-
-
-# ─── skill versioned update ────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_skill_update_fields_versioned_snapshots_body_and_frontmatter() -> None:
-    """body_md or frontmatter_json change → snapshot + bump."""
-    skill_id = 42
-    live_row = {
-        "id": skill_id,
-        "body_md": "OLD body",
-        "frontmatter_json": {"name": "Old"},
-        "current_version": 1,
-    }
-    inserted: list[dict] = []
-    updated: list[dict] = []
-    fake = _FakeClient(live_row, inserted, updated)
-
-    repo = SkillRepository()
-
-    async def _get_client():
-        return fake
-
-    repo._get_client = _get_client  # type: ignore[method-assign]
-
-    caller_id = uuid4()
-    await repo.update_fields_versioned(
-        skill_id,
-        {"body_md": "NEW body"},
-        created_by=caller_id,
-    )
-
-    assert len(inserted) == 1
-    snap = inserted[0]
-    assert snap["skill_id"] == skill_id
-    assert snap["version_number"] == 1
-    assert snap["body_md"] == "OLD body"
-    assert snap["frontmatter_json"] == {"name": "Old"}
-    assert snap["created_by"] == str(caller_id)
-
-    assert len(updated) == 1
-    patch = updated[0]
-    assert patch["body_md"] == "NEW body"
-    assert patch["current_version"] == 2
-
-
-@pytest.mark.asyncio
-async def test_skill_update_fields_versioned_noop_when_untracked_change() -> None:
-    """Updating only non-tracked fields (name, description) → no version row.
-    (Those fields still get patched via the non-versioned path in the router
-    if needed, but they never produce version history.)"""
-    skill_id = 7
-    live_row = {
-        "id": skill_id,
-        "body_md": "same",
-        "frontmatter_json": {},
-        "current_version": 5,
-    }
-    inserted: list[dict] = []
-    updated: list[dict] = []
-    fake = _FakeClient(live_row, inserted, updated)
-
-    repo = SkillRepository()
-
-    async def _get_client():
-        return fake
-
-    repo._get_client = _get_client  # type: ignore[method-assign]
-
-    # name is not in _VERSIONED_SKILL_FIELDS → update is a no-op to the versioned path.
-    await repo.update_fields_versioned(skill_id, {"name": "Renamed"}, created_by=None)
-
-    assert inserted == []
-    assert updated == []
-
-
-# ─── skill file upsert versioned ──────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_skill_file_upsert_versioned_existing_file_snapshots() -> None:
-    """Existing file → snapshot old content, bump current_version."""
-    file_id = uuid4()
-    live_row = {
-        "id": str(file_id),
-        "skill_id": 7,
-        "path": "references/examples.md",
-        "content": "OLD content",
-        "file_type": "markdown",
-        "binary_url": None,
-        "current_version": 2,
-    }
-    inserted: list[dict] = []
-    updated: list[dict] = []
-    fake = _FakeClient(live_row, inserted, updated)
-
-    repo = SkillRepository()
-
-    async def _get_client():
-        return fake
-
-    repo._get_client = _get_client  # type: ignore[method-assign]
-
-    await repo.upsert_file_versioned(
-        skill_id=7,
-        path="references/examples.md",
-        content="NEW content",
-        file_type="markdown",
-        created_by=None,
-    )
-
-    assert len(inserted) == 1
-    snap = inserted[0]
-    assert snap["skill_file_id"] == str(file_id)
-    assert snap["version_number"] == 2
-    assert snap["path"] == "references/examples.md"
-    assert snap["content"] == "OLD content"
-    assert snap["file_type"] == "markdown"
-
-    assert len(updated) == 1
-    patch = updated[0]
-    assert patch["content"] == "NEW content"
-    assert patch["current_version"] == 3
-
-
-@pytest.mark.asyncio
-async def test_skill_file_upsert_versioned_new_file_no_snapshot() -> None:
-    """No existing file → insert with current_version=1, no snapshot."""
-    inserted: list[dict] = []
-    updated: list[dict] = []
-    fake = _FakeClient(live_row=None, inserted=inserted, updated=updated)
-
-    repo = SkillRepository()
-
-    async def _get_client():
-        return fake
-
-    repo._get_client = _get_client  # type: ignore[method-assign]
-
-    await repo.upsert_file_versioned(
-        skill_id=7,
-        path="scripts/validate.py",
-        content="print('hi')",
-        file_type="script",
-        created_by=None,
-    )
-
-    # New-file path: ONE insert into skill_files with current_version=1.
-    # NO snapshot row (nothing to snapshot).
-    assert len(inserted) == 1
-    row = inserted[0]
-    assert row["skill_id"] == 7
-    assert row["path"] == "scripts/validate.py"
-    assert row["content"] == "print('hi')"
-    assert row["file_type"] == "script"
-    assert row["current_version"] == 1
-    assert updated == []
-
-
-@pytest.mark.asyncio
-async def test_skill_file_upsert_versioned_noop_when_content_unchanged() -> None:
-    """Existing file, same content → no snapshot, no update."""
-    live_row = {
-        "id": str(uuid4()),
-        "skill_id": 7,
-        "path": "references/examples.md",
-        "content": "same",
-        "file_type": "markdown",
-        "binary_url": None,
-        "current_version": 1,
-    }
-    inserted: list[dict] = []
-    updated: list[dict] = []
-    fake = _FakeClient(live_row, inserted, updated)
-
-    repo = SkillRepository()
-
-    async def _get_client():
-        return fake
-
-    repo._get_client = _get_client  # type: ignore[method-assign]
-
-    await repo.upsert_file_versioned(
-        skill_id=7,
-        path="references/examples.md",
-        content="same",
-        file_type="markdown",
-        created_by=None,
-    )
-
-    assert inserted == []
-    assert updated == []

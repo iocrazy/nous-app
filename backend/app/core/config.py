@@ -139,19 +139,6 @@ class Settings(BaseSettings):
         "writes (commit via write_scope(); create/update return {} on empty "
         "per REST contract).",
     )
-    USE_ORM_SCRIPTS: bool = Field(
-        default=False,
-        description="Route the four Script*Repository classes (ScriptProject / "
-        "ScriptChapter / ScriptAsset / ScriptStoryboardLink) through the "
-        "SQLAlchemy 2.0 ORM session layer (Batch L1b — replaces the supabase-py "
-        "REST path for script_projects / script_chapters / script_assets / "
-        "script_storyboard_links). Strategy C: all ids are bigint and stay "
-        "native int (the 5.3 trap); created_by uuid → str for shape parity; "
-        "created_at / updated_at → ISO str. Covers the BaseRepository CRUD "
-        "surface + list_by_project (paginated count) / bulk_upsert / "
-        "get_by_script / list_by_script / list_by_chapter / list_by_storyboard "
-        "(writes commit via write_scope()).",
-    )
     SCOPE_ENFORCE_RESOURCES: bool = Field(
         default=False,
         description="Activate the app-layer tenant-scope choke point "
@@ -326,27 +313,6 @@ class Settings(BaseSettings):
         "date range filters. Reads return []/None; create raises; writes commit via "
         "write_scope(). Inert — flip back to false to roll back.",
     )
-    USE_ORM_SKILL: bool = Field(
-        default=False,
-        description="Route SkillRepository (the AI-Library skill surface — skills "
-        "CRUD + skill_files multi-file CRUD + skill_versions/skill_file_versions "
-        "snapshots + the agent_skills reverse index) through the SQLAlchemy 2.0 "
-        "ORM session layer (Phase 2 M batch). 15 callsites, all routed through "
-        "get_skill_repository(). ID TYPES: skills.id is BIGINT → native int (5.3 "
-        "trap; every consumer int()s it). skill_files.id is UUID → str for SHAPE "
-        "parity (SkillFileOut.id: UUID accepts str or native; NO consumer does "
-        "UUID()/==/dict-key on a file id — audited). skills.created_by / "
-        "default_agent_id (uuid) → str. timestamps → ISO str; frontmatter_json / "
-        "input_schema (jsonb) → native dict; trigger_keywords (text[]) → native "
-        "list; status/category/file_type are CHECK-text NOT Enum (no _plain). "
-        "upsert_file reproduces the (skill_id,path) ON CONFLICT DO UPDATE "
-        "(ux_skill_files_path); the versioned writes keep the legacy "
-        "snapshot-then-update two-step (now inside one write_scope() — no "
-        "half-commit, behavior preserved, documented non-atomicity not 'repaired'). "
-        "No date range filters. Reads swallow + return None/[]; writes raise. "
-        "Writes commit via write_scope(). Inert — flip back to false to roll back.",
-    )
-
     USE_ORM_TEAM: bool = Field(
         default=False,
         description="Route TeamRepository (CROWN JEWEL — the team authorization "
@@ -437,81 +403,6 @@ class Settings(BaseSettings):
         "created_at/updated_at (server_default now()). Writes commit via "
         "write_scope() (a payment-state write silently rolled back = a paid order "
         "stuck pending). Inert — flip back to false to roll back.",
-    )
-
-    USE_ORM_COOKIES: bool = Field(
-        default=False,
-        description="Route CookiesRepository (SECRET — platform login cookies: "
-        "the user_cookies table) through the SQLAlchemy 2.0 ORM (Phase 2 H batch "
-        "— secret). SECRET-HANDLING: the cookie (cookie_text/cookie_file/"
-        "custom_headers, all Text) is stored and returned in PLAINTEXT — the "
-        "legacy does NO encryption and NO masking (no crypto helper imported), so "
-        "the ORM reproduces raw-write / raw-read identically (consumers — "
-        "abogus/ies/ytdlp/soda parsers — need the raw cookie to drive sessions). "
-        "Plaintext-at-rest is a reported CONCERN, NOT changed here. UUID sweep: "
-        "user_id → str on every return path (legacy supabase-py shape; consumers "
-        "index by platform so no authz == on the returned dict, but str() keeps "
-        "the dict byte-identical and is the WHERE-filter bind, adapted str→uuid). "
-        "id (bigint, server_default generate_snowflake_id()) → native int (5.3 "
-        "trap). is_valid (bool) native; created_at/updated_at → ISO str. NO Enum, "
-        "NO JSONB, NO renamed column, NO date RANGE filter (all WHERE are user_id/"
-        "platform equality). upsert reproduces ON CONFLICT (user_id, platform) DO "
-        "UPDATE (backed by user_cookies_user_id_platform_key) forcing is_valid="
-        "True + error_message=None + a fresh updated_at (native datetime, binds "
-        "directly); a stray data key is filtered to a silent no-op (phantom "
-        "screen). Reads return None/[]; writes commit via write_scope(); every "
-        "method swallows to the legacy fallback. Inert — flip back to false.",
-    )
-
-    USE_ORM_API_KEY: bool = Field(
-        default=False,
-        description="Route ApiKeyRepository (SECRET — API bearer keys: the "
-        "api_keys table) through the SQLAlchemy 2.0 ORM (Phase 2 H batch — "
-        "secret). SECRET-HANDLING: HASH-ON-WRITE / LOOKUP-BY-HASH reproduced "
-        "exactly — create() calls the base generate_key() static (UNCHANGED "
-        "crypto) storing key_hash=SHA-256(full_key) + key_prefix (masked display) "
-        "+ key_value (FULL PLAINTEXT, migration 039 'persistent full key access') "
-        "and reveals the full key ONCE via secret_key. validate_key (inherited) "
-        "does hash_key(full_key)→get_by_key_hash. EXPOSURE parity: reads return "
-        "the raw SELECT * incl. key_value (plaintext) + key_hash — IDENTICAL to "
-        "the legacy; the router surfaces key_value on list/get/update "
-        "(ApiKeyResponse.key_value). ⚠️ plaintext key at rest + returned on list "
-        "is a pre-existing over-exposure — reported as a CONCERN, reproduced "
-        "UNCHANGED (NOT narrowed/widened; narrowing breaks the UI re-copy). NO "
-        "encryption added (inert; would orphan existing plaintext rows). UUID "
-        "AUTHZ HOT SPOT: user_id → str on every read (get_api_key does "
-        "``key_data['user_id'] != auth.user_id`` str-compare; deps builds "
-        "AuthContext(user_id: str)). status is Enum(ApiKeyStatus) on the model → "
-        "_plain-unwrapped to bare str ('active'/'revoked'/'expired') so "
-        "validate_key's ``status != 'active'`` and the router str field match; "
-        "WHERE binds use the bare string literal. id (bigint) native int (5.3 "
-        "trap); scopes (jsonb array) native list; usage_count/rate_limit int; "
-        "timestamps → ISO str on reads. v3 temporal: NO SQL expiry filter "
-        "(validate_key checks expires_at in PYTHON on the ISO str — inherited, "
-        "unchanged); WRITE-BINDING — create/update _coerce_temporal(ISO-str→aware "
-        "datetime) for expires_at, update stamps updated_at=now(utc) native. "
-        "update_usage reproduces the SECURITY DEFINER atomic-increment RPC "
-        "increment_api_key_usage(key_id) (migration 003) via SELECT inside "
-        "write_scope() — no read-modify-write race; failure swallowed. Phantom "
-        "screen filters update data to mapped attrs. Writes commit via "
-        "write_scope(). Inert — flip back to false to roll back.",
-    )
-    USE_ORM_ANALYSIS: bool = Field(
-        default=False,
-        description="Route AnalysisRepository (resource_analysis CRUD + pgvector "
-        "embedding + match_videos_by_embedding RPC + cross-table availability "
-        "queries) through the SQLAlchemy 2.0 ORM (deferred-repo finish wave). "
-        "Strategy-C value-type parity: resource_id (bigint) native int; "
-        "detected_* / full_text (jsonb/text) native; analysis_cost (numeric) → "
-        "the REST shape; analyzed_at/created_at/updated_at (timestamptz) → ISO "
-        "str. content_embedding is written as a pgvector Vector(1536). The vector "
-        "similarity search keeps using the match_videos_by_embedding RPC "
-        "(executed as a raw statement — parity with the REST .rpc() path); "
-        "get_videos_by_analysis_level keeps its cross-table semantics. "
-        "Writes COMMIT via write_scope() with ON CONFLICT (resource_id, "
-        "analysis_level) idempotency. Table created in final post-076 form by mig "
-        "262; model + repo validated against live dev DB. Inert; flip false to "
-        "revert.",
     )
 
     # ============================================
