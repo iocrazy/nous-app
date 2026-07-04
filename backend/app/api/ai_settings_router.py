@@ -15,8 +15,14 @@ from app.repositories.user_settings_repository import UserSettingsRepository
 from app.schemas.ai import (
     AISettingsResponse,
     AISettingsUpdate,
+    ProviderHealthUpdate,
     TestConnectionRequest,
     TestConnectionResponse,
+)
+from app.services.ai.provider_health import (
+    InvalidProviderKey,
+    persist_provider_health,
+    validate_provider_key,
 )
 from app.services.ai.providers.ai_provider import AIProviderFactory
 
@@ -71,8 +77,14 @@ async def get_ai_settings(auth: AuthDep):
         settings = await repo.get_by_user_id(auth.user_id)
 
         ai_settings = {}
+        provider_health = {}
         if settings and settings.get("settings_json"):
-            ai_settings = settings["settings_json"].get(_AI_SETTINGS_KEY, {})
+            settings_json = settings["settings_json"]
+            ai_settings = settings_json.get(_AI_SETTINGS_KEY, {})
+            # Provider health lives at the settings_json TOP LEVEL (not under
+            # ai_settings) so the shallow || merge can't clobber it — see
+            # app.services.ai.provider_health.
+            provider_health = settings_json.get("ai_provider_health", {})
 
         return AISettingsResponse(
             ai_providers=ai_settings.get("ai_providers", {}),
@@ -84,6 +96,7 @@ async def get_ai_settings(auth: AuthDep):
             ai_enabled=ai_settings.get("ai_enabled", True),
             preferred_language=ai_settings.get("preferred_language", "auto"),
             task_assignment=ai_settings.get("task_assignment", {}),
+            provider_health=provider_health,
         )
 
     except Exception as e:
@@ -160,7 +173,52 @@ async def test_ai_connection(body: TestConnectionRequest, auth: AuthDep):
             "model": body.model,
         },
     )
+
+    # Best-effort: persist the probe outcome so the Settings UI can show
+    # "Last tested ..." after a reload (mirrors the admin nous_models probe
+    # board). Wrapped so telemetry can never fail the connection test.
+    try:
+        success = bool(result.get("success"))
+        if success:
+            n_models = len(result.get("models") or [])
+            detail = f"{n_models} models available" if n_models else "Connection OK"
+        else:
+            detail = result.get("error") or "Connection failed"
+        await persist_provider_health(
+            auth.user_id,
+            body.provider_key,
+            "ok" if success else "fail",
+            detail,
+        )
+    except Exception as exc:  # noqa: BLE001 — best-effort telemetry
+        logger.warning("provider-health persist (test-connection) failed: {}", exc)
+
     return TestConnectionResponse(**result)
+
+
+@router.post("/provider-health")
+async def report_provider_health(body: ProviderHealthUpdate, auth: AuthDep):
+    """Record a browser-direct local-provider test outcome.
+
+    The frontend probes local providers (Ollama / LM Studio) directly from
+    the browser — the backend can't reach ``localhost`` on the user's machine
+    — then reports the result here so it persists across reloads. Cloud
+    providers are persisted server-side by ``/ai/test-connection`` and need no
+    client report.
+    """
+    try:
+        validate_provider_key(body.provider_key)
+    except InvalidProviderKey as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    detail = body.detail or ("Connection OK" if body.status == "ok" else "")
+    await persist_provider_health(
+        auth.user_id,
+        body.provider_key,
+        "ok" if body.status == "ok" else "fail",
+        detail,
+    )
+    return {"ok": True}
 
 
 @router.get("/health")

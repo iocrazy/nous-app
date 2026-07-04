@@ -74,6 +74,34 @@ class AISettingsResponse(BaseModel):
             "transcription remains a 'provider:model' string."
         ),
     )
+    provider_health: Dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Last BYOK connection-test result per provider, keyed by provider "
+            "slug: {status: 'ok'|'fail', detail: str, tested_at: ISO-8601}. "
+            "Lives at the settings_json top level (NOT under ai_settings) — see "
+            "app.services.ai.provider_health. Read-only in this response; "
+            "written by /ai/test-connection + /ai/provider-health."
+        ),
+    )
+
+
+class ProviderHealthUpdate(BaseModel):
+    """Request body for POST /ai/provider-health.
+
+    Used by the frontend for browser-direct local-provider tests (Ollama /
+    LM Studio) that the backend can't reach — the browser probes the local
+    server, then reports the outcome here so it persists across reloads.
+    Cloud-provider tests need no client report: /ai/test-connection persists
+    server-side.
+    """
+
+    provider_key: str = Field(
+        ...,
+        description="Provider key: openai, ollama, lmstudio, …",
+    )
+    status: str = Field(..., description="'ok' or 'fail'")
+    detail: str = Field(default="", description="Short outcome detail (≤300 chars)")
 
 
 class TestConnectionRequest(BaseModel):

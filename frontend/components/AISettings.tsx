@@ -35,10 +35,12 @@ import { AISettings as AISettingsType, AIProviderConfig, NousModelPublic, AILibr
 import {
   saveAISettings as saveAISettingsApi,
   testAIConnection as testAIConnectionApi,
+  reportProviderHealth,
   getNousModels,
   getAIGovernance,
   GOVERNANCE_ALL_ALLOWED,
 } from '../services/aiService';
+import { relativeTime } from '../utils/taskDisplay';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { StoryboardApiSettings } from './StoryboardApiSettings';
 import { MCPServersPanel } from './MCPServersPanel';
@@ -403,6 +405,9 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
   const [showApiKeys, setShowApiKeys] = useState<Record<string, boolean>>({});
   const [connectionStatus, setConnectionStatus] = useState<Record<string, 'idle' | 'testing' | 'success' | 'error'>>({});
   const [connectionError, setConnectionError] = useState<Record<string, string>>({});
+  // ISO timestamp of the last connection test per provider (persisted server-
+  // side, seeded from settings.provider_health on load, updated live on test).
+  const [lastTested, setLastTested] = useState<Record<string, string>>({});
   // Daily-quota counters from Test Connection (ModelScope rate-limit headers).
   const [quotaInfo, setQuotaInfo] = useState<Record<string, Record<string, number> | undefined>>({});
   const [isSaving, setIsSaving] = useState(false);
@@ -429,6 +434,27 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
     isDirtyRef.current = true;
     setLocalSettings(updater);
   };
+
+  // Seed the connection-test UI from persisted provider_health so a reload
+  // restores the last "Connected / Failed / Last tested" state. Live results
+  // (prev) win over the seed — a fresh test in this session is never clobbered
+  // by a later prop refresh.
+  useEffect(() => {
+    const health = settings.provider_health;
+    if (!health) return;
+    const statusSeed: Record<string, 'success' | 'error'> = {};
+    const errorSeed: Record<string, string> = {};
+    const testedSeed: Record<string, string> = {};
+    for (const [key, entry] of Object.entries(health)) {
+      if (!entry) continue;
+      statusSeed[key] = entry.status === 'ok' ? 'success' : 'error';
+      if (entry.detail) errorSeed[key] = entry.detail;
+      if (entry.tested_at) testedSeed[key] = entry.tested_at;
+    }
+    setConnectionStatus((prev) => ({ ...statusSeed, ...prev }));
+    setConnectionError((prev) => ({ ...errorSeed, ...prev }));
+    setLastTested((prev) => ({ ...testedSeed, ...prev }));
+  }, [settings.provider_health]);
 
   useEffect(() => {
     getNousModels().then(setNousModels).catch(() => {});
@@ -569,6 +595,11 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
 
     setConnectionStatus((prev) => ({ ...prev, [providerKey]: 'testing' }));
     setConnectionError((prev) => ({ ...prev, [providerKey]: '' }));
+    // Stamp the test time locally so "Last tested ..." updates immediately;
+    // the backend persists the authoritative copy (server-side for cloud,
+    // via reportProviderHealth for local).
+    const markTested = () =>
+      setLastTested((prev) => ({ ...prev, [providerKey]: new Date().toISOString() }));
 
     try {
       if (isLocal) {
@@ -582,8 +613,10 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
 
         if (response.ok) {
           const data = await response.json();
+          let modelCount = 0;
           if (data?.data && Array.isArray(data.data)) {
             const modelIds = data.data.map((m: { id: string }) => m.id);
+            modelCount = modelIds.length;
             if (modelIds.length > 0) {
               updateProviderField(providerKey, 'models', modelIds);
               if (!provider.selected_model || !modelIds.includes(provider.selected_model)) {
@@ -592,12 +625,25 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
             }
           }
           setConnectionStatus((prev) => ({ ...prev, [providerKey]: 'success' }));
+          markTested();
+          // The backend can't reach the user's localhost — report the outcome
+          // so it persists across reloads. Fire-and-forget.
+          reportProviderHealth(
+            providerKey,
+            'ok',
+            modelCount > 0 ? `${modelCount} models available` : 'Connection OK',
+          ).catch((e) => console.error('[AISettings] reportProviderHealth failed:', e));
         } else {
+          const detail = `Server responded with status ${response.status}`;
           setConnectionStatus((prev) => ({ ...prev, [providerKey]: 'error' }));
-          setConnectionError((prev) => ({ ...prev, [providerKey]: `Server responded with status ${response.status}` }));
+          setConnectionError((prev) => ({ ...prev, [providerKey]: detail }));
+          markTested();
+          reportProviderHealth(providerKey, 'fail', detail).catch((e) =>
+            console.error('[AISettings] reportProviderHealth failed:', e),
+          );
         }
       } else {
-        // Use backend API for cloud providers
+        // Use backend API for cloud providers (backend persists the outcome).
         const result = await testAIConnectionApi(providerKey, {
           base_url: provider.base_url,
           api_key: provider.api_key,
@@ -617,13 +663,20 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
           setConnectionStatus((prev) => ({ ...prev, [providerKey]: 'error' }));
           setConnectionError((prev) => ({ ...prev, [providerKey]: result.error || 'Connection failed' }));
         }
+        markTested();
       }
     } catch (err) {
+      const detail = err instanceof Error ? err.message : 'Connection failed';
       setConnectionStatus((prev) => ({ ...prev, [providerKey]: 'error' }));
-      setConnectionError((prev) => ({
-        ...prev,
-        [providerKey]: err instanceof Error ? err.message : 'Connection failed',
-      }));
+      setConnectionError((prev) => ({ ...prev, [providerKey]: detail }));
+      markTested();
+      // Local test threw (timeout / network) — the backend never saw it, so
+      // report the failure here. Cloud failures are already persisted server-side.
+      if (isLocal) {
+        reportProviderHealth(providerKey, 'fail', detail).catch((e) =>
+          console.error('[AISettings] reportProviderHealth failed:', e),
+        );
+      }
     }
   }, [localSettings.providers]);
 
@@ -1385,6 +1438,13 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                               <> · this model: {quotaInfo[providerKey]?.model_requests_remaining}
                               /{quotaInfo[providerKey]?.model_requests_limit ?? '?'} left</>
                             )}
+                          </p>
+                        )}
+                        {/* Persisted across reloads — restores when the DB has a
+                            prior test result even before this session tests. */}
+                        {lastTested[providerKey] && (
+                          <p className="mt-1.5 text-[11px] text-ink-500">
+                            Last tested {relativeTime(lastTested[providerKey])}
                           </p>
                         )}
                       </div>
