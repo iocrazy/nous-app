@@ -45,7 +45,6 @@ import { aiLibraryService } from '../services/aiLibraryService';
 import { StoryboardApiSettings } from './StoryboardApiSettings';
 import { MCPServersPanel } from './MCPServersPanel';
 import { ApprovalsPanel } from './ApprovalsPanel';
-import { TokenBillingDashboard } from './TokenBillingDashboard';
 import { NousCenterVerifyPanel } from '../features/canvas-core/smart/NousCenterVerifyPanel';
 import { MemoryPanel } from './MemoryPanel';
 import { AgentMemoriesPanel } from './AgentMemoriesPanel';
@@ -1547,10 +1546,6 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
       {/* Agent memories: facts/decisions the AI has curated (own + team-shared) */}
       <AgentMemoriesPanel />
 
-      {/* Phase 3: Token usage dashboard */}
-      <section className="mt-8 bg-ink-900/40 border border-ink-800 rounded-lg overflow-hidden">
-        <TokenBillingDashboard />
-      </section>
 
       {/* Canvas + AI Phase 2 closer: nous-center protocol probe */}
       <NousCenterVerifyPanel />
