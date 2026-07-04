@@ -186,6 +186,21 @@ export const UsagePage: React.FC = () => {
         <>
           <SummaryCards data={data} />
 
+          {/* Charts row — agent dimension (month) + model dimension (30d)
+              side by side on wide screens, so both views read at a glance. */}
+          {(perAgent.length > 0 || scope === 'user') && (
+            <div
+              className={`grid gap-4 ${
+                perAgent.length > 0 && scope === 'user' ? 'xl:grid-cols-2' : ''
+              }`}
+            >
+              {perAgent.length > 0 && <PerAgentChart perAgent={perAgent} />}
+              {scope === 'user' && (
+                <DailyByModelChart refreshKey={refreshKey} />
+              )}
+            </div>
+          )}
+
           {perAgent.length === 0 ? (
             <div className="rounded-lg border border-dashed border-ink-800 bg-ink-900/40 px-4 py-10 text-center text-sm text-ink-500">
               {t(
@@ -194,17 +209,11 @@ export const UsagePage: React.FC = () => {
               )}
             </div>
           ) : (
-            <>
-              <PerAgentChart perAgent={perAgent} />
-              <PerAgentTable perAgent={perAgent} />
-            </>
+            <PerAgentTable perAgent={perAgent} />
           )}
 
           {scope === 'user' ? (
-            <>
-              <DailyByModelChart refreshKey={refreshKey} />
-              <RecentRunsTable refreshKey={refreshKey} />
-            </>
+            <RecentRunsTable refreshKey={refreshKey} />
           ) : (
             <div className="rounded-lg border border-dashed border-ink-800 bg-ink-900/40 px-4 py-6 text-center text-sm text-ink-500">
               {t(
@@ -343,25 +352,45 @@ const SummaryCard: React.FC<{
 
 const PerAgentChart: React.FC<{ perAgent: UsagePerAgent[] }> = ({ perAgent }) => {
   const { t } = useTranslation();
-  // Sort by cost desc so the chart leads with what's actually expensive.
+  // Cost is the headline metric — but when nothing this month has a price
+  // (all cost 0, common for unpriced models), an all-zero cost chart reads
+  // as broken. Fall back to tokens so the bars always carry information.
+  const hasCost = useMemo(
+    () => perAgent.some((a) => a.cost_cents > 0),
+    [perAgent],
+  );
   const sorted = useMemo(
     () =>
       [...perAgent]
-        .sort((a, b) => b.cost_cents - a.cost_cents)
+        .sort((a, b) =>
+          hasCost
+            ? b.cost_cents - a.cost_cents
+            : b.total_tokens - a.total_tokens,
+        )
         .slice(0, 10)
         .map((row, i) => ({
           name: row.agent_name ?? row.agent_slug ?? row.agent_id.slice(0, 8),
-          costCents: Number(row.cost_cents.toFixed(4)),
-          tokens: row.total_tokens,
+          value: hasCost
+            ? Number(row.cost_cents.toFixed(4))
+            : row.total_tokens,
           color: AGENT_BAR_COLORS[i % AGENT_BAR_COLORS.length],
         })),
-    [perAgent],
+    [perAgent, hasCost],
   );
+
+  // Nothing measurable at all (no cost AND no tokens) — the table already
+  // tells the run/failure story; a blank plot adds nothing.
+  if (sorted.every((s) => s.value === 0)) return null;
+
+  const fmt = (v: number): string =>
+    hasCost ? formatCost(v) : formatTokens(v);
 
   return (
     <section className="rounded-xl border border-ink-800 bg-ink-900/60 p-5">
       <h3 className="mb-3 text-sm font-semibold text-ink-200">
-        {t('aiUsage.chartTitle', 'Spend by agent (top 10)')}
+        {hasCost
+          ? t('aiUsage.chartTitle', 'Spend by agent (top 10)')
+          : t('aiUsage.chartTitleTokens', 'Tokens by agent (top 10)')}
       </h3>
       <div className="h-64 w-full">
         <ResponsiveContainer width="100%" height="100%">
@@ -387,7 +416,7 @@ const PerAgentChart: React.FC<{ perAgent: UsagePerAgent[] }> = ({ perAgent }) =>
               tick={{ fill: '#a1a1aa', fontSize: 11 }}
               axisLine={false}
               tickLine={false}
-              tickFormatter={(v) => formatCost(Number(v))}
+              tickFormatter={(v) => fmt(Number(v))}
             />
             <Tooltip
               cursor={{ fill: '#27272a55' }}
@@ -397,10 +426,10 @@ const PerAgentChart: React.FC<{ perAgent: UsagePerAgent[] }> = ({ perAgent }) =>
                 borderRadius: 8,
                 fontSize: 12,
               }}
-              formatter={(v: number | string) => formatCost(Number(v))}
+              formatter={(v: number | string) => fmt(Number(v))}
               labelStyle={{ color: '#e4e4e7' }}
             />
-            <Bar dataKey="costCents" radius={[4, 4, 0, 0]}>
+            <Bar dataKey="value" radius={[4, 4, 0, 0]}>
               {sorted.map((entry, idx) => (
                 <Cell key={entry.name + idx} fill={entry.color} />
               ))}

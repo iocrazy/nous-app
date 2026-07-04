@@ -57,7 +57,6 @@ vi.mock('../services/aiLibraryService', () => ({
 vi.mock('./StoryboardApiSettings', () => ({ StoryboardApiSettings: () => null }));
 vi.mock('./MCPServersPanel', () => ({ MCPServersPanel: () => null }));
 vi.mock('./ApprovalsPanel', () => ({ ApprovalsPanel: () => null }));
-vi.mock('./TokenBillingDashboard', () => ({ TokenBillingDashboard: () => null }));
 vi.mock('./MemoryPanel', () => ({ MemoryPanel: () => null }));
 vi.mock('./AIHealthBoard', () => ({ AIHealthBoard: () => null }));
 vi.mock('../features/canvas-core/smart/NousCenterVerifyPanel', () => ({
