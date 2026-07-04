@@ -168,12 +168,220 @@ def reveal(value: Any) -> Any:
     return value
 
 
+# ── User BYOK provider keys (Phase 2) ───────────────────────────────────
+#
+# ``user_settings.settings_json.ai_settings.ai_providers.<provider>.api_key``
+# is a SEPARATE table/column from ``system_settings`` — it needs its own
+# write/read chokepoints rather than a ``JSONB_SECRET_KEYS`` registry entry
+# (that registry is keyed by ``system_settings.key``, which this data never
+# has). Reuses the same ``enc:v1:`` marker + ``secret_box`` crypto so a value
+# is unambiguously ciphertext vs plaintext regardless of which table it came
+# from.
+#
+# REAL SHAPE: ``api_key`` may be a plain ``str`` OR a ``list[str]`` (Sprint 2
+# multi-key rotation — see ``app.services.ai.adapters.factory
+# .get_adapter_for_user``). Every element of the list is encrypted /
+# decrypted independently so ``RotatingAdapter`` keeps working unchanged.
+#
+# CONTEXT BINDING (anti-replay — security review of PR #1004)
+# ===========================================================
+# All ``enc:v1:`` surfaces share ONE Fernet key. Without binding, a
+# ciphertext stolen from ANY surface (a DB backup leak of
+# ``platform.ai_providers``, ``mediahub_models.api_key``, another user's
+# BYOK row, ...) could be replayed verbatim into a user's own BYOK
+# ``api_key``, and the reveal path would happily decrypt it — turning the
+# settings endpoint into a cross-tenant decryption oracle (exfiltrate via
+# ``api_key_hint`` or an attacker-controlled ``base_url``).
+#
+# So BYOK ciphertext does NOT encrypt the bare plaintext: it encrypts the
+# framed payload ``byok\x00{user_id}\x00{plaintext}``. On reveal, the frame
+# is parsed and the embedded user_id MUST match the row owner; an unbound
+# payload (a replayed platform/catalog ciphertext) or a mismatched user_id
+# (a replayed other-user BYOK ciphertext) resolves to ``""`` with an ERROR
+# log — never the foreign plaintext. Platform surfaces (admin-writer-only,
+# no user-writable path) keep the original unframed format.
+#
+# The FIRST defense layer — rejecting ``enc:v1:``-prefixed values in the
+# CLIENT payload outright (422) — lives at the API boundary
+# (``ai_settings_router`` / admin ``settings_router``); this binding is
+# defense in depth for anything that slips past it.
+BYOK_SECRET_FIELDS: Tuple[str, ...] = ("api_key",)
+
+_BYOK_CONTEXT = "byok"
+_BYOK_SEP = "\x00"
+
+
+def _byok_frame(plaintext: str, user_id: str) -> str:
+    """Build the owner-bound payload that actually gets encrypted."""
+    return f"{_BYOK_CONTEXT}{_BYOK_SEP}{user_id}{_BYOK_SEP}{plaintext}"
+
+
+def parse_byok_frame(payload: str) -> Tuple[str, str] | None:
+    """Parse a decrypted payload back into ``(user_id, plaintext)``.
+
+    Returns ``None`` for an unbound payload (no ``byok\\x00`` frame) — i.e.
+    a ciphertext produced for a DIFFERENT surface and replayed here. Public
+    so the secrets self-heal sweep can verify bindings without duplicating
+    the framing format."""
+    prefix = f"{_BYOK_CONTEXT}{_BYOK_SEP}"
+    if not payload.startswith(prefix):
+        return None
+    rest = payload[len(prefix) :]
+    user_id, sep, plaintext = rest.partition(_BYOK_SEP)
+    if not sep:
+        return None
+    return user_id, plaintext
+
+
+def encrypt_byok(plaintext: str, user_id: str) -> str:
+    """Strict-encrypt one BYOK secret BOUND to its owner. Public so the
+    secrets self-heal sweep produces the same bound format the write
+    chokepoint does. Raises ``secret_box.SecretBoxNotConfigured`` when no
+    real key is configured — fail closed, no dev-key fallback."""
+    return _encrypt_marked(_byok_frame(plaintext, str(user_id)))
+
+
+def _conceal_byok_scalar(value: Any, user_id: str) -> Any:
+    """Encrypt one secret scalar bound to ``user_id``. Non-string values
+    (should not normally occur) pass through untouched rather than being
+    coerced/encrypted, to avoid corrupting an unexpected shape.
+
+    Already-marked values pass through byte-for-byte (idempotent). After
+    the API boundary rejects client-supplied ``enc:v1:`` strings (422), the
+    only marker-prefixed values reaching this function are the DB-sourced
+    previous ciphertexts carried forward by the blank-means-keep merge —
+    and even a hostile one that slipped past the boundary is inert, because
+    the reveal side rejects any payload not bound to this exact user."""
+    if not isinstance(value, str):
+        return value
+    if not value.strip():
+        return value
+    if value.startswith(MARKER):
+        return value
+    return encrypt_byok(value, user_id)
+
+
+def _conceal_byok_field(value: Any, user_id: str) -> Any:
+    """Encrypt a BYOK secret field that may be ``str`` or ``list[str]``."""
+    if isinstance(value, list):
+        return [_conceal_byok_scalar(v, user_id) for v in value]
+    return _conceal_byok_scalar(value, user_id)
+
+
+def conceal_byok_providers(providers: Any, user_id: str) -> Any:
+    """WRITE-side chokepoint for user BYOK ``ai_providers`` — call after
+    ``merge_ai_providers`` has merged the incoming payload, right before the
+    result is persisted to ``user_settings.settings_json``.
+
+    Encrypts each provider entry's ``api_key`` (``str`` or ``list[str]``)
+    BOUND to ``user_id`` — the owner of the ``user_settings`` row being
+    written (see the context-binding note above); every other field
+    (``base_url``, ``model``, ``enabled``, ``app_id``, …) and any
+    unknown/non-dict entry passes through untouched. Fail-CLOSED, like
+    ``conceal_for_key``: raises ``secret_box.SecretBoxNotConfigured`` when
+    no real encryption key is configured, so a write of a plaintext BYOK
+    key never silently lands in the DB unencrypted.
+    """
+    if not isinstance(providers, dict):
+        return providers
+    uid = str(user_id)
+    out: Dict[str, Any] = {}
+    for provider, entry in providers.items():
+        if not isinstance(entry, dict):
+            out[provider] = entry
+            continue
+        new_entry = dict(entry)
+        for field_name in BYOK_SECRET_FIELDS:
+            if field_name in new_entry:
+                new_entry[field_name] = _conceal_byok_field(new_entry[field_name], uid)
+        out[provider] = new_entry
+    return out
+
+
+def _reveal_byok_scalar(value: Any, user_id: str) -> Any:
+    """Decrypt one BYOK scalar and verify the ownership binding.
+
+    - unmarked / non-string → passthrough (legacy plaintext rows).
+    - marked + decrypt fails → ``""`` (fail-soft, ERROR logged inside
+      ``_reveal_str``).
+    - marked + decrypts to a payload WITHOUT the ``byok`` frame → ``""`` +
+      ERROR — a ciphertext replayed from a different surface
+      (platform.ai_providers / mediahub_models / system_settings flat keys).
+    - marked + bound to a DIFFERENT user → ``""`` + ERROR — a ciphertext
+      replayed from another user's row.
+    - marked + bound to THIS user → the plaintext.
+    """
+    if not isinstance(value, str) or not value.startswith(MARKER):
+        return value
+    payload = _reveal_str(value)
+    if payload == "":
+        return ""
+    parsed = parse_byok_frame(payload)
+    if parsed is None:
+        logger.error(
+            "[secure_settings] BYOK ciphertext ownership mismatch — payload "
+            "carries no byok binding (possible cross-surface replay); "
+            "resolving to ''"
+        )
+        return ""
+    bound_uid, plaintext = parsed
+    if bound_uid != str(user_id):
+        logger.error(
+            "[secure_settings] BYOK ciphertext ownership mismatch — bound "
+            "user does not match row owner (possible replay); resolving to ''"
+        )
+        return ""
+    return plaintext
+
+
+def _reveal_byok_field(value: Any, user_id: str) -> Any:
+    """Decrypt a BYOK secret field that may be ``str`` or ``list[str]``."""
+    if isinstance(value, list):
+        return [_reveal_byok_scalar(v, user_id) for v in value]
+    return _reveal_byok_scalar(value, user_id)
+
+
+def reveal_byok_providers(providers: Any, user_id: str) -> Any:
+    """READ-side counterpart of :func:`conceal_byok_providers` — call from
+    every internal reader of user BYOK ``ai_providers`` so every downstream
+    consumer (adapter factory, task resolvers, chat wiring) sees plaintext.
+
+    ``user_id`` MUST be the owner of the ``user_settings`` row the dict was
+    read from — the ownership binding embedded at encrypt time is verified
+    against it (see the context-binding note above).
+
+    Fail-SOFT, like ``reveal``: a marked value that fails to decrypt OR
+    fails the ownership check logs an ERROR and resolves to ``""`` rather
+    than raising. Non-dict entries and unmarked/non-secret fields pass
+    through untouched.
+    """
+    if not isinstance(providers, dict):
+        return providers
+    uid = str(user_id)
+    out: Dict[str, Any] = {}
+    for provider, entry in providers.items():
+        if not isinstance(entry, dict):
+            out[provider] = entry
+            continue
+        new_entry = dict(entry)
+        for field_name in BYOK_SECRET_FIELDS:
+            if field_name in new_entry:
+                new_entry[field_name] = _reveal_byok_field(new_entry[field_name], uid)
+        out[provider] = new_entry
+    return out
+
+
 __all__ = [
     "MARKER",
     "SECRET_SETTING_KEYS",
     "JSONB_SECRET_KEYS",
+    "BYOK_SECRET_FIELDS",
     "is_secret_key",
     "conceal_for_key",
     "encrypt_marked",
+    "encrypt_byok",
+    "parse_byok_frame",
     "reveal",
+    "conceal_byok_providers",
+    "reveal_byok_providers",
 ]

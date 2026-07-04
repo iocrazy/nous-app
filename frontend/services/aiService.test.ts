@@ -186,6 +186,28 @@ describe('getAISettings', () => {
     const settings = await getAISettings();
     expect(settings.providers.kimi?.enabled_models).toBeUndefined();
   });
+
+  it('passes through the masked api_key_set/hint/count fields verbatim (secret-at-rest Phase 2 — the backend never returns a raw api_key)', async () => {
+    stubJson({
+      ai_providers: {
+        openai: {
+          enabled: true,
+          api_key_set: true,
+          api_key_hint: 'ab12',
+          api_key_count: 1,
+          base_url: 'https://x',
+        },
+      },
+    });
+    const settings = await getAISettings();
+    expect(settings.providers.openai).toMatchObject({
+      api_key_set: true,
+      api_key_hint: 'ab12',
+      api_key_count: 1,
+      base_url: 'https://x',
+    });
+    expect(settings.providers.openai).not.toHaveProperty('api_key');
+  });
 });
 
 describe('saveAISettings', () => {
@@ -247,6 +269,54 @@ describe('saveAISettings', () => {
       (spy.mock.calls[0][1] as RequestInit).body as string,
     );
     expect(body.whisper_provider).toBe('local');
+  });
+
+  it('strips read-only masking fields (api_key_set/hint/count) before sending — they are GET-only metadata, never a write payload', async () => {
+    const spy = stubJson({ success: true });
+    await saveAISettings({
+      ai_enabled: true,
+      preferred_language: 'auto',
+      providers: {
+        openai: {
+          enabled: true,
+          api_key_set: true,
+          api_key_hint: 'ab12',
+          api_key_count: 1,
+          base_url: 'https://x',
+        },
+      },
+      task_assignment: {
+        transcription: '',
+        summarization: '',
+        visual_analysis: '',
+        image_generation: '',
+        script_generation: '',
+      },
+    });
+    const body = JSON.parse(
+      (spy.mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(body.ai_providers.openai).toEqual({ enabled: true, base_url: 'https://x' });
+  });
+
+  it('leaves an untouched (blank) api_key out of the payload — blank means keep the stored value unchanged', async () => {
+    const spy = stubJson({ success: true });
+    await saveAISettings({
+      ai_enabled: true,
+      preferred_language: 'auto',
+      providers: { openai: { enabled: true, api_key: '' } },
+      task_assignment: {
+        transcription: '',
+        summarization: '',
+        visual_analysis: '',
+        image_generation: '',
+        script_generation: '',
+      },
+    });
+    const body = JSON.parse(
+      (spy.mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(body.ai_providers.openai.api_key).toBe('');
   });
 });
 

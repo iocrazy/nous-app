@@ -11,7 +11,7 @@ from loguru import logger
 
 from app.core.api_key_scopes import AVAILABLE_SCOPES
 from app.core.deps import AuthDep
-from app.repositories.api_key_repository import get_api_key_repository
+from app.repositories.api_key_repository import _mask_key, get_api_key_repository
 from app.schemas.api_key import (
     ApiKeyCreate,
     ApiKeyCreateResponse,
@@ -52,7 +52,8 @@ async def create_api_key(request: ApiKeyCreate, auth: AuthDep):
     """
     创建新的 API 密钥
 
-    返回完整密钥，可随时从列表中复制。
+    完整密钥仅在此创建响应中返回一次（``secret_key``），之后不可再取回；
+    列表/详情只返回前缀掩码。密钥在数据库中加密存储。
     """
     repo = get_api_key_repository()
 
@@ -106,7 +107,9 @@ async def list_api_keys(auth: AuthDep, include_revoked: bool = False):
         include_revoked: 是否包含已撤销的密钥
     """
     repo = get_api_key_repository()
-    keys = await repo.get_user_keys(auth.user_id, include_revoked)
+    keys = [
+        _mask_key(k) for k in await repo.get_user_keys(auth.user_id, include_revoked)
+    ]
 
     key_responses = [
         ApiKeyResponse(
@@ -114,6 +117,7 @@ async def list_api_keys(auth: AuthDep, include_revoked: bool = False):
             key_id=k["key_id"],
             key_prefix=k["key_prefix"],
             key_value=k.get("key_value"),
+            key_value_set=k.get("key_value_set", False),
             name=k["name"],
             description=k.get("description"),
             scopes=k["scopes"],
@@ -148,11 +152,13 @@ async def get_api_key(key_id: str, auth: AuthDep):
             status_code=status.HTTP_403_FORBIDDEN, detail="无权访问此密钥"
         )
 
+    key_data = _mask_key(key_data)
     return ApiKeyResponse(
         id=key_data["id"],
         key_id=key_data["key_id"],
         key_prefix=key_data["key_prefix"],
         key_value=key_data.get("key_value"),
+        key_value_set=key_data.get("key_value_set", False),
         name=key_data["name"],
         description=key_data.get("description"),
         scopes=key_data["scopes"],
@@ -189,11 +195,13 @@ async def update_api_key(key_id: str, request: ApiKeyUpdate, auth: AuthDep):
                 status_code=status.HTTP_404_NOT_FOUND, detail="密钥不存在或无权修改"
             )
 
+        result = _mask_key(result)
         return ApiKeyResponse(
             id=result["id"],
             key_id=result["key_id"],
             key_prefix=result["key_prefix"],
             key_value=result.get("key_value"),
+            key_value_set=result.get("key_value_set", False),
             name=result["name"],
             description=result.get("description"),
             scopes=result["scopes"],

@@ -1276,7 +1276,11 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                             type={showApiKeys[providerKey] ? 'text' : 'password'}
                             value={config.api_key || ''}
                             onChange={(e) => updateProviderField(providerKey, 'api_key', e.target.value)}
-                            placeholder={`Enter your ${meta.name} API key`}
+                            placeholder={
+                              config.api_key_set
+                                ? `Set (…${config.api_key_hint || '****'}) — leave blank to keep`
+                                : `Enter your ${meta.name} API key`
+                            }
                             className="w-full bg-ink-950 border border-ink-800 rounded-lg px-4 py-2.5 pr-10 text-sm text-ink-200 placeholder-ink-600 font-mono focus:outline-none focus:border-indigo-500 transition-colors"
                           />
                           <button
@@ -1287,6 +1291,13 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                             {showApiKeys[providerKey] ? <EyeOff size={16} /> : <Eye size={16} />}
                           </button>
                         </div>
+                        {config.api_key_set && !config.api_key && (
+                          <p className="text-[11px] text-ink-500">
+                            API key configured (…{config.api_key_hint || '****'})
+                            {(config.api_key_count ?? 1) > 1 && ` — ${config.api_key_count} keys`}
+                            . Type a new key to replace it.
+                          </p>
+                        )}
                       </div>
                     )}
 
@@ -1392,13 +1403,22 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                       />
                     )}
 
-                    {/* Test Connection button */}
-                    {(isLocal || config.api_key) && (
+                    {/* Test Connection button. A stored-but-not-retyped key
+                        (api_key_set, masked on GET) can't be tested without
+                        the user re-entering it — the backend never echoes a
+                        raw key back (secret-at-rest Phase 2) — so the button
+                        stays visible but disabled with an explanatory title. */}
+                    {(isLocal || config.api_key || config.api_key_set) && (
                       <div className="pt-1">
                         <button
                           onClick={() => testConnection(providerKey)}
-                          disabled={connStatus === 'testing'}
-                          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 border ${
+                          disabled={connStatus === 'testing' || (!isLocal && !config.api_key)}
+                          title={
+                            !isLocal && !config.api_key && config.api_key_set
+                              ? 'Re-enter the API key above to test it'
+                              : undefined
+                          }
+                          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 border disabled:opacity-50 disabled:cursor-not-allowed ${
                             connStatus === 'success'
                               ? 'bg-green-500/10 text-green-400 border-green-500/30'
                               : connStatus === 'error'

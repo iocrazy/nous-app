@@ -18,7 +18,8 @@ export interface ApiKeyResponse {
   id: number;
   key_id: string;
   key_prefix: string;
-  key_value?: string | null;
+  key_value?: string | null; // Masked display form; full key revealed only once at creation
+  key_value_set?: boolean;
   name: string;
   description: string | null;
   scopes: string[];
