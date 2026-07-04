@@ -39,8 +39,8 @@ const MenuItem = Menu.Item
 const MenuItemGroup = Menu.ItemGroup
 
 const allMenuKeys = [
-  '/', '/users', '/teams', '/media', '/transcode', '/tasks', '/tags', '/credits', '/ai',
-  '/agent-telemetry', '/monitoring', '/search', '/audit-logs', '/logs', '/alerts',
+  '/', '/users', '/teams', '/media', '/transcode', '/tasks', '/tags', '/credits',
+  '/ai-usage', '/ai', '/agent-telemetry', '/monitoring', '/search', '/audit-logs', '/logs', '/alerts',
   '/api-keys', '/settings/ai-governance', '/settings/topic-scoring', '/settings/signal-sources', '/settings/memory', '/settings',
   '/transcode-config', '/deployment-logs',
 ]
