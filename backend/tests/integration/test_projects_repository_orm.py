@@ -373,26 +373,66 @@ async def test_member_create_and_list_composite_pk(
     assert {x["user_id"] for x in members} == {str(user_id)}
 
 
-def test_member_update_delete_are_conscious_keep_on_supabase_path():
-    """update_member / delete_member are CONSCIOUS-KEEP on the legacy supabase
-    path (post-collapse: the ORM bodies live on ProjectsRepository, but these two
-    deliberately stay on the supabase client). They preserve the legacy phantom-
-    ``id`` SILENT NO-OP (an inert parity migration must not repair the surface).
-    Verified by source: they route through ``_get_client`` (supabase), while the
-    genuine DB ops (create_member / get_members) use the ORM ``write_scope`` /
-    ``read_scope``. See the MEMBER_ID note in the repository docstring."""
+async def test_member_update_and_delete_by_composite_pk_round_trip(
+    integration_db_url, patched_engine, cleanup_test_rows
+):
+    """update_member / delete_member identify the member by the composite PK
+    ``(project_id, user_id)`` — ``member_id`` on the wire is the user_id. Proves
+    the fix for the former phantom-``id`` SILENT NO-OP: the role change PERSISTS
+    (write_scope commit) and the delete actually removes the row."""
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        user_id = await _real_user_id(conn)
+        proj = await _seed_project(conn, user_id)
+    finally:
+        await conn.close()
+
+    await _repo().create_member(
+        {
+            "project_id": proj["id"],
+            "user_id": str(user_id),
+            "role": "viewer",
+            "invited_by": str(user_id),
+        }
+    )
+
+    # UPDATE by (project_id, user_id) → role change persists.
+    upd = await _repo().update_member(str(user_id), str(proj["id"]), {"role": "editor"})
+    assert upd is not None
+    assert upd["user_id"] == str(user_id)
+    assert type(upd["project_id"]) is int
+    assert upd["role"] == "editor"
+    # Fresh read confirms the commit (no silent rollback / no-op).
+    members = await _repo().get_members(str(proj["id"]))
+    assert {(m["user_id"], m["role"]) for m in members} == {(str(user_id), "editor")}
+
+    # A non-existent user_id → no RETURNING row → None (service → 404).
+    import uuid as _uuid
+
+    missing = await _repo().update_member(
+        str(_uuid.uuid4()), str(proj["id"]), {"role": "viewer"}
+    )
+    assert missing is None
+
+    # DELETE by (project_id, user_id) → row actually removed.
+    assert await _repo().delete_member(str(user_id), str(proj["id"])) is True
+    assert await _repo().get_members(str(proj["id"])) == []
+
+
+def test_member_update_delete_on_orm_path():
+    """update_member / delete_member now run on the ORM path (composite-PK
+    keyed), no longer the legacy supabase phantom-``id`` NO-OP. Verified by
+    source: they use ``write_scope`` / ``read_scope`` and do NOT touch
+    ``_get_client``; the four member DB ops are all ORM. See the MEMBER_ID note
+    in the repository docstring."""
     import inspect
 
     from app.repositories.projects_repository import ProjectsRepository
 
-    for name in ("update_member", "delete_member"):
-        src = inspect.getsource(getattr(ProjectsRepository, name))
-        assert "_get_client" in src  # still on the supabase path
-        assert "write_scope" not in src and "read_scope" not in src
-
-    for name in ("create_member", "get_members"):
+    for name in ("update_member", "delete_member", "create_member", "get_members"):
         src = inspect.getsource(getattr(ProjectsRepository, name))
         assert "_get_client" not in src  # genuine ORM DB op
+        assert "write_scope" in src or "read_scope" in src
 
 
 def test_comment_methods_are_conscious_keep_on_supabase_path():

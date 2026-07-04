@@ -1105,7 +1105,7 @@
       "addMember": "添加成员",
       "memberList": "成员列表",
       "noMembers": "暂无成员",
-      "roleAdmin": "管理员",
+      "roleManager": "管理者",
       "roleEditor": "编辑者",
       "roleViewer": "查看者"
     },

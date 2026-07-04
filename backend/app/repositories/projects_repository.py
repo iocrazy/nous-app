@@ -32,13 +32,12 @@ CONSCIOUS-KEEPS (still on the legacy supabase-py path — this is why the
     NOT a resources.id → writing it as review_comments.resource_id would FK-fail
     or mis-associate). The surface is half-migrated to the resources review
     system (reviews_router / ReviewService) and needs an ownership decision.
-  - ``update_member`` / ``delete_member`` — DEFERRED PRODUCT DECISION. project_
-    members has a composite PK (user_id + project_id) and NO ``id`` column, but
-    these filter by ``id == member_id`` — a phantom column that never matched
-    under REST, so they are a SILENT NO-OP today. Never ORM-overridden (repairing
-    them to filter by user_id would be a behavior change). Needs a separate
-    product decision (member_id → user_id). ``get_members`` / ``create_member``
-    ARE genuine non-drifted DB ops and run on the ORM path.
+  (RESOLVED — no longer conscious-keeps) ``update_member`` / ``delete_member``
+  used to filter a phantom ``id`` column (project_members has a composite PK
+  ``(user_id + project_id)`` and NO ``id``), so they were a SILENT NO-OP in
+  production. They now run on the ORM path, identified by ``(project_id,
+  user_id)`` — ``member_id`` on the route/wire is the member's ``user_id``.
+  ``get_members`` / ``create_member`` were already genuine non-drifted ORM ops.
 
 STRATEGY C — VALUE-TYPE PARITY (per-field, exact former-REST shape)
 ===================================================================
@@ -286,7 +285,7 @@ class ProjectsRepository:
         """Get async supabase client (loop-aware, safe for Celery workers).
 
         Retained for the conscious-keep methods only (auth-admin +
-        review_comments + update/delete_member) — see the module docstring."""
+        review_comments) — see the module docstring."""
         return await get_async_supabase_admin()
 
     # ------------------------------------------------------------------ #
@@ -1031,16 +1030,11 @@ class ProjectsRepository:
     # ------------------------------------------------------------------ #
     # Members  (composite PK user_id + project_id; NO id column.)
     #
-    # get_members / create_member are genuine, non-drifted DB ops → ORM path.
-    #
-    # update_member / delete_member are CONSCIOUS-KEEP on the legacy supabase
-    # path. DEFERRED PRODUCT DECISION (not a mechanical concern): project_members
-    # has a composite PK (user_id + project_id) and NO ``id`` column, but these
-    # filter by ``id == member_id`` — a phantom column that never matched under
-    # REST, so those endpoints are a SILENT NO-OP today. A parity migration must
-    # reproduce that no-op EXACTLY, so they were never ORM-migrated ("fixing" the
-    # surface to use user_id would be a behavior change). The phantom-id member
-    # surface needs a product decision (member_id → user_id) handled separately.
+    # All four DB ops (get_members / create_member / update_member /
+    # delete_member) run on the ORM path, keyed by the composite PK. The route
+    # segment ``/{project_id}/members/{member_id}`` carries the member's
+    # ``user_id`` (uuid str). update_member / delete_member previously filtered a
+    # phantom ``id`` column and were a SILENT NO-OP in production — fixed here.
     # ------------------------------------------------------------------ #
 
     async def get_members(self, project_id: str) -> List[Dict[str, Any]]:
@@ -1081,22 +1075,42 @@ class ProjectsRepository:
     async def update_member(
         self, member_id: str, project_id: str, data: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
-        """Update a member, scoped to project.
+        """Update a member's role, scoped to project.
 
-        CONSCIOUS-KEEP on the legacy supabase path (deferred product decision) —
-        filters by a phantom ``id`` column (project_members' PK is user_id +
-        project_id), so this is a SILENT NO-OP today, preserved as-is. See the
-        MEMBER_ID note above."""
+        Identified by the composite PK ``(project_id, user_id)`` — ``member_id``
+        is the member's ``user_id`` (uuid str), which is what the router path
+        ``/{project_id}/members/{member_id}`` and the frontend send. Returns the
+        updated row dict (strategy-C parity) or ``None`` when no such member
+        exists (the service turns that into a 404). The former impl filtered a
+        phantom ``id`` column (project_members has no ``id``) and was a SILENT
+        NO-OP in production."""
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.TABLE_MEMBERS)
-                .update(data)
-                .eq("id", member_id)
-                .eq("project_id", project_id)
-                .execute()
-            )
-            return result.data[0] if result.data else None
+            values = _known_only(data, _MEMBERS_ATTRS)
+            if not values:
+                async with read_scope() as session:
+                    row = (
+                        (
+                            await session.execute(
+                                select(ProjectMembers)
+                                .where(ProjectMembers.user_id == member_id)
+                                .where(ProjectMembers.project_id == int(project_id))
+                                .limit(1)
+                            )
+                        )
+                        .scalars()
+                        .first()
+                    )
+                    return _row(row, _MEMBERS_N2A) if row else None
+            async with write_scope() as session:
+                result = await session.execute(
+                    update(ProjectMembers)
+                    .where(ProjectMembers.user_id == member_id)
+                    .where(ProjectMembers.project_id == int(project_id))
+                    .values(**values)
+                    .returning(ProjectMembers)
+                )
+                row = result.scalars().first()
+                return _row(row, _MEMBERS_N2A) if row else None
         except Exception as e:
             logger.error(f"Failed to update member {member_id}: {e}")
             raise
@@ -1104,18 +1118,16 @@ class ProjectsRepository:
     async def delete_member(self, member_id: str, project_id: str) -> bool:
         """Delete a member, scoped to project.
 
-        CONSCIOUS-KEEP on the legacy supabase path (deferred product decision) —
-        filters by a phantom ``id`` column, a SILENT NO-OP today, preserved
-        as-is. See the MEMBER_ID note above."""
+        Identified by the composite PK ``(project_id, user_id)`` — ``member_id``
+        is the member's ``user_id``. The former impl filtered a phantom ``id``
+        column and was a SILENT NO-OP in production."""
         try:
-            client = await self._get_client()
-            await (
-                client.table(self.TABLE_MEMBERS)
-                .delete()
-                .eq("id", member_id)
-                .eq("project_id", project_id)
-                .execute()
-            )
+            async with write_scope() as session:
+                await session.execute(
+                    delete(ProjectMembers)
+                    .where(ProjectMembers.user_id == member_id)
+                    .where(ProjectMembers.project_id == int(project_id))
+                )
             return True
         except Exception as e:
             logger.error(f"Failed to delete member {member_id}: {e}")
