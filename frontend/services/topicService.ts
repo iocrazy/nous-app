@@ -102,16 +102,23 @@ export async function getInterest(): Promise<TopicInterest> {
   return { interest_text: d.interest_text || '', has_embedding: !!d.has_embedding };
 }
 
-/** Global master switch — whether the Topic Inspiration module is enabled.
- *  Fails open (returns true) so a transient error never hides the feature. */
-export async function getModuleStatus(): Promise<boolean> {
+export interface TopicModuleStatus {
+  /** Processing switch — whether the backend pipeline updates content. */
+  enabled: boolean;
+  /** Display switch — whether the nav entry + page are shown at all. */
+  visible: boolean;
+}
+
+/** Topic Inspiration module switches. Both fail open (true) so a transient
+ *  error never hides the feature or shows a bogus paused notice. */
+export async function getModuleStatus(): Promise<TopicModuleStatus> {
   try {
     const resp = await fetch(`${base()}/module-status`, { headers: await getAuthHeaders() });
     const d = await jsonOrThrow(resp);
-    return d.enabled !== false;
+    return { enabled: d.enabled !== false, visible: d.visible !== false };
   } catch (err) {
     console.error('topic module-status load failed', err);
-    return true;
+    return { enabled: true, visible: true };
   }
 }
 

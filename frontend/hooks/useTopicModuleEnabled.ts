@@ -1,21 +1,26 @@
 import { useEffect, useState } from 'react';
-import { getModuleStatus } from '../services/topicService';
+import { getModuleStatus, type TopicModuleStatus } from '../services/topicService';
 
 /**
- * Global Topic Inspiration master switch (admin-controlled). Defaults to `true`
- * while loading / on error so the feature is never hidden by a transient
- * failure. When an admin turns the module off, the nav item and page hide.
+ * Topic Inspiration module switches (admin-controlled).
+ *
+ * - `visible` — display switch: gates the nav item + page routing.
+ * - `enabled` — processing switch: when off the page shows a "updates
+ *   paused" notice but stays reachable.
+ *
+ * Both default to `true` while loading / on error so a transient failure
+ * never hides the feature or flashes a bogus paused notice.
  */
-export function useTopicModuleEnabled(): boolean {
-  const [enabled, setEnabled] = useState(true);
+export function useTopicModuleStatus(): TopicModuleStatus {
+  const [status, setStatus] = useState<TopicModuleStatus>({ enabled: true, visible: true });
   useEffect(() => {
     let alive = true;
     getModuleStatus().then((v) => {
-      if (alive) setEnabled(v);
+      if (alive) setStatus(v);
     });
     return () => {
       alive = false;
     };
   }, []);
-  return enabled;
+  return status;
 }
