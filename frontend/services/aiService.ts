@@ -405,6 +405,30 @@ export const getAISettings = async (): Promise<AISettings> => {
   } as AISettings;
 };
 
+// GET-only masking metadata (secret-at-rest Phase 2) — never meaningful on
+// the way back in, and echoing it verbatim would just persist stale noise
+// into settings_json.ai_settings.ai_providers[provider] (the backend re-
+// derives these from the real key on every GET/PUT response anyway).
+const _READ_ONLY_PROVIDER_FIELDS = ['api_key_set', 'api_key_hint', 'api_key_count'] as const;
+
+const stripReadOnlyProviderFields = (
+  providers: AISettings['providers']
+): AISettings['providers'] => {
+  const out: AISettings['providers'] = {};
+  for (const [key, config] of Object.entries(providers)) {
+    if (!config) {
+      out[key] = config;
+      continue;
+    }
+    const clean = { ...config };
+    for (const field of _READ_ONLY_PROVIDER_FIELDS) {
+      delete clean[field];
+    }
+    out[key] = clean;
+  }
+  return out;
+};
+
 export const saveAISettings = async (
   settings: AISettings
 ): Promise<void> => {
@@ -412,7 +436,7 @@ export const saveAISettings = async (
 
   // Map frontend AISettings shape to backend AISettingsUpdate schema
   const backendPayload = {
-    ai_providers: settings.providers,
+    ai_providers: stripReadOnlyProviderFields(settings.providers),
     whisper_provider: settings.task_assignment?.transcription?.startsWith('volcengine') ? 'volcengine'
       : settings.task_assignment?.transcription?.includes('openai') ? 'openai_api' : 'local',
     default_summary_model: settings.task_assignment?.summarization || 'gpt-4o-mini',

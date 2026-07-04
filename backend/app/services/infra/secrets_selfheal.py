@@ -19,6 +19,17 @@ material that is either:
 4. ``user_mcp_servers.bearer_token`` (raw Fernet, no ``enc:v1:`` marker —
    that repo's own scheme; healed dev-keyed → real-keyed, and legacy
    plaintext → encrypted)
+5. ``user_settings.settings_json['ai_settings']['ai_providers']`` per-provider
+   ``api_key`` (secret-at-rest Phase 2, BYOK) — ``api_key`` may be a plain
+   ``str`` OR a ``list[str]`` (Sprint 2 multi-key rotation); each element is
+   healed independently. BYOK ciphertext is OWNER-BOUND (payload
+   ``byok\\x00{user_id}\\x00{plaintext}``) — plaintext heals to the bound
+   format; ciphertext bound to a DIFFERENT user or unbound (a possible
+   replay) is NEVER rebound, only ERROR-logged. Written back with a TARGETED
+   ``jsonb_set`` on the ``{ai_settings,ai_providers}`` path only — never a
+   whole-column replace — so sibling ``settings_json`` keys (``parse_mode``,
+   General settings, other ``ai_settings`` fields) are untouched (the #485
+   clobber rule).
 
 Idempotent: values already decryptable under the real key (marker check +
 strict decrypt probe) are skipped, so a second pass rewrites 0 rows. Emits
@@ -39,7 +50,9 @@ from app.core.secure_settings import (
     JSONB_SECRET_KEYS,
     MARKER,
     SECRET_SETTING_KEYS,
+    encrypt_byok,
     encrypt_marked,
+    parse_byok_frame,
 )
 
 PLATFORM_PROVIDERS_KEY = "platform.ai_providers"
@@ -199,6 +212,122 @@ async def _heal_mediahub_models() -> int:
     return rewritten
 
 
+def _heal_byok_scalar(value: Any, user_id: str) -> Optional[str]:
+    """Healed replacement for one BYOK ``api_key`` scalar, or ``None`` when
+    no rewrite is needed. BYOK ciphertext is OWNER-BOUND (payload
+    ``byok\\x00{user_id}\\x00{plaintext}`` — see ``secure_settings``), so the
+    heal must both produce the bound format and verify existing bindings:
+
+    - unmarked non-blank str (plaintext) → encrypt BOUND to ``user_id``
+    - marked + real-key decryptable + bound to THIS user → None (healthy)
+    - marked + real-key decryptable + unbound or bound to ANOTHER user →
+      None + ERROR log — a possible cross-surface/cross-user ciphertext
+      replay. NEVER rebound to this user (that would launder a stolen
+      ciphertext into a working key); left in place, where the reveal path
+      already resolves it to ``""``.
+    - marked + dev-key decryptable + bound to THIS user → re-encrypt bound
+      under the real key
+    - marked + neither key → None + ERROR (unhealable)
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    if not value.startswith(MARKER):
+        return encrypt_byok(value, user_id)
+    ciphertext = value[len(MARKER) :]
+
+    payload = _real_decrypt(ciphertext)
+    dev_keyed = False
+    if payload is None:
+        payload = _dev_decrypt(ciphertext)
+        dev_keyed = payload is not None
+    if payload is None:
+        logger.error(
+            "[secrets-selfheal] BYOK api_key undecryptable under real AND dev "
+            "keys — cannot heal (was it encrypted under a rotated-away key?)"
+        )
+        return None
+
+    parsed = parse_byok_frame(payload)
+    if parsed is None or parsed[0] != str(user_id):
+        logger.error(
+            "[secrets-selfheal] BYOK api_key ownership mismatch (unbound or "
+            "bound to a different user) — possible ciphertext replay; left "
+            "untouched, NOT rebound"
+        )
+        return None
+    if not dev_keyed:
+        return None  # real-keyed + correctly bound — healthy
+    return encrypt_byok(parsed[1], user_id)
+
+
+def _heal_byok_field(value: Any, user_id: str) -> Optional[Any]:
+    """Healed replacement for one BYOK ``api_key`` field (``str`` or
+    ``list[str]`` — Sprint 2 multi-key rotation), or ``None`` when nothing in
+    it needs rewriting.
+
+    List elements are healed independently via ``_heal_byok_scalar``; a list
+    with a mix of already-healthy and needs-healing elements returns a NEW
+    list with only the needing elements replaced (the rest carried over
+    byte-for-byte)."""
+    if isinstance(value, list):
+        healed_elems = [
+            _heal_byok_scalar(v, user_id) if isinstance(v, str) else None for v in value
+        ]
+        if not any(h is not None for h in healed_elems):
+            return None
+        return [
+            healed if healed is not None else original
+            for healed, original in zip(healed_elems, value)
+        ]
+    return _heal_byok_scalar(value, user_id)
+
+
+async def _heal_user_settings_ai_providers() -> int:
+    """Rewrite plaintext/dev-keyed BYOK ``api_key`` fields inside
+    ``user_settings.settings_json.ai_settings.ai_providers``, one row at a
+    time. Counts rewritten FIELDS (matching ``_heal_platform_providers``).
+
+    Uses a TARGETED ``jsonb_set`` on the ``{ai_settings,ai_providers}`` path
+    — never a whole-``settings_json`` replace — so every other top-level key
+    (``parse_mode``, General settings) and every other ``ai_settings`` field
+    (``whisper_provider``, ``task_assignment``, ...) survives untouched (the
+    #485 clobber rule)."""
+    from app.db import engine as db_engine
+
+    rows = await db_engine.fetch_all(
+        "SELECT user_id, settings_json -> 'ai_settings' -> 'ai_providers' "
+        "AS ai_providers FROM public.user_settings "
+        "WHERE settings_json -> 'ai_settings' -> 'ai_providers' IS NOT NULL"
+    )
+    total_rewritten = 0
+    for row in rows:
+        raw = row["ai_providers"]
+        if not isinstance(raw, dict):
+            continue
+        merged: Dict[str, Any] = {}
+        row_rewritten = 0
+        for name, entry in raw.items():
+            if not isinstance(entry, dict):
+                merged[name] = entry
+                continue
+            new_entry = dict(entry)
+            if "api_key" in new_entry:
+                healed = _heal_byok_field(new_entry["api_key"], str(row["user_id"]))
+                if healed is not None:
+                    new_entry["api_key"] = healed
+                    row_rewritten += 1
+            merged[name] = new_entry
+        if row_rewritten:
+            await db_engine.execute(
+                "UPDATE public.user_settings SET settings_json = jsonb_set("
+                "settings_json, '{ai_settings,ai_providers}', CAST(:v AS jsonb)"
+                ") WHERE user_id = :uid",
+                {"v": json.dumps(merged), "uid": row["user_id"]},
+            )
+            total_rewritten += row_rewritten
+    return total_rewritten
+
+
 async def _heal_user_mcp_servers() -> int:
     from app.db import engine as db_engine
 
@@ -245,6 +374,7 @@ async def run_secrets_selfheal() -> Dict[str, Any]:
         ("platform_ai_providers", _heal_platform_providers),
         ("mediahub_models", _heal_mediahub_models),
         ("user_mcp_servers", _heal_user_mcp_servers),
+        ("user_settings_ai_providers", _heal_user_settings_ai_providers),
     ):
         try:
             summary[label] = await fn()
@@ -254,11 +384,13 @@ async def run_secrets_selfheal() -> Dict[str, Any]:
             summary["errors"] += 1
     logger.info(
         "[secrets-selfheal] done — system_settings={} platform_ai_providers={} "
-        "mediahub_models={} user_mcp_servers={} errors={}",
+        "mediahub_models={} user_mcp_servers={} user_settings_ai_providers={} "
+        "errors={}",
         summary["system_settings"],
         summary["platform_ai_providers"],
         summary["mediahub_models"],
         summary["user_mcp_servers"],
+        summary["user_settings_ai_providers"],
         summary["errors"],
     )
     return summary

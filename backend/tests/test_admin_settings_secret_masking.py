@@ -227,6 +227,25 @@ async def test_put_platform_providers_writes_and_encrypts(monkeypatch, client):
 
 
 @pytest.mark.asyncio
+async def test_put_platform_providers_rejects_client_ciphertext_422(
+    monkeypatch, client
+):
+    """Anti-replay boundary (PR #1004 security review): an admin PUT whose
+    api_key already carries the enc:v1: marker is rejected with 422 and
+    nothing is stored. Blank-means-keep sources the previous ciphertext from
+    the DB row server-side, so a legitimate payload never contains
+    ciphertext — a marker-prefixed value is a replay attempt."""
+    repo = _FakeRepo({})
+    _install_repo(monkeypatch, repo)
+    r = await client.put(
+        f"{BASE}/platform-ai-providers",
+        json={"providers": {"doubao": {"api_key": "enc:v1:gAAAAA-stolen-ciphertext"}}},
+    )
+    assert r.status_code == 422
+    assert repo.upserts == []  # nothing stored
+
+
+@pytest.mark.asyncio
 async def test_put_platform_providers_blank_means_keep(monkeypatch, client):
     from app.core.secure_settings import conceal_for_key, reveal
 

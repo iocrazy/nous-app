@@ -121,6 +121,40 @@ async def test_origin_byok_when_provider_enabled_and_keyed():
     assert cfg.agent_slug == ""
 
 
+async def test_byok_reveals_encrypted_api_key(monkeypatch):
+    """secret-at-rest Phase 2: an enc:v1: api_key stored in ai_providers is
+    decrypted before it reaches provider_config — this resolver reads raw
+    settings_json directly (not via get_ai_settings), so it needs its own
+    reveal chokepoint."""
+    from cryptography.fernet import Fernet
+
+    monkeypatch.setenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    monkeypatch.delenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY_OLD", raising=False)
+    from app.core.secure_settings import encrypt_byok
+
+    # Owner-bound to "u" (the user the resolver is called for).
+    ciphertext = encrypt_byok("user-doubao-plain", "u")
+    settings = _settings(
+        {
+            "ai_providers": {
+                "doubao": {
+                    "api_key": ciphertext,
+                    "enabled": True,
+                    "selected_model": "doubao-pro",
+                }
+            }
+        }
+    )
+    with patch(
+        "app.services.ai.governance.ai_governance.get_module_governance",
+        AsyncMock(return_value=_unlocked()),
+    ):
+        cfg = await helpers.resolve_summarization_config("u", settings_json=settings)
+
+    assert cfg.origin == "byok"
+    assert cfg.provider_config["api_key"] == "user-doubao-plain"
+
+
 async def test_provider_priority_doubao_wins_over_deepseek():
     """Both doubao and deepseek enabled+keyed → doubao wins (priority order)."""
     settings = _settings(

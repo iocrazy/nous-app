@@ -7,10 +7,17 @@ Endpoints for managing AI provider settings and testing connections.
 Settings are stored per-user in the user_settings table (settings_json field).
 """
 
+from typing import Any
+
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 
 from app.core.deps import AuthDep
+from app.core.secure_settings import (
+    MARKER,
+    conceal_byok_providers,
+    reveal_byok_providers,
+)
 from app.repositories.user_settings_repository import UserSettingsRepository
 from app.schemas.ai import (
     AISettingsResponse,
@@ -36,9 +43,94 @@ _AI_SETTINGS_KEY = "ai_settings"
 # has hydrated it, and a wholesale replace would wipe stored keys.
 _SECRET_FIELDS = ("api_key", "app_id")
 
+# GET/PUT response masking: how many trailing characters of a real (revealed)
+# api_key to expose as a hint, e.g. "...ab12".
+_HINT_LEN = 4
+
+
+def _api_key_hint(key: str) -> str:
+    key = key.strip()
+    if not key:
+        return ""
+    return key[-_HINT_LEN:] if len(key) > _HINT_LEN else key
+
+
+def _mask_provider_entry(entry: Any) -> Any:
+    """Replace one provider entry's ``api_key`` with presence metadata.
+
+    Product decision (secret-at-rest Phase 2, owner-ratified): the API never
+    returns a raw ``api_key`` to the client again — encrypted or not. ``entry``
+    must already be PLAINTEXT (call ``reveal_byok_providers`` first) so the
+    hint reflects real key material, not ciphertext. Every other field
+    (``base_url``, ``model``, ``enabled``, ``app_id``, …) is returned as-is.
+    """
+    if not isinstance(entry, dict):
+        return entry
+    out = {k: v for k, v in entry.items() if k != "api_key"}
+    raw_key = entry.get("api_key")
+    if isinstance(raw_key, list):
+        keys = [k.strip() for k in raw_key if isinstance(k, str) and k.strip()]
+        out["api_key_set"] = bool(keys)
+        out["api_key_count"] = len(keys)
+        out["api_key_hint"] = _api_key_hint(keys[0]) if keys else ""
+    else:
+        key = raw_key.strip() if isinstance(raw_key, str) else ""
+        out["api_key_set"] = bool(key)
+        out["api_key_count"] = 1 if key else 0
+        out["api_key_hint"] = _api_key_hint(key)
+    return out
+
+
+def mask_ai_providers(plaintext_providers: dict) -> dict:
+    """GET/PUT response masking chokepoint — replaces every provider's
+    ``api_key`` with ``api_key_set`` / ``api_key_hint`` / ``api_key_count``.
+    Input must already be revealed (plaintext); non-dict input passes
+    through untouched."""
+    if not isinstance(plaintext_providers, dict):
+        return plaintext_providers
+    return {
+        name: _mask_provider_entry(cfg) for name, cfg in plaintext_providers.items()
+    }
+
 
 def _is_blank(value) -> bool:
     return value is None or (isinstance(value, str) and not value.strip())
+
+
+def reject_client_ciphertext(incoming: dict | None) -> None:
+    """API-boundary guard (security review of PR #1004, layer 1): reject any
+    CLIENT-submitted secret value that already carries the ``enc:v1:``
+    marker with 422.
+
+    A legitimate request NEVER contains ciphertext: the blank-means-keep
+    semantics of ``merge_ai_providers`` source the previous (possibly
+    encrypted) value from the DB row SERVER-side — the client sends either
+    a new plaintext key or a blank. A marker-prefixed value in the payload
+    is therefore always either a client bug or an attempted ciphertext
+    replay (planting a stolen ciphertext from another surface/user so the
+    reveal path decrypts it — the decryption-oracle attack). The ownership
+    binding inside ``conceal/reveal_byok_providers`` is the second,
+    defense-in-depth layer.
+    """
+    if not isinstance(incoming, dict):
+        return
+    for provider, entry in incoming.items():
+        if not isinstance(entry, dict):
+            continue
+        for field_name in _SECRET_FIELDS:
+            value = entry.get(field_name)
+            candidates = value if isinstance(value, list) else [value]
+            for item in candidates:
+                if isinstance(item, str) and item.startswith(MARKER):
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            f"{provider}.{field_name} must be a plaintext "
+                            "credential — encrypted (enc:v1:) values are not "
+                            "accepted from the client. Leave the field blank "
+                            "to keep the stored key unchanged."
+                        ),
+                    )
 
 
 def merge_ai_providers(existing: dict | None, incoming: dict | None) -> dict:
@@ -86,8 +178,18 @@ async def get_ai_settings(auth: AuthDep):
             # app.services.ai.provider_health.
             provider_health = settings_json.get("ai_provider_health", {})
 
+        # Stored ai_providers may carry enc:v1: ciphertext api_keys (secret-at-
+        # rest Phase 2) or, for legacy rows, plaintext — reveal_byok_providers
+        # handles both (no-op on unmarked strings) and verifies the ownership
+        # binding against the requesting user (a replayed foreign ciphertext
+        # resolves to "" here, so the hint below can never leak it). The
+        # client never sees either form: mask_ai_providers replaces api_key
+        # with presence metadata computed from the real (revealed) material.
+        plaintext_providers = reveal_byok_providers(
+            ai_settings.get("ai_providers", {}), user_id=str(auth.user_id)
+        )
         return AISettingsResponse(
-            ai_providers=ai_settings.get("ai_providers", {}),
+            ai_providers=mask_ai_providers(plaintext_providers),
             whisper_provider=ai_settings.get("whisper_provider", "openai_api"),
             default_summary_model=ai_settings.get(
                 "default_summary_model", "gpt-4o-mini"
@@ -118,8 +220,22 @@ async def save_ai_settings(body: AISettingsUpdate, auth: AuthDep):
         ai_settings = settings_json.get(_AI_SETTINGS_KEY, {})
 
         if body.ai_providers is not None:
-            ai_settings["ai_providers"] = merge_ai_providers(
+            # Layer-1 anti-replay guard: the CLIENT payload must never carry
+            # enc:v1: ciphertext (422). Runs BEFORE the merge so a planted
+            # ciphertext never even reaches the stored map.
+            reject_client_ciphertext(body.ai_providers)
+            # merge_ai_providers runs against the STORED (possibly enc:v1:
+            # ciphertext) previous value: a blank incoming secret field falls
+            # back to the previous value byte-for-byte, so an unchanged key
+            # is carried forward as ciphertext without ever being decrypted.
+            # conceal_byok_providers is idempotent (marker check) — encrypts
+            # only the fields the caller actually supplied plaintext for,
+            # BOUND to the requesting user (layer-2 anti-replay).
+            merged = merge_ai_providers(
                 ai_settings.get("ai_providers"), body.ai_providers
+            )
+            ai_settings["ai_providers"] = conceal_byok_providers(
+                merged, user_id=str(auth.user_id)
             )
         if body.whisper_provider is not None:
             ai_settings["whisper_provider"] = body.whisper_provider
@@ -139,8 +255,16 @@ async def save_ai_settings(body: AISettingsUpdate, auth: AuthDep):
         # untouched. The nested merge above preserves sibling ai_settings fields.
         await repo.patch_settings_json(auth.user_id, {_AI_SETTINGS_KEY: ai_settings})
 
+        # Same masking contract as GET — the response never carries a raw
+        # api_key (plaintext OR ciphertext). reveal_byok_providers decrypts
+        # only the ciphertext fields (verifying the ownership binding);
+        # fields the caller just typed in this request are already plaintext
+        # and pass through unchanged.
+        plaintext_providers = reveal_byok_providers(
+            ai_settings.get("ai_providers", {}), user_id=str(auth.user_id)
+        )
         return AISettingsResponse(
-            ai_providers=ai_settings.get("ai_providers", {}),
+            ai_providers=mask_ai_providers(plaintext_providers),
             whisper_provider=ai_settings.get("whisper_provider", "openai_api"),
             default_summary_model=ai_settings.get(
                 "default_summary_model", "gpt-4o-mini"

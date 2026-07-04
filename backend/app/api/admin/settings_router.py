@@ -5,7 +5,7 @@ from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
 from app.core.config import settings
-from app.core.secure_settings import JSONB_SECRET_KEYS, is_secret_key
+from app.core.secure_settings import JSONB_SECRET_KEYS, MARKER, is_secret_key
 from app.repositories.admin.system_settings_repository import (
     get_system_settings_repository,
 )
@@ -643,6 +643,23 @@ async def update_platform_ai_providers_settings(
         for field_name in _PROVIDER_SECRET_FIELDS:
             value = data.get(field_name)
             if isinstance(value, str) and value.strip():
+                # Anti-replay boundary (same reasoning as the user BYOK PUT —
+                # security review of PR #1004): blank-means-keep sources the
+                # previous ciphertext from the DB row above, so a legitimate
+                # client payload NEVER contains an enc:v1: value. Accepting
+                # one would store a possibly-foreign ciphertext verbatim
+                # (conceal's idempotent marker check would not re-encrypt it)
+                # for the reveal path to later decrypt.
+                if value.strip().startswith(MARKER):
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            f"{name}.{field_name} must be a plaintext "
+                            "credential — encrypted (enc:v1:) values are not "
+                            "accepted from the client. Leave the field blank "
+                            "to keep the stored secret unchanged."
+                        ),
+                    )
                 entry[field_name] = value.strip()
                 written.append(f"{name}.{field_name}")
         merged[name] = entry
