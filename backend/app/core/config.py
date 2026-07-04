@@ -153,13 +153,6 @@ class Settings(BaseSettings):
     )
 
     # ============================================
-    # Notion 集成（可选）
-    # ============================================
-    NOTION_API_KEY: str = Field(default="", description="Notion API密钥")
-    NOTION_DATABASE_ID: str = Field(default="", description="Notion数据库ID")
-    PUSH_TO_NOTION: bool = Field(default=False, description="是否推送到Notion")
-
-    # ============================================
     # Redis 配置 (download progress + UnifiedProgressTracker KV)
     # ============================================
     REDIS_URL: str = Field(
@@ -248,9 +241,6 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = Field(
         default="gpt-4o", description="OpenAI model for visual analysis"
     )
-    OPENAI_EMBEDDING_MODEL: str = Field(
-        default="text-embedding-3-small", description="OpenAI embedding model"
-    )
 
     # ============================================
     # LLM Configuration (Script / Storyboard AI)
@@ -295,27 +285,16 @@ class Settings(BaseSettings):
         description="Doubao (Volcengine Ark) chat-completions endpoint URL",
     )
     DOUBAO_API_KEY: str = Field(default="", description="Doubao API Key")
-    WHISPER_PROVIDER: str = Field(
-        default="openai_api",
-        description="Whisper provider: openai_api, volcengine, or local",
-    )
-    VOLCENGINE_APP_ID: str = Field(default="", description="Volcengine ASR App ID")
-    VOLCENGINE_ACCESS_TOKEN: str = Field(
-        default="", description="Volcengine ASR Access Token"
-    )
     MEDIA_PUBLIC_URL: str = Field(
         default="https://mediahubserver.heygo.cn:88",
         description="Public URL for media file access",
     )
     NEWSNOW_API_URL: str = Field(
         default="http://localhost:4000",
-        description="Self-hosted NewsNow API base URL (Topic Inspiration newsnow adapter)",
-    )
-    AI_DEFAULT_SUMMARY_MODEL: str = Field(
-        default="gpt-4o-mini", description="Default LLM model for summaries"
-    )
-    AI_DEFAULT_ANALYSIS_MODEL: str = Field(
-        default="gpt-4o", description="Default LLM model for visual analysis"
+        description=(
+            "Self-hosted NewsNow API base URL — env FALLBACK only; the "
+            "authoritative value is system_settings newsnow.api_url (DB)"
+        ),
     )
 
     model_config = SettingsConfigDict(
