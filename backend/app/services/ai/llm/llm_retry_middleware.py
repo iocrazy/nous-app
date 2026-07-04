@@ -174,9 +174,21 @@ class LLMRetryMiddleware:
     rng: Optional[Callable[[], float]] = None
 
     # Test seam: override sleep so tests don't actually sleep seconds.
-    sleep: Callable[[float], Awaitable[None]] = field(default=asyncio.sleep, init=False)
+    # default_factory (NOT default): a plain Python function stored as a
+    # dataclass default becomes a class attribute, and function class
+    # attributes are descriptors — ``self.sleep(x)`` would bind ``self`` and
+    # call ``asyncio.sleep(<middleware>, x)``, crashing every backoff sleep
+    # with "'<=' not supported between 'LLMRetryMiddleware' and 'int'".
+    # default_factory assigns the function as an INSTANCE attribute, which
+    # does not bind. (time.monotonic is a C builtin — not a descriptor — so
+    # it never had the bug, but gets the same treatment for consistency.)
+    sleep: Callable[[float], Awaitable[None]] = field(
+        default_factory=lambda: asyncio.sleep, init=False
+    )
     # Test seam: override the monotonic clock for deterministic deadline tests.
-    monotonic: Callable[[], float] = field(default=time.monotonic, init=False)
+    monotonic: Callable[[], float] = field(
+        default_factory=lambda: time.monotonic, init=False
+    )
 
     async def call(
         self, composed: ComposedSystemPrompt, messages: list[dict]
