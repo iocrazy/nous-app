@@ -152,3 +152,63 @@ async def test_ensure_config_keeps_env_config_on_failure(monkeypatch):
     env_cfg = svc.config
     await svc._ensure_config()  # must not raise
     assert svc.config is env_cfg  # unchanged on failure
+
+
+# ----- _LoggingEmbedder (embed-failure observability) --------------------
+# graphiti-core swallows embedding failures internally; a misconfigured
+# embedder (doubao-vision on the plain /embeddings endpoint) 400'd for a
+# week in prod with ZERO application_logs rows. The shim makes every
+# failed embed call log a WARNING, then re-raises unchanged.
+
+
+def test_build_wraps_embedder_in_logging_shim():
+    from app.services.ai.memory.graph_memory import _LoggingEmbedder
+
+    _, embedder, _ = _build_llm_and_embedder(
+        _cfg(
+            extractor_api_key="ms-key",
+            embedder_api_key="ark-key",
+            embedder_model="doubao-embedding-vision-251215",
+            embedder_base_url="https://ark.example/api/v3",
+        )
+    )
+    assert isinstance(embedder, _LoggingEmbedder)
+
+
+@pytest.mark.asyncio
+async def test_logging_embedder_warns_and_reraises_on_failure(caplog):
+    from app.services.ai.memory.graph_memory import _LoggingEmbedder
+
+    class _Inner:
+        async def create(self, *_a, **_k):
+            raise RuntimeError("400 Bad Request")
+
+    shim = _LoggingEmbedder(_Inner(), model="doubao-x", base_url="https://ark")
+    with caplog.at_level("WARNING", logger="app.services.ai.memory.graph_memory"):
+        with pytest.raises(RuntimeError, match="400"):
+            await shim.create("hello")
+
+    assert any(
+        "embedder.create failed" in r.message and "doubao-x" in r.message
+        for r in caplog.records
+    )
+
+
+@pytest.mark.asyncio
+async def test_logging_embedder_passthrough_on_success():
+    from app.services.ai.memory.graph_memory import _LoggingEmbedder
+
+    class _Inner:
+        embedding_dim = 2048
+
+        async def create(self, data):
+            return [0.1, 0.2]
+
+        async def create_batch(self, data):
+            return [[0.1], [0.2]]
+
+    shim = _LoggingEmbedder(_Inner(), model="m", base_url="b")
+    assert await shim.create("x") == [0.1, 0.2]
+    assert await shim.create_batch(["x", "y"]) == [[0.1], [0.2]]
+    # Non-create attributes delegate untouched
+    assert shim.embedding_dim == 2048
