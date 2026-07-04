@@ -125,7 +125,8 @@ class ApiKeyCreateResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    # Full key (also stored in key_value for persistent access)
+    # Full key — ONE-SHOT reveal at creation only. At rest key_value is
+    # Fernet-encrypted; list/get/update responses return a masked value.
     secret_key: str = Field(..., description="完整密钥")
 
 
