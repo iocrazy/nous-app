@@ -219,6 +219,26 @@ class AgentRunsRepository(AsyncpgRepository):
         }
     )
 
+    # Projection for the admin listing — deliberately EXCLUDES the heavy text
+    # columns (input_summary / output_summary / metadata_json /
+    # skill_slugs_used): a 20-row page must not drag whole prompts around.
+    _ADMIN_LIST_COLS = (
+        "id",
+        "user_id",
+        "agent_id",
+        "model",
+        "provider",
+        "status",
+        "trigger",
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "cost_cents",
+        "started_at",
+        "ended_at",
+        "error_code",
+    )
+
     async def list_runs_admin(
         self,
         *,
@@ -239,11 +259,14 @@ class AgentRunsRepository(AsyncpgRepository):
         (the router gates access via ``AdminAuthDep``). Returns
         ``{"items": [...], "total": N}``. Datetimes bound as ``datetime``
         objects (never isoformat strings). Unknown ``sort_by`` falls back to
-        ``started_at`` (allow-list — the value reaches ``getattr``)."""
+        ``started_at`` (allow-list — the value reaches ``getattr``).
+
+        Selects the ``_ADMIN_LIST_COLS`` projection only — the heavy text
+        columns (prompt/output summaries, metadata) stay in the DB."""
         if sort_by not in self._ADMIN_SORTABLE:
             sort_by = "started_at"
         try:
-            base = select(AgentRuns)
+            base = select(*[getattr(AgentRuns, c) for c in self._ADMIN_LIST_COLS])
             if user_id is not None:
                 base = base.where(AgentRuns.user_id == user_id)
             if model:
@@ -267,7 +290,7 @@ class AgentRunsRepository(AsyncpgRepository):
                 result = await session.execute(
                     base.order_by(ordering).offset(offset).limit(limit)
                 )
-                items = [_agent_run_to_dict(r) for r in result.scalars().all()]
+                items = [dict(r) for r in result.mappings().all()]
             return {"items": items, "total": int(total or 0)}
         except Exception as e:
             logger.error(f"Failed to list admin runs: {e}")

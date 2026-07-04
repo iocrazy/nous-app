@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
 import { Tag, Button, Typography } from '@arco-design/web-react'
 import { IconExport } from '@arco-design/web-react/icon'
 import { NotionTable } from '../../components/notion-table'
@@ -63,8 +63,15 @@ function formatDuration(ms: number | null): string {
 
 // --- Main component ---
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 export function AiUsagePage() {
   const { data: models } = useAiUsageModels()
+  // Columns are built before useNotionTable returns addFilter — bridge via ref
+  // so the User cell's click-to-filter can reach it.
+  const addFilterRef = useRef<
+    ((f: { field: string; operator: string; value: string }) => void) | null
+  >(null)
 
   const columns = useMemo<NotionColumnDef<AiUsageRow>[]>(
     () => [
@@ -81,12 +88,26 @@ export function AiUsagePage() {
         key: 'user_email',
         header: 'User',
         type: 'text',
+        filterable: true,
         size: 200,
-        cell: (row) => (
-          <Typography.Text ellipsis={{ showTooltip: true }}>
-            {row.user_email || row.user_id || '-'}
-          </Typography.Text>
-        ),
+        cell: (row) =>
+          row.user_id ? (
+            <Typography.Text
+              style={{ color: 'rgb(var(--primary-6))', cursor: 'pointer' }}
+              ellipsis={{ showTooltip: true }}
+              onClick={() =>
+                addFilterRef.current?.({
+                  field: 'user_email',
+                  operator: 'is',
+                  value: row.user_id as string,
+                })
+              }
+            >
+              {row.user_email || row.user_id}
+            </Typography.Text>
+          ) : (
+            '-'
+          ),
       },
       {
         key: 'model',
@@ -165,28 +186,45 @@ export function AiUsagePage() {
     [models],
   )
 
-  const { table, toolbarProps, pagination, isLoading, setPage, queryResult } =
-    useNotionTable<AiUsageRow>({
-      tableKey: 'ai-usage',
-      columns,
-      defaultSorts: [{ field: 'started_at', direction: 'desc' }],
-      refetchInterval: 30000,
-      fetchData: async ({ page, pageSize, filters, sorts }) => {
-        const modelFilter = filters.find((f) => f.field === 'model')
-        const statusFilter = filters.find((f) => f.field === 'status')
-        const { data } = await apiClient.get('/api/v1/admin/ai-usage/runs', {
-          params: {
-            page,
-            page_size: pageSize,
-            ...(modelFilter?.value && { model: modelFilter.value }),
-            ...(statusFilter?.value && { status: statusFilter.value }),
-            ...(sorts[0]?.field && { sort_by: sorts[0].field }),
-            ...(sorts[0]?.direction && { sort_order: sorts[0].direction }),
-          },
-        })
-        return { items: data.items, total: data.total }
-      },
-    })
+  const {
+    table,
+    toolbarProps,
+    pagination,
+    isLoading,
+    setPage,
+    queryResult,
+    addFilter,
+  } = useNotionTable<AiUsageRow>({
+    tableKey: 'ai-usage',
+    columns,
+    defaultSorts: [{ field: 'started_at', direction: 'desc' }],
+    refetchInterval: 30000,
+    fetchData: async ({ page, pageSize, filters, sorts }) => {
+      const modelFilter = filters.find((f) => f.field === 'model')
+      const statusFilter = filters.find((f) => f.field === 'status')
+      // The User filter carries a user_id UUID (set by clicking a row's user);
+      // free-typed non-UUID text is ignored (emails aren't reverse-resolvable).
+      const userFilter = filters.find((f) => f.field === 'user_email')
+      const userIdValue =
+        typeof userFilter?.value === 'string' && UUID_RE.test(userFilter.value)
+          ? userFilter.value
+          : undefined
+      const { data } = await apiClient.get('/api/v1/admin/ai-usage/runs', {
+        params: {
+          page,
+          page_size: pageSize,
+          ...(modelFilter?.value && { model: modelFilter.value }),
+          ...(statusFilter?.value && { status: statusFilter.value }),
+          ...(userIdValue && { user_id: userIdValue }),
+          ...(sorts[0]?.field && { sort_by: sorts[0].field }),
+          ...(sorts[0]?.direction && { sort_order: sorts[0].direction }),
+        },
+      })
+      return { items: data.items, total: data.total }
+    },
+  })
+
+  addFilterRef.current = addFilter
 
   const handleExport = () => {
     const items = queryResult.data?.items ?? []
@@ -207,9 +245,17 @@ export function AiUsagePage() {
       emptyText="No AI usage found"
       scrollX={1340}
       toolbarExtra={
-        <Button icon={<IconExport />} size="small" onClick={handleExport}>
-          Export
-        </Button>
+        <>
+          <Typography.Text
+            type="secondary"
+            style={{ fontSize: 12, marginRight: 8 }}
+          >
+            Last 30 days · source: agent runs
+          </Typography.Text>
+          <Button icon={<IconExport />} size="small" onClick={handleExport}>
+            Export Page
+          </Button>
+        </>
       }
     />
   )

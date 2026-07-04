@@ -5,7 +5,20 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.api.admin.ai_usage_router import _duration_ms, list_ai_usage_runs
+from app.api.admin.ai_usage_router import (
+    _duration_ms,
+    _email_cache,
+    _emails_for,
+    list_ai_usage_runs,
+)
+
+
+@pytest.fixture(autouse=True)
+def _clear_email_cache():
+    """The email TTL cache is module-level — isolate tests from each other."""
+    _email_cache.clear()
+    yield
+    _email_cache.clear()
 
 
 def test_duration_ms_computes_from_iso_strings():
@@ -155,3 +168,26 @@ async def test_list_runs_passes_filters_to_repo():
     assert captured["offset"] == 10  # (page 2 - 1) * 10
     assert captured["limit"] == 10
     assert captured["started_after"] is not None
+
+
+@pytest.mark.asyncio
+async def test_email_cache_only_fetches_misses():
+    """Second resolution of the same user hits the TTL cache — no repeat
+    auth-admin call (the table polls every 30s; emails are cached 10 min)."""
+    calls = []
+
+    async def _fake_batch(uids):
+        calls.append(list(uids))
+        return {uid: (f"{uid[:4]}@example.com", None) for uid in uids}
+
+    with patch(
+        "app.api.admin.ai_usage_router.batch_get_user_auth_info",
+        new=AsyncMock(side_effect=_fake_batch),
+    ):
+        first = await _emails_for(["aaaa-1", "bbbb-2"])
+        second = await _emails_for(["aaaa-1", "bbbb-2", "cccc-3"])
+
+    assert first["aaaa-1"] == "aaaa@example.com"
+    assert second["cccc-3"] == "cccc@example.com"
+    # one call for the initial pair, one for the single new miss
+    assert calls == [["aaaa-1", "bbbb-2"], ["cccc-3"]]
