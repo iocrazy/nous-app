@@ -1,7 +1,8 @@
-"""Integration tests for TeamRepositoryOrm (Phase 2 H batch) against real PG.
+"""Integration tests for the ORM-backed TeamRepository against real PG.
 
-★ THE CROWN-JEWEL TEAM AUTHZ SURFACE. ★ Proves the REST → ORM swap is invisible
-AND that STRATEGY-C value-type parity holds on teams / team_members — with a
+★ THE CROWN-JEWEL TEAM AUTHZ SURFACE. ★ Proves STRATEGY-C value-type parity
+holds on teams / team_members after the post-rollout collapse to ORM-only — with
+a
 dedicated test that ``team_members.user_id`` is returned as STR so the
 app-layer authz/identity compare
 (``next(m for m in members if m["user_id"] == user_id)`` in
@@ -96,9 +97,9 @@ async def cleanup_teams(integration_db_url):
 
 
 def _repo():
-    from app.repositories.team_repository_orm import TeamRepositoryOrm
+    from app.repositories.team_repository import TeamRepository
 
-    return TeamRepositoryOrm()
+    return TeamRepository()
 
 
 def _name() -> str:
@@ -388,30 +389,16 @@ async def test_get_team_by_invite_code_and_join(
         await _repo().join_team_by_code(code, str(joiner))
 
 
-# ─── factory on/off ─────────────────────────────────────────────────────
+# ─── factory ─────────────────────────────────────────────────────────────
 
 
-def test_factory_off_returns_legacy():
-    from unittest.mock import patch
-
+def test_factory_returns_team_repository():
+    """Post-collapse the factory is unconditional: it always returns a
+    ``TeamRepository`` (the ORM bodies live directly on the class; the
+    ``USE_ORM_TEAM`` flag and the ``TeamRepositoryOrm`` subclass are retired)."""
     from app.repositories.team_repository import (
         TeamRepository,
         get_team_repository,
     )
 
-    with patch("app.core.config.settings.USE_ORM_TEAM", False):
-        assert type(get_team_repository()) is TeamRepository
-
-
-def test_factory_on_returns_orm(integration_db_url):
-    from unittest.mock import patch
-
-    from app.repositories.team_repository_orm import TeamRepositoryOrm
-
-    with (
-        patch("app.core.config.settings.USE_ORM_TEAM", True),
-        patch("app.db.engine.is_configured", return_value=True),
-    ):
-        from app.repositories.team_repository import get_team_repository
-
-        assert type(get_team_repository()) is TeamRepositoryOrm
+    assert type(get_team_repository()) is TeamRepository

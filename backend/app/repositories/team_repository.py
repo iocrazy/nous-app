@@ -1,218 +1,297 @@
-"""Team repository for database operations."""
+"""Team repository for database operations (SQLAlchemy 2.0 ORM).
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+★ CROWN JEWEL — the team authorization surface. ★
 
-from loguru import logger
+The ORM-backed implementation of ``teams`` + ``team_members`` (the team
+invite-code join lives on ``teams.invite_code``; the separate ``team_invites``
+table is NOT touched by this repo — that surface is the InviteRepository). Post
+100%-ORM rollout this is the single source: the ``USE_ORM_TEAM`` flag and the
+former ``TeamRepositoryOrm`` subclass are retired and the bodies live directly
+on ``TeamRepository``. Call sites (``app/api/teams_router.py`` +
+``app/api/ai_memory_router.py``; the admin router uses a DIFFERENT
+``AdminTeamsRepository``) route through ``get_team_repository()`` below.
 
-from app.db.supabase_client import get_async_supabase_admin
+★★★ UUID CONSUMER AUDIT — TEAM AUTHZ (the "all-bigint = safe" trap) ★★★
+======================================================================
+``teams.id`` is BIGINT, which tempts the wrong conclusion that the whole team
+surface is bigint-safe. It is NOT: ``teams.owner_id`` and
+``team_members.user_id`` are UUID columns. The ORM returns native ``uuid.UUID``;
+``uuid.UUID(...) == "uuid-string"`` is ALWAYS False with NO error/log. Every
+uuid below is str()'d via the generic ``_parity`` sweep over EVERY return path.
 
-if TYPE_CHECKING:
-    from app.repositories.team_repository_orm import TeamRepositoryOrm
+  team_members.user_id (uuid) → **str()'d — REQUIRED (authz ==).**
+      Returned by ``get_team_members`` (and present in each member dict). The
+      app-layer authz/identity compare (a real ``==`` against a STRING path
+      param):
+        • app/api/teams_router.py::update_member_role:
+              members = await repo.get_team_members(team_id, auth.user_id)
+              member = next((m for m in members
+                             if m["user_id"] == user_id), None)
+              if not member:
+                  raise HTTPException(404, "Member not found")
+          → ``user_id`` is the {user_id} PATH PARAMETER (a str). A native UUID
+            ``==`` str is False forever ⇒ ``member`` is None ⇒ a 404 "Member not
+            found" is raised AFTER the role update already succeeded. str() keeps
+            the lookup matching.
+      NOTE: the WHERE-side membership/ownership checks in this repo
+      (``.where(TeamMembers.user_id == user_id)`` etc.) bind a uuid STRING param
+      against the Uuid column — asyncpg's Uuid codec accepts the str form — so
+      those server-side filters are unaffected by parity; only the Python-side
+      dict compare above is the silent-killer site.
+
+  teams.owner_id (uuid) → **str()'d for SHAPE parity** (no Python ==/!= consumer
+      in this repo's call path). Returned by get_user_teams / get_team_by_id /
+      create_team / update_team / get_team_by_invite_code / join_team_by_code →
+      flows into ``TeamResponse(owner_id=t["owner_id"])``. TeamResponse.owner_id
+      is a STR field. The ownership gates (update_team / delete_team /
+      remove_member) compare owner_id INSIDE the SQL WHERE
+      (``.where(Teams.owner_id == user_id)`` / ``team.owner_id == target``),
+      NOT via the returned dict — see remove_member's owner-protection note.
+
+  remove_member owner-protection: it fetches ``teams.owner_id`` and compares
+      ``team.owner_id == target_user_id`` IN PYTHON. To keep this gate correct we
+      compare the str()'d owner_id against the str target — see ``remove_member``
+      below. This is a SECOND real Python uuid compare, handled explicitly.
+
+NON-uuid type-sensitive columns
+-------------------------------
+  teams.id / team_members.team_id (BIGINT snowflake) → STAY NATIVE int (the 5.3
+    trap). CONSUMER AUDIT: teams_router wraps every id in ``str(t["id"])`` /
+    ``str(m["team_id"])`` for the str response fields, and create_team feeds
+    ``team["id"]`` straight into the team_members insert (a bigint bind) — no
+    int() math, no type-sensitive ==. Inbound team_id params arrive as STR (path
+    params) → ``int(team_id)`` at each bind boundary (the bigint .eq filters).
+  team_members.role (CHECK = owner/admin/member) → plain VARCHAR(20) → native
+    str; the role gates do ``role in ["owner","admin"]`` (str membership).
+  teams.name / invite_code / kind (Text/String) → native str.
+  teams.settings_json / enabled_modules (JSONB) → native dict (parity).
+  teams.created_at / team_members.joined_at (timestamptz) → **.isoformat()**
+    ALWAYS (TeamResponse.created_at / TeamMemberResponse.joined_at parse the ISO
+    str). No temporal WRITES and no date/timestamptz RANGE *filters* here.
+
+create_team relies on the ``teams_invite_code_trigger`` (mig 009) to fill
+invite_code and uses ``.returning(Teams)`` to read it + the snowflake id back;
+the owner membership is added by the ``add_owner_as_member`` AFTER-INSERT
+trigger (mig 009). PROD-BUG CO-FIX (2026-06-06): the legacy ALSO explicitly
+inserted the owner member, which collided with that trigger on the team_members
+PK (23505) → every POST /teams 500'd; the redundant insert was dropped so the
+trigger is the single source of the owner membership AND team creation works.
+
+KNOWN PRE-EXISTING FOLLOW-UP (NOT a parity issue — documented, left as-is):
+   The router's update_member_role validates ``update.role in
+   ["admin","editor","reviewer","viewer"]`` and passes it to add_member /
+   update_member_role, but team_members.role has a DB CHECK allowing only
+   ['owner','admin','member']. Writing 'editor'/'reviewer'/'viewer' violates the
+   CHECK at the DB (23514 IntegrityError). This is a separate PRODUCT question
+   (which role vocabulary is canonical), not a parity concern. Left untouched.
+
+Writes commit via ``write_scope()`` (the silent-rollback P0 lesson); reads use
+``read_scope()``.
+"""
+
+from __future__ import annotations
+
+import datetime as _dt
+import uuid as _uuid
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import insert, select
+from sqlalchemy import update as sa_update
+from sqlalchemy.exc import IntegrityError
+
+from app.db.session import read_scope, write_scope
+from app.models import TeamMembers, Teams, UserProfiles
+from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
+
+_TEAM_N2A: Dict[str, str] = _name_to_attr(Teams)
+_MEMBER_N2A: Dict[str, str] = _name_to_attr(TeamMembers)
+
+
+def _parity(out: Dict[str, Any]) -> Dict[str, Any]:
+    """Strategy-C value-type parity IN PLACE on a SELECT *-shaped dict.
+
+    uuid → str (REST shape — REQUIRED for the team_members.user_id authz ==
+    and remove_member owner-protection compare; shape-only for teams.owner_id);
+    datetime → ISO str. Bigint id / team_id stay NATIVE int (the 5.3 trap).
+    JSONB settings_json / enabled_modules stay native dict. NULLs pass through."""
+    for key, value in out.items():
+        if isinstance(value, _uuid.UUID):
+            out[key] = str(value)
+        elif isinstance(value, _dt.datetime):
+            out[key] = value.isoformat()
+        elif isinstance(value, _dt.date):
+            out[key] = value.isoformat()
+    return out
+
+
+def _team_row(obj: Any) -> Dict[str, Any]:
+    return _parity(_orm_obj_to_dict(obj, _TEAM_N2A))
+
+
+def _member_row(obj: Any) -> Dict[str, Any]:
+    return _parity(_orm_obj_to_dict(obj, _MEMBER_N2A))
 
 
 class TeamRepository:
-    """Repository for team database operations."""
+    """Repository for team database operations (teams + team_members)."""
 
     async def get_user_teams(self, user_id: str) -> List[Dict[str, Any]]:
         """Get all teams the user is a member of."""
-        client = await get_async_supabase_admin()
+        async with read_scope() as session:
+            # Team ids from memberships (user_id is uuid str — asyncpg Uuid codec
+            # accepts the str form for the WHERE bind).
+            team_ids = (
+                (
+                    await session.execute(
+                        select(TeamMembers.team_id).where(
+                            TeamMembers.user_id == user_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if not team_ids:
+                return []
 
-        # Get team IDs from memberships
-        memberships = (
-            await client.table("team_members")
-            .select("team_id")
-            .eq("user_id", user_id)
-            .execute()
-        )
-
-        if not memberships.data:
-            return []
-
-        team_ids = [m["team_id"] for m in memberships.data]
-
-        # Get team details
-        teams = (
-            await client.table("teams")
-            .select("*")
-            .in_("id", team_ids)
-            .order("created_at", desc=True)
-            .execute()
-        )
-
-        return teams.data or []
+            result = await session.execute(
+                select(Teams)
+                .where(Teams.id.in_(list(team_ids)))
+                .order_by(Teams.created_at.desc())
+            )
+            return [_team_row(r) for r in result.scalars().all()]
 
     async def get_team_by_id(
         self, team_id: str, user_id: str
     ) -> Optional[Dict[str, Any]]:
         """Get a team by ID if user has access."""
-        client = await get_async_supabase_admin()
+        async with read_scope() as session:
+            # Membership gate first (no access → None).
+            member = await session.scalar(
+                select(TeamMembers.team_id)
+                .where(TeamMembers.team_id == int(team_id))
+                .where(TeamMembers.user_id == user_id)
+                .limit(1)
+            )
+            if member is None:
+                return None
 
-        # Check membership
-        membership = (
-            await client.table("team_members")
-            .select("*")
-            .eq("team_id", team_id)
-            .eq("user_id", user_id)
-            .execute()
-        )
-
-        if not membership.data:
-            return None
-
-        # Get team
-        team = (
-            await client.table("teams").select("*").eq("id", team_id).single().execute()
-        )
-
-        return team.data
+            result = await session.execute(
+                select(Teams).where(Teams.id == int(team_id)).limit(1)
+            )
+            row = result.scalars().first()
+            return _team_row(row) if row else None
 
     async def create_team(self, name: str, owner_id: str) -> Dict[str, Any]:
-        """Create a new team and add owner as member."""
-        client = await get_async_supabase_admin()
+        """Create a new team; the owner membership is added by the DB trigger.
 
-        # Create team
-        team = (
-            await client.table("teams")
-            .insert({"name": name, "owner_id": owner_id})
-            .select()
-            .single()
-            .execute()
-        )
-
-        if not team.data:
-            raise Exception("Failed to create team")
-
-        # Owner membership is added by the add_owner_as_member DB trigger
-        # (teams_add_owner_trigger, mig 009 — the canonical mechanism per mig
-        # 053/229). We do NOT insert it explicitly: the trigger already ran
-        # AFTER INSERT ON teams, so a second explicit insert collides on the
-        # team_members PK (23505) → every API team creation 500s. Dropping the
-        # redundant insert is the prod-bug fix.
-
-        return team.data
+        Owner membership is added by the add_owner_as_member DB trigger
+        (teams_add_owner_trigger, mig 009 — the canonical mechanism per mig
+        053/229; verified live in PROD 2026-06-06 via SSH). We INSERT only the
+        team and return it; we do NOT explicitly insert the owner member. The
+        legacy USED to do that explicit insert, which collided with the trigger
+        on the team_members PK → 23505 → every POST /teams 500'd. That redundant
+        insert was dropped (co-fixed prod bug); the trigger is now the single
+        source of the owner membership, so team creation works.
+        """
+        async with write_scope() as session:
+            # invite_code is filled by the teams_invite_code_trigger (mig 009);
+            # RETURNING reads the trigger-populated row (id + invite_code) back.
+            result = await session.execute(
+                insert(Teams).values(name=name, owner_id=owner_id).returning(Teams)
+            )
+            team_obj = result.scalars().first()
+            if team_obj is None:
+                raise Exception("Failed to create team")
+            return _team_row(team_obj)
 
     async def update_team(
         self, team_id: str, user_id: str, **updates
     ) -> Optional[Dict[str, Any]]:
         """Update a team if user is owner."""
-        client = await get_async_supabase_admin()
-
-        # Check ownership
-        team = (
-            await client.table("teams")
-            .select("*")
-            .eq("id", team_id)
-            .eq("owner_id", user_id)
-            .execute()
-        )
-
-        if not team.data:
-            return None
-
-        # Update team
-        result = (
-            await client.table("teams")
-            .update(updates)
-            .eq("id", team_id)
-            .select()
-            .single()
-            .execute()
-        )
-
-        return result.data
+        async with write_scope() as session:
+            # Ownership gate inside the WHERE — no row updated → None (parity).
+            result = await session.execute(
+                sa_update(Teams)
+                .where(Teams.id == int(team_id))
+                .where(Teams.owner_id == user_id)
+                .values(**updates)
+                .returning(Teams)
+            )
+            row = result.scalars().first()
+            return _team_row(row) if row else None
 
     async def delete_team(self, team_id: str, user_id: str) -> bool:
         """Delete a team if user is owner."""
-        client = await get_async_supabase_admin()
-
-        # Check ownership
-        team = (
-            await client.table("teams")
-            .select("id")
-            .eq("id", team_id)
-            .eq("owner_id", user_id)
-            .execute()
-        )
-
-        if not team.data:
-            return False
-
-        # Delete team (cascade will handle members)
-        await client.table("teams").delete().eq("id", team_id).execute()
-
-        return True
+        async with write_scope() as session:
+            # Ownership gate inside the WHERE; rowcount tells us if it matched.
+            result = await session.execute(
+                sa_delete(Teams)
+                .where(Teams.id == int(team_id))
+                .where(Teams.owner_id == user_id)
+            )
+            # Cascade handles team_members (FK ON DELETE CASCADE).
+            return bool(result.rowcount)
 
     async def get_team_members(
         self, team_id: str, user_id: str
     ) -> List[Dict[str, Any]]:
         """Get team members if user has access."""
-        client = await get_async_supabase_admin()
+        async with read_scope() as session:
+            # Membership gate first (no access → []).
+            member = await session.scalar(
+                select(TeamMembers.team_id)
+                .where(TeamMembers.team_id == int(team_id))
+                .where(TeamMembers.user_id == user_id)
+                .limit(1)
+            )
+            if member is None:
+                return []
 
-        # Check membership
-        membership = (
-            await client.table("team_members")
-            .select("*")
-            .eq("team_id", team_id)
-            .eq("user_id", user_id)
-            .execute()
-        )
+            result = await session.execute(
+                select(TeamMembers)
+                .where(TeamMembers.team_id == int(team_id))
+                .order_by(TeamMembers.joined_at.asc())
+            )
+            rows = [_member_row(r) for r in result.scalars().all()]
 
-        if not membership.data:
-            return []
-
-        # Get all members
-        members = (
-            await client.table("team_members")
-            .select("*")
-            .eq("team_id", team_id)
-            .order("joined_at")
-            .execute()
-        )
-
-        rows = members.data or []
-
-        # Enrich with display name from user_profiles.username — the team_members
-        # table carries no name/email, so without this every member (and chat
-        # message sender) renders as a raw UUID. One batched lookup, best-effort.
-        if rows:
+            # Enrich `name` from user_profiles.username — team_members has no
+            # name/email column, so without this every member (and chat message
+            # sender) renders as a raw UUID. Same scope/session, one batched query.
             ids = [r["user_id"] for r in rows if r.get("user_id")]
-            try:
-                profiles = (
-                    await client.table("user_profiles")
-                    .select("id, username")
-                    .in_("id", ids)
-                    .execute()
+            if ids:
+                prof = await session.execute(
+                    select(UserProfiles.id, UserProfiles.username).where(
+                        UserProfiles.id.in_(ids)
+                    )
                 )
-                name_by_id = {p["id"]: p.get("username") for p in (profiles.data or [])}
-            except (
-                Exception
-            ) as exc:  # noqa: BLE001 — enrichment must never fail the list
-                logger.warning(f"[team_members] username enrichment failed: {exc}")
-                name_by_id = {}
-            for r in rows:
-                if r.get("name") is None:
-                    r["name"] = name_by_id.get(r["user_id"])
+                name_by_id = {str(pid): uname for pid, uname in prof.all()}
+                for r in rows:
+                    if r.get("name") is None:
+                        r["name"] = name_by_id.get(str(r["user_id"]))
 
-        return rows
+            return rows
 
     async def add_member(
         self, team_id: str, new_user_id: str, role: str = "member"
     ) -> Optional[Dict[str, Any]]:
         """Add a member to a team."""
-        client = await get_async_supabase_admin()
-
+        # A UNIQUE-violation (23505) on the composite PK = duplicate member →
+        # return None (parity). Only reclassify on SQLSTATE 23505; any other
+        # IntegrityError (e.g. 23503 FK, 23514 role CHECK) re-raises.
         try:
-            result = (
-                await client.table("team_members")
-                .insert({"team_id": team_id, "user_id": new_user_id, "role": role})
-                .select()
-                .single()
-                .execute()
-            )
-
-            return result.data
-        except Exception as e:
-            if "23505" in str(e):  # Duplicate key
+            async with write_scope() as session:
+                result = await session.execute(
+                    insert(TeamMembers)
+                    .values(team_id=int(team_id), user_id=new_user_id, role=role)
+                    .returning(TeamMembers)
+                )
+                row = result.scalars().first()
+                return _member_row(row) if row else None
+        except IntegrityError as exc:
+            pgcode = getattr(getattr(exc, "orig", None), "sqlstate", None)
+            if pgcode == "23505" or "23505" in str(getattr(exc, "orig", exc)):
                 return None
             raise
 
@@ -220,86 +299,77 @@ class TeamRepository:
         self, team_id: str, target_user_id: str, role: str, requester_id: str
     ) -> bool:
         """Update a member's role if requester is owner/admin."""
-        client = await get_async_supabase_admin()
+        async with write_scope() as session:
+            # Requester must be owner/admin.
+            requester_role = await session.scalar(
+                select(TeamMembers.role)
+                .where(TeamMembers.team_id == int(team_id))
+                .where(TeamMembers.user_id == requester_id)
+                .limit(1)
+            )
+            if requester_role not in ("owner", "admin"):
+                return False
 
-        # Check if requester is owner or admin
-        requester = (
-            await client.table("team_members")
-            .select("role")
-            .eq("team_id", team_id)
-            .eq("user_id", requester_id)
-            .execute()
-        )
-
-        if not requester.data or requester.data[0]["role"] not in ["owner", "admin"]:
-            return False
-
-        # Update role
-        await client.table("team_members").update({"role": role}).eq(
-            "team_id", team_id
-        ).eq("user_id", target_user_id).execute()
-
-        return True
+            await session.execute(
+                sa_update(TeamMembers)
+                .where(TeamMembers.team_id == int(team_id))
+                .where(TeamMembers.user_id == target_user_id)
+                .values(role=role)
+            )
+            return True
 
     async def remove_member(
         self, team_id: str, target_user_id: str, requester_id: str
     ) -> bool:
         """Remove a member from team."""
-        client = await get_async_supabase_admin()
+        async with write_scope() as session:
+            # owner/admin OR self-removal.
+            if requester_id != target_user_id:
+                requester_role = await session.scalar(
+                    select(TeamMembers.role)
+                    .where(TeamMembers.team_id == int(team_id))
+                    .where(TeamMembers.user_id == requester_id)
+                    .limit(1)
+                )
+                if requester_role not in ("owner", "admin"):
+                    return False
 
-        # Check if requester is owner/admin or removing themselves
-        if requester_id != target_user_id:
-            requester = (
-                await client.table("team_members")
-                .select("role")
-                .eq("team_id", team_id)
-                .eq("user_id", requester_id)
-                .execute()
+            # Don't allow removing the owner. owner_id is uuid → str() BOTH sides
+            # of the Python compare (a native uuid.UUID here would compare unequal
+            # to the str target_user_id and silently let the owner be removed).
+            owner_id = await session.scalar(
+                select(Teams.owner_id).where(Teams.id == int(team_id)).limit(1)
             )
-
-            if not requester.data or requester.data[0]["role"] not in [
-                "owner",
-                "admin",
-            ]:
+            if owner_id is not None and str(owner_id) == str(target_user_id):
                 return False
 
-        # Don't allow removing the owner
-        team = (
-            await client.table("teams")
-            .select("owner_id")
-            .eq("id", team_id)
-            .single()
-            .execute()
-        )
-        if team.data and team.data["owner_id"] == target_user_id:
-            return False
-
-        # Remove member
-        await client.table("team_members").delete().eq("team_id", team_id).eq(
-            "user_id", target_user_id
-        ).execute()
-
-        return True
+            await session.execute(
+                sa_delete(TeamMembers)
+                .where(TeamMembers.team_id == int(team_id))
+                .where(TeamMembers.user_id == target_user_id)
+            )
+            return True
 
     async def get_team_by_invite_code(
         self, invite_code: str
     ) -> Optional[Dict[str, Any]]:
         """Get a team by its invite code."""
-        client = await get_async_supabase_admin()
-
-        result = (
-            await client.table("teams")
-            .select("*")
-            .eq("invite_code", invite_code.upper())
-            .execute()
-        )
-
-        return result.data[0] if result.data else None
+        async with read_scope() as session:
+            result = await session.execute(
+                select(Teams).where(Teams.invite_code == invite_code.upper()).limit(1)
+            )
+            row = result.scalars().first()
+            return _team_row(row) if row else None
 
     async def join_team_by_code(
         self, invite_code: str, user_id: str
     ) -> Optional[Dict[str, Any]]:
-        """Join a team using invite code."""
+        """Join a team using invite code.
+
+        Composes get_team_by_invite_code + add_member (both DB ops above); its
+        "Already a member" raise path depends only on add_member returning None
+        on 23505. No DB access of its own.
+        """
         team = await self.get_team_by_invite_code(invite_code)
 
         if not team:
@@ -314,24 +384,6 @@ class TeamRepository:
         return team
 
 
-def get_team_repository() -> Union["TeamRepository", "TeamRepositoryOrm"]:
-    """Return the right TeamRepository implementation per env.
-
-    ORM when ``USE_ORM_TEAM`` is set AND the SQLAlchemy engine is configured;
-    otherwise the legacy supabase-py REST path. A flag-on but engine-missing
-    deploy logs once and falls back to REST (never crashes).
-    """
-    from app.core.config import settings
-
-    if settings.USE_ORM_TEAM:
-        from app.db.engine import is_configured
-
-        if is_configured():
-            from app.repositories.team_repository_orm import TeamRepositoryOrm
-
-            return TeamRepositoryOrm()
-        logger.warning(
-            "USE_ORM_TEAM=true but SUPAVISOR_DATABASE_URL is empty "
-            "— falling back to supabase-py path"
-        )
+def get_team_repository() -> "TeamRepository":
+    """Return the TeamRepository (ORM-backed, unconditional post-rollout)."""
     return TeamRepository()
