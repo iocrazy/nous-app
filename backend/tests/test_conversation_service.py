@@ -20,6 +20,7 @@ def _make_repo(**overrides) -> AsyncMock:
     repo.is_member.return_value = True
     repo.is_team_member.return_value = True
     repo.conversation_scope_id.return_value = 99
+    repo.conversation_scope_and_type.return_value = {"scope_id": 99, "type": "group"}
     repo.get_conversation.return_value = {
         "id": 1,
         "scope_id": 99,
@@ -792,3 +793,40 @@ async def test_delete_message_not_found_raises():
             user_id="u1",
             message_id=42,
         )
+
+
+# ---------------------------------------------------------------------------
+# add_members — direct_agent guard (P3 ledger item)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_add_members_rejected_on_direct_agent_conversation():
+    """A 1:1 AI thread must never gain a second human member: /dream's
+    per-pair consolidation joins conversation_members, so an extra user row
+    fans out the message counts (P3 Task-2 review ledger item)."""
+    repo = _make_repo()
+    repo.conversation_scope_and_type.return_value = {
+        "scope_id": 99,
+        "type": "direct_agent",
+    }
+
+    from app.services.conversation_service import ConversationService
+
+    svc = ConversationService(repo)
+    with pytest.raises(PermissionError, match="direct agent"):
+        await svc.add_members(conversation_id=1, user_id="owner", user_ids=["u2"])
+    repo.add_members.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_add_members_ok_on_group_conversation():
+    repo = _make_repo()
+    repo.conversation_scope_and_type.return_value = {"scope_id": 99, "type": "group"}
+
+    from app.services.conversation_service import ConversationService
+
+    svc = ConversationService(repo)
+    n = await svc.add_members(conversation_id=1, user_id="owner", user_ids=["u2"])
+    assert n == 1
+    repo.add_members.assert_awaited_once()
