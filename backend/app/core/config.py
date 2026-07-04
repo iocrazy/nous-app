@@ -227,23 +227,6 @@ class Settings(BaseSettings):
         "hazard. The storyboard_frame_characters junction table has no consumer "
         "(nothing to migrate). Instant rollback = flip back to false.",
     )
-    USE_ORM_NOUS: bool = Field(
-        default=False,
-        description="Route NousRepository (admin-configured platform AI models "
-        "over nous_models) through the SQLAlchemy 2.0 ORM session layer (Phase 2 "
-        "M batch). Strategy C value-type parity: id (BIGINT snowflake) stays "
-        "NATIVE int (the 5.3 trap; every consumer does str(id) or passes it to a "
-        "response model — never int() math); created_at / updated_at → ISO str; "
-        "pricing_value (Numeric pricing/cost column) left NATIVE Decimal — the "
-        "numeric decision: every consumer wraps it in float() before any math "
-        "(float() works on both a REST str and a native Decimal), so no str() "
-        "coercion is needed. No uuid / jsonb columns. The legacy update injects "
-        "an 'updated_at=now()' string sentinel — the ORM drops it and sets "
-        "updated_at=func.now() (binding the literal string would error). Reads "
-        "swallow + return []/None; create/update swallow + return None (legacy "
-        "parity, NOT re-raise); delete returns False on failure. Writes commit "
-        "via write_scope(). Inert — flip back to false to roll back.",
-    )
     USE_ORM_AI: bool = Field(
         default=False,
         description="Route AIRepository (resource_transcripts / "

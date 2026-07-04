@@ -68,9 +68,9 @@ async def cleanup_test_rows(integration_db_url):
 
 
 def _repo():
-    from app.repositories.nous_repository_orm import NousRepositoryOrm
+    from app.repositories.nous_repository import NousRepository
 
-    return NousRepositoryOrm()
+    return NousRepository()
 
 
 def _model_payload(**overrides) -> dict:
@@ -206,30 +206,12 @@ async def test_list_all_and_list_enabled_public_cols(
     assert type(sample["id"]) is int
 
 
-# ─── Factory flag wiring ────────────────────────────────────────────────
+# ─── Factory wiring ─────────────────────────────────────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    from app.core.config import settings
+async def test_factory_returns_collapsed_repo():
+    """Post-rollout the factory unconditionally returns the collapsed ORM repo."""
     from app.repositories import nous_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_NOUS", False)
     repo = mod.get_nous_repository()
     assert type(repo) is mod.NousRepository
-    from app.repositories.nous_repository_orm import NousRepositoryOrm
-
-    assert not isinstance(repo, NousRepositoryOrm)
-
-
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories import nous_repository as mod
-    from app.repositories.nous_repository_orm import NousRepositoryOrm
-
-    monkeypatch.setattr(settings, "USE_ORM_NOUS", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    repo = mod.get_nous_repository()
-    assert isinstance(repo, NousRepositoryOrm)
