@@ -37,28 +37,40 @@ class ProjectsService:
     # ------------------------------------------------------------------ #
 
     async def get_projects_with_counts(
-        self, user_id: str, team_id: str | None = None
+        self,
+        user_id: str,
+        team_id: str | None = None,
+        project_type: str | None = None,
+        starred: bool | None = None,
+        archived: bool | None = False,
     ) -> list:
         """
-        Get projects for a user with file counts attached.
+        Get projects for a user with file counts attached. All filters push
+        down to the repo's SQL query (no more in-memory filtering here).
 
         Args:
             user_id: UUID of the authenticated user.
             team_id: If provided, filter by team. If None, return all.
+            project_type: Optional project_type filter.
+            starred: Optional is_starred filter.
+            archived: False (default) = active only, True = archived only,
+                None = both.
 
         Returns:
             List of project dicts, each with a ``file_count`` key.
         """
-        import asyncio
-
-        projects = await self.repo.get_user_projects(user_id, team_id=team_id)
+        projects = await self.repo.get_user_projects(
+            user_id,
+            team_id=team_id,
+            project_type=project_type,
+            starred=starred,
+            archived=archived,
+        )
         if not projects:
             return []
 
-        counts = await asyncio.gather(
-            *(self.repo.get_project_file_count(p["id"]) for p in projects)
-        )
-        return [{**p, "file_count": count} for p, count in zip(projects, counts)]
+        counts = await self.repo.get_project_file_counts([p["id"] for p in projects])
+        return [{**p, "file_count": counts.get(str(p["id"]), 0)} for p in projects]
 
     async def create_project(self, user_id: str, data: dict) -> dict:
         """
@@ -111,6 +123,13 @@ class ProjectsService:
         project = await self.repo.get_project_by_id(project_id)
         if not project:
             raise ValueError("Project not found")
+        if "archived" in data:
+            from datetime import datetime, timezone
+
+            data = {**data}
+            data["archived_at"] = (
+                datetime.now(timezone.utc) if data.pop("archived") else None
+            )
         return await self.repo.update_project(project_id, data)
 
     async def delete_project(self, project_id: str, user_id: str) -> bool:

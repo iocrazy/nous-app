@@ -313,16 +313,28 @@ class ProjectsRepository:
     # ------------------------------------------------------------------ #
 
     async def get_user_projects(
-        self, user_id: str, team_id: str | None = None
+        self,
+        user_id: str,
+        team_id: str | None = None,
+        project_type: str | None = None,
+        starred: bool | None = None,
+        archived: bool | None = False,
     ) -> List[Dict[str, Any]]:
         """
         Get projects accessible to a user, ordered by updated_at desc.
+        Filters push down to SQL (they used to be applied in-memory in the
+        router, and there was no ``archived`` filter at all).
 
         Args:
             user_id: UUID of the authenticated user.
             team_id: If provided, filter by team_id. If ``"personal"``,
                      return only projects where team_id IS NULL.
                      If None, return all user projects (no team filter).
+            project_type: If provided, filter by project_type.
+            starred: If provided, filter by is_starred.
+            archived: ``False`` (default) → active only (archived_at IS
+                NULL). ``True`` → archived only (archived_at IS NOT NULL).
+                ``None`` → both (no archived_at filter).
 
         Returns:
             List of project row dicts.
@@ -337,6 +349,14 @@ class ProjectsRepository:
                 stmt = stmt.where(Projects.team_id.is_(None))
             elif team_id:
                 stmt = stmt.where(Projects.team_id == int(team_id))
+            if project_type:
+                stmt = stmt.where(Projects.project_type == project_type)
+            if starred is not None:
+                stmt = stmt.where(Projects.is_starred.is_(starred))
+            if archived is True:
+                stmt = stmt.where(Projects.archived_at.is_not(None))
+            elif archived is False:
+                stmt = stmt.where(Projects.archived_at.is_(None))
             async with read_scope() as session:
                 result = await session.execute(stmt)
                 return [_row(r, _PROJECTS_N2A) for r in result.scalars().all()]
@@ -471,6 +491,35 @@ class ProjectsRepository:
         except Exception as e:
             logger.error(f"Failed to get file count for project {project_id}: {e}")
             return 0
+
+    async def get_project_file_counts(self, project_ids: List[str]) -> Dict[str, int]:
+        """
+        Non-trashed file counts for many projects in ONE query (replaces the
+        per-project N+1 in ``get_projects_with_counts``, which used to fire
+        one ``get_project_file_count`` query per project via ``asyncio.gather``).
+
+        Args:
+            project_ids: List of project ids (str or int).
+
+        Returns:
+            Dict mapping str(project_id) -> file count. Projects with zero
+            non-trashed files are simply absent (GROUP BY yields no row for
+            them) — callers should ``.get(str(pid), 0)``.
+        """
+        if not project_ids:
+            return {}
+        try:
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(ProjectFiles.project_id, func.count())
+                    .where(ProjectFiles.project_id.in_([int(p) for p in project_ids]))
+                    .where(ProjectFiles.is_trashed.is_(False))
+                    .group_by(ProjectFiles.project_id)
+                )
+                return {str(pid): count for pid, count in result.all()}
+        except Exception as e:
+            logger.error(f"Failed to get file counts: {e}")
+            return {}
 
     # ------------------------------------------------------------------ #
     # Files CRUD

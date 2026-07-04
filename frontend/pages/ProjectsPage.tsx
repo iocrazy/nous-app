@@ -104,8 +104,8 @@ export function ProjectsPage() {
     all: projects.length,
     starred: starredProjects.length,
     recent: recentProjects.length,
-    active: projects.filter(p => p.status !== 'archived').length,
-    archived: projects.filter(p => p.status === 'archived').length,
+    active: projects.filter(p => !p.archived_at).length,
+    archived: projects.filter(p => !!p.archived_at).length,
   }), [projects, starredProjects, recentProjects]);
 
   const folderCounts = useMemo(() => {
@@ -122,8 +122,8 @@ export function ProjectsPage() {
     switch (activeFilter) {
       case 'starred': return starredProjects;
       case 'recent': return recentProjects;
-      case 'active': return projects.filter(p => p.status !== 'archived');
-      case 'archived': return projects.filter(p => p.status === 'archived');
+      case 'active': return projects.filter(p => !p.archived_at);
+      case 'archived': return projects.filter(p => !!p.archived_at);
       default:
         // Check if it's a folder filter
         if (folders.includes(activeFilter)) {

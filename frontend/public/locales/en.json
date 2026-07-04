@@ -1063,6 +1063,8 @@
       "colorLabel": "Color Label",
       "star": "Star",
       "unstar": "Unstar",
+      "archive": "Archive",
+      "unarchive": "Unarchive",
       "delete": "Delete Project"
     },
     "create": {

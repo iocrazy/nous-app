@@ -1063,6 +1063,8 @@
       "colorLabel": "标记颜色",
       "star": "星标",
       "unstar": "取消星标",
+      "archive": "归档",
+      "unarchive": "取消归档",
       "delete": "删除项目"
     },
     "create": {
