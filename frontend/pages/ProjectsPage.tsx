@@ -180,12 +180,18 @@ export function ProjectsPage() {
 
   const refreshProjects = useCallback(async () => {
     try {
-      const data = await fetchProjects();
+      // Mirror the initial-load effect's team derivation — without this,
+      // any context-menu action (star/color/archive/delete) would refetch
+      // with no team filter and silently reset the list to all-teams.
+      const isPersonal = !selectedTeamId || selectedTeamId === personalTeamId;
+      const data = await fetchProjects({
+        teamId: isPersonal ? 'personal' : selectedTeamId,
+      });
       setProjects(data);
     } catch (err) {
       console.error('Failed to refresh projects:', err);
     }
-  }, []);
+  }, [selectedTeamId, personalTeamId]);
 
   const handleSectionChange = useCallback((section: string) => {
     setActiveTab(section as ProjectTab);
