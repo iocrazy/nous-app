@@ -7,29 +7,41 @@ cleanup batch 7）：legacy supabase-py 分支已删，运行路径不变。
 
 ★★★ SECRET-HANDLING BOUNDARY MAP — THE CENTRAL RISK OF THE SECRET DOMAIN ★★★
 =============================================================================
-``user_cookies`` stores platform login cookies (the secret) in PLAIN TEXT
-columns — ``cookie_text`` / ``cookie_file`` / ``custom_headers`` are all
-SQLAlchemy ``Text``. **This repo performs NO encryption/decryption and NO
-masking** (it imports no crypto helper — no Fernet / KMS / app.core.crypto):
-``upsert`` writes ``data`` verbatim into the row, and every read returns the
-raw ``SELECT *`` dict including the plaintext cookie. Consumers
-(abogus_parser / ytdlp_service / soda_music cookie_source /
-drissionpage_parser) read ``row["cookie_text"]`` / ``row["cookie_file"]`` /
-``row["custom_headers"]`` as plaintext to drive a browser / yt-dlp session —
-they REQUIRE the raw value.
+``user_cookies`` stores platform login cookies (the secret) in ``Text`` columns
+— ``cookie_text`` / ``cookie_file`` / ``custom_headers``. As of the secrets
+encrypt-at-rest project (Task 3) the two LOGIN-SECRET columns ``cookie_text`` /
+``cookie_file`` are ENCRYPTED AT REST (Fernet, ``gAAAAA`` prefix, via
+``app.core.secret_box``). Consumers (abogus_parser / ytdlp_service / soda_music
+cookie_source / drissionpage_parser / media_fetch_helpers) REQUIRE the raw
+plaintext to drive a browser / yt-dlp session, so — unlike ``api_keys``, which
+never surfaces its secret on reads — this repo DECRYPTS ON READ: every returned
+dict carries the real plaintext, byte-identical to the pre-encryption shape.
+**Consumers are zero-touch; only the at-rest representation changed.**
 
-  Encryption boundary: NONE (write stores raw, read returns raw) — IDENTICAL to
-  the retired REST path. The ORM does NOT add encryption (inert collapse: a
-  REST→ORM flip must change nothing observable, and adding encryption here would
-  make existing plaintext rows undecryptable). Plaintext-at-rest is reported as
-  a CONCERN for a human decision; it is NOT "fixed" here.
+  Encryption boundary: Fernet at the WRITE boundary. ``upsert`` runs
+  ``cookie_text`` / ``cookie_file`` through ``secret_box.encrypt`` before the
+  INSERT (``_encrypt_cookie_cols``); ``None`` passes through unchanged
+  (no-token semantics). ``custom_headers`` is NOT in the encrypted set — it is
+  not a login secret and stays verbatim.
 
-  Masking boundary: NONE in the repo. ``get_all_by_user`` /
-  ``get_by_user_and_platform`` return the raw cookie — exactly as the REST path
-  did. (The user_settings_router LIST endpoint chooses NOT to surface cookie
-  content to the client, but that masking lives in the ROUTER, not the repo, and
-  is unchanged by this collapse.) No repo method narrows or widens secret
-  exposure.
+  Decryption boundary: at the READ boundary, inside ``_row`` (used by BOTH read
+  methods AND the upsert RETURNING row) via ``_decrypt_cookie_cols`` →
+  ``secret_box.decrypt``. DUAL-READ: ``decrypt`` passes legacy plaintext (no
+  ``gAAAAA`` prefix) through unchanged, so rows written before the backfill read
+  seamlessly — the read path routes through ``decrypt`` and does NOT prefix-check
+  itself (that is the rotate runner's job). A per-column decrypt failure
+  (tampered / rotated-out key) is swallowed to ``None`` for that column only,
+  logged by column name — NEVER the cookie value.
+
+  Backfill: existing plaintext rows are encrypted out-of-band by
+  ``python -m scripts.rotate_secrets --target cookies`` after deploy (idempotent;
+  the ``cookies`` target maps to ``[cookie_text, cookie_file]``).
+
+  Masking boundary: NONE in the repo — reads deliberately return the FULL
+  decrypted plaintext because the downloaders need it. (The user_settings_router
+  LIST endpoint chooses NOT to surface cookie content to the client, but that
+  masking lives in the ROUTER, not the repo, and is unchanged.) No repo method
+  narrows or widens secret exposure beyond the encrypt-at-rest change above.
 
   ⚠️ Cookie freshness/expiry semantics must NOT drift (b站 cookie 失效 bug
   history): ``upsert`` forces a fresh ``updated_at`` on every save (see below)
@@ -100,6 +112,8 @@ from sqlalchemy import select
 from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from app.core.secret_box import decrypt as _decrypt_secret
+from app.core.secret_box import encrypt as _encrypt_secret
 from app.db.session import read_scope, write_scope
 from app.models import UserCookies
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
@@ -107,14 +121,54 @@ from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
 _COOKIE_N2A: Dict[str, str] = _name_to_attr(UserCookies)
 _COOKIE_ATTRS = {p.key for p in UserCookies.__mapper__.column_attrs}
 
+# The two AT-REST secret columns (encrypted on write, decrypted on read). NOTE:
+# ``custom_headers`` is intentionally NOT in this set — it is not a login secret
+# and stays verbatim (its plaintext parity is asserted by the integration test).
+_ENCRYPTED_COOKIE_COLS = ("cookie_text", "cookie_file")
+
+
+def _encrypt_cookie_cols(values: Dict[str, Any]) -> Dict[str, Any]:
+    """Encrypt the scoped secret columns IN PLACE before an upsert bind.
+
+    ``_encrypt_secret(None)`` returns ``None`` (no-token passthrough preserved),
+    so an absent/NULL column is never turned into a ciphertext. Columns not
+    present in ``values`` are left untouched."""
+    for col in _ENCRYPTED_COOKIE_COLS:
+        if col in values:
+            values[col] = _encrypt_secret(values[col])
+    return values
+
+
+def _decrypt_cookie_cols(out: Dict[str, Any]) -> Dict[str, Any]:
+    """Decrypt the scoped secret columns IN PLACE on a read dict so consumers
+    receive the REAL plaintext (downloaders need it to drive yt-dlp/browser).
+
+    Routes every value through ``secret_box.decrypt`` (which passes legacy
+    plaintext through unchanged — the DUAL-READ that keeps the backfill window
+    seamless; the ``gAAAAA`` prefix check is the decryptor's job, not ours). A
+    per-column decrypt failure (tampered / rotated-out key) is swallowed to
+    ``None`` for THAT column only — the row's other columns still surface, and
+    one corrupt cookie cannot blank a user's whole list. The failure is logged
+    by column name ONLY — NEVER the cookie value."""
+    for col in _ENCRYPTED_COOKIE_COLS:
+        if col in out:
+            try:
+                out[col] = _decrypt_secret(out[col])
+            except Exception as exc:  # tampered / wrong-or-rotated-out key
+                logger.warning(
+                    f"用户 Cookie 解密失败，按空值返回该列: column={col}, error={exc}"
+                )
+                out[col] = None
+    return out
+
 
 def _parity(out: Dict[str, Any]) -> Dict[str, Any]:
     """Strategy-C value-type parity IN PLACE on a SELECT *-shaped cookies dict.
 
     uuid (user_id) → str (REST shape); datetime → ISO str. Bigint id stays
-    NATIVE int (the 5.3 trap). bool / plaintext-secret text columns pass through
-    UNCHANGED (no masking — parity with the plaintext-at-rest read).
-    NULLs pass through."""
+    NATIVE int (the 5.3 trap). bool / text columns pass through UNCHANGED at this
+    layer — secret-column DECRYPTION (cookie_text / cookie_file) happens AFTER
+    parity in ``_decrypt_cookie_cols`` (see ``_row``). NULLs pass through."""
     for key, value in out.items():
         if isinstance(value, _uuid.UUID):
             out[key] = str(value)
@@ -126,21 +180,25 @@ def _parity(out: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _row(obj: Any) -> Dict[str, Any]:
-    """SELECT *-shaped, strategy-C-parity dict for one full UserCookies row.
+    """SELECT *-shaped, strategy-C-parity, DECRYPTED dict for one UserCookies row.
 
     uuid (user_id) → str; timestamptz (created_at/updated_at) → ISO str; bigint
-    id stays native int; bool/str pass through. Byte-identical to the legacy
-    supabase-py SELECT * dict."""
-    return _parity(_orm_obj_to_dict(obj, _COOKIE_N2A))
+    id stays native int; bool/str pass through. The two secret columns
+    (``cookie_text`` / ``cookie_file``) are DECRYPTED back to plaintext so the
+    returned dict is byte-identical to the legacy supabase-py SELECT * dict that
+    the downloaders consume (consumers zero-touch)."""
+    return _decrypt_cookie_cols(_parity(_orm_obj_to_dict(obj, _COOKIE_N2A)))
 
 
 class CookiesRepository:
     """ORM-backed 用户 Cookie 仓库类 (异步) — user_cookies CRUD.
 
-    NO encryption and NO masking (the cookie is stored and returned in
-    plaintext; consumers need the raw value to drive yt-dlp/browser sessions).
-    See the module docstring's SECRET-HANDLING BOUNDARY MAP. Plaintext-at-rest
-    is a reported CONCERN, not a behaviour changed here."""
+    ENCRYPT-AT-REST + DECRYPT-ON-READ: ``cookie_text`` / ``cookie_file`` are
+    encrypted on every ``upsert`` write and decrypted on every read (``_row``),
+    so the stored representation is ciphertext while consumers still receive the
+    real plaintext to drive yt-dlp/browser sessions (zero-touch). NO masking —
+    reads return the full decrypted cookie by design. See the module docstring's
+    SECRET-HANDLING BOUNDARY MAP."""
 
     def __init__(self):
         pass
@@ -213,6 +271,10 @@ class CookiesRepository:
             # ``data`` (legacy would 400→None on a bad PostgREST key; we make a
             # stray key a silent no-op, preserving the graceful-failure shape).
             extra = {k: v for k, v in (data or {}).items() if k in _COOKIE_ATTRS}
+            # ENCRYPT-AT-REST: cookie_text / cookie_file never land in the DB as
+            # plaintext. None passes through (no-token semantics preserved);
+            # custom_headers is out of scope and stays verbatim.
+            _encrypt_cookie_cols(extra)
             values = {
                 "user_id": user_id,
                 "platform": platform,

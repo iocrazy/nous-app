@@ -1,15 +1,14 @@
 """Integration tests for CookiesRepositoryOrm (Phase 2 H batch — SECRET) vs real PG.
 
-★ THE SECRET BATCH. ★ Proves the REST → ORM swap is invisible for the
-``user_cookies`` table AND that the secret-handling boundary is reproduced
-EXACTLY:
+★ THE SECRET BATCH. ★ Proves ENCRYPT-AT-REST + DECRYPT-ON-READ for the
+``user_cookies`` table against real PG:
 
   - ROUND-TRIP: a cookie written via upsert reads back as the SAME plaintext
-    (no encryption on write, no decryption on read — the legacy stores raw, the
-    ORM stores raw; double-encrypt or accidental encrypt would corrupt this).
+    (encrypted on write, decrypted on read — consumers zero-touch). The
+    DB column itself holds Fernet CIPHERTEXT (``gAAAAA``), NOT the plaintext.
   - NO MASKING: get_all_by_user / get_by_user_and_platform return the FULL
-    plaintext cookie (exposure parity — the repo never masks; the consumers
-    need the raw value). We assert the returned secret == what we wrote.
+    DECRYPTED plaintext cookie (the repo never masks — the downloaders need the
+    raw value). We assert the returned secret == what we wrote.
   - STRATEGY-C value-type parity: user_id (uuid) → STR, id (bigint) → native
     int (5.3 trap), created_at/updated_at (timestamptz) → ISO str, is_valid
     (bool) → native bool.
@@ -100,27 +99,34 @@ def _platform() -> str:
 # ─── ★ SECRET ROUND-TRIP: written plaintext reads back identical ─────────
 
 
-async def test_secret_roundtrip_plaintext_no_encryption(
+async def test_secret_roundtrip_encrypt_at_rest_decrypt_on_read(
     integration_db_url, patched_engine, cleanup_cookies, a_user
 ):
-    """The cookie (the secret) is written raw and read back RAW — no
-    encryption/decryption, no masking. Prove the exact plaintext survives the
-    write→read round-trip (a double-encrypt or accidental encrypt would corrupt
-    it; a mask would truncate it)."""
+    """The cookie (the secret) is ENCRYPTED at rest and DECRYPTED on read. Prove
+    the exact plaintext survives the write→read round-trip (consumers zero-touch)
+    while the DB column itself holds Fernet ciphertext."""
+    from app.core import secret_box
+
     user_id = str(a_user)
     platform = _platform()
     secret_cookie = "sessionid=SECRET_ABC123; ttwid=XYZ-Δ-987"  # noqa: E501
+    secret_file = '{"cookies": [{"name": "sid", "value": "deadbeef"}]}'
     secret_headers = "Referer: https://www.douyin.com/"
 
     saved = await _repo().upsert(
         user_id,
         platform,
-        {"cookie_text": secret_cookie, "custom_headers": secret_headers},
+        {
+            "cookie_text": secret_cookie,
+            "cookie_file": secret_file,
+            "custom_headers": secret_headers,
+        },
     )
     assert saved is not None
-    # Exposure parity: the FULL plaintext secret is returned (no masking).
+    # Decrypt-on-read: the FULL plaintext secret is returned (no masking).
     assert saved["cookie_text"] == secret_cookie
-    assert saved["custom_headers"] == secret_headers
+    assert saved["cookie_file"] == secret_file
+    assert saved["custom_headers"] == secret_headers  # not a scoped secret column
     assert saved["is_valid"] is True  # upsert forces is_valid=True
     assert saved["error_message"] is None
     # Strategy-C value-type parity on the returned dict.
@@ -129,10 +135,11 @@ async def test_secret_roundtrip_plaintext_no_encryption(
     assert type(saved["created_at"]) is str and "T" in saved["created_at"]
     assert type(saved["updated_at"]) is str and "T" in saved["updated_at"]
 
-    # Read back via BOTH read methods — same plaintext, no decryption needed.
+    # Read back via BOTH read methods — decryption returns the same plaintext.
     fetched = await _repo().get_by_user_and_platform(user_id, platform)
     assert fetched is not None
     assert fetched["cookie_text"] == secret_cookie  # round-trip exact
+    assert fetched["cookie_file"] == secret_file
     assert type(fetched["user_id"]) is str
 
     all_rows = await _repo().get_all_by_user(user_id)
@@ -140,18 +147,34 @@ async def test_secret_roundtrip_plaintext_no_encryption(
     assert len(mine) == 1
     assert mine[0]["cookie_text"] == secret_cookie  # list also returns full plaintext
 
-    # The DB column itself holds the RAW plaintext (no encryption at rest) —
-    # confirm the ORM did not transform the secret on write.
+    # The DB columns themselves hold Fernet CIPHERTEXT (encrypt-at-rest) — the
+    # plaintext never lands in the table; each value decrypts back to the secret.
     conn = await asyncpg.connect(integration_db_url)
     try:
-        raw = await conn.fetchval(
+        raw_text = await conn.fetchval(
             "SELECT cookie_text FROM user_cookies WHERE user_id = $1 AND platform = $2",
+            a_user,
+            platform,
+        )
+        raw_file = await conn.fetchval(
+            "SELECT cookie_file FROM user_cookies WHERE user_id = $1 AND platform = $2",
+            a_user,
+            platform,
+        )
+        # custom_headers is out of the encrypt scope — stored verbatim.
+        raw_headers = await conn.fetchval(
+            "SELECT custom_headers FROM user_cookies "
+            "WHERE user_id = $1 AND platform = $2",
             a_user,
             platform,
         )
     finally:
         await conn.close()
-    assert raw == secret_cookie  # stored raw, exactly as the legacy did
+    assert raw_text.startswith("gAAAAA") and raw_text != secret_cookie
+    assert raw_file.startswith("gAAAAA") and raw_file != secret_file
+    assert secret_box.decrypt(raw_text) == secret_cookie
+    assert secret_box.decrypt(raw_file) == secret_file
+    assert raw_headers == secret_headers  # plaintext at rest (not a secret col)
 
 
 # ─── upsert ON CONFLICT merge + updated_at refresh ──────────────────────
