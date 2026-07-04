@@ -230,37 +230,6 @@ class Settings(BaseSettings):
         "write_scope(). Inert — flip back to false to roll back.",
     )
 
-    USE_ORM_POINTS: bool = Field(
-        default=False,
-        description="Route PointsRepository (MONEY — the points capacity ledger: "
-        "point_pricing / point_packages / team_quotas / member_quotas / "
-        "point_transactions) through the SQLAlchemy 2.0 ORM (Phase 2 H batch — "
-        "money). NUMERIC-PRECISION DECISION: every point/money column here is "
-        "INTEGER/BigInteger (points_balance / amount / balance_after / "
-        "storage_*_bytes / points_cost / points_amount / *_this_month), NOT "
-        "Numeric — REST returned a JSON NUMBER for these, so they STAY NATIVE int "
-        "(the 5.3 trap) AND every consumer does exact int math on them "
-        "(check_quota's ``balance < cost``, add_points' ``balance + amount``, "
-        "reclaim's ``min``/``-``, admin_adjust's ``balance + amount``). str()ing "
-        "any would silently break the +/</min money math. The ONLY Numeric column "
-        "is point_transactions.duration_seconds → str()'d to match REST's "
-        "JSON-string shape (write-only/unread today; no exact-decimal consumer). "
-        "UUID sweep: point_pricing.id / point_packages.id / member_quotas.id+"
-        "user_id / point_transactions.user_id → str (default-str-all-uuid; "
-        "team_quotas has no uuid). ATOMIC MONEY: consume/refund go through the "
-        "SAME rpc_consume_team_points (mig 120/124) / rpc_refund_team_points_"
-        "idempotent (mig 123) SECURITY DEFINER functions via SELECT * FROM fn(...) "
-        "inside write_scope() (team_id→int BIGINT param, user_id str UUID param; "
-        "INTEGER return cols → native int) — a read_scope there would roll the "
-        "decrement back = LOST MONEY. CONCERN (reported, not repaired — inert "
-        "discipline): add_points / reclaim_daily_gift / admin_adjust(<0) / "
-        "increment_member_usage are PRE-EXISTING non-atomic read-then-write "
-        "balance paths; reproduced faithfully (no locking added). get_transactions"
-        "(days=N) binds a tz-aware datetime for ``created_at >= cutoff`` (v3 "
-        "rule). member_quotas upsert via ON CONFLICT (team_id,user_id). Writes "
-        "commit via write_scope(). Inert — flip back to false to roll back.",
-    )
-
     USE_ORM_PAYMENT: bool = Field(
         default=False,
         description="Route PaymentRepository (MONEY — payment orders, the "
