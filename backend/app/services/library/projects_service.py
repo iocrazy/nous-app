@@ -262,8 +262,11 @@ class ProjectsService:
         if not media:
             raise ValueError("Media not found")
 
-        media_owner = media.get("user_id")
-        if media_owner and str(media_owner) != str(user_id):
+        # parsed_media has no ownership column (dropped in migration 083);
+        # ownership lives on resources.creator_id via resources.media_id.
+        # None → allow: orphan/system media without a resource row passes.
+        media_creator = await self.repo.get_media_creator(media_id)
+        if media_creator and media_creator != str(user_id):
             raise PermissionError("You do not have access to this media item")
 
         file_data = {
