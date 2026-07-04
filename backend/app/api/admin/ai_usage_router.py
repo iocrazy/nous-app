@@ -76,6 +76,29 @@ class AiUsageListResponse(BaseModel):
     page_size: int
 
 
+class AiUsageDailyRow(BaseModel):
+    date: str
+    model: Optional[str] = None
+    provider: Optional[str] = None
+    requests: int = 0
+    total_tokens: int = 0
+    cost_cents: float = 0.0
+
+
+class AiUsageSummaryResponse(BaseModel):
+    days: int
+    total_requests: int
+    total_tokens: int
+    total_cost_cents: float
+    daily: List[AiUsageDailyRow]
+
+
+# System-initiated runs (scheduled pipelines, e.g. topic_scorer) carry this
+# sentinel user_id — skip auth-admin lookups for it; the frontend renders it
+# as "System".
+SYSTEM_RUN_USER_ID = "00000000-0000-0000-0000-000000000000"
+
+
 def _duration_ms(started: Optional[str], ended: Optional[str]) -> Optional[int]:
     """Milliseconds between started_at and ended_at. None if either is missing
     or unparseable. Values arrive as ISO strings (datetime) or datetime."""
@@ -141,7 +164,14 @@ async def list_ai_usage_runs(
     total = result["total"]
 
     # Enrich user_id → email (TTL-cached; only misses hit auth admin).
-    uids = list({str(r["user_id"]) for r in rows if r.get("user_id")})
+    # The system sentinel is not a real auth user — never look it up.
+    uids = list(
+        {
+            str(r["user_id"])
+            for r in rows
+            if r.get("user_id") and str(r["user_id"]) != SYSTEM_RUN_USER_ID
+        }
+    )
     email_map = await _emails_for(uids) if uids else {}
 
     items = [
@@ -175,3 +205,34 @@ async def list_ai_usage_models(auth: AdminAuthDep) -> List[str]:
     dropdown in the admin AI Usage page."""
     repo = get_agent_runs_repository()
     return await repo.distinct_models()
+
+
+@router.get("/summary", response_model=AiUsageSummaryResponse)
+async def ai_usage_summary(
+    auth: AdminAuthDep,
+    days: int = Query(30, ge=1, le=365),
+) -> AiUsageSummaryResponse:
+    """Per-day × per-model usage rollup for the charts (DeepSeek-console
+    style): daily cost / requests / tokens, stacked by model."""
+    started_after = datetime.now(timezone.utc) - timedelta(days=days)
+    repo = get_agent_runs_repository()
+    rows = await repo.daily_usage_by_model(started_after=started_after)
+
+    daily = [
+        AiUsageDailyRow(
+            date=str(r.get("date")),
+            model=r.get("model"),
+            provider=r.get("provider"),
+            requests=int(r.get("requests") or 0),
+            total_tokens=int(r.get("total_tokens") or 0),
+            cost_cents=float(r.get("cost_cents") or 0.0),
+        )
+        for r in rows
+    ]
+    return AiUsageSummaryResponse(
+        days=days,
+        total_requests=sum(d.requests for d in daily),
+        total_tokens=sum(d.total_tokens for d in daily),
+        total_cost_cents=sum(d.cost_cents for d in daily),
+        daily=daily,
+    )

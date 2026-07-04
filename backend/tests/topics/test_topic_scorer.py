@@ -403,3 +403,62 @@ async def test_score_items_fails_over_to_next_model(monkeypatch):
 @pytest.mark.asyncio
 async def test_score_items_empty_input():
     assert await TopicScorerService().score_items([]) == {}
+
+
+@pytest.mark.asyncio
+async def test_run_recorded_wraps_with_run_recorder(monkeypatch):
+    """Scoring calls must land in agent_runs: when the agent row resolves,
+    _run_recorded wraps run_turn in RunRecorder (system user, topic_scorer
+    trigger, model+provider attached) and passes the recorder into run_turn.
+    This is the regression guard for the invisible 2026-06 deepseek burn."""
+    from unittest.mock import AsyncMock
+    from uuid import UUID
+
+    from app.services.topics.topic_scorer import SYSTEM_RUN_USER_ID
+
+    svc = TopicScorerService()
+    captured: dict = {}
+
+    class _FakeRecorder:
+        def __init__(self, **kwargs):
+            captured["recorder_kwargs"] = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+    monkeypatch.setattr("app.services.topics.topic_scorer.RunRecorder", _FakeRecorder)
+
+    runner = type("R", (), {})()
+    runner.run_turn = AsyncMock(return_value={"content": "[]"})
+
+    agent_id = UUID("33333333-3333-3333-3333-333333333333")
+    result = await svc._run_recorded(
+        runner, object(), [], model="deepseek-v4-flash", agent_id=agent_id
+    )
+
+    assert result == {"content": "[]"}
+    kw = captured["recorder_kwargs"]
+    assert kw["agent_id"] == agent_id
+    assert kw["user_id"] == SYSTEM_RUN_USER_ID
+    assert kw["trigger"] == "topic_scorer"
+    assert kw["model"] == "deepseek-v4-flash"
+    assert kw["provider"] == "deepseek"
+    # the recorder instance reached run_turn (usage lands in agent_runs)
+    assert isinstance(runner.run_turn.call_args.kwargs["recorder"], _FakeRecorder)
+
+
+@pytest.mark.asyncio
+async def test_run_recorded_without_agent_id_still_runs(monkeypatch):
+    """Telemetry never blocks scoring: no agent row → plain run_turn."""
+    from unittest.mock import AsyncMock
+
+    svc = TopicScorerService()
+    runner = type("R", (), {})()
+    runner.run_turn = AsyncMock(return_value={"content": "[]"})
+
+    result = await svc._run_recorded(runner, object(), [], model="m", agent_id=None)
+    assert result == {"content": "[]"}
+    assert "recorder" not in runner.run_turn.call_args.kwargs

@@ -1,14 +1,17 @@
 import { useMemo, useRef } from 'react'
-import { Tag, Button, Typography } from '@arco-design/web-react'
+import { Tag, Button, Typography, Card, Grid, Statistic } from '@arco-design/web-react'
 import { IconExport } from '@arco-design/web-react/icon'
+import { Column, Line } from '@ant-design/charts'
 import { NotionTable } from '../../components/notion-table'
 import type { NotionColumnDef } from '../../components/notion-table'
 import { useNotionTable } from '../../hooks/useNotionTable'
 import { apiClient } from '../../api/client'
-import { useAiUsageModels } from '../../api/endpoints/ai-usage'
+import { useAiUsageModels, useAiUsageSummary } from '../../api/endpoints/ai-usage'
 import type { AiUsageRow } from '../../api/endpoints/ai-usage'
 import { formatDateTime } from '../../utils/format'
 import { exportToCsv } from '../../utils/csv-export'
+
+const { Row, Col } = Grid
 
 // --- Constants ---
 
@@ -61,6 +64,86 @@ function formatDuration(ms: number | null): string {
   return `${(ms / 1000).toFixed(1)} s`
 }
 
+const SYSTEM_USER_ID = '00000000-0000-0000-0000-000000000000'
+
+// --- Charts section (DeepSeek-console style: daily spend / requests /
+// tokens, stacked or grouped by model, hover shows per-model breakdown) ---
+
+function UsageCharts() {
+  const { data: summary } = useAiUsageSummary(30)
+
+  const chartRows = useMemo(
+    () =>
+      (summary?.daily ?? []).map((d) => ({
+        ...d,
+        model: d.model || 'unknown',
+        cost_usd: Number((d.cost_cents / 100).toFixed(6)),
+      })),
+    [summary],
+  )
+
+  if (!summary || chartRows.length === 0) return null
+
+  const common = {
+    data: chartRows,
+    xField: 'date',
+    seriesField: 'model',
+    height: 220,
+    legend: { position: 'bottom' as const },
+  }
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <Row gutter={16} style={{ marginBottom: 16 }}>
+        <Col span={8}>
+          <Card>
+            <Statistic
+              title={`Cost (${summary.days}d)`}
+              value={(summary.total_cost_cents / 100).toFixed(4)}
+              prefix="$"
+            />
+          </Card>
+        </Col>
+        <Col span={8}>
+          <Card>
+            <Statistic
+              title={`Requests (${summary.days}d)`}
+              value={summary.total_requests}
+              groupSeparator
+            />
+          </Card>
+        </Col>
+        <Col span={8}>
+          <Card>
+            <Statistic
+              title={`Tokens (${summary.days}d)`}
+              value={summary.total_tokens}
+              groupSeparator
+            />
+          </Card>
+        </Col>
+      </Row>
+      <Row gutter={16}>
+        <Col span={8}>
+          <Card title="Daily Cost ($)" bodyStyle={{ padding: 12 }}>
+            <Column {...common} yField="cost_usd" isStack />
+          </Card>
+        </Col>
+        <Col span={8}>
+          <Card title="Daily Requests" bodyStyle={{ padding: 12 }}>
+            <Line {...common} yField="requests" />
+          </Card>
+        </Col>
+        <Col span={8}>
+          <Card title="Daily Tokens" bodyStyle={{ padding: 12 }}>
+            <Column {...common} yField="total_tokens" isStack />
+          </Card>
+        </Col>
+      </Row>
+    </div>
+  )
+}
+
 // --- Main component ---
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -91,7 +174,20 @@ export function AiUsagePage() {
         filterable: true,
         size: 200,
         cell: (row) =>
-          row.user_id ? (
+          row.user_id === SYSTEM_USER_ID ? (
+            <Tag
+              style={{ cursor: 'pointer' }}
+              onClick={() =>
+                addFilterRef.current?.({
+                  field: 'user_email',
+                  operator: 'is',
+                  value: SYSTEM_USER_ID,
+                })
+              }
+            >
+              System
+            </Tag>
+          ) : row.user_id ? (
             <Typography.Text
               style={{ color: 'rgb(var(--primary-6))', cursor: 'pointer' }}
               ellipsis={{ showTooltip: true }}
@@ -236,27 +332,30 @@ export function AiUsagePage() {
   }
 
   return (
-    <NotionTable<AiUsageRow>
-      table={table}
-      toolbarProps={toolbarProps}
-      pagination={pagination}
-      onPageChange={setPage}
-      isLoading={isLoading}
-      emptyText="No AI usage found"
-      scrollX={1340}
-      toolbarExtra={
-        <>
-          <Typography.Text
-            type="secondary"
-            style={{ fontSize: 12, marginRight: 8 }}
-          >
-            Last 30 days · source: agent runs
-          </Typography.Text>
-          <Button icon={<IconExport />} size="small" onClick={handleExport}>
-            Export Page
-          </Button>
-        </>
-      }
-    />
+    <>
+      <UsageCharts />
+      <NotionTable<AiUsageRow>
+        table={table}
+        toolbarProps={toolbarProps}
+        pagination={pagination}
+        onPageChange={setPage}
+        isLoading={isLoading}
+        emptyText="No AI usage found"
+        scrollX={1340}
+        toolbarExtra={
+          <>
+            <Typography.Text
+              type="secondary"
+              style={{ fontSize: 12, marginRight: 8 }}
+            >
+              Last 30 days · source: agent runs
+            </Typography.Text>
+            <Button icon={<IconExport />} size="small" onClick={handleExport}>
+              Export Page
+            </Button>
+          </>
+        }
+      />
+    </>
   )
 }

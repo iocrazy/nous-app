@@ -312,6 +312,39 @@ class AgentRunsRepository(AsyncpgRepository):
             logger.error(f"Failed to list distinct models: {e}")
             return []
 
+    async def daily_usage_by_model(
+        self, *, started_after: datetime
+    ) -> List[Dict[str, Any]]:
+        """Per-day × per-model rollup for the admin AI-usage charts.
+
+        Returns rows ``{date, model, provider, requests, total_tokens,
+        cost_cents}`` ordered by date. NULL model groups as-is (router renders
+        'unknown'). Datetime bound as ``datetime``."""
+        try:
+            day = func.date(AgentRuns.started_at).label("date")
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(
+                        day,
+                        AgentRuns.model,
+                        AgentRuns.provider,
+                        func.count().label("requests"),
+                        func.coalesce(func.sum(AgentRuns.total_tokens), 0).label(
+                            "total_tokens"
+                        ),
+                        func.coalesce(func.sum(AgentRuns.cost_cents), 0).label(
+                            "cost_cents"
+                        ),
+                    )
+                    .where(AgentRuns.started_at >= started_after)
+                    .group_by(day, AgentRuns.model, AgentRuns.provider)
+                    .order_by(day.asc())
+                )
+                return [dict(r) for r in result.mappings().all()]
+        except Exception as e:
+            logger.error(f"Failed to compute daily usage: {e}")
+            return []
+
     # ------------------------------------------------------------------
     # Cancel (flip flag; runner observes via RunRecorder.check_cancelled)
     # ------------------------------------------------------------------

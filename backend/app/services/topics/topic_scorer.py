@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 from typing import Any, Optional
+from uuid import UUID
 
 from loguru import logger
 
@@ -29,10 +30,16 @@ from app.services.ai.governance.ai_governance import (
 )
 from app.services.ai.prompts.prompt_composer import ComposerInput, PromptComposer
 from app.services.ai.runner.agent_runner import AgentRunner
+from app.services.ai.runner.run_recorder import RunRecorder
 from app.services.ai.skills.skill_tool_service import SkillToolService
 from app.services.topics.scoring import normalize_dims
 
 AGENT_SLUG = "topic-scorer"
+# Scheduled scoring has no human caller; agent_runs.user_id is NOT NULL with no
+# FK, so this all-zeros sentinel marks system-initiated runs (admin AI Usage
+# renders it as "System"). Without a recorder these runs are INVISIBLE — the
+# 2026-06 deepseek balance burn (~2k calls / 7.6M tokens) never hit agent_runs.
+SYSTEM_RUN_USER_ID = UUID("00000000-0000-0000-0000-000000000000")
 _VALID_CATEGORIES = {"model", "product", "industry", "paper", "tips"}
 _MAX_CONTENT_CHARS = 600  # trim each item's content to bound prompt tokens
 # qwen3-6-35b is a reasoning model: it burns 1-2k tokens on <think> BEFORE the
@@ -201,6 +208,56 @@ class TopicScorerService:
             }
         return out
 
+    async def _recorder_agent_id(self) -> Optional[UUID]:
+        """UUID of the ``topic-scorer`` ai_agents row for RunRecorder, or None.
+
+        Telemetry must never block scoring — any failure resolves to None and
+        the run proceeds unrecorded (with a warning, so a silent-spend gap is
+        at least visible in logs)."""
+        try:
+            row = await get_agent_repository().get_by_slug(AGENT_SLUG)
+            if row and row.get("id"):
+                return UUID(str(row["id"]))
+        except Exception as e:  # noqa: BLE001 — telemetry is best-effort
+            logger.warning(f"[topic-scorer] recorder agent lookup failed: {e}")
+        logger.warning(
+            "[topic-scorer] no agent row for recorder — runs will NOT land in "
+            "agent_runs (spend invisible in admin AI Usage)"
+        )
+        return None
+
+    async def _run_recorded(
+        self,
+        runner: AgentRunner,
+        composed: Any,
+        user_messages: list[dict],
+        *,
+        model: str,
+        agent_id: Optional[UUID],
+    ) -> dict:
+        """One scoring turn, wrapped in RunRecorder when an agent row resolved.
+
+        Every platform-billed scoring call must land in ``agent_runs`` —
+        including failures (a 402/timeout records as a failed run with the
+        model/provider attached), so background spend is auditable in the
+        admin AI Usage page."""
+        if agent_id is None:
+            return await runner.run_turn(composed, user_messages=user_messages)
+        try:
+            provider: Optional[str] = provider_key_for_model(model)
+        except Exception:  # noqa: BLE001 — unknown prefix is fine
+            provider = None
+        async with RunRecorder(
+            agent_id=agent_id,
+            user_id=SYSTEM_RUN_USER_ID,
+            trigger="topic_scorer",
+            model=model,
+            provider=provider,
+        ) as rec:
+            return await runner.run_turn(
+                composed, user_messages=user_messages, recorder=rec
+            )
+
     async def score_items(
         self, items: list[dict], *, user_id: Optional[str] = None
     ) -> dict[int, dict]:
@@ -242,6 +299,7 @@ class TopicScorerService:
             )
         )
         user_messages = [{"role": "user", "content": self.build_user_payload(items)}]
+        recorder_agent_id = await self._recorder_agent_id()
 
         for adapter, model in candidates:
             runner = AgentRunner(
@@ -251,7 +309,13 @@ class TopicScorerService:
                 update={"model": model, "max_tokens": _MAX_OUTPUT_TOKENS}
             )
             try:
-                result = await runner.run_turn(composed, user_messages=user_messages)
+                result = await self._run_recorded(
+                    runner,
+                    composed,
+                    user_messages,
+                    model=model,
+                    agent_id=recorder_agent_id,
+                )
             except Exception as e:  # noqa: BLE001 — try the next candidate
                 logger.warning(f"[topic-scorer] model {model} unreachable: {e}")
                 continue
