@@ -302,6 +302,108 @@ async def test_verify_file_in_project_mismatch_still_raises():
             await svc._verify_file_in_project("43", "7")
 
 
+class _GatePassed(Exception):
+    """Sentinel raised by the first post-gate repo call — proves the ownership
+    gate passed without executing any file IO further down the method."""
+
+
+@pytest.mark.asyncio
+async def test_upload_new_version_gate_accepts_int_project_id_vs_str_param():
+    """``upload_new_version`` carried an inline copy of the same int/str
+    compare. With the gate delegated to ``_verify_file_in_project``, a
+    native-int row project_id must pass a str path param; the sentinel on
+    ``get_next_version_number`` (the first post-gate call) stops the method
+    before any file IO."""
+    from app.services.library.projects_service import ProjectsService
+
+    svc = ProjectsService()
+    with (
+        patch.object(
+            svc.repo, "get_project_by_id", new=AsyncMock(return_value={"id": 42})
+        ),
+        patch.object(
+            svc.repo,
+            "get_file_by_id",
+            new=AsyncMock(return_value={"id": 7, "project_id": 42}),
+        ),
+        patch.object(
+            svc.repo, "get_next_version_number", new=AsyncMock(side_effect=_GatePassed)
+        ),
+    ):
+        with pytest.raises(_GatePassed):
+            await svc.upload_new_version("42", "7", str(uuid.uuid4()), file=None)
+
+
+@pytest.mark.asyncio
+async def test_upload_new_version_gate_rejects_other_project():
+    from app.services.library.projects_service import ProjectsService
+
+    svc = ProjectsService()
+    with (
+        patch.object(
+            svc.repo, "get_project_by_id", new=AsyncMock(return_value={"id": 43})
+        ),
+        patch.object(
+            svc.repo,
+            "get_file_by_id",
+            new=AsyncMock(return_value={"id": 7, "project_id": 42}),
+        ),
+        patch.object(
+            svc.repo, "get_next_version_number", new=AsyncMock(side_effect=_GatePassed)
+        ) as post_gate,
+    ):
+        with pytest.raises(ValueError):
+            await svc.upload_new_version("43", "7", str(uuid.uuid4()), file=None)
+    post_gate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_update_review_status_gate_accepts_int_project_id_vs_str_param():
+    """``update_review_status`` carried the third copy of the inline int/str
+    compare; it must accept a native-int row project_id vs str path param."""
+    from app.services.library.projects_service import ProjectsService
+
+    svc = ProjectsService()
+    with (
+        patch.object(
+            svc.repo, "get_project_by_id", new=AsyncMock(return_value={"id": 42})
+        ),
+        patch.object(
+            svc.repo,
+            "get_file_by_id",
+            new=AsyncMock(return_value={"id": 7, "project_id": 42}),
+        ),
+        patch.object(
+            svc.repo,
+            "update_review_status",
+            new=AsyncMock(return_value={"id": 7, "review_status": "approved"}),
+        ),
+    ):
+        out = await svc.update_review_status("42", "7", str(uuid.uuid4()), "approved")
+    assert out["review_status"] == "approved"
+
+
+@pytest.mark.asyncio
+async def test_update_review_status_gate_rejects_other_project():
+    from app.services.library.projects_service import ProjectsService
+
+    svc = ProjectsService()
+    with (
+        patch.object(
+            svc.repo, "get_project_by_id", new=AsyncMock(return_value={"id": 43})
+        ),
+        patch.object(
+            svc.repo,
+            "get_file_by_id",
+            new=AsyncMock(return_value={"id": 7, "project_id": 42}),
+        ),
+        patch.object(svc.repo, "update_review_status", new=AsyncMock()) as update_mock,
+    ):
+        with pytest.raises(ValueError):
+            await svc.update_review_status("43", "7", str(uuid.uuid4()), "approved")
+    update_mock.assert_not_awaited()
+
+
 # ── service contract (keys flow through unchanged) ───────────────────────
 
 

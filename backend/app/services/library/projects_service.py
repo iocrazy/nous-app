@@ -332,11 +332,9 @@ class ProjectsService:
         if not project:
             raise ValueError("Project not found")
 
-        file_record = await self.repo.get_file_by_id(file_id)
-        if not file_record:
-            raise ValueError("File not found")
-        if file_record.get("project_id") != project_id:
-            raise ValueError("File not found in this project")
+        # Delegates the ownership check (incl. the int/str project_id
+        # coercion — the 5.3 trap) to the single shared gate.
+        await self._verify_file_in_project(project_id, file_id)
 
         # Get next version number
         next_version = await self.repo.get_next_version_number(file_id)
@@ -725,11 +723,9 @@ class ProjectsService:
         if not project:
             raise ValueError("Project not found")
 
-        file_record = await self.repo.get_file_by_id(file_id)
-        if not file_record:
-            raise ValueError("File not found")
-        if file_record.get("project_id") != project_id:
-            raise ValueError("File not found in this project")
+        # Delegates the ownership check (incl. the int/str project_id
+        # coercion — the 5.3 trap) to the single shared gate.
+        await self._verify_file_in_project(project_id, file_id)
 
         return await self.repo.update_review_status(file_id, review_status)
 

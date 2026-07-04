@@ -29,6 +29,11 @@ CREATE INDEX IF NOT EXISTS idx_project_file_comments_version
 
 ALTER TABLE project_file_comments ENABLE ROW LEVEL SECURITY;
 
+-- PG has no CREATE POLICY IF NOT EXISTS; DROP first so re-runs are clean
+-- (repo convention, see migrations 280/303).
+DROP POLICY IF EXISTS "Service role full access on project_file_comments"
+  ON project_file_comments;
+
 CREATE POLICY "Service role full access on project_file_comments"
   ON project_file_comments FOR ALL
   USING (auth.role() = 'service_role')
