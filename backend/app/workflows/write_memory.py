@@ -27,16 +27,43 @@ _RECENT_TURNS_PER_CHANNEL = 10
 
 @DBOS.step()
 async def load_recent_messages_step(session_id: str) -> dict[str, list[str]]:
-    """Pull last N user + N assistant messages from ai_messages."""
+    """Pull last N user + N assistant messages for a session.
+
+    Phase 2 (store fold): a "session id" may be a `conversations.id`
+    (direct_agent, FEATURE_DIRECT_CONVERSATIONS=on) or a legacy
+    `ai_sessions.id`. Snowflake ids are minted once, so an id exists in
+    only one of the two tables — probe conversations first, mirroring the
+    S7/S8 scope lookups. Conversations rows map sender_type→role and
+    body->>'text'→content so the downstream shape stays identical.
+    """
     from app.db import engine as db_engine
 
-    rows = await db_engine.fetch_all(
-        "SELECT role, content FROM public.ai_messages WHERE session_id = :sid "
-        "ORDER BY created_at DESC LIMIT :lim",
-        # session_id is a BIGINT snowflake (mig 232) carried as str — asyncpg
-        # rejects str binds on int8 ('str' object cannot be interpreted ...).
-        {"sid": int(session_id), "lim": _RECENT_TURNS_PER_CHANNEL * 4},
+    sid = int(session_id)
+    is_conversation = (
+        await db_engine.fetch_one(
+            "SELECT 1 AS x FROM public.conversations WHERE id = :sid",
+            {"sid": sid},
+        )
+        is not None
     )
+    if is_conversation:
+        rows = await db_engine.fetch_all(
+            "SELECT CASE WHEN sender_type = 'agent' THEN 'assistant' "
+            "            ELSE sender_type END AS role, "
+            "       COALESCE(body->>'text', '') AS content "
+            "FROM public.messages "
+            "WHERE conversation_id = :sid AND deleted_at IS NULL "
+            "ORDER BY seq DESC LIMIT :lim",
+            {"sid": sid, "lim": _RECENT_TURNS_PER_CHANNEL * 4},
+        )
+    else:
+        rows = await db_engine.fetch_all(
+            "SELECT role, content FROM public.ai_messages WHERE session_id = :sid "
+            "ORDER BY created_at DESC LIMIT :lim",
+            # session_id is a BIGINT snowflake (mig 232) carried as str — asyncpg
+            # rejects str binds on int8 ('str' object cannot be interpreted ...).
+            {"sid": sid, "lim": _RECENT_TURNS_PER_CHANNEL * 4},
+        )
     user_msgs: list[str] = []
     asst_msgs: list[str] = []
     for row in rows:
