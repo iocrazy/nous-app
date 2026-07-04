@@ -133,9 +133,9 @@ async def _seed_skill(conn) -> int:
 
 
 def _repo():
-    from app.repositories.agent_repository_orm import AgentRepositoryOrm
+    from app.repositories.agent_repository import AgentRepository
 
-    return AgentRepositoryOrm()
+    return AgentRepository()
 
 
 # ─── Reads: dict shape + strategy-C value-type parity ──────────────────
@@ -589,35 +589,13 @@ async def test_update_fields_versioned_snapshots_and_commits(
         await _repo().update_fields_versioned(uuid.uuid4(), {"agent_md": "x"})
 
 
-# ─── Flag-off legacy parity ─────────────────────────────────────────────
+# ─── Factory (flag-free, collapsed to ORM-only) ─────────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    """With USE_ORM_AGENTS off (default), the factory returns the legacy REST
-    AgentRepository — the ORM swap is opt-in and the REST path is unchanged."""
-    from app.core.config import settings
+async def test_factory_returns_collapsed_repo():
+    """The USE_ORM_AGENTS flag + legacy REST branch were retired; the factory
+    now unconditionally returns the collapsed ORM-backed AgentRepository."""
     from app.repositories import agent_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_AGENTS", False)
     repo = mod.get_agent_repository()
     assert type(repo) is mod.AgentRepository
-    # Crucially NOT the ORM subclass.
-    from app.repositories.agent_repository_orm import AgentRepositoryOrm
-
-    assert not isinstance(repo, AgentRepositoryOrm)
-
-
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    """With USE_ORM_AGENTS on AND the engine configured, the factory returns
-    the ORM subclass."""
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories import agent_repository as mod
-    from app.repositories.agent_repository_orm import AgentRepositoryOrm
-
-    monkeypatch.setattr(settings, "USE_ORM_AGENTS", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    repo = mod.get_agent_repository()
-    assert isinstance(repo, AgentRepositoryOrm)

@@ -89,20 +89,6 @@ class Settings(BaseSettings):
         "ORM background diff) for parity validation. Independent of USE_ORM_*. "
         "Empty = no shadowing (fully inert).",
     )
-    USE_ORM_AGENTS: bool = Field(
-        default=False,
-        description="Route AgentRepository through the SQLAlchemy 2.0 ORM "
-        "session layer (Phase 2 pilot — replaces the supabase-py REST path for "
-        "ai_agents / agent_skills / ai_agent_versions). Strategy C value-type "
-        "parity: uuid columns (id / user_id / created_by) are coerced to str at "
-        "the dict boundary to match the REST baseline (consumers do "
-        "UUID(agent['id']) / dict-key lookups / supabase inserts that break on a "
-        "native uuid.UUID); bigint team_id / project_id stay native int (REST "
-        "returned int; consumers do int(...) / bare-int compares). Covers "
-        "get_by_slug / get_by_id / list_persistent / list_accessible / "
-        "get_skill_ids reads + update_skill_bindings / update_fields / insert / "
-        "update_fields_versioned writes (writes commit via write_scope())",
-    )
     USE_ORM_RESOURCES: bool = Field(
         default=False,
         description="Route ResourcesRepository through the SQLAlchemy 2.0 ORM "
