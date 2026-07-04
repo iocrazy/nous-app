@@ -49,7 +49,8 @@ row it already owns, in every mode.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 
@@ -66,28 +67,73 @@ _SHADOW_SAMPLE = 1.0
 # shadow diffs are best-effort observability, not a correctness proof (the
 # two rows being compared may not even be the "same" logical entity, e.g.
 # the create_session mirror lives at a different id than the legacy row).
-_DIFF_FIELDS = ("title", "status", "role", "content")
+_DIFF_FIELDS = (
+    "title",
+    "status",
+    "role",
+    "content",
+    "total_tokens",
+    "message_count",
+)
 
 _VALID_MODES = ("off", "shadow", "on")
 
 _OWNER_LEGACY = "legacy"
 _OWNER_CONVERSATIONS = "conversations"
 
+# Distinct bad FEATURE_DIRECT_CONVERSATIONS values already warned about in
+# this process — keeps a misconfigured env var from spamming the log on
+# every single call (this function runs on the hot path).
+_warned_unknown_modes: set[str] = set()
+
 
 def _normalize_mode() -> str:
     """Read + normalize settings.FEATURE_DIRECT_CONVERSATIONS dynamically.
 
     Unknown values are treated as 'off' (the safe default) and logged once
-    per call — never raise on a bad env value.
+    per distinct bad value per process — never raise on a bad env value.
     """
     raw = (settings.FEATURE_DIRECT_CONVERSATIONS or "").strip().lower()
     if raw not in _VALID_MODES:
-        logger.warning(
-            "[p2-shadow] unknown FEATURE_DIRECT_CONVERSATIONS={!r}; treating as 'off'",
-            raw,
-        )
+        if raw not in _warned_unknown_modes:
+            _warned_unknown_modes.add(raw)
+            logger.warning(
+                "[p2-shadow] unknown FEATURE_DIRECT_CONVERSATIONS={!r}; "
+                "treating as 'off'",
+                raw,
+            )
         return "off"
     return raw
+
+
+def _key(session_id: Any) -> int:
+    """Normalize an owner-cache key to `int`.
+
+    ``create_session`` seeds the cache with the int id the store just
+    created; the API layer resolves session ids from path/query params,
+    which arrive as `str`. Without normalization, `_owner_cache[1]` (seeded)
+    and `_owner_cache["1"]` (looked up) are different dict keys and every
+    post-create lookup is a guaranteed cache miss (and, in 'off'/'shadow'
+    mode, a guaranteed probe against the wrong store in 'on' mode).
+    """
+    return int(session_id)
+
+
+def _sort_ts(row: dict) -> datetime:
+    """Comparable timestamp for cross-store sorting: legacy rows carry ISO
+    strings (PostgREST JSON), conversations rows carry tz-aware datetimes
+    (asyncpg). Normalize everything to an aware datetime; unparseable/missing
+    sorts last (epoch)."""
+    v = row.get("updated_at") or row.get("created_at")
+    if isinstance(v, datetime):
+        return v if v.tzinfo else v.replace(tzinfo=timezone.utc)
+    if isinstance(v, str):
+        try:
+            dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    return datetime.fromtimestamp(0, tz=timezone.utc)
 
 
 def _first_row(value: Any) -> Optional[Dict[str, Any]]:
@@ -98,12 +144,15 @@ def _first_row(value: Any) -> Optional[Dict[str, Any]]:
     return value
 
 
-def _shadow_diff(op: str, legacy_result: Any, new_result: Any) -> None:
+def _shadow_diff(op: str, legacy_result: Any, new_result: Any, *, entity: str) -> None:
     """Best-effort key-by-key diff on a stable field subset.
 
-    Never raises. Logs `[p2-shadow] MISMATCH op=... detail=...` when the
-    two sides disagree on any of `_DIFF_FIELDS`. Silent (no log at all)
-    when either side is empty/None, or when everything matches.
+    `entity` identifies what's being compared (a session id, or
+    ``user:{user_id}`` for user-scoped ops) so `[p2-shadow]` log lines are
+    greppable per entity. Never raises. Logs
+    `[p2-shadow] MISMATCH op=... entity=... field=...` when the two sides
+    disagree on any of `_DIFF_FIELDS`. Silent (no log at all) when either
+    side is empty/None, or when everything matches.
     """
     try:
         if _SHADOW_SAMPLE < 1.0:
@@ -126,10 +175,15 @@ def _shadow_diff(op: str, legacy_result: Any, new_result: Any) -> None:
         ]
         if mismatches:
             logger.warning(
-                "[p2-shadow] MISMATCH op={} detail={}", op, "; ".join(mismatches)
+                "[p2-shadow] MISMATCH op={} entity={} field={}",
+                op,
+                entity,
+                "; ".join(mismatches),
             )
     except Exception as exc:  # noqa: BLE001 - shadow diffs must never raise
-        logger.warning("[p2-shadow] diff_failed op={} err={!r}", op, exc)
+        logger.warning(
+            "[p2-shadow] diff_failed op={} entity={} err={!r}", op, entity, exc
+        )
 
 
 class RoutedAiStore:
@@ -163,27 +217,47 @@ class RoutedAiStore:
     async def _resolve(self, session_id: int) -> str:
         """Resolve + cache which store owns `session_id`.
 
-        Cache hit → return immediately, no probe. Cache miss:
-          * mode != 'on' → always "legacy", no probe at all (off/shadow
+        Thin wrapper over `_resolve_with_probe` for callers that only need
+        the owner (rename/delete/bump/messages) and have no use for a
+        prefetched probe row.
+        """
+        owner, _probe_row = await self._resolve_with_probe(session_id)
+        return owner
+
+    async def _resolve_with_probe(
+        self, session_id: int
+    ) -> Tuple[str, Optional[Dict[str, Any]]]:
+        """Resolve + cache which store owns `session_id`, also returning any
+        row already fetched while resolving so callers (namely
+        `get_session`) can reuse it instead of issuing a second query.
+
+        Cache hit → (owner, None) — nothing was probed, nothing to reuse.
+        Cache miss:
+          * mode != 'on' → (legacy, None), no probe at all (off/shadow
             per-session ops never touch the new store — see module
             docstring).
           * mode == 'on' → probe LegacyAiStore.get_session; a hit means
-            "legacy", a miss means the session must live on the
-            conversations store (the only two stores a RoutedAiStore ever
-            knows about).
+            "legacy" (and the row IS the probe result — return it), a miss
+            means the session must live on the conversations store (the
+            only two stores a RoutedAiStore ever knows about; nothing to
+            reuse in that case since the row lives on the other store).
         """
-        cached = self._owner_cache.get(session_id)
+        key = _key(session_id)
+        cached = self._owner_cache.get(key)
         if cached is not None:
-            return cached
+            return cached, None
 
         if _normalize_mode() != "on":
-            self._owner_cache[session_id] = _OWNER_LEGACY
-            return _OWNER_LEGACY
+            self._owner_cache[key] = _OWNER_LEGACY
+            return _OWNER_LEGACY, None
 
         row = await self._legacy.get_session(session_id=session_id)
-        owner = _OWNER_LEGACY if row is not None else _OWNER_CONVERSATIONS
-        self._owner_cache[session_id] = owner
-        return owner
+        if row is not None:
+            self._owner_cache[key] = _OWNER_LEGACY
+            return _OWNER_LEGACY, row
+
+        self._owner_cache[key] = _OWNER_CONVERSATIONS
+        return _OWNER_CONVERSATIONS, None
 
     # ------------------------------------------------------------------
     # Sessions
@@ -216,13 +290,13 @@ class RoutedAiStore:
         if mode == "on":
             row = await self._new.create_session(**kwargs)
             if row is not None and row.get("id") is not None:
-                self._owner_cache[row["id"]] = _OWNER_CONVERSATIONS
+                self._owner_cache[_key(row["id"])] = _OWNER_CONVERSATIONS
             return row
 
         # off / shadow: legacy is authoritative for the returned result.
         row = await self._legacy.create_session(**kwargs)
         if row is not None and row.get("id") is not None:
-            self._owner_cache[row["id"]] = _OWNER_LEGACY
+            self._owner_cache[_key(row["id"])] = _OWNER_LEGACY
 
         if mode == "shadow":
             try:
@@ -230,7 +304,10 @@ class RoutedAiStore:
             except Exception as exc:  # noqa: BLE001 - mirror is best-effort
                 logger.warning("[p2-shadow] mirror_create_failed: {!r}", exc)
             else:
-                _shadow_diff("create_session", row, mirror)
+                entity = (
+                    str(row["id"]) if row and row.get("id") is not None else "unknown"
+                )
+                _shadow_diff("create_session", row, mirror, entity=entity)
 
         return row
 
@@ -261,39 +338,29 @@ class RoutedAiStore:
             except Exception as exc:  # noqa: BLE001 - shadow list is best-effort
                 logger.warning("[p2-shadow] mirror_list_failed: {!r}", exc)
             else:
+                # Lists from the two stores are unrelated collections (not
+                # "the same" rows in different stores, unlike create_session's
+                # mirror), so a field-by-field diff of e.g. their first rows
+                # would be a guaranteed false positive. Log counts only.
                 logger.info(
-                    "[p2-shadow] op=list_sessions legacy_count={} new_count={}",
+                    "[p2-shadow] list_sessions counts legacy={} mirror={} entity=user:{}",
                     len(legacy_rows),
                     len(new_rows),
+                    user_id,
                 )
-                _shadow_diff("list_sessions", legacy_rows, new_rows)
             return legacy_rows
 
         # mode == "on": users with old + new sessions must see both.
         new_rows = await self._new.list_sessions(**kwargs)
         merged = list(legacy_rows) + list(new_rows)
-        merged.sort(key=lambda row: row.get("updated_at") or "", reverse=True)
+        merged.sort(key=_sort_ts, reverse=True)
         return merged[:limit]
 
     async def get_session(self, *, session_id: int) -> Optional[Dict[str, Any]]:
-        cached = self._owner_cache.get(session_id)
-        if cached is not None:
-            return await self._store_for(cached).get_session(session_id=session_id)
-
-        if _normalize_mode() != "on":
-            # off / shadow: legacy is the only store per-session ops touch.
-            self._owner_cache[session_id] = _OWNER_LEGACY
-            return await self._legacy.get_session(session_id=session_id)
-
-        # Cache miss in 'on' mode: the legacy probe result IS the answer
-        # when it hits, so don't fetch it twice.
-        row = await self._legacy.get_session(session_id=session_id)
-        if row is not None:
-            self._owner_cache[session_id] = _OWNER_LEGACY
-            return row
-
-        self._owner_cache[session_id] = _OWNER_CONVERSATIONS
-        return await self._new.get_session(session_id=session_id)
+        owner, probe_row = await self._resolve_with_probe(session_id)
+        if probe_row is not None:
+            return probe_row
+        return await self._store_for(owner).get_session(session_id=session_id)
 
     async def rename_session(self, *, session_id: int, title: str) -> Dict[str, Any]:
         owner = await self._resolve(session_id)
