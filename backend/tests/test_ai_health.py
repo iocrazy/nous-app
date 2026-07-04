@@ -1,8 +1,12 @@
 """AI capability health — surfaces the invisible capability→agent→model
 →provider→key mapping so users can see (and fix) what each feature uses.
 
-Reuses the SAME resolver the runtime uses (resolve_task_provider_config),
-so the panel can't drift from reality.
+Reuses the SAME resolvers the runtime uses so the panel can't drift from
+reality: resolve_task_provider_config for the agent-driven capabilities, and
+resolve_summarization_config for summarization (whose real workflow scans a
+hardcoded provider priority with no agent — audit finding D). The board is now
+honest about that path rather than reporting the agent-slug resolution the
+feature never runs.
 """
 
 from __future__ import annotations
@@ -10,6 +14,7 @@ from __future__ import annotations
 import pytest
 
 from app.services.ai import ai_health
+from app.services.ai.providers.ai_provider_helpers import ResolvedAIConfig
 
 
 def _patch(monkeypatch, *, settings, resolver, runtime=None):
@@ -19,11 +24,21 @@ def _patch(monkeypatch, *, settings, resolver, runtime=None):
     async def _resolve(uid, task_key, default_slug):
         return resolver(task_key, default_slug)
 
+    async def _resolve_summ(uid, settings_json=None):
+        # Summarization resolves through its own path; echo the same tuple the
+        # agent resolver would return so the shared _evaluate assertions still
+        # exercise summarization, but with agent_slug="" (no agent) as the real
+        # resolver produces.
+        pk, cfg, model, _slug = resolver("summarization", "summarize")
+        origin = "byok" if (cfg.get("api_key") or "").strip() else "env"
+        return ResolvedAIConfig(pk, cfg, model, "", origin)
+
     async def _runtime(uid, task_types):
         return runtime or {}
 
     monkeypatch.setattr(ai_health, "get_ai_settings", _get_ai_settings)
     monkeypatch.setattr(ai_health, "resolve_task_provider_config", _resolve)
+    monkeypatch.setattr(ai_health, "resolve_summarization_config", _resolve_summ)
     monkeypatch.setattr(ai_health, "fetch_runtime_summary", _runtime)
 
 
@@ -47,7 +62,10 @@ async def test_ok_when_model_and_key_present(monkeypatch):
     assert summ["status"] == "ok"
     assert summ["model"] == "qwen-max"
     assert summ["provider"] == "qwen"
-    assert summ["agent_slug"] == "summarize"
+    # The board is now honest: summarization has no agent (it scans a hardcoded
+    # provider priority), so agent_slug is "" — not the agent-slug the old
+    # (never-run) resolution path reported.
+    assert summ["agent_slug"] == ""
     assert summ["assigned"] is True
 
 
@@ -280,8 +298,14 @@ async def test_resolver_failure_is_isolated(monkeypatch):
             default_slug,
         )
 
+    async def _resolve_summ(uid, settings_json=None):
+        return ResolvedAIConfig(
+            "qwen", {"model": "qwen-max", "api_key": "sk"}, "qwen-max", "", "byok"
+        )
+
     monkeypatch.setattr(ai_health, "get_ai_settings", _get_ai_settings)
     monkeypatch.setattr(ai_health, "resolve_task_provider_config", _resolve)
+    monkeypatch.setattr(ai_health, "resolve_summarization_config", _resolve_summ)
 
     rows = await ai_health.get_capability_health("u1")
     # The crashing capability becomes an 'error' row; siblings unaffected.

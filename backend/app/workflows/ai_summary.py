@@ -38,56 +38,24 @@ async def load_summary_inputs(parsed_media_id: int, user_id: str) -> dict[str, A
             f"no transcript for parsed_media={parsed_media_id} user={user_id}"
         )
 
-    # ── Governance gate (shared helper — platform-catalog first) ────────────
-    # Check BEFORE consulting user settings so a locked module short-circuits
-    # without depending on the user having settings configured. The shared
-    # resolver tries the platform catalog first, then the admin's manual config.
-    from app.services.ai.governance.ai_governance import resolve_locked_module_config
-
-    locked = await resolve_locked_module_config("summarization")
-    if locked is not None:
-        return {
-            "transcript": row["transcript"],
-            "title": row.get("title") or "",
-            "resource_id": str(row["resource_id"]),
-            "provider_key": locked.provider_key,
-            "provider_config": locked.provider_config,
-        }
-    # ── End governance gate ─────────────────────────────────────────────────
-
-    settings_row = await db_engine.fetch_one(
-        "SELECT settings_json FROM public.user_settings WHERE user_id = :uid",
-        {"uid": user_id},
+    # Resolve the provider config through the shared typed resolver (A3 lift).
+    # It owns the governance gate (platform-catalog first), the "no
+    # user_settings" raise, the hardcoded provider-priority scan, and the
+    # default_summary_model fallback. Passing settings_json=None lets the
+    # resolver issue the same user_settings SELECT the workflow used to run —
+    # and skip it entirely when the module is governance-locked.
+    from app.services.ai.providers.ai_provider_helpers import (
+        resolve_summarization_config,
     )
-    if not settings_row:
-        raise RuntimeError(f"no user_settings for {user_id}")
-    settings = settings_row["settings_json"]
-    if isinstance(settings, str):
-        settings = json.loads(settings)
-    ai_settings = settings.get("ai_settings", {})
-    providers = ai_settings.get("ai_providers", {}) or {}
 
-    chosen_key: Optional[str] = None
-    chosen_cfg: dict[str, Any] = {}
-    for key in ("doubao", "qwen", "openai", "deepseek"):
-        cfg = providers.get(key)
-        if cfg and cfg.get("api_key") and cfg.get("enabled"):
-            chosen_key, chosen_cfg = key, cfg
-            break
+    cfg = await resolve_summarization_config(user_id)
 
     return {
         "transcript": row["transcript"],
         "title": row.get("title") or "",
         "resource_id": str(row["resource_id"]),
-        "provider_key": chosen_key or "",
-        "provider_config": {
-            "api_key": chosen_cfg.get("api_key", ""),
-            "base_url": chosen_cfg.get("base_url", ""),
-            "app_id": chosen_cfg.get("app_id", ""),
-            "model": chosen_cfg.get("selected_model")
-            or ai_settings.get("default_summary_model")
-            or "",
-        },
+        "provider_key": cfg.provider_key,
+        "provider_config": cfg.provider_config,
     }
 
 

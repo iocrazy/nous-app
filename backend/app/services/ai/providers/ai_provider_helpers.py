@@ -416,6 +416,107 @@ async def resolve_transcription_config(
     )
 
 
+async def resolve_summarization_config(
+    user_id: str, settings_json: Optional[dict] = None
+) -> ResolvedAIConfig:
+    """Resolve the summarization provider config for a user run.
+
+    Behaviour-preserving lift of the resolution section that lived inline in
+    ``app.workflows.ai_summary.load_summary_inputs`` — moved here so the
+    summarization user path resolves through the SAME typed
+    :class:`ResolvedAIConfig` as the other resolvers (the unification point).
+
+    Unlike the agent-driven tasks, summarization has NO agent slug and honors
+    NO user nous-pick: its user path scans a HARDCODED provider priority
+    (``doubao`` → ``qwen`` → ``openai`` → ``deepseek``) for the first provider
+    the user has both keyed and enabled, and uses that provider's
+    ``selected_model`` (falling back to ``ai_settings.default_summary_model``).
+    ``agent_slug`` is therefore always ``""`` — summarization composes no agent
+    prompt.
+
+    Resolution order (identical to the pre-lift workflow):
+
+    1. Governance gate — ``resolve_locked_module_config("summarization")``.
+       Locked → ``origin="governance"``; the user path is bypassed (user
+       settings are not consulted) and provider/config/model come from the
+       admin's locked config (``provider_config`` keeps the ``app_id`` shape the
+       workflow's dict carried).
+    2. User path — requires ``user_settings``; missing → ``RuntimeError("no
+       user_settings for ...")``. Scans the hardcoded provider priority for the
+       first ``{api_key, enabled}`` provider. When one is found the config
+       carries its api_key (``origin="byok"``); when NONE is enabled the loop
+       leaves ``provider_key=""`` with an empty (keyless) config
+       (``origin="env"``) — the exact fall-through the workflow preserved (no
+       raise). ``model`` is the chosen provider's ``selected_model`` else
+       ``default_summary_model`` else ``""``.
+
+    ``settings_json`` is the user_settings ``settings_json`` value (dict or JSON
+    string); pass it to avoid a second DB read. When ``None`` (and the module
+    isn't governance-locked) the same SQL the workflow used is issued here.
+    """
+    from app.services.ai.governance.ai_governance import resolve_locked_module_config
+
+    # ── Governance gate (shared helper — platform-catalog first) ──────────
+    # Check BEFORE consulting user settings so a locked module short-circuits
+    # without depending on the user having settings configured.
+    locked = await resolve_locked_module_config("summarization")
+    if locked is not None:
+        return ResolvedAIConfig(
+            provider_key=locked.provider_key,
+            provider_config=locked.provider_config,
+            model=locked.model,
+            agent_slug="",
+            origin="governance",
+        )
+
+    # ── User path — user_settings required from here on ───────────────────
+    if settings_json is None:
+        from app.db import engine as db_engine
+
+        settings_row = await db_engine.fetch_one(
+            "SELECT settings_json FROM public.user_settings WHERE user_id = :uid",
+            {"uid": user_id},
+        )
+        if not settings_row:
+            raise RuntimeError(f"no user_settings for {user_id}")
+        settings_json = settings_row["settings_json"]
+    if not settings_json:
+        raise RuntimeError(f"no user_settings for {user_id}")
+
+    settings = settings_json
+    if isinstance(settings, str):
+        settings = json.loads(settings)
+    ai_settings = settings.get("ai_settings", {})
+    providers = ai_settings.get("ai_providers", {}) or {}
+
+    chosen_key: Optional[str] = None
+    chosen_cfg: Dict[str, Any] = {}
+    for key in ("doubao", "qwen", "openai", "deepseek"):
+        cfg = providers.get(key)
+        if cfg and cfg.get("api_key") and cfg.get("enabled"):
+            chosen_key, chosen_cfg = key, cfg
+            break
+
+    model = (
+        chosen_cfg.get("selected_model")
+        or ai_settings.get("default_summary_model")
+        or ""
+    )
+    provider_config: Dict[str, Any] = {
+        "api_key": chosen_cfg.get("api_key", ""),
+        "base_url": chosen_cfg.get("base_url", ""),
+        "app_id": chosen_cfg.get("app_id", ""),
+        "model": model,
+    }
+    return ResolvedAIConfig(
+        provider_key=chosen_key or "",
+        provider_config=provider_config,
+        model=model,
+        agent_slug="",
+        origin=_byok_origin(provider_config),
+    )
+
+
 async def resolve_task_provider_config(
     user_id: Optional[str],
     task_key: str,
