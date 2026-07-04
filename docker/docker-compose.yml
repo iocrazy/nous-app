@@ -68,6 +68,10 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
       - DOUBAO_API_KEY=${DOUBAO_API_KEY:-}
+      # Secret-at-rest root key (Fernet). _OLD carries the previous key
+      # during rotation windows (MultiFernet decrypt).
+      - MEDIAHUB_TOKEN_ENCRYPTION_KEY=${MEDIAHUB_TOKEN_ENCRYPTION_KEY:-}
+      - MEDIAHUB_TOKEN_ENCRYPTION_KEY_OLD=${MEDIAHUB_TOKEN_ENCRYPTION_KEY_OLD:-}
       - WHISPER_PROVIDER=${WHISPER_PROVIDER:-openai_api}
       # DBOS orchestrator — direct Postgres URL (NOT supavisor / pgbouncer:
       # DBOS uses LISTEN/NOTIFY which doesn't survive any pooler). Empty
@@ -160,6 +164,10 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
       - DOUBAO_API_KEY=${DOUBAO_API_KEY:-}
+      # Secret-at-rest root key (Fernet). _OLD carries the previous key
+      # during rotation windows (MultiFernet decrypt).
+      - MEDIAHUB_TOKEN_ENCRYPTION_KEY=${MEDIAHUB_TOKEN_ENCRYPTION_KEY:-}
+      - MEDIAHUB_TOKEN_ENCRYPTION_KEY_OLD=${MEDIAHUB_TOKEN_ENCRYPTION_KEY_OLD:-}
       - WHISPER_PROVIDER=${WHISPER_PROVIDER:-openai_api}
       # CRITICAL: worker NEEDS DBOS_DATABASE_URL — the WHOLE point of
       # this container is to consume the DBOS workflow queue. Without
