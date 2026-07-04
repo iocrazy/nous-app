@@ -21,40 +21,44 @@ the crypto):
   key_hash  (String(64)) — SHA-256(full_key) hex. The HASH-AT-REST: lookups go
                            by hash, the full key is never matched directly.
   key_prefix(String(20)) — display prefix "dk_xxxxxxxx..." (the MASKED form).
-  key_value (String)     — the FULL plaintext key (migration 039 added this
-                           deliberately: "persistent full key access" so the UI
-                           can re-copy the key from the list). PLAINTEXT AT REST.
+  key_value (String)     — the FULL key. As of Task 52 (encrypt-at-rest) this is
+                           ENCRYPTED at rest: create() runs it through
+                           ``secret_box.encrypt`` (Fernet, ``gAAAAA`` prefix)
+                           before insert. Legacy rows may still be plaintext
+                           until the ``rotate_secrets --target api_keys``
+                           backfill runs; ``secret_box.decrypt`` passes
+                           non-``gAAAAA`` values through, so the migration window
+                           is seamless. Reads NEVER surface it — see MASKING.
 
   HASH-ON-WRITE / LOOKUP-BY-HASH reproduced EXACTLY:
     - create(): calls self.generate_key() (pure static) → stores key_hash +
-      key_value + key_prefix; returns the row with ``secret_key`` = full_key
-      injected ONCE (the one-time reveal contract — identical to legacy).
+      key_prefix + ENCRYPTED key_value; returns the row with ``secret_key`` =
+      full_key (plaintext) injected ONCE (the one-time reveal contract).
     - validate_key(full_key): self.hash_key(full_key) → get_by_key_hash() →
-      status/expiry checks. The hash is computed in Python (pure static),
-      looked up by the key_hash column. Reproduced byte-for-byte.
+      status/expiry checks. Hash-based, UNTOUCHED — it never reads/decrypts
+      key_value. Reproduced byte-for-byte.
 
-  EXPOSURE / MASKING boundary reproduced EXACTLY (do NOT widen/narrow):
-    - create()        → returns the row + ``secret_key`` (full plaintext, ONE
-                        time). Plaintext exposure: INTENTIONAL one-time reveal.
+  ENCRYPT-AT-REST + MASKING boundary (Task 52 — do NOT widen):
+    - create()        → returns the row (key_value = CIPHERTEXT) + ``secret_key``
+                        (full plaintext, ONE time). The one-time reveal is the
+                        ONLY plaintext exposure; the router's create response
+                        does not echo key_value.
     - get_by_key_hash / get_by_key_id / get_user_keys / update / revoke /
-      validate_key → return the raw ``SELECT *`` dict, which INCLUDES key_value
-                     (full plaintext) and key_hash. This is the SAME shape the
-                     legacy supabase-py ``select("*")`` returned. The
-                     api_key_router THEN surfaces ``key_value`` to the client in
-                     list / get / update responses (migration 039 + the
-                     ApiKeyResponse.key_value field). ⚠️ This means the LIST and
-                     GET endpoints return the FULL plaintext key, not a masked
-                     ``key_prefix``-only form. That is a pre-existing
-                     over-exposure (plaintext key at rest + returned on list);
-                     it is reproduced UNCHANGED here — the collapse must not
-                     narrow it (would break the UI re-copy) nor widen it. NO repo
-                     method masks; masking is the router's ``key_prefix`` field
-                     choice, untouched by this migration.
+      validate_key → return the raw ``SELECT *`` dict, whose key_value is the
+                     CIPHERTEXT at rest (never plaintext). No repo READ decrypts
+                     key_value — nothing server-side needs the real value
+                     (validation is hash-based; the UI re-copy affordance is
+                     retired). The ``_mask_key(row)`` helper (below) is what the
+                     api_key_router applies to every list / get / update row: it
+                     replaces key_value with ``key_prefix + "…"`` and adds a
+                     ``key_value_set`` boolean, so NEITHER plaintext NOR
+                     ciphertext ever reaches the client on reads.
 
-  Encryption boundary reproduced: NONE. The legacy stored key_value in
-  PLAINTEXT (no Fernet/KMS/app.core.crypto import anywhere in the repo). The
-  collapse does NOT add encryption (inert; adding it would orphan existing
-  plaintext rows). Plaintext-at-rest is a pre-existing CONCERN, not fixed here.
+  Encryption boundary: Fernet at the create() write boundary via
+  ``app.core.secret_box.encrypt`` (default dev-fallback key — same convention as
+  ``user_mcp_servers`` and the rotate runner). Existing plaintext rows are
+  backfilled out-of-band by ``python -m scripts.rotate_secrets --target
+  api_keys`` after deploy.
 
 ★ UUID AUTHZ HOT SPOT ★
 =======================
@@ -136,6 +140,7 @@ from loguru import logger
 from sqlalchemy import func, select, text
 from sqlalchemy import update as sa_update
 
+from app.core.secret_box import encrypt as encrypt_secret
 from app.db.session import read_scope, write_scope
 from app.models import ApiKeys
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
@@ -168,9 +173,10 @@ def _parity(out: Dict[str, Any]) -> Dict[str, Any]:
     the AuthContext.user_id str field); datetime → ISO str. Bigint id stays
     NATIVE int (the 5.3 trap). status was ALREADY unwrapped Enum→bare-str by
     ``_orm_obj_to_dict``/``_plain`` (so it is a plain str here, not an Enum).
-    JSONB scopes stays a native list/dict. key_value / key_hash / key_prefix
-    pass through UNCHANGED (no masking — exposure parity with the legacy
-    SELECT *). NULLs pass through."""
+    JSONB scopes stays a native list/dict. key_value (CIPHERTEXT at rest) /
+    key_hash / key_prefix pass through UNCHANGED at this layer — masking is the
+    router's job via ``_mask_key`` (reads never surface key_value). NULLs pass
+    through."""
     for key, value in out.items():
         if isinstance(value, _uuid.UUID):
             out[key] = str(value)
@@ -186,14 +192,31 @@ def _row(obj: Any) -> Dict[str, Any]:
     return _parity(_orm_obj_to_dict(obj, _KEY_N2A))
 
 
+def _mask_key(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Read-side MASK for the SECRET column ``key_value`` (ciphertext at rest).
+
+    Returns a NEW dict (never mutates ``row`` — immutability rule) with
+    ``key_value`` replaced by the public ``key_prefix`` display form + an
+    ellipsis, plus a boolean ``key_value_set`` telling the UI whether a full
+    key exists. The plaintext key is ONLY available at create-time (the
+    one-time ``secret_key`` reveal); it is never reconstructed here, and the
+    ciphertext is never surfaced. The api_key_router applies this to every
+    list / get / update row before building ApiKeyResponse.
+    """
+    is_set = bool(row.get("key_value"))
+    masked = (row.get("key_prefix") or "") + "…" if is_set else None
+    return {**row, "key_value": masked, "key_value_set": is_set}
+
+
 class ApiKeyRepository:
     """ORM-backed API 密钥数据仓储 (异步) over the ``api_keys`` table.
 
     Uses the PURE ``generate_key`` / ``hash_key`` crypto statics (unchanged —
-    hash-on-write / lookup-by-hash reproduced exactly). NO encryption (plaintext
-    key_value at rest, as legacy). Exposure is reproduced method-for-method:
-    create() reveals the full key ONCE via ``secret_key``; reads return the raw
-    SELECT * (incl. key_value/key_hash) — no widen/narrow. See the module
+    hash-on-write / lookup-by-hash reproduced exactly). ENCRYPT-AT-REST:
+    create() encrypts key_value via ``secret_box.encrypt`` before insert; reads
+    return the raw SELECT * carrying that ciphertext, and the router masks it
+    through ``_mask_key`` (reads never surface plaintext or ciphertext). create()
+    still reveals the full key ONCE via ``secret_key``. See the module
     SECRET-HANDLING BOUNDARY MAP."""
 
     @staticmethod
@@ -258,7 +281,9 @@ class ApiKeyRepository:
             "key_id": key_id,
             "key_hash": key_hash,
             "key_prefix": key_prefix,
-            "key_value": full_key,
+            # ENCRYPT-AT-REST: key_value never lands in the DB as plaintext.
+            # The one-time reveal below still returns the plaintext full_key.
+            "key_value": encrypt_secret(full_key),
             "name": name,
             "description": description,
             "user_id": user_id,

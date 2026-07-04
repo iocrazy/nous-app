@@ -7,11 +7,14 @@
     validate_key(full_key) finds the row by hash. Round-trip proven.
   - ONE-TIME REVEAL: create() returns the full plaintext key ONCE via
     ``secret_key``; subsequent reads do NOT add secret_key.
-  - EXPOSURE PARITY (the leak-prevention test): get_user_keys / get_by_key_id
-    return the raw SELECT * which — per migration 039 + ApiKeyResponse.key_value
-    — DOES include key_value (full plaintext) and key_hash. We assert the ORM
-    reproduces that EXACT exposure (does NOT narrow it to a mask, does NOT
-    widen it), and that key_prefix is the masked "dk_xxxxxxxx..." display form.
+  - ENCRYPT-AT-REST + MASKED READS (Task 52): create() encrypts key_value
+    before insert (Fernet ``gAAAAA`` ciphertext that decrypts back to the full
+    key). get_user_keys / get_by_key_id return the raw SELECT * with that
+    CIPHERTEXT in key_value (never plaintext at rest), and ``_mask_key`` — the
+    helper the router applies to list/get/update rows — replaces key_value with
+    the public "dk_xxxxxxxx...…" display form + a key_value_set flag, so no
+    plaintext OR ciphertext ever reaches the client on reads. key_prefix stays
+    the masked "dk_xxxxxxxx..." display form.
   - STRATEGY-C value-type parity: user_id (uuid) → STR (the get_api_key authz
     != consumer + AuthContext.user_id str field), id (bigint) → native int
     (5.3 trap), status (Enum) → bare str ("active"/"revoked"), scopes (jsonb)
@@ -143,21 +146,34 @@ async def test_create_hashes_reveals_once_and_exposure_parity(
     assert validated["key_id"] == created["key_id"]
     assert validated["status"] == "active"
 
-    # EXPOSURE PARITY: get_by_key_id / get_user_keys return the raw SELECT *,
-    # which (migration 039) INCLUDES key_value (full plaintext) + key_hash.
-    # The ORM must reproduce that exact exposure — NOT narrow it to a mask.
+    # ENCRYPT-AT-REST: get_by_key_id / get_user_keys return the raw SELECT *,
+    # which now carries CIPHERTEXT in key_value (never plaintext at rest). The
+    # ciphertext decrypts back to the full key.
+    from app.core import secret_box
+    from app.repositories.api_key_repository import _mask_key
+
     by_id = await _repo().get_by_key_id(created["key_id"])
     assert by_id is not None
-    assert by_id["key_value"] == full_key  # full plaintext returned (over-exposure
-    #                                        is pre-existing — reproduced, NOT fixed)
+    assert by_id["key_value"].startswith("gAAAAA")  # encrypted at rest
+    assert by_id["key_value"] != full_key
+    assert secret_box.decrypt(by_id["key_value"]) == full_key  # round-trips
     assert by_id["key_hash"] == expected_hash
     assert "secret_key" not in by_id  # secret_key is create()-only (one-time)
     assert type(by_id["user_id"]) is str  # authz != consumer needs str
 
+    # MASKED READ: the router applies _mask_key — no plaintext OR ciphertext
+    # reaches the client; key_value becomes the prefix display form + a flag.
+    masked = _mask_key(by_id)
+    assert masked["key_value"] == created["key_prefix"] + "…"
+    assert masked["key_value_set"] is True
+    assert full_key not in masked["key_value"]
+    assert "gAAAAA" not in masked["key_value"]
+
     listed = await _repo().get_user_keys(user_id)
     mine = [k for k in listed if k["key_id"] == created["key_id"]]
     assert len(mine) == 1
-    assert mine[0]["key_value"] == full_key  # list also returns full plaintext
+    assert mine[0]["key_value"].startswith("gAAAAA")  # list also ciphertext at rest
+    assert secret_box.decrypt(mine[0]["key_value"]) == full_key
     assert mine[0]["status"] == "active"
 
 
