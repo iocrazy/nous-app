@@ -350,3 +350,36 @@ async def test_unknown_then_success_recovers():
 
     assert result["choices"][0]["message"]["content"] == "ok"
     assert adapter.call.await_count == 2
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_default_sleep_is_not_descriptor_bound():
+    """Prod regression (2026-07-04): ``sleep`` stored via ``field(default=
+    asyncio.sleep)`` became a class attribute, and plain Python functions
+    are descriptors — ``self.sleep(chunk)`` bound the middleware instance
+    and called ``asyncio.sleep(<middleware>, chunk)``, crashing every real
+    backoff with "'<=' not supported between 'LLMRetryMiddleware' and
+    'int'". Masked in every other test here by ``base_delay_s=0`` (zero
+    delay skips the sleep loop entirely). This test drives the REAL default
+    sleep with a nonzero delay."""
+    mw = LLMRetryMiddleware(AsyncMock())
+    await mw._sleep_with_cancel(0.01)  # pre-fix: TypeError
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_retry_with_nonzero_backoff_uses_default_sleep():
+    """End-to-end: a retryable failure followed by success must survive a
+    real (tiny) backoff sleep on the default seam."""
+    adapter = AsyncMock()
+    adapter.call.side_effect = [
+        TimeoutError("blip"),
+        {"choices": [{"message": {"content": "ok"}}]},
+    ]
+
+    mw = LLMRetryMiddleware(adapter, max_retries=2, base_delay_s=0.01, max_delay_s=0.02)
+    result = await mw.call(_composed(), [])
+
+    assert result["choices"][0]["message"]["content"] == "ok"
+    assert adapter.call.await_count == 2

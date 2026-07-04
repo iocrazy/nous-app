@@ -97,7 +97,13 @@ class LLMFallbackChain:
 
     _switch_log: list[_SwitchEvent] = field(default_factory=list, init=False)
     # Test seam: override the monotonic clock for deterministic deadline tests.
-    monotonic: Callable[[], float] = field(default=time.monotonic, init=False)
+    # default_factory to keep the instance-attribute pattern — see the
+    # descriptor-binding note on LLMRetryMiddleware.sleep (a plain-function
+    # dataclass default binds as a method; builtins like time.monotonic
+    # happen not to, but don't rely on that).
+    monotonic: Callable[[], float] = field(
+        default_factory=lambda: time.monotonic, init=False
+    )
 
     @property
     def switch_log(self) -> list[_SwitchEvent]:
