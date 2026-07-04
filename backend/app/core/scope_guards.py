@@ -51,14 +51,17 @@ async def verify_scope_access(
         )
 
 
-async def verify_project_write_access(
-    project_id: str,
-    auth: AuthContext = Depends(get_auth),
-) -> None:
-    """Guard for `/projects/{project_id}/...` write targets.
+_PROJECT_WRITE_ROLES = ("manager", "editor")
 
-    Caller must be the project owner, or a member of the project's team.
-    `project_id` is injected from the route's path parameter by name match.
+
+async def _check_project_access(
+    project_id: str, auth: AuthContext, *, write: bool
+) -> None:
+    """Shared body for the project read/write guards.
+
+    Access: owner, or member of the project's team, or a row in
+    project_members — any role for read, manager/editor for write.
+    project_members has a composite PK (project_id, user_id); no id column.
     """
     client = await get_async_supabase_admin()
     project_res = (
@@ -88,9 +91,38 @@ async def verify_project_write_access(
         if member_res.data:
             return
 
+    pm_res = (
+        await client.table("project_members")
+        .select("role")
+        .eq("project_id", project_id)
+        .eq("user_id", auth.user_id)
+        .limit(1)
+        .execute()
+    )
+    if pm_res.data:
+        role = pm_res.data[0].get("role")
+        if not write or role in _PROJECT_WRITE_ROLES:
+            return
+
     raise HTTPException(
         status_code=403, detail="You do not have access to this project"
     )
+
+
+async def verify_project_write_access(
+    project_id: str,
+    auth: AuthContext = Depends(get_auth),
+) -> None:
+    """Guard for `/projects/{project_id}/...` write targets."""
+    await _check_project_access(project_id, auth, write=True)
+
+
+async def verify_project_read_access(
+    project_id: str,
+    auth: AuthContext = Depends(get_auth),
+) -> None:
+    """Guard for `/projects/{project_id}/...` read targets."""
+    await _check_project_access(project_id, auth, write=False)
 
 
 async def verify_resource_write_access(

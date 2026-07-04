@@ -93,7 +93,9 @@ class ProjectsService:
 
     async def update_project(self, project_id: str, user_id: str, data: dict) -> dict:
         """
-        Update a project after verifying ownership.
+        Update a project.
+
+        Ownership/membership is enforced by the route-level write guard.
 
         Args:
             project_id: UUID of the project.
@@ -104,13 +106,11 @@ class ProjectsService:
             Updated project dict.
 
         Raises:
-            ValueError: If project not found or user is not the owner.
+            ValueError: If project not found.
         """
         project = await self.repo.get_project_by_id(project_id)
         if not project:
             raise ValueError("Project not found")
-        if project["owner_id"] != user_id:
-            raise PermissionError("Only the project owner can update this project")
         return await self.repo.update_project(project_id, data)
 
     async def delete_project(self, project_id: str, user_id: str) -> bool:
@@ -252,6 +252,7 @@ class ProjectsService:
 
         Raises:
             ValueError: If project or media not found.
+            PermissionError: If the media is owned by a different user.
         """
         project = await self.repo.get_project_by_id(project_id)
         if not project:
@@ -260,6 +261,13 @@ class ProjectsService:
         media = await self.repo.get_media_metadata(media_id)
         if not media:
             raise ValueError("Media not found")
+
+        # parsed_media has no ownership column (dropped in migration 083);
+        # ownership lives on resources.creator_id via resources.media_id.
+        # None → allow: orphan/system media without a resource row passes.
+        media_creator = await self.repo.get_media_creator(media_id)
+        if media_creator and media_creator != str(user_id):
+            raise PermissionError("You do not have access to this media item")
 
         file_data = {
             "project_id": project_id,

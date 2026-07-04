@@ -123,6 +123,7 @@ from app.models import (
     ProjectMembers,
     Projects,
     ProjectTasks,
+    Resources,
     Shares,
 )
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
@@ -610,6 +611,28 @@ class ProjectsRepository:
         except Exception as e:
             logger.error(f"Failed to get media metadata {media_id}: {e}")
             return None
+
+    async def get_media_creator(self, media_id: str) -> Optional[str]:
+        """creator_id of the resources row linked to this parsed_media id,
+        or None when no resource row exists (orphan/system media).
+
+        parsed_media has no ownership column (dropped in migration 083);
+        ownership lives on resources.creator_id via resources.media_id.
+
+        This backs a security check, so it FAILS CLOSED: raises on lookup
+        failure — callers must not treat an error as an ownership pass.
+        """
+        try:
+            async with read_scope() as session:
+                creator = await session.scalar(
+                    select(Resources.creator_id)
+                    .where(Resources.media_id == int(media_id))
+                    .limit(1)
+                )
+                return str(creator) if creator else None
+        except Exception as e:
+            logger.error(f"Failed to get media creator for {media_id}: {e}")
+            raise
 
     # ------------------------------------------------------------------ #
     # File versions
