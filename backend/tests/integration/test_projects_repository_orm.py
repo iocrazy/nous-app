@@ -512,6 +512,46 @@ async def test_comment_crud_round_trip_on_project_file_comments(
     assert await _repo().get_comments_for_file(str(f["id"])) == []
 
 
+async def test_service_comment_round_trip_through_verify_gate(
+    integration_db_url, patched_engine, cleanup_test_rows
+):
+    """SERVICE-level round trip (add_comment → get_file_comments →
+    delete_comment) with str path-param-shaped ids, exactly as the router
+    calls it. This exercises ``_verify_file_in_project``, which used to
+    compare the row's NATIVE-int project_id against the str path param and
+    raised ``ValueError('File not found in this project')`` on EVERY call —
+    killing all 8 file-scoped endpoints end-to-end. The repo-level round
+    trip above cannot catch that; this one does."""
+    from app.services.library.projects_service import ProjectsService
+
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        user_id = await _real_user_id(conn)
+        proj = await _seed_project(conn, user_id)
+    finally:
+        await conn.close()
+
+    f = await _repo().create_file({"project_id": proj["id"], "filename": "svc.mp4"})
+
+    svc = ProjectsService()
+    # str(...) everywhere — the router passes path params as strings.
+    created = await svc.add_comment(
+        project_id=str(proj["id"]),
+        file_id=str(f["id"]),
+        author_id=str(user_id),
+        content="Through the gate",
+        timestamp_seconds=1.25,
+    )
+    assert created["file_id"] == str(f["id"])
+    assert created["author_id"] == str(user_id)
+
+    listed = await svc.get_file_comments(str(proj["id"]), str(f["id"]))
+    assert {c["id"] for c in listed} == {created["id"]}
+
+    assert await svc.delete_comment(created["id"], str(user_id)) is True
+    assert await svc.get_file_comments(str(proj["id"]), str(f["id"])) == []
+
+
 async def test_share_and_collection_commit(
     integration_db_url, patched_engine, cleanup_test_rows
 ):

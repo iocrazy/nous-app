@@ -263,6 +263,45 @@ async def test_delete_comment_raises_on_db_error():
             await ProjectsRepository().delete_comment(str(_COMMENT_ID))
 
 
+# ── service gate: _verify_file_in_project int/str compare ────────────────
+
+
+@pytest.mark.asyncio
+async def test_verify_file_in_project_int_project_id_matches_str_path_param():
+    """Post-ORM, ``get_file_by_id`` returns ``project_id`` as a NATIVE int
+    (``_row``/``_parity`` leave bigints native — the 5.3 trap), while the
+    router path param arrives as a str. The gate must coerce both sides:
+    ``{"project_id": 42}`` vs ``project_id="42"`` must NOT raise. Before the
+    fix this raised ``ValueError("File not found in this project")`` on
+    EVERY call, killing all 8 file-scoped endpoints end-to-end."""
+    from app.services.library.projects_service import ProjectsService
+
+    svc = ProjectsService()
+    with patch.object(
+        svc.repo,
+        "get_file_by_id",
+        new=AsyncMock(return_value={"id": 7, "project_id": 42}),
+    ):
+        out = await svc._verify_file_in_project("42", "7")
+    assert out["project_id"] == 42
+
+
+@pytest.mark.asyncio
+async def test_verify_file_in_project_mismatch_still_raises():
+    """A genuinely different project still raises (the guard must not become
+    a pass-through)."""
+    from app.services.library.projects_service import ProjectsService
+
+    svc = ProjectsService()
+    with patch.object(
+        svc.repo,
+        "get_file_by_id",
+        new=AsyncMock(return_value={"id": 7, "project_id": 42}),
+    ):
+        with pytest.raises(ValueError):
+            await svc._verify_file_in_project("43", "7")
+
+
 # ── service contract (keys flow through unchanged) ───────────────────────
 
 

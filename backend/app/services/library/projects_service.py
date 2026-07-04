@@ -416,7 +416,10 @@ class ProjectsService:
         file_record = await self.repo.get_file_by_id(file_id)
         if not file_record:
             raise ValueError("File not found")
-        if file_record.get("project_id") != project_id:
+        # project_id on the row is a NATIVE int post-ORM (bigint ids stay
+        # native — the 5.3 trap), while the router path param is a str.
+        # Coerce both sides or the guard rejects EVERY call.
+        if str(file_record.get("project_id")) != str(project_id):
             raise ValueError("File not found in this project")
         return file_record
 
