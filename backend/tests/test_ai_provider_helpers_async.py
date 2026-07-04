@@ -48,9 +48,10 @@ async def test_get_ai_settings_reveals_encrypted_api_key(monkeypatch):
 
     monkeypatch.setenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
     monkeypatch.delenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY_OLD", raising=False)
-    from app.core.secure_settings import encrypt_marked
+    from app.core.secure_settings import encrypt_byok
 
-    ciphertext = encrypt_marked("sk-real-secret")
+    # Owner-bound to "u-1" (the user get_ai_settings is called for).
+    ciphertext = encrypt_byok("sk-real-secret", "u-1")
     repo = MagicMock()
     repo.get_by_user_id = AsyncMock(
         return_value={

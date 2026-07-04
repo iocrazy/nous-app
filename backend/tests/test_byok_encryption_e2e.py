@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from cryptography.fernet import Fernet
 
-from app.core.secure_settings import MARKER, encrypt_marked
+from app.core.secure_settings import MARKER, encrypt_byok
 from app.services.ai.adapters.factory import get_adapter_for_user
 from app.services.ai.providers.ai_provider_helpers import (
     get_ai_settings,
@@ -48,7 +48,8 @@ def real_key(monkeypatch: pytest.MonkeyPatch) -> str:
 
 
 async def test_encrypted_row_resolves_to_plaintext_adapter_key(real_key):
-    ciphertext = encrypt_marked("sk-real-e2e-secret")
+    # Owner-bound to "user-e2e" (the row owner get_ai_settings is called for).
+    ciphertext = encrypt_byok("sk-real-e2e-secret", "user-e2e")
     assert ciphertext.startswith(MARKER)
 
     repo = MagicMock()
@@ -85,7 +86,7 @@ async def test_multi_key_rotation_row_resolves_to_plaintext_adapters(real_key):
     into a RotatingAdapter whose underlying adapters carry plaintext keys."""
     from app.agent_framework import RotatingAdapter
 
-    keys = [encrypt_marked("sk-rot-a"), encrypt_marked("sk-rot-b")]
+    keys = [encrypt_byok("sk-rot-a", "user-e2e"), encrypt_byok("sk-rot-b", "user-e2e")]
     repo = MagicMock()
     repo.get_by_user_id = AsyncMock(
         return_value={

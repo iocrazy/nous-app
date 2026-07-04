@@ -149,15 +149,21 @@ def test_reveal_passthrough_non_marked(real_key):
 # ── BYOK ai_providers (user_settings, Phase 2) ─────────────────────
 
 
+# All BYOK helpers take the row-owner user_id (the ownership binding — see
+# secure_settings' context-binding note). _UID is the "correct" owner used
+# across the roundtrip tests.
+_UID = "user-owner-1"
+
+
 @pytest.mark.unit
 def test_byok_str_roundtrip(real_key):
     providers = {"openai": {"api_key": "sk-user-1", "base_url": "https://x"}}
-    out = conceal_byok_providers(providers)
+    out = conceal_byok_providers(providers, user_id=_UID)
     assert out["openai"]["api_key"].startswith(MARKER)
     assert out["openai"]["base_url"] == "https://x"
     # original not mutated
     assert providers["openai"]["api_key"] == "sk-user-1"
-    back = reveal_byok_providers(out)
+    back = reveal_byok_providers(out, user_id=_UID)
     assert back["openai"]["api_key"] == "sk-user-1"
     assert back["openai"]["base_url"] == "https://x"
 
@@ -165,23 +171,23 @@ def test_byok_str_roundtrip(real_key):
 @pytest.mark.unit
 def test_byok_list_roundtrip(real_key):
     """api_key may be list[str] (Sprint 2 multi-key rotation) — every
-    element encrypts/decrypts independently."""
+    element encrypts/decrypts independently, each bound to the owner."""
     providers = {"qwen": {"api_key": ["sk-a", "sk-b", "sk-c"], "model": "qwen-max"}}
-    out = conceal_byok_providers(providers)
+    out = conceal_byok_providers(providers, user_id=_UID)
     assert isinstance(out["qwen"]["api_key"], list)
     assert all(k.startswith(MARKER) for k in out["qwen"]["api_key"])
     assert out["qwen"]["model"] == "qwen-max"
-    back = reveal_byok_providers(out)
+    back = reveal_byok_providers(out, user_id=_UID)
     assert back["qwen"]["api_key"] == ["sk-a", "sk-b", "sk-c"]
 
 
 @pytest.mark.unit
 def test_byok_conceal_idempotent(real_key):
     providers = {"openai": {"api_key": "sk-1"}}
-    once = conceal_byok_providers(providers)
-    twice = conceal_byok_providers(once)
+    once = conceal_byok_providers(providers, user_id=_UID)
+    twice = conceal_byok_providers(once, user_id=_UID)
     assert twice == once
-    assert reveal_byok_providers(twice)["openai"]["api_key"] == "sk-1"
+    assert reveal_byok_providers(twice, user_id=_UID)["openai"]["api_key"] == "sk-1"
 
 
 @pytest.mark.unit
@@ -191,20 +197,25 @@ def test_byok_passthrough_non_dict_entries_and_missing_api_key():
         "weird": "not-a-dict",
         "empty": {},
     }
-    out = conceal_byok_providers(providers)
+    out = conceal_byok_providers(providers, user_id=_UID)
     assert out == providers
-    assert reveal_byok_providers(providers) == providers
-    assert conceal_byok_providers("not-a-dict") == "not-a-dict"
-    assert reveal_byok_providers(None) is None
+    assert reveal_byok_providers(providers, user_id=_UID) == providers
+    assert conceal_byok_providers("not-a-dict", user_id=_UID) == "not-a-dict"
+    assert reveal_byok_providers(None, user_id=_UID) is None
 
 
 @pytest.mark.unit
 def test_byok_blank_and_none_pass_through(real_key):
     assert (
-        conceal_byok_providers({"openai": {"api_key": ""}})["openai"]["api_key"] == ""
+        conceal_byok_providers({"openai": {"api_key": ""}}, user_id=_UID)["openai"][
+            "api_key"
+        ]
+        == ""
     )
     assert (
-        conceal_byok_providers({"openai": {"api_key": None}})["openai"]["api_key"]
+        conceal_byok_providers({"openai": {"api_key": None}}, user_id=_UID)["openai"][
+            "api_key"
+        ]
         is None
     )
 
@@ -212,9 +223,9 @@ def test_byok_blank_and_none_pass_through(real_key):
 @pytest.mark.unit
 def test_byok_conceal_raises_without_real_key(no_key):
     with pytest.raises(secret_box.SecretBoxNotConfigured):
-        conceal_byok_providers({"openai": {"api_key": "sk-secret"}})
+        conceal_byok_providers({"openai": {"api_key": "sk-secret"}}, user_id=_UID)
     with pytest.raises(secret_box.SecretBoxNotConfigured):
-        conceal_byok_providers({"qwen": {"api_key": ["sk-a", "sk-b"]}})
+        conceal_byok_providers({"qwen": {"api_key": ["sk-a", "sk-b"]}}, user_id=_UID)
 
 
 @pytest.mark.unit
@@ -222,9 +233,9 @@ def test_byok_reveal_fail_soft_on_wrong_key(monkeypatch):
     key_a = Fernet.generate_key().decode()
     monkeypatch.setenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY", key_a)
     monkeypatch.delenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY_OLD", raising=False)
-    out = conceal_byok_providers({"openai": {"api_key": "sk-1"}})
+    out = conceal_byok_providers({"openai": {"api_key": "sk-1"}}, user_id=_UID)
     monkeypatch.setenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
-    revealed = reveal_byok_providers(out)
+    revealed = reveal_byok_providers(out, user_id=_UID)
     assert revealed["openai"]["api_key"] == ""  # fail-soft, never raises
 
 
@@ -235,10 +246,68 @@ def test_byok_reveal_fail_soft_list_partial(monkeypatch):
     key_a = Fernet.generate_key().decode()
     monkeypatch.setenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY", key_a)
     monkeypatch.delenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY_OLD", raising=False)
-    out = conceal_byok_providers({"qwen": {"api_key": ["sk-a", "sk-b"]}})
+    out = conceal_byok_providers({"qwen": {"api_key": ["sk-a", "sk-b"]}}, user_id=_UID)
     monkeypatch.setenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
-    revealed = reveal_byok_providers(out)
+    revealed = reveal_byok_providers(out, user_id=_UID)
     assert revealed["qwen"]["api_key"] == ["", ""]
+
+
+# ── BYOK ownership binding (anti-replay — PR #1004 security review) ──────
+
+
+@pytest.mark.unit
+def test_byok_cross_user_replay_blocked(real_key):
+    """ATTACK (cross-USER replay): user A's own bound ciphertext, planted
+    verbatim into user B's row, must NOT decrypt for B — resolves to ''.
+
+    The ciphertext IS valid Fernet under the shared key and IS a real BYOK
+    frame; only the embedded owner (A) differs from the reader (B). Without
+    the binding this would hand B user A's plaintext key."""
+    victim = conceal_byok_providers(
+        {"openai": {"api_key": "sk-victim-A"}}, user_id="user-A"
+    )
+    stolen_ct = victim["openai"]["api_key"]
+    assert stolen_ct.startswith(MARKER)
+    # Attacker B plants A's ciphertext in their own row and reads it back.
+    revealed = reveal_byok_providers(
+        {"openai": {"api_key": stolen_ct}}, user_id="user-B"
+    )
+    assert revealed["openai"]["api_key"] == ""  # binding mismatch → dead
+
+
+@pytest.mark.unit
+def test_byok_cross_surface_replay_blocked(real_key):
+    """ATTACK (cross-SURFACE replay): a ciphertext produced by the PLATFORM
+    format (encrypt_marked — same shared Fernet key, no byok frame), planted
+    into a user's BYOK api_key, must NOT decrypt — resolves to ''.
+
+    This is the exact DB-backup-leak oracle: a stolen platform.ai_providers /
+    mediahub_models / system_settings ciphertext replayed into a BYOK slot.
+    The payload decrypts fine but carries no ``byok\\x00`` frame, so reveal
+    rejects it."""
+    from app.core.secure_settings import encrypt_marked
+
+    platform_ct = encrypt_marked("stolen-platform-secret")  # unframed format
+    assert platform_ct.startswith(MARKER)
+    revealed = reveal_byok_providers(
+        {"openai": {"api_key": platform_ct}}, user_id="user-A"
+    )
+    assert revealed["openai"]["api_key"] == ""  # unbound payload → dead
+
+
+@pytest.mark.unit
+def test_byok_bound_ciphertext_is_not_bare_plaintext(real_key):
+    """The stored ciphertext must decrypt to the FRAMED payload, not the bare
+    key — so a raw-Fernet decrypt (e.g. via a different marker scheme) can't
+    silently yield the plaintext without the owner check."""
+    from app.core import secret_box
+    from app.core.secure_settings import parse_byok_frame
+
+    out = conceal_byok_providers({"openai": {"api_key": "sk-framed"}}, user_id="user-Z")
+    ct = out["openai"]["api_key"][len(MARKER) :]
+    payload = secret_box.decrypt(ct, allow_dev_fallback=False)
+    assert payload != "sk-framed"  # NOT the bare plaintext
+    assert parse_byok_frame(payload) == ("user-Z", "sk-framed")
 
 
 # ── fail-closed write / fail-soft read ─────────────────────────────

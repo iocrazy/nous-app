@@ -637,11 +637,15 @@ async def _load_user_provider_config(user_id: UUID) -> dict[str, Any]:
         ai_settings = settings_json.get("ai_settings") or {}
         # Stored api_key values may carry the enc:v1: marker (secret-at-rest
         # Phase 2) — reveal here so get_adapter_for_user (and every other
-        # chat-turn consumer) receives plaintext credentials. Fail-soft:
-        # an undecryptable value degrades to "" rather than raising.
+        # chat-turn consumer) receives plaintext credentials. user_id is the
+        # row owner (the .eq("user_id", ...) above), so the ownership binding
+        # embedded at encrypt time is verified. Fail-soft: an undecryptable
+        # or foreign-bound value degrades to "" rather than raising.
         from app.core.secure_settings import reveal_byok_providers
 
-        return reveal_byok_providers(ai_settings.get("ai_providers") or {})
+        return reveal_byok_providers(
+            ai_settings.get("ai_providers") or {}, user_id=str(user_id)
+        )
     except Exception as err:
         logger.warning(f"[wiring] user_settings lookup failed for {user_id}: {err}")
         return {}

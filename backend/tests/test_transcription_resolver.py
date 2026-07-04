@@ -121,9 +121,10 @@ async def test_byok_reveals_encrypted_api_key(monkeypatch):
 
     monkeypatch.setenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
     monkeypatch.delenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY_OLD", raising=False)
-    from app.core.secure_settings import encrypt_marked
+    from app.core.secure_settings import encrypt_byok
 
-    ciphertext = encrypt_marked("sk-plaintext-asr")
+    # Owner-bound to "u" (the user the resolver is called for).
+    ciphertext = encrypt_byok("sk-plaintext-asr", "u")
     settings = _settings(
         {
             "whisper_provider": "openai",

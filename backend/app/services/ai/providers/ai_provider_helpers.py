@@ -73,7 +73,11 @@ async def get_ai_settings(user_id: str) -> dict:
     if isinstance(ai_settings, dict) and "ai_providers" in ai_settings:
         ai_settings = {
             **ai_settings,
-            "ai_providers": reveal_byok_providers(ai_settings.get("ai_providers")),
+            # user_id is the row owner here (the repo query IS by user_id) —
+            # the ownership binding embedded at encrypt time is verified.
+            "ai_providers": reveal_byok_providers(
+                ai_settings.get("ai_providers"), user_id=str(user_id)
+            ),
         }
     return ai_settings
 
@@ -395,9 +399,14 @@ async def resolve_transcription_config(
     ai_settings = settings.get("ai_settings", {})
     # This reads raw settings_json directly (not via get_ai_settings) — reveal
     # here so the returned provider_cfg carries the plaintext api_key.
+    # user_id is the row owner (the SELECT above is WHERE user_id = :uid, or
+    # the caller passed the settings_json it fetched for this same user) —
+    # required for the ownership-binding check.
     from app.core.secure_settings import reveal_byok_providers
 
-    providers = reveal_byok_providers(ai_settings.get("ai_providers", {}) or {})
+    providers = reveal_byok_providers(
+        ai_settings.get("ai_providers", {}) or {}, user_id=str(user_id)
+    )
     whisper_provider = ai_settings.get("whisper_provider", "openai")
     provider_cfg = providers.get(whisper_provider) or {}
 
@@ -508,9 +517,14 @@ async def resolve_summarization_config(
     ai_settings = settings.get("ai_settings", {})
     # This reads raw settings_json directly (not via get_ai_settings) — reveal
     # here so the chosen provider's config carries the plaintext api_key.
+    # user_id is the row owner (SELECT WHERE user_id = :uid, or the caller
+    # passed this same user's settings_json) — required for the
+    # ownership-binding check.
     from app.core.secure_settings import reveal_byok_providers
 
-    providers = reveal_byok_providers(ai_settings.get("ai_providers", {}) or {})
+    providers = reveal_byok_providers(
+        ai_settings.get("ai_providers", {}) or {}, user_id=str(user_id)
+    )
 
     chosen_key: Optional[str] = None
     chosen_cfg: Dict[str, Any] = {}

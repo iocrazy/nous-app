@@ -17,7 +17,13 @@ import pytest
 from cryptography.fernet import Fernet
 
 from app.core import secret_box
-from app.core.secure_settings import MARKER, encrypt_marked, reveal
+from app.core.secure_settings import (
+    MARKER,
+    encrypt_byok,
+    encrypt_marked,
+    parse_byok_frame,
+    reveal,
+)
 from app.services.infra import secrets_selfheal as heal_mod
 from app.services.infra.secrets_selfheal import run_secrets_selfheal
 
@@ -243,10 +249,15 @@ async def test_old_key_rotation_counts_as_healthy(monkeypatch, fake_db: _FakeDB)
 
 @pytest.mark.asyncio
 async def test_user_settings_ai_providers_mixed_rows_healed(real_key, fake_db: _FakeDB):
-    """Plaintext, dev-keyed, real-keyed (skip), and multi-key list rows all
-    heal correctly; sibling settings_json keys (parse_mode, whisper_provider)
-    survive untouched — the targeted jsonb_set never whole-blob replaces."""
-    already_good = encrypt_marked("already-fine")
+    """Plaintext heals to the OWNER-BOUND format; an already-bound real-keyed
+    value is skipped; multi-key list elements heal independently, each bound;
+    sibling settings_json keys (parse_mode, whisper_provider) survive
+    untouched — the targeted jsonb_set never whole-blob replaces."""
+    # A genuinely-healthy BYOK value is bound to its owner (user-1).
+    already_bound = encrypt_byok("already-fine", "user-1")
+    # An already-bound list element for user-2 (captured so we can assert it
+    # is left byte-for-byte untouched — Fernet IV is random, not reproducible).
+    bound_c = encrypt_byok("bound-c", "user-2")
     fake_db.user_settings = {
         "user-1": {
             "parse_mode": "auto",
@@ -254,20 +265,15 @@ async def test_user_settings_ai_providers_mixed_rows_healed(real_key, fake_db: _
                 "whisper_provider": "openai",
                 "ai_providers": {
                     "openai": {"api_key": "plain-openai", "base_url": "https://x"},
-                    "doubao": {"api_key": already_good, "enabled": True},
+                    "doubao": {"api_key": already_bound, "enabled": True},
                 },
             },
         },
         "user-2": {
             "ai_settings": {
                 "ai_providers": {
-                    "qwen": {
-                        "api_key": [
-                            "plain-a",
-                            MARKER + _dev_encrypt("dev-b"),
-                            already_good,
-                        ]
-                    },
+                    # two plaintext elements to heal + one already-bound
+                    "qwen": {"api_key": ["plain-a", "plain-b", bound_c]},
                 },
             },
         },
@@ -281,7 +287,7 @@ async def test_user_settings_ai_providers_mixed_rows_healed(real_key, fake_db: _
 
     assert summary["errors"] == 0
     # Counts rewritten FIELDS (matching _heal_platform_providers), not list
-    # elements: user-1.openai.api_key (1; doubao.api_key already real-keyed,
+    # elements: user-1.openai.api_key (1; doubao.api_key already bound,
     # skipped) + user-2.qwen.api_key (1 field, even though 2 of its 3 list
     # elements needed healing).
     assert summary["user_settings_ai_providers"] == 2
@@ -291,21 +297,56 @@ async def test_user_settings_ai_providers_mixed_rows_healed(real_key, fake_db: _
     assert u1["ai_settings"]["whisper_provider"] == "openai"  # sibling untouched
     prov1 = u1["ai_settings"]["ai_providers"]
     assert prov1["openai"]["api_key"].startswith(MARKER)
-    assert reveal(prov1["openai"]["api_key"]) == "plain-openai"
+    # healed value carries the owner-bound frame (user-1), not bare plaintext
+    assert parse_byok_frame(reveal(prov1["openai"]["api_key"])) == (
+        "user-1",
+        "plain-openai",
+    )
     assert prov1["openai"]["base_url"] == "https://x"
-    assert prov1["doubao"]["api_key"] == already_good  # untouched, not re-encrypted
+    assert prov1["doubao"]["api_key"] == already_bound  # untouched (already bound)
     assert prov1["doubao"]["enabled"] is True
 
     prov2 = fake_db.user_settings["user-2"]["ai_settings"]["ai_providers"]["qwen"][
         "api_key"
     ]
-    assert reveal(prov2[0]) == "plain-a"
-    assert reveal(prov2[1]) == "dev-b"
-    assert prov2[2] == already_good  # already real-keyed element, untouched
+    assert parse_byok_frame(reveal(prov2[0])) == ("user-2", "plain-a")
+    assert parse_byok_frame(reveal(prov2[1])) == ("user-2", "plain-b")
+    assert prov2[2] == bound_c  # already bound, untouched
 
     assert fake_db.user_settings["user-3"] == {
         "ai_settings": {"whisper_provider": "local"}
     }
+
+
+@pytest.mark.asyncio
+async def test_user_settings_ai_providers_foreign_ciphertext_not_rebound(
+    real_key, fake_db: _FakeDB
+):
+    """ATTACK/heal safety: a ciphertext that decrypts fine under the real key
+    but is UNBOUND (platform format) or bound to ANOTHER user must NOT be
+    rebound to this row's owner — that would launder a stolen ciphertext into
+    a working key. It is left untouched (reveal still resolves it to '')."""
+    platform_ct = encrypt_marked("stolen-platform-secret")  # unframed
+    foreign_ct = encrypt_byok("victim-key", "some-other-user")  # bound to A
+    fake_db.user_settings = {
+        "user-1": {
+            "ai_settings": {
+                "ai_providers": {
+                    "openai": {"api_key": platform_ct},
+                    "doubao": {"api_key": foreign_ct},
+                },
+            },
+        },
+    }
+
+    summary = await run_secrets_selfheal()
+
+    # Both are left untouched (0 rewrites); errors counter unaffected — the
+    # per-field ERROR logs are informational, the sweep itself does not fail.
+    assert summary["user_settings_ai_providers"] == 0
+    prov = fake_db.user_settings["user-1"]["ai_settings"]["ai_providers"]
+    assert prov["openai"]["api_key"] == platform_ct  # NOT rebound
+    assert prov["doubao"]["api_key"] == foreign_ct  # NOT rebound
 
 
 @pytest.mark.asyncio

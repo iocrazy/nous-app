@@ -75,9 +75,11 @@ async def test_put_encrypts_new_api_key(real_key):
 @pytest.mark.asyncio
 async def test_put_blank_keeps_existing_ciphertext_unchanged(real_key):
     from app.api.ai_settings_router import save_ai_settings
-    from app.core.secure_settings import encrypt_marked
+    from app.core.secure_settings import encrypt_byok
 
-    stored_ciphertext = encrypt_marked("sk-already-encrypted")
+    # Owner-bound to "u1" (the requesting user), as the write chokepoint
+    # produces it — so reveal for the hint succeeds.
+    stored_ciphertext = encrypt_byok("sk-already-encrypted", "u1")
     existing = {
         "settings_json": {
             "ai_settings": {
@@ -150,15 +152,94 @@ async def test_put_no_real_key_fails_closed(no_key):
     patch_mock.assert_not_awaited()  # never reached the DB with plaintext
 
 
+# ── anti-replay: client-submitted ciphertext (PR #1004 security review) ─
+
+
+@pytest.mark.asyncio
+async def test_put_rejects_client_submitted_ciphertext_422(real_key):
+    """ATTACK (layer 1 — marker injection): a client PUT whose api_key is
+    already ``enc:v1:``-prefixed is rejected with 422 and NOTHING is stored.
+
+    A legitimate keep-unchanged NEVER sends ciphertext from the client — the
+    blank-means-keep merge (merge_ai_providers) sources the previous
+    (possibly encrypted) value from the DB row server-side; the client only
+    ever sends new plaintext or a blank. A marker-prefixed value is therefore
+    always a bug or a ciphertext-replay attempt (planting a stolen ciphertext
+    so the reveal path decrypts it)."""
+    from app.api.ai_settings_router import save_ai_settings
+    from app.core.secure_settings import MARKER as _M
+
+    stolen = f"{_M}gAAAAA-some-stolen-ciphertext-from-another-surface"
+    with patch("app.api.ai_settings_router.UserSettingsRepository") as repo_cls:
+        repo_cls.return_value.get_by_user_id = AsyncMock(return_value=None)
+        patch_mock = AsyncMock(return_value={})
+        repo_cls.return_value.patch_settings_json = patch_mock
+
+        body = AISettingsUpdate(ai_providers={"openai": {"api_key": stolen}})
+        with pytest.raises(HTTPException) as exc_info:
+            await save_ai_settings(body, _fake_auth("attacker"))
+
+    assert exc_info.value.status_code == 422
+    patch_mock.assert_not_awaited()  # nothing stored
+
+
+@pytest.mark.asyncio
+async def test_put_rejects_client_ciphertext_in_list_element_422(real_key):
+    """Same guard applies to any element of a multi-key list."""
+    from app.api.ai_settings_router import save_ai_settings
+    from app.core.secure_settings import MARKER as _M
+
+    with patch("app.api.ai_settings_router.UserSettingsRepository") as repo_cls:
+        repo_cls.return_value.get_by_user_id = AsyncMock(return_value=None)
+        patch_mock = AsyncMock(return_value={})
+        repo_cls.return_value.patch_settings_json = patch_mock
+
+        body = AISettingsUpdate(
+            ai_providers={"qwen": {"api_key": ["sk-legit", f"{_M}stolen-ct"]}}
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            await save_ai_settings(body, _fake_auth("attacker"))
+
+    assert exc_info.value.status_code == 422
+    patch_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_cross_user_replay_yields_empty_hint(real_key):
+    """ATTACK (layer 2 — cross-user replay via direct DB plant): even if a
+    foreign ciphertext is somehow present in the attacker's row (bypassing
+    the layer-1 boundary — e.g. a direct DB write), GET reveals it against
+    the requesting user and the ownership binding fails → the response hint
+    is EMPTY, never the victim's plaintext last-4."""
+    from app.api.ai_settings_router import get_ai_settings
+    from app.core.secure_settings import encrypt_byok
+
+    # user-VICTIM's own bound ciphertext, planted into the attacker's row.
+    victim_ct = encrypt_byok("sk-victim-XYZW", "user-victim")
+    stored = {
+        "settings_json": {
+            "ai_settings": {"ai_providers": {"openai": {"api_key": victim_ct}}}
+        }
+    }
+    with patch("app.api.ai_settings_router.UserSettingsRepository") as repo_cls:
+        repo_cls.return_value.get_by_user_id = AsyncMock(return_value=stored)
+        resp = await get_ai_settings(_fake_auth("attacker"))
+
+    entry = resp.ai_providers["openai"]
+    assert entry["api_key_set"] is False  # revealed to "" → not set
+    assert entry["api_key_hint"] == ""  # NEVER the victim's "XYZW"
+    assert "XYZW" not in str(resp.ai_providers)
+
+
 # ── GET masks stored keys ───────────────────────────────────────────
 
 
 @pytest.mark.asyncio
 async def test_get_masks_encrypted_key(real_key):
     from app.api.ai_settings_router import get_ai_settings
-    from app.core.secure_settings import encrypt_marked
+    from app.core.secure_settings import encrypt_byok
 
-    stored_ciphertext = encrypt_marked("sk-secret-9999")
+    stored_ciphertext = encrypt_byok("sk-secret-9999", "u1")  # bound to owner
     stored = {
         "settings_json": {
             "ai_settings": {"ai_providers": {"openai": {"api_key": stored_ciphertext}}}
