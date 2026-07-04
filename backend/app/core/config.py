@@ -128,17 +128,6 @@ class Settings(BaseSettings):
         "Covers parsed_media CRUD + lists + search + statistics; the 9 "
         "wrapper methods route through the ORM overrides via Python MRO)",
     )
-    USE_ORM_LIBRARIES: bool = Field(
-        default=False,
-        description="Route LibrariesRepository through the SQLAlchemy 2.0 ORM "
-        "session layer (Batch L1 — replaces the supabase-py REST path for the "
-        "libraries table). Strategy C: created_by uuid → str at the dict "
-        "boundary (REST-parity); bigint id stays native int; text "
-        "scope_id / scope_type stay str; created_at / updated_at → ISO str. "
-        "Covers get_by_id / list_by_scope reads + create / update / delete "
-        "writes (commit via write_scope(); create/update return {} on empty "
-        "per REST contract).",
-    )
     SCOPE_ENFORCE_RESOURCES: bool = Field(
         default=False,
         description="Activate the app-layer tenant-scope choke point "
