@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 
+from .ai_usage_router import router as ai_usage_router
 from .alert_rules_router import router as alert_rules_router
 from .audit_logs_router import router as audit_logs_router
 from .boundary_audit_router import router as boundary_audit_router
@@ -117,6 +118,9 @@ admin_router.include_router(tags_router, prefix="/tags", tags=["Admin - Tags"])
 admin_router.include_router(celery_router, prefix="/celery", tags=["Admin - Celery"])
 admin_router.include_router(
     mediahub_model_router, prefix="/mediahub-models", tags=["Admin - Mediahub Models"]
+)
+admin_router.include_router(
+    ai_usage_router, prefix="/ai-usage", tags=["Admin - AI Usage"]
 )
 admin_router.include_router(
     boundary_audit_router,
