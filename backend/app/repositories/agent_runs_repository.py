@@ -206,6 +206,90 @@ class AgentRunsRepository(AsyncpgRepository):
             return []
 
     # ------------------------------------------------------------------
+    # Admin cross-user listing (AdminAuthDep gates the router; NO user scope)
+    # ------------------------------------------------------------------
+
+    _ADMIN_SORTABLE = frozenset(
+        {
+            "started_at",
+            "cost_cents",
+            "total_tokens",
+            "prompt_tokens",
+            "completion_tokens",
+        }
+    )
+
+    async def list_runs_admin(
+        self,
+        *,
+        user_id: Optional[UUID] = None,
+        model: Optional[str] = None,
+        provider: Optional[str] = None,
+        status: Optional[str] = None,
+        started_after: Optional[datetime] = None,
+        started_before: Optional[datetime] = None,
+        sort_by: str = "started_at",
+        sort_desc: bool = True,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> Dict[str, Any]:
+        """Admin-only cross-user paginated ``agent_runs`` listing with filters.
+
+        Deliberately has NO user-scope filter — admin sees every user's runs
+        (the router gates access via ``AdminAuthDep``). Returns
+        ``{"items": [...], "total": N}``. Datetimes bound as ``datetime``
+        objects (never isoformat strings). Unknown ``sort_by`` falls back to
+        ``started_at`` (allow-list — the value reaches ``getattr``)."""
+        if sort_by not in self._ADMIN_SORTABLE:
+            sort_by = "started_at"
+        try:
+            base = select(AgentRuns)
+            if user_id is not None:
+                base = base.where(AgentRuns.user_id == user_id)
+            if model:
+                base = base.where(AgentRuns.model == model)
+            if provider:
+                base = base.where(AgentRuns.provider == provider)
+            if status:
+                base = base.where(AgentRuns.status == status)
+            if started_after is not None:
+                base = base.where(AgentRuns.started_at >= started_after)
+            if started_before is not None:
+                base = base.where(AgentRuns.started_at <= started_before)
+
+            sort_col = getattr(AgentRuns, sort_by)
+            ordering = sort_col.desc() if sort_desc else sort_col.asc()
+
+            async with read_scope() as session:
+                total = await session.scalar(
+                    select(func.count()).select_from(base.subquery())
+                )
+                result = await session.execute(
+                    base.order_by(ordering).offset(offset).limit(limit)
+                )
+                items = [_agent_run_to_dict(r) for r in result.scalars().all()]
+            return {"items": items, "total": int(total or 0)}
+        except Exception as e:
+            logger.error(f"Failed to list admin runs: {e}")
+            return {"items": [], "total": 0}
+
+    async def distinct_models(self) -> List[str]:
+        """Distinct non-null model names present in ``agent_runs`` — populates
+        the admin AI-usage model filter dropdown. Ordered alphabetically."""
+        try:
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(AgentRuns.model)
+                    .where(AgentRuns.model.is_not(None))
+                    .distinct()
+                    .order_by(AgentRuns.model.asc())
+                )
+                return [m for (m,) in result.all() if m]
+        except Exception as e:
+            logger.error(f"Failed to list distinct models: {e}")
+            return []
+
+    # ------------------------------------------------------------------
     # Cancel (flip flag; runner observes via RunRecorder.check_cancelled)
     # ------------------------------------------------------------------
 

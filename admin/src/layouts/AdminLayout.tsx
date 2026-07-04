@@ -108,6 +108,7 @@ export function AdminLayout() {
             <MenuItem key="/tags"><IconTags />Tags</MenuItem>
             <MenuItem key="/credits"><IconStar />Credits</MenuItem>
             <MenuItem key="/agent-telemetry"><IconRobot />Agent Telemetry</MenuItem>
+            <MenuItem key="/ai-usage"><IconStar />AI Usage</MenuItem>
           </MenuItemGroup>
           <MenuItemGroup key="logs" title="Logs & Monitoring">
             <MenuItem key="/monitoring"><IconCompass />Monitoring</MenuItem>
