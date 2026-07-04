@@ -95,9 +95,9 @@ async def _seed(conn, **overrides) -> dict:
 
 
 def _repo():
-    from app.repositories.libraries_repository_orm import LibrariesRepositoryOrm
+    from app.repositories.libraries_repository import LibrariesRepository
 
-    return LibrariesRepositoryOrm()
+    return LibrariesRepository()
 
 
 # ─── Reads ──────────────────────────────────────────────────────────────
@@ -239,30 +239,11 @@ async def test_delete_commits_returns_true(
     assert still == 0
 
 
-# ─── Flag-off legacy parity ─────────────────────────────────────────────
+# ─── Factory (flag-free, collapsed to ORM-only) ─────────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    from app.core.config import settings
+async def test_factory_returns_collapsed_repo():
     from app.repositories import libraries_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_LIBRARIES", False)
     repo = mod.get_libraries_repository()
     assert type(repo) is mod.LibrariesRepository
-    from app.repositories.libraries_repository_orm import LibrariesRepositoryOrm
-
-    assert not isinstance(repo, LibrariesRepositoryOrm)
-
-
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories import libraries_repository as mod
-    from app.repositories.libraries_repository_orm import LibrariesRepositoryOrm
-
-    monkeypatch.setattr(settings, "USE_ORM_LIBRARIES", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    repo = mod.get_libraries_repository()
-    assert isinstance(repo, LibrariesRepositoryOrm)

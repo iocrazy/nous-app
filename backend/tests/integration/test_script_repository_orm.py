@@ -1,8 +1,8 @@
-"""Integration tests for the Script*RepositoryOrm classes (Batch L1b) vs real PG.
+"""Integration tests for the Script*Repository classes (post ORM-collapse,
+ORM-only) vs real PG.
 
-Proves the REST → ORM swap is invisible AND that STRATEGY-C value-type parity
-holds across script_projects / script_chapters / script_assets /
-script_storyboard_links:
+Proves STRATEGY-C value-type parity of the collapsed ORM bodies across
+script_projects / script_chapters / script_assets / script_storyboard_links:
 
   - ALL ids (id / script_id / project_id / team_id / chapter_id /
     storyboard_project_id) are bigint and STAY native int (the 5.3 trap).
@@ -139,29 +139,29 @@ async def _seed_project(conn, scaffold, **overrides) -> dict:
 
 
 def _project_repo():
-    from app.repositories.script_repository_orm import ScriptProjectRepositoryOrm
+    from app.repositories.script_repository import ScriptProjectRepository
 
-    return ScriptProjectRepositoryOrm()
+    return ScriptProjectRepository()
 
 
 def _chapter_repo():
-    from app.repositories.script_repository_orm import ScriptChapterRepositoryOrm
+    from app.repositories.script_repository import ScriptChapterRepository
 
-    return ScriptChapterRepositoryOrm()
+    return ScriptChapterRepository()
 
 
 def _asset_repo():
-    from app.repositories.script_repository_orm import ScriptAssetRepositoryOrm
+    from app.repositories.script_repository import ScriptAssetRepository
 
-    return ScriptAssetRepositoryOrm()
+    return ScriptAssetRepository()
 
 
 def _link_repo():
-    from app.repositories.script_repository_orm import (
-        ScriptStoryboardLinkRepositoryOrm,
+    from app.repositories.script_repository import (
+        ScriptStoryboardLinkRepository,
     )
 
-    return ScriptStoryboardLinkRepositoryOrm()
+    return ScriptStoryboardLinkRepository()
 
 
 # ─── script_projects ────────────────────────────────────────────────────
@@ -382,42 +382,18 @@ async def test_link_crud_and_listings(integration_db_url, patched_engine, scaffo
     assert await repo.list_by_chapter(str(chapter_id)) == []
 
 
-# ─── Flag-off legacy parity ─────────────────────────────────────────────
+# ─── factory parity ─────────────────────────────────────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    from app.core.config import settings
+async def test_factories_return_collapsed_repos():
+    """Post-rollout the four factories unconditionally return the (now ORM-only)
+    collapsed classes — no flag, no engine fallback."""
     from app.repositories import script_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_SCRIPTS", False)
     assert type(mod.get_script_project_repository()) is mod.ScriptProjectRepository
     assert type(mod.get_script_chapter_repository()) is mod.ScriptChapterRepository
     assert type(mod.get_script_asset_repository()) is mod.ScriptAssetRepository
     assert (
         type(mod.get_script_storyboard_link_repository())
         is mod.ScriptStoryboardLinkRepository
-    )
-
-
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories import script_repository as mod
-    from app.repositories.script_repository_orm import (
-        ScriptAssetRepositoryOrm,
-        ScriptChapterRepositoryOrm,
-        ScriptProjectRepositoryOrm,
-        ScriptStoryboardLinkRepositoryOrm,
-    )
-
-    monkeypatch.setattr(settings, "USE_ORM_SCRIPTS", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    assert isinstance(mod.get_script_project_repository(), ScriptProjectRepositoryOrm)
-    assert isinstance(mod.get_script_chapter_repository(), ScriptChapterRepositoryOrm)
-    assert isinstance(mod.get_script_asset_repository(), ScriptAssetRepositoryOrm)
-    assert isinstance(
-        mod.get_script_storyboard_link_repository(),
-        ScriptStoryboardLinkRepositoryOrm,
     )

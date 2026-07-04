@@ -1,7 +1,7 @@
-"""Integration tests for SkillRepositoryOrm (Phase 2 M batch) against real PG.
+"""Integration tests for SkillRepository (post ORM-collapse, ORM-only) vs real PG.
 
-Proves the REST → ORM swap is invisible AND that STRATEGY-C value-type parity
-holds on the skill surface (15 callsites):
+Proves STRATEGY-C value-type parity of the collapsed ORM bodies on the skill
+surface (15 callsites):
 
   - skills.id (BIGINT) → native int (5.3 trap; every consumer int()s it).
   - skill_files.id (UUID) → str for shape parity (SkillFileOut.id: UUID accepts
@@ -11,7 +11,7 @@ holds on the skill surface (15 callsites):
   - upsert_file reproduces (skill_id, path) ON CONFLICT DO UPDATE.
   - upsert_file_versioned: new → INSERT v1; changed → snapshot + UPDATE v2;
     unchanged → no-op (returns current).
-  - factory on/off.
+  - the get_skill_repository() factory returns the collapsed class.
 
 Setup: requires INTEGRATION_DATABASE_URL. Skips cleanly otherwise:
 
@@ -68,9 +68,9 @@ async def cleanup(integration_db_url):
 
 
 def _repo():
-    from app.repositories.skill_repository_orm import SkillRepositoryOrm
+    from app.repositories.skill_repository import SkillRepository
 
-    return SkillRepositoryOrm()
+    return SkillRepository()
 
 
 def _name() -> str:
@@ -278,30 +278,15 @@ async def test_delete_commit(integration_db_url, patched_engine, cleanup):
     assert await _repo().get_by_id(sid) is None
 
 
-# ─── factory on/off ─────────────────────────────────────────────────────
+# ─── factory parity ─────────────────────────────────────────────────────
 
 
-def test_factory_off_returns_legacy():
-    from unittest.mock import patch
-
+def test_factory_returns_collapsed_repo():
+    """Flag retired — the factory unconditionally returns the collapsed
+    ORM-only SkillRepository."""
     from app.repositories.skill_repository import (
         SkillRepository,
         get_skill_repository,
     )
 
-    with patch("app.core.config.settings.USE_ORM_SKILL", False):
-        assert type(get_skill_repository()) is SkillRepository
-
-
-def test_factory_on_returns_orm(integration_db_url):
-    from unittest.mock import patch
-
-    from app.repositories.skill_repository_orm import SkillRepositoryOrm
-
-    with (
-        patch("app.core.config.settings.USE_ORM_SKILL", True),
-        patch("app.db.engine.is_configured", return_value=True),
-    ):
-        from app.repositories.skill_repository import get_skill_repository
-
-        assert type(get_skill_repository()) is SkillRepositoryOrm
+    assert type(get_skill_repository()) is SkillRepository
