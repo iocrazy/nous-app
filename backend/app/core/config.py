@@ -405,24 +405,6 @@ class Settings(BaseSettings):
         "stuck pending). Inert — flip back to false to roll back.",
     )
 
-    USE_ORM_ANALYSIS: bool = Field(
-        default=False,
-        description="Route AnalysisRepository (resource_analysis CRUD + pgvector "
-        "embedding + match_videos_by_embedding RPC + cross-table availability "
-        "queries) through the SQLAlchemy 2.0 ORM (deferred-repo finish wave). "
-        "Strategy-C value-type parity: resource_id (bigint) native int; "
-        "detected_* / full_text (jsonb/text) native; analysis_cost (numeric) → "
-        "the REST shape; analyzed_at/created_at/updated_at (timestamptz) → ISO "
-        "str. content_embedding is written as a pgvector Vector(1536). The vector "
-        "similarity search keeps using the match_videos_by_embedding RPC "
-        "(executed as a raw statement — parity with the REST .rpc() path); "
-        "get_videos_by_analysis_level keeps its cross-table semantics. "
-        "Writes COMMIT via write_scope() with ON CONFLICT (resource_id, "
-        "analysis_level) idempotency. Table created in final post-076 form by mig "
-        "262; model + repo validated against live dev DB. Inert; flip false to "
-        "revert.",
-    )
-
     # ============================================
     # Feature flags — optional capabilities (default off; flip via .env)
     # ============================================

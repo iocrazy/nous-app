@@ -1,4 +1,4 @@
-"""Integration tests for AnalysisRepositoryOrm against a real PostgreSQL DB.
+"""Integration tests for the ORM-backed AnalysisRepository against a real PostgreSQL DB.
 
 Strategy-C parity asserts:
   - resource_id → native int (not str)
@@ -115,9 +115,9 @@ async def test_resource(integration_db_url):
 
 
 def _repo():
-    from app.repositories.analysis_repository_orm import AnalysisRepositoryOrm
+    from app.repositories.analysis_repository import AnalysisRepository
 
-    return AnalysisRepositoryOrm()
+    return AnalysisRepository()
 
 
 # ─── Reads ──────────────────────────────────────────────────────────────────
@@ -356,32 +356,12 @@ async def test_get_analysis_stats_after_create(
     assert isinstance(stats["total"], int)
 
 
-# ─── Factory routing ────────────────────────────────────────────────────────
+# ─── factory (ORM-only, post-rollout) ───────────────────────────────────
 
 
-async def test_factory_off_returns_rest(monkeypatch):
-    """USE_ORM_ANALYSIS=False → REST AnalysisRepository instance."""
-    from app.core.config import settings
+async def test_factory_returns_orm_repository():
+    """Per-domain rollout flag retired → factory unconditionally returns the
+    ORM-backed AnalysisRepository."""
     from app.repositories import analysis_repository as mod
 
-    monkeypatch.setattr(settings, "USE_ORM_ANALYSIS", False)
-    repo = mod.get_analysis_repository()
-    assert type(repo) is mod.AnalysisRepository
-    from app.repositories.analysis_repository_orm import AnalysisRepositoryOrm
-
-    assert not isinstance(repo, AnalysisRepositoryOrm)
-
-
-async def test_factory_on_returns_orm(monkeypatch, integration_db_url):
-    """USE_ORM_ANALYSIS=True + engine configured → AnalysisRepositoryOrm."""
-    from app.core.config import settings
-    from app.db import engine as db_engine
-    from app.repositories import analysis_repository as mod
-    from app.repositories.analysis_repository_orm import AnalysisRepositoryOrm
-
-    monkeypatch.setattr(settings, "USE_ORM_ANALYSIS", True)
-    monkeypatch.setattr(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    )
-    repo = mod.get_analysis_repository()
-    assert isinstance(repo, AnalysisRepositoryOrm)
+    assert type(mod.get_analysis_repository()) is mod.AnalysisRepository
