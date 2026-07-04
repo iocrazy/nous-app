@@ -271,12 +271,6 @@ class Issues(Base):
             name="issues_status_check",
         ),
         ForeignKeyConstraint(
-            ["ai_session_id"],
-            ["public.ai_sessions.id"],
-            ondelete="SET NULL",
-            name="issues_ai_session_id_fkey",
-        ),
-        ForeignKeyConstraint(
             ["assignee_agent_id"],
             ["public.ai_agents.id"],
             ondelete="SET NULL",

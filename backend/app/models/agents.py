@@ -152,12 +152,6 @@ class AgentRuns(Base):
             ["public.agent_runs.id"],
             name="agent_runs_root_run_id_fkey",
         ),
-        ForeignKeyConstraint(
-            ["session_id"],
-            ["public.ai_sessions.id"],
-            ondelete="SET NULL",
-            name="agent_runs_session_id_fkey",
-        ),
         PrimaryKeyConstraint("id", name="agent_runs_pkey"),
         Index("idx_agent_runs_agent_started", "agent_id", "started_at"),
         Index(

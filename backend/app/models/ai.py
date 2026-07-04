@@ -1,4 +1,12 @@
-"""AI agents, sessions, messages, skills, and pricing models."""
+"""AI agents, session memory, skills, and pricing models.
+
+Legacy ai_sessions / ai_messages tables (and their ORM models) were retired in
+migration 333 (Phase 3 Wave 2) — all chat traffic now lives on the
+conversations/messages tables (raw-SQL repositories, not yet ORM-mapped; see
+app.repositories.conversation_repository). ai_session_memory survives: mig
+332 repurposed it to key off either store's id (see its class docstring
+below).
+"""
 
 from __future__ import annotations
 
@@ -264,82 +272,18 @@ class AiAgentVersions(Base):
     created_by: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid)
 
 
-class AiSessions(Base):
-    __tablename__ = "ai_sessions"
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["agent_id"],
-            ["public.ai_agents.id"],
-            ondelete="SET NULL",
-            name="ai_sessions_agent_id_fkey",
-        ),
-        PrimaryKeyConstraint("id", name="ai_sessions_pkey"),
-        Index(
-            "idx_ai_sessions_agent",
-            "agent_id",
-            postgresql_where="(agent_id IS NOT NULL)",
-        ),
-        Index(
-            "idx_ai_sessions_project",
-            "project_id",
-            "updated_at",
-            postgresql_where="(project_id IS NOT NULL)",
-        ),
-        Index("idx_ai_sessions_user", "user_id", "updated_at"),
-        {
-            "comment": "Multi-turn conversation threads per user per project",
-            "schema": "public",
-        },
-    )
-
-    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
-    id: Mapped[int] = mapped_column(
-        BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")
-    )
-    team_id: Mapped[Optional[int]] = mapped_column(BigInteger)
-    project_id: Mapped[Optional[int]] = mapped_column(BigInteger)
-    title: Mapped[Optional[str]] = mapped_column(
-        Text, server_default=text("'New Chat'::text")
-    )
-    context_type: Mapped[Optional[str]] = mapped_column(Text)
-    context_id: Mapped[Optional[str]] = mapped_column(Text)
-    total_tokens: Mapped[Optional[int]] = mapped_column(
-        Integer, server_default=text("0")
-    )
-    message_count: Mapped[Optional[int]] = mapped_column(
-        Integer, server_default=text("0")
-    )
-    status: Mapped[Optional[str]] = mapped_column(
-        Text, server_default=text("'active'::text")
-    )
-    created_at: Mapped[Optional[datetime.datetime]] = mapped_column(
-        DateTime(True), server_default=text("now()")
-    )
-    updated_at: Mapped[Optional[datetime.datetime]] = mapped_column(
-        DateTime(True), server_default=text("now()")
-    )
-    agent_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        Uuid, comment="Bound agent for consistency across session turns"
-    )
-    agent_slug: Mapped[Optional[str]] = mapped_column(
-        String(64), comment="Denormalized agent slug — avoids join for hot read paths"
-    )
-
-
 class AiSessionMemory(Base):
     __tablename__ = "ai_session_memory"
     __table_args__ = (
-        ForeignKeyConstraint(
-            ["session_id"],
-            ["public.ai_sessions.id"],
-            ondelete="CASCADE",
-            name="ai_session_memory_session_id_fkey",
-        ),
         PrimaryKeyConstraint("session_id", name="ai_session_memory_pkey"),
         {
             "comment": (
                 "Wave 5b: continuously-maintained session notes with fixed schema. "
-                "Replaces compactor's one-shot summary at compaction time."
+                "Replaces compactor's one-shot summary at compaction time. "
+                "session_id is a plain BIGINT (no FK, since mig 332): it holds a "
+                "legacy ai_sessions.id for old rows or a conversations.id for "
+                "new-store rows — the same sidecar key space is reused across "
+                "both stores post-Phase-3 (mig 333 drops ai_sessions itself)."
             ),
             "schema": "public",
         },
@@ -379,46 +323,6 @@ class AiSessionMemory(Base):
         Integer, nullable=False, server_default=text("0")
     )
     session_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-
-
-class AiMessages(Base):
-    __tablename__ = "ai_messages"
-    __table_args__ = (
-        CheckConstraint(
-            "role = ANY (ARRAY['system'::text, 'user'::text, 'assistant'::text])",
-            name="ai_messages_role_check",
-        ),
-        ForeignKeyConstraint(
-            ["session_id"],
-            ["public.ai_sessions.id"],
-            ondelete="CASCADE",
-            name="ai_messages_session_id_fkey",
-        ),
-        PrimaryKeyConstraint("id", name="ai_messages_pkey"),
-        Index("idx_ai_messages_session", "session_id", "created_at"),
-        {"comment": "Chat messages within AI sessions", "schema": "public"},
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, primary_key=True, server_default=text("gen_random_uuid()")
-    )
-    role: Mapped[str] = mapped_column(Text, nullable=False)
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    agent_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid)
-    skill_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid)
-    metadata_json: Mapped[Optional[dict]] = mapped_column(
-        JSONB, server_default=text("'{}'::jsonb")
-    )
-    prompt_tokens: Mapped[Optional[int]] = mapped_column(
-        Integer, server_default=text("0")
-    )
-    completion_tokens: Mapped[Optional[int]] = mapped_column(
-        Integer, server_default=text("0")
-    )
-    created_at: Mapped[Optional[datetime.datetime]] = mapped_column(
-        DateTime(True), server_default=text("now()")
-    )
-    session_id: Mapped[Optional[int]] = mapped_column(BigInteger)
 
 
 class NousModels(Base):

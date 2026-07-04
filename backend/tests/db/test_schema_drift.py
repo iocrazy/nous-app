@@ -4,7 +4,9 @@ Replaces Alembic autogenerate as the "models stay in sync with the DB" guarantee
 Models were generated from PROD via sqlacodegen; against PROD this test is GREEN
 by construction.
 
-Five hard gates (all run against the 107 mapped public tables):
+Five hard gates (all run against the 105 mapped public tables — was 107
+before migration 333 retired the ai_sessions/ai_messages tables + models,
+Phase 3 Wave 2 legacy-chat cleanup):
   1. test_no_missing_tables         — every mapped table exists in live public schema
   2. test_column_names_match        — set(model cols) == set(live cols) per table
   3. test_nullability_matches       — model nullable matches live is_nullable per col
@@ -45,7 +47,7 @@ _EXCLUDED_TABLES: frozenset[str] = frozenset(
 # ── SQLAlchemy type → PG udt_name normalization map ─────────────────────
 # Maps the SQLAlchemy column type class name (from type(col.type).__name__)
 # to the PG information_schema.columns.udt_name token.
-# Covers every SA type that appears across the 107 mapped tables.
+# Covers every SA type that appears across the 105 mapped tables.
 #
 # Rules:
 #   • Enums: udt_name == the PG enum type name (col.type.name), NOT "text".

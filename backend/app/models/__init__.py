@@ -1,4 +1,8 @@
-"""SQLAlchemy 2.0 ORM model package — 106 mapped classes + 1 junction table = 107 tables.
+"""SQLAlchemy 2.0 ORM model package — 104 mapped classes + 1 junction table = 105 tables.
+
+(Was 106/107 before migration 333 retired the ai_sessions/ai_messages models —
+Phase 3 Wave 2 legacy-chat table drop; conversations/messages are raw-SQL,
+not yet ORM-mapped.)
 
 Flat models only: no joined-table inheritance, no relationships, no create_all.
 auth.users (GoTrue) is permanently EXCLUDED; FKs targeting users.id are omitted.
@@ -36,10 +40,8 @@ from app.models.ai import (  # noqa: F401
     AgentMemory,
     AiAgents,
     AiAgentVersions,
-    AiMessages,
     AiModelPrices,
     AiSessionMemory,
-    AiSessions,
     AiUsageLogs,
     NousModels,
     SkillFiles,
@@ -178,10 +180,8 @@ __all__ = [
     "AgentMemory",
     "AiAgentVersions",
     "AiAgents",
-    "AiMessages",
     "AiModelPrices",
     "AiSessionMemory",
-    "AiSessions",
     "AiUsageLogs",
     "NousModels",
     "SkillFileVersions",
