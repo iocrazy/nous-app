@@ -7,8 +7,8 @@ from .audit_logs_router import router as audit_logs_router
 from .boundary_audit_router import router as boundary_audit_router
 from .celery_router import router as celery_router
 from .credits_router import router as credits_router
+from .mediahub_model_router import router as mediahub_model_router
 from .monitoring_router import router as monitoring_router
-from .nous_router import router as nous_router
 from .request_logs_router import router as request_logs_router
 from .search_router import router as search_router
 from .settings_router import router as settings_router
@@ -116,7 +116,7 @@ admin_router.include_router(credits_router, prefix="/credits", tags=["Admin - Cr
 admin_router.include_router(tags_router, prefix="/tags", tags=["Admin - Tags"])
 admin_router.include_router(celery_router, prefix="/celery", tags=["Admin - Celery"])
 admin_router.include_router(
-    nous_router, prefix="/nous-models", tags=["Admin - Nous Models"]
+    mediahub_model_router, prefix="/mediahub-models", tags=["Admin - Mediahub Models"]
 )
 admin_router.include_router(
     boundary_audit_router,

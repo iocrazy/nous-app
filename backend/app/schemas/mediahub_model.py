@@ -1,4 +1,4 @@
-# backend/app/schemas/nous.py
+# backend/app/schemas/mediahub_model.py
 
 """Pydantic schemas for Nous models API."""
 
@@ -6,15 +6,15 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel
 
-NousModelType = Literal["llm", "embedding", "tts", "asr"]
+MediahubModelType = Literal["llm", "embedding", "tts", "asr"]
 
 
-class NousModelCreate(BaseModel):
-    """Request body for creating a Nous model."""
+class MediahubModelCreate(BaseModel):
+    """Request body for creating a Mediahub model."""
 
     name: str
     display_name: str
-    type: NousModelType
+    type: MediahubModelType
     description: Optional[str] = None
     actual_provider: str
     actual_model: str
@@ -29,12 +29,12 @@ class NousModelCreate(BaseModel):
     sort_order: int = 0
 
 
-class NousModelUpdate(BaseModel):
-    """Request body for updating a Nous model (all fields optional)."""
+class MediahubModelUpdate(BaseModel):
+    """Request body for updating a Mediahub model (all fields optional)."""
 
     name: Optional[str] = None
     display_name: Optional[str] = None
-    type: Optional[NousModelType] = None
+    type: Optional[MediahubModelType] = None
     description: Optional[str] = None
     actual_provider: Optional[str] = None
     actual_model: Optional[str] = None
@@ -47,7 +47,7 @@ class NousModelUpdate(BaseModel):
     sort_order: Optional[int] = None
 
 
-class NousModelResponse(BaseModel):
+class MediahubModelResponse(BaseModel):
     """Admin response — api_key masked."""
 
     id: str
@@ -73,7 +73,7 @@ class NousModelResponse(BaseModel):
     last_tested_at: Optional[str] = None
 
 
-class NousModelPublic(BaseModel):
+class MediahubModelPublic(BaseModel):
     """Public response — no API key or provider details."""
 
     name: str
@@ -84,7 +84,7 @@ class NousModelPublic(BaseModel):
     pricing_value: float
 
 
-class NousProbeRequest(BaseModel):
+class MediahubModelProbeRequest(BaseModel):
     """Admin 'Test & Load Models' request.
 
     ``name`` is the existing model being edited (optional): when ``api_key`` is
@@ -101,7 +101,7 @@ class NousProbeRequest(BaseModel):
     name: Optional[str] = None
 
 
-class NousModelTestResponse(BaseModel):
+class MediahubModelTestResponse(BaseModel):
     """Result of a real per-model connectivity probe (chat / embedding / asr)."""
 
     ok: bool

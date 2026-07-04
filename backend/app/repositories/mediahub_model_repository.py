@@ -1,11 +1,11 @@
-# backend/app/repositories/nous_repository.py
+# backend/app/repositories/mediahub_model_repository.py
 
-"""Repository for nous_models table — admin-configured platform AI models.
+"""Repository for mediahub_models table — admin-configured platform AI models.
 
-ORM 2.0 (Phase 2, M batch): ``NousRepository`` is the SQLAlchemy 2.0
+ORM 2.0 (Phase 2, M batch): ``MediahubModelRepository`` is the SQLAlchemy 2.0
 implementation — reads go through ``read_scope()`` and writes through
 ``write_scope()``; row objects are converted to SELECT *-shaped dicts by the
-``_parity`` value-type sweep. Call sites route through ``get_nous_repository()``
+``_parity`` value-type sweep. Call sites route through ``get_mediahub_model_repository()``
 (bottom of this file). The legacy supabase-py REST branch and the
 ``USE_ORM_NOUS`` flag were retired post-rollout (prod runs 100% ORM).
 
@@ -21,16 +21,16 @@ advances to the DB clock on update.
 STRATEGY C — VALUE-TYPE PARITY (per-field, exact REST shape)
 ============================================================
 REST rendered JSON: bigint → int, timestamptz → ISO str, numeric → str. The ORM
-returns native types. nous_models has NO uuid columns and NO jsonb columns, so
+returns native types. mediahub_models has NO uuid columns and NO jsonb columns, so
 the parity surface is small:
 
   id (BIGINT snowflake PK) → STAYS NATIVE int (the 5.3 trap): every consumer
-    (admin nous_router._to_response, ai_router, ai_settings_router) reads
+    (admin mediahub_model_router._to_response, ai_router, ai_settings_router) reads
     ``str(row["id"])`` or passes id straight to a response model — no consumer
     does ``int(id)`` math or a type-sensitive ``==``.
 
   created_at / updated_at (timestamptz) → ``.isoformat()`` ALWAYS: admin
-    nous_router does ``str(row.get("created_at", ""))`` — ``str()`` on an ISO
+    mediahub_model_router does ``str(row.get("created_at", ""))`` — ``str()`` on an ISO
     string is a no-op (parity).
 
   pricing_value (Numeric pricing/cost column) → LEFT NATIVE (Decimal): every
@@ -58,22 +58,22 @@ from loguru import logger
 from sqlalchemy import delete, func, insert, select, update
 
 from app.db.session import read_scope, write_scope
-from app.models import NousModels
+from app.models import MediahubModels
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
 
-_NOUS_N2A: Dict[str, str] = _name_to_attr(NousModels)
-_NOUS_ATTRS = {p.key for p in NousModels.__mapper__.column_attrs}
+_NOUS_N2A: Dict[str, str] = _name_to_attr(MediahubModels)
+_NOUS_ATTRS = {p.key for p in MediahubModels.__mapper__.column_attrs}
 
 # Public columns exposed by list_enabled (no api_key / app_id / base_url).
 _PUBLIC_COLS = (
-    NousModels.id,
-    NousModels.name,
-    NousModels.display_name,
-    NousModels.type,
-    NousModels.description,
-    NousModels.pricing_type,
-    NousModels.pricing_value,
-    NousModels.sort_order,
+    MediahubModels.id,
+    MediahubModels.name,
+    MediahubModels.display_name,
+    MediahubModels.type,
+    MediahubModels.description,
+    MediahubModels.pricing_type,
+    MediahubModels.pricing_value,
+    MediahubModels.sort_order,
 )
 
 
@@ -81,7 +81,7 @@ def _parity(out: Dict[str, Any]) -> Dict[str, Any]:
     """Strategy-C value-type parity IN PLACE on a SELECT *-shaped dict:
     datetime → ISO str (REST shape); bigint id + Numeric pricing_value LEFT
     NATIVE (the 5.3 trap + the float()-tolerant numeric decision). uuid → str
-    (defensive; nous_models has none today). NULLs pass through."""
+    (defensive; mediahub_models has none today). NULLs pass through."""
     for key, value in out.items():
         if isinstance(value, _uuid.UUID):
             out[key] = str(value)
@@ -97,10 +97,10 @@ def _row(obj: Any) -> Dict[str, Any]:
     return _parity(_orm_obj_to_dict(obj, _NOUS_N2A))
 
 
-class NousRepository:
-    """CRUD for nous_models table (SQLAlchemy 2.0 ORM)."""
+class MediahubModelRepository:
+    """CRUD for mediahub_models table (SQLAlchemy 2.0 ORM)."""
 
-    TABLE = "nous_models"
+    TABLE = "mediahub_models"
 
     # ------------------------------------------------------------------
     # Public queries (no API keys exposed)
@@ -116,30 +116,30 @@ class NousRepository:
         try:
             stmt = (
                 select(*_PUBLIC_COLS)
-                .where(NousModels.is_enabled.is_(True))
-                .order_by(NousModels.sort_order)
+                .where(MediahubModels.is_enabled.is_(True))
+                .order_by(MediahubModels.sort_order)
             )
             if type_filter:
-                stmt = stmt.where(NousModels.type == type_filter)
+                stmt = stmt.where(MediahubModels.type == type_filter)
             async with read_scope() as session:
                 result = await session.execute(stmt)
                 # Partial-column SELECT → mappings() gives DB-column-keyed rows.
                 return [_parity(dict(m)) for m in result.mappings().all()]
         except Exception as e:
-            logger.error(f"Failed to list enabled nous models: {e}")
+            logger.error(f"Failed to list enabled mediahub models: {e}")
             return []
 
     async def get_by_name(self, name: str) -> Optional[Dict[str, Any]]:
-        """Get a Nous model by name (includes all fields for backend use)."""
+        """Get a Mediahub model by name (includes all fields for backend use)."""
         try:
             async with read_scope() as session:
                 result = await session.execute(
-                    select(NousModels).where(NousModels.name == name).limit(1)
+                    select(MediahubModels).where(MediahubModels.name == name).limit(1)
                 )
                 row = result.scalars().first()
                 return _row(row) if row else None
         except Exception as e:
-            logger.error(f"Failed to get nous model '{name}': {e}")
+            logger.error(f"Failed to get mediahub model '{name}': {e}")
             return None
 
     # ------------------------------------------------------------------
@@ -151,31 +151,31 @@ class NousRepository:
         try:
             async with read_scope() as session:
                 result = await session.execute(
-                    select(NousModels).order_by(NousModels.sort_order)
+                    select(MediahubModels).order_by(MediahubModels.sort_order)
                 )
                 return [_row(r) for r in result.scalars().all()]
         except Exception as e:
-            logger.error(f"Failed to list all nous models: {e}")
+            logger.error(f"Failed to list all mediahub models: {e}")
             return []
 
     async def create(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Create a new Nous model."""
+        """Create a new Mediahub model."""
         try:
             values = {k: v for k, v in data.items() if k in _NOUS_ATTRS}
             async with write_scope() as session:
                 result = await session.execute(
-                    insert(NousModels).values(**values).returning(NousModels)
+                    insert(MediahubModels).values(**values).returning(MediahubModels)
                 )
                 row = result.scalars().first()
                 return _row(row) if row else None
         except Exception as e:
-            logger.error(f"Failed to create nous model: {e}")
+            logger.error(f"Failed to create mediahub model: {e}")
             return None
 
     async def update(
         self, model_id: str, data: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
-        """Update a Nous model."""
+        """Update a Mediahub model."""
         try:
             # Drop the REST "now()" sentinel; set updated_at via SQL func.now()
             # (the legacy injected {"updated_at": "now()"} as a server-time
@@ -186,15 +186,15 @@ class NousRepository:
             values["updated_at"] = func.now()
             async with write_scope() as session:
                 result = await session.execute(
-                    update(NousModels)
-                    .where(NousModels.id == int(model_id))
+                    update(MediahubModels)
+                    .where(MediahubModels.id == int(model_id))
                     .values(**values)
-                    .returning(NousModels)
+                    .returning(MediahubModels)
                 )
                 row = result.scalars().first()
                 return _row(row) if row else None
         except Exception as e:
-            logger.error(f"Failed to update nous model {model_id}: {e}")
+            logger.error(f"Failed to update mediahub model {model_id}: {e}")
             return None
 
     async def record_test_result(
@@ -209,14 +209,14 @@ class NousRepository:
         try:
             async with write_scope() as session:
                 result = await session.execute(
-                    update(NousModels)
-                    .where(NousModels.id == int(model_id))
+                    update(MediahubModels)
+                    .where(MediahubModels.id == int(model_id))
                     .values(
                         last_test_status=status,
                         last_test_detail=detail,
                         last_tested_at=func.now(),
                     )
-                    .returning(NousModels)
+                    .returning(MediahubModels)
                 )
                 row = result.scalars().first()
                 return _row(row) if row else None
@@ -225,18 +225,18 @@ class NousRepository:
             return None
 
     async def delete(self, model_id: str) -> bool:
-        """Delete a Nous model."""
+        """Delete a Mediahub model."""
         try:
             async with write_scope() as session:
                 await session.execute(
-                    delete(NousModels).where(NousModels.id == int(model_id))
+                    delete(MediahubModels).where(MediahubModels.id == int(model_id))
                 )
             return True
         except Exception as e:
-            logger.error(f"Failed to delete nous model {model_id}: {e}")
+            logger.error(f"Failed to delete mediahub model {model_id}: {e}")
             return False
 
 
-def get_nous_repository() -> NousRepository:
-    """Return the NousRepository (SQLAlchemy 2.0 ORM, collapsed post-rollout)."""
-    return NousRepository()
+def get_mediahub_model_repository() -> MediahubModelRepository:
+    """Return the MediahubModelRepository (SQLAlchemy 2.0 ORM, collapsed post-rollout)."""
+    return MediahubModelRepository()

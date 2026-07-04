@@ -5,7 +5,7 @@ providers, browser-direct probes for local Ollama / LM Studio) used to live
 ONLY in React state — gone on reload. This persists the last outcome into
 ``user_settings.settings_json.ai_provider_health.<provider_key>`` so the
 Settings UI can show "Last tested ..." across reloads, mirroring the admin
-platform-model probe board (``nous_models.last_test_status``).
+platform-model probe board (``mediahub_models.last_test_status``).
 
 STORAGE SHAPE — a NEW TOP-LEVEL key in ``settings_json``, deliberately NOT
 nested under ``ai_settings``. The canonical settings_json merge

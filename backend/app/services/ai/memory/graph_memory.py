@@ -128,7 +128,7 @@ async def _default_settings_reader(key: str) -> Optional[str]:
 async def _apply_catalog(
     base_url: str, api_key: str, model: str
 ) -> tuple[str, str, str]:
-    """If ``model`` is a platform-catalog (nous_models) name, return the
+    """If ``model`` is a platform-catalog (mediahub_models) name, return the
     catalog's ``(base_url, api_key, actual_model)``; otherwise return the manual
     values unchanged. Ungated (admin config). Never raises."""
     if not model:

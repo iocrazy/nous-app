@@ -1,7 +1,7 @@
 # backend/tests/test_admin_nous_response.py
 """admin nous _to_response maps type + description (api_key still masked)."""
 
-from app.api.admin.nous_router import _to_response
+from app.api.admin.mediahub_model_router import _to_response
 
 
 def test_to_response_maps_type_and_description():

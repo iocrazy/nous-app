@@ -36,7 +36,7 @@ class ResolvedAIConfig:
     config:
 
       - ``"governance"`` — admin-locked module config (user path bypassed).
-      - ``"platform"``  — a platform ``nous_models`` catalog entry, whether
+      - ``"platform"``  — a platform ``mediahub_models`` catalog entry, whether
         the user picked it (``nous:<model>``) or the assigned agent's model
         resolved through the gated catalog path.
       - ``"byok"``      — the user's own provider config, with a non-empty
@@ -69,10 +69,10 @@ def get_provider_config(ai_settings: dict, provider_key: str) -> dict:
     return providers.get(provider_key, {})
 
 
-async def resolve_nous_model(
+async def resolve_mediahub_model(
     model_name: str, module: str
 ) -> Optional[Tuple[str, Dict[str, Any], str]]:
-    """Resolve a model name against the platform ``nous_models`` registry.
+    """Resolve a model name against the platform ``mediahub_models`` registry.
 
     Full-table lookup by ``name`` (enabled + disabled), then:
       - found + enabled + nous allowed for ``module`` → return
@@ -82,12 +82,12 @@ async def resolve_nous_model(
         never silently fall back to a guessed BYOK provider.
       - not found → ``None`` (an ordinary BYOK model name like ``gpt-4o``).
     """
-    from app.repositories.nous_repository import get_nous_repository
+    from app.repositories.mediahub_model_repository import get_mediahub_model_repository
     from app.services.ai.governance.ai_governance import is_nous_allowed
 
     if not model_name:
         return None
-    repo = get_nous_repository()
+    repo = get_mediahub_model_repository()
     row = await repo.get_by_name(model_name)
     if not row:
         return None  # ordinary BYOK model name — leave the caller's path intact.
@@ -111,7 +111,7 @@ async def resolve_nous_model(
 async def resolve_platform_model(
     model_name: str,
 ) -> Optional[Tuple[str, Dict[str, Any], str]]:
-    """Direct platform-catalog (``nous_models``) lookup, WITHOUT the user-facing
+    """Direct platform-catalog (``mediahub_models``) lookup, WITHOUT the user-facing
     nous gate.
 
     For ADMIN platform config: a module locked to / configured with a platform
@@ -122,11 +122,11 @@ async def resolve_platform_model(
     for an enabled catalog model; ``None`` when ``model_name`` isn't a catalog
     model (an ordinary manual model string); raises when found-but-disabled.
     """
-    from app.repositories.nous_repository import get_nous_repository
+    from app.repositories.mediahub_model_repository import get_mediahub_model_repository
 
     if not model_name:
         return None
-    repo = get_nous_repository()
+    repo = get_mediahub_model_repository()
     row = await repo.get_by_name(model_name)
     if not row:
         return None
@@ -216,7 +216,7 @@ async def resolve_task_ai_config(
     # gone/disabled, degrade to the default agent rather than erroring the task.
     if assigned_slug.startswith("nous:"):
         try:
-            nous = await resolve_nous_model(assigned_slug[len("nous:") :], task_key)
+            nous = await resolve_mediahub_model(assigned_slug[len("nous:") :], task_key)
         except RuntimeError:
             nous = None
         if nous is not None:
@@ -258,7 +258,7 @@ async def resolve_task_ai_config(
     # Shared nous lookup: if the agent's model names a platform Nous model,
     # return the platform config while KEEPING resolved_slug so the caller
     # still composes THIS agent's custom prompt (prompt preserved).
-    nous = await resolve_nous_model(model, task_key)
+    nous = await resolve_mediahub_model(model, task_key)
     if nous is not None:
         n_provider_key, n_provider_config, n_model = nous
         return ResolvedAIConfig(
@@ -333,7 +333,7 @@ async def resolve_transcription_config(
     2. User path — requires ``user_settings``; missing → ``RuntimeError("no
        user_settings for ...")``. Reads ``whisper_provider`` +
        ``task_assignment.transcription``. A ``nous:<model>`` selection resolves
-       through the GATED :func:`resolve_nous_model` (user-facing pick) and
+       through the GATED :func:`resolve_mediahub_model` (user-facing pick) and
        fails (``RuntimeError``) on an unknown model — never silently falling
        back. Otherwise the user's BYOK provider entry is used
        (``origin="byok"`` when it carries an api_key, else ``"env"``).
@@ -393,7 +393,7 @@ async def resolve_transcription_config(
     # route through the SAME ASR dispatch.
     if task_assignment.startswith("nous:"):
         nous_name = task_assignment.split(":", 1)[1]
-        nous = await resolve_nous_model(nous_name, "transcription")
+        nous = await resolve_mediahub_model(nous_name, "transcription")
         if nous is None:
             raise RuntimeError(
                 f"transcription references unknown platform model '{nous_name}'"

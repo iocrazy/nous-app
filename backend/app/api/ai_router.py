@@ -100,7 +100,7 @@ async def trigger_transcription_by_resource(
     # === Nous billing — only charge if user selected a nous-* model ===
     import math
 
-    from app.repositories.nous_repository import get_nous_repository
+    from app.repositories.mediahub_model_repository import get_mediahub_model_repository
     from app.repositories.user_settings_repository import UserSettingsRepository
 
     settings_repo = UserSettingsRepository()
@@ -116,9 +116,9 @@ async def trigger_transcription_by_resource(
 
     if _is_nous and _team_id:
         # Look up Nous model pricing
-        nous_repo = get_nous_repository()
-        nous_model = await nous_repo.get_by_name(selected_model)
-        if not nous_model or not nous_model.get("is_enabled"):
+        nous_repo = get_mediahub_model_repository()
+        mediahub_model = await nous_repo.get_by_name(selected_model)
+        if not mediahub_model or not mediahub_model.get("is_enabled"):
             raise HTTPException(
                 status_code=400, detail=f"Nous model '{selected_model}' not available"
             )
@@ -128,8 +128,8 @@ async def trigger_transcription_by_resource(
         if duration_seconds <= 0:
             duration_seconds = 60  # fallback: charge 1 minute minimum
 
-        pricing_value = float(nous_model["pricing_value"])
-        if nous_model["pricing_type"] == "per_hour":
+        pricing_value = float(mediahub_model["pricing_value"])
+        if mediahub_model["pricing_type"] == "per_hour":
             _points_cost = max(1, math.ceil(duration_seconds / 3600 * pricing_value))
         else:
             _points_cost = max(1, int(pricing_value))

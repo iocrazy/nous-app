@@ -175,7 +175,7 @@ async def test_ai_connection(body: TestConnectionRequest, auth: AuthDep):
     )
 
     # Best-effort: persist the probe outcome so the Settings UI can show
-    # "Last tested ..." after a reload (mirrors the admin nous_models probe
+    # "Last tested ..." after a reload (mirrors the admin mediahub_models probe
     # board). Wrapped so telemetry can never fail the connection test.
     try:
         success = bool(result.get("success"))
@@ -268,16 +268,16 @@ async def get_ai_governance(auth: AuthDep):
     return result
 
 
-@router.get("/nous-models")
-async def list_nous_models(type: str | None = None):
+@router.get("/mediahub-models")
+async def list_mediahub_models(type: str | None = None):
     """List enabled Nous models (public, no API keys), optionally filtered by
     model type (``llm`` / ``embedding`` / ``tts`` / ``asr``).
 
     Returns models available for users to select. If none are configured,
     returns an empty list.
     """
-    from app.repositories.nous_repository import get_nous_repository
+    from app.repositories.mediahub_model_repository import get_mediahub_model_repository
 
-    repo = get_nous_repository()
+    repo = get_mediahub_model_repository()
     models = await repo.list_enabled(type)
     return {"models": models}

@@ -102,7 +102,7 @@ async def test_shim_equivalence_plain_byok():
             helpers_mod, "get_ai_settings", new=AsyncMock(return_value=ai_settings)
         ),
         patch.object(
-            helpers_mod, "resolve_nous_model", new=AsyncMock(return_value=None)
+            helpers_mod, "resolve_mediahub_model", new=AsyncMock(return_value=None)
         ),
     ):
         cfg = await helpers_mod.resolve_task_ai_config(
@@ -163,7 +163,7 @@ async def test_origin_platform_user_nous_pick():
         ),
         patch.object(
             helpers_mod,
-            "resolve_nous_model",
+            "resolve_mediahub_model",
             new=AsyncMock(
                 return_value=(
                     "doubao",
@@ -208,7 +208,7 @@ async def test_origin_byok_with_api_key():
             helpers_mod, "get_ai_settings", new=AsyncMock(return_value=ai_settings)
         ),
         patch.object(
-            helpers_mod, "resolve_nous_model", new=AsyncMock(return_value=None)
+            helpers_mod, "resolve_mediahub_model", new=AsyncMock(return_value=None)
         ),
     ):
         cfg = await helpers_mod.resolve_task_ai_config(
@@ -248,7 +248,7 @@ async def test_origin_env_byok_without_api_key():
             helpers_mod, "get_ai_settings", new=AsyncMock(return_value=ai_settings)
         ),
         patch.object(
-            helpers_mod, "resolve_nous_model", new=AsyncMock(return_value=None)
+            helpers_mod, "resolve_mediahub_model", new=AsyncMock(return_value=None)
         ),
     ):
         cfg = await helpers_mod.resolve_task_ai_config(

@@ -4,7 +4,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.services.ai.nous_health import probe_nous_model as _probe_nous_model
+from app.services.ai.mediahub_model_health import (
+    probe_mediahub_model as _probe_mediahub_model,
+)
 
 
 class _Resp:
@@ -38,7 +40,7 @@ class _Client:
 
 def _patch(resp):
     _Client._resp = resp
-    return patch("app.services.ai.nous_health.httpx.AsyncClient", _Client)
+    return patch("app.services.ai.mediahub_model_health.httpx.AsyncClient", _Client)
 
 
 @pytest.mark.asyncio
@@ -50,7 +52,7 @@ async def test_llm_chat_ok() -> None:
         "api_key": "k",
     }
     with _patch(_Resp(200, {"choices": [{"message": {"content": "hi"}}]})):
-        out = await _probe_nous_model(row)
+        out = await _probe_mediahub_model(row)
     assert out["ok"] is True
     assert _Client.captured["url"].endswith("/chat/completions")
 
@@ -64,7 +66,7 @@ async def test_llm_http_error_surfaces() -> None:
         "api_key": "k",
     }
     with _patch(_Resp(429, text='{"error":"SetLimitExceeded"}')):
-        out = await _probe_nous_model(row)
+        out = await _probe_mediahub_model(row)
     assert out["ok"] is False
     assert "429" in out["error"]
 
@@ -78,7 +80,7 @@ async def test_embedding_multimodal_dims() -> None:
         "api_key": "k",
     }
     with _patch(_Resp(200, {"data": {"embedding": [0.1] * 2048}})):
-        out = await _probe_nous_model(row)
+        out = await _probe_mediahub_model(row)
     assert out["ok"] is True
     assert out["dims"] == 2048
     assert _Client.captured["url"].endswith("/embeddings/multimodal")
@@ -94,7 +96,7 @@ async def test_embedding_openai_shape() -> None:
         "api_key": "k",
     }
     with _patch(_Resp(200, {"data": [{"embedding": [0.2] * 1536}]})):
-        out = await _probe_nous_model(row)
+        out = await _probe_mediahub_model(row)
     assert out["dims"] == 1536
     assert _Client.captured["url"].endswith("/embeddings")
     assert _Client.captured["json"]["input"] == "ping"
@@ -110,12 +112,12 @@ async def test_asr_delegates_to_test_connection() -> None:
         "api_key": "k",
     }
     with patch(
-        "app.services.ai.nous_health.AIProviderFactory.test_connection",
+        "app.services.ai.mediahub_model_health.AIProviderFactory.test_connection",
         AsyncMock(
             return_value={"success": True, "models": ["seed-asr"], "error": None}
         ),
     ):
-        out = await _probe_nous_model(row)
+        out = await _probe_mediahub_model(row)
     assert out["ok"] is True
 
 
@@ -128,9 +130,9 @@ async def test_exception_is_caught() -> None:
         "api_key": "k",
     }
     with patch(
-        "app.services.ai.nous_health.httpx.AsyncClient",
+        "app.services.ai.mediahub_model_health.httpx.AsyncClient",
         side_effect=RuntimeError("boom"),
     ):
-        out = await _probe_nous_model(row)
+        out = await _probe_mediahub_model(row)
     assert out["ok"] is False
     assert "boom" in out["error"]
