@@ -5,7 +5,7 @@ from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
 from app.core.config import settings
-from app.core.secure_settings import is_secret_key
+from app.core.secure_settings import JSONB_SECRET_KEYS, is_secret_key
 from app.repositories.admin.system_settings_repository import (
     get_system_settings_repository,
 )
@@ -702,6 +702,20 @@ async def update_setting(
 ):
     """Update a system setting by key."""
     repo = get_system_settings_repository()
+
+    # Review finding (secret-hardening): conceal_for_key only encrypts a
+    # JSONB_SECRET_KEYS entry when the value is a dict — a non-dict write
+    # through this generic path would land in PLAINTEXT, and the self-heal
+    # scanner skips non-dict shapes so it would never be encrypted after
+    # the fact. Reject the shape outright; these keys have dedicated
+    # typed endpoints.
+    if key in JSONB_SECRET_KEYS and not isinstance(update.value, dict):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Setting '{key}' must be a JSON object " "(use its dedicated endpoint)"
+            ),
+        )
 
     if not await repo.exists(key):
         raise HTTPException(

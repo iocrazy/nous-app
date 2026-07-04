@@ -273,3 +273,22 @@ async def test_platform_providers_requires_admin(monkeypatch, client):
         assert r.status_code in (401, 403)
     finally:
         app.dependency_overrides[get_admin_auth] = _fake_admin
+
+
+@pytest.mark.asyncio
+async def test_generic_patch_rejects_non_dict_platform_providers(monkeypatch, client):
+    """Review finding: a non-dict write to platform.ai_providers through the
+    generic PATCH would bypass field-level encryption (conceal_for_key only
+    encrypts dict shapes) and the self-heal scanner skips non-dict values —
+    plaintext forever. The generic path must reject the shape (422)."""
+    repo = _FakeRepo({"platform.ai_providers": {"doubao": {"api_key": "enc:v1:x"}}})
+    _install_repo(monkeypatch, repo)
+
+    r = await client.patch(
+        f"{BASE}/platform.ai_providers",
+        json={"value": "sk-oops-plaintext"},
+    )
+    assert r.status_code == 422, r.text
+    assert "JSON object" in r.text
+    # Nothing was written
+    assert repo._rows["platform.ai_providers"] == {"doubao": {"api_key": "enc:v1:x"}}
