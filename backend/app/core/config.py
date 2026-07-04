@@ -194,26 +194,6 @@ class Settings(BaseSettings):
         "hazard. The storyboard_frame_characters junction table has no consumer "
         "(nothing to migrate). Instant rollback = flip back to false.",
     )
-    USE_ORM_AI: bool = Field(
-        default=False,
-        description="Route AIRepository (resource_transcripts / "
-        "resource_summaries upsert-by-resource_id + the AI status columns on "
-        "resources) through the SQLAlchemy 2.0 ORM session layer (Phase 2 M "
-        "batch). Strategy C value-type parity: transcript/summary id (uuid) → "
-        "str (shape only — no consumer reads the row id); resource_id (bigint) "
-        "native int; created_at → ISO str (REQUIRED — Transcript/SummaryResponse "
-        ".created_at are typed Optional[str], pydantic rejects a native "
-        "datetime); segments / key_points / topics (jsonb) → native dict/list; "
-        "duration_seconds (double) → native float. resources.*_status are "
-        "Enum(AiTaskStatus) columns — writes bind the bare status string "
-        "(SQLAlchemy Enum accepts the matching value), filters compare to the "
-        "string; the get_videos_needing_* SELECTs don't project a status column "
-        "so no Enum read-unwrap. upsert reproduces ON CONFLICT (resource_id) DO "
-        "UPDATE. No date range filters. save_* / get_* swallow + return None; "
-        "update_media_ai_status returns False on failure; get_videos_* return [] "
-        "(both cold/uncalled in app today, migrated for completeness). Writes "
-        "commit via write_scope(). Inert — flip back to false to roll back.",
-    )
     USE_ORM_TEAM: bool = Field(
         default=False,
         description="Route TeamRepository (CROWN JEWEL — the team authorization "
