@@ -120,30 +120,6 @@ class Settings(BaseSettings):
         "and all callers can land BEFORE enforcement flips on. Instant rollback "
         "= flip back to false.",
     )
-    USE_ORM_PAYMENT: bool = Field(
-        default=False,
-        description="Route PaymentRepository (MONEY — payment orders, the "
-        "purchase ledger: the orders table) through the SQLAlchemy 2.0 ORM "
-        "(Phase 2 H batch — money). NUMERIC-PRECISION DECISION: orders has NO "
-        "Numeric column — amount_cents / points_amount are INTEGER (REST returned "
-        "numbers → STAY NATIVE int; the 5.3 trap). points_amount feeds "
-        "points_service.add_points' ``balance + amount`` exact int math; str() "
-        "would break it. id / team_id are BigInteger → native int (order_id binds "
-        "to update_order's WHERE; team_id → add_points → int()). UUID sweep: "
-        "user_id / package_id → str (default-str-all-uuid; user_id flows into "
-        "add_points→create_transaction's Uuid write bind which accepts the str "
-        "form). payment_status/method/currency are CHECK/plain String NOT Enum "
-        "(handle_callback does ``status == 'paid'`` str==str — no _plain). "
-        "WRITE-BINDING (v3): the legacy .isoformat()'d paid_at/expired_at/created_"
-        "at/updated_at to ISO strings before REST; asyncpg REQUIRES native aware "
-        "datetimes, so the ORM does the INVERSE — _coerce_temporal(ISO-str→"
-        "datetime) at the write boundary; update_order + expire_pending_orders "
-        "use func.now() (DB clock) for updated_at and the ``expired_at < NOW()`` "
-        "filter (the legacy bound a naive-local string). create_order omits "
-        "created_at/updated_at (server_default now()). Writes commit via "
-        "write_scope() (a payment-state write silently rolled back = a paid order "
-        "stuck pending). Inert — flip back to false to roll back.",
-    )
 
     # ============================================
     # Feature flags — optional capabilities (default off; flip via .env)
