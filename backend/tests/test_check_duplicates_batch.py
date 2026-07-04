@@ -1,7 +1,8 @@
 """Tests for the batch check-duplicates endpoint (Task 1 – bulk import).
 
 Coverage:
-- find_by_hashes: issues one PostgREST .in_ query; maps hash→first row
+- find_by_hashes: issues one ORM ``file_hash IN (...)`` query; maps hash→first
+  row (projected to the exact legacy column set)
 - POST /check-duplicates: one result per input item, order preserved
 - duplicate=True only when hash exists AND file_size_bytes == item.file_size
 - duplicate=False when hash exists but size differs (collision guard)
@@ -12,145 +13,180 @@ Coverage:
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
+from app.models import Resources
+from app.repositories import resources_repository as repo_mod
 from app.repositories.resources_repository import ResourcesRepository
 
-# ─── Repository helpers ────────────────────────────────────────────────────────
+# ─── Repository scope-mock plumbing ────────────────────────────────────────────
 
 
-class _FakeQuery:
-    """Chainable query stub that records every chained call."""
+class _ScalarResult:
+    def __init__(self, objs: list[Any]) -> None:
+        self._objs = objs
 
-    def __init__(self, data: list[dict] | None = None) -> None:
-        self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
-        self._data = data if data is not None else []
-
-    def __getattr__(self, name: str):
-        def _capture(*args: Any, **kwargs: Any) -> "_FakeQuery":
-            self.calls.append((name, args, kwargs))
-            return self
-
-        return _capture
-
-    async def execute(self) -> Any:
-        return type("_R", (), {"data": self._data})()
-
-    def call_args(self, method: str) -> tuple[Any, ...] | None:
-        found = next((c for c in self.calls if c[0] == method), None)
-        return found[1] if found else None
-
-    def kwarg(self, method: str, key: str) -> Any:
-        found = next((c for c in self.calls if c[0] == method), None)
-        return found[2].get(key) if found else None
+    def all(self) -> list[Any]:
+        return list(self._objs)
 
 
-def _repo_with_query(query: _FakeQuery) -> ResourcesRepository:
-    repo = ResourcesRepository()
+class _ExecResult:
+    def __init__(self, objs: list[Any]) -> None:
+        self._objs = objs
 
-    class _Client:
-        def table(self, _name: str) -> _FakeQuery:
-            return query
+    def scalars(self) -> _ScalarResult:
+        return _ScalarResult(self._objs)
 
-    async def _get_client() -> Any:
-        return _Client()
 
-    repo._get_client = _get_client  # type: ignore[method-assign]
-    return repo
+class _CapSession:
+    """Records executed ORM statements and hands back queued ORM objects."""
+
+    def __init__(self, objs: list[Any] | None = None) -> None:
+        self.statements: list[Any] = []
+        self._objs = list(objs or [])
+
+    async def execute(self, stmt: Any, params: Any = None) -> _ExecResult:
+        self.statements.append(stmt)
+        return _ExecResult(self._objs)
+
+
+@asynccontextmanager
+async def _fake_scope(session: _CapSession):
+    yield session
+
+
+def _compiled(session: _CapSession):
+    """(sql_text, bind_values) for the single captured statement."""
+    assert session.statements, "expected a query to be executed"
+    compiled = session.statements[-1].compile(dialect=postgresql.dialect())
+    return str(compiled), compiled.params
+
+
+def _res(**kw: Any) -> Resources:
+    """A transient Resources ORM instance for the projected read path."""
+    return Resources(source_type="web", filename=kw.pop("filename", "f.mp4"), **kw)
 
 
 # ─── find_by_hashes tests ─────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_find_by_hashes_uses_in_query() -> None:
-    """find_by_hashes must use .in_("file_hash", ...) not individual .eq calls."""
+async def test_find_by_hashes_uses_in_query(monkeypatch) -> None:
+    """find_by_hashes filters ``file_hash IN (...)`` with the given hashes."""
     hashes = ["a" * 64, "b" * 64]
-    q = _FakeQuery(data=[])
-    repo = _repo_with_query(q)
+    session = _CapSession(objs=[])
+    monkeypatch.setattr(repo_mod, "read_scope", lambda: _fake_scope(session))
+    repo = ResourcesRepository()
 
     await repo.find_by_hashes(hashes, "user-1")
 
-    in_args = q.call_args("in_")
-    assert in_args is not None, "Expected .in_() to be called"
-    assert in_args[0] == "file_hash"
-    assert list(in_args[1]) == hashes
+    sql, binds = _compiled(session)
+    assert "file_hash IN" in sql
+    # The IN list is a single POSTCOMPILE bind holding all hashes.
+    flat = [x for v in binds.values() for x in (v if isinstance(v, list) else [v])]
+    for h in hashes:
+        assert h in flat
 
 
 @pytest.mark.asyncio
-async def test_find_by_hashes_filters_by_creator_id() -> None:
+async def test_find_by_hashes_filters_by_creator_id(monkeypatch) -> None:
     """find_by_hashes must bind creator_id so data never crosses user boundaries."""
-    q = _FakeQuery(data=[])
-    repo = _repo_with_query(q)
+    session = _CapSession(objs=[])
+    monkeypatch.setattr(repo_mod, "read_scope", lambda: _fake_scope(session))
+    repo = ResourcesRepository()
 
     await repo.find_by_hashes(["a" * 64], "creator-99")
 
-    # Look for an eq call with "creator_id"
-    eq_calls = [c for c in q.calls if c[0] == "eq" and c[1][0] == "creator_id"]
-    assert eq_calls, "Expected .eq('creator_id', ...) to filter by user"
-    assert eq_calls[0][1][1] == "creator-99"
+    sql, binds = _compiled(session)
+    assert "creator_id" in sql
+    assert "creator-99" in binds.values()
 
 
 @pytest.mark.asyncio
-async def test_find_by_hashes_filters_is_trashed_false() -> None:
+async def test_find_by_hashes_filters_is_trashed_false(monkeypatch) -> None:
     """find_by_hashes must exclude trashed resources."""
-    q = _FakeQuery(data=[])
-    repo = _repo_with_query(q)
+    session = _CapSession(objs=[])
+    monkeypatch.setattr(repo_mod, "read_scope", lambda: _fake_scope(session))
+    repo = ResourcesRepository()
 
     await repo.find_by_hashes(["a" * 64], "u1")
 
-    eq_calls = [c for c in q.calls if c[0] == "eq" and c[1][0] == "is_trashed"]
-    assert eq_calls, "Expected .eq('is_trashed', False)"
-    assert eq_calls[0][1][1] is False
+    sql, _binds = _compiled(session)
+    # ``is_(False)`` renders as a literal ``IS false`` (not a bind param).
+    assert "is_trashed IS false" in sql
 
 
 @pytest.mark.asyncio
-async def test_find_by_hashes_returns_hash_keyed_dict() -> None:
-    """Return value is {file_hash: first_matching_row}."""
+async def test_find_by_hashes_returns_hash_keyed_dict(monkeypatch) -> None:
+    """Return value is {file_hash: first_matching_row} projected to the legacy
+    column set (id → int, no extra keys leak)."""
     hash_a = "a" * 64
     hash_b = "b" * 64
-    row_a = {"file_hash": hash_a, "id": "1", "file_size_bytes": 100}
-    row_b = {"file_hash": hash_b, "id": "2", "file_size_bytes": 200}
-
-    q = _FakeQuery(data=[row_a, row_b])
-    repo = _repo_with_query(q)
+    objs = [
+        _res(id=1, file_hash=hash_a, file_size_bytes=100),
+        _res(id=2, file_hash=hash_b, file_size_bytes=200),
+    ]
+    session = _CapSession(objs=objs)
+    monkeypatch.setattr(repo_mod, "read_scope", lambda: _fake_scope(session))
+    repo = ResourcesRepository()
 
     result = await repo.find_by_hashes([hash_a, hash_b], "u1")
 
-    assert result == {hash_a: row_a, hash_b: row_b}
+    assert set(result.keys()) == {hash_a, hash_b}
+    assert result[hash_a]["id"] == 1
+    assert result[hash_a]["file_size_bytes"] == 100
+    # Exactly the legacy projection — no extra columns from the full entity read.
+    assert set(result[hash_a].keys()) == set(repo_mod._FIND_BY_HASH_COLS)
 
 
 @pytest.mark.asyncio
-async def test_find_by_hashes_first_row_per_hash_wins() -> None:
+async def test_find_by_hashes_first_row_per_hash_wins(monkeypatch) -> None:
     """When multiple rows share a hash, only the first is kept in the map."""
     h = "c" * 64
-    row1 = {"file_hash": h, "id": "first", "file_size_bytes": 42}
-    row2 = {"file_hash": h, "id": "second", "file_size_bytes": 42}
-
-    q = _FakeQuery(data=[row1, row2])
-    repo = _repo_with_query(q)
+    objs = [
+        _res(id=111, file_hash=h, file_size_bytes=42),
+        _res(id=222, file_hash=h, file_size_bytes=42),
+    ]
+    session = _CapSession(objs=objs)
+    monkeypatch.setattr(repo_mod, "read_scope", lambda: _fake_scope(session))
+    repo = ResourcesRepository()
 
     result = await repo.find_by_hashes([h], "u1")
 
-    assert result[h]["id"] == "first"
+    assert result[h]["id"] == 111
 
 
 @pytest.mark.asyncio
-async def test_find_by_hashes_returns_empty_dict_on_error() -> None:
+async def test_find_by_hashes_returns_empty_dict_on_error(monkeypatch) -> None:
     """find_by_hashes must never raise; return {} on any DB error."""
-    repo = ResourcesRepository()
 
-    async def _bad_client() -> Any:
+    def _boom():
         raise RuntimeError("DB exploded")
 
-    repo._get_client = _bad_client  # type: ignore[method-assign]
+    monkeypatch.setattr(repo_mod, "read_scope", _boom)
+    repo = ResourcesRepository()
 
     result = await repo.find_by_hashes(["a" * 64], "u1")
 
     assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_find_by_hashes_empty_input_short_circuits(monkeypatch) -> None:
+    """Empty hash list → {} without opening a session."""
+    session = _CapSession(objs=[])
+    monkeypatch.setattr(repo_mod, "read_scope", lambda: _fake_scope(session))
+    repo = ResourcesRepository()
+
+    result = await repo.find_by_hashes([], "u1")
+
+    assert result == {}
+    assert session.statements == []
 
 
 # ─── Endpoint tests ────────────────────────────────────────────────────────────
