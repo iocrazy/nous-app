@@ -2114,6 +2114,7 @@
   "topic": {
     "title": "Topic Inspiration",
     "subtitle": "AI 精选高价值话题与灵感",
+    "updatesPaused": "内容更新已暂停",
     "currentHot": "当前热点",
     "generateScript": "生成脚本",
     "parseDownload": "解析下载",

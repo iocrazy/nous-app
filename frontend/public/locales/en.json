@@ -2114,6 +2114,7 @@
   "topic": {
     "title": "Topic Inspiration",
     "subtitle": "AI-curated high-value topics and inspiration",
+    "updatesPaused": "Content updates are paused",
     "currentHot": "Current Hotspots",
     "generateScript": "Generate Script",
     "parseDownload": "Parse & Download",

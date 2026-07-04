@@ -1,4 +1,5 @@
-"""Integration tests for AIRepositoryOrm (Phase 2 M batch) against real PG.
+"""Integration tests for AIRepository (ORM-backed, ai domain collapsed to
+ORM-only) against real PG.
 
 Proves the REST → ORM swap is invisible AND that STRATEGY-C value-type parity
 holds on resource_transcripts / resource_summaries + the resources status cols:
@@ -83,9 +84,9 @@ async def seed_resource(integration_db_url):
 
 
 def _repo():
-    from app.repositories.ai_repository_orm import AIRepositoryOrm
+    from app.repositories.ai_repository import AIRepository
 
-    return AIRepositoryOrm()
+    return AIRepository()
 
 
 # ─── Transcript upsert (COMMIT + parity) ────────────────────────────────
@@ -208,27 +209,12 @@ async def test_get_videos_needing_transcription_native_int_id(
     _ = rid  # fixture used for engine wiring / cleanup
 
 
-# ─── factory on/off ─────────────────────────────────────────────────────
+# ─── factory (ORM-only) ─────────────────────────────────────────────────
 
 
-def test_factory_off_returns_legacy():
-    from unittest.mock import patch
-
+def test_factory_returns_ai_repository():
+    """The ai domain is ORM-only: the factory unconditionally returns the
+    (ORM-backed) AIRepository — no flag routing."""
     from app.repositories.ai_repository import AIRepository, get_ai_repository
 
-    with patch("app.core.config.settings.USE_ORM_AI", False):
-        assert type(get_ai_repository()) is AIRepository
-
-
-def test_factory_on_returns_orm(integration_db_url):
-    from unittest.mock import patch
-
-    from app.repositories.ai_repository_orm import AIRepositoryOrm
-
-    with (
-        patch("app.core.config.settings.USE_ORM_AI", True),
-        patch("app.db.engine.is_configured", return_value=True),
-    ):
-        from app.repositories.ai_repository import get_ai_repository
-
-        assert type(get_ai_repository()) is AIRepositoryOrm
+    assert type(get_ai_repository()) is AIRepository

@@ -234,11 +234,14 @@ async def hotspot_dates(auth: AuthDep, limit_days: int = Query(60, ge=1, le=180)
 
 @router.get("/module-status", response_model=ModuleStatusResponse)
 async def module_status(auth: AuthDep):
-    """Global master switch for the Topic Inspiration module. The frontend reads
-    this to hide the page/nav when an admin has turned the feature off."""
-    from app.services.topics.module_config import is_module_enabled
+    """Topic Inspiration module switches. The frontend hides the page/nav when
+    ``visible`` is false and shows a paused notice when ``enabled`` is false."""
+    from app.services.topics.module_config import is_module_enabled, is_module_visible
 
-    return ModuleStatusResponse(enabled=await is_module_enabled())
+    return ModuleStatusResponse(
+        enabled=await is_module_enabled(),
+        visible=await is_module_visible(),
+    )
 
 
 def _to_health_out(

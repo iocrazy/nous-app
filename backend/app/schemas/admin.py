@@ -719,10 +719,13 @@ class TopicScoringConfigResponse(BaseModel):
 
 
 class TopicModuleConfigResponse(BaseModel):
-    """Global master switch for the whole Topic Inspiration module
-    (system_settings['topics.module']). Off = pause everything + hide the page."""
+    """Topic Inspiration module switches (system_settings['topics.module']).
+    ``enabled`` pauses/resumes the backend pipeline; ``visible`` shows/hides
+    the frontend nav entry + page. Independent — pausing processing no longer
+    hides the surface."""
 
     enabled: bool = True
+    visible: bool = True
 
 
 class TopicContentFetchConfigResponse(BaseModel):
