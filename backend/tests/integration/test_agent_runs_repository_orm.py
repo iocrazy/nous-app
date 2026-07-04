@@ -1,4 +1,4 @@
-"""Integration tests for AgentRunsRepositoryOrm (Task 5.3) against real PG.
+"""Integration tests for the collapsed AgentRunsRepository (ORM-only) against real PG.
 
 The agent_runs repository runs on the SQLAlchemy 2.0 ORM session layer now —
 ``read_scope()`` for reads, ``write_scope()`` (which COMMITS) for writes. These
@@ -119,9 +119,9 @@ async def _insert_run(conn, agent_id, user_id, **overrides) -> dict:
 
 
 def _repo():
-    from app.repositories.agent_runs_repository_orm import AgentRunsRepositoryOrm
+    from app.repositories.agent_runs_repository import AgentRunsRepository
 
-    return AgentRunsRepositoryOrm()
+    return AgentRunsRepository()
 
 
 # ─── Reads ─────────────────────────────────────────────────────────────

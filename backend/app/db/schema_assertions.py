@@ -79,7 +79,7 @@ CRITICAL_MODELS: tuple[type, ...] = (
     ResourceItems,  # USE_ORM_RESOURCES (folder cascade)
     ResourceVersions,  # USE_ORM_RESOURCES
     Folders,  # USE_ORM_RESOURCES
-    AgentRuns,  # USE_ORM_AGENT_RUNS
+    AgentRuns,  # agent_runs
     UserSettings,  # USE_ORM_USER_SETTINGS
 )
 

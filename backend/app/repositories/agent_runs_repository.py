@@ -1,52 +1,122 @@
-"""Repository for agent_runs table — read paths only (writes go through RunRecorder).
+"""Repository for agent_runs table (SQLAlchemy 2.0 ORM) — read paths + the
+cancel trigger + the sweeper helpers (writes to agent_runs are otherwise owned
+by RunRecorder).
 
-The ``get_agent_runs_repository()`` factory returns either the legacy
-supabase-py implementation (this file) or the SQLAlchemy 2.0 ORM one
-(``agent_runs_repository_orm.py``) depending on the ``USE_ORM_AGENT_RUNS``
-flag. Call sites import the factory instead of the class so the swap is
-invisible to them.
+Post-rollout the repository IS the SQLAlchemy 2.0 implementation — the legacy
+supabase-py REST path and its ``USE_ORM_AGENT_RUNS`` flag were retired once prod
+ran 100% ORM. Reads go through ``read_scope()``; the two writes
+(``request_cancel`` / ``mark_heartbeat_lost``) go through ``write_scope()``
+(which ``session.begin()``s and COMMITS — this is the P0 fix over the old
+non-committing ``engine.connect()`` path, which silently rolled the UPDATE back
+on close). Call sites route through ``get_agent_runs_repository()`` (bottom of
+this module) so the backing store stays invisible to them.
 
-Task 5.3 of the ORM-2.0 migration removed the (never-prod-live)
-``USE_ASYNCPG_AGENT_RUNS`` path in favour of the ORM one (no tri-state): the
-ORM path commits writes via ``write_scope()``, fixing the silent-rollback P0.
-
-Framing: the effective prod baseline the ``monthly_usage_by_agent`` consumer
-was built against is THIS REST (supabase-py/PostgREST) base, not the asyncpg
-one — so when ``USE_ORM_AGENT_RUNS`` flips, value-type parity is checked
-REST→ORM (PostgREST renders uuid/numeric/bigint as JSON strings; the ORM repo
-coerces the usage projection to match).
+VALUE-TYPE PARITY (REST-origin domain, Task 5.3). The effective prod baseline
+the ``monthly_usage_by_agent`` consumer was built against is the REST
+(supabase-py/PostgREST) base — PostgREST renders uuid/numeric/bigint as JSON
+strings, so the usage projection coerces to match:
+  - ``agent_id`` / ``user_id`` (uuid) → str (the consumer does
+    ``UUID(str(agent_id))`` and ``str(r["user_id"]) == str(uuid)``).
+  - ``cost_cents`` (numeric) → str (the consumer does ``float(cost_cents)``;
+    PostgREST renders numeric as a JSON str).
+  - ``team_id`` / ``project_id`` (bigint) stay NATIVE int — the backend REST
+    base returned them as int and the team/project-scope filter is a bare int
+    compare (``r.get("team_id") == team_id``); stringifying them silently zeroes
+    those scopes. See ``_usage_row_to_dict`` / ``_USAGE_STR_COLS``.
+The other reads (list_*/get_by_id) are NOT stringified: they leave the HTTP
+boundary via FastAPI ``jsonable_encoder`` (UUID→str, datetime→ISO), so native
+uuid.UUID / datetime in the dict produces byte-identical HTTP responses.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from loguru import logger
+from sqlalchemy import func, select, update
 
-from app.core.config import settings
-from app.db.supabase_client import get_async_supabase_admin
+from app.db.repository_base import AsyncpgRepository
+from app.db.session import read_scope, write_scope
+from app.models import AgentRuns
+from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
 
-if TYPE_CHECKING:
-    from app.repositories.agent_runs_repository_orm import AgentRunsRepositoryOrm
+# agent_runs DB-column-name → mapped-attribute-name. Built once from the mapper.
+# For agent_runs every name == key (no reserved-name remap), but we resolve via
+# this map anyway for parity with the sibling repos and to stay correct if a
+# column is ever renamed.
+_AGENT_RUNS_NAME_TO_ATTR: Dict[str, str] = _name_to_attr(AgentRuns)
+
+# The 9-column projection monthly_usage_by_agent returns. Pinned here so the ORM
+# select returns EXACTLY the columns the REST/legacy impl did.
+_USAGE_COLS = (
+    "agent_id",
+    "user_id",
+    "team_id",
+    "project_id",
+    "status",
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "cost_cents",
+)
+
+# Columns of the usage projection whose VALUE TYPE must match what the live REST
+# (supabase-py/PostgREST) backend baseline returned, because the /usage consumer
+# (ai_library_router.get_usage) does Python-level type-sensitive ops on them.
+# Coerce EXACTLY these three (the ORM returns native uuid.UUID / Decimal):
+#   - agent_id : uuid    → str   (consumer does UUID(str(agent_id)) + dict key)
+#   - user_id  : uuid    → str   (consumer does str(r["user_id"]) == str(uuid))
+#   - cost_cents : numeric → str (REST renders numeric as a JSON str; consumer
+#                                 does float(cost_cents) — str works)
+# DO NOT coerce team_id / project_id: they are bigint, and the *backend*
+# supabase-py base returned bigint as a native Python int (JSON number → int —
+# the bigint→str precision concern is a FRONTEND/JS issue via bigIntSafeFetch,
+# not backend). The consumer filters with a BARE int compare
+# (``r.get("team_id") == team_id`` where team_id is an ``int`` query param), so
+# stringifying them makes ``"123" == 123`` False → team/project usage returns
+# ZERO. Tokens (int4) and status (text) already match REST — left as-is. NULLs
+# pass through unchanged.
+_USAGE_STR_COLS = ("agent_id", "user_id", "cost_cents")
 
 
-class AgentRunsRepository:
+def _usage_row_to_dict(row: Any) -> Dict[str, Any]:
+    """One monthly_usage_by_agent row → dict with REST value-type parity.
+
+    Coerces the uuid (agent_id / user_id) and numeric (cost_cents) columns to
+    str (matching PostgREST's JSON rendering) so the /usage consumer's
+    type-sensitive ops keep working. team_id / project_id (bigint) stay native
+    int to match the backend REST base + the consumer's bare-int filter. NULLs
+    stay None."""
+    out = dict(row)
+    for col in _USAGE_STR_COLS:
+        val = out.get(col)
+        if val is not None:
+            out[col] = str(val)
+    return out
+
+
+def _agent_run_to_dict(obj: Any) -> Dict[str, Any]:
+    """SELECT *-shaped dict for an ``agent_runs`` ORM row."""
+    return _orm_obj_to_dict(obj, _AGENT_RUNS_NAME_TO_ATTR)
+
+
+class AgentRunsRepository(AsyncpgRepository):
     """Data access for agent_runs. Writes are exclusively owned by RunRecorder;
     this repo exposes the read paths, the cancel trigger, and sweeper helpers.
 
     RLS on the table already restricts rows to the calling user's scope when
-    a user-scoped client is used. We use the admin client here for service
-    reads (list/detail) and let the router layer enforce user-scope via
-    ``auth.user_id`` filters in the query. The cancel path verifies ownership
-    before flipping the flag.
+    a user-scoped client is used. The router layer enforces user-scope via
+    explicit ``user_id`` filters in the query; the cancel path verifies
+    ownership before flipping the flag.
+
+    ``_bigint`` is inherited from ``AsyncpgRepository`` (``agent_runs.id`` /
+    ``parent_run_id`` are BIGINT — migration 232 — and snowflake ids travel as
+    strings through FastAPI path params, which the PG int8 codec rejects).
     """
 
     TABLE = "agent_runs"
-
-    async def _get_client(self):
-        return await get_async_supabase_admin()
 
     # ------------------------------------------------------------------
     # Reads
@@ -60,33 +130,27 @@ class AgentRunsRepository:
         limit: int = 50,
         offset: int = 0,
     ) -> Dict[str, Any]:
-        """Paginated runs for one agent, scoped to the caller.
-
-        Returns {"items": [...], "total": N}. Admin client + explicit user_id
-        filter substitutes for RLS at this layer (admin client bypasses RLS).
-        """
+        """Paginated runs for one agent, scoped to the caller. Returns
+        {"items": [...], "total": N}. Two queries — count + page — matching
+        the prior shape rather than collapsing into a window function."""
         try:
-            client = await self._get_client()
-            # Count first
-            count_result = (
-                await client.table(self.TABLE)
-                .select("id", count="exact", head=True)
-                .eq("agent_id", str(agent_id))
-                .eq("user_id", str(user_id))
-                .execute()
-            )
-            total = count_result.count or 0
-
-            result = (
-                await client.table(self.TABLE)
-                .select("*")
-                .eq("agent_id", str(agent_id))
-                .eq("user_id", str(user_id))
-                .order("started_at", desc=True)
-                .range(offset, offset + limit - 1)
-                .execute()
-            )
-            return {"items": result.data or [], "total": total}
+            async with read_scope() as session:
+                total = await session.scalar(
+                    select(func.count())
+                    .select_from(AgentRuns)
+                    .where(AgentRuns.agent_id == agent_id)
+                    .where(AgentRuns.user_id == user_id)
+                )
+                result = await session.execute(
+                    select(AgentRuns)
+                    .where(AgentRuns.agent_id == agent_id)
+                    .where(AgentRuns.user_id == user_id)
+                    .order_by(AgentRuns.started_at.desc())
+                    .limit(limit)
+                    .offset(offset)
+                )
+                items = [_agent_run_to_dict(r) for r in result.scalars().all()]
+            return {"items": items, "total": int(total or 0)}
         except Exception as e:
             logger.error(f"Failed to list runs (agent={agent_id}, user={user_id}): {e}")
             return {"items": [], "total": 0}
@@ -94,22 +158,21 @@ class AgentRunsRepository:
     async def get_by_id(
         self, run_id: str, *, user_id: UUID
     ) -> Optional[Dict[str, Any]]:
-        """Single run detail; returns None if not found OR not owned by user.
+        """Single run detail; None if not found OR not owned by user.
 
         The second clause doubles as authz: a stray run_id from another user
-        reads as 404, not 403, to avoid leaking existence.
-        """
+        reads as 404, not 403, to avoid leaking existence."""
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.TABLE)
-                .select("*")
-                .eq("id", str(run_id))
-                .eq("user_id", str(user_id))
-                .maybe_single()
-                .execute()
-            )
-            return result.data if result and result.data else None
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(AgentRuns)
+                    # agent_runs.id is BIGINT (mig 232); coerce str → int8.
+                    .where(AgentRuns.id == self._bigint(run_id))
+                    .where(AgentRuns.user_id == user_id)
+                    .limit(1)
+                )
+                row = result.scalars().first()
+                return _agent_run_to_dict(row) if row else None
         except Exception as e:
             logger.error(f"Failed to get run {run_id}: {e}")
             return None
@@ -120,30 +183,24 @@ class AgentRunsRepository:
         *,
         user_id: UUID,
         limit: int = 100,
-    ) -> list[Dict[str, Any]]:
-        """Phase 4 of #199: direct children of one parent run.
+    ) -> List[Dict[str, Any]]:
+        """Phase 4 of #199: direct children of one parent run, newest first.
 
-        Direct only — caller asks recursively if they want a full tree
-        (this avoids surprise N+1 explosions and keeps the per-call
-        cost predictable). The user_id filter doubles as authz: a
-        stray parent_run_id from another user reads as empty rather
-        than leaking existence.
-
-        Ordered by started_at DESC so the newest sub-spawn is at top —
-        matches Runs UI's "newest first" convention.
-        """
+        Direct only — caller asks recursively if they want a full tree (avoids
+        surprise N+1 explosions). The user_id filter doubles as authz: a stray
+        parent_run_id from another user reads as empty rather than leaking
+        existence. Ordered by started_at DESC to match the Runs UI convention."""
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.TABLE)
-                .select("*")
-                .eq("parent_run_id", str(parent_run_id))
-                .eq("user_id", str(user_id))
-                .order("started_at", desc=True)
-                .limit(limit)
-                .execute()
-            )
-            return result.data or []
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(AgentRuns)
+                    # agent_runs.parent_run_id is BIGINT (mig 232); coerce.
+                    .where(AgentRuns.parent_run_id == self._bigint(parent_run_id))
+                    .where(AgentRuns.user_id == user_id)
+                    .order_by(AgentRuns.started_at.desc())
+                    .limit(limit)
+                )
+                return [_agent_run_to_dict(r) for r in result.scalars().all()]
         except Exception as e:
             logger.error(f"Failed to list children for parent={parent_run_id}: {e}")
             return []
@@ -153,23 +210,20 @@ class AgentRunsRepository:
     # ------------------------------------------------------------------
 
     async def request_cancel(self, run_id: str, *, user_id: UUID) -> bool:
-        """Set cancel_requested=true. Idempotent. Only acts on running, owned rows.
-
-        Returns True when the flag was flipped (or already pending). False if
-        the run doesn't exist, is already in a terminal state, or is not owned
-        by the caller.
-        """
+        """Set cancel_requested=true. Idempotent. Only acts on running, owned
+        rows. Returns True iff a row was actually updated. Committed via
+        write_scope (the old asyncpg path silently rolled this back)."""
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.TABLE)
-                .update({"cancel_requested": True})
-                .eq("id", str(run_id))
-                .eq("user_id", str(user_id))
-                .eq("status", "running")
-                .execute()
-            )
-            return bool(result.data)
+            async with write_scope() as session:
+                result = await session.execute(
+                    update(AgentRuns)
+                    # agent_runs.id is BIGINT (mig 232); coerce.
+                    .where(AgentRuns.id == self._bigint(run_id))
+                    .where(AgentRuns.user_id == user_id)
+                    .where(AgentRuns.status == "running")
+                    .values(cancel_requested=True)
+                )
+                return (result.rowcount or 0) > 0
         except Exception as e:
             logger.error(f"Failed to request cancel for run {run_id}: {e}")
             return False
@@ -179,31 +233,31 @@ class AgentRunsRepository:
     # ------------------------------------------------------------------
 
     async def mark_heartbeat_lost(self, *, stale_before: datetime) -> int:
-        """Flip all running rows with heartbeat_at < stale_before → heartbeat_lost.
-
-        Returns the number of rows updated. Caller is the sweeper cron; advisory
-        lock is held one level up so this call is assumed serialized.
-        """
+        """Bulk-flip stuck running rows (heartbeat_at < stale_before) →
+        heartbeat_lost. Returns the row count for telemetry. A SET-based UPDATE
+        (naturally idempotent). Committed via write_scope. Datetimes bound as
+        ``datetime`` objects, never isoformat strings."""
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.TABLE)
-                .update(
-                    {
-                        "status": "heartbeat_lost",
-                        "ended_at": datetime.now(timezone.utc).isoformat(),
-                        "error_code": "heartbeat_lost",
-                        "error_message": "No heartbeat for >2 minutes",
-                    }
+            async with write_scope() as session:
+                result = await session.execute(
+                    update(AgentRuns)
+                    .where(AgentRuns.status == "running")
+                    .where(AgentRuns.heartbeat_at < stale_before)
+                    .values(
+                        status="heartbeat_lost",
+                        ended_at=datetime.now(timezone.utc),
+                        error_code="heartbeat_lost",
+                        error_message="No heartbeat for >2 minutes",
+                    )
                 )
-                .eq("status", "running")
-                .lt("heartbeat_at", stale_before.isoformat())
-                .execute()
-            )
-            return len(result.data or [])
+                return result.rowcount or 0
         except Exception as e:
             logger.error(f"Failed to mark heartbeat_lost: {e}")
             return 0
+
+    # ------------------------------------------------------------------
+    # Aggregate
+    # ------------------------------------------------------------------
 
     async def monthly_usage_by_agent(
         self,
@@ -211,29 +265,26 @@ class AgentRunsRepository:
         month_start: datetime,
         month_end: datetime,
     ) -> List[Dict[str, Any]]:
-        """Aggregate tokens + cost grouped by agent for [month_start, month_end).
+        """Raw rows (9-column projection) for [month_start, month_end). Caller
+        (ai_library_router.get_usage) groups in Python — matches the REST
+        baseline. Datetimes bound as ``datetime``.
 
-        Used by the sweeper to compare against each agent's monthly budget,
-        and by the usage endpoint for the AI Usage dashboard. Scope filtering
-        (user / team / project) layers on top at the endpoint.
-
-        Returns raw rows; the caller groups in Python. For production scale
-        this should move to a SQL function, but for phase-1 volumes (hundreds
-        of runs/month) client-side aggregation is fine.
-        """
+        VALUE-TYPE PARITY: agent_id / user_id (uuid) + cost_cents (numeric) are
+        coerced to str (see ``_usage_row_to_dict``) to match the live REST
+        baseline — the consumer does ``str(r["user_id"]) == str(uuid)`` /
+        ``UUID(str(r["agent_id"]))`` / ``float(cost_cents)`` and breaks on a
+        native ``uuid.UUID`` / ``Decimal``. team_id / project_id (bigint) stay
+        native int (REST backend returned int; the scope filter is a bare int
+        compare — stringifying them silently zeroes team/project scopes)."""
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.TABLE)
-                .select(
-                    "agent_id,user_id,team_id,project_id,status,"
-                    "prompt_tokens,completion_tokens,total_tokens,cost_cents"
+            cols = [getattr(AgentRuns, name) for name in _USAGE_COLS]
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(*cols)
+                    .where(AgentRuns.started_at >= month_start)
+                    .where(AgentRuns.started_at < month_end)
                 )
-                .gte("started_at", month_start.isoformat())
-                .lt("started_at", month_end.isoformat())
-                .execute()
-            )
-            return result.data or []
+                return [_usage_row_to_dict(r) for r in result.mappings().all()]
         except Exception as e:
             logger.error(f"Failed to load monthly usage: {e}")
             return []
@@ -242,32 +293,10 @@ class AgentRunsRepository:
 # ─── Factory ──────────────────────────────────────────────────────────
 
 
-def get_agent_runs_repository() -> Union[AgentRunsRepository, "AgentRunsRepositoryOrm"]:
-    """Return the active AgentRunsRepository implementation.
+def get_agent_runs_repository() -> AgentRunsRepository:
+    """Return the AgentRunsRepository.
 
-    Routing (no tri-state — the ORM path REPLACED asyncpg, Task 5.3):
-      - ``settings.USE_ORM_AGENT_RUNS=True`` AND the SQLAlchemy engine
-        configured (``app.db.engine.is_configured``)
-        → SQLAlchemy 2.0 ORM implementation (committing writes)
-      - else → legacy supabase-py implementation (this file)
-
-    Both classes expose the same public method signatures, so call sites
-    just do ``repo = get_agent_runs_repository()`` and use it the same
-    way regardless of backend.
-    """
-    if settings.USE_ORM_AGENT_RUNS:
-        from app.db.engine import is_configured
-
-        if is_configured():
-            from app.repositories.agent_runs_repository_orm import (
-                AgentRunsRepositoryOrm,
-            )
-
-            return AgentRunsRepositoryOrm()
-        # Flag on but engine missing — log once + fall back so a
-        # half-configured deploy doesn't crash.
-        logger.warning(
-            "USE_ORM_AGENT_RUNS=true but SUPAVISOR_DATABASE_URL "
-            "is empty — falling back to supabase-py path"
-        )
+    Post-rollout there is no flag branch and no engine-missing fallback: the
+    repository IS the SQLAlchemy 2.0 ORM implementation. Call sites just do
+    ``repo = get_agent_runs_repository()`` and use it directly."""
     return AgentRunsRepository()
