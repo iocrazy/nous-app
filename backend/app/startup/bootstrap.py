@@ -261,10 +261,41 @@ async def _bg_memory_warmup() -> None:
         logger.warning(f"memory warmup failed (non-fatal): {exc!r}")
 
 
+async def _bg_secrets_selfheal() -> None:
+    """Secret-at-rest self-heal (see app.services.infra.secrets_selfheal).
+
+    When NO real MEDIAHUB_TOKEN_ENCRYPTION_KEY is configured this is where
+    the long-promised boot warning fires (secret_box's docstring promised it
+    since P7 but it was never wired — is_configured() had zero non-test
+    callers): MCP bearer tokens fall back to the PUBLIC committed dev key
+    and settings-secret writes fail closed. When a real key IS configured,
+    run one idempotent sweep that re-encrypts plaintext / dev-keyed secrets
+    under it (marker check ⇒ a second pass rewrites 0 rows).
+    """
+    try:
+        from app.core import secret_box
+
+        if not secret_box.is_configured():
+            logger.warning(
+                "MEDIAHUB_TOKEN_ENCRYPTION_KEY is NOT set — MCP bearer tokens "
+                "fall back to the PUBLIC dev key committed in this repo and "
+                "settings secrets are NOT protected at rest. Set "
+                "MEDIAHUB_TOKEN_ENCRYPTION_KEY (keep the old key as "
+                "MEDIAHUB_TOKEN_ENCRYPTION_KEY_OLD during rotation)."
+            )
+            return
+        from app.services.infra.secrets_selfheal import run_secrets_selfheal
+
+        await run_secrets_selfheal()
+    except Exception as exc:  # noqa: BLE001 — healer must never break startup
+        logger.warning(f"secrets selfheal on startup failed: {exc!r}")
+
+
 def install_background_bootstrap(app: FastAPI) -> None:
     """Spawn all background bootstrap tasks into `app.state.bg_tasks`."""
     app.state.bg_tasks = BackgroundTaskRegistry()
     app.state.bg_tasks.spawn("schema_probe", _bg_schema_probe())
+    app.state.bg_tasks.spawn("secrets_selfheal", _bg_secrets_selfheal())
     app.state.bg_tasks.spawn("seed_loader", _bg_seed_loader())
     app.state.bg_tasks.spawn("deployment_log", _bg_deployment_log())
     app.state.bg_tasks.spawn("liveness_reconcile", _bg_liveness_reconcile())

@@ -670,6 +670,29 @@ async def update_platform_ai_providers_settings(
     return await _read_platform_providers_masked()
 
 
+@router.post("/encrypt-secrets")
+async def encrypt_secrets(auth: AdminAuthDep):
+    """Manually re-run the secret-at-rest self-heal sweep (same code path the
+    startup task runs): re-encrypts plaintext / dev-keyed secrets in
+    system_settings, platform.ai_providers, mediahub_models.api_key and
+    user_mcp_servers.bearer_token under the real env key. Idempotent —
+    a repeat run rewrites 0 rows. 409 when no real encryption key is set."""
+    from app.core import secret_box
+    from app.services.infra.secrets_selfheal import run_secrets_selfheal
+
+    if not secret_box.is_configured():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "MEDIAHUB_TOKEN_ENCRYPTION_KEY is not configured — set a real "
+                "encryption key before running the self-heal sweep"
+            ),
+        )
+    summary = await run_secrets_selfheal()
+    logger.info(f"[Admin] encrypt-secrets run by {auth.user_id}: {summary}")
+    return summary
+
+
 @router.patch("/{key}", response_model=SystemSettingResponse)
 async def update_setting(
     key: str,
