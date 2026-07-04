@@ -1,5 +1,5 @@
 """Pin the snowflake-str → int8 coercion in
-``ResourcesRepositoryOrm.create_version``.
+``ResourcesRepository.create_version``.
 
 Real-world breakage (prod log, 2026-05-29):
 
@@ -21,8 +21,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.repositories import resources_repository_orm as orm_mod
-from app.repositories.resources_repository_orm import ResourcesRepositoryOrm
+from app.repositories import resources_repository as orm_mod
+from app.repositories.resources_repository import ResourcesRepository
 
 
 def _patch_write_scope_capturing(captured: dict):
@@ -54,7 +54,7 @@ def _patch_write_scope_capturing(captured: dict):
 
 @pytest.mark.asyncio
 async def test_create_version_coerces_bigint_columns_from_str():
-    repo = ResourcesRepositoryOrm()
+    repo = ResourcesRepository()
     captured: dict = {}
 
     original = orm_mod.write_scope
@@ -89,7 +89,7 @@ async def test_create_version_coerces_bigint_columns_from_str():
 async def test_create_version_leaves_int_inputs_untouched():
     """A caller that already passes ints (e.g. resources_service) shouldn't
     trip the coerce path."""
-    repo = ResourcesRepositoryOrm()
+    repo = ResourcesRepository()
     captured: dict = {}
 
     original = orm_mod.write_scope

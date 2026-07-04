@@ -10,13 +10,14 @@ skip the destructive cleanup. No scheduled sweeper reclaims the skipped files �
 they leak until a later successful permanent_delete or manual cleanup (accepted:
 leaking on a rare transient error beats deleting files another user needs).
 
-These are pure unit tests over the caller logic + the legacy repo's re-raise —
-the repo is a stand-in whose ``count_resources_by_media_id`` raises, or (for the
-legacy repo test) the supabase client is patched to raise. No DB / network.
-INERT wrt the scope flag (this is about error propagation, not enforcement)."""
+These are pure unit tests over the caller logic + the repo's re-raise — the
+repo is a stand-in whose ``count_resources_by_media_id`` raises, or (for the
+repo test) the ORM read session is patched to raise. No DB / network. INERT
+wrt the scope flag (this is about error propagation, not enforcement)."""
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -149,23 +150,32 @@ async def test_cleanup_expired_trash_count_raise_skips_only_that_resource():
     svc._delete_media_record.assert_awaited_once_with("media-solo")
 
 
-# ── legacy (supabase-py) repo — the LIVE prod default path ──────────────────
+# ── repo (ORM) — count_resources_by_media_id re-raises, never fabricates 0 ──
 
 
 @pytest.mark.asyncio
-async def test_legacy_repo_count_reraises_on_error_never_returns_zero():
-    """``ResourcesRepository.count_resources_by_media_id`` (legacy supabase-py,
-    the LIVE prod default while USE_ORM_RESOURCES is False) must RE-RAISE on a
-    DB error, NOT return a fabricated 0. We patch ``_get_client`` to raise and
-    assert the exception propagates (mirrors the ORM repo's re-raise so the
-    fabricated-0 data-loss path is closed on BOTH impls)."""
+async def test_repo_count_reraises_on_error_never_returns_zero():
+    """``ResourcesRepository.count_resources_by_media_id`` (ORM-backed) must
+    RE-RAISE on a DB error, NOT return a fabricated 0. We patch the ORM read
+    session's ``scalar`` to raise and assert the exception propagates — a fake
+    0 would let the GC delete shared files another user still references."""
 
     class _Boom(Exception):
         pass
 
+    async def _raise_scalar(*_a, **_k):
+        raise _Boom("db down")
+
+    fake_session = MagicMock()
+    fake_session.scalar = AsyncMock(side_effect=_raise_scalar)
+
+    @asynccontextmanager
+    async def _fake_read_scope():
+        yield fake_session
+
+    from app.repositories import resources_repository as repo_mod
+
     repo = ResourcesRepository()
-    with patch.object(
-        ResourcesRepository, "_get_client", AsyncMock(side_effect=_Boom("db down"))
-    ):
+    with patch.object(repo_mod, "read_scope", _fake_read_scope):
         with pytest.raises(_Boom):
             await repo.count_resources_by_media_id("123")

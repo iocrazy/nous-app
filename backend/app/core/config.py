@@ -89,15 +89,6 @@ class Settings(BaseSettings):
         "ORM background diff) for parity validation. Independent of USE_ORM_*. "
         "Empty = no shadowing (fully inert).",
     )
-    USE_ORM_RESOURCES: bool = Field(
-        default=False,
-        description="Route ResourcesRepository through the SQLAlchemy 2.0 ORM "
-        "session layer (Task 5.2 — replaces the asyncpg resources path; fixes "
-        "the silent-rollback P0 by committing writes via write_scope() and "
-        "running folder cascades atomically in one write_scope(). Covers "
-        "resources / resource_items / resource_versions / folders; the "
-        "resource_tags + smart-folder methods inherit legacy via MRO)",
-    )
     USE_ORM_MEDIA: bool = Field(
         default=False,
         description="Route MediaRepository through the SQLAlchemy 2.0 ORM "

@@ -1,4 +1,4 @@
-"""Integration tests for ResourcesRepositoryOrm (Task 5.2) against real PG.
+"""Integration tests for ResourcesRepository (Task 5.2) against real PG.
 
 The resources repository (resources / resource_items / resource_versions /
 folders) runs on the SQLAlchemy 2.0 ORM session layer now — ``read_scope()``
@@ -24,7 +24,7 @@ Setup: requires INTEGRATION_DATABASE_URL set to a PG with the mediahub
 schema. Skips otherwise. Use the dev stack for these write-heavy tests:
 
     source /tmp/orm2_integration.env  # sets INTEGRATION_DATABASE_URL
-    uv run pytest tests/integration/test_resources_repository_orm.py -v
+    uv run pytest tests/integration/test_resources_repository.py -v
 
 Seed rows are tagged with a per-run prefix for predictable cleanup; the
 fixture deletes them after each test even on failure.
@@ -149,9 +149,9 @@ async def _seed_parsed_media(
 
 
 def _repo():
-    from app.repositories.resources_repository_orm import ResourcesRepositoryOrm
+    from app.repositories.resources_repository import ResourcesRepository
 
-    return ResourcesRepositoryOrm()
+    return ResourcesRepository()
 
 
 # ─── Reads ─────────────────────────────────────────────────────────────

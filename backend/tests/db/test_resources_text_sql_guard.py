@@ -1,4 +1,4 @@
-"""CI guard: every raw ``text()`` statement in ``resources_repository_orm.py``
+"""CI guard: every raw ``text()`` statement in ``resources_repository.py``
 that touches the ``resources`` table must be EITHER routed through ``scoped_sql``
 OR an explicitly allowlisted membership/folder-scoped method (A3).
 
@@ -25,7 +25,7 @@ builder owns the predicate shape; the caller cannot misplace it). A method that
 hand-writes ``:scope_user_id`` WITHOUT routing through the builder is treated as
 NOT scoped (it must use the builder), closing the misplacement blind spot.
 
-This test ``ast``-scans ``resources_repository_orm.py`` for every ``text(...)``
+This test ``ast``-scans ``resources_repository.py`` for every ``text(...)``
 call whose SQL references the ``resources`` table (``FROM resources`` /
 ``JOIN resources`` / ``UPDATE resources``) and asserts each is one of:
 
@@ -58,7 +58,7 @@ _REPO_FILE = (
     Path(__file__).resolve().parents[2]
     / "app"
     / "repositories"
-    / "resources_repository_orm.py"
+    / "resources_repository.py"
 )
 
 # Methods whose raw text() on ``resources`` is scoped by folder/resource_items

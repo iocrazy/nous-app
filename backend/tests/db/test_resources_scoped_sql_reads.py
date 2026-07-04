@@ -1,5 +1,5 @@
 """Integration tests for the two A3 ``scoped_sql``-routed creator-scoped reads on
-``ResourcesRepositoryOrm``: ``get_completed_resource_by_url_and_creator`` and
+``ResourcesRepository``: ``get_completed_resource_by_url_and_creator`` and
 ``get_owned_platform_ids``.
 
 The choke point is blind to ``text()`` SQL, so these reads carry their tenant
@@ -40,7 +40,7 @@ from sqlalchemy import text
 
 from app.db import scope as scope_mod
 from app.db.scope import Scope, request_scope, system_request_scope
-from app.repositories.resources_repository_orm import ResourcesRepositoryOrm
+from app.repositories.resources_repository import ResourcesRepository
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -87,8 +87,8 @@ def enforce_off():
 
 
 @pytest.fixture
-def repo() -> ResourcesRepositoryOrm:
-    return ResourcesRepositoryOrm()
+def repo() -> ResourcesRepository:
+    return ResourcesRepository()
 
 
 def _pk() -> int:
@@ -181,7 +181,7 @@ async def seeded(patched_engine):
 
 @pytest.mark.parametrize("flag", ["off", "on"])
 async def test_completed_by_url_user_scope_sees_only_own(
-    seeded: _Ids, repo: ResourcesRepositoryOrm, flag, request
+    seeded: _Ids, repo: ResourcesRepository, flag, request
 ):
     """USER scope A: A's url returns A's row; B's url returns None (excluded by
     the ambient creator predicate). Identical with flag on or off."""
@@ -200,7 +200,7 @@ async def test_completed_by_url_user_scope_sees_only_own(
 
 
 async def test_completed_by_url_no_scope_returns_none_failclosed(
-    seeded: _Ids, repo: ResourcesRepositoryOrm, enforce_on
+    seeded: _Ids, repo: ResourcesRepository, enforce_on
 ):
     """No ambient scope: scoped_sql raises inside the method → the method's own
     except returns None. The row is NOT leaked."""
@@ -210,7 +210,7 @@ async def test_completed_by_url_no_scope_returns_none_failclosed(
 
 
 async def test_completed_by_url_system_scope_sees_all(
-    seeded: _Ids, repo: ResourcesRepositoryOrm, enforce_on
+    seeded: _Ids, repo: ResourcesRepository, enforce_on
 ):
     """SYSTEM scope: the IS NULL branch opens to all owners — A's row is found
     even though we are not acting as A."""
@@ -225,7 +225,7 @@ async def test_completed_by_url_system_scope_sees_all(
 
 @pytest.mark.parametrize("flag", ["off", "on"])
 async def test_owned_platform_ids_user_scope_sees_only_own(
-    seeded: _Ids, repo: ResourcesRepositoryOrm, flag, request
+    seeded: _Ids, repo: ResourcesRepository, flag, request
 ):
     """USER scope A: querying both platform ids returns only A's (B's excluded
     by the ambient creator predicate). Identical with flag on or off."""
@@ -238,7 +238,7 @@ async def test_owned_platform_ids_user_scope_sees_only_own(
 
 
 async def test_owned_platform_ids_no_scope_returns_empty_failclosed(
-    seeded: _Ids, repo: ResourcesRepositoryOrm, enforce_on
+    seeded: _Ids, repo: ResourcesRepository, enforce_on
 ):
     """No ambient scope: scoped_sql raises → method except returns set()."""
     ids = seeded
@@ -247,7 +247,7 @@ async def test_owned_platform_ids_no_scope_returns_empty_failclosed(
 
 
 async def test_owned_platform_ids_system_scope_sees_all(
-    seeded: _Ids, repo: ResourcesRepositoryOrm, enforce_on
+    seeded: _Ids, repo: ResourcesRepository, enforce_on
 ):
     """SYSTEM scope: IS NULL branch opens to all owners — both pids returned."""
     ids = seeded
