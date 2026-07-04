@@ -1,38 +1,129 @@
 """Repository for ai_agents + agent_skills tables (AI Library Phase 1).
 
-ORM 2.0 migration (Phase 2 pilot): ``AgentRepository`` is the legacy
-supabase-py REST implementation; ``AgentRepositoryOrm`` (in
-``agent_repository_orm.py``) is the SQLAlchemy 2.0 ORM successor. Call sites
-go through ``get_agent_repository()`` (bottom of this file) which picks the
-ORM subclass when ``USE_ORM_AGENTS`` is on AND the engine is configured.
+SQLAlchemy 2.0 ORM implementation over the ai_agents / agent_skills /
+ai_agent_versions surface. Prod runs 100% ORM; the legacy supabase-py REST
+path and the ``USE_ORM_AGENTS`` flag were retired in the ORM 2.0 cleanup —
+``get_agent_repository()`` (bottom of this file) now unconditionally returns
+``AgentRepository``.
+
+STRATEGY C — VALUE-TYPE PARITY
+==============================
+Supabase REST rendered JSON: ``uuid`` → STRING, ``bigint`` → Python int,
+``numeric`` → string, ``timestamptz`` → ISO string. The ORM returns NATIVE
+``uuid.UUID`` / ``int`` / ``Decimal`` / ``datetime``. HTTP responses are fine
+either way (FastAPI ``jsonable_encoder`` serializes at the edge), but
+Python-layer type-sensitive consumers break on the native types. We coerce
+ONLY the fields a type-sensitive consumer actually touches, to the EXACT REST
+shape:
+
+  ai_agents.id / user_id / created_by : uuid → STR — consumers do
+    ``UUID(agent["id"])`` (prompt_composer, ai_library_chat_wiring,
+    delegate_tool, subagent_task_service, workforce_router), dict-key lookups,
+    and supabase-py inserts that ``json.dumps`` the value (ai_library_chat_service).
+
+  ai_agents.team_id / project_id : bigint → LEFT AS NATIVE int (do NOT str).
+    REST returned int; ``ai_library_router._enrich_rows_with_scope_names`` does
+    ``int(team_id)`` / bare-int dict lookups — coercing bigint→str silently
+    zeroes team/project scope (the 5.3 trap).
+
+  ai_agents.temperature / *_budget_cents : numeric → LEFT AS NATIVE Decimal.
+    Consumers only do ``float(...)``, which tolerates Decimal/str/float — so
+    the value type is irrelevant; coercing would be gold-plating.
+
+  ai_agents.created_at / updated_at : timestamptz → ISO STRING (always).
+    prompt_composer._prefix_fingerprint feeds ``str(agent["updated_at"])`` into
+    the SHA-1 prompt-cache key; ``str(datetime)`` uses a SPACE separator whereas
+    ``.isoformat()`` uses ``T``, so an un-coerced datetime would shift every
+    agent's fingerprint. We ``.isoformat()`` every timestamp column at the
+    boundary (explicit list + a generic ``datetime`` guard).
+
+  get_skill_ids : agent_skills.skill_id is BIGINT, consumed as int both ways —
+    the ORM already yields int for a BigInteger column. No coercion.
+
+Writes commit via ``write_scope()``. All writes are SET-based / delete+insert,
+so they are idempotent.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from loguru import logger
+from sqlalchemy import delete, insert, or_, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from app.db.supabase_client import get_async_supabase_admin
+from app.db.session import read_scope, write_scope
+from app.models import AgentSkills, AiAgents
+from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
 
-if TYPE_CHECKING:
-    from app.repositories.agent_repository_orm import AgentRepositoryOrm
+# ai_agents DB-column-name → mapped-attribute-name. Built once from the mapper.
+# For ai_agents every name == key (no reserved-name remap), but we resolve via
+# this map anyway for parity with the other ORM repos and to stay correct if a
+# column is ever renamed.
+_AI_AGENTS_NAME_TO_ATTR: Dict[str, str] = _name_to_attr(AiAgents)
+
+# uuid columns of the ai_agents SELECT-* dict whose VALUE TYPE must match the
+# REST baseline (string) because Python-level type-sensitive consumers touch
+# them. See the module docstring for the per-consumer audit. team_id /
+# project_id (bigint) are deliberately NOT here — they stay native int.
+_AGENT_UUID_STR_COLS = ("id", "user_id", "created_by")
+
+# timestamptz columns of the ai_agents SELECT-* dict. ORM returns a native
+# ``datetime``; REST returned an ISO string. We ALWAYS ``.isoformat()`` these —
+# the TEMPLATE RULE for timestamps (cheap, exact REST match, and avoids the
+# easy-to-miss ``==`` / ordering / ``str()``-fingerprint footgun; see the
+# module docstring for the prompt-cache fingerprint case). The generic
+# ``datetime`` guard in ``_agent_to_dict`` catches any timestamp col not
+# enumerated here, so a future column addition stays correct without a code
+# change.
+_AGENT_TS_ISO_COLS = ("created_at", "updated_at")
+
+# The projection list_persistent returns (id + slug + name + description +
+# model). Pinned so the ORM select returns EXACTLY the columns the REST impl
+# did. Only ``id`` is type-sensitive (uuid → str); the rest are text.
+_PERSISTENT_COLS = ("id", "slug", "name", "description", "model")
+
+
+def _agent_to_dict(obj: Any) -> Dict[str, Any]:
+    """SELECT *-shaped dict for an ``ai_agents`` ORM row, with strategy-C
+    value-type parity:
+
+      - uuid columns (id / user_id / created_by) → str (REST returned strings;
+        consumers do ``UUID(...)`` / dict-key / supabase inserts).
+      - timestamptz columns (created_at / updated_at, plus any other native
+        ``datetime`` in the row) → ``.isoformat()`` (REST returned ISO strings;
+        a consumer feeds ``str(updated_at)`` into a fingerprint).
+      - bigint (team_id / project_id) / numeric (Decimal) / everything else →
+        LEFT native (see the module docstring for why).
+
+    NULLs pass through unchanged."""
+    out = _orm_obj_to_dict(obj, _AI_AGENTS_NAME_TO_ATTR)
+    for col in _AGENT_UUID_STR_COLS:
+        val = out.get(col)
+        if val is not None:
+            out[col] = str(val)
+    for col in _AGENT_TS_ISO_COLS:
+        val = out.get(col)
+        if isinstance(val, datetime):
+            out[col] = val.isoformat()
+    # Generic guard: any OTHER timestamp column not enumerated above (e.g. a
+    # future column addition) still gets ISO-coerced, so the template rule
+    # ("timestamptz → .isoformat() always") holds without a code change.
+    for key, val in out.items():
+        if isinstance(val, datetime):
+            out[key] = val.isoformat()
+    return out
 
 
 class AgentRepository:
     """Data access for ai_agents + agent_skills tables.
 
-    Uses the service-role (admin) client because access control is
+    Uses the service-role (admin) session because access control is
     enforced at the route layer via user-scoped clients. See
     migration 138_ai_library_phase1.sql for schema details.
     """
-
-    TABLE = "ai_agents"
-    BINDING_TABLE = "agent_skills"
-
-    async def _get_client(self):
-        return await get_async_supabase_admin()
 
     # ------------------------------------------------------------------
     # Reads
@@ -41,15 +132,12 @@ class AgentRepository:
     async def get_by_slug(self, slug: str) -> Optional[Dict[str, Any]]:
         """Fetch a single agent by slug; returns None if not found."""
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.TABLE)
-                .select("*")
-                .eq("slug", slug)
-                .maybe_single()
-                .execute()
-            )
-            return result.data if result and result.data else None
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(AiAgents).where(AiAgents.slug == slug).limit(1)
+                )
+                row = result.scalars().first()
+                return _agent_to_dict(row) if row else None
         except Exception as e:
             logger.error(f"Failed to get agent by slug '{slug}': {e}")
             return None
@@ -57,15 +145,12 @@ class AgentRepository:
     async def get_by_id(self, agent_id: UUID) -> Optional[Dict[str, Any]]:
         """Fetch an agent by UUID; returns None if not found."""
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.TABLE)
-                .select("*")
-                .eq("id", str(agent_id))
-                .maybe_single()
-                .execute()
-            )
-            return result.data if result and result.data else None
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(AiAgents).where(AiAgents.id == agent_id).limit(1)
+                )
+                row = result.scalars().first()
+                return _agent_to_dict(row) if row else None
         except Exception as e:
             logger.error(f"Failed to get agent by id {agent_id}: {e}")
             return None
@@ -73,22 +158,25 @@ class AgentRepository:
     async def list_persistent(self) -> List[Dict[str, Any]]:
         """List agents marked as persistent workers (M3 Delegate targets).
 
-        Returns slug + name + description so the PromptComposer can
-        render an `<available_workers>` block. Sorted by slug for
-        stable fingerprinting. Empty list when no persistent agents
-        exist (Delegate then becomes self-documenting "no workers
-        available").
-        """
+        Returns id + slug + name + description + model so the PromptComposer
+        can render an `<available_workers>` block. Sorted by slug for stable
+        fingerprinting. Empty list when no persistent agents exist. Only
+        ``id`` is type-sensitive (uuid → str)."""
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.TABLE)
-                .select("id,slug,name,description,model")
-                .eq("persistent", True)
-                .order("slug")
-                .execute()
-            )
-            return result.data or []
+            cols = [getattr(AiAgents, name) for name in _PERSISTENT_COLS]
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(*cols)
+                    .where(AiAgents.persistent.is_(True))
+                    .order_by(AiAgents.slug)
+                )
+                out: List[Dict[str, Any]] = []
+                for row in result.mappings().all():
+                    d = dict(row)
+                    if d.get("id") is not None:
+                        d["id"] = str(d["id"])
+                    out.append(d)
+                return out
         except Exception as e:
             logger.error(f"Failed to list persistent agents: {e}")
             return []
@@ -107,30 +195,28 @@ class AgentRepository:
           * ``team_id IN team_ids`` (agents scoped to any of the user's teams)
           * ``project_id IN project_ids`` (agents scoped to user's projects)
 
-        The backend uses the service-role client (RLS bypassed), so this OR
+        The backend uses the service-role session (RLS bypassed), so this OR
         filter must be enforced here to match migration 138's RLS policy.
 
         Sorted by ``sort_order`` then ``name``.
         """
         try:
-            client = await self._get_client()
-            filters = ["is_system_preset.eq.true", f"user_id.eq.{user_id}"]
+            predicates = [
+                AiAgents.is_system_preset.is_(True),
+                AiAgents.user_id == user_id,
+            ]
             if team_ids:
-                filters.append(f"team_id.in.({','.join(str(i) for i in team_ids)})")
+                predicates.append(AiAgents.team_id.in_(team_ids))
             if project_ids:
-                filters.append(
-                    f"project_id.in.({','.join(str(i) for i in project_ids)})"
-                )
+                predicates.append(AiAgents.project_id.in_(project_ids))
 
-            query = (
-                client.table(self.TABLE)
-                .select("*")
-                .or_(",".join(filters))
-                .order("sort_order")
-                .order("name")
-            )
-            result = await query.execute()
-            return result.data or []
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(AiAgents)
+                    .where(or_(*predicates))
+                    .order_by(AiAgents.sort_order, AiAgents.name)
+                )
+                return [_agent_to_dict(r) for r in result.scalars().all()]
         except Exception as e:
             logger.error(f"Failed to list accessible agents for user {user_id}: {e}")
             return []
@@ -138,57 +224,78 @@ class AgentRepository:
     async def get_skill_ids(self, agent_id: UUID) -> List[int]:
         """Return the ordered list of enabled skill IDs bound to an agent.
 
-        skill_id is BIGINT per migration 139 (see agent_skills.skill_id FK).
+        skill_id is BIGINT per migration 139 (see agent_skills.skill_id FK) —
+        the ORM yields int directly; return ``list[int]``.
         """
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.BINDING_TABLE)
-                .select("skill_id")
-                .eq("agent_id", str(agent_id))
-                .eq("enabled", True)
-                .order("sort_order")
-                .execute()
-            )
-            return [int(row["skill_id"]) for row in (result.data or [])]
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(AgentSkills.skill_id)
+                    .where(AgentSkills.agent_id == agent_id)
+                    .where(AgentSkills.enabled.is_(True))
+                    .order_by(AgentSkills.sort_order)
+                )
+                return [int(sid) for sid in result.scalars().all()]
         except Exception as e:
             logger.error(f"Failed to get skill ids for agent {agent_id}: {e}")
             return []
 
     # ------------------------------------------------------------------
-    # Writes
+    # Writes (COMMITTING via write_scope)
     # ------------------------------------------------------------------
 
     async def update_skill_bindings(self, agent_id: UUID, skill_ids: List[int]) -> None:
-        """Replace all skill bindings for an agent (delete existing + insert new).
+        """Set an agent's skill bindings to exactly ``skill_ids`` (ordered via
+        sort_order). Atomic + committing in one write_scope().
 
-        Preserves requested order via sort_order.
+        Concurrency-safe: uses per-row ``INSERT ... ON CONFLICT DO UPDATE``
+        (upsert) for the desired set, then deletes any binding no longer
+        desired — instead of delete-then-insert, which raced when two
+        startup ``seed_loader`` runs (gateway + worker, or multiple uvicorn
+        workers) re-bound the same agent concurrently: the second committer's
+        plain INSERT collided with the rows the first had just committed,
+        raising ``agent_skills_pkey`` UniqueViolation (harmless — bindings
+        ended up correct — but a recurring startup ERROR). ON CONFLICT makes
+        each row write atomic, so concurrent identical re-binds converge
+        without raising.
         """
         try:
-            client = await self._get_client()
-            await (
-                client.table(self.BINDING_TABLE)
-                .delete()
-                .eq("agent_id", str(agent_id))
-                .execute()
-            )
-
-            if skill_ids:
-                rows = [
-                    {
-                        "agent_id": str(agent_id),
-                        "skill_id": sid,
-                        "sort_order": i,
-                        "enabled": True,
-                    }
-                    for i, sid in enumerate(skill_ids)
-                ]
-                await client.table(self.BINDING_TABLE).insert(rows).execute()
-
+            async with write_scope() as session:
+                if skill_ids:
+                    stmt = pg_insert(AgentSkills).values(
+                        [
+                            {
+                                "agent_id": agent_id,
+                                "skill_id": sid,
+                                "sort_order": i,
+                                "enabled": True,
+                            }
+                            for i, sid in enumerate(skill_ids)
+                        ]
+                    )
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=[AgentSkills.agent_id, AgentSkills.skill_id],
+                        set_={
+                            "sort_order": stmt.excluded.sort_order,
+                            "enabled": stmt.excluded.enabled,
+                        },
+                    )
+                    await session.execute(stmt)
+                    # Drop bindings that are no longer desired.
+                    await session.execute(
+                        delete(AgentSkills).where(
+                            AgentSkills.agent_id == agent_id,
+                            AgentSkills.skill_id.not_in(skill_ids),
+                        )
+                    )
+                else:
+                    # Empty desired set → clear all bindings for the agent.
+                    await session.execute(
+                        delete(AgentSkills).where(AgentSkills.agent_id == agent_id)
+                    )
             logger.info(
-                "Updated skill bindings for agent %s (%d skills)",
-                agent_id,
-                len(skill_ids),
+                f"Updated skill bindings for agent {agent_id} "
+                f"({len(skill_ids)} skills)"
             )
         except Exception as e:
             logger.error(f"Failed to update skill bindings for agent {agent_id}: {e}")
@@ -197,31 +304,41 @@ class AgentRepository:
     async def update_fields(
         self, agent_id: UUID, updates: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """PATCH-style update on ai_agents; returns the updated row or {}."""
+        """PATCH-style update on ai_agents; returns the updated row dict (with
+        strategy-C value-type parity) or {} if no row matched. Committing."""
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.TABLE)
-                .update(updates)
-                .eq("id", str(agent_id))
-                .execute()
-            )
-            return result.data[0] if result.data else {}
+            async with write_scope() as session:
+                result = await session.execute(
+                    update(AiAgents)
+                    .where(AiAgents.id == agent_id)
+                    .values(**updates)
+                    .returning(AiAgents)
+                )
+                row = result.scalars().first()
+                return _agent_to_dict(row) if row else {}
         except Exception as e:
             logger.error(f"Failed to update agent {agent_id}: {e}")
             raise
 
     async def insert(self, fields: Dict[str, Any]) -> Dict[str, Any]:
-        """Create a new ai_agents row.
+        """Create a new ai_agents row; returns the inserted row dict (with
+        strategy-C value-type parity). Committing. Raises if no row returned.
 
         The caller is responsible for setting ``is_system_preset`` (false for
-        user-created agents). Returns the inserted row.
+        user-created agents).
         """
-        client = await self._get_client()
-        result = await client.table(self.TABLE).insert(fields).execute()
-        if not result.data:
-            raise RuntimeError("insert returned no data")
-        return result.data[0]
+        try:
+            async with write_scope() as session:
+                result = await session.execute(
+                    insert(AiAgents).values(**fields).returning(AiAgents)
+                )
+                row = result.scalars().first()
+                if row is None:
+                    raise RuntimeError("insert returned no data")
+                return _agent_to_dict(row)
+        except Exception as e:
+            logger.error(f"Failed to insert agent: {e}")
+            raise
 
     # Fields snapshotted into ai_agent_versions. Narrower than update_fields'
     # accepted fields — only behavioral content, per Phase 2 plan.
@@ -241,97 +358,70 @@ class AgentRepository:
         created_by: Optional[UUID] = None,
         notes: Optional[str] = None,
     ) -> None:
-        """Snapshot-then-update: record pre-update behavioral content into
-        ai_agent_versions, then apply the patch with bumped current_version.
+        """Snapshot-then-update: record the pre-update behavioral content into
+        ai_agent_versions, then apply the patch with a bumped current_version.
 
-        No-op if none of the tracked behavioral fields actually differs from
-        the current row (silences seed-loader reruns). Raises ValueError if
-        the agent does not exist.
+        No-op if no incoming value differs from the current row (silences
+        seed-loader reruns). Snapshots ONLY when a tracked behavioral field
+        changes, so non-behavioral updates (budgets, paused_reason, etc.)
+        don't pollute version history. Raises ValueError if the agent does
+        not exist.
+
+        The snapshot INSERT + live UPDATE run in ONE committing
+        ``write_scope()`` — so a crash between them can no longer leave a
+        half-applied version bump.
 
         Seed loader should keep using ``update_fields`` (non-versioned) —
         bulk idempotent sync should not pollute version history.
-
-        Note: the snapshot INSERT and live UPDATE are NOT in a single transaction.
-        See ``SkillRepository.upsert_file_versioned`` for the same limitation and
-        Phase 3 mitigation path.
         """
-        client = await self._get_client()
-        result = (
-            await client.table(self.TABLE)
-            .select("*")
-            .eq("id", str(agent_id))
-            .maybe_single()
-            .execute()
-        )
-        current = result.data if result and result.data else None
-        if current is None:
-            raise ValueError(f"agent {agent_id} not found")
+        from app.models import AiAgentVersions
 
-        # A full no-op (every incoming value equals current) skips entirely —
-        # this is what silences seed-loader reruns that repost identical
-        # content. If ANY field differs, we do write; snapshots only fire
-        # for tracked-field changes so non-behavioral updates (budgets,
-        # paused_reason, etc.) don't pollute version history.
-        any_changed = any(updates[k] != current.get(k) for k in updates)
-        if not any_changed:
-            return
+        async with write_scope() as session:
+            result = await session.execute(
+                select(AiAgents).where(AiAgents.id == agent_id).limit(1)
+            )
+            current_obj = result.scalars().first()
+            if current_obj is None:
+                raise ValueError(f"agent {agent_id} not found")
+            current = _orm_obj_to_dict(current_obj, _AI_AGENTS_NAME_TO_ATTR)
 
-        tracked_changed = any(
-            k in updates and updates[k] != current.get(k)
-            for k in self._VERSIONED_AGENT_FIELDS
-        )
+            # A full no-op (every incoming value equals current) skips entirely —
+            # this is what silences seed-loader reruns that repost identical
+            # content. If ANY field differs, we do write; snapshots only fire
+            # for tracked-field changes.
+            any_changed = any(updates[k] != current.get(k) for k in updates)
+            if not any_changed:
+                return
 
-        patch: Dict[str, Any] = dict(updates)
-        if tracked_changed:
-            current_version = int(current.get("current_version") or 1)
-            snapshot: Dict[str, Any] = {
-                "agent_id": str(agent_id),
-                "version_number": current_version,
-                "notes": notes,
-                "created_by": str(created_by) if created_by else None,
-            }
-            for field in self._VERSIONED_AGENT_FIELDS:
-                snapshot[field] = current.get(field)
+            tracked_changed = any(
+                k in updates and updates[k] != current.get(k)
+                for k in self._VERSIONED_AGENT_FIELDS
+            )
 
-            await client.table("ai_agent_versions").insert(snapshot).execute()
-            patch["current_version"] = current_version + 1
+            patch: Dict[str, Any] = dict(updates)
+            if tracked_changed:
+                current_version = int(current.get("current_version") or 1)
+                snapshot: Dict[str, Any] = {
+                    "agent_id": agent_id,
+                    "version_number": current_version,
+                    "notes": notes,
+                    "created_by": created_by,
+                }
+                for field in self._VERSIONED_AGENT_FIELDS:
+                    snapshot[field] = current.get(field)
+                await session.execute(insert(AiAgentVersions).values(**snapshot))
+                patch["current_version"] = current_version + 1
 
-        await client.table(self.TABLE).update(patch).eq("id", str(agent_id)).execute()
-
-
-# ─── SQLAlchemy ORM migration factory (Phase 2 pilot) ──────────────────
-#
-# The supabase-py REST → SQLAlchemy 2.0 ORM cutover for the ai_agents
-# surface. Routes ``AgentRepository`` through the ORM subclass when both
-# ``USE_ORM_AGENTS=true`` and the SQLAlchemy engine is configured
-# (``app.db.engine.is_configured``). Half-configured deploys (flag on,
-# engine missing) fall back to the legacy supabase-py path with a single
-# warning so a misconfigured env never crashes the worker.
-#
-# Call sites use ``get_agent_repository()`` rather than ``AgentRepository()``
-# directly. The ORM subclass is a drop-in (``AgentRepositoryOrm`` IS-A
-# ``AgentRepository``), so existing type hints (``AgentRepository | None``)
-# keep accepting it.
+            await session.execute(
+                update(AiAgents).where(AiAgents.id == agent_id).values(**patch)
+            )
 
 
-def get_agent_repository() -> Union["AgentRepository", "AgentRepositoryOrm"]:
-    """Return the right AgentRepository implementation per env.
+def get_agent_repository() -> AgentRepository:
+    """Return the AgentRepository (SQLAlchemy 2.0 ORM-backed).
 
-    ORM when ``USE_ORM_AGENTS`` is set AND the SQLAlchemy engine is
-    configured; otherwise the legacy supabase-py REST path. A flag-on but
-    engine-missing deploy logs once and falls back to REST (never crashes).
+    Kept as a factory so call sites stay decoupled from construction; the
+    ORM 2.0 cleanup retired the ``USE_ORM_AGENTS`` flag and the legacy
+    supabase-py REST branch, so this now unconditionally constructs the repo.
     """
-    from app.core.config import settings
-
-    if settings.USE_ORM_AGENTS:
-        from app.db.engine import is_configured
-
-        if is_configured():
-            from app.repositories.agent_repository_orm import AgentRepositoryOrm
-
-            return AgentRepositoryOrm()
-        logger.warning(
-            "USE_ORM_AGENTS=true but SUPAVISOR_DATABASE_URL is empty "
-            "— falling back to supabase-py path"
-        )
     return AgentRepository()
