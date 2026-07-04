@@ -155,3 +155,63 @@ async def test_resource_non_creator_403(patch_admin):
     with pytest.raises(HTTPException) as ei:
         await verify_resource_write_access(resource_id="r1", auth=_auth("u1"))
     assert ei.value.status_code == 403
+
+
+# ─── verify_project_read_access + project_members branch ──────────────
+
+
+async def test_read_project_member_viewer_passes(patch_admin):
+    from app.core.scope_guards import verify_project_read_access
+
+    patch_admin(
+        {
+            "projects": [{"owner_id": "owner", "team_id": None}],
+            "project_members": [{"role": "viewer"}],
+        }
+    )
+    await verify_project_read_access(project_id="p1", auth=_auth("u1"))
+
+
+async def test_read_non_member_403(patch_admin):
+    from app.core.scope_guards import verify_project_read_access
+
+    patch_admin(
+        {
+            "projects": [{"owner_id": "owner", "team_id": None}],
+            "project_members": [],
+        }
+    )
+    with pytest.raises(HTTPException) as ei:
+        await verify_project_read_access(project_id="p1", auth=_auth("u1"))
+    assert ei.value.status_code == 403
+
+
+async def test_read_project_missing_404(patch_admin):
+    from app.core.scope_guards import verify_project_read_access
+
+    patch_admin({"projects": []})
+    with pytest.raises(HTTPException) as ei:
+        await verify_project_read_access(project_id="p1", auth=_auth("u1"))
+    assert ei.value.status_code == 404
+
+
+async def test_write_project_member_editor_passes(patch_admin):
+    patch_admin(
+        {
+            "projects": [{"owner_id": "owner", "team_id": None}],
+            "project_members": [{"role": "editor"}],
+        }
+    )
+    await verify_project_write_access(project_id="p1", auth=_auth("u1"))
+
+
+async def test_write_project_member_viewer_403(patch_admin):
+    patch_admin(
+        {
+            "projects": [{"owner_id": "owner", "team_id": None}],
+            "project_members": [{"role": "viewer"}],
+        }
+    )
+    with pytest.raises(HTTPException) as ei:
+        await verify_project_write_access(project_id="p1", auth=_auth("u1"))
+    assert ei.value.status_code == 403
