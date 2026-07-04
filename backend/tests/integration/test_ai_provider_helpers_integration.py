@@ -3,9 +3,8 @@
 Proves the DB reads in ``ai_provider_helpers`` execute async-native against a
 REAL Postgres on the *caller's* event loop — the exact thing the run_async
 bridge removal enables (a fresh-loop bridge + ORM asyncpg conn is the bug
-§2.4b eliminates). Routes through the ORM path (``USE_ORM_USER_SETTINGS`` on +
-engine pointed at the dev DSN), seeding a throwaway ``user_settings`` row and
-asserting the round-trip.
+§2.4b eliminates). Routes through the ORM path (engine pointed at the dev
+DSN), seeding a throwaway ``user_settings`` row and asserting the round-trip.
 
 Setup: requires INTEGRATION_DATABASE_URL + >=1 auth.users row. Skips cleanly:
 
@@ -41,10 +40,7 @@ async def patched_engine(integration_db_url):
 
     db_engine._engine = None
     db_session.dispose_sessionmaker()
-    with (
-        patch.object(db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url),
-        patch.object(db_engine.settings, "USE_ORM_USER_SETTINGS", True),
-    ):
+    with patch.object(db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url):
         yield
     await db_engine.dispose_engine()
     db_engine._engine = None
