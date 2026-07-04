@@ -5,7 +5,6 @@ and a stubbed auth user — no real DB required.
 
 The smoke test (marked 'smoke') requires a real local Supabase Postgres:
     SUPAVISOR_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres \
-    FEATURE_CONVERSATIONS=true \
     uv run pytest tests/test_conversation_router.py -v -k smoke
 """
 
@@ -49,7 +48,7 @@ _MSG_DICT: dict[str, Any] = {
 
 def _make_client() -> TestClient:
     """Build a test FastAPI app that includes conversation_router directly
-    (bypassing the flag-gate in api/__init__.py) and overrides get_auth."""
+    and overrides get_auth."""
     from app.api.conversation_router import router
     from app.core.deps import get_auth
 

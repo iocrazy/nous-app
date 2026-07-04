@@ -297,11 +297,6 @@ class Settings(BaseSettings):
         "true once the agent_memories table is populated and recall quality "
         "is validated in production.",
     )
-    FEATURE_CONVERSATIONS: bool = Field(
-        default=False,
-        description="Serve the unified /conversations API. Off (default) keeps "
-        "only the legacy /chat API live.",
-    )
     FEATURE_GROUP_AGENT_MEMORY: bool = Field(
         default=False,
         description="Group-chat agent memory: inject conversation_memory "
