@@ -57,6 +57,7 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 from sqlalchemy import delete, func, insert, select, update
 
+from app.core.secure_settings import MARKER, encrypt_marked, reveal
 from app.db.session import read_scope, write_scope
 from app.models import MediahubModels
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
@@ -92,9 +93,38 @@ def _parity(out: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def _conceal_api_key(values: Dict[str, Any]) -> Dict[str, Any]:
+    """Phase 1b (secret-at-rest): encrypt a non-blank plaintext ``api_key``
+    before it hits the DB. Idempotent (marker check) so re-writing an
+    already-encrypted value never double-encrypts. Returns a NEW dict.
+
+    STRICT — no dev-key fallback: raises ``SecretBoxNotConfigured`` when
+    ``MEDIAHUB_TOKEN_ENCRYPTION_KEY`` isn't set, so a platform-model key
+    write fails loud instead of landing under the public committed dev key.
+    ``app_id`` (a provider app identifier, not a credential per the scout
+    design) stays plaintext."""
+    api_key = values.get("api_key")
+    if not isinstance(api_key, str) or not api_key.strip():
+        return values
+    if api_key.startswith(MARKER):
+        return values
+    out = dict(values)
+    out["api_key"] = encrypt_marked(api_key)
+    return out
+
+
 def _row(obj: Any) -> Dict[str, Any]:
-    """SELECT *-shaped, strategy-C-parity dict for one full ORM row."""
-    return _parity(_orm_obj_to_dict(obj, _NOUS_N2A))
+    """SELECT *-shaped, strategy-C-parity dict for one full ORM row.
+
+    Phase 1b: ``api_key`` is stored encrypted (``enc:v1:`` marker) — reveal
+    it here so every full-row read path (get_by_name / list_all / create /
+    update RETURNING) stays repo-transparent for consumers (prober, admin
+    router key-inherit, provider resolution). ``reveal`` is fail-soft: an
+    undecryptable value resolves to "" (logged), never raises."""
+    out = _parity(_orm_obj_to_dict(obj, _NOUS_N2A))
+    if isinstance(out.get("api_key"), str):
+        out["api_key"] = reveal(out["api_key"])
+    return out
 
 
 class MediahubModelRepository:
@@ -159,9 +189,12 @@ class MediahubModelRepository:
             return []
 
     async def create(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Create a new Mediahub model."""
+        """Create a new Mediahub model. ``api_key`` is encrypted at rest
+        (Phase 1b) — encryption happens BEFORE the swallow-to-None try block
+        so a missing MEDIAHUB_TOKEN_ENCRYPTION_KEY fails loud (fail-closed
+        write), not as an opaque None."""
+        values = _conceal_api_key({k: v for k, v in data.items() if k in _NOUS_ATTRS})
         try:
-            values = {k: v for k, v in data.items() if k in _NOUS_ATTRS}
             async with write_scope() as session:
                 result = await session.execute(
                     insert(MediahubModels).values(**values).returning(MediahubModels)
@@ -175,14 +208,16 @@ class MediahubModelRepository:
     async def update(
         self, model_id: str, data: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
-        """Update a Mediahub model."""
+        """Update a Mediahub model. ``api_key`` is encrypted at rest (Phase
+        1b); encryption runs BEFORE the swallow-to-None try block so a
+        missing encryption key fails loud (see ``create``)."""
+        # Drop the REST "now()" sentinel; set updated_at via SQL func.now()
+        # (the legacy injected {"updated_at": "now()"} as a server-time
+        # string — binding that literal would error on a DateTime column).
+        values = _conceal_api_key(
+            {k: v for k, v in data.items() if k in _NOUS_ATTRS and k != "updated_at"}
+        )
         try:
-            # Drop the REST "now()" sentinel; set updated_at via SQL func.now()
-            # (the legacy injected {"updated_at": "now()"} as a server-time
-            # string — binding that literal would error on a DateTime column).
-            values = {
-                k: v for k, v in data.items() if k in _NOUS_ATTRS and k != "updated_at"
-            }
             values["updated_at"] = func.now()
             async with write_scope() as session:
                 result = await session.execute(
