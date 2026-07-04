@@ -1394,24 +1394,36 @@ class ResourcesRepository(AsyncpgRepository):
             logger.error(f"Failed to delete folder {folder_id}: {e}")
             raise
 
-    async def get_descendant_folder_ids(self, folder_id: str) -> List[str]:
-        """Recursive descent into non-trashed children. Single CTE.
+    async def get_descendant_folder_ids(
+        self, folder_id: str, *, include_trashed: bool = False
+    ) -> List[str]:
+        """Recursive descent into children (excluding ``folder_id`` itself).
+        Single CTE.
+
+        By default only NON-trashed descendants (the folder-tree UI contract).
+        Pass ``include_trashed=True`` for a permanent purge
+        (``permanent_delete_folder``), which must reach EVERY descendant — the
+        trashed sub-folders and the subtrees hanging beneath them — so the CTE
+        recurses through trashed folders instead of stopping at them.
 
         Returns list[str] for legacy contract (some unmigrated paths pass it
         back to PostgREST); internal callers like ``count_folder_contents``
         re-coerce via ``_bigint_list``."""
+        # Helper-controlled literal fragments (no user input) — safe to splice.
+        base_filter = "" if include_trashed else " AND is_trashed = false"
+        rec_filter = "" if include_trashed else " WHERE f.is_trashed = false"
         try:
             async with read_scope() as session:
                 result = await session.execute(
                     text(
                         "WITH RECURSIVE descendants AS ("
                         "  SELECT id FROM folders "
-                        "    WHERE parent_id = :fid AND is_trashed = false "
+                        "    WHERE parent_id = :fid" + base_filter + " "
                         "  UNION ALL "
                         "  SELECT f.id FROM folders f "
-                        "    INNER JOIN descendants d ON f.parent_id = d.id "
-                        "    WHERE f.is_trashed = false"
-                        ") SELECT id FROM descendants"
+                        "    INNER JOIN descendants d ON f.parent_id = d.id"
+                        + rec_filter
+                        + ") SELECT id FROM descendants"
                     ),
                     {"fid": self._bigint(folder_id)},
                 )
@@ -1860,7 +1872,14 @@ class ResourcesRepository(AsyncpgRepository):
         produces for relative dates parses straight back to the identical tz-aware
         instant). Text columns and non-str values pass through unchanged. A value
         that fails to parse is left as-is so the downstream query raises exactly
-        as the REST body's malformed filter would (→ swallowed to ``[]``)."""
+        as the REST body's malformed filter would (→ swallowed to ``[]``).
+
+        The int / datetime coercion set is closed over the field types actually
+        reachable via the smart-rule schema (filename / file_type / file_size_bytes
+        / created_at / duration_seconds / resolution / source_type / mime_type):
+        no bool / UUID / date-only Resources column is reachable, so only int and
+        timestamptz need special-casing; every other type is text-like and passes
+        through. Extend this if a new coercible field is ever added to the schema."""
         if not isinstance(value, str):
             return value
         try:

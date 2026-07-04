@@ -87,6 +87,7 @@ class _CapSession:
         self._rowsets = list(rowsets or [])
         self._get_returns = list(get_returns or [])
         self.statements: List[Any] = []
+        self.exec_params: List[Any] = []
         self.gets: List[Any] = []
         self.added: List[Any] = []
         self.deleted: List[Any] = []
@@ -94,6 +95,7 @@ class _CapSession:
 
     async def execute(self, stmt: Any, params: Any = None) -> _Result:
         self.statements.append(stmt)
+        self.exec_params.append(params)
         rows = self._rowsets.pop(0) if self._rowsets else []
         return _Result(rows)
 
@@ -672,3 +674,36 @@ async def test_list_resources_in_folder_reraises_on_error(monkeypatch) -> None:
     repo = ResourcesRepository()
     with pytest.raises(RuntimeError):
         await repo.list_resources_in_folder("42")
+
+
+# ─── get_descendant_folder_ids (include_trashed toggle) ───────────────────────
+
+
+@pytest.mark.asyncio
+async def test_get_descendant_folder_ids_default_excludes_trashed(monkeypatch) -> None:
+    session = _CapSession(rowsets=[[{"id": 2}, {"id": 3}]])
+    _patch_read(monkeypatch, session)
+    repo = ResourcesRepository()
+
+    out = await repo.get_descendant_folder_ids("1")
+
+    assert out == ["2", "3"]  # coerced to str
+    sql = str(session.statements[0])
+    assert "is_trashed = false" in sql  # default filters trashed out
+    assert session.exec_params[0]["fid"] == 1  # bigint-coerced
+
+
+@pytest.mark.asyncio
+async def test_get_descendant_folder_ids_include_trashed_drops_filter(
+    monkeypatch,
+) -> None:
+    session = _CapSession(rowsets=[[{"id": 2}]])
+    _patch_read(monkeypatch, session)
+    repo = ResourcesRepository()
+
+    out = await repo.get_descendant_folder_ids("1", include_trashed=True)
+
+    assert out == ["2"]
+    sql = str(session.statements[0])
+    # The permanent-purge variant recurses through trashed folders (no filter).
+    assert "is_trashed" not in sql
