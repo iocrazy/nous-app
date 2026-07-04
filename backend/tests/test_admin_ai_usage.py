@@ -171,6 +171,119 @@ async def test_list_runs_passes_filters_to_repo():
 
 
 @pytest.mark.asyncio
+async def test_summary_aggregates_daily_rows():
+    """Summary sums requests/tokens/cost across the daily × model buckets."""
+    from app.api.admin.ai_usage_router import ai_usage_summary
+
+    fake_auth = MagicMock()
+    fake_auth.user_id = "admin-1"
+
+    daily_rows = [
+        {
+            "date": "2026-07-01",
+            "model": "deepseek-v4-flash",
+            "provider": "deepseek",
+            "requests": 290,
+            "total_tokens": 1_100_000,
+            "cost_cents": "31.5",
+        },
+        {
+            "date": "2026-07-01",
+            "model": "doubao-seed-2-0-lite-260428",
+            "provider": "doubao",
+            "requests": 3,
+            "total_tokens": 4_000,
+            "cost_cents": "0.4",
+        },
+        {
+            "date": "2026-07-02",
+            "model": "deepseek-v4-flash",
+            "provider": "deepseek",
+            "requests": 288,
+            "total_tokens": 1_050_000,
+            "cost_cents": "30.0",
+        },
+    ]
+
+    with patch(
+        "app.api.admin.ai_usage_router.get_agent_runs_repository"
+    ) as mock_repo_factory:
+        mock_repo = MagicMock()
+        mock_repo.daily_usage_by_model = AsyncMock(return_value=daily_rows)
+        mock_repo_factory.return_value = mock_repo
+
+        resp = await ai_usage_summary(fake_auth, days=30)
+
+    assert resp.days == 30
+    assert resp.total_requests == 581
+    assert resp.total_tokens == 2_154_000
+    assert resp.total_cost_cents == pytest.approx(61.9)
+    assert len(resp.daily) == 3
+    assert resp.daily[0].model == "deepseek-v4-flash"
+
+
+@pytest.mark.asyncio
+async def test_list_runs_skips_system_sentinel_in_email_enrich():
+    """The all-zeros system user_id must never hit the auth-admin lookup."""
+    from app.api.admin.ai_usage_router import SYSTEM_RUN_USER_ID
+
+    fake_auth = MagicMock()
+    fake_auth.user_id = "admin-1"
+
+    repo_rows = {
+        "items": [
+            {
+                "id": 1,
+                "user_id": SYSTEM_RUN_USER_ID,
+                "model": "deepseek-v4-flash",
+                "provider": "deepseek",
+                "status": "failed",
+                "trigger": "topic_scorer",
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+                "cost_cents": 0,
+                "started_at": "2026-07-04T00:00:00+00:00",
+                "ended_at": None,
+                "error_code": "HTTPStatusError",
+            }
+        ],
+        "total": 1,
+    }
+
+    batch_mock = AsyncMock(return_value={})
+    with (
+        patch(
+            "app.api.admin.ai_usage_router.get_agent_runs_repository"
+        ) as mock_repo_factory,
+        patch(
+            "app.api.admin.ai_usage_router.batch_get_user_auth_info",
+            new=batch_mock,
+        ),
+    ):
+        mock_repo = MagicMock()
+        mock_repo.list_runs_admin = AsyncMock(return_value=repo_rows)
+        mock_repo_factory.return_value = mock_repo
+
+        resp = await list_ai_usage_runs(
+            fake_auth,
+            page=1,
+            page_size=20,
+            user_id=None,
+            model=None,
+            provider=None,
+            status=None,
+            days=None,
+            sort_by="started_at",
+            sort_order="desc",
+        )
+
+    batch_mock.assert_not_awaited()  # sentinel never reaches auth admin
+    assert resp.items[0].user_email is None
+    assert resp.items[0].trigger == "topic_scorer"
+
+
+@pytest.mark.asyncio
 async def test_email_cache_only_fetches_misses():
     """Second resolution of the same user hits the TTL cache — no repeat
     auth-admin call (the table polls every 30s; emails are cached 10 min)."""
