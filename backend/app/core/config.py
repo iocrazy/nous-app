@@ -73,22 +73,6 @@ class Settings(BaseSettings):
     SUPAVISOR_POOL_MAX_SIZE: int = Field(
         default=10, description="asyncpg pool max connections"
     )
-    # Per-repository feature flags. Default false = legacy supabase-py
-    # path. Set true on a single repo to A/B-test the asyncpg version
-    # without affecting the rest. After a repo is proven stable for a
-    # week in prod the default flips and the legacy code is removed.
-    # Shadow-compare parity harness (ORM 2.0 rollout-readiness). Comma-list of
-    # domain keys to dual-run REST(live) + ORM(background) on reads and diff-log
-    # mismatches to application_logs (module='orm_shadow'). INDEPENDENT of the
-    # USE_ORM_* flags below — shadowing validates parity *before* a flip. Empty
-    # default → no domain shadowed → factories behave exactly as before. Example:
-    # SHADOW_ORM_DOMAINS="admin_audit_logs,admin_monitoring".
-    SHADOW_ORM_DOMAINS: str = Field(
-        default="",
-        description="Comma-list of ORM domains to shadow-compare (REST live + "
-        "ORM background diff) for parity validation. Independent of USE_ORM_*. "
-        "Empty = no shadowing (fully inert).",
-    )
     SCOPE_ENFORCE_RESOURCES: bool = Field(
         default=False,
         description="Activate the app-layer tenant-scope choke point "

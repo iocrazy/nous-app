@@ -114,11 +114,12 @@ async def maybe_unit_of_work(enabled: bool) -> AsyncIterator[AsyncSession | None
                       exactly the legacy per-method behaviour. Zero overhead —
                       NO session/connection is opened.
 
-    Pass ``settings.USE_ORM_<DOMAIN> and is_configured()`` for ``enabled`` so the
-    unit-of-work activates only when (a) the domain's repos are ORM-backed (they
-    use ``write_scope()`` and therefore join the ambient transaction) AND (b) the
-    SQLAlchemy engine exists (opening a UoW calls ``get_engine()``; without the
-    engine it would raise). With the flag off the path is byte-for-byte unchanged.
+    Pass ``is_configured()`` for ``enabled`` so the unit-of-work activates only
+    when the SQLAlchemy engine exists (opening a UoW calls ``get_engine()``;
+    without the engine it would raise). The repos are ORM-backed unconditionally
+    now — they use ``write_scope()`` and therefore join the ambient transaction —
+    so ``is_configured()`` is the only remaining gate. With it False the path is
+    a no-op (yields None) and byte-for-byte unchanged.
     """
     if enabled:
         async with unit_of_work() as session:
