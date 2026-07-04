@@ -19,9 +19,36 @@ workflow's own loop — no bridge, ORM-safe.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
 from loguru import logger
+
+
+@dataclass(frozen=True)
+class ResolvedAIConfig:
+    """Typed result of :func:`resolve_task_ai_config`.
+
+    Carries the same four values the legacy tuple return exposed
+    (``provider_key`` / ``provider_config`` / ``model`` / ``agent_slug``)
+    plus an ``origin`` tag identifying WHICH resolution branch produced the
+    config:
+
+      - ``"governance"`` — admin-locked module config (user path bypassed).
+      - ``"platform"``  — a platform ``nous_models`` catalog entry, whether
+        the user picked it (``nous:<model>``) or the assigned agent's model
+        resolved through the gated catalog path.
+      - ``"byok"``      — the user's own provider config, with a non-empty
+        ``api_key``.
+      - ``"env"``       — a BYOK-shaped result WITHOUT an api_key; the adapter
+        factory falls back to env credentials.
+    """
+
+    provider_key: str
+    provider_config: Dict[str, Any]
+    model: str
+    agent_slug: str
+    origin: str  # "governance" | "platform" | "byok" | "env"
 
 
 async def get_ai_settings(user_id: str) -> dict:
@@ -120,11 +147,18 @@ DEFAULT_CLASSIFY_AGENT_SLUG = "classify"
 DEFAULT_SCRIPT_AGENT_SLUG = "script_ai"
 
 
-async def resolve_task_provider_config(
+def _byok_origin(provider_config: Dict[str, Any]) -> str:
+    """Classify a BYOK-shaped result: ``"byok"`` when the config carries a
+    non-empty ``api_key``, else ``"env"`` (the adapter factory falls back to
+    env credentials when no user key is present)."""
+    return "byok" if (provider_config.get("api_key") or "").strip() else "env"
+
+
+async def resolve_task_ai_config(
     user_id: Optional[str],
     task_key: str,
     default_slug: str,
-) -> Tuple[str, Dict[str, Any], str, str]:
+) -> ResolvedAIConfig:
     """Resolve a task's assigned agent slug + model + user's BYO provider config.
 
     Generic form of ``resolve_analyze_provider_config`` (which delegates
@@ -133,10 +167,10 @@ async def resolve_task_provider_config(
     takes its model, derives the provider key from the model prefix, and
     merges the user's BYO entry for that provider.
 
-    Returns ``(provider_key, provider_config, model, agent_slug)`` — the
-    resolved slug is returned so the caller composes the SAME agent whose
-    model was resolved (see #622/#623: prompt agent and model agent must
-    match or the composed model overrides the resolved one).
+    Returns a :class:`ResolvedAIConfig` — the resolved slug is returned so the
+    caller composes the SAME agent whose model was resolved (see #622/#623:
+    prompt agent and model agent must match or the composed model overrides
+    the resolved one), and ``origin`` tags which branch produced the config.
 
     Governance gate
     ---------------
@@ -159,7 +193,13 @@ async def resolve_task_provider_config(
     # ── Governance gate (shared helper — platform-catalog first) ──────────
     locked = await resolve_locked_module_config(task_key)
     if locked is not None:
-        return locked.provider_key, locked.provider_config, locked.model, default_slug
+        return ResolvedAIConfig(
+            provider_key=locked.provider_key,
+            provider_config=locked.provider_config,
+            model=locked.model,
+            agent_slug=default_slug,
+            origin="governance",
+        )
 
     # Load settings first so we can read the user's assigned agent slug.
     # Reused below for the BYO provider lookup — a single read, not two.
@@ -180,7 +220,13 @@ async def resolve_task_provider_config(
             nous = None
         if nous is not None:
             n_provider_key, n_provider_config, n_model = nous
-            return n_provider_key, n_provider_config, n_model, default_slug
+            return ResolvedAIConfig(
+                provider_key=n_provider_key,
+                provider_config=n_provider_config,
+                model=n_model,
+                agent_slug=default_slug,
+                origin="platform",
+            )
         assigned_slug = default_slug
         resolved_slug = default_slug
 
@@ -200,7 +246,13 @@ async def resolve_task_provider_config(
             f"[AI] {task_key} agent '{assigned_slug}' missing or has no "
             "model; caller will use built-in default"
         )
-        return "", {}, "", resolved_slug
+        return ResolvedAIConfig(
+            provider_key="",
+            provider_config={},
+            model="",
+            agent_slug=resolved_slug,
+            origin=_byok_origin({}),
+        )
 
     # Shared nous lookup: if the agent's model names a platform Nous model,
     # return the platform config while KEEPING resolved_slug so the caller
@@ -208,7 +260,13 @@ async def resolve_task_provider_config(
     nous = await resolve_nous_model(model, task_key)
     if nous is not None:
         n_provider_key, n_provider_config, n_model = nous
-        return n_provider_key, n_provider_config, n_model, resolved_slug
+        return ResolvedAIConfig(
+            provider_key=n_provider_key,
+            provider_config=n_provider_config,
+            model=n_model,
+            agent_slug=resolved_slug,
+            origin="platform",
+        )
 
     try:
         provider_key = provider_key_for_model(model)
@@ -220,11 +278,39 @@ async def resolve_task_provider_config(
         provider_key = ""
 
     if not user_id or not provider_key:
-        return provider_key, {"model": model}, model, resolved_slug
+        return ResolvedAIConfig(
+            provider_key=provider_key,
+            provider_config={"model": model},
+            model=model,
+            agent_slug=resolved_slug,
+            origin=_byok_origin({"model": model}),
+        )
 
     provider_config = dict(get_provider_config(ai_settings, provider_key))
     provider_config["model"] = model
-    return provider_key, provider_config, model, resolved_slug
+    return ResolvedAIConfig(
+        provider_key=provider_key,
+        provider_config=provider_config,
+        model=model,
+        agent_slug=resolved_slug,
+        origin=_byok_origin(provider_config),
+    )
+
+
+async def resolve_task_provider_config(
+    user_id: Optional[str],
+    task_key: str,
+    default_slug: str,
+) -> Tuple[str, Dict[str, Any], str, str]:
+    """Backwards-compatible tuple shim over :func:`resolve_task_ai_config`.
+
+    Returns ``(provider_key, provider_config, model, agent_slug)`` — byte-for-
+    byte the legacy return shape, so all existing call sites stay untouched.
+    New code that needs the resolution ``origin`` should call
+    ``resolve_task_ai_config`` directly.
+    """
+    cfg = await resolve_task_ai_config(user_id, task_key, default_slug)
+    return cfg.provider_key, cfg.provider_config, cfg.model, cfg.agent_slug
 
 
 async def resolve_analyze_provider_config(
