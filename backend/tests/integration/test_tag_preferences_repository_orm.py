@@ -1,4 +1,4 @@
-"""Integration tests for TagPreferencesRepositoryOrm (Batch L1) against real PG.
+"""Integration tests for TagPreferencesRepository (ORM-backed) against real PG.
 
 The public return shape is a fixed 3-key defaults-merged dict
 (starred_tag_ids / picker_settings / panel_size) — NOT a SELECT-* dict. There
@@ -72,11 +72,9 @@ async def test_user(integration_db_url):
 
 
 def _repo():
-    from app.repositories.tag_preferences_repository_orm import (
-        TagPreferencesRepositoryOrm,
-    )
+    from app.repositories.tag_preferences_repository import TagPreferencesRepository
 
-    return TagPreferencesRepositoryOrm()
+    return TagPreferencesRepository()
 
 
 # ─── Reads ──────────────────────────────────────────────────────────────
@@ -175,32 +173,13 @@ async def test_upsert_idempotent_second_write(
     assert cnt == 1  # one row, not two
 
 
-# ─── Factory routing (engine-presence parity) ──────────────────────────
+# ─── Factory (ORM-only, flag-free) ─────────────────────────────────────
 
 
-async def test_factory_engine_not_configured_returns_rest(monkeypatch):
-    """When engine is NOT configured, factory returns the legacy REST repo."""
-    from app.db import engine as db_engine
+async def test_factory_returns_orm_repo():
+    """Factory unconditionally returns the collapsed ORM-backed class —
+    no engine-presence branch, no legacy REST fallback."""
     from app.repositories import tag_preferences_repository as mod
 
-    monkeypatch.setattr(db_engine, "is_configured", lambda: False)
     repo = mod.get_tag_preferences_repository()
     assert type(repo) is mod.TagPreferencesRepository
-    from app.repositories.tag_preferences_repository_orm import (
-        TagPreferencesRepositoryOrm,
-    )
-
-    assert not isinstance(repo, TagPreferencesRepositoryOrm)
-
-
-async def test_factory_engine_configured_returns_orm(monkeypatch):
-    """When engine IS configured, factory returns the ORM repo."""
-    from app.db import engine as db_engine
-    from app.repositories import tag_preferences_repository as mod
-    from app.repositories.tag_preferences_repository_orm import (
-        TagPreferencesRepositoryOrm,
-    )
-
-    monkeypatch.setattr(db_engine, "is_configured", lambda: True)
-    repo = mod.get_tag_preferences_repository()
-    assert isinstance(repo, TagPreferencesRepositoryOrm)
