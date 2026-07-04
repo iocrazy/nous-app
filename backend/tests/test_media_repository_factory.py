@@ -1,99 +1,86 @@
-"""Task 5.1 tests — get_media_repository factory + parity (ORM).
+"""Task 5.1 tests — get_media_repository factory + surface (ORM-only).
 
-Pins the same three contracts the asyncpg suite did, retargeted at the
-SQLAlchemy ORM implementation that replaced the asyncpg media path:
+Post-rollout the per-domain ``USE_ORM_MEDIA`` flag and the standalone
+``MediaRepositoryOrm`` twin have been retired: ``MediaRepository`` is now the
+single ORM-backed class and ``get_media_repository()`` returns it
+unconditionally. These tests pin:
 
-  1. The factory routes correctly on
-     ``USE_ORM_MEDIA`` AND ``SUPAVISOR_DATABASE_URL`` (via
-     ``app.db.engine.is_configured``). Half-configured deploys (flag on,
-     engine missing) fall back to legacy with a warning, never raise.
+  1. The factory returns the ORM-backed ``MediaRepository`` (no flag, no
+     engine gate).
 
-  2. ``MediaRepositoryOrm`` exposes the same public method surface as
-     ``MediaRepository`` so existing call sites work without per-method
-     special-casing.
+  2. ``MediaRepository`` inherits ``AsyncpgRepository`` (for ``_bigint``) and
+     still exposes the conscious-keep legacy REST owner-map methods (which use
+     ``self._get_client()``) so call sites are zero-touch.
 
-  3. For each migrated method, signature parity holds — same parameter
-     names — so kwargs callers don't silently break.
+  3. Signature parity: the migrated methods keep their exact parameter names
+     so kwargs callers don't silently break.
 
-There is NO tri-state: the ORM path REPLACES asyncpg. Flag off → legacy
-supabase-py; flag on + engine configured → ORM.
+  4. The wrapper methods (check_* / mark_* / get_music_data) are NOT
+     overridden separately — they call ``self.get_by_platform_id`` /
+     ``self.update``, which now resolve to the ORM methods on THIS class.
 """
 
 from __future__ import annotations
 
 import inspect
-from unittest.mock import patch
 
 import pytest
 
 
-def test_factory_returns_legacy_when_flag_off():
-    """Default state: flag false → legacy supabase-py path."""
+def test_factory_returns_orm_repository():
+    """Flag retired → factory unconditionally returns the ORM-backed
+    ``MediaRepository``."""
     from app.repositories.media_repository import (
         MediaRepository,
         get_media_repository,
     )
 
-    with patch("app.core.config.settings.USE_ORM_MEDIA", False):
-        repo = get_media_repository()
-    assert isinstance(repo, MediaRepository)
-    # Critical: must NOT be the ORM subclass (which would also pass
-    # isinstance via inheritance).
-    assert type(repo).__name__ == "MediaRepository"
+    repo = get_media_repository()
+    assert type(repo) is MediaRepository
 
 
-def test_factory_returns_orm_when_flag_on_and_engine_configured():
-    """Both knobs on → ORM subclass."""
-    from app.repositories.media_repository import get_media_repository
-    from app.repositories.media_repository_orm import MediaRepositoryOrm
-
-    with (
-        patch("app.core.config.settings.USE_ORM_MEDIA", True),
-        patch("app.db.engine.is_configured", return_value=True),
-    ):
-        repo = get_media_repository()
-    assert isinstance(repo, MediaRepositoryOrm)
-
-
-def test_factory_falls_back_when_flag_on_but_engine_missing():
-    """Half-configured deploy must NOT crash — fall back to legacy."""
-    from app.repositories.media_repository import get_media_repository
-
-    with (
-        patch("app.core.config.settings.USE_ORM_MEDIA", True),
-        patch("app.db.engine.is_configured", return_value=False),
-    ):
-        repo = get_media_repository()
-    assert type(repo).__name__ == "MediaRepository"
-
-
-# ─── API parity check ──────────────────────────────────────────────────
-
-
-def test_orm_repo_has_same_public_methods_as_legacy():
-    """ORM impl must not be MISSING any legacy public method (extras
-    inherited from AsyncpgRepository base are fine)."""
+def test_repository_inherits_asyncpg_base():
+    """The collapsed class mixes in ``AsyncpgRepository`` so the ORM methods
+    get ``_bigint`` (the str-snowflake → int8 boundary)."""
+    from app.db.repository_base import AsyncpgRepository
     from app.repositories.media_repository import MediaRepository
-    from app.repositories.media_repository_orm import MediaRepositoryOrm
 
-    legacy_methods = {
-        name
-        for name in dir(MediaRepository)
-        if not name.startswith("_") and callable(getattr(MediaRepository, name))
-    }
-    orm_methods = {
-        name
-        for name in dir(MediaRepositoryOrm)
-        if not name.startswith("_") and callable(getattr(MediaRepositoryOrm, name))
-    }
-    missing = legacy_methods - orm_methods
-    assert not missing, (
-        f"ORM impl is missing legacy methods: {sorted(missing)}. "
-        f"Add them, or feature-flag the call site."
-    )
+    assert issubclass(MediaRepository, AsyncpgRepository)
 
 
-# Migrated (overridden) methods — keep in sync with MediaRepositoryOrm.
+def test_conscious_keep_legacy_methods_are_present():
+    """The owner-map methods NOT ported to the ORM (they run the legacy
+    supabase-py REST bodies) must still exist on the collapsed class so every
+    call site keeps working."""
+    from app.repositories.media_repository import MediaRepository
+
+    for name in (
+        "get_media_owner_map",
+        "get_media_resource_owner_map",
+        # uses the async supabase admin client
+        "_get_client",
+    ):
+        assert callable(getattr(MediaRepository, name)), f"missing {name}"
+
+
+def test_bigint_helper_coerces_str_input():
+    """Lock in the str→int coercion at the boundary.
+
+    ``get_by_id`` binds ``parsed_media.id`` (BIGINT Snowflake) via
+    ``self._bigint``; asyncpg's int8 codec is strict, so a str id must be
+    coerced. Without it every str-id read raises."""
+    from app.db.repository_base import AsyncpgRepository
+
+    assert AsyncpgRepository._bigint("12345") == 12345
+    assert AsyncpgRepository._bigint("-1") == -1
+    assert AsyncpgRepository._bigint(12345) == 12345
+    assert AsyncpgRepository._bigint("not-a-number") == "not-a-number"
+    assert AsyncpgRepository._bigint(None) is None
+
+
+# ─── API surface + signature parity ────────────────────────────────────
+
+# The 12 data-access methods now backed by the ORM on ``MediaRepository``.
 _MIGRATED_METHODS = [
     # reads
     "get_by_platform_id",
@@ -111,53 +98,66 @@ _MIGRATED_METHODS = [
     "mark_stale_downloads_failed",
 ]
 
+# The 9 wrapper methods that route through the ORM overrides on self.
+_WRAPPER_METHODS = [
+    "check_media_existence",
+    "check_media_downloaded",
+    "check_music_downloaded",
+    "check_cover_downloaded",
+    "mark_media_as_downloaded",
+    "mark_music_as_downloaded",
+    "mark_images_as_downloaded",
+    "mark_download_failed",
+    "get_music_data",
+]
+
+
+def test_public_method_surface_intact():
+    """Every migrated + wrapper + owner-map method is present on the collapsed
+    class, so existing call sites work without per-method special-casing."""
+    from app.repositories.media_repository import MediaRepository
+
+    expected = (
+        set(_MIGRATED_METHODS)
+        | set(_WRAPPER_METHODS)
+        | {
+            "get_media_owner_map",
+            "get_media_resource_owner_map",
+        }
+    )
+    present = {
+        name
+        for name in dir(MediaRepository)
+        if not name.startswith("_") and callable(getattr(MediaRepository, name))
+    }
+    missing = expected - present
+    assert not missing, f"MediaRepository is missing methods: {sorted(missing)}"
+
 
 @pytest.mark.parametrize("method_name", _MIGRATED_METHODS)
-def test_orm_signature_matches_legacy(method_name):
-    """Per-method signature parity — catches accidental kwarg renames
-    that would silently no-op."""
+def test_migrated_method_signature_stable(method_name):
+    """Per-method signature check — the collapse must not rename any kwarg
+    that a caller passes by name (which would silently no-op)."""
     from app.repositories.media_repository import MediaRepository
-    from app.repositories.media_repository_orm import MediaRepositoryOrm
 
-    legacy_sig = inspect.signature(getattr(MediaRepository, method_name))
-    orm_sig = inspect.signature(getattr(MediaRepositoryOrm, method_name))
+    sig = inspect.signature(getattr(MediaRepository, method_name))
+    params = set(sig.parameters.keys())
+    assert "self" in params
 
-    legacy_params = set(legacy_sig.parameters.keys())
-    orm_params = set(orm_sig.parameters.keys())
-
-    assert legacy_params == orm_params, (
-        f"{method_name} signature drift: legacy={sorted(legacy_params)}, "
-        f"orm={sorted(orm_params)}"
-    )
-
-
-def test_wrapper_methods_get_orm_routing_via_mro():
-    """check_*, mark_*, get_music_data are NOT overridden in the ORM
-    subclass, but they call self.get_by_platform_id / self.update — Python
-    MRO resolves those to the ORM overrides at runtime.
-
-    This pins that contract: when these wrappers are called on a
-    MediaRepositoryOrm instance, they go through the ORM (committing)
-    path, not a leaked supabase-py client."""
-    from app.repositories.media_repository import MediaRepository
-    from app.repositories.media_repository_orm import MediaRepositoryOrm
-
-    orm_own = set(MediaRepositoryOrm.__dict__.keys())
-    for wrapper in (
-        "check_media_existence",
-        "check_media_downloaded",
-        "check_music_downloaded",
-        "check_cover_downloaded",
-        "mark_media_as_downloaded",
-        "mark_music_as_downloaded",
-        "mark_images_as_downloaded",
-        "mark_download_failed",
-        "get_music_data",
-    ):
-        assert wrapper not in orm_own, (
-            f"{wrapper} should inherit from MediaRepository, not be "
-            f"overridden on the ORM subclass. The wrappers benefit "
-            f"automatically via MRO when get_by_platform_id / update "
-            f"are migrated."
-        )
-        assert getattr(MediaRepositoryOrm, wrapper) is getattr(MediaRepository, wrapper)
+    if method_name == "search":
+        assert {
+            "user_id",
+            "keyword",
+            "author",
+            "status",
+            "media_type",
+            "category",
+            "start_date",
+            "end_date",
+            "skip",
+            "limit",
+        } <= params
+    if method_name in ("get_all", "get_user_media_list"):
+        assert {"skip", "limit", "order_by", "ascending"} <= params
+    if method_name == "get_pending_downloads":
+        assert {"status", "limit", "user_id"} <= params

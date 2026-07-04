@@ -1,7 +1,7 @@
 """A4 Item 3 — parsed_media-via-resources INDIRECT-SCOPE verification.
 
 FINDING (documented in the A4 report): the media ORM repo
-(``app/repositories/media_repository_orm.py``) reaches the scoped ``resources``
+(``app/repositories/media_repository.py``) reaches the scoped ``resources``
 table from FOUR reads, and ALL FOUR are ORM ``select()`` statements — i.e.
 INJECTABLE by the choke point (H2 hardening), not ``text()`` choke-point
 bypasses:
@@ -46,7 +46,7 @@ from sqlalchemy import text
 
 from app.db import scope as scope_mod
 from app.db.scope import Scope, request_scope, system_request_scope
-from app.repositories.media_repository_orm import MediaRepositoryOrm
+from app.repositories.media_repository import MediaRepository
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -93,8 +93,8 @@ def enforce_off():
 
 
 @pytest.fixture
-def repo() -> MediaRepositoryOrm:
-    return MediaRepositoryOrm()
+def repo() -> MediaRepository:
+    return MediaRepository()
 
 
 def _pk() -> int:
@@ -186,7 +186,7 @@ async def seeded(patched_engine):
 
 
 async def test_flag_off_get_user_media_list_no_injection(
-    seeded: _Ids, repo: MediaRepositoryOrm, enforce_off
+    seeded: _Ids, repo: MediaRepository, enforce_off
 ):
     """FLAG OFF: get_user_media_list still filters by its OWN ``creator_id == A``
     WHERE clause (not the choke point) → A sees only A's row; the manual filter
@@ -200,7 +200,7 @@ async def test_flag_off_get_user_media_list_no_injection(
 
 
 async def test_flag_on_get_user_media_list_excludes_foreign_via_join(
-    seeded: _Ids, repo: MediaRepositoryOrm, enforce_on
+    seeded: _Ids, repo: MediaRepository, enforce_on
 ):
     """FLAG ON + USER scope A: the choke point injects
     ``resources.creator_id == A`` into the resources⨝parsed_media JOIN. B's row

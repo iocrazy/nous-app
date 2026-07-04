@@ -89,14 +89,6 @@ class Settings(BaseSettings):
         "ORM background diff) for parity validation. Independent of USE_ORM_*. "
         "Empty = no shadowing (fully inert).",
     )
-    USE_ORM_MEDIA: bool = Field(
-        default=False,
-        description="Route MediaRepository through the SQLAlchemy 2.0 ORM "
-        "session layer (Task 5.1 — replaces the asyncpg media path; fixes "
-        "the silent-rollback P0 by committing writes via write_scope(). "
-        "Covers parsed_media CRUD + lists + search + statistics; the 9 "
-        "wrapper methods route through the ORM overrides via Python MRO)",
-    )
     SCOPE_ENFORCE_RESOURCES: bool = Field(
         default=False,
         description="Activate the app-layer tenant-scope choke point "
