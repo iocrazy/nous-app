@@ -132,34 +132,6 @@ class Settings(BaseSettings):
         "preserved byte-for-byte. The PostgREST read-merge-write path stays "
         "as the engine-not-configured fallback",
     )
-    USE_ORM_PROJECTS: bool = Field(
-        default=False,
-        description="Route ProjectsRepository (the MediaTrack project system: "
-        "projects / project_files / project_folders / project_members / "
-        "project_tasks / file_versions / review_comments / parsed_media / "
-        "shares / project_collections — 10 tables) through the SQLAlchemy 2.0 "
-        "ORM session layer (Phase 2 L-solo). Strategy C value-type parity: ALL "
-        "bigint ids + FKs (project/file/folder/task/version/share/collection ids "
-        "+ project_id / media_id / folder_id / parent_id / file_id) stay NATIVE "
-        "int (the 5.3 trap — they flow into scope / membership / FK / dict-key "
-        "compares); uuid columns are coerced to str at the dict boundary to "
-        "match the REST baseline (CONSUMED: owner_id == user_id ownership checks, "
-        "project_members.user_id as an enrich-email dict key); timestamptz → ISO "
-        "str and date (project_tasks.due_date) → 'YYYY-MM-DD' str; numeric "
-        "(fps/timecode) left native. parsed_media Enum(DownloadStatus) columns "
-        "are unwrapped to bare strings and the renamed metadata_ → 'metadata' "
-        "column is resolved via the mapper. Writes commit via write_scope(). "
-        "Inert parity migration — NO endpoint changes behavior on flip. The "
-        "auth-admin methods (enrich_members_with_email / get_user_email), the "
-        "review_comments methods, and project_members update/delete all INHERIT "
-        "the legacy supabase path via MRO (auth-admin hits Supabase Auth not a "
-        "table; the other two are deferred product decisions over schema drift — "
-        "see the projects_repository_orm module docstring). projects.display_code "
-        "is a phantom column preserved as a graceful no-op (REST parity). "
-        "Co-fixed prod bug: the legacy get_members ordered by a phantom "
-        "created_at column (silently returned [] via swallowed PGRST 400) — now "
-        "orders by joined_at on both paths.",
-    )
     USE_ORM_STORYBOARD: bool = Field(
         default=False,
         description="Route the SIX Storyboard Workbench repos (StoryboardProject"
@@ -228,37 +200,6 @@ class Settings(BaseSettings):
         "others raises a CHECK violation under BOTH REST and ORM (a separate "
         "product question, preserved faithfully). Writes commit via "
         "write_scope(). Inert — flip back to false to roll back.",
-    )
-
-    USE_ORM_POINTS: bool = Field(
-        default=False,
-        description="Route PointsRepository (MONEY — the points capacity ledger: "
-        "point_pricing / point_packages / team_quotas / member_quotas / "
-        "point_transactions) through the SQLAlchemy 2.0 ORM (Phase 2 H batch — "
-        "money). NUMERIC-PRECISION DECISION: every point/money column here is "
-        "INTEGER/BigInteger (points_balance / amount / balance_after / "
-        "storage_*_bytes / points_cost / points_amount / *_this_month), NOT "
-        "Numeric — REST returned a JSON NUMBER for these, so they STAY NATIVE int "
-        "(the 5.3 trap) AND every consumer does exact int math on them "
-        "(check_quota's ``balance < cost``, add_points' ``balance + amount``, "
-        "reclaim's ``min``/``-``, admin_adjust's ``balance + amount``). str()ing "
-        "any would silently break the +/</min money math. The ONLY Numeric column "
-        "is point_transactions.duration_seconds → str()'d to match REST's "
-        "JSON-string shape (write-only/unread today; no exact-decimal consumer). "
-        "UUID sweep: point_pricing.id / point_packages.id / member_quotas.id+"
-        "user_id / point_transactions.user_id → str (default-str-all-uuid; "
-        "team_quotas has no uuid). ATOMIC MONEY: consume/refund go through the "
-        "SAME rpc_consume_team_points (mig 120/124) / rpc_refund_team_points_"
-        "idempotent (mig 123) SECURITY DEFINER functions via SELECT * FROM fn(...) "
-        "inside write_scope() (team_id→int BIGINT param, user_id str UUID param; "
-        "INTEGER return cols → native int) — a read_scope there would roll the "
-        "decrement back = LOST MONEY. CONCERN (reported, not repaired — inert "
-        "discipline): add_points / reclaim_daily_gift / admin_adjust(<0) / "
-        "increment_member_usage are PRE-EXISTING non-atomic read-then-write "
-        "balance paths; reproduced faithfully (no locking added). get_transactions"
-        "(days=N) binds a tz-aware datetime for ``created_at >= cutoff`` (v3 "
-        "rule). member_quotas upsert via ON CONFLICT (team_id,user_id). Writes "
-        "commit via write_scope(). Inert — flip back to false to roll back.",
     )
 
     USE_ORM_PAYMENT: bool = Field(

@@ -1,4 +1,4 @@
-"""Integration tests for PointsRepositoryOrm (Phase 2 H batch — MONEY) vs real PG.
+"""Integration tests for the ORM PointsRepository (Phase 2 H batch — MONEY) vs real PG.
 
 ★ THE MONEY SURFACE — the points capacity ledger. ★ Proves the REST → ORM swap
 is invisible AND that STRATEGY-C value-type parity holds on the points tables —
@@ -88,9 +88,9 @@ async def seed_team(integration_db_url):
 
 
 def _repo():
-    from app.repositories.points_repository_orm import PointsRepositoryOrm
+    from app.repositories.points_repository import PointsRepository
 
-    return PointsRepositoryOrm()
+    return PointsRepository()
 
 
 # ─── team_quota create + balance round-trip (COMMIT, exact value) ────────
@@ -362,30 +362,15 @@ async def test_get_all_pricing_returns_list(patched_engine):
         assert type(r["id"]) is str
 
 
-# ─── factory on/off ─────────────────────────────────────────────────────
+# ─── factory (ORM-only, post-rollout) ───────────────────────────────────
 
 
-def test_factory_off_returns_legacy():
-    from unittest.mock import patch
-
+def test_factory_returns_orm_repository():
+    """Per-domain rollout flag ``USE_ORM_POINTS`` retired → factory
+    unconditionally returns the ORM-backed PointsRepository."""
     from app.repositories.points_repository import (
         PointsRepository,
         get_points_repository,
     )
 
-    with patch("app.core.config.settings.USE_ORM_POINTS", False):
-        assert type(get_points_repository()) is PointsRepository
-
-
-def test_factory_on_returns_orm(integration_db_url):
-    from unittest.mock import patch
-
-    from app.repositories.points_repository_orm import PointsRepositoryOrm
-
-    with (
-        patch("app.core.config.settings.USE_ORM_POINTS", True),
-        patch("app.db.engine.is_configured", return_value=True),
-    ):
-        from app.repositories.points_repository import get_points_repository
-
-        assert type(get_points_repository()) is PointsRepositoryOrm
+    assert type(get_points_repository()) is PointsRepository
