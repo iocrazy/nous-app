@@ -1,4 +1,4 @@
-"""Integration tests for PaymentRepositoryOrm (Phase 2 H batch — MONEY) vs PG.
+"""Integration tests for the ORM-backed PaymentRepository (Phase 2 H batch — MONEY) vs PG.
 
 ★ THE MONEY SURFACE — payment orders (the purchase ledger). ★ Proves the
 REST → ORM swap is invisible AND that STRATEGY-C value-type parity holds on the
@@ -87,9 +87,9 @@ async def seed_team(integration_db_url):
 
 
 def _repo():
-    from app.repositories.payment_repository_orm import PaymentRepositoryOrm
+    from app.repositories.payment_repository import PaymentRepository
 
-    return PaymentRepositoryOrm()
+    return PaymentRepository()
 
 
 def _order_data(team_id: int, user_id) -> dict:
@@ -249,30 +249,15 @@ async def test_expire_pending_orders(integration_db_url, patched_engine, seed_te
     assert fresh_status == "pending"  # future expiry untouched
 
 
-# ─── factory on/off ─────────────────────────────────────────────────────
+# ─── factory (ORM-only, post-rollout) ────────────────────────────────────
 
 
-def test_factory_off_returns_legacy():
-    from unittest.mock import patch
-
+def test_factory_returns_orm_repository():
+    """Per-domain rollout flag ``USE_ORM_PAYMENT`` retired → factory
+    unconditionally returns the ORM-backed PaymentRepository."""
     from app.repositories.payment_repository import (
         PaymentRepository,
         get_payment_repository,
     )
 
-    with patch("app.core.config.settings.USE_ORM_PAYMENT", False):
-        assert type(get_payment_repository()) is PaymentRepository
-
-
-def test_factory_on_returns_orm(integration_db_url):
-    from unittest.mock import patch
-
-    from app.repositories.payment_repository_orm import PaymentRepositoryOrm
-
-    with (
-        patch("app.core.config.settings.USE_ORM_PAYMENT", True),
-        patch("app.db.engine.is_configured", return_value=True),
-    ):
-        from app.repositories.payment_repository import get_payment_repository
-
-        assert type(get_payment_repository()) is PaymentRepositoryOrm
+    assert type(get_payment_repository()) is PaymentRepository
