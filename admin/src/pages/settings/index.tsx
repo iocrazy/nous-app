@@ -125,6 +125,10 @@ export function Settings() {
     'nous.',
     'telemetry.langfuse.secret_key',
     'telemetry.langfuse.public_key',
+    // platform.* (platform.ai_providers) → server-side masked to {set: bool};
+    // the generic SettingRow would just render the mask, so hide it here —
+    // manage via PUT /admin/settings/platform-ai-providers instead.
+    'platform.',
   ]
   const generic = (settings || []).filter(
     (s) => !HIDDEN_PREFIXES.some((p) => s.key.startsWith(p)),
