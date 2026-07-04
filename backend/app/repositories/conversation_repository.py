@@ -166,6 +166,14 @@ class ConversationRepository:
             {"cid": _bigint(conversation_id)},
         )
 
+    async def conversation_scope_and_type(
+        self, *, conversation_id: int
+    ) -> dict[str, Any] | None:
+        return await db_engine.fetch_one(
+            "SELECT scope_id, type FROM conversations WHERE id = :cid",
+            {"cid": _bigint(conversation_id)},
+        )
+
     async def get_my_conversations(self, user_id: str) -> list[dict[str, Any]]:
         """Return conversations visible to *user_id* (open, not archived), with unread."""
         rows = await db_engine.fetch_all(

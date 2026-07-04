@@ -62,9 +62,15 @@ class ConversationService:
         self, *, conversation_id: int, user_id: str, user_ids: list[str]
     ) -> int:
         await self._require_member(conversation_id, user_id)
-        scope_id = await self._repo.conversation_scope_id(
+        info = await self._repo.conversation_scope_and_type(
             conversation_id=conversation_id
         )
+        # A 1:1 AI thread must stay exactly one human + one agent: /dream's
+        # per-pair consolidation joins conversation_members, so a second
+        # user row fans out its message counts (P3 Task-2 review ledger).
+        if info is not None and info.get("type") == "direct_agent":
+            raise PermissionError("cannot add members to a direct agent conversation")
+        scope_id = info.get("scope_id") if info is not None else None
         if scope_id is not None:
             for target in user_ids:
                 if not await self._repo.is_team_member(
