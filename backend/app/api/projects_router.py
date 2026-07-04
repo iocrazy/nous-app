@@ -57,24 +57,34 @@ async def list_projects(
     team_id: Optional[str] = Query(
         None, description="Filter by team ID (null = personal)"
     ),
+    archived: Optional[bool] = Query(
+        None,
+        description=(
+            "true = archived only, false = active only, "
+            "omitted = both (the frontend fetches both and filters locally)"
+        ),
+    ),
 ):
     """
-    List all projects accessible to the current user.
+    List all projects accessible to the current user. All filters are
+    pushed down to SQL in the service/repo layer (no in-memory filtering).
 
     - **project_type**: Optional filter (internal, external, personal).
     - **starred**: Optional filter for starred projects.
     - **team_id**: Optional team filter. If provided, returns team projects.
       If omitted, returns all user projects (backward-compatible).
+    - **archived**: true = archived only, false = active only, omitted =
+      both (frontend fetches once and splits into Active/Archived views).
     """
     try:
         svc = ProjectsService()
-        projects = await svc.get_projects_with_counts(auth.user_id, team_id=team_id)
-
-        if project_type:
-            projects = [p for p in projects if p.get("project_type") == project_type]
-        if starred is not None:
-            projects = [p for p in projects if p.get("is_starred") == starred]
-
+        projects = await svc.get_projects_with_counts(
+            auth.user_id,
+            team_id=team_id,
+            project_type=project_type,
+            starred=starred,
+            archived=archived,
+        )
         return {"success": True, "data": projects}
     except Exception as e:
         logger.error(f"Failed to list projects: {e}")

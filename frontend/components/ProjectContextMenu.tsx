@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Settings, Users, Palette, Star, Trash2 } from 'lucide-react';
+import { Settings, Users, Palette, Star, Archive, Trash2 } from 'lucide-react';
 import { Project } from '../types';
 
 const COLOR_OPTIONS = [
@@ -22,6 +22,7 @@ interface ProjectContextMenuProps {
   onMembers: () => void;
   onColorLabel: (color: string | null) => void;
   onToggleStar: () => void;
+  onArchive: () => void;
   onDelete: () => void;
 }
 
@@ -32,7 +33,7 @@ const typeColors: Record<string, string> = {
 };
 
 export const ProjectContextMenu: React.FC<ProjectContextMenuProps> = ({
-  project, position, onClose, onSettings, onMembers, onColorLabel, onToggleStar, onDelete
+  project, position, onClose, onSettings, onMembers, onColorLabel, onToggleStar, onArchive, onDelete
 }) => {
   const { t } = useTranslation();
   const ref = useRef<HTMLDivElement>(null);
@@ -136,6 +137,14 @@ export const ProjectContextMenu: React.FC<ProjectContextMenuProps> = ({
           ? t('projects.contextMenu.unstar', 'Unstar')
           : t('projects.contextMenu.star', 'Star')}
         onClick={onToggleStar}
+      />
+
+      <MenuItem
+        icon={<Archive size={14} />}
+        label={project.archived_at
+          ? t('projects.contextMenu.unarchive', 'Unarchive')
+          : t('projects.contextMenu.archive', 'Archive')}
+        onClick={onArchive}
       />
 
       <div className="border-t border-ink-800/50 my-1" />

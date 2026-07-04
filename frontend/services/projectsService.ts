@@ -52,7 +52,7 @@ export const createProject = async (data: {
 
 export const updateProject = async (
   id: string,
-  data: Partial<Project>,
+  data: Partial<Project> & { archived?: boolean },
 ): Promise<Project> => {
   const response = await apiClient.put<Envelope<Project>>(
     `/api/v1/projects/${id}`,

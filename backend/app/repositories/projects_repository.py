@@ -21,17 +21,16 @@ CONSCIOUS-KEEPS (still on the legacy supabase-py path — this is why the
     overridden; kept on the auth-admin path. The ORM ``get_members`` below str()s
     user_id (uuid → str), which ``enrich_members_with_email`` needs for its
     ``user_map.get(m["user_id"])`` lookup against ``str(u.id)`` keys.
-  - ``get_comments_for_file`` / ``create_comment`` / ``get_comment_by_id`` /
-    ``delete_comment`` — DEFERRED PRODUCT DECISION. Migration 062 DROPPED the
-    original (043) review_comments table and recreated it with resource_id /
-    timecode (no file_id / timestamp_seconds / drawing_data), so these methods
-    target the dropped 043 columns and are ALREADY 500-ing in production. They
-    were never ORM-overridden (a parity migration must reproduce the break, not
-    repair it); a naive ORM remap would be WRONG because the comment surface is
-    reached via the project_files path (a project_files.id is passed as file_id,
-    NOT a resources.id → writing it as review_comments.resource_id would FK-fail
-    or mis-associate). The surface is half-migrated to the resources review
-    system (reviews_router / ReviewService) and needs an ownership decision.
+  (RESOLVED — no longer a conscious-keep) ``get_comments_for_file`` /
+  ``create_comment`` / ``get_comment_by_id`` / ``delete_comment`` used to target
+  the dropped 043-era ``review_comments`` columns (migration 062 recreated that
+  table with resource_id / timecode, no file_id / timestamp_seconds /
+  drawing_data), so they were ALREADY 500-ing in production. The deferred
+  product decision has been made: a dedicated ``project_file_comments`` table
+  (migration 335) now owns this surface, keyed by ``project_files.id`` /
+  ``file_versions.id`` (see ``ProjectFileComments`` in ``app/models/teams.py``).
+  These four methods now run on the ORM path against that table — see the
+  section comment above the methods below.
   (RESOLVED — no longer conscious-keeps) ``update_member`` / ``delete_member``
   used to filter a phantom ``id`` column (project_members has a composite PK
   ``(user_id + project_id)`` and NO ``id``), so they were a SILENT NO-OP in
@@ -118,6 +117,7 @@ from app.models import (
     FileVersions,
     ParsedMedia,
     ProjectCollections,
+    ProjectFileComments,
     ProjectFiles,
     ProjectFolders,
     ProjectMembers,
@@ -140,6 +140,7 @@ _VERSIONS_N2A: Dict[str, str] = _name_to_attr(FileVersions)
 _MEDIA_N2A: Dict[str, str] = _name_to_attr(ParsedMedia)
 _SHARES_N2A: Dict[str, str] = _name_to_attr(Shares)
 _COLLECTIONS_N2A: Dict[str, str] = _name_to_attr(ProjectCollections)
+_COMMENTS_N2A: Dict[str, str] = _name_to_attr(ProjectFileComments)
 
 # Mapped attribute names per model — for filtering unknown keys out of write
 # values() (the DISPLAY_CODE / arbitrary-dict graceful-no-op contract). Bigint
@@ -152,6 +153,7 @@ _MEMBERS_ATTRS = {p.key for p in ProjectMembers.__mapper__.column_attrs}
 _VERSIONS_ATTRS = {p.key for p in FileVersions.__mapper__.column_attrs}
 _SHARES_ATTRS = {p.key for p in Shares.__mapper__.column_attrs}
 _COLLECTIONS_ATTRS = {p.key for p in ProjectCollections.__mapper__.column_attrs}
+_COMMENTS_ATTRS = {p.key for p in ProjectFileComments.__mapper__.column_attrs}
 
 
 def _temporal_kinds(model: Any) -> Dict[str, str]:
@@ -238,6 +240,23 @@ def _row(obj: Any, name_to_attr: Dict[str, str]) -> Dict[str, Any]:
     return _parity(_orm_obj_to_dict(obj, name_to_attr))
 
 
+def _comment_row(obj: Any) -> Dict[str, Any]:
+    """project_file_comments row → dict, with id/file_id/version_id stringified.
+
+    Unlike the rest of this repo's bigint ids/FKs (which STAY native int — the
+    5.3 trap), the comment surface's wire contract (``CommentResponse`` schema
+    / frontend ``ReviewComment``) expects string ids, matching the legacy
+    review_comments REST shape this surface replaces. ``_row`` alone leaves
+    bigints native, so we stringify the three id-shaped fields here rather
+    than in the general helper (which every other table relies on staying
+    native for scope/FK comparisons)."""
+    out = _row(obj, _COMMENTS_N2A)
+    for key in ("id", "file_id", "version_id"):
+        if out.get(key) is not None:
+            out[key] = str(out[key])
+    return out
+
+
 def _known_only(
     data: Dict[str, Any],
     attrs: set[str],
@@ -264,15 +283,15 @@ class ProjectsRepository:
     """Projects and project files data access (async, SQLAlchemy 2.0 ORM).
 
     Every genuine DB-touching method on the 10 project tables runs on the ORM
-    session layer. The auth-admin methods (enrich_members_with_email /
-    get_user_email) and the deferred review_comments + update/delete_member
-    surfaces stay on the legacy supabase path — see the module docstring."""
+    session layer. Only the auth-admin methods (enrich_members_with_email /
+    get_user_email) stay on the legacy supabase path — see the module
+    docstring."""
 
     TABLE_PROJECTS = "projects"
     TABLE_FILES = "project_files"
     TABLE_MEDIA = "parsed_media"
     TABLE_VERSIONS = "file_versions"
-    TABLE_COMMENTS = "review_comments"
+    TABLE_COMMENTS = "project_file_comments"
     TABLE_FOLDERS = "project_folders"
     TABLE_SHARES = "shares"
     TABLE_TASKS = "project_tasks"
@@ -294,16 +313,28 @@ class ProjectsRepository:
     # ------------------------------------------------------------------ #
 
     async def get_user_projects(
-        self, user_id: str, team_id: str | None = None
+        self,
+        user_id: str,
+        team_id: str | None = None,
+        project_type: str | None = None,
+        starred: bool | None = None,
+        archived: bool | None = False,
     ) -> List[Dict[str, Any]]:
         """
         Get projects accessible to a user, ordered by updated_at desc.
+        Filters push down to SQL (they used to be applied in-memory in the
+        router, and there was no ``archived`` filter at all).
 
         Args:
             user_id: UUID of the authenticated user.
             team_id: If provided, filter by team_id. If ``"personal"``,
                      return only projects where team_id IS NULL.
                      If None, return all user projects (no team filter).
+            project_type: If provided, filter by project_type.
+            starred: If provided, filter by is_starred.
+            archived: ``False`` (default) → active only (archived_at IS
+                NULL). ``True`` → archived only (archived_at IS NOT NULL).
+                ``None`` → both (no archived_at filter).
 
         Returns:
             List of project row dicts.
@@ -318,6 +349,14 @@ class ProjectsRepository:
                 stmt = stmt.where(Projects.team_id.is_(None))
             elif team_id:
                 stmt = stmt.where(Projects.team_id == int(team_id))
+            if project_type:
+                stmt = stmt.where(Projects.project_type == project_type)
+            if starred is not None:
+                stmt = stmt.where(Projects.is_starred.is_(starred))
+            if archived is True:
+                stmt = stmt.where(Projects.archived_at.is_not(None))
+            elif archived is False:
+                stmt = stmt.where(Projects.archived_at.is_(None))
             async with read_scope() as session:
                 result = await session.execute(stmt)
                 return [_row(r, _PROJECTS_N2A) for r in result.scalars().all()]
@@ -452,6 +491,35 @@ class ProjectsRepository:
         except Exception as e:
             logger.error(f"Failed to get file count for project {project_id}: {e}")
             return 0
+
+    async def get_project_file_counts(self, project_ids: List[str]) -> Dict[str, int]:
+        """
+        Non-trashed file counts for many projects in ONE query (replaces the
+        per-project N+1 in ``get_projects_with_counts``, which used to fire
+        one ``get_project_file_count`` query per project via ``asyncio.gather``).
+
+        Args:
+            project_ids: List of project ids (str or int).
+
+        Returns:
+            Dict mapping str(project_id) -> file count. Projects with zero
+            non-trashed files are simply absent (GROUP BY yields no row for
+            them) — callers should ``.get(str(pid), 0)``.
+        """
+        if not project_ids:
+            return {}
+        try:
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(ProjectFiles.project_id, func.count())
+                    .where(ProjectFiles.project_id.in_([int(p) for p in project_ids]))
+                    .where(ProjectFiles.is_trashed.is_(False))
+                    .group_by(ProjectFiles.project_id)
+                )
+                return {str(pid): count for pid, count in result.all()}
+        except Exception as e:
+            logger.error(f"Failed to get file counts: {e}")
+            return {}
 
     # ------------------------------------------------------------------ #
     # Files CRUD
@@ -686,79 +754,78 @@ class ProjectsRepository:
             raise
 
     # ------------------------------------------------------------------ #
-    # Review comments — CONSCIOUS-KEEP on the legacy supabase path.
-    #
-    # DEFERRED PRODUCT DECISION (not a mechanical migration concern): migration
-    # 062 DROPPED the original (043) review_comments table and recreated it with
-    # a different schema (resource_id / timecode; no file_id / timestamp_seconds
-    # / drawing_data). These four methods target the dropped 043 columns, so they
-    # are ALREADY 500-ing in production — they were never ORM-migrated (a parity
-    # migration must reproduce the break, not repair it). Beyond parity, a naive
-    # ORM remap would be WRONG: the comment surface is reached via the
-    # project_files path (ProjectsService._verify_file_in_project passes a
-    # project_files.id as file_id), so file_id is NOT a resources.id — writing it
-    # as review_comments.resource_id (FK → resources.id) would FK-fail or mis-
-    # associate. The comment surface is half-migrated to the resources review
-    # system (see reviews_router / ReviewService) and needs a product decision
-    # about ownership, not a mechanical port here.
+    # Project file comments (project_file_comments, migration 335).
+    # The 043-era review_comments surface died with migration 062; the
+    # resources review system owns review_comments now. This surface has
+    # its own table keyed by project_files.id / file_versions.id.
     # ------------------------------------------------------------------ #
 
     async def get_comments_for_file(
         self, file_id: str, version_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """
-        Get comments for a file, optionally filtered by version.
-        Ordered by timestamp_seconds ASC (nulls last), then created_at ASC.
-        """
+        """Comments for a file, timestamp_seconds ASC nulls-last, created ASC."""
         try:
-            client = await self._get_client()
-            query = client.table(self.TABLE_COMMENTS).select("*").eq("file_id", file_id)
+            stmt = select(ProjectFileComments).where(
+                ProjectFileComments.file_id == int(file_id)
+            )
             if version_id:
-                query = query.eq("version_id", version_id)
-            query = query.order("timestamp_seconds", desc=False, nullsfirst=False)
-            query = query.order("created_at", desc=False)
-            result = await query.execute()
-            return result.data or []
+                stmt = stmt.where(ProjectFileComments.version_id == int(version_id))
+            stmt = stmt.order_by(
+                ProjectFileComments.timestamp_seconds.asc().nulls_last(),
+                ProjectFileComments.created_at.asc(),
+            )
+            async with read_scope() as session:
+                result = await session.execute(stmt)
+                return [_comment_row(r) for r in result.scalars().all()]
         except Exception as e:
             logger.error(f"Failed to get comments for file {file_id}: {e}")
-            return []
+            raise
 
     async def create_comment(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Create a new review comment."""
+        """Create a new project-file comment."""
         try:
-            client = await self._get_client()
-            result = await client.table(self.TABLE_COMMENTS).insert(data).execute()
+            values = _known_only(data, _COMMENTS_ATTRS)
+            for key in ("file_id", "version_id"):
+                if values.get(key) is not None:
+                    values[key] = int(values[key])
+            async with write_scope() as session:
+                result = await session.execute(
+                    insert(ProjectFileComments)
+                    .values(**values)
+                    .returning(ProjectFileComments)
+                )
+                row = result.scalars().first()
+                out = _comment_row(row) if row else {}
             logger.info(f"Created comment on file {data.get('file_id')}")
-            return result.data[0] if result.data else {}
+            return out
         except Exception as e:
             logger.error(f"Failed to create comment: {e}")
             raise
 
     async def get_comment_by_id(self, comment_id: str) -> Optional[Dict[str, Any]]:
-        """Get a single comment by its UUID."""
+        """Get a single comment by id."""
         try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.TABLE_COMMENTS)
-                .select("*")
-                .eq("id", comment_id)
-                .execute()
-            )
-            return result.data[0] if result.data else None
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(ProjectFileComments)
+                    .where(ProjectFileComments.id == int(comment_id))
+                    .limit(1)
+                )
+                row = result.scalars().first()
+                return _comment_row(row) if row else None
         except Exception as e:
             logger.error(f"Failed to get comment {comment_id}: {e}")
-            return None
+            raise
 
     async def delete_comment(self, comment_id: str) -> bool:
-        """Delete a comment by its UUID."""
+        """Delete a comment by id."""
         try:
-            client = await self._get_client()
-            await (
-                client.table(self.TABLE_COMMENTS)
-                .delete()
-                .eq("id", comment_id)
-                .execute()
-            )
+            async with write_scope() as session:
+                await session.execute(
+                    delete(ProjectFileComments).where(
+                        ProjectFileComments.id == int(comment_id)
+                    )
+                )
             logger.info(f"Deleted comment {comment_id}")
             return True
         except Exception as e:

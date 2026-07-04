@@ -12,6 +12,10 @@ Proves STRATEGY-C value-type parity holds across the MediaTrack project surface
     membership / author compares).
   - timestamptz (created_at / updated_at / trashed_at / joined_at / …) → ISO STR.
   - date (project_tasks.due_date) → 'YYYY-MM-DD' STR.
+  - EXCEPTION: project_file_comments.id / file_id / version_id (PR-A2, Task 5)
+    are stringified — this surface's wire contract (``CommentResponse`` /
+    frontend ``ReviewComment``) expects string ids, unlike every other bigint
+    id/FK above which stays native int.
 
 Writes (create_* / update_* / delete_*) go through ``write_scope()`` (COMMITS) —
 a fresh asyncpg read proves no silent rollback.
@@ -435,12 +439,12 @@ def test_member_update_delete_on_orm_path():
         assert "write_scope" in src or "read_scope" in src
 
 
-def test_comment_methods_are_conscious_keep_on_supabase_path():
-    """The four review_comments methods are CONSCIOUS-KEEP on the legacy supabase
-    path (they 500 identically to today: migration 062 dropped the 043 schema
-    they target; a parity migration must reproduce that break, not repair it).
-    Verified by source: they route through ``_get_client`` (supabase), not the
-    ORM. See the COMMENT note in the repository docstring."""
+def test_comment_methods_are_on_orm_path():
+    """PR-A2 (Task 5): the four project_file_comments methods now run on the
+    ORM path against the dedicated table (migration 335) — no longer the
+    CONSCIOUS-KEEP legacy supabase path that 500'd on the dropped 043
+    review_comments columns. Verified by source: they use write_scope /
+    read_scope and never touch ``_get_client``."""
     import inspect
 
     from app.repositories.projects_repository import ProjectsRepository
@@ -452,8 +456,100 @@ def test_comment_methods_are_conscious_keep_on_supabase_path():
         "delete_comment",
     ):
         src = inspect.getsource(getattr(ProjectsRepository, name))
-        assert "_get_client" in src  # still on the supabase path
-        assert "write_scope" not in src and "read_scope" not in src
+        assert "_get_client" not in src  # genuine ORM DB op
+        assert "write_scope" in src or "read_scope" in src
+
+
+async def test_comment_crud_round_trip_on_project_file_comments(
+    integration_db_url, patched_engine, cleanup_test_rows
+):
+    """create_comment / get_comments_for_file / get_comment_by_id /
+    delete_comment round-trip against project_file_comments (migration 335).
+    id/file_id/version_id come back as STR (comment-surface wire contract —
+    unlike every other bigint id/FK in this repo, which stays native int)."""
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        user_id = await _real_user_id(conn)
+        proj = await _seed_project(conn, user_id)
+    finally:
+        await conn.close()
+
+    f = await _repo().create_file({"project_id": proj["id"], "filename": "r.mp4"})
+    v1 = await _repo().create_version(
+        {"file_id": f["id"], "version_number": 1, "filename": "r.mp4"}
+    )
+
+    created = await _repo().create_comment(
+        {
+            "file_id": f["id"],
+            "version_id": v1["id"],
+            "author_id": str(user_id),
+            "content": "Looks great",
+            "timestamp_seconds": 3.5,
+        }
+    )
+    assert type(created["id"]) is str
+    assert created["file_id"] == str(f["id"])
+    assert created["version_id"] == str(v1["id"])
+    assert created["author_id"] == str(user_id)
+    assert created["content"] == "Looks great"
+    assert type(created["created_at"]) is str and "T" in created["created_at"]
+
+    listed = await _repo().get_comments_for_file(str(f["id"]))
+    assert {c["id"] for c in listed} == {created["id"]}
+
+    filtered = await _repo().get_comments_for_file(
+        str(f["id"]), version_id=str(v1["id"])
+    )
+    assert {c["id"] for c in filtered} == {created["id"]}
+
+    fetched = await _repo().get_comment_by_id(created["id"])
+    assert fetched is not None
+    assert fetched["id"] == created["id"]
+
+    assert await _repo().delete_comment(created["id"]) is True
+    assert await _repo().get_comment_by_id(created["id"]) is None
+    assert await _repo().get_comments_for_file(str(f["id"])) == []
+
+
+async def test_service_comment_round_trip_through_verify_gate(
+    integration_db_url, patched_engine, cleanup_test_rows
+):
+    """SERVICE-level round trip (add_comment → get_file_comments →
+    delete_comment) with str path-param-shaped ids, exactly as the router
+    calls it. This exercises ``_verify_file_in_project``, which used to
+    compare the row's NATIVE-int project_id against the str path param and
+    raised ``ValueError('File not found in this project')`` on EVERY call —
+    killing all 8 file-scoped endpoints end-to-end. The repo-level round
+    trip above cannot catch that; this one does."""
+    from app.services.library.projects_service import ProjectsService
+
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        user_id = await _real_user_id(conn)
+        proj = await _seed_project(conn, user_id)
+    finally:
+        await conn.close()
+
+    f = await _repo().create_file({"project_id": proj["id"], "filename": "svc.mp4"})
+
+    svc = ProjectsService()
+    # str(...) everywhere — the router passes path params as strings.
+    created = await svc.add_comment(
+        project_id=str(proj["id"]),
+        file_id=str(f["id"]),
+        author_id=str(user_id),
+        content="Through the gate",
+        timestamp_seconds=1.25,
+    )
+    assert created["file_id"] == str(f["id"])
+    assert created["author_id"] == str(user_id)
+
+    listed = await svc.get_file_comments(str(proj["id"]), str(f["id"]))
+    assert {c["id"] for c in listed} == {created["id"]}
+
+    assert await svc.delete_comment(created["id"], str(user_id)) is True
+    assert await svc.get_file_comments(str(proj["id"]), str(f["id"])) == []
 
 
 async def test_share_and_collection_commit(

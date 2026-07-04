@@ -37,6 +37,14 @@ class ProjectUpdate(BaseModel):
     is_starred: Optional[bool] = None
     announcement: Optional[str] = Field(None, max_length=100)
     color_label: Optional[str] = Field(None, max_length=20)
+    archived: Optional[bool] = Field(
+        None,
+        description=(
+            "Set true to archive, false to unarchive. Mapped to a real "
+            "archived_at timestamp/None by the service — never written "
+            "directly to the DB as a column named 'archived'."
+        ),
+    )
 
 
 class ProjectResponse(BaseModel):
@@ -52,6 +60,7 @@ class ProjectResponse(BaseModel):
     announcement: Optional[str] = None
     is_starred: bool = False
     color_label: Optional[str] = None
+    archived_at: Optional[datetime] = None
     file_count: int = 0
     created_at: datetime
     updated_at: datetime

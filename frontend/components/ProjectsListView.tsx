@@ -54,6 +54,15 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
     }
   };
 
+  const handleToggleArchive = async (project: Project) => {
+    try {
+      await updateProject(project.id, { archived: !project.archived_at });
+      onProjectsChange?.();
+    } catch (err) {
+      console.error('Failed to toggle archive:', err);
+    }
+  };
+
   const handleDeleteProject = async (project: Project) => {
     if (!window.confirm(t('projects.confirmDelete', `Delete "${project.name}"? This cannot be undone.`))) return;
     try {
@@ -347,6 +356,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
           onMembers={() => setMembersProject(contextMenu.project)}
           onColorLabel={(color) => handleColorLabel(contextMenu.project, color)}
           onToggleStar={() => handleToggleStarById(contextMenu.project)}
+          onArchive={() => handleToggleArchive(contextMenu.project)}
           onDelete={() => handleDeleteProject(contextMenu.project)}
         />
       )}

@@ -13,6 +13,7 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     DateTime,
+    Float,
     ForeignKeyConstraint,
     Index,
     Integer,
@@ -330,6 +331,7 @@ class Projects(Base):
         Text, comment="Project announcement (max 100 chars)"
     )
     color_label: Mapped[Optional[str]] = mapped_column(String(20))
+    archived_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True))
 
 
 class ProjectFiles(Base):
@@ -410,6 +412,44 @@ class ProjectFiles(Base):
     review_status: Mapped[Optional[str]] = mapped_column(String(30))
     media_id: Mapped[Optional[int]] = mapped_column(BigInteger)
     folder_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+
+
+class ProjectFileComments(Base):
+    __tablename__ = "project_file_comments"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["file_id"],
+            ["public.project_files.id"],
+            ondelete="CASCADE",
+            name="project_file_comments_file_id_fkey",
+        ),
+        ForeignKeyConstraint(
+            ["version_id"],
+            ["public.file_versions.id"],
+            ondelete="SET NULL",
+            name="project_file_comments_version_id_fkey",
+        ),
+        PrimaryKeyConstraint("id", name="project_file_comments_pkey"),
+        Index("idx_project_file_comments_file", "file_id"),
+        Index("idx_project_file_comments_version", "version_id"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")
+    )
+    file_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    version_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    author_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    timestamp_seconds: Mapped[Optional[float]] = mapped_column(Float)
+    drawing_data: Mapped[Optional[dict]] = mapped_column(JSONB)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
 
 
 class ProjectFolders(Base):

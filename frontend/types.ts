@@ -687,6 +687,7 @@ export interface Project {
   announcement: string | null;
   is_starred: boolean;
   color_label: string | null;
+  archived_at: string | null;
   file_count: number;
   display_code?: string;
   modules_enabled?: string[];
