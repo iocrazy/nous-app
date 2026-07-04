@@ -1648,23 +1648,6 @@
     "rollbackDone": "Rolled back",
     "rollbackFailed": "Rollback failed: {{message}}"
   },
-  "tokenUsage": {
-    "title": "Token Usage",
-    "lastNDays": "Last {{count}} days",
-    "refresh": "Refresh",
-    "loading": "Loading...",
-    "loadFailed": "Load usage failed",
-    "noUsage": "No usage in this window",
-    "statTokens": "Tokens",
-    "statPoints": "Points spent",
-    "statRuns": "Runs",
-    "byModel": "By model",
-    "byDay": "By day",
-    "colModel": "Model",
-    "colRuns": "Runs",
-    "colTokens": "Tokens",
-    "colCost": "Cost"
-  },
   "approvals": {
     "title": "Pending Approvals",
     "empty": "No pending approvals",
@@ -2065,7 +2048,8 @@
     "colDuration": "Duration",
     "colTrigger": "Trigger",
     "colError": "Error",
-    "detailTeamHint": "Per-call detail and daily model charts are available in the My usage view."
+    "detailTeamHint": "Per-call detail and daily model charts are available in the My usage view.",
+    "chartTitleTokens": "Tokens by agent (top 10)"
   },
   "clockDrift": {
     "warning": "Your device clock is {{amount}} {{direction}} server time — this breaks sign-in. Enable automatic date & time in system settings.",
