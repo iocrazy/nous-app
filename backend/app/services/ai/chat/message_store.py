@@ -115,5 +115,11 @@ class MessageStore(Protocol):
         completion_tokens: int,
         metadata: dict,
     ) -> Dict[str, Any]:
-        """Insert an assistant-role message. Returns the inserted row."""
+        """Insert an assistant-role message. Returns the inserted row.
+
+        ``metadata`` keys ``'agent_id'``, ``'prompt_tokens'``,
+        ``'completion_tokens'`` are reserved and rejected (raise
+        ``ValueError``) — they collide with this method's own decoration
+        fields.
+        """
         ...

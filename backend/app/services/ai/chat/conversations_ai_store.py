@@ -388,7 +388,14 @@ class ConversationsAiStore:
     def _to_legacy_message_shape(row: Dict[str, Any]) -> Dict[str, Any]:
         """Map a public.messages row (keys: id, conversation_id, seq,
         sender_type, sender_id, from_agent_id, type, body, created_at) into
-        the legacy ai_messages row shape."""
+        the legacy ai_messages row shape.
+
+        ``id`` / ``session_id`` are returned native (not stringified) —
+        deliberate, matching the session-half id-shape convention documented
+        at the top of this module: the schema layer's own
+        coercion/validators (e.g. ``_COERCE_IDS`` / Pydantic) are what
+        stringify BIGINT ids for the API response, so don't "fix" it here.
+        """
         body = row.get("body") or {}
         # asyncpg/SQLAlchemy normally hands JSONB back as a decoded dict
         # (proven for `body` in Phase 1.5's conversation_memory_service /
@@ -404,6 +411,11 @@ class ConversationsAiStore:
         return {
             "id": row["id"],
             "session_id": row.get("conversation_id"),
+            # The `sender_type` fallback (returning it unmapped) is
+            # unreachable in practice — `messages.sender_type` has a CHECK
+            # constraint limiting it to the three keys in _ROLE_MAP — but is
+            # kept as belt-and-braces so a schema/enum drift degrades to a
+            # passthrough value instead of a KeyError.
             "role": _ROLE_MAP.get(sender_type, sender_type),
             "content": body.get("text", ""),
             "agent_id": meta.get("agent_id"),
@@ -472,10 +484,25 @@ class ConversationsAiStore:
         """Insert an agent-role message. Usage + caller metadata fold into
         ``body['meta']`` (the ``messages`` table has no dedicated columns for
         them); ``get_messages`` unpacks that sidecar back into the legacy
-        agent_id/prompt_tokens/completion_tokens/metadata_json fields."""
+        agent_id/prompt_tokens/completion_tokens/metadata_json fields.
+
+        ``metadata`` may NOT reuse the reserved decoration keys
+        (``agent_id`` / ``prompt_tokens`` / ``completion_tokens``) — those
+        are the Protocol boundary's own fields, and a caller key of the same
+        name would silently overwrite them in ``meta`` below (dict unpacking
+        order) and then get stripped back out on read by
+        ``_to_legacy_message_shape``, losing the caller's real value with no
+        error. Reject it up front instead.
+        """
         from app.repositories.conversation_repository import (
             get_conversation_repository,
         )
+
+        reserved = set(_META_DECORATION_KEYS) & set((metadata or {}).keys())
+        if reserved:
+            raise ValueError(
+                f"metadata keys {sorted(reserved)} are reserved for message decoration"
+            )
 
         agent_id_str = str(agent_id) if agent_id is not None else None
         meta = {

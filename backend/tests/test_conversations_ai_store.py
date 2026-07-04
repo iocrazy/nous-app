@@ -621,6 +621,39 @@ async def test_append_assistant_message_handles_none_agent_id() -> None:
 
 
 @pytest.mark.asyncio
+async def test_append_assistant_message_rejects_reserved_metadata_keys() -> None:
+    """A caller-supplied metadata key that collides with a decoration field
+    (agent_id/prompt_tokens/completion_tokens) must raise ValueError instead
+    of silently overwriting the decoration value (see review finding on
+    dict-unpack order) — send_message must never even be called.
+
+    The happy-path round trip for non-reserved keys (run_id/tool_calls/
+    awaiting_approval) is covered by
+    test_append_assistant_message_metadata_round_trip_via_return_value above.
+    """
+    store = _store()
+
+    async def fake_send_message(**kwargs: Any) -> dict:
+        raise AssertionError(
+            "send_message must not be called when metadata is rejected"
+        )
+
+    with patch(
+        "app.repositories.conversation_repository.get_conversation_repository",
+        return_value=type("R", (), {"send_message": staticmethod(fake_send_message)})(),
+    ):
+        with pytest.raises(ValueError, match="reserved"):
+            await store.append_assistant_message(
+                session_id=_CONV_ID,
+                agent_id=_AGENT_ID,
+                content="hi",
+                prompt_tokens=1,
+                completion_tokens=1,
+                metadata={"agent_id": "evil"},
+            )
+
+
+@pytest.mark.asyncio
 async def test_get_messages_sql_orders_by_seq_asc_and_excludes_deleted() -> None:
     captured: dict = {}
 
