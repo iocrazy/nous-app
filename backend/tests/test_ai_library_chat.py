@@ -603,3 +603,115 @@ async def test_chat_chunk_callback_failure_does_not_abort_turn() -> None:
     asst_inserts = [m for m in store.appended if m.get("role") == "assistant"]
     assert asst_inserts[0]["content"] == "part1part2"
     assert out["assistant_message"]["content"] == "part1part2"
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_user_cancel_degrades_gracefully() -> None:
+    """RunAborted mid-stream (user cancel) must NOT propagate as an
+    unhandled exception (pre-fix behavior: 500). It mirrors run_turn's
+    buffered-cancel contract: partial content + any tool trace gathered
+    so far are kept, result carries cancelled=True. (#984 review
+    follow-up — the streaming path had no RunAborted handler at all.)"""
+    from app.agent_framework.abort_controller import RunAborted
+    from app.services.ai.adapters.base import StreamChunk
+    from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
+
+    user_id = uuid4()
+    session_id = uuid4()
+    agent_id = uuid4()
+    session_row = {
+        "id": str(session_id),
+        "user_id": str(user_id),
+        "agent_slug": "script_ai",
+        "agent_id": str(agent_id),
+        "total_tokens": 0,
+        "message_count": 0,
+        "team_id": None,
+        "project_id": None,
+    }
+    store = _FakeStore(session_row)
+
+    composed = MagicMock()
+    composed.agent_id = agent_id
+    composed.agent_slug = "script_ai"
+    composed.model = "qwen-max"
+
+    composer = MagicMock()
+    composer.compose = AsyncMock(return_value=composed)
+
+    async def _fake_stream(*_a, **_kw):
+        yield StreamChunk(delta_text="partial ")
+        yield StreamChunk(delta_text="answer")
+        raise RunAborted("user cancel mid-stream")
+
+    runner = MagicMock()
+    runner.stream_turn = MagicMock(side_effect=_fake_stream)
+    runner.run_turn = AsyncMock(return_value={"content": "unused"})
+
+    recorder = MagicMock()
+    recorder.run_id = uuid4()
+    recorder.prompt_tokens = 5
+    recorder.completion_tokens = 3
+    recorder.set_summaries = MagicMock()
+    recorder.record_usage = MagicMock()
+
+    fake_agent_record = {
+        "id": str(agent_id),
+        "slug": "script_ai",
+        "model": "qwen-max",
+        "budget_per_run_cents": None,
+        "fallback_models": [],
+    }
+    fake_stack = MagicMock()
+    fake_stack.runner = runner
+    fake_stack.graph_facts = []
+    fake_stack.user_context = None
+    fake_stack.primary_model = "qwen-max"
+    fake_stack.fallback_chain_active = False
+    fake_agent_repo_instance = MagicMock()
+    fake_agent_repo_instance.get_by_slug = AsyncMock(return_value=fake_agent_record)
+
+    async def _capture(_text):
+        pass
+
+    with (
+        patch(
+            "app.services.ai.chat.ai_library_chat_service.get_agent_repository",
+            return_value=fake_agent_repo_instance,
+        ),
+        patch(
+            "app.services.ai.chat.ai_library_chat_service.build_agent_runner_stack",
+            AsyncMock(return_value=fake_stack),
+        ),
+        patch(
+            "app.services.ai.chat.ai_library_chat_service.PromptComposer",
+            return_value=composer,
+        ),
+        patch(
+            "app.services.ai.chat.ai_library_chat_service.AgentRunner",
+            return_value=runner,
+        ),
+        patch(
+            "app.services.ai.chat.ai_library_chat_service.get_adapter",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "app.services.ai.chat.ai_library_chat_service.SkillToolService",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "app.services.ai.chat.ai_library_chat_service.RunRecorder",
+            side_effect=lambda **kw: _RunRecorderCM(recorder),
+        ),
+    ):
+        svc = AILibraryChatService(store=store)
+        out = await svc.chat(
+            session_id,
+            user_id=user_id,
+            content="hi",
+            chunk_callback=_capture,
+        )
+
+    assert out["cancelled"] is True
+    # Partial content persisted as the assistant turn (not lost)
+    assert out["assistant_message"] is not None

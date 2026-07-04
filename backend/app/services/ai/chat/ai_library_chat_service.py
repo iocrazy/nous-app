@@ -27,6 +27,7 @@ from uuid import UUID
 from fastapi import HTTPException, status
 from loguru import logger
 
+from app.agent_framework.abort_controller import RunAborted
 from app.core.config import settings
 from app.repositories.agent_repository import get_agent_repository
 from app.repositories.skill_repository import get_skill_repository
@@ -825,35 +826,48 @@ class AILibraryChatService:
                         # Streaming path: accumulate chunks + forward to caller
                         accumulated: list[str] = []
                         tool_calls_trace = []
-                        async for chunk in runner.stream_turn(
-                            composed,
-                            user_messages=user_messages,
-                            recorder=recorder,
-                            auto_recorder=False,  # we already own the context
-                        ):
-                            if chunk.delta_text:
-                                accumulated.append(chunk.delta_text)
-                                try:
-                                    await chunk_callback(chunk.delta_text)
-                                except Exception as cb_exc:
-                                    # Callback failure must not kill the turn
-                                    logger.warning(
-                                        f"[chat] chunk_callback raised: {cb_exc}"
-                                    )
-                            if chunk.tool_call_delta:
-                                # Surface tool-call-start hints to UI; the
-                                # synthetic "→ Running X..." text comes
-                                # through delta_text on the next chunk
-                                pass
-                            # Bugfix: stream_turn's terminal chunk(s) carry
-                            # the executed-tool-call trace (see StreamChunk
-                            # in adapters/base.py). Without this the
-                            # streaming path always returned tool_calls=[]
-                            # — FinishIssue outcomes and any other tool
-                            # results were invisible to callers (issue
-                            # lifecycle routing, sub-task cards).
-                            if chunk.tool_call_trace is not None:
-                                tool_calls_trace = chunk.tool_call_trace
+                        stream_cancelled = False
+                        try:
+                            async for chunk in runner.stream_turn(
+                                composed,
+                                user_messages=user_messages,
+                                recorder=recorder,
+                                auto_recorder=False,  # we already own the context
+                            ):
+                                if chunk.delta_text:
+                                    accumulated.append(chunk.delta_text)
+                                    try:
+                                        await chunk_callback(chunk.delta_text)
+                                    except Exception as cb_exc:
+                                        # Callback failure must not kill the turn
+                                        logger.warning(
+                                            f"[chat] chunk_callback raised: {cb_exc}"
+                                        )
+                                if chunk.tool_call_delta:
+                                    # Surface tool-call-start hints to UI; the
+                                    # synthetic "→ Running X..." text comes
+                                    # through delta_text on the next chunk
+                                    pass
+                                # Bugfix: stream_turn's terminal chunk(s) carry
+                                # the executed-tool-call trace (see StreamChunk
+                                # in adapters/base.py). Without this the
+                                # streaming path always returned tool_calls=[]
+                                # — FinishIssue outcomes and any other tool
+                                # results were invisible to callers (issue
+                                # lifecycle routing, sub-task cards).
+                                if chunk.tool_call_trace is not None:
+                                    tool_calls_trace = chunk.tool_call_trace
+                        except RunAborted as abort_exc:
+                            # User cancel mid-stream. The buffered path
+                            # (run_turn) returns {"cancelled": True} instead
+                            # of raising — mirror that so a cancel degrades to
+                            # a persisted partial turn, not an unhandled 500.
+                            # Partial text + any trace gathered so far are
+                            # kept (tools that ran before the cancel DID run).
+                            logger.info(
+                                f"[chat] stream turn aborted by user: {abort_exc}"
+                            )
+                            stream_cancelled = True
                         assistant_content = "".join(accumulated)
                 finally:
                     # Clear per-turn @-ref state so a subsequent turn on the
@@ -886,12 +900,15 @@ class AILibraryChatService:
                     pass
                 recorder.set_summaries(output_summary=assistant_content)
                 # In the streaming path, ``result`` was never built; backfill
-                # what downstream code references.
+                # what downstream code references. Same shape as run_turn's
+                # cancel return ({"cancelled": True}) when the user aborted.
                 if chunk_callback is not None:
                     result = {
                         "content": assistant_content,
                         "tool_calls": tool_calls_trace,
                     }
+                    if stream_cancelled:
+                        result["cancelled"] = True
         except AgentPausedError as err:
             logger.warning(f"[ChatService] agent paused: {err}")
             # Mark the user message with a hint so the UI can show "the
@@ -1114,6 +1131,10 @@ class AILibraryChatService:
             # row id the frontend can subscribe / poll for resolution.
             # None on the common case (turn ran to completion).
             "approval_request_id": approval_row_id,
+            # True when the user cancelled mid-turn (both paths: run_turn's
+            # buffered cancel return and the streaming RunAborted handler).
+            # Partial content, if any, is still persisted above.
+            "cancelled": bool(result.get("cancelled")),
         }
 
     async def _maybe_compact(
