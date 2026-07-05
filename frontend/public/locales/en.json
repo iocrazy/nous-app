@@ -1613,7 +1613,9 @@
       "addAgentError": "Failed to add agent",
       "removeAgentError": "Failed to remove agent",
       "leaveError": "Failed to leave group",
-      "dissolveError": "Failed to dissolve group"
+      "dissolveError": "Failed to dissolve group",
+      "allMembersAdded": "All team members are already in this group. Invite people to the team first (Team Settings → Members), then add them here.",
+      "noAgentsHint": "No chat-enabled agents yet. Enable chat permission for an agent in Settings → AI Library, then add it here."
     },
     "typing": {
       "one": "{{name}} is typing…",

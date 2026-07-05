@@ -1613,7 +1613,9 @@
       "addAgentError": "添加智能体失败",
       "removeAgentError": "移除智能体失败",
       "leaveError": "退出群组失败",
-      "dissolveError": "解散群组失败"
+      "dissolveError": "解散群组失败",
+      "allMembersAdded": "团队成员均已在本群。先在 团队设置 → 成员 邀请新成员加入团队，再回到这里添加。",
+      "noAgentsHint": "暂无已启用聊天权限的智能体。先在 设置 → AI 库 为智能体开启聊天权限，再回到这里添加。"
     },
     "typing": {
       "one": "{{name}} 正在输入…",

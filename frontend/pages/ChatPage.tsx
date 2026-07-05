@@ -77,23 +77,33 @@ export function ChatPage(): React.ReactElement {
       : null;
   const settingsAvailable = settingsChannel !== null;
 
+  // Open/close set BOTH flags in one handler (batched into one render).
+  // The previous forward-sync effect (`setInfoVisible(showSettings && …)`)
+  // fought the reopen mirror below: closing only flipped showSettings, so
+  // for one render infoVisible was still true and the mirror flipped
+  // showSettings straight back — the X button could never close the panel.
+  const openSettings = useCallback(() => {
+    setShowSettings(true);
+    setInfoVisible(true);
+  }, [setInfoVisible]);
+  const closeSettings = useCallback(() => {
+    setShowSettings(false);
+    setInfoVisible(false);
+  }, [setInfoVisible]);
+
   useEffect(() => {
     setInfoAvailable(settingsAvailable);
-    if (!settingsAvailable) setShowSettings(false);
+    if (!settingsAvailable) closeSettings();
     return () => {
       // Leaving the page: release the slot so other pages start clean.
       setInfoAvailable(false);
       setInfoVisible(false);
     };
-  }, [settingsAvailable, setInfoAvailable, setInfoVisible]);
+  }, [settingsAvailable, setInfoAvailable, setInfoVisible, closeSettings]);
 
-  // showSettings → infoVisible is the forward direction; the reopen handle
-  // flips infoVisible→true, which we mirror back (loop-safe: the collapse
-  // direction only ever flows showSettings→false→infoVisible, mirroring the
-  // ResourcesShell asymmetry).
-  useEffect(() => {
-    setInfoVisible(showSettings && settingsAvailable);
-  }, [showSettings, settingsAvailable, setInfoVisible]);
+  // Reopen mirror: the shell's `‹ Info` handle only flips infoVisible → true;
+  // reflect that into showSettings. Close never goes through this path (both
+  // flags drop together in closeSettings), so it cannot loop.
   useEffect(() => {
     if (infoVisible && settingsAvailable && !showSettings) setShowSettings(true);
   }, [infoVisible, settingsAvailable, showSettings]);
@@ -698,7 +708,7 @@ export function ChatPage(): React.ReactElement {
                 {activeChannel && activeChannel.type !== 'dm' && (
                   <button
                     type="button"
-                    onClick={() => setShowSettings(true)}
+                    onClick={openSettings}
                     title={t('chat.groupSettings.title')}
                     className="w-[26px] h-[26px] rounded-[7px] grid place-items-center text-content-3 hover:text-content hover:bg-white/[.06] transition-colors"
                   >
@@ -777,7 +787,7 @@ export function ChatPage(): React.ReactElement {
           channel: settingsChannel,
           teamId: selectedTeamId,
           currentUserId,
-          onClose: () => setShowSettings(false),
+          onClose: closeSettings,
           // Merge only the edited fields — the PATCH response carries
           // unread:0 / mentions:0 defaults that would clobber live badges.
           onChannelUpdated: (ch: Channel) =>
@@ -787,7 +797,7 @@ export function ChatPage(): React.ReactElement {
               ),
             ),
           onLeftOrDissolved: () => {
-            setShowSettings(false);
+            closeSettings();
             setChannels((prev) => prev.filter((c) => c.id !== settingsChannel.id));
             setActiveId(null);
           },

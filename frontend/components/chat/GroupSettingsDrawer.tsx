@@ -457,8 +457,10 @@ export default function GroupSettingsPanel({
                   })}
                 </div>
 
-                {/* Add members */}
-                {addableMembers.length > 0 && (
+                {/* Add members — when nobody is addable, say WHY instead of
+                    rendering nothing (a 1-person team otherwise sees no add
+                    affordance at all and reads the feature as missing). */}
+                {addableMembers.length > 0 ? (
                   <div className="mt-2 flex flex-wrap gap-[6px]">
                     {addableMembers.map((m) => {
                       const label = m.name || m.email || m.user_id;
@@ -476,6 +478,10 @@ export default function GroupSettingsPanel({
                       );
                     })}
                   </div>
+                ) : (
+                  <p className="mt-2 text-[12px] text-content-3 leading-[1.5]">
+                    {t('chat.groupSettings.allMembersAdded')}
+                  </p>
                 )}
               </section>
 
@@ -485,8 +491,8 @@ export default function GroupSettingsPanel({
                   {t('chat.groupSettings.agents', { count: agentMembers.length })}
                 </label>
                 {agentMembers.length === 0 && addableAgents.length === 0 ? (
-                  <p className="text-[12px] text-content-3">
-                    {t('chat.createGroup.noAgents')}
+                  <p className="text-[12px] text-content-3 leading-[1.5]">
+                    {t('chat.groupSettings.noAgentsHint')}
                   </p>
                 ) : (
                   <>
