@@ -16,7 +16,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Plus, X } from 'lucide-react';
+import { Plus, Search, X } from 'lucide-react';
 import type { Editor } from '@tiptap/core';
 
 import { aiLibraryService } from '../services/aiLibraryService';
@@ -133,6 +133,13 @@ export function AIChatPanel({
   const [agents, setAgents] = useState<AILibraryAgent[]>([]);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  // Session-history search (slide-over only). Client-side title filter —
+  // the list is capped at 50 sessions server-side. Reset when the overlay
+  // closes so it reopens fresh.
+  const [sessionSearch, setSessionSearch] = useState('');
+  useEffect(() => {
+    if (!sessionsOverlayOpen) setSessionSearch('');
+  }, [sessionsOverlayOpen]);
   const [messages, setMessages] = useState<AIChatMessage[]>([]);
   const [selectedAgentSlug, setSelectedAgentSlug] = useState<string | null>(null);
 
@@ -568,9 +575,39 @@ export function AIChatPanel({
                 Chat History
               </span>
             </div>
+            <div className="border-b border-ink-800 px-2 py-1.5">
+              <div className="flex items-center gap-1.5 rounded-md bg-ink-800 px-2 py-1">
+                <Search size={13} className="flex-shrink-0 text-ink-500" />
+                <input
+                  type="text"
+                  value={sessionSearch}
+                  onChange={(e) => setSessionSearch(e.target.value)}
+                  placeholder="Search sessions..."
+                  className="w-full bg-transparent text-xs text-ink-200 placeholder-ink-500 focus:outline-none"
+                />
+                {sessionSearch && (
+                  <button
+                    type="button"
+                    aria-label="Clear search"
+                    onClick={() => setSessionSearch('')}
+                    className="flex-shrink-0 text-ink-500 hover:text-ink-300"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+            </div>
             <div className="min-h-0 flex-1 overflow-y-auto">
               <SessionList
-                sessions={sessionItems}
+                sessions={
+                  sessionSearch.trim()
+                    ? sessionItems.filter((it) =>
+                        (it.title || 'New chat')
+                          .toLowerCase()
+                          .includes(sessionSearch.trim().toLowerCase()),
+                      )
+                    : sessionItems
+                }
                 activeSessionId={activeSessionId}
                 onSelect={(id) => {
                   handleSelectSession(id);
