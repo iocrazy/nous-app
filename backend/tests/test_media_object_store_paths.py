@@ -123,11 +123,10 @@ async def test_video_never_routes_to_object_store(tmp_path, monkeypatch):
     assert "sb://" not in inserted["file_path"]
 
 
-# ── reader: agent vision → signed URL for object-store images ────────────────
+# ── reader: agent vision for object-store images ─────────────────────────────
 
 
-@pytest.mark.asyncio
-async def test_vision_uses_signed_url_for_object_store():
+def _vision_fixture():
     import app.services.chat.conversation_agent_turn as turn
 
     recent = [
@@ -144,8 +143,20 @@ async def test_vision_uses_signed_url_for_object_store():
         "file_size_bytes": 100,
         "conversation_id": 9,
     }
+    return turn, recent, history, row
+
+
+async def test_vision_object_store_defaults_to_base64(monkeypatch):
+    """No public base configured → object-store images inline as base64.
+
+    A signed URL here would be built on the LAN SUPABASE_URL, which a CLOUD
+    provider cannot fetch — that silently broke vision post-go-live. Base64
+    always works, so it is the default.
+    """
+    turn, recent, history, row = _vision_fixture()
+    monkeypatch.setattr(turn.settings, "STORAGE_SIGNED_URL_PUBLIC_BASE", "")
     store = AsyncMock()
-    store.signed_url.return_value = "https://storage/signed?token=xyz"
+    store.get_bytes.return_value = b"PNGBYTES"
     with (
         patch.object(turn, "model_supports_vision", new=AsyncMock(return_value=True)),
         patch.object(turn.db_engine, "fetch_one", new=AsyncMock(return_value=row)),
@@ -159,11 +170,44 @@ async def test_vision_uses_signed_url_for_object_store():
             conversation_id=9,
         )
     assert n == 1
-    block = history[0]["content"][1]
-    assert block["image_url"]["url"] == "https://storage/signed?token=xyz"
-    # signed URL, NOT base64 (the token-tax win)
-    assert not block["image_url"]["url"].startswith("data:")
-    store.signed_url.assert_awaited_once()
+    url = history[0]["content"][1]["image_url"]["url"]
+    assert url.startswith("data:image/png;base64,")
+    store.get_bytes.assert_awaited_once()
+    store.signed_url.assert_not_awaited()
+
+
+async def test_vision_object_store_signed_url_when_public_base_set(monkeypatch):
+    """Public base configured → signed URL with the LAN host swapped out."""
+    turn, recent, history, row = _vision_fixture()
+    monkeypatch.setattr(
+        turn.settings,
+        "STORAGE_SIGNED_URL_PUBLIC_BASE",
+        "https://sb-mediahub.example.com:88",
+    )
+    store = AsyncMock()
+    store.signed_url.return_value = (
+        "http://192.168.50.9:9082/storage/v1/object/sign/chat-media/k?token=xyz"
+    )
+    with (
+        patch.object(turn, "model_supports_vision", new=AsyncMock(return_value=True)),
+        patch.object(turn.db_engine, "fetch_one", new=AsyncMock(return_value=row)),
+        patch.object(turn, "ObjectStore", return_value=store),
+    ):
+        n = await turn._inject_image_blocks(
+            history,
+            recent,
+            model="doubao-seed-2-0",
+            provider=None,
+            conversation_id=9,
+        )
+    assert n == 1
+    url = history[0]["content"][1]["image_url"]["url"]
+    # LAN origin swapped for the public one; path + token preserved.
+    assert url == (
+        "https://sb-mediahub.example.com:88"
+        "/storage/v1/object/sign/chat-media/k?token=xyz"
+    )
+    store.get_bytes.assert_not_awaited()
 
 
 # ── AI-generation write path → object store (Phase 1c) ───────────────────────
