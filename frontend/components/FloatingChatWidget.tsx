@@ -18,7 +18,7 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { GripHorizontal, MessageSquare, Minus } from 'lucide-react';
+import { GripHorizontal, History, MessageSquare, Minus } from 'lucide-react';
 
 import { AIChatPanel } from './AIChatPanel';
 import {
@@ -175,20 +175,15 @@ export function FloatingChatWidget(): React.ReactElement {
       style={{ right, bottom, width, height }}
       className="fixed z-40 flex flex-col overflow-hidden rounded-xl border border-ink-700 bg-ink-900 shadow-2xl"
     >
-      {/* Title bar — drag handle + module chip + minimize */}
+      {/* Title bar — the WHOLE bar drags (grip icon is a visual affordance,
+          not a button). Session history moved to its own history icon so the
+          grip means "drag" as users expect. */}
       <div
         onPointerDown={onDragStart}
-        className="flex h-8 flex-shrink-0 cursor-grab select-none items-center gap-2 border-b border-ink-800 bg-ink-900/95 px-2 active:cursor-grabbing"
+        className="flex h-9 flex-shrink-0 cursor-grab select-none items-center gap-1.5 border-b border-ink-800 bg-ink-800/70 px-2 active:cursor-grabbing"
       >
-        <button
-          type="button"
-          onClick={() => setSessionsOpen((v) => !v)}
-          title="Chat History"
-          aria-label="Toggle session history"
-          className="rounded p-1 text-ink-400 hover:bg-ink-800 hover:text-ink-200"
-        >
-          <GripHorizontal size={14} />
-        </button>
+        <GripHorizontal size={15} className="text-ink-500" />
+        <span className="text-xs font-medium text-ink-300">AI Chat</span>
         {pageContext?.moduleLabel && (
           <span className="rounded bg-indigo-500/10 px-1.5 py-0.5 text-[11px] font-medium text-indigo-400">
             {pageContext.moduleLabel}
@@ -197,10 +192,19 @@ export function FloatingChatWidget(): React.ReactElement {
         <div className="flex-1" />
         <button
           type="button"
+          onClick={() => setSessionsOpen((v) => !v)}
+          title="Chat History"
+          aria-label="Toggle session history"
+          className="rounded p-1 text-ink-400 hover:bg-ink-700 hover:text-ink-200"
+        >
+          <History size={14} />
+        </button>
+        <button
+          type="button"
           onClick={minimize}
           title="Minimize (Esc)"
           aria-label="Minimize AI Chat"
-          className="rounded p-1 text-ink-400 hover:bg-ink-800 hover:text-ink-200"
+          className="rounded p-1 text-ink-400 hover:bg-ink-700 hover:text-ink-200"
         >
           <Minus size={14} />
         </button>
@@ -221,19 +225,30 @@ export function FloatingChatWidget(): React.ReactElement {
         />
       </div>
 
-      {/* Resize handles — top/left edges + top-left corner */}
+      {/* Resize handles — top/left edges + a VISIBLE top-left corner grip.
+          The window is anchored bottom-right, so it grows up/left. Edges are
+          8px hit areas (grabbable); the corner shows a diagonal affordance. */}
       <div
         onPointerDown={onResizeStart('n')}
-        className="absolute left-3 right-3 top-0 h-1.5 cursor-ns-resize"
+        className="absolute left-4 right-4 top-0 z-30 h-2 cursor-ns-resize"
       />
       <div
         onPointerDown={onResizeStart('w')}
-        className="absolute bottom-3 left-0 top-3 w-1.5 cursor-ew-resize"
+        className="absolute bottom-4 left-0 top-4 z-30 w-2 cursor-ew-resize"
       />
       <div
         onPointerDown={onResizeStart('nw')}
-        className="absolute left-0 top-0 h-3 w-3 cursor-nwse-resize"
-      />
+        title="Resize"
+        className="absolute left-0 top-0 z-40 flex h-4 w-4 cursor-nwse-resize items-start justify-start"
+      >
+        <svg width="10" height="10" viewBox="0 0 10 10" className="text-ink-500">
+          <path
+            d="M0 3 L3 0 M0 6 L6 0 M0 9 L9 0"
+            stroke="currentColor"
+            strokeWidth="1"
+          />
+        </svg>
+      </div>
     </div>
   );
 }
