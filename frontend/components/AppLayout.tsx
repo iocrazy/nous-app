@@ -24,6 +24,7 @@ import { TaskManagerProvider } from '../contexts/TaskManagerContext';
 import { UserProfileModal } from './UserProfileModal';
 import { MobileProfilePage } from './MobileProfilePage';
 import { MobileTasksPage } from './MobileTasksPage';
+import { FloatingChatWidget } from './FloatingChatWidget';
 import { MobileTabBar, type MobileTab } from './MobileTabBar';
 import { useTabBarCollapse } from '../hooks/useTabBarCollapse';
 import { useIsDesktop } from '../hooks/useIsDesktop';
@@ -458,6 +459,12 @@ function AppLayoutInner() {
         }}
         onLogout={handleAuthLogout}
       />
+
+      {/* Global floating AI chat — desktop only (mobile keeps its tab bar
+          clear; the fullscreen editor routes host their own instance). */}
+      <div className="hidden md:block">
+        <FloatingChatWidget />
+      </div>
 
       {/* Mobile Tasks Page — Task Center overlay (keeps the bottom tab bar visible) */}
       <MobileTasksPage

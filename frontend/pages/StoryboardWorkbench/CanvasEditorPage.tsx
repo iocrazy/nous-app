@@ -9,7 +9,8 @@ import { useCanvasStore } from '../../stores/canvasStore';
 import { useStoryboardStore } from '../../stores/storyboardStore';
 import { fetchProject } from '../../services/storyboardService';
 import { CharacterPanel } from '../../features/storyboard/ui/CharacterPanel';
-import { AIChatDrawer } from '../../components/AIChatDrawer';
+import { FloatingChatWidget } from '../../components/FloatingChatWidget';
+import { useGlobalChatStore } from '../../stores/globalChatStore';
 import { FrameTimeline } from '../../features/storyboard/ui/FrameTimeline';
 import { ScriptImportDialog } from '../../features/storyboard/ui/ScriptImportDialog';
 import { ExportDialog } from '../../features/storyboard/ui/ExportDialog';
@@ -105,6 +106,18 @@ export function CanvasEditorPage() {
   const toggleSidePanel = useCallback((panel: SidePanel) => {
     setSidePanel((prev) => (prev === panel ? null : panel));
   }, []);
+
+  // Register this page's chat context with the global floating chat.
+  useEffect(() => {
+    if (!projectId) return;
+    useGlobalChatStore.getState().setPageContext({
+      projectId,
+      contextType: 'storyboard',
+      contextId: projectId,
+      moduleLabel: 'Storyboard',
+    });
+    return () => useGlobalChatStore.getState().setPageContext(null);
+  }, [projectId]);
 
   // ─── Load project on mount ──────────────────────────────────────────────
 
@@ -213,7 +226,7 @@ export function CanvasEditorPage() {
                   onClick={() => setShowTimeline((v) => !v)}
                 />
                 {/* AI Chat moved to a bottom-right floating button (see
-                    AIChatDrawer below). The legacy left-toolbar entry
+                    FloatingChatWidget below). The legacy left-toolbar entry
                     was removed when chat migrated from
                     storyboardService.chatWithAI to the AI Library /
                     AgentRunner pipeline. */}
@@ -256,15 +269,10 @@ export function CanvasEditorPage() {
                 isOpen={showExport}
                 onClose={() => setShowExport(false)}
               />
-              {/* AI Chat Drawer — bottom-right FAB + slide-in panel.
-                  Now goes through the AI Library / AgentRunner pipeline,
-                  so users see Skill / Delegate sub-task cards inline
-                  and every turn lands in agent_runs telemetry. */}
-              <AIChatDrawer
-                projectId={projectId}
-                contextType="storyboard"
-                contextId={projectId}
-              />
+              {/* Global floating AI chat — fullscreen route hosts its own
+                  widget instance (outside AppLayout). Context registered
+                  in the effect near the top of the component. */}
+              <FloatingChatWidget />
             </>
           )}
         </>
