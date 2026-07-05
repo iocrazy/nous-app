@@ -1,5 +1,6 @@
 """Script AI Router — endpoints for AI-powered outline, expansion, and branching."""
 
+import uuid as _uuid
 from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException
@@ -37,10 +38,12 @@ async def generate_outline(
     try:
         await _verify_script_access(body.script_id, auth.user_id)
         mgr = get_task_manager()
+        wf_id = str(_uuid.uuid4())
         task_id = await mgr.create(
             user_id=auth.user_id,
             task_type="script_outline_gen",
             title=f"Generate outline ({body.chapter_count} chapters)",
+            dbos_workflow_id=wf_id,
         )
 
         # PR-D7 phase 3: routes through DBOS only (legacy script_tasks
@@ -60,6 +63,7 @@ async def generate_outline(
                 "chapter_count": body.chapter_count,
                 "style_guide": body.style_guide,
             },
+            workflow_id=wf_id,
         )
 
         return {"success": True, "task_id": task_id}
@@ -74,10 +78,12 @@ async def expand_chapter(auth: AuthDep, body: ExpandChapterRequest) -> Dict[str,
     try:
         await _verify_script_access(body.script_id, auth.user_id)
         mgr = get_task_manager()
+        wf_id = str(_uuid.uuid4())
         task_id = await mgr.create(
             user_id=auth.user_id,
             task_type="script_expand_chapter",
             title=f"Expand chapter: {body.title}",
+            dbos_workflow_id=wf_id,
         )
 
         from app.services.infra.dbos_orchestrator import start_workflow_routed
@@ -94,6 +100,7 @@ async def expand_chapter(auth: AuthDep, body: ExpandChapterRequest) -> Dict[str,
                 "context": body.context,
                 "user_id": auth.user_id,
             },
+            workflow_id=wf_id,
         )
 
         return {"success": True, "task_id": task_id}
@@ -110,10 +117,12 @@ async def create_branches(auth: AuthDep, body: CreateBranchesRequest) -> Dict[st
     try:
         await _verify_script_access(body.script_id, auth.user_id)
         mgr = get_task_manager()
+        wf_id = str(_uuid.uuid4())
         task_id = await mgr.create(
             user_id=auth.user_id,
             task_type="script_create_branches",
             title=f"Create {body.branch_count} branches: {body.title}",
+            dbos_workflow_id=wf_id,
         )
 
         from app.services.infra.dbos_orchestrator import start_workflow_routed
@@ -132,6 +141,7 @@ async def create_branches(auth: AuthDep, body: CreateBranchesRequest) -> Dict[st
                 "context": body.context,
                 "user_id": auth.user_id,
             },
+            workflow_id=wf_id,
         )
 
         return {"success": True, "task_id": task_id}
@@ -155,10 +165,12 @@ async def convert_to_storyboard(
     try:
         await _verify_script_access(body.script_id, auth.user_id)
         mgr = get_task_manager()
+        wf_id = str(_uuid.uuid4())
         task_id = await mgr.create(
             user_id=auth.user_id,
             task_type="script_to_storyboard",
             title="Convert chapter to storyboard",
+            dbos_workflow_id=wf_id,
         )
 
         from app.services.infra.dbos_orchestrator import start_workflow_routed
@@ -173,6 +185,7 @@ async def convert_to_storyboard(
                 "storyboard_project_id": body.storyboard_project_id,
                 "user_id": auth.user_id,
             },
+            workflow_id=wf_id,
         )
 
         return {"success": True, "task_id": task_id}
