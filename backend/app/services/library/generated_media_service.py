@@ -82,6 +82,23 @@ async def _download_to(
         raise
 
 
+async def _download_to_bytes(source_url: str, *, max_bytes: int) -> bytes:
+    """Stream source_url into memory, byte-capped. For small (image) blobs
+    destined for the object store — videos keep the streamed-to-disk path."""
+    chunks: list[bytes] = []
+    async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+        async with client.stream("GET", source_url) as resp:
+            resp.raise_for_status()
+            async for chunk in cap_aiter(resp.aiter_bytes(), max_bytes):
+                chunks.append(chunk)
+    return b"".join(chunks)
+
+
+# Generated images destined for the object store are small; cap the in-memory
+# buffer well below the 512 MiB filesystem ceiling. Over-cap → filesystem.
+_OBJECT_STORE_IMAGE_MAX_BYTES = 16 * 1024 * 1024
+
+
 @dataclass
 class GenerationOrigin:
     kind: str  # 'agent_run' | 'canvas_run' | 'chat_upload'
@@ -107,32 +124,66 @@ async def register_generated_media(
     mime: str,
     origin: GenerationOrigin,
 ) -> dict:
-    """Download a generated media URL into Tier-1 and insert one row. Returns it."""
+    """Download a generated media URL into Tier-1 and insert one row. Returns it.
+
+    Object-store path (flag on + image + within the in-memory cap): the blob is
+    buffered and content-addressed into the chat-media bucket. Any failure —
+    storage error OR over-cap — falls back to the streamed-to-disk filesystem
+    path, so a generation never fails to persist. Videos always stream to disk.
+    """
     kind = media_kind_from_mime(mime)
-    gen_uuid = _uuid.uuid4().hex
-    rel = (
-        f"teams/{scope_id}/generations/{_date_bucket()}/"
-        f"{gen_uuid}/media{ext_for(mime, kind)}"
-    )
-    dest = f"{settings.DOWNLOAD_PATH}/{rel}"
-    size = await _download_to(dest, source_url)
+    file_path: Optional[str] = None
+    size: int = 0
+    content_sha256: Optional[str] = None
+
+    if settings.FEATURE_CHAT_MEDIA_OBJECT_STORE and kind == "image":
+        try:
+            data = await _download_to_bytes(
+                source_url, max_bytes=_OBJECT_STORE_IMAGE_MAX_BYTES
+            )
+            sha, key = content_key(scope_id=scope_id, data=data, mime=mime)
+            store = chat_media_store()
+            if not await store.exists(key):
+                await store.put_bytes(key, data, mime)
+            file_path = to_file_path(CHAT_MEDIA_BUCKET, key)
+            size = len(data)
+            content_sha256 = sha
+        except Exception as exc:
+            logger.warning(
+                f"[register_generated_media] object-store write failed, "
+                f"falling back to filesystem: scope={scope_id} error={exc!r}"
+            )
+            file_path = None  # fall through
+
+    if file_path is None:
+        gen_uuid = _uuid.uuid4().hex
+        rel = (
+            f"teams/{scope_id}/generations/{_date_bucket()}/"
+            f"{gen_uuid}/media{ext_for(mime, kind)}"
+        )
+        dest = f"{settings.DOWNLOAD_PATH}/{rel}"
+        size = await _download_to(dest, source_url)
+        file_path = rel
+
     row = await db_engine.execute_returning_one(
         "INSERT INTO public.generated_media "
         "(scope_id, creator_id, media_kind, mime, file_path, file_size_bytes, "
         " origin_kind, origin_run_id, agent_id, canvas_id, node_id, prompt, model, "
-        " provider, params, cost_cents, parent_resource_id, derivation_kind, conversation_id) "
+        " provider, params, cost_cents, parent_resource_id, derivation_kind, "
+        " conversation_id, content_sha256) "
         "VALUES (:scope_id, :creator_id, :media_kind, :mime, :file_path, :file_size_bytes, "
         " :origin_kind, :origin_run_id, :agent_id, :canvas_id, :node_id, :prompt, :model, "
         " :provider, CAST(:params AS jsonb), :cost_cents, :parent_resource_id, :derivation_kind,"
-        " :conversation_id) "
+        " :conversation_id, :content_sha256) "
         "RETURNING *",
         {
             "scope_id": scope_id,
             "creator_id": user_id,
             "media_kind": kind,
             "mime": mime,
-            "file_path": rel,
+            "file_path": file_path,
             "file_size_bytes": size,
+            "content_sha256": content_sha256,
             "origin_kind": origin.kind,
             "origin_run_id": origin.run_id,
             "agent_id": origin.agent_id,

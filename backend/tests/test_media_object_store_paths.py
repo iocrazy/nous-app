@@ -164,3 +164,99 @@ async def test_vision_uses_signed_url_for_object_store():
     # signed URL, NOT base64 (the token-tax win)
     assert not block["image_url"]["url"].startswith("data:")
     store.signed_url.assert_awaited_once()
+
+
+# ── AI-generation write path → object store (Phase 1c) ───────────────────────
+
+
+@pytest.mark.asyncio
+async def test_generated_image_routes_to_object_store(monkeypatch):
+    captured = {}
+
+    async def fake_returning_one(sql, params):
+        captured.update(params)
+        return {"id": 5, **params}
+
+    store = AsyncMock()
+    store.exists.return_value = False
+    monkeypatch.setattr(gm_svc.settings, "FEATURE_CHAT_MEDIA_OBJECT_STORE", True)
+    monkeypatch.setattr(gm_svc, "_download_to_bytes", AsyncMock(return_value=b"GENIMG"))
+    monkeypatch.setattr(gm_svc.db_engine, "execute_returning_one", fake_returning_one)
+    with patch.object(gm_svc, "chat_media_store", return_value=store):
+        await gm_svc.register_generated_media(
+            user_id="u",
+            scope_id=9,
+            source_url="http://x/y.png",
+            mime="image/png",
+            origin=gm_svc.GenerationOrigin(kind="canvas_run"),
+        )
+    store.put_bytes.assert_awaited_once()
+    assert captured["file_path"].startswith("sb://chat-media/t9/")
+    assert captured["content_sha256"] and len(captured["content_sha256"]) == 64
+
+
+@pytest.mark.asyncio
+async def test_generated_video_stays_filesystem(monkeypatch):
+    captured = {}
+
+    async def fake_returning_one(sql, params):
+        captured.update(params)
+        return {"id": 5, **params}
+
+    async def fake_download(dest_path, source_url, **k):
+        from pathlib import Path
+
+        Path(dest_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(dest_path).write_bytes(b"MP4")
+        return 3
+
+    store = AsyncMock()
+    monkeypatch.setattr(gm_svc.settings, "FEATURE_CHAT_MEDIA_OBJECT_STORE", True)
+    monkeypatch.setattr(gm_svc.settings, "DOWNLOAD_PATH", "/tmp/mh-test-gen")
+    monkeypatch.setattr(gm_svc, "_download_to", fake_download)
+    monkeypatch.setattr(gm_svc.db_engine, "execute_returning_one", fake_returning_one)
+    with patch.object(gm_svc, "chat_media_store", return_value=store):
+        await gm_svc.register_generated_media(
+            user_id="u",
+            scope_id=9,
+            source_url="http://x/y.mp4",
+            mime="video/mp4",
+            origin=gm_svc.GenerationOrigin(kind="canvas_run"),
+        )
+    store.put_bytes.assert_not_awaited()
+    assert "sb://" not in captured["file_path"]
+    assert captured["content_sha256"] is None
+
+
+@pytest.mark.asyncio
+async def test_generated_image_falls_back_on_storage_error(tmp_path, monkeypatch):
+    captured = {}
+
+    async def fake_returning_one(sql, params):
+        captured.update(params)
+        return {"id": 5, **params}
+
+    async def fake_download(dest_path, source_url, **k):
+        from pathlib import Path
+
+        Path(dest_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(dest_path).write_bytes(b"IMG")
+        return 3
+
+    store = AsyncMock()
+    store.exists.side_effect = RuntimeError("storage down")
+    monkeypatch.setattr(gm_svc.settings, "FEATURE_CHAT_MEDIA_OBJECT_STORE", True)
+    monkeypatch.setattr(gm_svc.settings, "DOWNLOAD_PATH", str(tmp_path))
+    monkeypatch.setattr(gm_svc, "_download_to_bytes", AsyncMock(return_value=b"IMG"))
+    monkeypatch.setattr(gm_svc, "_download_to", fake_download)
+    monkeypatch.setattr(gm_svc.db_engine, "execute_returning_one", fake_returning_one)
+    with patch.object(gm_svc, "chat_media_store", return_value=store):
+        await gm_svc.register_generated_media(
+            user_id="u",
+            scope_id=9,
+            source_url="http://x/y.png",
+            mime="image/png",
+            origin=gm_svc.GenerationOrigin(kind="canvas_run"),
+        )
+    assert "generations/" in captured["file_path"]
+    assert "sb://" not in captured["file_path"]
