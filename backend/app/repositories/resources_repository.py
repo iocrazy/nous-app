@@ -701,6 +701,18 @@ class ResourcesRepository(AsyncpgRepository):
             return None
 
     async def create_resource_item(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        # Choke-point coercion: callers pass snowflake ids as str (API layer)
+        # or int interchangeably, and asyncpg's strict int8 codec rejects str
+        # even with a ::BIGINT cast — a str scope_id 500'd the resources
+        # upload path (2026-07-05). Coercing here protects all 9 call sites.
+        data = {
+            **data,
+            **{
+                k: self._bigint(data[k])
+                for k in ("scope_id", "resource_id", "folder_id", "library_id")
+                if data.get(k) is not None
+            },
+        }
         try:
             async with write_scope() as session:
                 result = await session.execute(
