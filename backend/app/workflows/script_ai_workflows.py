@@ -47,9 +47,20 @@ async def script_ai_expand_step(
     user_id: Optional[str],
 ) -> str:
     """Run the LLM chapter-expansion call. Returns sanitized HTML."""
+    from app.services.ai.providers.ai_provider_helpers import (
+        resolve_script_provider_config,
+    )
     from app.services.storyboard.script.script_ai_service import ScriptAIService
 
-    ai_svc = ScriptAIService(user_id=user_id)
+    provider_key, provider_config, _model, agent_slug = (
+        await resolve_script_provider_config(user_id)
+    )
+    ai_svc = ScriptAIService(
+        user_id=user_id,
+        agent_slug=agent_slug,
+        provider_key=provider_key,
+        provider_config=provider_config,
+    )
     html = await ai_svc.expand_chapter(title=title, summary=summary, context=context)
     logger.info(f"[script_ai][expand][step] LLM returned {len(html)} chars")
     return html
@@ -99,9 +110,20 @@ async def script_ai_branches_step(
     user_id: Optional[str],
 ) -> list[dict[str, Any]]:
     """Run the LLM branching call. Returns a list of branch dicts."""
+    from app.services.ai.providers.ai_provider_helpers import (
+        resolve_script_provider_config,
+    )
     from app.services.storyboard.script.script_ai_service import ScriptAIService
 
-    ai_svc = ScriptAIService(user_id=user_id)
+    provider_key, provider_config, _model, agent_slug = (
+        await resolve_script_provider_config(user_id)
+    )
+    ai_svc = ScriptAIService(
+        user_id=user_id,
+        agent_slug=agent_slug,
+        provider_key=provider_key,
+        provider_config=provider_config,
+    )
     branches = await ai_svc.create_branches(
         title=title,
         summary=summary,
@@ -193,6 +215,9 @@ async def script_ai_scenes_step(
     Chapter/project reads moved INTO the workflow (the endpoint only
     verifies access + dispatches chapter_id/storyboard_project_id now).
     """
+    from app.services.ai.providers.ai_provider_helpers import (
+        resolve_script_provider_config,
+    )
     from app.services.storyboard.script.script_ai_service import ScriptAIService
     from app.services.storyboard.script.script_service import ScriptService
 
@@ -206,7 +231,15 @@ async def script_ai_scenes_step(
     if project and project.get("settings_json"):
         style_guide = project["settings_json"].get("style_guide")
 
-    ai_svc = ScriptAIService(user_id=user_id)
+    provider_key, provider_config, _model, agent_slug = (
+        await resolve_script_provider_config(user_id)
+    )
+    ai_svc = ScriptAIService(
+        user_id=user_id,
+        agent_slug=agent_slug,
+        provider_key=provider_key,
+        provider_config=provider_config,
+    )
     scenes = await ai_svc.split_chapter_to_scenes(
         title=chapter.get("title", ""),
         summary=chapter.get("summary", ""),
