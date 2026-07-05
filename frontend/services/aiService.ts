@@ -466,7 +466,7 @@ export const saveAISettings = async (
 export const getNousModels = async (type?: string): Promise<NousModelPublic[]> => {
   const apiUrl = getApiUrl();
   const params = type ? `?type=${type}` : '';
-  const response = await fetch(`${apiUrl}/api/v1/ai/nous-models${params}`, {
+  const response = await fetch(`${apiUrl}/api/v1/ai/mediahub-models${params}`, {
     headers: await getAuthHeaders(),
   });
   if (!response.ok) return [];
