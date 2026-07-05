@@ -36,6 +36,8 @@ _FALLBACK_PREFIXES = (
     "qwen2.5-vl",
     "gemini-",
     "doubao-vision",
+    # Doubao Seed 1.6/2.0 are natively multimodal VLMs (text+image input).
+    "doubao-seed",
 )
 
 
