@@ -3,7 +3,7 @@ import {
   Button, Modal, Form, Input, Select, Switch,
   Space, Message, Popconfirm, Tag, Typography, Card, Spin,
 } from '@arco-design/web-react'
-import { IconPlus, IconDelete, IconSync } from '@arco-design/web-react/icon'
+import { IconPlus, IconDelete, IconSync, IconEdit } from '@arco-design/web-react/icon'
 import { useAuth } from '../../auth/AuthProvider'
 
 const { Title, Text } = Typography
@@ -146,6 +146,16 @@ export function AIModelsPage() {
     Record<string, { done: number; total: number }>
   >({})
   const [form] = Form.useForm()
+
+  // Edit modal — reused for a single model ('model') and for a whole
+  // provider's shared key/base_url ('provider', looped PUT over the group).
+  const [editForm] = Form.useForm()
+  const [editModal, setEditModal] = useState<
+    | { mode: 'model'; model: NousModel }
+    | { mode: 'provider'; group: ProviderGroup }
+    | null
+  >(null)
+  const [editSaving, setEditSaving] = useState(false)
 
   const apiBase = import.meta.env.VITE_API_URL || ''
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
@@ -405,6 +415,87 @@ export function AIModelsPage() {
     }
   }
 
+  const openEditModel = (m: NousModel) => {
+    setEditModal({ mode: 'model', model: m })
+    editForm.resetFields()
+    editForm.setFieldsValue({
+      display_name: m.display_name,
+      actual_model: m.actual_model,
+      type: m.type,
+      base_url: m.base_url || '',
+      pricing_value: m.pricing_value,
+      api_key: '', // blank = keep current
+    })
+  }
+
+  const openEditProvider = (g: ProviderGroup) => {
+    setEditModal({ mode: 'provider', group: g })
+    editForm.resetFields()
+    editForm.setFieldsValue({
+      base_url: g.base_url,
+      app_id: g.app_id || '',
+      api_key: '', // blank = keep current
+    })
+  }
+
+  // PUT one model. Only non-empty fields are sent (blank api_key = keep).
+  const putModel = async (id: string, patch: Record<string, unknown>) => {
+    const res = await fetch(`${apiBase}/api/v1/admin/mediahub-models/${id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(patch),
+    })
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      throw new Error(`HTTP ${res.status}${body ? `: ${body.slice(0, 120)}` : ''}`)
+    }
+  }
+
+  const handleEditSave = async () => {
+    if (!editModal) return
+    let values: Record<string, unknown>
+    try {
+      values = await editForm.validate()
+    } catch {
+      Message.error('Please check the fields')
+      return
+    }
+    setEditSaving(true)
+    try {
+      if (editModal.mode === 'model') {
+        const patch: Record<string, unknown> = {
+          display_name: values.display_name,
+          actual_model: values.actual_model,
+          type: values.type,
+          base_url: values.base_url || '',
+          pricing_value: Number(values.pricing_value) || 0,
+        }
+        // Only overwrite the key when the admin typed a new one.
+        if ((values.api_key as string)?.trim()) patch.api_key = values.api_key
+        await putModel(editModal.model.id, patch)
+        Message.success('Model updated')
+      } else {
+        // Provider-level: base_url / app_id / (optional) api_key apply to
+        // every model row in the group — they share the provider's access.
+        const shared: Record<string, unknown> = {
+          base_url: values.base_url || '',
+          app_id: values.app_id || '',
+        }
+        if ((values.api_key as string)?.trim()) shared.api_key = values.api_key
+        for (const m of editModal.group.models) {
+          await putModel(m.id, shared)
+        }
+        Message.success(`Updated ${editModal.group.models.length} model(s)`)
+      }
+      setEditModal(null)
+      fetchModels()
+    } catch (err) {
+      Message.error(`Update failed: ${err instanceof Error ? err.message : 'error'}`)
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
   const handleToggleEnabled = async (record: NousModel) => {
     const res = await fetch(`${apiBase}/api/v1/admin/mediahub-models/${record.id}`, {
       method: 'PUT',
@@ -517,6 +608,7 @@ export function AIModelsPage() {
                       </Button>
                     )
                   })()}
+                  <Button size="small" icon={<IconEdit />} onClick={() => openEditProvider(g)}>Edit</Button>
                   <Button size="small" icon={<IconPlus />} onClick={() => openAddModels(g)}>Add Models</Button>
                 </Space>
               </div>
@@ -552,6 +644,12 @@ export function AIModelsPage() {
                     >
                       Test
                     </Button>
+                    <Button
+                      icon={<IconEdit />}
+                      size="mini"
+                      type="text"
+                      onClick={() => openEditModel(m)}
+                    />
                     <Popconfirm title="Remove this model?" onOk={() => handleDeleteModel(m.id)}>
                       <Button icon={<IconDelete />} size="mini" status="danger" type="text" />
                     </Popconfirm>
@@ -622,6 +720,69 @@ export function AIModelsPage() {
               onChange={setSelectedModels}
               options={pickerOptions}
             />
+          </FormItem>
+        </Form>
+      </Modal>
+
+      {/* Edit modal — single model, or a whole provider's shared access. */}
+      <Modal
+        title={
+          editModal?.mode === 'provider'
+            ? `Edit Provider — ${editModal.group.provider}`
+            : editModal?.mode === 'model'
+              ? `Edit Model — ${editModal.model.actual_model}`
+              : 'Edit'
+        }
+        visible={!!editModal}
+        onOk={handleEditSave}
+        confirmLoading={editSaving}
+        onCancel={() => setEditModal(null)}
+        okText="Save"
+        unmountOnExit
+      >
+        <Form form={editForm} layout="vertical">
+          {editModal?.mode === 'provider' && (
+            <div style={{ marginBottom: 12, fontSize: 12, color: 'var(--color-text-3)' }}>
+              Changes apply to all {editModal.group.models.length} model(s) on
+              this provider (they share the base URL + key).
+            </div>
+          )}
+
+          {editModal?.mode === 'model' && (
+            <>
+              <FormItem label="Display Name" field="display_name" rules={[{ required: true }]}>
+                <Input />
+              </FormItem>
+              <FormItem label="Actual Model" field="actual_model" rules={[{ required: true }]}>
+                <Input placeholder="Model id sent to the provider" />
+              </FormItem>
+              <FormItem label="Type" field="type" rules={[{ required: true }]}>
+                <Select
+                  options={['llm', 'embedding', 'tts', 'asr'].map((v) => ({ label: v, value: v }))}
+                />
+              </FormItem>
+              <FormItem label="Pricing Value" field="pricing_value">
+                <Input type="number" />
+              </FormItem>
+            </>
+          )}
+
+          <FormItem label="API Base URL" field="base_url">
+            <Input placeholder="https://api.example.com/v1" />
+          </FormItem>
+
+          {editModal?.mode === 'provider' && (
+            <FormItem label="App ID" field="app_id">
+              <Input placeholder="Optional (volcengine)" />
+            </FormItem>
+          )}
+
+          <FormItem
+            label="API Key"
+            field="api_key"
+            extra="Leave blank to keep the current key. Type a new one to replace it."
+          >
+            <Input.Password placeholder="•••• (unchanged)" />
           </FormItem>
         </Form>
       </Modal>
