@@ -106,3 +106,35 @@ class MarkReadIn(BaseModel):
 
 class AgentAdd(BaseModel):
     agent_slug: str
+
+
+class MemberOut(BaseModel):
+    """One conversation member — a user or an agent (group settings drawer)."""
+
+    member_type: Literal["user", "agent"]
+    user_id: Optional[str] = None
+    agent_id: Optional[str] = None
+    role: str = "member"
+    name: Optional[str] = None
+    email: Optional[str] = None
+    agent_slug: Optional[str] = None
+    joined_at: datetime
+
+    @field_validator("user_id", "agent_id", mode="before")
+    @classmethod
+    def _coerce_uuid_str(cls, v: Any) -> Optional[str]:
+        # asyncpg returns UUID columns as uuid.UUID objects; serialise as str.
+        return None if v is None else str(v)
+
+
+class MemberRoleSet(BaseModel):
+    role: Literal["admin", "member"]
+
+
+class OwnerTransfer(BaseModel):
+    to_user_id: str
+
+
+class ConversationUpdate(BaseModel):
+    name: Optional[str] = None
+    type: Optional[Literal["group", "public"]] = None

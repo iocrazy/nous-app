@@ -211,6 +211,172 @@ class ConversationRepository:
         )
         return [str(r["user_id"]) for r in rows]
 
+    # ── Group management (roles) ──────────────────────────────────────────────
+
+    async def list_members(self, *, conversation_id: int) -> list[dict[str, Any]]:
+        """All members (users + agents) with role, enriched with display names.
+
+        User names come from user_profiles.username via a service-role read —
+        RLS only exposes the caller's own profile row to the client, so the
+        frontend cannot resolve other members' names itself.
+        """
+        rows = await db_engine.fetch_all(
+            """
+            SELECT cm.member_type, cm.user_id, cm.agent_id, cm.role,
+                   cm.joined_at,
+                   up.username AS profile_name,
+                   a.name AS agent_name, a.slug AS agent_slug
+              FROM public.conversation_members cm
+              LEFT JOIN public.user_profiles up
+                     ON cm.member_type = 'user' AND up.id = cm.user_id
+              LEFT JOIN public.ai_agents a
+                     ON cm.member_type = 'agent' AND a.id = cm.agent_id
+             WHERE cm.conversation_id = :cid
+             ORDER BY cm.joined_at ASC
+            """,
+            {"cid": _bigint(conversation_id)},
+        )
+        return [
+            {
+                "member_type": r["member_type"],
+                "user_id": r["user_id"],
+                "agent_id": r["agent_id"],
+                "role": r["role"],
+                "joined_at": r["joined_at"],
+                "name": r["profile_name"] or r["agent_name"],
+                "agent_slug": r["agent_slug"],
+            }
+            for r in rows
+        ]
+
+    async def get_member_role(
+        self, *, conversation_id: int, user_id: str
+    ) -> Optional[str]:
+        v = await db_engine.fetch_val(
+            """
+            SELECT role FROM public.conversation_members
+             WHERE conversation_id = :cid
+               AND member_type = 'user'
+               AND user_id = :uid
+            """,
+            {"cid": _bigint(conversation_id), "uid": user_id},
+        )
+        return None if v is None else str(v)
+
+    async def remove_user_member(self, *, conversation_id: int, user_id: str) -> bool:
+        n = await db_engine.execute(
+            """
+            DELETE FROM public.conversation_members
+             WHERE conversation_id = :cid
+               AND member_type = 'user'
+               AND user_id = :uid
+            """,
+            {"cid": _bigint(conversation_id), "uid": user_id},
+        )
+        return bool(n)
+
+    async def remove_agent_member(
+        self, *, conversation_id: int, agent_id: str
+    ) -> bool:
+        n = await db_engine.execute(
+            """
+            DELETE FROM public.conversation_members
+             WHERE conversation_id = :cid
+               AND member_type = 'agent'
+               AND agent_id = :agent_id
+            """,
+            {"cid": _bigint(conversation_id), "agent_id": agent_id},
+        )
+        return bool(n)
+
+    async def set_member_role(
+        self, *, conversation_id: int, user_id: str, role: str
+    ) -> bool:
+        n = await db_engine.execute(
+            """
+            UPDATE public.conversation_members
+               SET role = :role
+             WHERE conversation_id = :cid
+               AND member_type = 'user'
+               AND user_id = :uid
+            """,
+            {"cid": _bigint(conversation_id), "uid": user_id, "role": role},
+        )
+        return bool(n)
+
+    async def transfer_owner(
+        self, *, conversation_id: int, from_user_id: str, to_user_id: str
+    ) -> None:
+        """Atomically demote *from_user_id* to member and promote *to_user_id*.
+
+        Both UPDATEs run in one transaction; if the target is not a member the
+        promote hits 0 rows and the whole transaction rolls back (ValueError)
+        so the group is never left ownerless.
+        """
+        eng = db_engine.get_engine()
+        async with eng.begin() as conn:
+            promoted = await conn.execute(
+                text(
+                    """
+                    UPDATE public.conversation_members
+                       SET role = 'owner'
+                     WHERE conversation_id = :cid
+                       AND member_type = 'user'
+                       AND user_id = :to_uid
+                    """
+                ),
+                {"cid": _bigint(conversation_id), "to_uid": to_user_id},
+            )
+            if not promoted.rowcount:
+                raise ValueError("target user is not a member of this conversation")
+            await conn.execute(
+                text(
+                    """
+                    UPDATE public.conversation_members
+                       SET role = 'member'
+                     WHERE conversation_id = :cid
+                       AND member_type = 'user'
+                       AND user_id = :from_uid
+                    """
+                ),
+                {"cid": _bigint(conversation_id), "from_uid": from_user_id},
+            )
+
+    async def update_conversation(
+        self,
+        *,
+        conversation_id: int,
+        name: Optional[str] = None,
+        type: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Update title and/or type; None means leave unchanged."""
+        # execute_returning_one, not fetch_one: fetch_one runs on connect()
+        # and never commits, so the UPDATE would silently roll back.
+        row = await db_engine.execute_returning_one(
+            """
+            UPDATE public.conversations
+               SET title = COALESCE(:name, title),
+                   type  = COALESCE(:type, type)
+             WHERE id = :cid
+            RETURNING id, scope_id, type, history_mode,
+                      title AS name, topic, last_seq, created_at
+            """,
+            {"cid": _bigint(conversation_id), "name": name, "type": type},
+        )
+        return dict(row) if row else None
+
+    async def archive_conversation(self, *, conversation_id: int) -> bool:
+        n = await db_engine.execute(
+            """
+            UPDATE public.conversations
+               SET archived_at = now()
+             WHERE id = :cid
+               AND archived_at IS NULL
+            """,
+            {"cid": _bigint(conversation_id)},
+        )
+        return bool(n)
+
     # ── Message operations ────────────────────────────────────────────────────
 
     async def send_message(
