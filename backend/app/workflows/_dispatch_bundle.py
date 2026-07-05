@@ -41,6 +41,9 @@ from app.workflows.script_ai_workflows import (  # noqa: F401
     script_to_storyboard_workflow,
 )
 from app.workflows.script_outline import script_outline_workflow  # noqa: F401
+from app.workflows.script_scene_convert import (  # noqa: F401
+    script_scene_convert_workflow,
+)
 from app.workflows.soda_download import (  # noqa: F401
     soda_download_queue,
     soda_download_workflow,

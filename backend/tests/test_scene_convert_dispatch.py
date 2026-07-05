@@ -351,3 +351,14 @@ async def test_persist_scenes_skips_scene_with_no_usable_elements():
 
     assert result["scene_count"] == 0
     repo.create_with_content.assert_not_awaited()
+
+
+def test_workflow_registered_in_dispatch_bundle():
+    """Worker processes register workflows ONLY via the dispatch bundle import.
+
+    A workflow missing here is enqueued by the gateway but never picked up
+    (task stuck 'queued' forever) — exactly what happened on first prod E2E.
+    """
+    from app.workflows import _dispatch_bundle
+
+    assert hasattr(_dispatch_bundle, "script_scene_convert_workflow")
