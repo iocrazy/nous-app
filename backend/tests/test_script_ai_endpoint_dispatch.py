@@ -95,8 +95,11 @@ def mock_task_manager(monkeypatch):
 
 @pytest.fixture
 def mock_verify_access(monkeypatch):
+    # PR-B2: the private _verify_script_access copy was collapsed into the
+    # shared app.core.scope_guards.verify_script_access, imported into the
+    # router module — patch it by the name the router now calls.
     mock = AsyncMock(return_value=None)
-    monkeypatch.setattr(script_ai_router, "_verify_script_access", mock)
+    monkeypatch.setattr(script_ai_router, "verify_script_access", mock)
     return mock
 
 

@@ -5,7 +5,8 @@ from typing import Any, Dict
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 
-from app.core.deps import AuthDep, get_team_id_for_user
+from app.core.deps import AuthDep
+from app.core.scope_guards import verify_script_access
 from app.schemas.script import (
     ScriptCanvasSyncRequest,
     ScriptChapterCreate,
@@ -16,15 +17,15 @@ from app.services.storyboard.script.script_service import ScriptService
 router = APIRouter(prefix="/scripts/projects")
 
 
-async def _verify_script_access(script_id: str, user_id: str) -> None:
-    """Verify the authenticated user has access to this script (via team membership)."""
-    svc = ScriptService()
-    project = await svc.project_repo.get_by_id(script_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Script project not found")
-    user_team = await get_team_id_for_user(user_id)
-    if str(user_team) != str(project.get("team_id")):
-        raise HTTPException(status_code=403, detail="Access denied")
+async def _script_id_for_chapter(chapter_id: str) -> str:
+    """Resolve a chapter to its owning script_id (404 if the chapter is gone).
+
+    Used by the chapter update/delete IDOR fix: those endpoints have no
+    script_id in their path, so we look it up before the team check."""
+    chapter = await ScriptService().chapter_repo.get_by_id(chapter_id)
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+    return str(chapter.get("script_id"))
 
 
 @router.post("/{script_id}/chapters")
@@ -32,7 +33,7 @@ async def create_chapter(
     auth: AuthDep, script_id: str, body: ScriptChapterCreate
 ) -> Dict[str, Any]:
     try:
-        await _verify_script_access(script_id, auth.user_id)
+        await verify_script_access(script_id, auth)
         svc = ScriptService()
         chapter = await svc.create_chapter(
             script_id, body.model_dump(exclude_none=True)
@@ -47,6 +48,10 @@ async def create_chapter(
 async def update_chapter(
     auth: AuthDep, chapter_id: str, body: ScriptChapterUpdate
 ) -> Dict[str, Any]:
+    # IDOR fix: resolve chapter → script and enforce team access BEFORE the
+    # try/except (which maps everything to 500) so 404/403 surface intact.
+    script_id = await _script_id_for_chapter(chapter_id)
+    await verify_script_access(script_id, auth)
     try:
         svc = ScriptService()
         chapter = await svc.update_chapter(
@@ -60,6 +65,9 @@ async def update_chapter(
 
 @router.delete("/chapters/{chapter_id}")
 async def delete_chapter(auth: AuthDep, chapter_id: str) -> Dict[str, Any]:
+    # IDOR fix: same resolve-then-verify guard as update_chapter.
+    script_id = await _script_id_for_chapter(chapter_id)
+    await verify_script_access(script_id, auth)
     try:
         svc = ScriptService()
         await svc.delete_chapter(chapter_id)
@@ -74,7 +82,7 @@ async def sync_canvas(
     auth: AuthDep, script_id: str, body: ScriptCanvasSyncRequest
 ) -> Dict[str, Any]:
     try:
-        await _verify_script_access(script_id, auth.user_id)
+        await verify_script_access(script_id, auth)
         svc = ScriptService()
         added = [ch.model_dump(exclude_none=True) for ch in body.added_chapters]
         result = await svc.sync_canvas(

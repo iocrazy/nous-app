@@ -6,7 +6,8 @@ from typing import Any, Dict
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 
-from app.core.deps import AuthDep, get_team_id_for_user
+from app.core.deps import AuthDep
+from app.core.scope_guards import verify_script_access
 from app.schemas.script import (
     ConvertToStoryboardRequest,
     CreateBranchesRequest,
@@ -14,20 +15,8 @@ from app.schemas.script import (
     GenerateOutlineRequest,
 )
 from app.services.infra.unified_task_manager import get_task_manager
-from app.services.storyboard.script.script_service import ScriptService
 
 router = APIRouter(prefix="/scripts")
-
-
-async def _verify_script_access(script_id: str, user_id: str) -> None:
-    """Verify the authenticated user has access to this script (via team membership)."""
-    svc = ScriptService()
-    project = await svc.project_repo.get_by_id(script_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Script project not found")
-    user_team = await get_team_id_for_user(user_id)
-    if str(user_team) != str(project.get("team_id")):
-        raise HTTPException(status_code=403, detail="Access denied")
 
 
 @router.post("/generate-outline")
@@ -36,7 +25,7 @@ async def generate_outline(
 ) -> Dict[str, Any]:
     """Dispatch async outline generation. Returns task_id immediately."""
     try:
-        await _verify_script_access(body.script_id, auth.user_id)
+        await verify_script_access(body.script_id, auth)
         mgr = get_task_manager()
         wf_id = str(_uuid.uuid4())
         task_id = await mgr.create(
@@ -77,7 +66,7 @@ async def generate_outline(
 async def expand_chapter(auth: AuthDep, body: ExpandChapterRequest) -> Dict[str, Any]:
     """Dispatch async chapter expansion. Returns task_id immediately."""
     try:
-        await _verify_script_access(body.script_id, auth.user_id)
+        await verify_script_access(body.script_id, auth)
         mgr = get_task_manager()
         wf_id = str(_uuid.uuid4())
         task_id = await mgr.create(
@@ -116,7 +105,7 @@ async def expand_chapter(auth: AuthDep, body: ExpandChapterRequest) -> Dict[str,
 async def create_branches(auth: AuthDep, body: CreateBranchesRequest) -> Dict[str, Any]:
     """Dispatch async story branching. Returns task_id immediately."""
     try:
-        await _verify_script_access(body.script_id, auth.user_id)
+        await verify_script_access(body.script_id, auth)
         mgr = get_task_manager()
         wf_id = str(_uuid.uuid4())
         task_id = await mgr.create(
@@ -164,7 +153,7 @@ async def convert_to_storyboard(
     dispatches chapter_id + storyboard_project_id.
     """
     try:
-        await _verify_script_access(body.script_id, auth.user_id)
+        await verify_script_access(body.script_id, auth)
         mgr = get_task_manager()
         wf_id = str(_uuid.uuid4())
         task_id = await mgr.create(
