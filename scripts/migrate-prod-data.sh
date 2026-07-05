@@ -81,9 +81,8 @@ table_counts() {
   sudo docker exec "$container" psql -U postgres -d postgres -At -c "
 SELECT 'parsed_media',     COUNT(*) FROM parsed_media
 UNION ALL SELECT 'resources',         COUNT(*) FROM resources
-UNION ALL SELECT 'unified_tasks',     COUNT(*) FROM unified_tasks
+UNION ALL SELECT 'task_tracking',     COUNT(*) FROM task_tracking
 UNION ALL SELECT 'projects',          COUNT(*) FROM projects
-UNION ALL SELECT 'project_tasks',     COUNT(*) FROM project_tasks
 UNION ALL SELECT 'teams',             COUNT(*) FROM teams
 UNION ALL SELECT 'auth.users',        COUNT(*) FROM auth.users
 UNION ALL SELECT 'storage.objects',   COUNT(*) FROM storage.objects
