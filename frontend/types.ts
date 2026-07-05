@@ -1405,6 +1405,8 @@ export type UsageGroupBy = 'model' | 'agent';
 
 export interface UsageDailySummary {
   days: number;
+  /** Set when the window is a calendar month (YYYY-MM) instead of last-N-days. */
+  month: string | null;
   group_by: UsageGroupBy;
   total_requests: number;
   total_failed: number;
@@ -1625,6 +1627,18 @@ export interface Channel {
   unread: number;
   mentions: number;
   created_at: string;
+}
+
+/** One conversation member (user or agent) with its group role. */
+export interface ConversationMember {
+  member_type: 'user' | 'agent';
+  user_id: string | null;
+  agent_id: string | null;
+  role: 'owner' | 'admin' | 'member' | string;
+  name: string | null;
+  email: string | null;
+  agent_slug: string | null;
+  joined_at: string;
 }
 
 export interface ChatMessage {

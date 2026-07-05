@@ -353,6 +353,7 @@ class AgentRunsRepository(AsyncpgRepository):
         self,
         *,
         started_after: datetime,
+        started_before: Optional[datetime] = None,
         user_id: Optional[UUID] = None,
         group_by: str = "model",
     ) -> List[Dict[str, Any]]:
@@ -397,6 +398,8 @@ class AgentRunsRepository(AsyncpgRepository):
                 .group_by(day, key_col)
                 .order_by(day.asc())
             )
+            if started_before is not None:
+                stmt = stmt.where(AgentRuns.started_at < started_before)
             if user_id is not None:
                 stmt = stmt.where(AgentRuns.user_id == user_id)
             async with read_scope() as session:

@@ -68,8 +68,9 @@ class ConversationService:
         # A 1:1 AI thread must stay exactly one human + one agent: /dream's
         # per-pair consolidation joins conversation_members, so a second
         # user row fans out its message counts (P3 Task-2 review ledger).
-        if info is not None and info.get("type") == "direct_agent":
-            raise PermissionError("cannot add members to a direct agent conversation")
+        # A user dm is likewise a fixed pair — invite is a group concept.
+        if info is not None and info.get("type") in ("direct_agent", "dm"):
+            raise PermissionError("cannot add members to this conversation type")
         scope_id = info.get("scope_id") if info is not None else None
         if scope_id is not None:
             for target in user_ids:
@@ -194,6 +195,159 @@ class ConversationService:
             added_by=user_id,
         )
         return {"added": True, "agent_id": str(agent["id"])}
+
+    # ── Group management (roles: owner / admin / member) ─────────────────────
+    #
+    # Permission matrix (Feishu-style, user-approved 2026-07-04):
+    #   invite / add agent          any member
+    #   remove regular member/agent admin, owner
+    #   remove admin                owner only
+    #   grant / revoke admin        owner only
+    #   transfer ownership          owner only (old owner → member)
+    #   edit name / visibility      admin, owner
+    #   leave                       any member except owner (must transfer)
+    #   dissolve (archive)          owner only
+
+    _GROUP_TYPES = frozenset({"group", "public"})
+
+    async def _require_group_role(
+        self, conversation_id: int, user_id: str, allowed: frozenset[str]
+    ) -> str:
+        """Membership check FIRST, then group-type/archived gates.
+
+        Order matters: checking the conversation before the caller's
+        membership turns the error message into an existence oracle
+        (outsiders could distinguish "not found" / "not a group" / "not a
+        member" for arbitrary IDs). Non-members always get the same 403.
+        """
+        role = await self._repo.get_member_role(
+            conversation_id=conversation_id, user_id=user_id
+        )
+        if role is None:
+            raise PermissionError("not a member of this conversation")
+        info = await self._repo.conversation_scope_and_type(
+            conversation_id=conversation_id
+        )
+        if info is None or info.get("archived_at") is not None:
+            # Archived (dissolved) groups are gone as far as management goes.
+            raise ValueError(f"conversation {conversation_id} not found")
+        if info.get("type") not in self._GROUP_TYPES:
+            raise PermissionError("not a group conversation")
+        if role not in allowed:
+            raise PermissionError("insufficient role for this action")
+        return role
+
+    async def list_members(
+        self, *, conversation_id: int, user_id: str
+    ) -> list[dict[str, Any]]:
+        await self._require_member(conversation_id, user_id)
+        return await self._repo.list_members(conversation_id=conversation_id)
+
+    async def remove_member(
+        self, *, conversation_id: int, user_id: str, target_user_id: str
+    ) -> dict[str, Any]:
+        """Remove a member (admin/owner per matrix) or leave (self-target)."""
+        actor_role = await self._require_group_role(
+            conversation_id, user_id, frozenset({"owner", "admin", "member"})
+        )
+        if target_user_id == user_id:
+            # Leaving. The owner would strand the group — transfer first.
+            if actor_role == "owner":
+                raise PermissionError("owner must transfer ownership before leaving")
+        else:
+            target_role = await self._repo.get_member_role(
+                conversation_id=conversation_id, user_id=target_user_id
+            )
+            if target_role is None:
+                raise ValueError("target user is not a member of this conversation")
+            if actor_role == "admin":
+                if target_role != "member":
+                    raise PermissionError("admins can only remove regular members")
+            elif actor_role != "owner":
+                raise PermissionError("insufficient role to remove members")
+        removed = await self._repo.remove_user_member(
+            conversation_id=conversation_id, user_id=target_user_id
+        )
+        if not removed:
+            # 0 rows: the target vanished or became owner between the role
+            # check and the guarded DELETE (concurrent transfer-owner).
+            raise ValueError("member could not be removed; state changed, retry")
+        return {"removed": True}
+
+    async def set_member_role(
+        self, *, conversation_id: int, user_id: str, target_user_id: str, role: str
+    ) -> dict[str, Any]:
+        await self._require_group_role(conversation_id, user_id, frozenset({"owner"}))
+        if target_user_id == user_id:
+            raise ValueError("cannot change your own role; use transfer-owner")
+        target_role = await self._repo.get_member_role(
+            conversation_id=conversation_id, user_id=target_user_id
+        )
+        if target_role is None:
+            raise ValueError("target user is not a member of this conversation")
+        updated = await self._repo.set_member_role(
+            conversation_id=conversation_id, user_id=target_user_id, role=role
+        )
+        if not updated:
+            raise ValueError("role could not be updated; state changed, retry")
+        return {"updated": True, "role": role}
+
+    async def transfer_ownership(
+        self, *, conversation_id: int, user_id: str, to_user_id: str
+    ) -> dict[str, Any]:
+        await self._require_group_role(conversation_id, user_id, frozenset({"owner"}))
+        if to_user_id == user_id:
+            raise ValueError("already the owner")
+        await self._repo.transfer_owner(
+            conversation_id=conversation_id,
+            from_user_id=user_id,
+            to_user_id=to_user_id,
+        )
+        return {"transferred": True}
+
+    async def remove_agent(
+        self, *, conversation_id: int, user_id: str, agent_id: str
+    ) -> dict[str, Any]:
+        await self._require_group_role(
+            conversation_id, user_id, frozenset({"owner", "admin"})
+        )
+        removed = await self._repo.remove_agent_member(
+            conversation_id=conversation_id, agent_id=agent_id
+        )
+        return {"removed": removed}
+
+    async def update_conversation(
+        self,
+        *,
+        conversation_id: int,
+        user_id: str,
+        name: Optional[str] = None,
+        type: Optional[str] = None,
+    ) -> dict[str, Any]:
+        await self._require_group_role(
+            conversation_id, user_id, frozenset({"owner", "admin"})
+        )
+        if name is not None:
+            name = name.strip()
+            if not name:
+                raise ValueError("group name cannot be empty")
+        if type is not None and type not in self._GROUP_TYPES:
+            raise ValueError("visibility must be 'group' or 'public'")
+        row = await self._repo.update_conversation(
+            conversation_id=conversation_id, name=name, type=type
+        )
+        if row is None:
+            raise ValueError(f"conversation {conversation_id} not found")
+        return row
+
+    async def dissolve_conversation(
+        self, *, conversation_id: int, user_id: str
+    ) -> dict[str, Any]:
+        await self._require_group_role(conversation_id, user_id, frozenset({"owner"}))
+        archived = await self._repo.archive_conversation(
+            conversation_id=conversation_id
+        )
+        return {"archived": archived}
 
     async def edit_message(
         self,

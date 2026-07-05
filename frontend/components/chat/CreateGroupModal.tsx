@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Globe, Lock, X } from 'lucide-react';
 import { aiLibraryService } from '../../services/aiLibraryService';
-import { fetchTeamMembers } from '../../services/teamService';
+import { getTeamMembers } from '../../services/teamService';
 import { conversationService } from '../../services/conversationService';
 import { useToast } from '../Toast';
 import type { AILibraryAgent, Channel, TeamMember } from '../../types';
@@ -64,8 +64,11 @@ export default function CreateGroupModal({ teamId, open, onClose, onCreated }: P
 
     let cancelled = false;
 
+    // getTeamMembers (backend, service-role) — NOT fetchTeamMembers (direct
+    // Supabase): team_members has no name column and user_profiles RLS hides
+    // other members' rows, so the direct read renders every chip as a raw UUID.
     Promise.all([
-      fetchTeamMembers(teamId),
+      getTeamMembers(teamId),
       aiLibraryService.listAgents(),
     ])
       .then(([teamMembers, allAgents]) => {
