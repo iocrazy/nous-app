@@ -271,6 +271,7 @@ class ScriptProjects(Base):
     genre: Mapped[Optional[str]] = mapped_column(
         String(50), comment="Story genre/style"
     )
+    episode_id: Mapped[Optional[int]] = mapped_column(BigInteger)
 
 
 class ScriptAssets(Base):
@@ -365,6 +366,135 @@ class ScriptChapters(Base):
     content_json: Mapped[Optional[dict]] = mapped_column(
         JSONB,
         comment="TipTap ProseMirror JSON document (source of truth)",
+    )
+
+
+class Episodes(Base):
+    __tablename__ = "episodes"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["project_id"],
+            ["public.projects.id"],
+            ondelete="CASCADE",
+            name="episodes_project_id_fkey",
+        ),
+        PrimaryKeyConstraint("id", name="episodes_pkey"),
+        Index("idx_episodes_project", "project_id", "sort_order"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")
+    )
+    project_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    title: Mapped[str] = mapped_column(
+        String(200), nullable=False, server_default=text("'Ep 1'::character varying")
+    )
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
+class ScriptScenes(Base):
+    __tablename__ = "script_scenes"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["chapter_id"],
+            ["public.script_chapters.id"],
+            ondelete="SET NULL",
+            name="script_scenes_chapter_id_fkey",
+        ),
+        ForeignKeyConstraint(
+            ["script_id"],
+            ["public.script_projects.id"],
+            ondelete="CASCADE",
+            name="script_scenes_script_id_fkey",
+        ),
+        PrimaryKeyConstraint("id", name="script_scenes_pkey"),
+        Index("idx_script_scenes_script", "script_id", "chapter_id", "sort_order"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")
+    )
+    script_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    chapter_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    heading_int_ext: Mapped[Optional[str]] = mapped_column(String(10))
+    location_text: Mapped[Optional[str]] = mapped_column(Text)
+    location_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, comment="Entity soft reference, no FK (spec §2.4)"
+    )
+    time_of_day: Mapped[Optional[str]] = mapped_column(String(20))
+    content_json: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    content: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''::text")
+    )
+    content_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    position_x: Mapped[Optional[float]] = mapped_column(Double(53))
+    position_y: Mapped[Optional[float]] = mapped_column(Double(53))
+    width: Mapped[Optional[float]] = mapped_column(Double(53))
+    height: Mapped[Optional[float]] = mapped_column(Double(53))
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
+class ScriptOps(Base):
+    __tablename__ = "script_ops"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["scene_id"],
+            ["public.script_scenes.id"],
+            ondelete="CASCADE",
+            name="script_ops_scene_id_fkey",
+        ),
+        PrimaryKeyConstraint("id", name="script_ops_pkey"),
+        Index("idx_script_ops_scene", "scene_id", "op_seq"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")
+    )
+    scene_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    op_seq: Mapped[int] = mapped_column(
+        Integer, nullable=False, comment="= content_version after apply"
+    )
+    op_json: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, comment='{"ops":[...], "inverse":[...]}'
+    )
+    actor: Mapped[str] = mapped_column(
+        String(64), nullable=False, comment="user uuid or 'copilot'"
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True),
+        nullable=False,
+        server_default=text("now()"),
     )
 
 

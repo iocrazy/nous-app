@@ -113,10 +113,13 @@ from app.models.reviews import (  # noqa: F401
     UserNotifications,
 )
 from app.models.scripts import (  # noqa: F401
+    Episodes,
     ProjectWorkflows,
     ScriptAssets,
     ScriptChapters,
+    ScriptOps,
     ScriptProjects,
+    ScriptScenes,
     ScriptStoryboardLinks,
     TaskFlows,
     WorkflowNodes,
@@ -245,10 +248,13 @@ __all__ = [
     "ReviewStatus",
     "UserNotifications",
     # scripts
+    "Episodes",
     "ProjectWorkflows",
     "ScriptAssets",
     "ScriptChapters",
+    "ScriptOps",
     "ScriptProjects",
+    "ScriptScenes",
     "ScriptStoryboardLinks",
     "TaskFlows",
     "WorkflowNodes",
