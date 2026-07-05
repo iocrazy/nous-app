@@ -79,10 +79,14 @@ def _ext_for(mime: str, filename: Optional[str]) -> str:
     return guessed or ".bin"
 
 
+def _object_key(scope_id: int, sha: str, ext: str) -> str:
+    return f"t{scope_id}/{sha[:2]}/{sha[2:4]}/{sha}{ext}"
+
+
 def content_key(
     *, scope_id: int, data: bytes, mime: str, filename: Optional[str] = None
 ) -> tuple[str, str]:
-    """Return (sha256_hex, object_key) for a blob.
+    """Return (sha256_hex, object_key) for an in-memory blob.
 
     Key = ``t{scope}/{sha[:2]}/{sha[2:4]}/{sha}{ext}`` — content-addressed, so
     the same bytes always produce the same key (dedup), the hash prefix
@@ -90,9 +94,15 @@ def content_key(
     key (privacy / injection / collision).
     """
     sha = hashlib.sha256(data).hexdigest()
-    ext = _ext_for(mime, filename)
-    key = f"t{scope_id}/{sha[:2]}/{sha[2:4]}/{sha}{ext}"
-    return sha, key
+    return sha, _object_key(scope_id, sha, _ext_for(mime, filename))
+
+
+def content_key_from_sha(
+    *, scope_id: int, sha: str, mime: str, filename: Optional[str] = None
+) -> str:
+    """Same key scheme as ``content_key`` but from a precomputed sha — for
+    large blobs (video) hashed by streaming a file instead of buffering bytes."""
+    return _object_key(scope_id, sha, _ext_for(mime, filename))
 
 
 def to_file_path(bucket: str, key: str) -> str:
@@ -139,6 +149,23 @@ class ObjectStore:
         await proxy.upload(
             key,
             data,
+            {
+                "content-type": mime or "application/octet-stream",
+                "upsert": "true" if upsert else "false",
+            },
+        )
+
+    async def put_file(
+        self, key: str, file_path: str, mime: str, *, upsert: bool = True
+    ) -> None:
+        """Upload from a local file (streamed by the SDK) — for blobs too large
+        to buffer in memory (generated video)."""
+        from pathlib import Path
+
+        proxy = await self._proxy()
+        await proxy.upload(
+            key,
+            Path(file_path),
             {
                 "content-type": mime or "application/octet-stream",
                 "upsert": "true" if upsert else "false",

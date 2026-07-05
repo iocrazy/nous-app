@@ -179,3 +179,29 @@ async def test_remove_calls_proxy_with_key_list():
     with patch.object(store, "_proxy", new=AsyncMock(return_value=proxy)):
         await store.remove("t1/ab/cd/h.png")
     proxy.remove.assert_awaited_once_with(["t1/ab/cd/h.png"])
+
+
+@pytest.mark.asyncio
+async def test_put_file_uploads_from_path(tmp_path):
+    f = tmp_path / "vid.mp4"
+    f.write_bytes(b"MP4")
+    store = ObjectStore(CHAT_MEDIA_BUCKET)
+    proxy = _mock_proxy(upload=None)
+    with patch.object(store, "_proxy", new=AsyncMock(return_value=proxy)):
+        await store.put_file("t1/ab/cd/h.mp4", str(f), "video/mp4")
+    args, _ = proxy.upload.call_args
+    assert args[0] == "t1/ab/cd/h.mp4"
+    assert str(args[1]) == str(f)  # a Path to the file, not bytes
+    assert args[2]["content-type"] == "video/mp4"
+
+
+def test_content_key_from_sha_matches_content_key():
+    import hashlib as _h
+
+    data = b"same bytes"
+    sha, key = content_key(scope_id=3, data=data, mime="video/mp4")
+    sha2 = _h.sha256(data).hexdigest()
+    from app.services.library.media_storage import content_key_from_sha
+
+    key2 = content_key_from_sha(scope_id=3, sha=sha2, mime="video/mp4")
+    assert key == key2 and sha == sha2
