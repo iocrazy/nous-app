@@ -1627,6 +1627,18 @@ export interface Channel {
   created_at: string;
 }
 
+/** One conversation member (user or agent) with its group role. */
+export interface ConversationMember {
+  member_type: 'user' | 'agent';
+  user_id: string | null;
+  agent_id: string | null;
+  role: 'owner' | 'admin' | 'member' | string;
+  name: string | null;
+  email: string | null;
+  agent_slug: string | null;
+  joined_at: string;
+}
+
 export interface ChatMessage {
   id: string;
   channel_id: string;

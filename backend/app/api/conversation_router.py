@@ -13,10 +13,14 @@ from app.schemas.conversation import (
     AgentAdd,
     ConversationCreate,
     ConversationOut,
+    ConversationUpdate,
     MarkReadIn,
     MemberAdd,
+    MemberOut,
+    MemberRoleSet,
     MessageCreate,
     MessageOut,
+    OwnerTransfer,
 )
 from app.services.chat.chat_attachment_service import save_chat_image
 from app.services.conversation_service import get_conversation_service
@@ -98,6 +102,114 @@ async def add_members(conversation_id: int, payload: MemberAdd, auth: AuthDep):
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     return {"added": added}
+
+
+@router.get("/{conversation_id}/members", response_model=list[MemberOut])
+async def list_members(conversation_id: int, auth: AuthDep):
+    svc = get_conversation_service()
+    try:
+        return await svc.list_members(
+            conversation_id=conversation_id, user_id=auth.user_id
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+
+
+@router.delete("/{conversation_id}/members/{member_user_id}")
+async def remove_member(conversation_id: int, member_user_id: str, auth: AuthDep):
+    """Remove a member (admin/owner) or leave the group (self-target)."""
+    svc = get_conversation_service()
+    try:
+        return await svc.remove_member(
+            conversation_id=conversation_id,
+            user_id=auth.user_id,
+            target_user_id=member_user_id,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.patch("/{conversation_id}/members/{member_user_id}/role")
+async def set_member_role(
+    conversation_id: int, member_user_id: str, payload: MemberRoleSet, auth: AuthDep
+):
+    svc = get_conversation_service()
+    try:
+        return await svc.set_member_role(
+            conversation_id=conversation_id,
+            user_id=auth.user_id,
+            target_user_id=member_user_id,
+            role=payload.role,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.post("/{conversation_id}/transfer-owner")
+async def transfer_owner(conversation_id: int, payload: OwnerTransfer, auth: AuthDep):
+    svc = get_conversation_service()
+    try:
+        return await svc.transfer_ownership(
+            conversation_id=conversation_id,
+            user_id=auth.user_id,
+            to_user_id=payload.to_user_id,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.delete("/{conversation_id}/agents/{agent_id}")
+async def remove_agent(conversation_id: int, agent_id: str, auth: AuthDep):
+    svc = get_conversation_service()
+    try:
+        return await svc.remove_agent(
+            conversation_id=conversation_id,
+            user_id=auth.user_id,
+            agent_id=agent_id,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.patch("/{conversation_id}", response_model=ConversationOut)
+async def update_conversation(
+    conversation_id: int, payload: ConversationUpdate, auth: AuthDep
+):
+    svc = get_conversation_service()
+    try:
+        row = await svc.update_conversation(
+            conversation_id=conversation_id,
+            user_id=auth.user_id,
+            name=payload.name,
+            type=payload.type,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    return {**row, "unread": 0}
+
+
+@router.delete("/{conversation_id}")
+async def dissolve_conversation(conversation_id: int, auth: AuthDep):
+    """Dissolve (archive) a group — owner only."""
+    svc = get_conversation_service()
+    try:
+        return await svc.dissolve_conversation(
+            conversation_id=conversation_id, user_id=auth.user_id
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
 @router.get("/{conversation_id}/messages", response_model=list[MessageOut])
