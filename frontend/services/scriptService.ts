@@ -103,6 +103,11 @@ export async function updateScriptViewport(
 // ─── AI Operations ───────────────────────────────────────────────────────────
 
 // ─── AI Operations (async) ───────────────────────────────────────────────────
+// These four endpoints dispatch a DBOS workflow and return a FLAT
+// `{ success, task_id }` envelope (the async-dispatch convention shared by
+// aiService / sb AI / resource AI) — task_id is TOP-LEVEL, not under `data`,
+// so they use handleResponse (raw json), NOT unwrapResponse (which reads
+// `.data` and would yield undefined → 'cannot destructure task_id').
 // These four endpoints now dispatch a DBOS workflow and return a `task_id`
 // immediately (the LLM work happens in the background). Callers watch
 // task_tracking via `useTaskCompletion(task_id, …)` and reload the script
@@ -122,7 +127,7 @@ export async function generateOutline(data: {
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
-  return unwrapResponse<{ task_id: string }>(res);
+  return handleResponse<{ task_id: string }>(res);
 }
 
 export async function expandChapter(data: {
@@ -139,7 +144,7 @@ export async function expandChapter(data: {
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
-  return unwrapResponse<{ task_id: string }>(res);
+  return handleResponse<{ task_id: string }>(res);
 }
 
 export async function createBranches(data: {
@@ -157,7 +162,7 @@ export async function createBranches(data: {
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
-  return unwrapResponse<{ task_id: string }>(res);
+  return handleResponse<{ task_id: string }>(res);
 }
 
 export async function convertToStoryboard(data: {
@@ -171,7 +176,7 @@ export async function convertToStoryboard(data: {
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
-  return unwrapResponse<{ task_id: string }>(res);
+  return handleResponse<{ task_id: string }>(res);
 }
 
 // ─── Script Assets ───────────────────────────────────────────────────────────

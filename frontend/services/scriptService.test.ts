@@ -129,7 +129,7 @@ describe('scriptService canvas + viewport', () => {
 
 describe('scriptService AI operations', () => {
   it('generateOutline returns task_id', async () => {
-    stubJson({ success: true, data: { task_id: 'tk-1' } });
+    stubJson({ success: true, task_id: 'tk-1' });
     const result = await generateOutline({
       script_id: 's1',
       premise: 'p',
@@ -139,7 +139,7 @@ describe('scriptService AI operations', () => {
   });
 
   it('expandChapter dispatches async and returns task_id', async () => {
-    const spy = stubJson({ success: true, data: { task_id: 'tk-exp' } });
+    const spy = stubJson({ success: true, task_id: 'tk-exp' });
     const result = await expandChapter({
       script_id: 's1',
       chapter_id: 'c1',
@@ -153,7 +153,7 @@ describe('scriptService AI operations', () => {
   });
 
   it('createBranches dispatches async and returns task_id', async () => {
-    const spy = stubJson({ success: true, data: { task_id: 'tk-br' } });
+    const spy = stubJson({ success: true, task_id: 'tk-br' });
     const result = await createBranches({
       script_id: 's1',
       chapter_id: 'c1',
@@ -169,7 +169,7 @@ describe('scriptService AI operations', () => {
   });
 
   it('convertToStoryboard dispatches async and returns task_id', async () => {
-    stubJson({ success: true, data: { task_id: 'tk-sb' } });
+    stubJson({ success: true, task_id: 'tk-sb' });
     const result = await convertToStoryboard({
       script_id: 's1',
       chapter_id: 'c1',
