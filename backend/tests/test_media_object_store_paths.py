@@ -196,7 +196,45 @@ async def test_generated_image_routes_to_object_store(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_generated_video_stays_filesystem(monkeypatch):
+async def test_generated_video_streams_to_object_store(monkeypatch):
+    """AI-generated SHORT video now goes to the bucket too — streamed via a
+    temp file (put_file, not put_bytes) to avoid buffering it in memory."""
+    captured = {}
+
+    async def fake_returning_one(sql, params):
+        captured.update(params)
+        return {"id": 5, **params}
+
+    async def fake_download(dest_path, source_url, **k):
+        from pathlib import Path
+
+        Path(dest_path).write_bytes(b"MP4DATA")
+        return 7
+
+    store = AsyncMock()
+    store.exists.return_value = False
+    monkeypatch.setattr(gm_svc.settings, "FEATURE_CHAT_MEDIA_OBJECT_STORE", True)
+    monkeypatch.setattr(gm_svc, "_download_to", fake_download)
+    monkeypatch.setattr(gm_svc.db_engine, "execute_returning_one", fake_returning_one)
+    with patch.object(gm_svc, "chat_media_store", return_value=store):
+        await gm_svc.register_generated_media(
+            user_id="u",
+            scope_id=9,
+            source_url="http://x/y.mp4",
+            mime="video/mp4",
+            origin=gm_svc.GenerationOrigin(kind="canvas_run"),
+        )
+    # streamed upload from a temp file, NOT an in-memory put_bytes
+    store.put_file.assert_awaited_once()
+    store.put_bytes.assert_not_awaited()
+    assert captured["file_path"].startswith("sb://chat-media/t9/")
+    assert captured["media_kind"] == "video"
+    assert captured["content_sha256"] and len(captured["content_sha256"]) == 64
+
+
+@pytest.mark.asyncio
+async def test_generated_video_falls_back_to_filesystem_on_error(tmp_path, monkeypatch):
+    """Storage failure on a generated video → streamed-to-disk filesystem."""
     captured = {}
 
     async def fake_returning_one(sql, params):
@@ -211,8 +249,9 @@ async def test_generated_video_stays_filesystem(monkeypatch):
         return 3
 
     store = AsyncMock()
+    store.exists.side_effect = RuntimeError("storage down")
     monkeypatch.setattr(gm_svc.settings, "FEATURE_CHAT_MEDIA_OBJECT_STORE", True)
-    monkeypatch.setattr(gm_svc.settings, "DOWNLOAD_PATH", "/tmp/mh-test-gen")
+    monkeypatch.setattr(gm_svc.settings, "DOWNLOAD_PATH", str(tmp_path))
     monkeypatch.setattr(gm_svc, "_download_to", fake_download)
     monkeypatch.setattr(gm_svc.db_engine, "execute_returning_one", fake_returning_one)
     with patch.object(gm_svc, "chat_media_store", return_value=store):
@@ -223,9 +262,8 @@ async def test_generated_video_stays_filesystem(monkeypatch):
             mime="video/mp4",
             origin=gm_svc.GenerationOrigin(kind="canvas_run"),
         )
-    store.put_bytes.assert_not_awaited()
+    assert "generations/" in captured["file_path"]
     assert "sb://" not in captured["file_path"]
-    assert captured["content_sha256"] is None
 
 
 @pytest.mark.asyncio

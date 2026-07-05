@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
 import mimetypes
 import os
 import re
+import tempfile
 import uuid as _uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -23,6 +26,7 @@ from app.services.library.media_storage import (
     CHAT_MEDIA_BUCKET,
     chat_media_store,
     content_key,
+    content_key_from_sha,
     to_file_path,
 )
 
@@ -84,7 +88,7 @@ async def _download_to(
 
 async def _download_to_bytes(source_url: str, *, max_bytes: int) -> bytes:
     """Stream source_url into memory, byte-capped. For small (image) blobs
-    destined for the object store — videos keep the streamed-to-disk path."""
+    destined for the object store — video streams to a temp file instead."""
     chunks: list[bytes] = []
     async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
         async with client.stream("GET", source_url) as resp:
@@ -94,9 +98,54 @@ async def _download_to_bytes(source_url: str, *, max_bytes: int) -> bytes:
     return b"".join(chunks)
 
 
-# Generated images destined for the object store are small; cap the in-memory
-# buffer well below the 512 MiB filesystem ceiling. Over-cap → filesystem.
+def _sha256_file(path: str) -> str:
+    """Stream-hash a file (no full read into memory) — for video blobs."""
+    h = hashlib.sha256()
+    with open(path, "rb") as fp:
+        for chunk in iter(lambda: fp.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+# Object-store caps: generated images buffer in memory (small); generated
+# short videos stream via a temp file (no memory blowup). Over-cap → filesystem.
 _OBJECT_STORE_IMAGE_MAX_BYTES = 16 * 1024 * 1024
+_OBJECT_STORE_VIDEO_MAX_BYTES = 256 * 1024 * 1024
+
+
+async def _write_generation_to_object_store(
+    *, scope_id: int, source_url: str, mime: str, kind: str
+) -> tuple[str, int, str]:
+    """Content-address a generated image/video into the chat-media bucket.
+
+    Returns (sb:// file_path, size_bytes, sha256). Images buffer in memory;
+    videos stream to a temp file then upload from disk (avoids memory blowup
+    and the small in-memory cap). Dedup: an already-present key skips the
+    upload. Raises on any failure so the caller falls back to the filesystem.
+    """
+    store = chat_media_store()
+    if kind == "video":
+        fd, tmp = tempfile.mkstemp(suffix=ext_for(mime, kind))
+        os.close(fd)
+        try:
+            size = await _download_to(
+                tmp, source_url, max_bytes=_OBJECT_STORE_VIDEO_MAX_BYTES
+            )
+            sha = await asyncio.to_thread(_sha256_file, tmp)
+            key = content_key_from_sha(scope_id=scope_id, sha=sha, mime=mime)
+            if not await store.exists(key):
+                await store.put_file(key, tmp, mime)
+        finally:
+            Path(tmp).unlink(missing_ok=True)
+    else:
+        data = await _download_to_bytes(
+            source_url, max_bytes=_OBJECT_STORE_IMAGE_MAX_BYTES
+        )
+        sha, key = content_key(scope_id=scope_id, data=data, mime=mime)
+        size = len(data)
+        if not await store.exists(key):
+            await store.put_bytes(key, data, mime)
+    return to_file_path(CHAT_MEDIA_BUCKET, key), size, sha
 
 
 @dataclass
@@ -126,32 +175,31 @@ async def register_generated_media(
 ) -> dict:
     """Download a generated media URL into Tier-1 and insert one row. Returns it.
 
-    Object-store path (flag on + image + within the in-memory cap): the blob is
-    buffered and content-addressed into the chat-media bucket. Any failure —
-    storage error OR over-cap — falls back to the streamed-to-disk filesystem
-    path, so a generation never fails to persist. Videos always stream to disk.
+    Object-store path (flag on + generated image/video): the blob is
+    content-addressed into the chat-media bucket — images buffer in memory,
+    short videos stream via a temp file. Any failure (storage error OR
+    over-cap) falls back to the streamed-to-disk filesystem path, so a
+    generation never fails to persist. NOTE: this covers only AI *generations*
+    (Tier-1 generated_media) — the media library's downloaded/uploaded videos
+    live on their own path and stay on the filesystem+nginx.
     """
     kind = media_kind_from_mime(mime)
     file_path: Optional[str] = None
     size: int = 0
     content_sha256: Optional[str] = None
 
-    if settings.FEATURE_CHAT_MEDIA_OBJECT_STORE and kind == "image":
+    if settings.FEATURE_CHAT_MEDIA_OBJECT_STORE and kind in ("image", "video"):
         try:
-            data = await _download_to_bytes(
-                source_url, max_bytes=_OBJECT_STORE_IMAGE_MAX_BYTES
+            file_path, size, content_sha256 = (
+                await _write_generation_to_object_store(
+                    scope_id=scope_id, source_url=source_url, mime=mime, kind=kind
+                )
             )
-            sha, key = content_key(scope_id=scope_id, data=data, mime=mime)
-            store = chat_media_store()
-            if not await store.exists(key):
-                await store.put_bytes(key, data, mime)
-            file_path = to_file_path(CHAT_MEDIA_BUCKET, key)
-            size = len(data)
-            content_sha256 = sha
         except Exception as exc:
             logger.warning(
                 f"[register_generated_media] object-store write failed, "
-                f"falling back to filesystem: scope={scope_id} error={exc!r}"
+                f"falling back to filesystem: scope={scope_id} "
+                f"kind={kind} error={exc!r}"
             )
             file_path = None  # fall through
 
