@@ -170,3 +170,12 @@ def test_location_dataclass_is_frozen():
     loc = MediaLocation(backend="filesystem", rel_path="a")
     with pytest.raises(Exception):
         loc.backend = "object_store"  # type: ignore[misc]
+
+
+@pytest.mark.asyncio
+async def test_remove_calls_proxy_with_key_list():
+    store = ObjectStore(CHAT_MEDIA_BUCKET)
+    proxy = _mock_proxy(remove=[])
+    with patch.object(store, "_proxy", new=AsyncMock(return_value=proxy)):
+        await store.remove("t1/ab/cd/h.png")
+    proxy.remove.assert_awaited_once_with(["t1/ab/cd/h.png"])

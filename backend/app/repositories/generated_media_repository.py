@@ -6,7 +6,10 @@ import base64
 import json
 from typing import Optional
 
+from loguru import logger
+
 from app.db import engine as db_engine
+from app.services.library.media_storage import ObjectStore, resolve_media_source
 
 _COLS = (
     "id, scope_id, creator_id, media_kind, mime, file_path, file_size_bytes, "
@@ -109,11 +112,49 @@ class GeneratedMediaRepository:
         )
 
     async def delete(self, gen_id: int, scope_id: int) -> bool:
+        # Capture the location BEFORE deleting so we can clean up an orphaned
+        # object-store object afterwards (filesystem cleanup is pre-existing
+        # behavior — left as-is; each fs row has a unique uuid path anyway).
+        row = await db_engine.fetch_one(
+            "SELECT file_path FROM public.generated_media "
+            "WHERE id = :id AND scope_id = :scope_id",
+            {"id": gen_id, "scope_id": scope_id},
+        )
         n = await db_engine.execute(
             "DELETE FROM public.generated_media WHERE id = :id AND scope_id = :scope_id",
             {"id": gen_id, "scope_id": scope_id},
         )
+        if n and row:
+            await self._maybe_remove_object(row.get("file_path") or "")
         return bool(n)
+
+    async def _maybe_remove_object(self, file_path: str) -> None:
+        """Remove the backing object IFF no other row still references it.
+
+        Content-addressed keys are SHARED by dedup — two generated_media rows
+        with identical bytes point at the same object. Only remove when the
+        refcount hits zero (no sibling row has the same file_path), else we'd
+        delete a live object out from under another row. A removal failure is
+        swallowed (a leaked object is acceptable; failing the delete is not).
+        """
+        if not file_path:
+            return
+        loc = resolve_media_source(file_path)
+        if not loc.is_object_store:
+            return
+        remaining = await db_engine.fetch_val(
+            "SELECT COUNT(*) FROM public.generated_media WHERE file_path = :fp",
+            {"fp": file_path},
+        )
+        if remaining and int(remaining) > 0:
+            return  # still referenced — keep the object
+        try:
+            await ObjectStore(loc.bucket).remove(loc.key)
+        except Exception as exc:
+            logger.warning(
+                f"[generated_media] object cleanup failed (leak, non-fatal): "
+                f"key={loc.key} error={exc!r}"
+            )
 
     async def mark_promoted(self, gen_id: int, resource_id: int) -> Optional[dict]:
         """Set promoted_resource_id (Tier-1 → Tier-2 link). Returns the row."""

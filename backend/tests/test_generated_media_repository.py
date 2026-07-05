@@ -186,3 +186,129 @@ async def test_list_for_scope_no_next_cursor_when_last_page(monkeypatch):
 
     assert len(result["items"]) == 2
     assert result["next_cursor"] is None
+
+
+# ---------------------------------------------------------------------------
+# Object-store cleanup on delete (Phase 1d) — dedup refcount guard
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_delete_filesystem_row_does_not_touch_object_store(monkeypatch):
+    """A legacy filesystem row deletes without any object-store call."""
+    import app.repositories.generated_media_repository as mod
+
+    repo = GeneratedMediaRepository()
+    monkeypatch.setattr(
+        mod.db_engine,
+        "fetch_one",
+        _amock(return_value={"file_path": "teams/1/chat/2026/07/05/x/a.png"}),
+    )
+    monkeypatch.setattr(mod.db_engine, "execute", _amock(return_value=1))
+    remove_called = {"n": 0}
+
+    class _Store:
+        def __init__(self, *a):
+            pass
+
+        async def remove(self, key):
+            remove_called["n"] += 1
+
+    monkeypatch.setattr(mod, "ObjectStore", _Store)
+    assert await repo.delete(1, 1) is True
+    assert remove_called["n"] == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_object_store_row_removes_when_unreferenced(monkeypatch):
+    import app.repositories.generated_media_repository as mod
+
+    repo = GeneratedMediaRepository()
+    monkeypatch.setattr(
+        mod.db_engine,
+        "fetch_one",
+        _amock(return_value={"file_path": "sb://chat-media/t1/ab/cd/h.png"}),
+    )
+    monkeypatch.setattr(mod.db_engine, "execute", _amock(return_value=1))
+    # No sibling rows reference the object → refcount 0 → remove.
+    monkeypatch.setattr(mod.db_engine, "fetch_val", _amock(return_value=0))
+    removed = {"key": None}
+
+    class _Store:
+        def __init__(self, bucket):
+            self.bucket = bucket
+
+        async def remove(self, key):
+            removed["key"] = key
+
+    monkeypatch.setattr(mod, "ObjectStore", _Store)
+    assert await repo.delete(1, 1) is True
+    assert removed["key"] == "t1/ab/cd/h.png"
+
+
+@pytest.mark.asyncio
+async def test_delete_object_store_row_keeps_object_when_still_referenced(monkeypatch):
+    """Dedup: a sibling row shares the object → must NOT remove it."""
+    import app.repositories.generated_media_repository as mod
+
+    repo = GeneratedMediaRepository()
+    monkeypatch.setattr(
+        mod.db_engine,
+        "fetch_one",
+        _amock(return_value={"file_path": "sb://chat-media/t1/ab/cd/h.png"}),
+    )
+    monkeypatch.setattr(mod.db_engine, "execute", _amock(return_value=1))
+    monkeypatch.setattr(mod.db_engine, "fetch_val", _amock(return_value=1))  # sibling
+    remove_called = {"n": 0}
+
+    class _Store:
+        def __init__(self, *a):
+            pass
+
+        async def remove(self, key):
+            remove_called["n"] += 1
+
+    monkeypatch.setattr(mod, "ObjectStore", _Store)
+    assert await repo.delete(1, 1) is True
+    assert remove_called["n"] == 0  # kept — still referenced
+
+
+@pytest.mark.asyncio
+async def test_delete_object_cleanup_failure_still_succeeds(monkeypatch):
+    """A remove() failure must NOT fail the delete (object leak is acceptable)."""
+    import app.repositories.generated_media_repository as mod
+
+    repo = GeneratedMediaRepository()
+    monkeypatch.setattr(
+        mod.db_engine,
+        "fetch_one",
+        _amock(return_value={"file_path": "sb://chat-media/t1/ab/cd/h.png"}),
+    )
+    monkeypatch.setattr(mod.db_engine, "execute", _amock(return_value=1))
+    monkeypatch.setattr(mod.db_engine, "fetch_val", _amock(return_value=0))
+
+    class _Store:
+        def __init__(self, *a):
+            pass
+
+        async def remove(self, key):
+            raise RuntimeError("storage down")
+
+    monkeypatch.setattr(mod, "ObjectStore", _Store)
+    assert await repo.delete(1, 1) is True  # still True despite cleanup failure
+
+
+@pytest.mark.asyncio
+async def test_delete_missing_row_returns_false(monkeypatch):
+    import app.repositories.generated_media_repository as mod
+
+    repo = GeneratedMediaRepository()
+    monkeypatch.setattr(mod.db_engine, "fetch_one", _amock(return_value=None))
+    monkeypatch.setattr(mod.db_engine, "execute", _amock(return_value=0))
+    assert await repo.delete(1, 1) is False
+
+
+def _amock(return_value):
+    from unittest.mock import AsyncMock
+
+    return AsyncMock(return_value=return_value)
