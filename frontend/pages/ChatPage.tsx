@@ -23,7 +23,9 @@ import { MessageList } from '../components/chat/MessageList';
 import { Composer } from '../components/chat/Composer';
 import { TypingIndicator } from '../components/chat/TypingIndicator';
 import CreateGroupModal from '../components/chat/CreateGroupModal';
-import GroupSettingsDrawer from '../components/chat/GroupSettingsDrawer';
+import { createPortal } from 'react-dom';
+import GroupSettingsPanel, { GroupSettingsOverlay } from '../components/chat/GroupSettingsDrawer';
+import { useIslandWork } from '../contexts/IslandWorkContext';
 import ResourcePicker from '../components/chat/ResourcePicker';
 
 import type { Channel, ChatMessage, ResourceItem } from '../types';
@@ -63,6 +65,38 @@ export function ChatPage(): React.ReactElement {
    * selecting a channel sets activeAgentDm=null.
    */
   const [activeAgentDm, setActiveAgentDm] = useState<string | null>(null);
+
+  // ── Info island wiring (group settings panel) ──────────────────────────────
+  // The settings panel portals into the shell's right info island — the same
+  // slot the resource library's info panel uses — so width, splitter, and the
+  // reopen handle are shell-owned and the look matches across pages.
+  const { infoIslandEl, infoVisible, setInfoVisible, setInfoAvailable } = useIslandWork();
+  const settingsChannel =
+    activeAgentDm === null
+      ? (channels.find((c) => c.id === activeId && c.type !== 'dm') ?? null)
+      : null;
+  const settingsAvailable = settingsChannel !== null;
+
+  useEffect(() => {
+    setInfoAvailable(settingsAvailable);
+    if (!settingsAvailable) setShowSettings(false);
+    return () => {
+      // Leaving the page: release the slot so other pages start clean.
+      setInfoAvailable(false);
+      setInfoVisible(false);
+    };
+  }, [settingsAvailable, setInfoAvailable, setInfoVisible]);
+
+  // showSettings → infoVisible is the forward direction; the reopen handle
+  // flips infoVisible→true, which we mirror back (loop-safe: the collapse
+  // direction only ever flows showSettings→false→infoVisible, mirroring the
+  // ResourcesShell asymmetry).
+  useEffect(() => {
+    setInfoVisible(showSettings && settingsAvailable);
+  }, [showSettings, settingsAvailable, setInfoVisible]);
+  useEffect(() => {
+    if (infoVisible && settingsAvailable && !showSettings) setShowSettings(true);
+  }, [infoVisible, settingsAvailable, showSettings]);
 
   /** People that can be @-mentioned in the Composer (current team members, excluding self). */
   const [membersForComposer, setMembersForComposer] = useState<{ user_id: string; label: string }[]>([]);
@@ -738,29 +772,37 @@ export function ChatPage(): React.ReactElement {
           onSelect={handleSendMedia}
         />
       )}
-      {activeChannel && selectedTeamId && currentUserId && (
-        <GroupSettingsDrawer
-          channel={activeChannel}
-          teamId={selectedTeamId}
-          currentUserId={currentUserId}
-          open={showSettings}
-          onClose={() => setShowSettings(false)}
-          onChannelUpdated={(ch) =>
-            // Merge only the edited fields — the PATCH response carries
-            // unread:0 / mentions:0 defaults that would clobber live badges.
+      {showSettings && settingsChannel && selectedTeamId && currentUserId && (() => {
+        const panelProps = {
+          channel: settingsChannel,
+          teamId: selectedTeamId,
+          currentUserId,
+          onClose: () => setShowSettings(false),
+          // Merge only the edited fields — the PATCH response carries
+          // unread:0 / mentions:0 defaults that would clobber live badges.
+          onChannelUpdated: (ch: Channel) =>
             setChannels((prev) =>
               prev.map((c) =>
                 c.id === ch.id ? { ...c, name: ch.name, type: ch.type } : c,
               ),
-            )
-          }
-          onLeftOrDissolved={() => {
+            ),
+          onLeftOrDissolved: () => {
             setShowSettings(false);
-            setChannels((prev) => prev.filter((c) => c.id !== activeChannel.id));
+            setChannels((prev) => prev.filter((c) => c.id !== settingsChannel.id));
             setActiveId(null);
-          }}
-        />
-      )}
+          },
+        };
+        // Portal into the shell's info island when the frame is mounted
+        // (≥sm); fall back to a fixed overlay on viewports without it.
+        return infoIslandEl ? (
+          createPortal(
+            <GroupSettingsPanel key={settingsChannel.id} {...panelProps} />,
+            infoIslandEl,
+          )
+        ) : (
+          <GroupSettingsOverlay key={settingsChannel.id} {...panelProps} />
+        );
+      })()}
     </div>
   );
 }

@@ -26,7 +26,6 @@ interface Props {
   channel: Channel;
   teamId: string;
   currentUserId: string;
-  open: boolean;
   onClose: () => void;
   /** Called after rename / visibility change so the sidebar stays in sync. */
   onChannelUpdated: (ch: Channel) => void;
@@ -43,18 +42,23 @@ function initials(str: string): string {
 }
 
 /**
- * Feishu-style group settings drawer: group info, member list with role
- * badges + owner/admin actions (set admin, transfer owner, remove), add
+ * Group settings panel: group info, member list with role badges +
+ * owner/admin actions (set admin, transfer owner, remove), add
  * members/agents pickers, leave/dissolve footer.
+ *
+ * Renders BARE (no overlay, no own island chrome) — ChatPage portals it
+ * into the IslandShell info island, the same slot the resource library's
+ * info panel lives in, so width/splitter/reopen are shell-owned and the
+ * styling matches. Mount = open: fetch runs on mount, so the parent gates
+ * rendering instead of passing an `open` prop.
  *
  * Destructive actions use a two-step inline confirm (first click arms the
  * button, second click fires) instead of a blocking browser confirm().
  */
-export default function GroupSettingsDrawer({
+export default function GroupSettingsPanel({
   channel,
   teamId,
   currentUserId,
-  open,
   onClose,
   onChannelUpdated,
   onLeftOrDissolved,
@@ -112,7 +116,6 @@ export default function GroupSettingsDrawer({
   }, [channel.id]);
 
   useEffect(() => {
-    if (!open) return;
     setArming(null);
     setEditingName(false);
     setNameDraft(channel.name ?? '');
@@ -141,9 +144,7 @@ export default function GroupSettingsDrawer({
     return () => {
       cancelled = true;
     };
-  }, [open, channel.id, teamId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  if (!open) return null;
+  }, [channel.id, teamId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Run an action with busy-guard + toast-on-error + member refresh. */
   async function run(action: () => Promise<void>, errKey: string): Promise<void> {
@@ -286,27 +287,22 @@ export default function GroupSettingsDrawer({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/50 backdrop-blur-[1px]"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="w-[380px] h-full bg-island border-l border-line-strong flex flex-col overflow-hidden">
-        {/* ── Header ── */}
-        <div className="flex items-center justify-between px-5 py-[16px] border-b border-line flex-shrink-0">
-          <h3 className="text-[15px] font-semibold text-content leading-none">
+    <div className="h-full flex flex-col">
+        {/* ── Header — mirrors ResourceInfoPanel's header grammar ── */}
+        <div className="flex items-center justify-between p-4 border-b border-line flex-shrink-0 bg-island sticky top-0 z-10">
+          <h3 className="text-sm font-semibold text-content select-none">
             {t('chat.groupSettings.title')}
           </h3>
           <button
             onClick={onClose}
-            className="w-[26px] h-[26px] rounded-[7px] grid place-items-center text-content-3 hover:text-content-2 hover:bg-white/[.06] transition-colors"
+            className="p-1.5 text-content-3 hover:text-content hover:bg-island-2 rounded-lg transition-colors"
             aria-label="Close"
           >
-            <X size={14} strokeWidth={2} />
+            <X size={16} />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-5">
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 flex flex-col gap-5">
           {loading ? (
             <div className="py-10 text-center text-[13px] text-content-3">
               {t('chat.groupSettings.loading')}
@@ -548,7 +544,7 @@ export default function GroupSettingsDrawer({
 
         {/* ── Footer: leave / dissolve ── */}
         {!loading && selfInGroup && (
-          <div className="px-5 py-[14px] border-t border-line flex-shrink-0 flex flex-col gap-2">
+          <div className="px-4 py-[14px] border-t border-line flex-shrink-0 flex flex-col gap-2">
             {!isOwner && (
               <button
                 type="button"
@@ -587,6 +583,25 @@ export default function GroupSettingsDrawer({
             )}
           </div>
         )}
+    </div>
+  );
+}
+
+/**
+ * Overlay fallback for viewports without the island frame (the shell's
+ * info-island target only mounts ≥sm): wraps the bare panel in a fixed
+ * right-side sheet with a backdrop.
+ */
+export function GroupSettingsOverlay(props: Props) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex justify-end bg-black/50 backdrop-blur-[1px]"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) props.onClose();
+      }}
+    >
+      <div className="w-[380px] max-w-full h-full bg-island border-l border-line-strong overflow-hidden">
+        <GroupSettingsPanel {...props} />
       </div>
     </div>
   );
