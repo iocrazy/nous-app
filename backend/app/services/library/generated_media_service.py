@@ -8,6 +8,7 @@ import os
 import re
 import uuid as _uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -20,6 +21,18 @@ from app.core.config import settings
 from app.db import engine as db_engine
 
 _DEFAULT_MAX_BYTES = 512 * 1024 * 1024  # 512 MiB ceiling per generation
+
+
+def _date_bucket() -> str:
+    """UTC yyyy/mm/dd path segment for new media writes.
+
+    Without it every upload/generation lands a new uuid dir in one flat
+    parent (teams/{scope}/chat/, …/generations/) whose entry count grows
+    unbounded — large directories slow listing and lookups on the NAS.
+    Read paths are unaffected: consumers resolve files via the
+    generated_media.file_path column, so pre-bucket rows keep working.
+    """
+    return datetime.now(timezone.utc).strftime("%Y/%m/%d")
 
 
 def media_kind_from_mime(mime: str) -> str:
@@ -91,7 +104,10 @@ async def register_generated_media(
     """Download a generated media URL into Tier-1 and insert one row. Returns it."""
     kind = media_kind_from_mime(mime)
     gen_uuid = _uuid.uuid4().hex
-    rel = f"teams/{scope_id}/generations/{gen_uuid}/media{ext_for(mime, kind)}"
+    rel = (
+        f"teams/{scope_id}/generations/{_date_bucket()}/"
+        f"{gen_uuid}/media{ext_for(mime, kind)}"
+    )
     dest = f"{settings.DOWNLOAD_PATH}/{rel}"
     size = await _download_to(dest, source_url)
     row = await db_engine.execute_returning_one(
@@ -148,7 +164,7 @@ async def register_uploaded_media(
     """Write uploaded bytes into the staged store and insert one row. Returns it."""
     kind = media_kind_from_mime(mime)
     gen_uuid = _uuid.uuid4().hex
-    rel = f"teams/{scope_id}/{subdir}/{gen_uuid}/{_safe_filename(filename)}"
+    rel = f"teams/{scope_id}/{subdir}/{_date_bucket()}/{gen_uuid}/{_safe_filename(filename)}"
     dest = f"{settings.DOWNLOAD_PATH}/{rel}"
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     part = dest + ".part"
