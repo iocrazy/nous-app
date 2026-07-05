@@ -14,17 +14,22 @@ Security contract (CHAT-SEC-AGENT-08, CHAT-AGENT-07, CHAT-PERM-10):
 
 from __future__ import annotations
 
+import asyncio
+import base64
+from pathlib import Path
 from typing import Any, Optional
 from uuid import UUID
 
 from loguru import logger
 
 from app.core.config import settings
+from app.db import engine as db_engine
 from app.repositories.agent_repository import get_agent_repository
 from app.repositories.conversation_repository import get_conversation_repository
 from app.repositories.skill_repository import get_skill_repository
 from app.services.ai.adapters.factory import provider_key_for_model
 from app.services.ai.chat.ai_library_chat_wiring import build_agent_runner_stack
+from app.services.ai.model_capabilities import model_supports_vision
 from app.services.ai.permissions.agent_chat_caps import agent_chat_caps
 from app.services.ai.prompts.prompt_composer import ComposerInput, PromptComposer
 from app.services.ai.runner.run_recorder import RunRecorder
@@ -77,6 +82,9 @@ def _render_body(body: Any, type: str) -> str:  # noqa: A002
         return str(body)
     if type == "text":
         return str(body.get("text", ""))
+    if type == "image":
+        alt = body.get("alt") or body.get("filename") or ""
+        return f"[image: {alt}]" if alt else "[image]"
     if type in ("media_card", "task_card"):
         title = body.get("title") or body.get("name") or ""
         label = "media card" if type == "media_card" else "task card"
@@ -84,16 +92,100 @@ def _render_body(body: Any, type: str) -> str:  # noqa: A002
     return str(body)
 
 
-def _map_message(msg: dict[str, Any]) -> dict[str, str]:
+def _map_message(msg: dict[str, Any]) -> dict[str, Any]:
     """Map a messages row to an LLM-compatible {role, content} dict."""
     role = "assistant" if msg.get("sender_type") == "agent" else "user"
     content = _render_body(msg.get("body"), msg.get("type", "text"))
     return {"role": role, "content": content}
 
 
-def _build_history(msgs: list[dict[str, Any]]) -> list[dict[str, str]]:
+def _build_history(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Convert recent conversation messages to LLM conversation history."""
     return [_map_message(m) for m in msgs]
+
+
+# ── Vision: inline chat images as multimodal content blocks ─────────────────
+#
+# Without this the model only ever saw "[image: name]" placeholders (before
+# that, a raw body dict) and told users it "cannot read images". When the
+# resolved model supports vision, the newest N image messages are re-rendered
+# as OpenAI-style multipart content with a base64 data URL — providers can't
+# fetch our auth-gated attachment endpoints, and the worker shares the storage
+# volume, so reading bytes locally is both simplest and safest.
+
+_MAX_VISION_IMAGES = 4
+_MAX_VISION_IMAGE_BYTES = 8 * 1024 * 1024
+
+
+async def _inject_image_blocks(
+    history: list[dict[str, Any]],
+    recent: list[dict[str, Any]],
+    *,
+    model: str,
+    provider: Optional[str],
+    conversation_id: int,
+) -> int:
+    """Mutate *history* in place: turn image messages into multimodal blocks.
+
+    `history` and `recent` are index-aligned (_build_history is a 1:1 map).
+    Only attachments registered to THIS conversation are inlined — an
+    id-swapped body pointing at another conversation's media is skipped
+    (defense against cross-conversation exfiltration via crafted bodies).
+    Returns the number of images inlined.
+    """
+    if not model or not await model_supports_vision(model, provider):
+        return 0
+    injected = 0
+    for idx in range(len(recent) - 1, -1, -1):
+        if injected >= _MAX_VISION_IMAGES:
+            break
+        msg = recent[idx]
+        if msg.get("type") != "image":
+            continue
+        body = msg.get("body") or {}
+        gm_id = body.get("generated_media_id")
+        if not gm_id:
+            continue
+        try:
+            row = await db_engine.fetch_one(
+                "SELECT file_path, mime, file_size_bytes, conversation_id "
+                "FROM generated_media WHERE id = :id",
+                {"id": int(gm_id)},
+            )
+        except (ValueError, TypeError):
+            continue
+        if row is None or str(row.get("conversation_id")) != str(conversation_id):
+            continue
+        if (row.get("file_size_bytes") or 0) > _MAX_VISION_IMAGE_BYTES:
+            logger.info(
+                f"[conversation_agent_turn] vision_skip_oversize: "
+                f"media={gm_id} bytes={row.get('file_size_bytes')}"
+            )
+            continue
+        path = Path(f"{settings.DOWNLOAD_PATH}/{row['file_path']}")
+        try:
+            data = await asyncio.to_thread(path.read_bytes)
+        except OSError as exc:
+            logger.warning(
+                f"[conversation_agent_turn] vision_read_failed: "
+                f"media={gm_id} error={exc!r}"
+            )
+            continue
+        b64 = base64.b64encode(data).decode("ascii")
+        mime = row.get("mime") or "image/png"
+        alt = str(body.get("alt") or "image")
+        history[idx] = {
+            "role": history[idx]["role"],
+            "content": [
+                {"type": "text", "text": f"[image: {alt}]"},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{mime};base64,{b64}"},
+                },
+            ],
+        }
+        injected += 1
+    return injected
 
 
 def _build_resource_fetch_handler(
@@ -274,6 +366,28 @@ async def run_conversation_agent_turn(
         provider: Optional[str] = provider_key_for_model(model) if model else None
     except Exception:
         provider = None
+
+    # Vision: once the model is known, inline recent chat images as
+    # multimodal blocks (no-op for text-only models — they keep the
+    # "[image: …]" placeholders). Failure here must never kill the turn.
+    try:
+        injected = await _inject_image_blocks(
+            history,
+            recent,
+            model=model,
+            provider=provider,
+            conversation_id=int(conversation_id),
+        )
+        if injected:
+            logger.info(
+                f"[conversation_agent_turn] vision_inlined: "
+                f"agent={agent_slug} conversation={conversation_id} images={injected}"
+            )
+    except Exception as exc:
+        logger.warning(
+            f"[conversation_agent_turn] vision_inject_failed: "
+            f"agent={agent_slug} conversation={conversation_id} error={exc!r}"
+        )
 
     # Gate 5 — run turn inside RunRecorder; clean up on exit.
     result: Optional[dict[str, Any]] = None
