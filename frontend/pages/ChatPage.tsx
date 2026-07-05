@@ -58,6 +58,10 @@ export function ChatPage(): React.ReactElement {
   const [showCreate, setShowCreate] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  /** Files staged in the composer; uploaded only when the user hits send. */
+  const [pendingAttachments, setPendingAttachments] = useState<
+    { id: string; file: File; previewUrl: string }[]
+  >([]);
 
   /**
    * When non-null, the user has opened a DM with an agent (by slug).
@@ -107,6 +111,15 @@ export function ChatPage(): React.ReactElement {
   useEffect(() => {
     if (infoVisible && settingsAvailable && !showSettings) setShowSettings(true);
   }, [infoVisible, settingsAvailable, showSettings]);
+
+  // Switching conversations drops staged composer files (they belong to the
+  // previous conversation); revoke the object URLs so previews don't leak.
+  useEffect(() => {
+    setPendingAttachments((prev) => {
+      prev.forEach((a) => URL.revokeObjectURL(a.previewUrl));
+      return [];
+    });
+  }, [activeId]);
 
   /** People that can be @-mentioned in the Composer (current team members, excluding self). */
   const [membersForComposer, setMembersForComposer] = useState<{ user_id: string; label: string }[]>([]);
@@ -474,30 +487,50 @@ export function ChatPage(): React.ReactElement {
   // ── Send message ──────────────────────────────────────────────────────────
 
   const handleSend = useCallback(
-    (text: string, mentionUserIds: string[]) => {
+    async (text: string, mentionUserIds: string[]) => {
       if (!activeId || sending) return;
+      const staged = pendingAttachments;
+      if (!text && staged.length === 0) return;
 
       setSending(true);
-
-      const body: Record<string, unknown> = { text };
-      if (mentionUserIds.length > 0) {
-        body.mention_user_ids = mentionUserIds;
+      try {
+        // Staged files first (uploaded only now — picking a file never sends
+        // on its own), then the text message so the caption reads under them.
+        for (const att of staged) {
+          const uploaded = await svc.uploadConversationImage(activeId, att.file);
+          const sent = await svc.sendMessage(
+            activeId,
+            {
+              kind: 'image',
+              generated_media_id: uploaded.id,
+              image_url: uploaded.url,
+              alt: att.file.name,
+              mime: uploaded.mime,
+            },
+            'image',
+          );
+          if (activeIdRef.current === activeId) appendMessage(sent);
+        }
+        if (staged.length > 0) {
+          staged.forEach((a) => URL.revokeObjectURL(a.previewUrl));
+          setPendingAttachments([]);
+        }
+        if (text) {
+          const body: Record<string, unknown> = { text };
+          if (mentionUserIds.length > 0) {
+            body.mention_user_ids = mentionUserIds;
+          }
+          const sent = await svc.sendMessage(activeId, body);
+          if (activeIdRef.current === activeId) appendMessage(sent);
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        addToast(t('chat.errorSend', { error: msg }), 'error');
+      } finally {
+        setSending(false);
       }
-
-      svc
-        .sendMessage(activeId, body)
-        .then((sent) => {
-          appendMessage(sent);
-        })
-        .catch((err: unknown) => {
-          const msg = err instanceof Error ? err.message : String(err);
-          addToast(t('chat.errorSend', { error: msg }), 'error');
-        })
-        .finally(() => {
-          setSending(false);
-        });
     },
-    [activeId, sending, appendMessage, addToast, t],
+    [activeId, sending, pendingAttachments, appendMessage, addToast, t],
   );
 
   // ── Send media card ───────────────────────────────────────────────────────
@@ -550,10 +583,10 @@ export function ChatPage(): React.ReactElement {
     [activeId, appendMessage, addToast, t],
   );
 
-  // ── Upload inline images ─────────────────────────────────────────────────
+  // ── Stage inline images (uploaded at send time, not on pick) ─────────────
 
   const handleAttachFiles = useCallback(
-    async (files: File[]) => {
+    (files: File[]) => {
       const channelId = activeIdRef.current;
       if (!channelId || !selectedTeamId || files.length === 0 || sending) return;
 
@@ -568,44 +601,25 @@ export function ChatPage(): React.ReactElement {
         return;
       }
 
-      setSending(true);
-      addToast(t('chat.image.uploading'), 'info');
-      try {
-        for (const file of files) {
-          const attachment = await conversationService.uploadConversationImage(
-            channelId,
-            file,
-          );
-          const sent = await conversationService.sendMessage(
-            channelId,
-            {
-              kind: 'image',
-              generated_media_id: attachment.id,
-              image_url: attachment.url,
-              alt: file.name,
-              mime: attachment.mime,
-            },
-            'image',
-          );
-          if (activeIdRef.current === channelId) {
-            appendMessage(sent);
-          }
-        }
-      } catch (err) {
-        console.error('[ChatPage] upload image failed', err);
-        addToast(t('chat.image.uploadError'), 'error');
-      } finally {
-        setSending(false);
-      }
+      setPendingAttachments((prev) => [
+        ...prev,
+        ...files.map((file) => ({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          file,
+          previewUrl: URL.createObjectURL(file),
+        })),
+      ]);
     },
-    [
-      selectedTeamId,
-      sending,
-      appendMessage,
-      addToast,
-      t,
-    ],
+    [selectedTeamId, sending, addToast, t],
   );
+
+  const handleRemoveAttachment = useCallback((id: string) => {
+    setPendingAttachments((prev) => {
+      const target = prev.find((a) => a.id === id);
+      if (target) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((a) => a.id !== id);
+    });
+  }, []);
 
   const handleSaveImage = useCallback(
     async (generatedMediaId: string, scope: 'team' | 'personal') => {
@@ -746,6 +760,12 @@ export function ChatPage(): React.ReactElement {
                   onSend={handleSend}
                   onAttachMedia={() => setShowPicker(true)}
                   onAttachFiles={handleAttachFiles}
+                  attachments={pendingAttachments.map((a) => ({
+                    id: a.id,
+                    name: a.file.name,
+                    previewUrl: a.previewUrl,
+                  }))}
+                  onRemoveAttachment={handleRemoveAttachment}
                   onTyping={sendTyping}
                   disabled={sending || !activeId}
                   placeholder={

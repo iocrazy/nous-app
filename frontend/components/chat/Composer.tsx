@@ -17,18 +17,32 @@
 
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Paperclip, Image, AtSign, Send } from 'lucide-react';
+import { Paperclip, Layers, AtSign, Send, X } from 'lucide-react';
 import { MentionDropdown, type MentionCandidate } from './MentionDropdown';
 import { useComposerPaste } from '../../hooks/useComposerPaste';
 import { useComposerDropzone } from '../../hooks/useComposerDropzone';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+export interface ComposerAttachment {
+  id: string;
+  name: string;
+  /** Object URL for the thumbnail preview. */
+  previewUrl: string;
+}
+
 export interface ComposerProps {
   onSend: (text: string, mentionUserIds: string[]) => void;
   onAttachMedia?: () => void;
   /** Called when the user picks, pastes, or drops image files. */
   onAttachFiles?: (files: File[]) => void;
+  /**
+   * Staged (not-yet-sent) attachments, shown as removable thumbnails above
+   * the textarea. Files are uploaded at SEND time, together with the text —
+   * picking a file must never fire a message on its own.
+   */
+  attachments?: ComposerAttachment[];
+  onRemoveAttachment?: (id: string) => void;
   /** Called on each input change when content is non-empty. Hook-side throttling applies. */
   onTyping?: () => void;
   disabled?: boolean;
@@ -64,6 +78,8 @@ export function Composer({
   onSend,
   onAttachMedia,
   onAttachFiles,
+  attachments = [],
+  onRemoveAttachment,
   onTyping,
   disabled = false,
   placeholder,
@@ -142,7 +158,9 @@ export function Composer({
     const el = textareaRef.current;
     if (!el || disabled) return;
     const text = el.value.trim();
-    if (!text) return;
+    // Attachments alone are a valid send; empty text is only a no-op when
+    // there is nothing staged either.
+    if (!text && attachments.length === 0) return;
 
     // Keep only ids whose @<label> token is still present in the message.
     // Guard against prefix collisions: "@Alice" must not match inside "@Alice Smith"
@@ -177,7 +195,7 @@ export function Composer({
     mentionMapRef.current.clear();
     setMentionQuery(null);
     setActiveIndex(0);
-  }, [disabled, onSend]);
+  }, [disabled, onSend, attachments.length]);
 
   // ── keyboard ───────────────────────────────────────────────────────────────
 
@@ -303,6 +321,35 @@ export function Composer({
           onPick={handlePick}
         />
 
+        {/* Staged attachments — removable thumbnails; uploaded on send. */}
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-2">
+            {attachments.map((a) => (
+              <div
+                key={a.id}
+                className="relative group/att w-[52px] h-[52px] rounded-[8px] overflow-hidden border border-line-strong bg-island-2"
+                title={a.name}
+              >
+                <img
+                  src={a.previewUrl}
+                  alt={a.name}
+                  className="w-full h-full object-cover"
+                />
+                {onRemoveAttachment && (
+                  <button
+                    type="button"
+                    onClick={() => onRemoveAttachment(a.id)}
+                    aria-label={t('chat.image.removeAttachment')}
+                    className="absolute top-[2px] right-[2px] w-[16px] h-[16px] rounded-full grid place-items-center bg-black/70 text-white opacity-0 group-hover/att:opacity-100 transition-opacity"
+                  >
+                    <X size={10} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
         <textarea
           ref={textareaRef}
           disabled={disabled}
@@ -335,6 +382,8 @@ export function Composer({
               <Paperclip size={14} />
             </button>
           )}
+          {/* Layers matches the Resources nav icon — this button inserts a
+              file FROM the library, not an image upload (that's the clip). */}
           <button
             type="button"
             disabled={disabled}
@@ -342,7 +391,7 @@ export function Composer({
             title={t('chat.attachMedia')}
             className="w-[30px] h-[30px] rounded-[8px] grid place-items-center text-content-3 hover:text-content hover:bg-island-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
-            <Image size={14} />
+            <Layers size={14} />
           </button>
           <button
             type="button"

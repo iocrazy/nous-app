@@ -341,3 +341,46 @@ describe('Composer @mention dropdown logic', () => {
     expect(screen.queryByTitle('chat.attachResource')).toBeTruthy();
   });
 });
+
+describe('Composer staged attachments', () => {
+  const onSend = vi.fn();
+
+  beforeEach(() => {
+    onSend.mockClear();
+  });
+
+  const ATTACHMENTS = [
+    { id: 'a1', name: 'shot.png', previewUrl: 'blob:mock-1' },
+    { id: 'a2', name: 'frame.jpg', previewUrl: 'blob:mock-2' },
+  ];
+
+  it('renders a thumbnail per staged attachment', () => {
+    render(
+      <Composer onSend={onSend} attachments={ATTACHMENTS} onRemoveAttachment={vi.fn()} />,
+    );
+    expect(screen.getByTitle('shot.png')).toBeTruthy();
+    expect(screen.getByTitle('frame.jpg')).toBeTruthy();
+  });
+
+  it('remove button reports the attachment id', () => {
+    const onRemove = vi.fn();
+    render(
+      <Composer onSend={onSend} attachments={ATTACHMENTS} onRemoveAttachment={onRemove} />,
+    );
+    const removeButtons = screen.getAllByLabelText('chat.image.removeAttachment');
+    fireEvent.click(removeButtons[0]);
+    expect(onRemove).toHaveBeenCalledWith('a1');
+  });
+
+  it('allows sending with empty text when attachments are staged', () => {
+    render(<Composer onSend={onSend} attachments={ATTACHMENTS} />);
+    fireEvent.click(screen.getByTitle('chat.send'));
+    expect(onSend).toHaveBeenCalledWith('', []);
+  });
+
+  it('still blocks empty sends when nothing is staged', () => {
+    render(<Composer onSend={onSend} attachments={[]} />);
+    fireEvent.click(screen.getByTitle('chat.send'));
+    expect(onSend).not.toHaveBeenCalled();
+  });
+});

@@ -1655,7 +1655,8 @@
       "saveTeam": "Save to team library",
       "savePersonal": "Save to personal library",
       "saved": "Image saved to library",
-      "saveError": "Failed to save image"
+      "saveError": "Failed to save image",
+      "removeAttachment": "Remove attachment"
     }
   },
   "mcp": {

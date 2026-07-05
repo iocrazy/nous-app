@@ -32,8 +32,12 @@ function Toggle({
           checked ? 'bg-indigo-500' : 'bg-ink-700'
         }`}
       >
+        {/* left-0 is load-bearing: an absolutely-positioned element with no
+            left/right sits at its STATIC position, and <button> centers its
+            content — so the knob started mid-track and the ON translate
+            pushed it outside the pill entirely. */}
         <span
-          className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+          className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
             checked ? 'translate-x-[18px]' : 'translate-x-0.5'
           }`}
         />
