@@ -814,7 +814,7 @@ async def test_add_members_rejected_on_direct_agent_conversation():
     from app.services.conversation_service import ConversationService
 
     svc = ConversationService(repo)
-    with pytest.raises(PermissionError, match="direct agent"):
+    with pytest.raises(PermissionError, match="conversation type"):
         await svc.add_members(conversation_id=1, user_id="owner", user_ids=["u2"])
     repo.add_members.assert_not_called()
 

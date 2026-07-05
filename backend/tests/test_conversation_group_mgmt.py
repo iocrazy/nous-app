@@ -28,7 +28,9 @@ ROLES = {OWNER: "owner", ADMIN: "admin", MEMBER: "member"}
 
 
 def _make_repo(
-    conv_type: str = "group", roles: dict[str, str] | None = None
+    conv_type: str = "group",
+    roles: dict[str, str] | None = None,
+    archived_at: object = None,
 ) -> AsyncMock:
     repo = AsyncMock()
     role_map = ROLES if roles is None else roles
@@ -44,6 +46,7 @@ def _make_repo(
     repo.conversation_scope_and_type.return_value = {
         "scope_id": 99,
         "type": conv_type,
+        "archived_at": archived_at,
     }
     repo.list_members.return_value = []
     repo.remove_user_member.return_value = True
@@ -290,3 +293,67 @@ async def test_non_owner_cannot_dissolve(actor: str):
     repo = _make_repo()
     with pytest.raises(PermissionError):
         await _svc(repo).dissolve_conversation(conversation_id=1, user_id=actor)
+
+
+# ── Hardening: TOCTOU / archived / oracle (adversarial review 2026-07-04) ────
+
+
+@pytest.mark.asyncio
+async def test_remove_member_zero_rows_raises():
+    """Guarded DELETE hit 0 rows (target became owner concurrently) → 400."""
+    repo = _make_repo()
+    repo.remove_user_member.return_value = False
+    with pytest.raises(ValueError, match="state changed"):
+        await _svc(repo).remove_member(
+            conversation_id=1, user_id=OWNER, target_user_id=MEMBER
+        )
+
+
+@pytest.mark.asyncio
+async def test_set_role_zero_rows_raises():
+    repo = _make_repo()
+    repo.set_member_role.return_value = False
+    with pytest.raises(ValueError, match="state changed"):
+        await _svc(repo).set_member_role(
+            conversation_id=1, user_id=OWNER, target_user_id=MEMBER, role="admin"
+        )
+
+
+@pytest.mark.asyncio
+async def test_archived_group_rejects_management():
+    """Dissolved (archived) groups are gone — management actions 400."""
+    repo = _make_repo(archived_at="2026-07-04T00:00:00Z")
+    svc = _svc(repo)
+    with pytest.raises(ValueError, match="not found"):
+        await svc.remove_member(conversation_id=1, user_id=OWNER, target_user_id=MEMBER)
+    with pytest.raises(ValueError, match="not found"):
+        await svc.update_conversation(conversation_id=1, user_id=OWNER, name="X")
+    with pytest.raises(ValueError, match="not found"):
+        await svc.dissolve_conversation(conversation_id=1, user_id=OWNER)
+
+
+@pytest.mark.asyncio
+async def test_outsider_gets_uniform_not_a_member():
+    """Membership is checked before conversation lookup — no existence oracle."""
+    for conv_type in ("group", "direct_agent"):
+        repo = _make_repo(conv_type=conv_type)
+        svc = _svc(repo)
+        with pytest.raises(PermissionError, match="not a member"):
+            await svc.remove_member(
+                conversation_id=1, user_id=OUTSIDER, target_user_id=MEMBER
+            )
+        with pytest.raises(PermissionError, match="not a member"):
+            await svc.dissolve_conversation(conversation_id=1, user_id=OUTSIDER)
+        # The conversation row must not even be fetched for outsiders.
+        repo.conversation_scope_and_type.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_add_members_blocked_for_dm():
+    repo = _make_repo(conv_type="dm")
+    repo.is_member.side_effect = None
+    repo.is_member.return_value = True
+    with pytest.raises(PermissionError, match="conversation type"):
+        await _svc(repo).add_members(
+            conversation_id=1, user_id=OWNER, user_ids=[MEMBER]
+        )

@@ -74,14 +74,18 @@ export default function GroupSettingsDrawer({
   /** Action key currently armed for its second (confirming) click. */
   const [arming, setArming] = useState<string | null>(null);
 
+  // null = self not in the loaded member list (load failed, or we were
+  // removed while the drawer was open) — hide all management actions and
+  // the leave/dissolve footer rather than defaulting to 'member'.
   const myRole = useMemo(
     () =>
       members.find((m) => m.member_type === 'user' && m.user_id === currentUserId)
-        ?.role ?? 'member',
+        ?.role ?? null,
     [members, currentUserId],
   );
   const isOwner = myRole === 'owner';
   const canManage = isOwner || myRole === 'admin';
+  const selfInGroup = myRole !== null;
 
   const userMembers = useMemo(
     () => members.filter((m) => m.member_type === 'user'),
@@ -543,7 +547,7 @@ export default function GroupSettingsDrawer({
         </div>
 
         {/* ── Footer: leave / dissolve ── */}
-        {!loading && (
+        {!loading && selfInGroup && (
           <div className="px-5 py-[14px] border-t border-line flex-shrink-0 flex flex-col gap-2">
             {!isOwner && (
               <button

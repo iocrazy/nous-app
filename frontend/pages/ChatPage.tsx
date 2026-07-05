@@ -746,7 +746,13 @@ export function ChatPage(): React.ReactElement {
           open={showSettings}
           onClose={() => setShowSettings(false)}
           onChannelUpdated={(ch) =>
-            setChannels((prev) => prev.map((c) => (c.id === ch.id ? { ...c, ...ch } : c)))
+            // Merge only the edited fields — the PATCH response carries
+            // unread:0 / mentions:0 defaults that would clobber live badges.
+            setChannels((prev) =>
+              prev.map((c) =>
+                c.id === ch.id ? { ...c, name: ch.name, type: ch.type } : c,
+              ),
+            )
           }
           onLeftOrDissolved={() => {
             setShowSettings(false);

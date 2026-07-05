@@ -136,5 +136,5 @@ class OwnerTransfer(BaseModel):
 
 
 class ConversationUpdate(BaseModel):
-    name: Optional[str] = None
+    name: Optional[str] = Field(default=None, max_length=120)
     type: Optional[Literal["group", "public"]] = None

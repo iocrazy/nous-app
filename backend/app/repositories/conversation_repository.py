@@ -170,7 +170,7 @@ class ConversationRepository:
         self, *, conversation_id: int
     ) -> dict[str, Any] | None:
         return await db_engine.fetch_one(
-            "SELECT scope_id, type FROM conversations WHERE id = :cid",
+            "SELECT scope_id, type, archived_at FROM conversations WHERE id = :cid",
             {"cid": _bigint(conversation_id)},
         )
 
@@ -225,10 +225,13 @@ class ConversationRepository:
             SELECT cm.member_type, cm.user_id, cm.agent_id, cm.role,
                    cm.joined_at,
                    up.username AS profile_name,
+                   au.email AS email,
                    a.name AS agent_name, a.slug AS agent_slug
               FROM public.conversation_members cm
               LEFT JOIN public.user_profiles up
                      ON cm.member_type = 'user' AND up.id = cm.user_id
+              LEFT JOIN auth.users au
+                     ON cm.member_type = 'user' AND au.id = cm.user_id
               LEFT JOIN public.ai_agents a
                      ON cm.member_type = 'agent' AND a.id = cm.agent_id
              WHERE cm.conversation_id = :cid
@@ -244,6 +247,7 @@ class ConversationRepository:
                 "role": r["role"],
                 "joined_at": r["joined_at"],
                 "name": r["profile_name"] or r["agent_name"],
+                "email": r["email"],
                 "agent_slug": r["agent_slug"],
             }
             for r in rows
@@ -264,12 +268,17 @@ class ConversationRepository:
         return None if v is None else str(v)
 
     async def remove_user_member(self, *, conversation_id: int, user_id: str) -> bool:
+        # role <> 'owner' guard: the service pre-checks the target's role, but
+        # a concurrent transfer-owner can promote the target between check and
+        # delete (TOCTOU) — deleting the owner then leaves the group permanently
+        # ownerless. 0 rows → the service surfaces a conflict error.
         n = await db_engine.execute(
             """
             DELETE FROM public.conversation_members
              WHERE conversation_id = :cid
                AND member_type = 'user'
                AND user_id = :uid
+               AND role <> 'owner'
             """,
             {"cid": _bigint(conversation_id), "uid": user_id},
         )
@@ -362,6 +371,7 @@ class ConversationRepository:
                SET title = COALESCE(:name, title),
                    type  = COALESCE(:type, type)
              WHERE id = :cid
+               AND archived_at IS NULL
             RETURNING id, scope_id, type, history_mode,
                       title AS name, topic, last_seq, created_at
             """,
@@ -401,6 +411,8 @@ class ConversationRepository:
         """
         eng = db_engine.get_engine()
         async with eng.begin() as conn:
+            # archived_at guard: a dissolved group must stop accepting
+            # messages; without it "deleted" groups keep chatting forever.
             seq = (
                 await conn.execute(
                     text(
@@ -408,12 +420,15 @@ class ConversationRepository:
                         UPDATE public.conversations
                            SET last_seq = last_seq + 1
                          WHERE id = :cid
+                           AND archived_at IS NULL
                          RETURNING last_seq
                         """
                     ),
                     {"cid": _bigint(conversation_id)},
                 )
-            ).scalar_one()
+            ).scalar()
+            if seq is None:
+                raise ValueError("conversation not found or archived")
             row = (
                 (
                     await conn.execute(
