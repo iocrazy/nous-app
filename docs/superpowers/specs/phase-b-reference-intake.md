@@ -10,7 +10,9 @@
 ## 参考来源
 
 - **laper.ai**（截图 9 张，2026-07-05 收）— Script/Beats/Storyboard/Scenes/Characters/Locations/Props 的成熟形态
-- **Infinite-Canvas**（`/Volumes/program/project-code/github-repos/Infinite-Canvas`）— 节点式智能画布：ComfyUI/即梦CLI/多模型（OpenAI/Gemini/方舟/Modelscope/火山）文生图·图生图·文生视频·图生视频；扩图/全景/抽帧/循环节点。**注：该仓 LICENSE 禁商用**，只作交互/能力参考，不移植代码。
+- **Infinite-Canvas**（`/Volumes/program/project-code/github-repos/Infinite-Canvas`）— 节点式智能画布：ComfyUI/即梦CLI/多模型（OpenAI/Gemini/方舟/Modelscope/火山）文生图·图生图·文生视频·图生视频；扩图/全景/抽帧/循环节点。
+  - ⚠️ **LICENSE 明文禁商用**：「禁止用于任何形式的修改封装成商业产品，商用须取得授权」「二次开发必须保持开源并注明来源」。MediaHub 是商业产品（计费/积分/套餐）→ **不可全量搬、不可二次开发闭源**。
+  - ✅ **用户拍板：clean-room 重写**（2026-07-05）。把它当**功能/交互参考**（节点类型、连线语义、生成流程、多模型编排思路——思路不受版权保护），在 MediaHub 现有 `canvas-core` + `@xyflow/react`(MIT) 上**干净重写，一行代码不抄**。跟现有栈无缝，完全合法。
 
 ## MediaHub 现有地基（Phase B 是提升不是从零）
 
@@ -77,6 +79,22 @@
 - Storyboard：Storyboard / Shot List 切换；按场景分列（Scene 01–06，带 I/E·Location·D/N）；每列 Open + Auto Storyboard；镜头卡 SHOT 01-01
 - Scenes（Scene Board）：Cards / Scene List 切换；场景卡（#1–#6）在无限画布上连线成流；每卡 INT/EXT·location·D/N·chars/lines 计数 + **Generate Still / Edit / Generate Video**
 
+**⭐ Auto Storyboard 流程实测（图 50→51→52，2026-07-05）**：
+- 分镜**按 Scene 组织**（每 scene 一列/一个 scene board）。对 scene 点 **Auto Storyboard**（或 AI 里说 auto）→ AI 读该 scene 剧本上下文 → 拆成多个 **Shot**。
+- **AI 是感知式的**：工具步 Reading storyboard scene → Reading script focus → Viewing locations/characters → Deleting empty shot → Creating shot；生成时参考 scene 剧本 + locations + characters 实体。
+- **Shot 构成**：镜号(SHOT 01-01) + **镜头参数标签**(焦段/景别/角度/运动，如 16mm·WIDE·LOW·STATIC / MEDIUM·HANDHELD / CLOSE UP·PUSH·50mm) + **散文镜头描述** + **@实体引用**(@CLIENT) + **Generate 按钮**(出真实分镜图)。Shot 卡有 Storyboard/Lens 两 tab(Lens=镜头参数, Storyboard=画面)。
+- 空 shot 占位「No storyboard yet」；顶部 scene 头 `SCENE 01 · EXT KANTIPATH STREET - NIGHT · N shots` + Arrange/Add shot。
+
+**⭐ 用户拍板：脚本→分镜粒度 = B（场景级），但「不一定沿用 laper 设计」**
+- **B** = 章→拆场景→每场景 Auto Storyboard→shots（scene=剧本&分镜共同基本单元）。→ 数据模型三层：
+  ```
+  Outline(章节结构) → Chapter(高层故事结构,管分支) → 写成 Scene(写作+分镜共同基本单元)
+                                                          ↓ Auto Storyboard(AI 读 scene+实体)
+                                                        Shot(镜头:参数标签+描述+@实体) → Generate 真图
+  ```
+- ⚠️ **现有断层**：MediaHub 现 script 生成的是**章节节点**，缺明确 **Scene 层**（章节直跳分镜）。落地 B 必须补「章节→场景」拆分层——这也是 outline↔script 联动、拖场景换序、Beats↔scene 锚定的共同作用层。
+- **「不照搬 laper」**：laper 的 shot 拆分（参数标签+散文+@实体+逐个 Generate）作为**能力基线**（分镜该有的信息），但**具体视觉/交互（列式 vs 画布、shot 卡形态）用户保留推翻权**，届时 design-shotgun 出稿。
+
 ### Characters / Locations / Props 实体模块
 - Characters：Overview / Relationships / Casting；卡片（VOICE V.O./CLIENT/CEO/DEV）Portrait/Advanced，色卡渐变，scenes/lines 计数，描述，Generate/Edit（AI 立绘）
 - Locations：Overview / Relationships / Scout Sheet；卡片带 scenes/chars 计数、描述、Generate（AI 场景图）
@@ -104,13 +122,30 @@
 - Generate Story Outline 500 + expand/branches/storyboard 同病（4 端点 task_tracking.dbos_workflow_id NOT NULL 未串 wf_id，自 23ca9d28 一直坏）→ #1017 v0.25.106
 - 教训：这几个都是「无人使用面的连环隐藏 bug」，和 Phase A 救活 project-files 面同一模式。现有 script/storyboard 后端虽在，但前端链路多处腐坏，Phase B 要连地基一起校。
 
+## ⭐ 节点视图定位（用户 2026-07-05 补充洞察）
+
+看现有 MediaHub 节点式 script（章节节点，带 Expand/Branch/Storyboard）后，用户提出：节点式作为「**另一种形式，等剧本定稿后**」用来和下阶段分镜做关联。→ 彻底理顺「文字 vs 节点」：**同一份剧本在生命周期不同阶段的两张脸**。
+- **写作阶段** = 文字剧本主视图（laper 自动格式化，写 scene/对白）
+- **定稿后** = 节点视图，干文字视图干不了的两件事：
+  1. **分支叙事**（Character Choice / Condition × 2-4 支）——多路径故事本质是 DAG，节点是天然形态，线性文字表达不了，**节点视图不可替代的价值**。
+  2. **脚本→分镜的桥**——每章节点「Storyboard」按钮把上游脚本喂给下游分镜。落地「阶段=上下游流程节点」：章节节点(脚本阶段上游)→分镜节点(分镜阶段下游)，节点视图=两阶段接缝。
+- 现有节点动作实测：**Expand**(章节 summary→AI 3-5 段 prose，可给 expansion request)、**Branch**(从某章分叉)、**Storyboard**(章→分镜)。
+
+### ⚠️ 待用户定：脚本→分镜粒度（影响数据模型层数）
+现节点=**章节**粒度；分镜按**场景**分列。点章节「Storyboard」时：A) 章→直接分镜(两层)；B) 章→拆场景→每场景→分镜(三层，laper 是这个，scene=剧本&分镜共同基本单元)。现 MediaHub Expand 是章节级 prose，无 scene 拆分层。
+
 ## 已定（用户拍板）
+- **UI 重新设计**：现有前端腐坏 + 旧节点画布优先设计错位 → Phase B **重做主视图**。**laper 设计图（已收全批截图）作为基线，目标超过它**。用 design-shotgun / design-consultation 出稿（超 laper，不照搬）。
+- **⭐ 生成资产（图片/视频）用 Supabase 对象存储**：Phase B 的 Generate Still/Video（shot/scene/character/location 出图出视频）**存 Supabase Storage buckets**。
+  - ⚠️ **现状 delta**：现有 storyboard/generated media 存 **NAS 本地文件系统**（`storyboard_service.py` `NAS_BASE_PATH=/app/downloads`，DB 存相对路径 + `/file` token 端点取），**无任何 Supabase Storage 封装**（grep `storage.from_`/`.upload` 零命中）。
+  - 需新建：Supabase Storage 客户端封装 + bucket 结构设计 + 公开/签名 URL 处理（替代 NAS 相对路径 + mediaToken）。self-hosted sb-prod 栈需确认 storage service 已启用。
 - **PC 端优先**，移动端以后再说
 - laper screenwriting = MediaHub project（结构直接映射）
 - 首个深挖模块 = Script
-- **主视图文字剧本 + 节点化底层**（不是纯节点画布）
-- **阶段/流程节点化**（画布上下游连线，不是 tab 条）
+- **文字剧本=写作主视图；节点视图=定稿后的结构/分支/推进-分镜形态**（两张脸，非二选一）
+- **阶段/流程节点化**（画布上下游连线，不是 tab 条）；章节节点→分镜节点=阶段接缝
 - Episode 是路由层级（切 Ep 换整套模块）
+- ✅ 现有 script/storyboard 后端数据层活着（六连环 bug 已修+E2E 验证），前端集成腐坏——Phase B 连地基端到端校，别假设前端可复用
 
 ## 待收集
 - Beats 时间轴编排的交互细节 + 与 Script scene 的对应关系（用户要补的联动）
