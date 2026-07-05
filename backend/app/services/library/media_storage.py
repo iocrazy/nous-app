@@ -149,6 +149,10 @@ class ObjectStore:
         proxy = await self._proxy()
         return await proxy.download(key)
 
+    async def remove(self, key: str) -> None:
+        proxy = await self._proxy()
+        await proxy.remove([key])
+
     async def signed_url(self, key: str, *, ttl_seconds: int = 300) -> str:
         """Short-TTL signed URL for a private object (default 5 min)."""
         proxy = await self._proxy()
