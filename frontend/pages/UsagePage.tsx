@@ -167,7 +167,7 @@ export const UsagePage: React.FC = () => {
                     }}
                     className={`rounded px-2.5 py-1 text-xs font-medium tabular-nums transition-colors ${
                       rangeMode === 'presets' && days === d
-                        ? 'bg-ink-700 text-ink-50'
+                        ? 'bg-indigo-500/10 text-indigo-400'
                         : 'text-ink-400 hover:text-ink-200'
                     }`}
                   >
@@ -179,7 +179,7 @@ export const UsagePage: React.FC = () => {
                   onClick={() => setRangeMode('month')}
                   className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
                     rangeMode === 'month'
-                      ? 'bg-ink-700 text-ink-50'
+                      ? 'bg-indigo-500/10 text-indigo-400'
                       : 'text-ink-400 hover:text-ink-200'
                   }`}
                 >
@@ -343,7 +343,7 @@ const ScopeButton: React.FC<{
     onClick={onClick}
     className={`rounded px-3 py-1.5 text-xs font-medium transition-colors ${
       active
-        ? 'bg-ink-700 text-ink-50'
+        ? 'bg-indigo-500/10 text-indigo-400'
         : 'text-ink-400 hover:text-ink-200'
     }`}
   >
@@ -666,7 +666,7 @@ const ToggleBtn: React.FC<{
     onClick={onClick}
     className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
       active
-        ? 'bg-ink-700 text-ink-50'
+        ? 'bg-indigo-500/10 text-indigo-400'
         : 'text-ink-400 hover:text-ink-200'
     }`}
   >
