@@ -93,7 +93,17 @@ async def resolve_mediahub_model(
 ) -> Optional[Tuple[str, Dict[str, Any], str]]:
     """Resolve a model name against the platform ``mediahub_models`` registry.
 
-    Full-table lookup by ``name`` (enabled + disabled), then:
+    Full-table lookup by ``name`` (enabled + disabled), falling back to a
+    lookup by ``actual_model`` (the raw upstream provider id) when the name
+    lookup misses — some ``ai_agents.model`` rows store the raw Ark/provider
+    model id (e.g. ``doubao-seed-2-0-lite-260428``) instead of the catalog
+    ``name`` (e.g. ``mediahub-doubao-seed-2-0-lite``); without the fallback
+    those agents fall through to an ordinary BYOK resolution that has no env
+    key configured, producing a 401 from the upstream provider. ``name`` is
+    tried first (unchanged behavior for correctly-named agents); the
+    ``actual_model`` fallback only engages when the name lookup misses, and
+    the two namespaces (``mediahub-*`` vs raw provider ids) never collide.
+    Then:
       - found + enabled + nous allowed for ``module`` → return
         ``(actual_provider, {api_key, base_url, model, app_id}, actual_model)``
         — the platform config, ready for the existing adapter factory.
@@ -108,6 +118,8 @@ async def resolve_mediahub_model(
         return None
     repo = get_mediahub_model_repository()
     row = await repo.get_by_name(model_name)
+    if not row:
+        row = await repo.get_by_actual_model(model_name)
     if not row:
         return None  # ordinary BYOK model name — leave the caller's path intact.
 
@@ -140,6 +152,10 @@ async def resolve_platform_model(
     Returns ``(actual_provider, {api_key, base_url, model, app_id}, actual_model)``
     for an enabled catalog model; ``None`` when ``model_name`` isn't a catalog
     model (an ordinary manual model string); raises when found-but-disabled.
+
+    Same ``name``-then-``actual_model`` fallback as :func:`resolve_mediahub_model`
+    (see its docstring) — kept consistent so the admin/ungated path resolves an
+    agent storing the raw provider id exactly like the gated user path does.
     """
     from app.repositories.mediahub_model_repository import get_mediahub_model_repository
 
@@ -147,6 +163,8 @@ async def resolve_platform_model(
         return None
     repo = get_mediahub_model_repository()
     row = await repo.get_by_name(model_name)
+    if not row:
+        row = await repo.get_by_actual_model(model_name)
     if not row:
         return None
     if not row.get("is_enabled"):

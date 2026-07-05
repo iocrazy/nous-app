@@ -27,6 +27,7 @@ async def test_resolve_nous_returns_none_for_non_nous_name():
 
     repo = MagicMock()
     repo.get_by_name = AsyncMock(return_value=None)
+    repo.get_by_actual_model = AsyncMock(return_value=None)
     with patch(
         "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
         return_value=repo,
@@ -235,6 +236,7 @@ async def test_resolve_platform_model_none_for_unknown_name():
 
     repo = MagicMock()
     repo.get_by_name = AsyncMock(return_value=None)
+    repo.get_by_actual_model = AsyncMock(return_value=None)
     with patch(
         "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
         return_value=repo,
