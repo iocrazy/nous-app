@@ -35,7 +35,7 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from loguru import logger
-from sqlalchemy import func, select, update
+from sqlalchemy import case, func, select, update
 
 from app.db.repository_base import AsyncpgRepository
 from app.db.session import read_scope, write_scope
@@ -347,6 +347,63 @@ class AgentRunsRepository(AsyncpgRepository):
                 return [dict(r) for r in result.mappings().all()]
         except Exception as e:
             logger.error(f"Failed to compute daily usage: {e}")
+            return []
+
+    async def daily_usage(
+        self,
+        *,
+        started_after: datetime,
+        user_id: Optional[UUID] = None,
+        group_by: str = "model",
+    ) -> List[Dict[str, Any]]:
+        """Per-day rollup grouped by ``model`` or ``agent`` — powers the usage
+        page's single hero chart with a dimension switcher.
+
+        Returns rows ``{date, key, requests, failed_requests, prompt_tokens,
+        completion_tokens, total_tokens, cost_cents}`` ordered by date. ``key``
+        is the model name or the agent_id (uuid → str; caller enriches to a
+        display label). ``failed_requests`` counts failed + heartbeat_lost so
+        the page can surface a success rate. Unknown ``group_by`` falls back
+        to model."""
+        key_col = AgentRuns.agent_id if group_by == "agent" else AgentRuns.model
+        try:
+            day = func.date(AgentRuns.started_at).label("date")
+            failed = func.sum(
+                case(
+                    (AgentRuns.status.in_(("failed", "heartbeat_lost")), 1),
+                    else_=0,
+                )
+            ).label("failed_requests")
+            stmt = (
+                select(
+                    day,
+                    key_col.label("key"),
+                    func.count().label("requests"),
+                    failed,
+                    func.coalesce(func.sum(AgentRuns.prompt_tokens), 0).label(
+                        "prompt_tokens"
+                    ),
+                    func.coalesce(func.sum(AgentRuns.completion_tokens), 0).label(
+                        "completion_tokens"
+                    ),
+                    func.coalesce(func.sum(AgentRuns.total_tokens), 0).label(
+                        "total_tokens"
+                    ),
+                    func.coalesce(func.sum(AgentRuns.cost_cents), 0).label(
+                        "cost_cents"
+                    ),
+                )
+                .where(AgentRuns.started_at >= started_after)
+                .group_by(day, key_col)
+                .order_by(day.asc())
+            )
+            if user_id is not None:
+                stmt = stmt.where(AgentRuns.user_id == user_id)
+            async with read_scope() as session:
+                result = await session.execute(stmt)
+                return [dict(r) for r in result.mappings().all()]
+        except Exception as e:
+            logger.error(f"Failed to compute grouped daily usage: {e}")
             return []
 
     # ------------------------------------------------------------------

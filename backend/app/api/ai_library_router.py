@@ -1839,26 +1839,53 @@ async def get_usage_runs(
 
 @router.get(
     "/usage/daily",
-    summary="Caller's own daily × model usage rollup (for charts)",
+    summary="Caller's own daily usage rollup grouped by model or agent",
 )
-async def get_usage_daily(auth: AuthDep, days: int = 30) -> Dict[str, Any]:
-    """Daily × model buckets powering the usage charts (requests / tokens /
-    cost per day, stacked by model). Hard-scoped to the caller."""
+async def get_usage_daily(
+    auth: AuthDep, days: int = 30, group_by: str = "model"
+) -> Dict[str, Any]:
+    """Daily buckets powering the usage page's hero chart — grouped by
+    ``model`` (default) or ``agent``, with failure counts so the page can
+    surface a success rate. Hard-scoped to the caller."""
     if not (1 <= days <= 365):
         raise HTTPException(status_code=400, detail="days must be 1..365")
+    if group_by not in ("model", "agent"):
+        raise HTTPException(status_code=400, detail="group_by must be model|agent")
 
     user_uuid = _coerce_user_uuid(auth.user_id)
     runs_repo = get_agent_runs_repository()
-    rows = await runs_repo.daily_usage_by_model(
+    rows = await runs_repo.daily_usage(
         started_after=datetime.now(timezone.utc) - timedelta(days=days),
         user_id=user_uuid,
+        group_by=group_by,
     )
+
+    # Agent grouping keys are uuids — enrich to display labels (bounded by
+    # the caller's distinct agents). Model keys label as themselves.
+    labels: Dict[str, str] = {}
+    if group_by == "agent":
+        agent_repo, _ = _repos()
+        for key in {str(r["key"]) for r in rows if r.get("key")}:
+            try:
+                agent = await agent_repo.get_by_id(UUID(key))
+                if agent:
+                    labels[key] = agent.get("name") or agent.get("slug") or key
+            except Exception as exc:  # noqa: BLE001 — label is cosmetic
+                logger.warning(f"[usage/daily] agent label failed for {key}: {exc}")
+
     daily = [
         {
             "date": str(r.get("date")),
-            "model": r.get("model"),
-            "provider": r.get("provider"),
+            "key": str(r["key"]) if r.get("key") else None,
+            "label": (
+                labels.get(str(r.get("key")), str(r.get("key")))
+                if r.get("key")
+                else None
+            ),
             "requests": int(r.get("requests") or 0),
+            "failed_requests": int(r.get("failed_requests") or 0),
+            "prompt_tokens": int(r.get("prompt_tokens") or 0),
+            "completion_tokens": int(r.get("completion_tokens") or 0),
             "total_tokens": int(r.get("total_tokens") or 0),
             "cost_cents": float(r.get("cost_cents") or 0.0),
         }
@@ -1866,7 +1893,9 @@ async def get_usage_daily(auth: AuthDep, days: int = 30) -> Dict[str, Any]:
     ]
     return {
         "days": days,
+        "group_by": group_by,
         "total_requests": sum(d["requests"] for d in daily),
+        "total_failed": sum(d["failed_requests"] for d in daily),
         "total_tokens": sum(d["total_tokens"] for d in daily),
         "total_cost_cents": sum(d["cost_cents"] for d in daily),
         "daily": daily,
