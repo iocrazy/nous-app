@@ -199,3 +199,47 @@ async def test_usage_daily_rejects_bad_days():
     with pytest.raises(HTTPException) as exc:
         await get_usage_daily(_auth(), days=0)
     assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_usage_daily_month_mode_windows_calendar_month():
+    """month=YYYY-MM overrides days: repo gets [month start, next month)."""
+    from app.api.ai_library_router import get_usage_daily
+
+    captured = {}
+
+    async def _fake_daily(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    with patch("app.api.ai_library_router.get_agent_runs_repository") as repo_factory:
+        repo = MagicMock()
+        repo.daily_usage = AsyncMock(side_effect=_fake_daily)
+        repo_factory.return_value = repo
+
+        resp = await get_usage_daily(_auth(), days=30, month="2026-06")
+
+    assert captured["started_after"].isoformat().startswith("2026-06-01")
+    assert captured["started_before"].isoformat().startswith("2026-07-01")
+    assert resp["month"] == "2026-06"
+
+
+@pytest.mark.asyncio
+async def test_usage_runs_month_mode_windows_calendar_month():
+    from app.api.ai_library_router import get_usage_runs
+
+    captured = {}
+
+    async def _fake_list(**kwargs):
+        captured.update(kwargs)
+        return {"items": [], "total": 0}
+
+    with patch("app.api.ai_library_router.get_agent_runs_repository") as repo_factory:
+        repo = MagicMock()
+        repo.list_runs_admin = AsyncMock(side_effect=_fake_list)
+        repo_factory.return_value = repo
+
+        await get_usage_runs(_auth(), month="2026-06")
+
+    assert captured["started_after"].isoformat().startswith("2026-06-01")
+    assert captured["started_before"].isoformat().startswith("2026-07-01")

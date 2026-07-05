@@ -1760,17 +1760,27 @@ async def get_usage_runs(
     model: str | None = None,
     status: str | None = None,
     days: int = 30,
+    month: str | None = None,
 ) -> Dict[str, Any]:
     """Row-level usage for the AI Usage page: every run the CALLER made —
     time / agent / model / provider / tokens / cost / status / duration.
 
     Hard-scoped to the authenticated user (the repo filter is forced to
     ``auth.user_id`` — there is no way to read another user's runs here).
-    ``days`` windows to the last N days (default 30, max 365)."""
+    ``days`` windows to the last N days (default 30, max 365); ``month``
+    (YYYY-MM) switches to a calendar-month window and overrides days."""
     if page < 1 or not (1 <= page_size <= 100):
         raise HTTPException(status_code=400, detail="bad page/page_size")
     if not (1 <= days <= 365):
         raise HTTPException(status_code=400, detail="days must be 1..365")
+
+    started_before: datetime | None = None
+    if month is not None:
+        start_iso, end_iso = _month_bounds(month)
+        started_after = datetime.fromisoformat(start_iso)
+        started_before = datetime.fromisoformat(end_iso)
+    else:
+        started_after = datetime.now(timezone.utc) - timedelta(days=days)
 
     user_uuid = _coerce_user_uuid(auth.user_id)
     runs_repo = get_agent_runs_repository()
@@ -1778,7 +1788,8 @@ async def get_usage_runs(
         user_id=user_uuid,  # forced — user scope, never cross-user
         model=model,
         status=status,
-        started_after=datetime.now(timezone.utc) - timedelta(days=days),
+        started_after=started_after,
+        started_before=started_before,
         offset=(page - 1) * page_size,
         limit=page_size,
     )
@@ -1842,7 +1853,7 @@ async def get_usage_runs(
     summary="Caller's own daily usage rollup grouped by model or agent",
 )
 async def get_usage_daily(
-    auth: AuthDep, days: int = 30, group_by: str = "model"
+    auth: AuthDep, days: int = 30, group_by: str = "model", month: str | None = None
 ) -> Dict[str, Any]:
     """Daily buckets powering the usage page's hero chart — grouped by
     ``model`` (default) or ``agent``, with failure counts so the page can
@@ -1852,10 +1863,19 @@ async def get_usage_daily(
     if group_by not in ("model", "agent"):
         raise HTTPException(status_code=400, detail="group_by must be model|agent")
 
+    started_before: datetime | None = None
+    if month is not None:
+        start_iso, end_iso = _month_bounds(month)
+        started_after = datetime.fromisoformat(start_iso)
+        started_before = datetime.fromisoformat(end_iso)
+    else:
+        started_after = datetime.now(timezone.utc) - timedelta(days=days)
+
     user_uuid = _coerce_user_uuid(auth.user_id)
     runs_repo = get_agent_runs_repository()
     rows = await runs_repo.daily_usage(
-        started_after=datetime.now(timezone.utc) - timedelta(days=days),
+        started_after=started_after,
+        started_before=started_before,
         user_id=user_uuid,
         group_by=group_by,
     )
@@ -1893,6 +1913,7 @@ async def get_usage_daily(
     ]
     return {
         "days": days,
+        "month": month,
         "group_by": group_by,
         "total_requests": sum(d["requests"] for d in daily),
         "total_failed": sum(d["failed_requests"] for d in daily),

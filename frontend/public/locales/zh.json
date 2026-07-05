@@ -2123,7 +2123,9 @@
     "breakdownTitle": "维度汇总",
     "colShare": "占比",
     "emptyRange": "该时间范围内无用量。",
-    "runsTitleRange": "最近调用明细（最近 {{days}} 天）"
+    "runsTitleRange": "最近调用明细（最近 {{days}} 天）",
+    "rangeMonth": "按月",
+    "runsTitleMonth": "最近调用明细（{{month}}）"
   },
   "clockDrift": {
     "warning": "设备时间与服务器相差 {{amount}}（{{direction}}）——这会导致登录异常。请在系统设置中开启自动设置日期与时间。",

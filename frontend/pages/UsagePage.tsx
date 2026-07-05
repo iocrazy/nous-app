@@ -73,6 +73,8 @@ export const UsagePage: React.FC = () => {
 
   const [scope, setScope] = useState<UsageScope>(defaultScope);
   const [days, setDays] = useState<number>(30);
+  // 'presets' = rolling last-N-days; 'month' = calendar-month window.
+  const [rangeMode, setRangeMode] = useState<'presets' | 'month'>('presets');
   const [groupBy, setGroupBy] = useState<UsageGroupBy>('model');
   const [summary, setSummary] = useState<UsageDailySummary | null>(null);
   // Team scope keeps the legacy monthly rollup (runs mostly carry no
@@ -97,7 +99,11 @@ export const UsagePage: React.FC = () => {
     setRefreshKey((k) => k + 1);
     try {
       if (scope === 'user') {
-        const resp = await aiLibraryService.getUsageDaily(days, groupBy);
+        const resp = await aiLibraryService.getUsageDaily(
+          days,
+          groupBy,
+          rangeMode === 'month' ? month : undefined,
+        );
         setSummary(resp);
       } else {
         const resp = await aiLibraryService.getUsage(
@@ -115,7 +121,7 @@ export const UsagePage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [scope, days, groupBy, month, teamId, addToast]);
+  }, [scope, days, groupBy, month, rangeMode, teamId, addToast]);
 
   useEffect(() => {
     void fetchUsage();
@@ -149,22 +155,46 @@ export const UsagePage: React.FC = () => {
             />
           )}
           {scope === 'user' ? (
-            <div className="inline-flex items-center rounded-md border border-ink-700 bg-ink-800 p-1">
-              {RANGE_PRESETS.map((d) => (
+            <>
+              <div className="inline-flex items-center rounded-md border border-ink-700 bg-ink-800 p-1">
+                {RANGE_PRESETS.map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => {
+                      setRangeMode('presets');
+                      setDays(d);
+                    }}
+                    className={`rounded px-2.5 py-1 text-xs font-medium tabular-nums transition-colors ${
+                      rangeMode === 'presets' && days === d
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'text-ink-400 hover:text-ink-200'
+                    }`}
+                  >
+                    {d}d
+                  </button>
+                ))}
                 <button
-                  key={d}
                   type="button"
-                  onClick={() => setDays(d)}
-                  className={`rounded px-2.5 py-1 text-xs font-medium tabular-nums transition-colors ${
-                    days === d
-                      ? 'bg-indigo-500/15 text-indigo-300'
+                  onClick={() => setRangeMode('month')}
+                  className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
+                    rangeMode === 'month'
+                      ? 'bg-indigo-600 text-white shadow-sm'
                       : 'text-ink-400 hover:text-ink-200'
                   }`}
                 >
-                  {d}d
+                  {t('aiUsage.rangeMonth', 'Month')}
                 </button>
-              ))}
-            </div>
+              </div>
+              {rangeMode === 'month' && (
+                <MonthPicker
+                  month={month}
+                  onPrev={() => shiftMonth(-1)}
+                  onNext={() => shiftMonth(1)}
+                  isCurrentMonth={isCurrentMonth}
+                />
+              )}
+            </>
           ) : (
             <MonthPicker
               month={month}
@@ -213,7 +243,11 @@ export const UsagePage: React.FC = () => {
             onGroupByChange={setGroupBy}
           />
           <BreakdownTable summary={summary} />
-          <RecentRunsTable refreshKey={refreshKey} days={days} />
+          <RecentRunsTable
+            refreshKey={refreshKey}
+            days={days}
+            month={rangeMode === 'month' ? month : undefined}
+          />
         </>
       )}
 
@@ -309,7 +343,7 @@ const ScopeButton: React.FC<{
     onClick={onClick}
     className={`rounded px-3 py-1.5 text-xs font-medium transition-colors ${
       active
-        ? 'bg-indigo-500/15 text-indigo-300'
+        ? 'bg-indigo-600 text-white shadow-sm'
         : 'text-ink-400 hover:text-ink-200'
     }`}
   >
@@ -632,7 +666,7 @@ const ToggleBtn: React.FC<{
     onClick={onClick}
     className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
       active
-        ? 'bg-indigo-500/15 text-indigo-300'
+        ? 'bg-indigo-600 text-white shadow-sm'
         : 'text-ink-400 hover:text-ink-200'
     }`}
   >
@@ -801,10 +835,11 @@ const BreakdownTable: React.FC<{ summary: UsageDailySummary }> = ({
 
 const RUNS_PAGE_SIZE = 25;
 
-const RecentRunsTable: React.FC<{ refreshKey: number; days: number }> = ({
-  refreshKey,
-  days,
-}) => {
+const RecentRunsTable: React.FC<{
+  refreshKey: number;
+  days: number;
+  month?: string;
+}> = ({ refreshKey, days, month }) => {
   const { t } = useTranslation();
   const [page, setPage] = useState(1);
   const [items, setItems] = useState<UsageRunItem[]>([]);
@@ -813,7 +848,7 @@ const RecentRunsTable: React.FC<{ refreshKey: number; days: number }> = ({
   useEffect(() => {
     let cancelled = false;
     aiLibraryService
-      .getUsageRuns({ page, pageSize: RUNS_PAGE_SIZE, days })
+      .getUsageRuns({ page, pageSize: RUNS_PAGE_SIZE, days, month })
       .then((resp) => {
         if (cancelled) return;
         setItems(resp.items);
@@ -825,7 +860,7 @@ const RecentRunsTable: React.FC<{ refreshKey: number; days: number }> = ({
     return () => {
       cancelled = true;
     };
-  }, [page, refreshKey, days]);
+  }, [page, refreshKey, days, month]);
 
   const from = total === 0 ? 0 : (page - 1) * RUNS_PAGE_SIZE + 1;
   const to = Math.min(page * RUNS_PAGE_SIZE, total);
@@ -834,9 +869,11 @@ const RecentRunsTable: React.FC<{ refreshKey: number; days: number }> = ({
     <section className="overflow-hidden rounded-xl border border-ink-800 bg-ink-900/60">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-ink-800 px-5 py-3">
         <h3 className="text-sm font-semibold text-ink-200">
-          {t('aiUsage.runsTitleRange', 'Recent calls (last {{days}} days)', {
-            days,
-          })}
+          {month
+            ? t('aiUsage.runsTitleMonth', 'Recent calls ({{month}})', { month })
+            : t('aiUsage.runsTitleRange', 'Recent calls (last {{days}} days)', {
+                days,
+              })}
         </h3>
         <div className="flex items-center gap-2 text-xs text-ink-400">
           <span className="tabular-nums">

@@ -2123,7 +2123,9 @@
     "breakdownTitle": "Breakdown",
     "colShare": "Share",
     "emptyRange": "No usage in this range.",
-    "runsTitleRange": "Recent calls (last {{days}} days)"
+    "runsTitleRange": "Recent calls (last {{days}} days)",
+    "rangeMonth": "Month",
+    "runsTitleMonth": "Recent calls ({{month}})"
   },
   "clockDrift": {
     "warning": "Your device clock is {{amount}} {{direction}} server time — this breaks sign-in. Enable automatic date & time in system settings.",
