@@ -157,10 +157,20 @@ Steps:
      mounts lack xattr/permissions and break storage).
 2. Confirm mig 337 applied on prod (`SELECT id FROM storage.buckets WHERE
    id='chat-media'`).
-3. Un-mocked smoke on the DEV stack first (`FEATURE_CHAT_MEDIA_OBJECT_STORE=true`
-   in dev backend .env → `stop -t0`/`start`, standing lesson: .env needs a real
-   restart): upload a chat image → confirm an `sb://` row + a real object in the
-   bucket → @agent vision describes it → promote → serves via `/cover`.
+3. Un-mocked smoke on the DEV stack first. Two layers:
+   a. Protocol smoke (no flag flip, no DB) — proves the live storage-api
+      round-trip (put/get/signed-url/put_file/remove):
+      ```bash
+      RUN_STORAGE_SMOKE=1 uv run pytest \
+        tests/test_storage_object_store_smoke.py -v
+      ```
+      (skipped by default; needs the backend Supabase env + `chat-media`
+      bucket from mig 337.)
+   b. Feature smoke — set `FEATURE_CHAT_MEDIA_OBJECT_STORE=true` in the dev
+      backend .env → `stop -t0`/`start` (standing lesson: .env needs a real
+      restart), then upload a chat image AND generate a short video →
+      confirm `sb://` rows + real objects in the bucket → @agent vision
+      describes the image → promote → serves via `/cover` / `/file`.
 4. Flip prod: host `.env` `FEATURE_CHAT_MEDIA_OBJECT_STORE=true` +
    `stop -t0`/`start`. Canary: upload → render → @agent vision → promote →
    error-funnel query (`application_logs` ERROR since flip).
