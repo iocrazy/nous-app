@@ -19,6 +19,12 @@ from loguru import logger
 from app.boundary import cap_aiter
 from app.core.config import settings
 from app.db import engine as db_engine
+from app.services.library.media_storage import (
+    CHAT_MEDIA_BUCKET,
+    chat_media_store,
+    content_key,
+    to_file_path,
+)
 
 _DEFAULT_MAX_BYTES = 512 * 1024 * 1024  # 512 MiB ceiling per generation
 
@@ -151,6 +157,74 @@ def _safe_filename(name: str) -> str:
     return name or "attachment"
 
 
+async def _insert_uploaded_row(
+    *,
+    user_id: str,
+    scope_id: int,
+    kind: str,
+    mime: str,
+    file_path: str,
+    file_size_bytes: int,
+    origin: GenerationOrigin,
+    content_sha256: Optional[str] = None,
+) -> dict:
+    """INSERT one generated_media row for an uploaded blob (path-agnostic)."""
+    row = await db_engine.execute_returning_one(
+        "INSERT INTO public.generated_media "
+        "(scope_id, creator_id, media_kind, mime, file_path, file_size_bytes, "
+        " origin_kind, conversation_id, content_sha256) "
+        "VALUES (:scope_id, :creator_id, :media_kind, :mime, :file_path, "
+        " :file_size_bytes, :origin_kind, :conversation_id, :content_sha256) "
+        "RETURNING *",
+        {
+            "scope_id": scope_id,
+            "creator_id": user_id,
+            "media_kind": kind,
+            "mime": mime,
+            "file_path": file_path,
+            "file_size_bytes": file_size_bytes,
+            "origin_kind": origin.kind,
+            "conversation_id": origin.conversation_id,
+            "content_sha256": content_sha256,
+        },
+    )
+    return row or {}
+
+
+async def _register_uploaded_to_object_store(
+    *,
+    user_id: str,
+    scope_id: int,
+    file_bytes: bytes,
+    filename: str,
+    mime: str,
+    kind: str,
+    origin: GenerationOrigin,
+) -> dict:
+    """Upload bytes to the chat-media bucket (content-addressed) + insert row.
+
+    Dedup: identical bytes hash to the same key, so a re-upload skips the PUT
+    (the row still inserts, pointing at the shared object). Raises on any
+    storage failure so the caller can fall back to the filesystem.
+    """
+    sha, key = content_key(
+        scope_id=scope_id, data=file_bytes, mime=mime, filename=filename
+    )
+    store = chat_media_store()
+    if not await store.exists(key):
+        await store.put_bytes(key, file_bytes, mime)
+    return await _insert_uploaded_row(
+        user_id=user_id,
+        scope_id=scope_id,
+        kind=kind,
+        mime=mime,
+        file_path=to_file_path(CHAT_MEDIA_BUCKET, key),
+        file_size_bytes=len(file_bytes),
+        origin=origin,
+        content_sha256=sha,
+    )
+
+
 async def register_uploaded_media(
     *,
     user_id: str,
@@ -161,8 +235,30 @@ async def register_uploaded_media(
     origin: GenerationOrigin,
     subdir: str = "chat",
 ) -> dict:
-    """Write uploaded bytes into the staged store and insert one row. Returns it."""
+    """Write uploaded bytes into the staged store and insert one row. Returns it.
+
+    Object-store path (flag on + image): content-addressed upload to the
+    chat-media bucket. Falls back to the filesystem on ANY storage error so an
+    upload never hard-fails because storage-api is down. Videos and non-image
+    uploads always stay on the filesystem (object store is for small images).
+    """
     kind = media_kind_from_mime(mime)
+    if settings.FEATURE_CHAT_MEDIA_OBJECT_STORE and kind == "image":
+        try:
+            return await _register_uploaded_to_object_store(
+                user_id=user_id,
+                scope_id=scope_id,
+                file_bytes=file_bytes,
+                filename=filename,
+                mime=mime,
+                kind=kind,
+                origin=origin,
+            )
+        except Exception as exc:
+            logger.warning(
+                f"[register_uploaded_media] object-store upload failed, "
+                f"falling back to filesystem: scope={scope_id} error={exc!r}"
+            )
     gen_uuid = _uuid.uuid4().hex
     rel = f"teams/{scope_id}/{subdir}/{_date_bucket()}/{gen_uuid}/{_safe_filename(filename)}"
     dest = f"{settings.DOWNLOAD_PATH}/{rel}"
@@ -175,24 +271,15 @@ async def register_uploaded_media(
     except BaseException:
         Path(part).unlink(missing_ok=True)
         raise
-    row = await db_engine.execute_returning_one(
-        "INSERT INTO public.generated_media "
-        "(scope_id, creator_id, media_kind, mime, file_path, file_size_bytes, "
-        " origin_kind, conversation_id) "
-        "VALUES (:scope_id, :creator_id, :media_kind, :mime, :file_path, "
-        " :file_size_bytes, :origin_kind, :conversation_id) RETURNING *",
-        {
-            "scope_id": scope_id,
-            "creator_id": user_id,
-            "media_kind": kind,
-            "mime": mime,
-            "file_path": rel,
-            "file_size_bytes": len(file_bytes),
-            "origin_kind": origin.kind,
-            "conversation_id": origin.conversation_id,
-        },
+    return await _insert_uploaded_row(
+        user_id=user_id,
+        scope_id=scope_id,
+        kind=kind,
+        mime=mime,
+        file_path=rel,
+        file_size_bytes=len(file_bytes),
+        origin=origin,
     )
-    return row or {}
 
 
 __all__ = [

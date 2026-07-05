@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.repositories.conversation_repository import get_conversation_repository
 from app.repositories.generated_media_repository import GeneratedMediaRepository
 from app.repositories.resources_repository import ResourcesRepository
+from app.services.library.media_storage import ObjectStore, resolve_media_source
 from app.services.library.resources_service import _resolve_personal_team_id
 
 
@@ -70,15 +71,30 @@ class PromoteGeneratedMediaService:
         mime = gen.get("mime") or (
             "video/mp4" if media_kind == "video" else "image/png"
         )
-        src_abs = os.path.join(settings.DOWNLOAD_PATH, gen["file_path"])
-        if not os.path.isfile(src_abs):
-            raise ValueError("generation file missing")
+        # Source bytes come from whichever backend holds the generation.
+        # Object-store sources are fetched into memory (small images);
+        # filesystem sources keep the zero-copy path (read size/hash in place,
+        # copy2 later). `src_bytes` is populated only for the object-store case.
+        loc = resolve_media_source(gen["file_path"])
+        src_bytes: bytes | None = None
+        if loc.is_object_store:
+            try:
+                src_bytes = await ObjectStore(loc.bucket).get_bytes(loc.key)
+            except Exception as exc:
+                raise ValueError("generation file missing") from exc
+            src_abs = None
+            size = len(src_bytes)
+            file_hash = hashlib.sha256(src_bytes).hexdigest()
+        else:
+            src_abs = os.path.join(settings.DOWNLOAD_PATH, gen["file_path"])
+            if not os.path.isfile(src_abs):
+                raise ValueError("generation file missing")
+            size = os.path.getsize(src_abs)
+            file_hash = await asyncio.to_thread(_sha256, src_abs)
         ext = os.path.splitext(gen["file_path"])[1] or (
             ".mp4" if media_kind == "video" else ".png"
         )
         filename = f"generated-{media_kind}{ext}"
-        size = os.path.getsize(src_abs)
-        file_hash = await asyncio.to_thread(_sha256, src_abs)
 
         # 1) resource row. `resources` has NO metadata column (prod schema —
         # inserting one 500s with PGRST204). Provenance stays queryable on the
@@ -100,10 +116,16 @@ class PromoteGeneratedMediaService:
         )
         resource_id = str(resource["id"])
 
+        # Resources stay on the filesystem this phase, so the destination is
+        # always a local path — write the object-store bytes we buffered, or
+        # copy2 the local source.
         rel = f"teams/{target_scope_id}/uploads/{resource_id}/v1/{filename}"
         dst_abs = os.path.join(settings.DOWNLOAD_PATH, rel)
         Path(dst_abs).parent.mkdir(parents=True, exist_ok=True)
-        await asyncio.to_thread(shutil.copy2, src_abs, dst_abs)
+        if src_bytes is not None:
+            await asyncio.to_thread(Path(dst_abs).write_bytes, src_bytes)
+        else:
+            await asyncio.to_thread(shutil.copy2, src_abs, dst_abs)
         await self.res_repo.update_resource(resource_id, {"file_path": rel})
 
         # 3) version row
