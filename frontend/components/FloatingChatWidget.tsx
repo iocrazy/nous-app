@@ -45,12 +45,43 @@ export function FloatingChatWidget(): React.ReactElement {
   // Laper-style Chat History: the title-bar grip button slides the session
   // list out from the left edge of the window.
   const [sessionsOpen, setSessionsOpen] = useState(false);
+  const sessionsOpenRef = useRef(sessionsOpen);
+  sessionsOpenRef.current = sessionsOpen;
 
-  // Keyboard: ⌘I / Ctrl+I toggle, ESC minimize.
+  // Keep the window inside the viewport. The rect persists in localStorage,
+  // so a size/position saved on a larger browser window can put the title
+  // bar ABOVE the visible area on a smaller one — the window then looks
+  // "stuck" (nothing to grab, no minimize). Re-fit whenever the widget
+  // opens and whenever the browser window resizes.
+  useEffect(() => {
+    if (!open) return;
+    const fit = () => {
+      const s = useGlobalChatStore.getState();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const w = clamp(s.width, CHAT_MIN_W, Math.max(CHAT_MIN_W, vw - 16));
+      const h = clamp(s.height, CHAT_MIN_H, Math.max(CHAT_MIN_H, vh - 48));
+      const r = clamp(s.right, 8, Math.max(8, vw - w - 8));
+      const b = clamp(s.bottom, 8, Math.max(8, vh - h - 8));
+      if (w !== s.width || h !== s.height || r !== s.right || b !== s.bottom) {
+        setRect({ width: w, height: h, right: r, bottom: b });
+      }
+    };
+    fit();
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, [open, setRect]);
+
+  // Keyboard: ⌘I / Ctrl+I toggle. ESC closes the sessions overlay first,
+  // then minimizes the window.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && useGlobalChatStore.getState().open) {
         e.preventDefault();
+        if (sessionsOpenRef.current) {
+          setSessionsOpen(false);
+          return;
+        }
         minimize();
         return;
       }
