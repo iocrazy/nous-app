@@ -384,3 +384,68 @@ class ScriptAIService:
             }
             for i, s in enumerate(scenes[:8])
         ]
+
+    async def split_chapter_to_screenplay_scenes(
+        self,
+        title: str,
+        summary: str,
+        content: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Split chapter prose into shooting scenes with screenplay elements.
+
+        Unlike ``split_chapter_to_scenes`` (which yields storyboard nodes), this
+        returns the screenplay-scene shape the script editor persists directly
+        into ``script_scenes.content_json``: each scene carries a heading
+        (INT/EXT + location + time-of-day) and an ordered list of elements
+        (action / dialogue / character / paren / transition). The chapter's
+        original sentences are preserved into action/dialogue elements; a
+        speaker name is emitted as a ``character`` element immediately followed
+        by the ``dialogue`` element it introduces.
+
+        Parsing is defensive: markdown fences are stripped, ``json.loads`` runs,
+        and the top-level shape is validated — an unparseable or non-array
+        response raises (the DBOS workflow turns that into a task failure rather
+        than persisting garbage).
+        """
+        request_instructions = (
+            "Task: convert chapter prose into shooting scenes for a screenplay "
+            "editor.\n"
+            "Split the chapter into distinct scenes at each change of location "
+            "or time. Preserve the author's original sentences — do not "
+            "paraphrase, invent, or drop content; route every sentence into an "
+            "element.\n"
+            "Return ONLY a JSON array (no prose, no markdown fences). Each scene "
+            "object MUST have exactly these keys:\n"
+            '- "heading_int_ext": "INT" or "EXT" (interior or exterior; pick the '
+            "best fit)\n"
+            '- "location_text": string (where the scene takes place)\n'
+            '- "time_of_day": string (e.g. "DAY", "NIGHT", "DAWN", "DUSK", or '
+            '"" if unknown)\n'
+            '- "elements": a non-empty JSON array of element objects, each with:\n'
+            '    - "type": one of "action", "dialogue", "character", "paren", '
+            '"transition"\n'
+            '    - "text": string (the element\'s content)\n'
+            "Rules for elements:\n"
+            '- Narrative/descriptive sentences become "action" elements.\n'
+            '- Spoken lines become "dialogue" elements. When a speaker is '
+            'named, emit a "character" element (the speaker\'s name, no colon) '
+            'IMMEDIATELY BEFORE the "dialogue" element it introduces.\n'
+            "- Parenthetical stage directions attached to a line become "
+            '"paren" elements.\n'
+            "- Keep the elements in the original reading order.\n"
+            "Return ONLY the JSON array."
+        )
+
+        user_prompt = f"Chapter title: {title}\nSummary: {summary}"
+        if content:
+            user_prompt += f"\n\nFull content:\n{content}"
+
+        response = await self._run_agent(request_instructions, user_prompt)
+        # _extract_json strips fences + json.loads; a malformed body raises
+        # json.JSONDecodeError, which propagates so the workflow can fail loudly.
+        scenes = self._extract_json(response)
+
+        if not isinstance(scenes, list):
+            raise ValueError("LLM did not return a JSON array of scenes")
+
+        return scenes

@@ -190,6 +190,82 @@ class ScriptSceneRepository:
             logger.error(f"Failed to create scene: {e}")
             raise
 
+    async def create_with_content(
+        self,
+        data: Dict[str, Any],
+        elements: List[dict],
+        actor: str,
+    ) -> Dict[str, Any]:
+        """Create a scene AND its genesis content in ONE transaction.
+
+        Unlike ``create`` (which lands an empty scene the editor then fills via
+        ``apply_element_ops``), this seeds ``content_json`` = ``elements``,
+        derives ``content`` via ``extract_text``, stamps ``content_version`` = 1,
+        and appends the genesis op ledger row (``op_seq`` = 1, ``op_json`` = a
+        batch of ``insert`` ops with their ``delete`` inverses) to ``script_ops``
+        in the SAME committing transaction. Used by AI convert-to-scenes so a
+        fully-formed scene and a replayable ledger land atomically — a partial
+        write can never leave a scene without its genesis op.
+
+        ``elements`` are trusted, id-bearing element dicts (the caller generates
+        the ``el_`` ids and validates types). ``sort_order`` auto-assigns to
+        ``MAX+STEP`` within the (script_id, chapter_id) group, exactly as
+        ``create`` does, so successive scenes from one chapter keep order."""
+        try:
+            values = _scene_write_values(data)
+            values["content_json"] = elements
+            values["content"] = extract_text(elements)
+            values["content_version"] = 1
+            inserts = [
+                {
+                    "op": "insert",
+                    "element_id": el["id"],
+                    "payload": {k: v for k, v in el.items() if k != "id"},
+                }
+                for el in elements
+            ]
+            # Inverse undoes last-applied-first (scene_ops convention): delete
+            # the elements in reverse insertion order back to an empty scene.
+            inverse = [
+                {"op": "delete", "element_id": el["id"]} for el in reversed(elements)
+            ]
+            async with write_scope() as session:
+                if data.get("sort_order") is None:
+                    script_id = values["script_id"]
+                    chapter_id = values.get("chapter_id")
+                    max_stmt = select(func.max(ScriptScenes.sort_order)).where(
+                        ScriptScenes.script_id == script_id
+                    )
+                    if chapter_id is None:
+                        max_stmt = max_stmt.where(ScriptScenes.chapter_id.is_(None))
+                    else:
+                        max_stmt = max_stmt.where(ScriptScenes.chapter_id == chapter_id)
+                    current_max = await session.scalar(max_stmt)
+                    values["sort_order"] = (current_max or 0) + STEP
+                result = await session.execute(
+                    insert(ScriptScenes).values(**values).returning(ScriptScenes)
+                )
+                row = result.scalars().first()
+                if row is None:
+                    raise RuntimeError("Insert into script_scenes returned no data")
+                await session.execute(
+                    insert(ScriptOps).values(
+                        scene_id=row.id,
+                        op_seq=1,
+                        op_json={"ops": inserts, "inverse": inverse},
+                        actor=actor,
+                    )
+                )
+                out = _row(row)
+            logger.info(
+                f"Created scene with content in script {data.get('script_id')} "
+                f"chapter {data.get('chapter_id')} ({len(elements)} elements)"
+            )
+            return out
+        except Exception as e:
+            logger.error(f"Failed to create scene with content: {e}")
+            raise
+
     async def update_meta(
         self, scene_id: str, data: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:

@@ -142,6 +142,65 @@ async def create_branches(auth: AuthDep, body: CreateBranchesRequest) -> Dict[st
         raise HTTPException(status_code=500, detail="Failed to create branches")
 
 
+@router.post("/{script_id}/chapters/{chapter_id}/convert-to-scenes")
+async def convert_to_scenes(
+    auth: AuthDep, script_id: str, chapter_id: str
+) -> Dict[str, Any]:
+    """Dispatch async chapter-prose → screenplay-scenes conversion.
+
+    Path-scoped (``/scripts/{script_id}/chapters/{chapter_id}/...``): verifies
+    team access to the script, then confirms the chapter actually belongs to
+    that script before dispatching. The bigint ids arrive as path strings while
+    the chapter's ``script_id`` reads back as a native int — the belongs check
+    str-coerces both sides (#1006: an int-vs-str ``!=`` is always true and would
+    silently 404 or, worse, let a cross-script chapter through). Returns the
+    flat ``{"success", "task_id"}`` envelope immediately.
+    """
+    try:
+        await verify_script_access(script_id, auth)
+
+        from app.services.storyboard.script.script_service import ScriptService
+
+        chapter = await ScriptService().chapter_repo.get_by_id(chapter_id)
+        if not chapter or str(chapter.get("script_id")) != str(script_id):
+            raise HTTPException(
+                status_code=404, detail="Chapter not found in this script"
+            )
+
+        mgr = get_task_manager()
+        wf_id = str(_uuid.uuid4())
+        task_id = await mgr.create(
+            user_id=auth.user_id,
+            task_type="script_scene_convert",
+            title="Convert chapter to scenes",
+            dbos_workflow_id=wf_id,
+        )
+
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
+        from app.workflows.script_scene_convert import script_scene_convert_workflow
+
+        await start_workflow_routed(
+            "script_scene_convert",
+            dbos_workflow_callable=script_scene_convert_workflow,
+            dbos_workflow_kwargs={
+                "script_id": script_id,
+                "chapter_id": chapter_id,
+                "user_id": auth.user_id,
+            },
+            workflow_id=wf_id,
+        )
+
+        return {"success": True, "task_id": task_id}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"[ScriptAI] convert_to_scenes failed: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to convert chapter to scenes",
+        )
+
+
 @router.post("/convert-to-storyboard")
 async def convert_to_storyboard(
     auth: AuthDep, body: ConvertToStoryboardRequest
