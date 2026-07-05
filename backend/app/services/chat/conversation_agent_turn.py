@@ -164,17 +164,38 @@ async def _inject_image_blocks(
             )
             continue
         mime = row.get("mime") or "image/png"
-        # Object-store images: hand the provider a short-TTL signed URL — it
-        # fetches directly, no base64 (kills the +33% token tax). Filesystem
-        # images: read local bytes and inline as a base64 data URL (providers
-        # can't reach our auth-gated endpoints). Either failure skips the
-        # image (degrades to the placeholder) rather than killing the turn.
+        # ALL images inline as base64 data URLs by default — the model
+        # provider runs in the cloud and must be able to fetch whatever URL we
+        # hand it. Our storage signed URLs are built on SUPABASE_URL, which is
+        # a LAN address (192.168.50.9) in this deployment: the provider can't
+        # reach it, so a signed URL silently breaks vision for object-store
+        # images (post-go-live review catch, 2026-07-05). Signed URLs are
+        # opt-in via STORAGE_SIGNED_URL_PUBLIC_BASE — set it ONLY to a base
+        # the provider can genuinely reach from the public internet.
         loc = resolve_media_source(row["file_path"])
         try:
             if loc.is_object_store:
-                image_ref = await ObjectStore(loc.bucket).signed_url(
-                    loc.key, ttl_seconds=300
-                )
+                public_base = (
+                    getattr(settings, "STORAGE_SIGNED_URL_PUBLIC_BASE", "") or ""
+                ).rstrip("/")
+                if public_base:
+                    signed = await ObjectStore(loc.bucket).signed_url(
+                        loc.key, ttl_seconds=300
+                    )
+                    # Rewrite the origin: keep path+token, swap the LAN host
+                    # for the public one (the token is in the query string and
+                    # stays valid regardless of host).
+                    from urllib.parse import urlsplit, urlunsplit
+
+                    parts = urlsplit(signed)
+                    pub = urlsplit(public_base)
+                    image_ref = urlunsplit(
+                        (pub.scheme, pub.netloc, parts.path, parts.query, "")
+                    )
+                else:
+                    data = await ObjectStore(loc.bucket).get_bytes(loc.key)
+                    b64 = base64.b64encode(data).decode("ascii")
+                    image_ref = f"data:{mime};base64,{b64}"
             else:
                 path = Path(f"{settings.DOWNLOAD_PATH}/{loc.rel_path}")
                 data = await asyncio.to_thread(path.read_bytes)
