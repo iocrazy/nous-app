@@ -172,6 +172,31 @@ class MediahubModelRepository:
             logger.error(f"Failed to get mediahub model '{name}': {e}")
             return None
 
+    async def get_by_actual_model(self, actual_model: str) -> Optional[Dict[str, Any]]:
+        """Get a Mediahub model by ``actual_model`` (the raw upstream model id,
+        e.g. ``doubao-seed-2-0-lite-260428``) — a fallback lookup for
+        ``resolve_mediahub_model`` when an ``ai_agents.model`` value stores the
+        raw provider id instead of the catalog ``name``. ``name`` values are
+        ``mediahub-*`` prefixed and ``actual_model`` values are raw provider ids,
+        so the two namespaces never collide. Ordered by ``sort_order`` so a
+        hypothetical duplicate resolves deterministically (mirrors
+        ``get_by_name``'s ``.limit(1)`` shape)."""
+        try:
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(MediahubModels)
+                    .where(MediahubModels.actual_model == actual_model)
+                    .order_by(MediahubModels.sort_order)
+                    .limit(1)
+                )
+                row = result.scalars().first()
+                return _row(row) if row else None
+        except Exception as e:
+            logger.error(
+                f"Failed to get mediahub model by actual_model '{actual_model}': {e}"
+            )
+            return None
+
     # ------------------------------------------------------------------
     # Admin CRUD
     # ------------------------------------------------------------------
