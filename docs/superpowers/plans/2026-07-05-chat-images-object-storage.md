@@ -114,9 +114,56 @@ join `conversation_members` — design carefully against the RLS lessons in
   stack storage-api before flag-on (standing lesson: mocked tests miss live
   protocol breaks, #918).
 
-**Phase 2 — flag-on + ops** (no code)
-- Verify storage-api on prod stack (ops checklist above), flip flag, canary:
-  upload → render → @agent vision → promote → dissolve, plus error-funnel query.
+**Phase 1 — DONE (2026-07-05)**
+- 1a foundation (#1036, v0.25.115): mig 337 (`chat-media` bucket +
+  `content_sha256` col), `media_storage.py` (`resolve_media_source` /
+  `content_key` / `ObjectStore`), flag. Inert.
+- 1b write path + readers (#1037, v0.25.116): `register_uploaded_media`
+  object-store branch (image-only, dedup, filesystem fallback); all four
+  readers ported (cover/file stream-proxy, promote, agent-vision signed-URL).
+  Flag still default-off → behavior-neutral.
+
+**Phase 2 — flag-on + ops runbook** (no code; gated on NAS access)
+
+Findings from the 2026-07-05 recon (settle the prerequisites):
+- Supabase Storage was used before: mig 052 provisioned a public `thumbnails`
+  bucket. It's now DORMANT — local dev has 1 bucket / 0 objects; the thumbnail
+  workload moved to filesystem+nginx. So storage-api existed at some point but
+  may have been removed since.
+- The NAS `MediaHub.library` (SMB-mounted `/volume2/sources/…`) has an empty
+  `s3/` subdir created 2026-07-05 — strongly suggests the NAS Supabase Storage
+  was recently pointed here, but nothing has landed yet. Empty dir can't tell
+  file-backend from s3-backend.
+- Repo has zero storage-api / STORAGE_BACKEND config — it lives in the NAS
+  supabase stack compose (Portainer), NOT git. `deploy/nas` + `docker/` only
+  manage redis + backend.
+
+Steps:
+1. On the NAS, settle backend + health in one shot:
+   ```bash
+   sudo docker ps | grep -i storage        # container alive?
+   sudo docker inspect $(sudo docker ps -qf name=storage) \
+     | grep -iE "STORAGE_BACKEND|STORAGE_FILE_BACKEND_PATH|GLOBAL_S3|S3_ENDPOINT"
+   ```
+   - `STORAGE_BACKEND=s3` + `GLOBAL_S3_*` → S3 backend (MinIO; data root is the
+     `s3/` dir). `STORAGE_BACKEND=file` + `STORAGE_FILE_BACKEND_PATH=…/s3` →
+     file backend. Either is transparent to our code (we PUT/GET by key).
+   - nothing / no container → storage-api not deployed; deploy it first (add to
+     the NAS supabase compose, then `docker compose up -d` — Watchtower does
+     NOT read compose, standing lesson #172). If it lands on `MediaHub.library`,
+     give it a DEDICATED subdir it owns exclusively (opaque internal layout —
+     don't mix with the existing `teams/` tree). macOS local dev: use a named
+     Docker volume, NOT a bind mount to `/Volumes/...` (Supabase docs: bind
+     mounts lack xattr/permissions and break storage).
+2. Confirm mig 337 applied on prod (`SELECT id FROM storage.buckets WHERE
+   id='chat-media'`).
+3. Un-mocked smoke on the DEV stack first (`FEATURE_CHAT_MEDIA_OBJECT_STORE=true`
+   in dev backend .env → `stop -t0`/`start`, standing lesson: .env needs a real
+   restart): upload a chat image → confirm an `sb://` row + a real object in the
+   bucket → @agent vision describes it → promote → serves via `/cover`.
+4. Flip prod: host `.env` `FEATURE_CHAT_MEDIA_OBJECT_STORE=true` +
+   `stop -t0`/`start`. Canary: upload → render → @agent vision → promote →
+   error-funnel query (`application_logs` ERROR since flip).
 - Rollback = flag off (new rows already written to storage keep working via
   resolver; only NEW writes revert to filesystem).
 
