@@ -20,14 +20,14 @@ import {
 
 async function fetchModels(): Promise<NousModel[]> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/v1/admin/nous-models`, { headers });
+  const res = await fetch(`${getApiUrl()}/api/v1/admin/mediahub-models`, { headers });
   if (!res.ok) throw new Error(`Failed to fetch models: ${res.status}`);
   return res.json();
 }
 
 async function createModel(data: ModelFormData): Promise<NousModel> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/v1/admin/nous-models`, {
+  const res = await fetch(`${getApiUrl()}/api/v1/admin/mediahub-models`, {
     method: 'POST',
     headers,
     body: JSON.stringify(data),
@@ -41,7 +41,7 @@ async function createModel(data: ModelFormData): Promise<NousModel> {
 
 async function updateModel(id: string, data: Partial<ModelFormData>): Promise<NousModel> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/v1/admin/nous-models/${id}`, {
+  const res = await fetch(`${getApiUrl()}/api/v1/admin/mediahub-models/${id}`, {
     method: 'PUT',
     headers,
     body: JSON.stringify(data),
@@ -55,7 +55,7 @@ async function updateModel(id: string, data: Partial<ModelFormData>): Promise<No
 
 async function deleteModel(id: string): Promise<void> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/v1/admin/nous-models/${id}`, {
+  const res = await fetch(`${getApiUrl()}/api/v1/admin/mediahub-models/${id}`, {
     method: 'DELETE',
     headers,
   });
