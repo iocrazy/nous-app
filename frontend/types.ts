@@ -1405,6 +1405,8 @@ export type UsageGroupBy = 'model' | 'agent';
 
 export interface UsageDailySummary {
   days: number;
+  /** Set when the window is a calendar month (YYYY-MM) instead of last-N-days. */
+  month: string | null;
   group_by: UsageGroupBy;
   total_requests: number;
   total_failed: number;

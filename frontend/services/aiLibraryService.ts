@@ -373,12 +373,14 @@ export const aiLibraryService = {
     model?: string;
     status?: string;
     days?: number;
+    month?: string;
   } = {}): Promise<UsageRunsPage> {
     const qs = new URLSearchParams({
       page: String(opts.page ?? 1),
       page_size: String(opts.pageSize ?? 25),
       days: String(opts.days ?? 30),
     });
+    if (opts.month) qs.set('month', opts.month);
     if (opts.model) qs.set('model', opts.model);
     if (opts.status) qs.set('status', opts.status);
     const resp = await fetch(`${base()}/usage/runs?${qs.toString()}`, {
@@ -391,11 +393,16 @@ export const aiLibraryService = {
   async getUsageDaily(
     days = 30,
     groupBy: UsageGroupBy = 'model',
+    month?: string,
   ): Promise<UsageDailySummary> {
-    const resp = await fetch(
-      `${base()}/usage/daily?days=${days}&group_by=${groupBy}`,
-      { headers: await getAuthHeaders() },
-    );
+    const qs = new URLSearchParams({
+      days: String(days),
+      group_by: groupBy,
+    });
+    if (month) qs.set('month', month);
+    const resp = await fetch(`${base()}/usage/daily?${qs.toString()}`, {
+      headers: await getAuthHeaders(),
+    });
     return handle<UsageDailySummary>(resp);
   },
 
