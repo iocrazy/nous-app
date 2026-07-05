@@ -111,12 +111,19 @@ async def test_save_chat_image_writes_file_and_calls_insert(tmp_path, monkeypatc
         conv_repo=fake_conv_repo,
     )
 
-    # File must be written to disk under the right path structure
+    # File must be written to disk under the right path structure:
+    # teams/{scope}/chat/{yyyy}/{mm}/{dd}/{uuid}/{filename} — the date
+    # bucket keeps any single directory from accumulating unbounded entries.
     rel = captured["params"]["file_path"]
     assert rel.startswith("teams/77/chat/")
     assert rel.endswith("/shot.png")
     parts = rel.split("/")
-    assert len(parts[3]) == 32, "middle segment must be a uuid4 hex"
+    assert len(parts) == 8, f"expected date-bucketed path, got {rel!r}"
+    yyyy, mm, dd = parts[3], parts[4], parts[5]
+    assert len(yyyy) == 4 and yyyy.isdigit(), "year bucket"
+    assert len(mm) == 2 and mm.isdigit(), "month bucket"
+    assert len(dd) == 2 and dd.isdigit(), "day bucket"
+    assert len(parts[6]) == 32, "per-file segment must be a uuid4 hex"
     dest = tmp_path / rel
     assert dest.exists(), "file must exist on disk"
     assert dest.read_bytes() == b"PNG"
