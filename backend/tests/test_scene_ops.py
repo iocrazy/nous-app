@@ -165,6 +165,18 @@ def test_update_merges_only_provided_keys():
     assert els[0]["character_id"] == "c1"  # untouched
 
 
+def test_update_introducing_new_key_round_trips_exactly():
+    """Inverse of an update that ADDS a key must remove it, not leave key: None."""
+    start = [{"id": "el_a", "type": "dialogue", "text": "hi"}]
+    els, inverse = apply_ops(
+        start,
+        [{"op": "update", "element_id": "el_a", "payload": {"character_id": "c9"}}],
+    )
+    assert els[0]["character_id"] == "c9"
+    restored, _ = apply_ops(els, inverse)
+    assert restored == start  # exact — no leftover character_id: None
+
+
 def test_update_unknown_element_raises_unknown_element():
     with pytest.raises(OpError) as ei:
         apply_ops(

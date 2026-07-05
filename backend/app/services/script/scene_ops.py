@@ -132,9 +132,12 @@ def _op_update(elements: list, op: dict) -> Optional[dict]:
     if idx < 0:
         raise OpError("unknown_element", f"element {element_id!r} not found")
     payload = op.get("payload") or {}
-    prior = {k: copy.deepcopy(elements[idx].get(k)) for k in payload}
+    # Inverse is an insert-upsert carrying the FULL prior payload: a merge-back
+    # update cannot remove a key this op introduced (it would leave key: None),
+    # while upsert's whole-payload replace restores the element exactly.
+    prior_payload = _payload_without_id(elements[idx])
     elements[idx].update(copy.deepcopy(payload))
-    return {"op": "update", "element_id": element_id, "payload": prior}
+    return {"op": "insert", "element_id": element_id, "payload": prior_payload}
 
 
 def _op_delete(elements: list, op: dict) -> Optional[dict]:
