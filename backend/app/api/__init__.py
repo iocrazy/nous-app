@@ -19,6 +19,7 @@ from app.api.canvases_router import router as canvases_router
 from app.api.cleanup_router import router as cleanup_router
 from app.api.collections_router import router as collections_router
 from app.api.conversation_router import router as conversation_router
+from app.api.episodes_router import router as episodes_router
 from app.api.error_report_router import router as error_report_router
 from app.api.flows_router import router as flows_router
 from app.api.frontend_config_router import router as frontend_config_router
@@ -49,6 +50,7 @@ from app.api.script_canvas_router import router as script_canvas_router
 from app.api.script_export_router import router as script_export_router
 from app.api.script_import_router import router as script_import_router
 from app.api.script_projects_router import router as script_projects_router
+from app.api.script_scenes_router import router as script_scenes_router
 from app.api.search_router import router as search_router
 from app.api.shares_router import router as shares_router
 from app.api.skills_router import router as skills_router
@@ -184,6 +186,8 @@ api_router.include_router(router=script_assets_router, tags=["Script Assets"])
 api_router.include_router(router=script_ai_router, tags=["Script AI"])
 api_router.include_router(router=script_import_router, tags=["Script Import"])
 api_router.include_router(router=script_export_router, tags=["Script Export"])
+api_router.include_router(router=script_scenes_router, tags=["Script Scenes"])
+api_router.include_router(router=episodes_router, tags=["Episodes"])
 
 api_router.include_router(router=ai_library_router, tags=["AI Library"])
 

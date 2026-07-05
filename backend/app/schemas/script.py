@@ -88,6 +88,78 @@ class ScriptChapterUpdate(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Episode schemas (Phase B P2)
+# ---------------------------------------------------------------------------
+
+
+class EpisodeCreate(BaseModel):
+    """Request body for creating an episode under a project."""
+
+    title: Optional[str] = Field(None, max_length=200)
+    sort_order: Optional[int] = None
+
+
+class EpisodeUpdate(BaseModel):
+    """Request body for updating an episode (title / sort_order)."""
+
+    title: Optional[str] = Field(None, max_length=200)
+    sort_order: Optional[int] = None
+
+
+# ---------------------------------------------------------------------------
+# Scene schemas (Phase B P2)
+# ---------------------------------------------------------------------------
+
+
+class SceneCreate(BaseModel):
+    """Request body for creating a scene under a script. ``script_id`` comes
+    from the path; ``content`` flows exclusively through the ops endpoint."""
+
+    chapter_id: Optional[str] = None
+    heading_int_ext: Optional[str] = Field(None, max_length=10)
+    location_text: Optional[str] = None
+    location_id: Optional[str] = None
+    time_of_day: Optional[str] = Field(None, max_length=20)
+    position_x: Optional[float] = None
+    position_y: Optional[float] = None
+    width: Optional[float] = None
+    height: Optional[float] = None
+    sort_order: Optional[int] = None
+
+
+class SceneMetaUpdate(BaseModel):
+    """Request body for updating scene header fields / canvas coords. NEVER
+    touches content_version/content — those move through the ops endpoint."""
+
+    heading_int_ext: Optional[str] = Field(None, max_length=10)
+    location_text: Optional[str] = None
+    location_id: Optional[str] = None
+    time_of_day: Optional[str] = Field(None, max_length=20)
+    position_x: Optional[float] = None
+    position_y: Optional[float] = None
+    width: Optional[float] = None
+    height: Optional[float] = None
+
+
+class SceneOpsRequest(BaseModel):
+    """Request body for `POST /scenes/{scene_id}/elements/ops`."""
+
+    ops: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class SceneMoveRequest(BaseModel):
+    """Request body for `POST /scenes/{scene_id}/move`.
+
+    ``chapter_id`` uses field-set semantics: omit to keep the current chapter,
+    supply (incl. null) to reparent. The router reads ``model_fields_set`` to
+    honour that distinction against the repository's UNSET sentinel."""
+
+    chapter_id: Optional[str] = None
+    before_scene_id: Optional[str] = None
+    after_scene_id: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
 # Canvas sync schema
 # ---------------------------------------------------------------------------
 
