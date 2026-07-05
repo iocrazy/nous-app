@@ -100,6 +100,16 @@ set_=<every supplied non-id column>)``. Explicit ``id`` / injected FK str values
 are coerced to int (``_bigint``) for the BIGINT bind (asyncpg int8 codec is
 strict).
 
+Single-row create/update bigint coercion (fix/script-sb-create-bigint,
+2026-07-04): every single-row create/update ``values()`` dict is also run
+through ``_coerce_bigint_cols()`` for its bigint FK/id columns (team_id /
+project_id / node_id) before bind. This was NOT true before this fix —
+``StoryboardProjectRepository.create`` in particular bound ``team_id`` (a str
+from ``require_team_id()``) straight into an INSERT, which asyncpg's strict
+int8 codec rejects with a DataError (prod 500 on every "New Storyboard"
+click). Only the bulk_upsert paths and WHERE-clause ``_bigint()`` calls had
+this discipline; the single-row write ``values()`` paths did not.
+
 Date/timestamp FILTER binding (v3 trap): NONE. Every read filters by equality
 (id / project_id / node_id / file_hash) or ``.neq("status","deleted")`` / ilike
 / ordering — there is NO ``WHERE <ts_col> </>/<= X`` range filter, so there is no
@@ -160,6 +170,20 @@ def _bigint(value: Any) -> Any:
     if value is None or isinstance(value, int):
         return value
     return int(value)
+
+
+def _coerce_bigint_cols(data: Dict[str, Any], cols: tuple) -> Dict[str, Any]:
+    """Return a NEW dict (immutable — never mutate the caller's ``data``) with
+    each of ``cols`` coerced through ``_bigint`` when present. Every write path
+    that binds a caller-supplied dict containing bigint FK/id columns (team_id /
+    project_id / node_id) must run it through this first — the service layer
+    passes these as ``str`` (e.g. ``require_team_id`` / path params) and
+    asyncpg's int8 codec rejects a str bind."""
+    out = dict(data)
+    for col in cols:
+        if col in out:
+            out[col] = _bigint(out[col])
+    return out
 
 
 def _parity(out: Dict[str, Any]) -> Dict[str, Any]:
@@ -259,7 +283,9 @@ class StoryboardProjectRepository:
     async def create(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Insert a new storyboard project. Returns the created row dict."""
         try:
-            values = _known_only(data, _PROJECTS_ATTRS)
+            values = _coerce_bigint_cols(
+                _known_only(data, _PROJECTS_ATTRS), ("id", "team_id", "project_id")
+            )
             async with write_scope() as session:
                 result = await session.execute(
                     pg_insert(StoryboardProjects)
@@ -277,7 +303,9 @@ class StoryboardProjectRepository:
     async def update(self, project_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """Update an existing storyboard project. Returns the updated row dict."""
         try:
-            values = _known_only(data, _PROJECTS_ATTRS)
+            values = _coerce_bigint_cols(
+                _known_only(data, _PROJECTS_ATTRS), ("team_id", "project_id")
+            )
             if not values:
                 current = await self.get_by_id(project_id)
                 return current or {}
@@ -437,7 +465,9 @@ class StoryboardNodeRepository:
     async def update(self, node_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """Update a single node. Returns the updated row dict."""
         try:
-            values = _known_only(data, _NODES_ATTRS)
+            values = _coerce_bigint_cols(
+                _known_only(data, _NODES_ATTRS), ("project_id",)
+            )
             if not values:
                 async with read_scope() as session:
                     row = (
@@ -597,7 +627,9 @@ class StoryboardFrameRepository:
     async def create(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Insert a single frame record. Returns the created row dict."""
         try:
-            values = _known_only(data, _FRAMES_ATTRS)
+            values = _coerce_bigint_cols(
+                _known_only(data, _FRAMES_ATTRS), ("id", "node_id", "project_id")
+            )
             async with write_scope() as session:
                 result = await session.execute(
                     pg_insert(StoryboardFrames)
@@ -636,7 +668,9 @@ class StoryboardFrameRepository:
     async def update(self, frame_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """Update a single frame. Returns the updated row dict."""
         try:
-            values = _known_only(data, _FRAMES_ATTRS)
+            values = _coerce_bigint_cols(
+                _known_only(data, _FRAMES_ATTRS), ("node_id", "project_id")
+            )
             if not values:
                 async with read_scope() as session:
                     row = (
@@ -729,7 +763,9 @@ class StoryboardCharacterRepository:
     async def create(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Insert a new character. Returns the created row dict."""
         try:
-            values = _known_only(data, _CHARACTERS_ATTRS)
+            values = _coerce_bigint_cols(
+                _known_only(data, _CHARACTERS_ATTRS), ("id", "project_id")
+            )
             async with write_scope() as session:
                 result = await session.execute(
                     pg_insert(StoryboardCharacters)
@@ -747,7 +783,9 @@ class StoryboardCharacterRepository:
     async def update(self, character_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """Update an existing character. Returns the updated row dict."""
         try:
-            values = _known_only(data, _CHARACTERS_ATTRS)
+            values = _coerce_bigint_cols(
+                _known_only(data, _CHARACTERS_ATTRS), ("project_id",)
+            )
             if not values:
                 current = await self.get_by_id(character_id)
                 return current or {}
@@ -832,7 +870,9 @@ class StoryboardAssetRepository:
     async def create(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Insert a new asset record. Returns the created row dict."""
         try:
-            values = _known_only(data, _ASSETS_ATTRS)
+            values = _coerce_bigint_cols(
+                _known_only(data, _ASSETS_ATTRS), ("id", "project_id")
+            )
             async with write_scope() as session:
                 result = await session.execute(
                     pg_insert(StoryboardAssets)

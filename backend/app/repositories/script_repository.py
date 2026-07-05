@@ -31,11 +31,18 @@ ISO string. The ORM returns native ``uuid.UUID`` / ``int`` / ``datetime``.
   (no consumer is type-sensitive — left native per the iron rule).
 
 Write-input audit: create/update/bulk_upsert receive str team_id / created_by /
-script_id from the service. created_by binds via the Uuid type processor;
-bigint FKs (script_id / project_id / team_id) are coerced to int before bind
-(SQLAlchemy's asyncpg int8 codec is strict about str-for-bigint). Writes commit
-via ``write_scope()`` (the silent-rollback P0 lesson). bulk_upsert is ON
-CONFLICT (id) — idempotent.
+script_id / project_id / parent_chapter_id / chapter_id /
+storyboard_project_id / storyboard_node_id from the service (e.g.
+``require_team_id()`` returns str). created_by binds via the Uuid type
+processor; every bigint FK/id column is run through ``_coerce_bigint_cols()``
+(built on ``_bigint()``) on the write ``values()`` dict before bind
+(asyncpg's int8 codec is strict about str-for-bigint — a bare str crashes the
+INSERT/UPDATE with a DataError, not a validation error). This was audited and
+enforced on 2026-07-04 (fix/script-sb-create-bigint) after prod 500s on
+``script_projects`` / ``storyboard_projects`` create surfaced that the
+promise above was never wired into the create/update paths, only bulk_upsert
+and WHERE clauses. Writes commit via ``write_scope()`` (the silent-rollback
+P0 lesson). bulk_upsert is ON CONFLICT (id) — idempotent.
 """
 
 from __future__ import annotations
@@ -86,6 +93,21 @@ def _bigint(value: Any) -> Any:
     return int(value)
 
 
+def _coerce_bigint_cols(data: Dict[str, Any], cols: tuple) -> Dict[str, Any]:
+    """Return a NEW dict (immutable — never mutate the caller's ``data``) with
+    each of ``cols`` coerced through ``_bigint`` when present. Every write path
+    that binds a caller-supplied dict containing bigint FK/id columns (team_id /
+    project_id / script_id / parent_chapter_id / chapter_id /
+    storyboard_project_id / storyboard_node_id) must run it through this first
+    — the service layer passes these as ``str`` (e.g. ``require_team_id``
+    returns str) and asyncpg's int8 codec rejects a str bind."""
+    out = dict(data)
+    for col in cols:
+        if col in out:
+            out[col] = _bigint(out[col])
+    return out
+
+
 # ─── script_projects ────────────────────────────────────────────────────
 
 
@@ -110,9 +132,10 @@ class ScriptProjectRepository(BaseRepository):
 
     async def create(self, data: Dict[str, Any]) -> Dict[str, Any]:
         try:
+            values = _coerce_bigint_cols(data, ("id", "project_id", "team_id"))
             async with write_scope() as session:
                 result = await session.execute(
-                    insert(ScriptProjects).values(**data).returning(ScriptProjects)
+                    insert(ScriptProjects).values(**values).returning(ScriptProjects)
                 )
                 row = result.scalars().first()
                 if row is None:
@@ -126,11 +149,12 @@ class ScriptProjectRepository(BaseRepository):
 
     async def update(self, record_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
         try:
+            values = _coerce_bigint_cols(data, ("project_id", "team_id"))
             async with write_scope() as session:
                 result = await session.execute(
                     update(ScriptProjects)
                     .where(ScriptProjects.id == _bigint(record_id))
-                    .values(**data)
+                    .values(**values)
                     .returning(ScriptProjects)
                 )
                 row = result.scalars().first()
@@ -206,9 +230,10 @@ class ScriptChapterRepository(BaseRepository):
 
     async def create(self, data: Dict[str, Any]) -> Dict[str, Any]:
         try:
+            values = _coerce_bigint_cols(data, ("id", "script_id", "parent_chapter_id"))
             async with write_scope() as session:
                 result = await session.execute(
-                    insert(ScriptChapters).values(**data).returning(ScriptChapters)
+                    insert(ScriptChapters).values(**values).returning(ScriptChapters)
                 )
                 row = result.scalars().first()
                 if row is None:
@@ -222,11 +247,12 @@ class ScriptChapterRepository(BaseRepository):
 
     async def update(self, record_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
         try:
+            values = _coerce_bigint_cols(data, ("script_id", "parent_chapter_id"))
             async with write_scope() as session:
                 result = await session.execute(
                     update(ScriptChapters)
                     .where(ScriptChapters.id == _bigint(record_id))
-                    .values(**data)
+                    .values(**values)
                     .returning(ScriptChapters)
                 )
                 row = result.scalars().first()
@@ -272,9 +298,10 @@ class ScriptChapterRepository(BaseRepository):
             out: List[Dict[str, Any]] = []
             async with write_scope() as session:
                 for ch in chapters:
-                    row = {**ch, "script_id": _bigint(script_id)}
-                    if "id" in row and row["id"] is not None:
-                        row["id"] = _bigint(row["id"])
+                    row = _coerce_bigint_cols(
+                        {**ch, "script_id": script_id},
+                        ("id", "script_id", "parent_chapter_id"),
+                    )
                     stmt = pg_insert(ScriptChapters).values(**row)
                     # ON CONFLICT (id) DO UPDATE every supplied non-PK column.
                     update_cols = {
@@ -319,9 +346,10 @@ class ScriptAssetRepository(BaseRepository):
 
     async def create(self, data: Dict[str, Any]) -> Dict[str, Any]:
         try:
+            values = _coerce_bigint_cols(data, ("id", "script_id"))
             async with write_scope() as session:
                 result = await session.execute(
-                    insert(ScriptAssets).values(**data).returning(ScriptAssets)
+                    insert(ScriptAssets).values(**values).returning(ScriptAssets)
                 )
                 row = result.scalars().first()
                 if row is None:
@@ -335,11 +363,12 @@ class ScriptAssetRepository(BaseRepository):
 
     async def update(self, record_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
         try:
+            values = _coerce_bigint_cols(data, ("script_id",))
             async with write_scope() as session:
                 result = await session.execute(
                     update(ScriptAssets)
                     .where(ScriptAssets.id == _bigint(record_id))
-                    .values(**data)
+                    .values(**values)
                     .returning(ScriptAssets)
                 )
                 row = result.scalars().first()
@@ -392,10 +421,14 @@ class ScriptStoryboardLinkRepository(BaseRepository):
 
     async def create(self, data: Dict[str, Any]) -> Dict[str, Any]:
         try:
+            values = _coerce_bigint_cols(
+                data,
+                ("id", "chapter_id", "storyboard_project_id", "storyboard_node_id"),
+            )
             async with write_scope() as session:
                 result = await session.execute(
                     insert(ScriptStoryboardLinks)
-                    .values(**data)
+                    .values(**values)
                     .returning(ScriptStoryboardLinks)
                 )
                 row = result.scalars().first()
