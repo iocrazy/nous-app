@@ -307,12 +307,30 @@ class ConversationRepository:
     ) -> None:
         """Atomically demote *from_user_id* to member and promote *to_user_id*.
 
-        Both UPDATEs run in one transaction; if the target is not a member the
-        promote hits 0 rows and the whole transaction rolls back (ValueError)
-        so the group is never left ownerless.
+        Both UPDATEs run in one transaction. Demote runs FIRST with a
+        `role='owner'` guard: two concurrent transfers both promoting first
+        would each demote the old owner unconditionally and leave TWO owners.
+        With the guard, the second transaction's demote hits 0 rows (the row
+        lock serializes them) and rolls back. A missing target likewise rolls
+        the demote back, so the group is never left ownerless.
         """
         eng = db_engine.get_engine()
         async with eng.begin() as conn:
+            demoted = await conn.execute(
+                text(
+                    """
+                    UPDATE public.conversation_members
+                       SET role = 'member'
+                     WHERE conversation_id = :cid
+                       AND member_type = 'user'
+                       AND user_id = :from_uid
+                       AND role = 'owner'
+                    """
+                ),
+                {"cid": _bigint(conversation_id), "from_uid": from_user_id},
+            )
+            if not demoted.rowcount:
+                raise ValueError("caller is no longer the owner of this conversation")
             promoted = await conn.execute(
                 text(
                     """
@@ -327,18 +345,6 @@ class ConversationRepository:
             )
             if not promoted.rowcount:
                 raise ValueError("target user is not a member of this conversation")
-            await conn.execute(
-                text(
-                    """
-                    UPDATE public.conversation_members
-                       SET role = 'member'
-                     WHERE conversation_id = :cid
-                       AND member_type = 'user'
-                       AND user_id = :from_uid
-                    """
-                ),
-                {"cid": _bigint(conversation_id), "from_uid": from_user_id},
-            )
 
     async def update_conversation(
         self,
