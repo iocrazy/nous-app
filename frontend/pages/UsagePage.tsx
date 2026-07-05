@@ -1,20 +1,19 @@
 /**
- * AI Usage dashboard — monthly rollup of agent_runs spend.
+ * AI Usage dashboard — console-style usage view over agent_runs.
  *
  * Routes: /usage (personal scope) and /team/:teamId/usage (team scope).
- * Project scope is deferred; the backend supports it but the UI picker
- * would need a project list we don't need for the first pass.
  *
- * What it shows:
- *   - Month picker (prev / current / next) — disabled "next" past current
- *   - Scope switcher (User / Team) — only Team if user is on a team route
- *   - Summary cards: runs / tokens / cost for the selected (month, scope)
- *   - Per-agent breakdown: bar chart of spend + a detailed table with
- *     prompt/completion/total tokens, cost, failure count
+ * User scope (the main view, OpenAI-console shaped):
+ *   - One time-range control (7d / 30d / 90d) governs the whole page
+ *   - Stat tiles: spend / tokens / requests / success rate
+ *   - Hero chart: daily stacked bars, switchable by dimension
+ *     (model | agent) and metric (cost | tokens | requests)
+ *   - Breakdown table with per-key share bars
+ *   - Paginated per-call table
  *
- * Polling: none. The backend query is heavy (aggregation over a full
- * month of agent_runs rows); we re-fetch on month/scope change and
- * provide a Refresh button for live updates.
+ * Team scope keeps the legacy monthly rollup (month picker + per-agent
+ * table): most runs carry no team_id, so a daily/range view would
+ * mislead there.
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -24,7 +23,6 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
   Legend,
   ResponsiveContainer,
   Tooltip,
@@ -42,7 +40,8 @@ import {
 } from 'lucide-react';
 import type {
   UsageAggregate,
-  UsageDailyRow,
+  UsageDailySummary,
+  UsageGroupBy,
   UsagePerAgent,
   UsageRunItem,
   UsageScope,
@@ -61,6 +60,8 @@ const AGENT_BAR_COLORS = [
   '#3b82f6',
 ];
 
+const RANGE_PRESETS = [7, 30, 90] as const;
+
 export const UsagePage: React.FC = () => {
   const { t } = useTranslation();
   const { addToast } = useToast();
@@ -71,6 +72,11 @@ export const UsagePage: React.FC = () => {
   const defaultScope: UsageScope = teamId != null ? 'team' : 'user';
 
   const [scope, setScope] = useState<UsageScope>(defaultScope);
+  const [days, setDays] = useState<number>(30);
+  const [groupBy, setGroupBy] = useState<UsageGroupBy>('model');
+  const [summary, setSummary] = useState<UsageDailySummary | null>(null);
+  // Team scope keeps the legacy monthly rollup (runs mostly carry no
+  // team_id, so a range/daily view would mislead there).
   const [month, setMonth] = useState<string>(() => formatMonth(new Date()));
   const [data, setData] = useState<UsageAggregate | null>(null);
   const [loading, setLoading] = useState(false);
@@ -82,8 +88,7 @@ export const UsagePage: React.FC = () => {
     setScope(defaultScope);
   }, [defaultScope]);
 
-  // Bumped by the Refresh button so the detail sections (daily chart /
-  // recent-calls table, which fetch independently) reload together.
+  // Bumped by the Refresh button so the runs table reloads with the charts.
   const [refreshKey, setRefreshKey] = useState(0);
 
   const fetchUsage = useCallback(async (): Promise<void> => {
@@ -91,21 +96,26 @@ export const UsagePage: React.FC = () => {
     setError(null);
     setRefreshKey((k) => k + 1);
     try {
-      const resp = await aiLibraryService.getUsage(
-        month,
-        scope,
-        scope === 'team' && teamId != null ? teamId : undefined,
-      );
-      setData(resp);
+      if (scope === 'user') {
+        const resp = await aiLibraryService.getUsageDaily(days, groupBy);
+        setSummary(resp);
+      } else {
+        const resp = await aiLibraryService.getUsage(
+          month,
+          scope,
+          teamId != null ? teamId : undefined,
+        );
+        setData(resp);
+      }
     } catch (err) {
-      console.error('[UsagePage] getUsage failed:', err);
+      console.error('[UsagePage] usage fetch failed:', err);
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
       addToast(`Failed to load usage: ${msg}`, 'error');
     } finally {
       setLoading(false);
     }
-  }, [month, scope, teamId, addToast]);
+  }, [scope, days, groupBy, month, teamId, addToast]);
 
   useEffect(() => {
     void fetchUsage();
@@ -123,48 +133,60 @@ export const UsagePage: React.FC = () => {
   const perAgent = data?.per_agent ?? [];
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 p-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
-      <header className="flex flex-wrap items-start justify-between gap-4">
+    <div className="max-w-6xl mx-auto space-y-5 p-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
+      <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-lg font-semibold text-ink-100">
             {t('aiUsage.title', 'AI Usage')}
           </h1>
-          <p className="mt-1 text-sm text-ink-400">
-            {t(
-              'aiUsage.subtitle',
-              'Monthly rollup of token spend and cost across your agents. Data is aggregated server-side from agent_runs.',
-            )}
-          </p>
         </div>
-        <div className="flex items-center gap-2">
-          <MonthPicker
-            month={month}
-            onPrev={() => shiftMonth(-1)}
-            onNext={() => shiftMonth(1)}
-            isCurrentMonth={isCurrentMonth}
-          />
+        <div className="flex flex-wrap items-center gap-2">
+          {teamId != null && (
+            <ScopeSwitcher
+              scope={scope}
+              onChange={setScope}
+              hasTeam={teamId != null}
+            />
+          )}
+          {scope === 'user' ? (
+            <div className="inline-flex items-center rounded-md border border-ink-700 bg-ink-800 p-1">
+              {RANGE_PRESETS.map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => setDays(d)}
+                  className={`rounded px-2.5 py-1 text-xs font-medium tabular-nums transition-colors ${
+                    days === d
+                      ? 'bg-indigo-500/15 text-indigo-300'
+                      : 'text-ink-400 hover:text-ink-200'
+                  }`}
+                >
+                  {d}d
+                </button>
+              ))}
+            </div>
+          ) : (
+            <MonthPicker
+              month={month}
+              onPrev={() => shiftMonth(-1)}
+              onNext={() => shiftMonth(1)}
+              isCurrentMonth={isCurrentMonth}
+            />
+          )}
           <button
             type="button"
             onClick={fetchUsage}
             disabled={loading}
-            className="inline-flex items-center gap-1.5 rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm font-medium text-ink-200 hover:bg-ink-700 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-md border border-ink-700 bg-ink-800 px-3 py-1.5 text-xs font-medium text-ink-200 hover:bg-ink-700 disabled:opacity-50"
             title={t('aiUsage.refresh', 'Refresh')}
           >
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
             {t('aiUsage.refresh', 'Refresh')}
           </button>
         </div>
       </header>
 
-      {teamId != null && (
-        <ScopeSwitcher
-          scope={scope}
-          onChange={setScope}
-          hasTeam={teamId != null}
-        />
-      )}
-
-      {error && !data && (
+      {error && (
         <div className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
           <AlertCircle size={16} className="mt-0.5 flex-shrink-0" />
           <div>
@@ -176,31 +198,28 @@ export const UsagePage: React.FC = () => {
         </div>
       )}
 
-      {loading && !data && (
+      {loading && !summary && !data && (
         <p className="text-sm text-ink-500">
           {t('aiUsage.loading', 'Loading usage...')}
         </p>
       )}
 
-      {data && (
+      {scope === 'user' && summary && (
+        <>
+          <StatTiles summary={summary} />
+          <HeroChart
+            summary={summary}
+            groupBy={groupBy}
+            onGroupByChange={setGroupBy}
+          />
+          <BreakdownTable summary={summary} />
+          <RecentRunsTable refreshKey={refreshKey} days={days} />
+        </>
+      )}
+
+      {scope === 'team' && data && (
         <>
           <SummaryCards data={data} />
-
-          {/* Charts row — agent dimension (month) + model dimension (30d)
-              side by side on wide screens, so both views read at a glance. */}
-          {(perAgent.length > 0 || scope === 'user') && (
-            <div
-              className={`grid gap-4 ${
-                perAgent.length > 0 && scope === 'user' ? 'xl:grid-cols-2' : ''
-              }`}
-            >
-              {perAgent.length > 0 && <PerAgentChart perAgent={perAgent} />}
-              {scope === 'user' && (
-                <DailyByModelChart refreshKey={refreshKey} />
-              )}
-            </div>
-          )}
-
           {perAgent.length === 0 ? (
             <div className="rounded-lg border border-dashed border-ink-800 bg-ink-900/40 px-4 py-10 text-center text-sm text-ink-500">
               {t(
@@ -211,17 +230,12 @@ export const UsagePage: React.FC = () => {
           ) : (
             <PerAgentTable perAgent={perAgent} />
           )}
-
-          {scope === 'user' ? (
-            <RecentRunsTable refreshKey={refreshKey} />
-          ) : (
-            <div className="rounded-lg border border-dashed border-ink-800 bg-ink-900/40 px-4 py-6 text-center text-sm text-ink-500">
-              {t(
-                'aiUsage.detailTeamHint',
-                'Per-call detail and daily model charts are available in the My usage view.',
-              )}
-            </div>
-          )}
+          <div className="rounded-lg border border-dashed border-ink-800 bg-ink-900/40 px-4 py-6 text-center text-sm text-ink-500">
+            {t(
+              'aiUsage.detailTeamHint',
+              'Per-call detail and daily model charts are available in the My usage view.',
+            )}
+          </div>
         </>
       )}
     </div>
@@ -350,97 +364,6 @@ const SummaryCard: React.FC<{
   </div>
 );
 
-const PerAgentChart: React.FC<{ perAgent: UsagePerAgent[] }> = ({ perAgent }) => {
-  const { t } = useTranslation();
-  // Cost is the headline metric — but when nothing this month has a price
-  // (all cost 0, common for unpriced models), an all-zero cost chart reads
-  // as broken. Fall back to tokens so the bars always carry information.
-  const hasCost = useMemo(
-    () => perAgent.some((a) => a.cost_cents > 0),
-    [perAgent],
-  );
-  const sorted = useMemo(
-    () =>
-      [...perAgent]
-        .sort((a, b) =>
-          hasCost
-            ? b.cost_cents - a.cost_cents
-            : b.total_tokens - a.total_tokens,
-        )
-        .slice(0, 10)
-        .map((row, i) => ({
-          name: row.agent_name ?? row.agent_slug ?? row.agent_id.slice(0, 8),
-          value: hasCost
-            ? Number(row.cost_cents.toFixed(4))
-            : row.total_tokens,
-          color: AGENT_BAR_COLORS[i % AGENT_BAR_COLORS.length],
-        })),
-    [perAgent, hasCost],
-  );
-
-  // Nothing measurable at all (no cost AND no tokens) — the table already
-  // tells the run/failure story; a blank plot adds nothing.
-  if (sorted.every((s) => s.value === 0)) return null;
-
-  const fmt = (v: number): string =>
-    hasCost ? formatCost(v) : formatTokens(v);
-
-  return (
-    <section className="rounded-xl border border-ink-800 bg-ink-900/60 p-5">
-      <h3 className="mb-3 text-sm font-semibold text-ink-200">
-        {hasCost
-          ? t('aiUsage.chartTitle', 'Spend by agent (top 10)')
-          : t('aiUsage.chartTitleTokens', 'Tokens by agent (top 10)')}
-      </h3>
-      <div className="h-64 w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={sorted}>
-            <CartesianGrid
-              strokeDasharray="3 3"
-              stroke="#27272a"
-              vertical={false}
-            />
-            <XAxis
-              dataKey="name"
-              stroke="#a1a1aa"
-              tick={{ fill: '#a1a1aa', fontSize: 11 }}
-              axisLine={false}
-              tickLine={false}
-              interval={0}
-              angle={-20}
-              textAnchor="end"
-              height={50}
-            />
-            <YAxis
-              stroke="#a1a1aa"
-              tick={{ fill: '#a1a1aa', fontSize: 11 }}
-              axisLine={false}
-              tickLine={false}
-              tickFormatter={(v) => fmt(Number(v))}
-            />
-            <Tooltip
-              cursor={{ fill: '#27272a55' }}
-              contentStyle={{
-                backgroundColor: '#18181b',
-                border: '1px solid #3f3f46',
-                borderRadius: 8,
-                fontSize: 12,
-              }}
-              formatter={(v: number | string) => fmt(Number(v))}
-              labelStyle={{ color: '#e4e4e7' }}
-            />
-            <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-              {sorted.map((entry, idx) => (
-                <Cell key={entry.name + idx} fill={entry.color} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-    </section>
-  );
-};
-
 const PerAgentTable: React.FC<{ perAgent: UsagePerAgent[] }> = ({ perAgent }) => {
   const { t } = useTranslation();
   const sorted = useMemo(
@@ -530,139 +453,358 @@ const PerAgentTable: React.FC<{ perAgent: UsagePerAgent[] }> = ({ perAgent }) =>
   );
 };
 
-// ─── Detail sections (user scope, rolling last 30 days) ────────────────────
+// ─── User-scope dashboard (range-driven, OpenAI-console style) ─────────────
 
-type DailyMetric = 'total_tokens' | 'cost_cents' | 'requests';
-
-const DailyByModelChart: React.FC<{ refreshKey: number }> = ({ refreshKey }) => {
+const StatTiles: React.FC<{ summary: UsageDailySummary }> = ({ summary }) => {
   const { t } = useTranslation();
-  const [rows, setRows] = useState<UsageDailyRow[]>([]);
+  const successRate =
+    summary.total_requests > 0
+      ? `${(
+          ((summary.total_requests - summary.total_failed) /
+            summary.total_requests) *
+          100
+        ).toFixed(0)}%`
+      : '—';
+  return (
+    <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <SummaryCard
+        icon={<DollarSign size={18} />}
+        tint="text-amber-300 bg-amber-500/10"
+        label={t('aiUsage.statSpend', 'Spend')}
+        value={formatCost(summary.total_cost_cents)}
+      />
+      <SummaryCard
+        icon={<Zap size={18} />}
+        tint="text-emerald-300 bg-emerald-500/10"
+        label={t('aiUsage.totalTokens', 'Total tokens')}
+        value={formatTokens(summary.total_tokens)}
+      />
+      <SummaryCard
+        icon={<ListChecks size={18} />}
+        tint="text-indigo-300 bg-indigo-500/10"
+        label={t('aiUsage.statRequests', 'Requests')}
+        value={summary.total_requests.toLocaleString()}
+      />
+      <SummaryCard
+        icon={<AlertCircle size={18} />}
+        tint="text-sky-300 bg-sky-500/10"
+        label={t('aiUsage.statSuccess', 'Success rate')}
+        value={successRate}
+      />
+    </div>
+  );
+};
+
+type DailyMetric = 'cost_cents' | 'total_tokens' | 'requests';
+
+const HeroChart: React.FC<{
+  summary: UsageDailySummary;
+  groupBy: UsageGroupBy;
+  onGroupByChange: (g: UsageGroupBy) => void;
+}> = ({ summary, groupBy, onGroupByChange }) => {
+  const { t } = useTranslation();
   const [metric, setMetric] = useState<DailyMetric>('total_tokens');
 
-  useEffect(() => {
-    let cancelled = false;
-    aiLibraryService
-      .getUsageDaily(30)
-      .then((resp) => {
-        if (!cancelled) setRows(resp.daily);
-      })
-      .catch((err) => {
-        console.error('[UsagePage] getUsageDaily failed:', err);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [refreshKey]);
-
-  // Pivot rows → one object per date with a key per model, so Recharts can
-  // render one stacked <Bar> per model.
-  const { chartData, models } = useMemo(() => {
-    const modelSet = new Set<string>();
+  // Pivot rows → one object per date with a key per series, so Recharts can
+  // render one stacked <Bar> per model/agent.
+  const { chartData, series } = useMemo(() => {
+    const seriesSet = new Set<string>();
     const byDate = new Map<string, Record<string, number | string>>();
-    for (const r of rows) {
-      const model = r.model || 'unknown';
-      modelSet.add(model);
+    for (const r of summary.daily) {
+      const label = r.label || r.key || 'unknown';
+      seriesSet.add(label);
       const bucket = byDate.get(r.date) ?? { date: r.date.slice(5) };
-      bucket[model] = Number(bucket[model] ?? 0) + Number(r[metric] ?? 0);
+      bucket[label] = Number(bucket[label] ?? 0) + Number(r[metric] ?? 0);
       byDate.set(r.date, bucket);
     }
-    return {
-      chartData: [...byDate.values()],
-      models: [...modelSet].sort(),
-    };
-  }, [rows, metric]);
-
-  if (rows.length === 0) return null;
+    return { chartData: [...byDate.values()], series: [...seriesSet].sort() };
+  }, [summary, metric]);
 
   const metricLabels: Record<DailyMetric, string> = {
-    total_tokens: t('aiUsage.metricTokens', 'Tokens'),
     cost_cents: t('aiUsage.metricCost', 'Cost'),
+    total_tokens: t('aiUsage.metricTokens', 'Tokens'),
     requests: t('aiUsage.metricRequests', 'Requests'),
   };
 
+  const fmt = (v: number): string =>
+    metric === 'cost_cents'
+      ? formatCost(v)
+      : metric === 'total_tokens'
+        ? formatTokens(v)
+        : v.toLocaleString();
+
   return (
     <section className="rounded-xl border border-ink-800 bg-ink-900/60 p-5">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold text-ink-200">
-          {t('aiUsage.dailyTitle', 'Daily usage by model (last 30 days)')}
+          {t('aiUsage.heroTitle', 'Usage over time')}
         </h3>
-        <div className="inline-flex items-center rounded-md border border-ink-700 bg-ink-800 p-0.5">
-          {(Object.keys(metricLabels) as DailyMetric[]).map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => setMetric(m)}
-              className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
-                metric === m
-                  ? 'bg-indigo-500/15 text-indigo-300'
-                  : 'text-ink-400 hover:text-ink-200'
-              }`}
-            >
-              {metricLabels[m]}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="h-64 w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={chartData}>
-            <CartesianGrid
-              strokeDasharray="3 3"
-              stroke="#27272a"
-              vertical={false}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex items-center rounded-md border border-ink-700 bg-ink-800 p-0.5">
+            <ToggleBtn
+              label={t('aiUsage.groupByModel', 'By model')}
+              active={groupBy === 'model'}
+              onClick={() => onGroupByChange('model')}
             />
-            <XAxis
-              dataKey="date"
-              stroke="#a1a1aa"
-              tick={{ fill: '#a1a1aa', fontSize: 11 }}
-              axisLine={false}
-              tickLine={false}
+            <ToggleBtn
+              label={t('aiUsage.groupByAgent', 'By agent')}
+              active={groupBy === 'agent'}
+              onClick={() => onGroupByChange('agent')}
             />
-            <YAxis
-              stroke="#a1a1aa"
-              tick={{ fill: '#a1a1aa', fontSize: 11 }}
-              axisLine={false}
-              tickLine={false}
-              tickFormatter={(v) =>
-                metric === 'cost_cents'
-                  ? formatCost(Number(v))
-                  : formatTokens(Number(v))
-              }
-            />
-            <Tooltip
-              cursor={{ fill: '#27272a55' }}
-              contentStyle={{
-                backgroundColor: '#18181b',
-                border: '1px solid #3f3f46',
-                borderRadius: 8,
-                fontSize: 12,
-              }}
-              formatter={(v: number | string) =>
-                metric === 'cost_cents'
-                  ? formatCost(Number(v))
-                  : Number(v).toLocaleString()
-              }
-              labelStyle={{ color: '#e4e4e7' }}
-            />
-            <Legend wrapperStyle={{ fontSize: 11 }} />
-            {models.map((m, i) => (
-              <Bar
+          </div>
+          <div className="inline-flex items-center rounded-md border border-ink-700 bg-ink-800 p-0.5">
+            {(Object.keys(metricLabels) as DailyMetric[]).map((m) => (
+              <ToggleBtn
                 key={m}
-                dataKey={m}
-                stackId="daily"
-                fill={AGENT_BAR_COLORS[i % AGENT_BAR_COLORS.length]}
+                label={metricLabels[m]}
+                active={metric === m}
+                onClick={() => setMetric(m)}
               />
             ))}
-          </BarChart>
-        </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+      {chartData.length === 0 ? (
+        <div className="flex h-72 items-center justify-center text-sm text-ink-500">
+          {t('aiUsage.emptyRange', 'No usage in this range.')}
+        </div>
+      ) : (
+        <div className="h-72 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={chartData}>
+              <CartesianGrid
+                strokeDasharray="3 3"
+                stroke="#27272a"
+                vertical={false}
+              />
+              <XAxis
+                dataKey="date"
+                stroke="#a1a1aa"
+                tick={{ fill: '#a1a1aa', fontSize: 11 }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <YAxis
+                stroke="#a1a1aa"
+                tick={{ fill: '#a1a1aa', fontSize: 11 }}
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={(v) => fmt(Number(v))}
+              />
+              <Tooltip
+                cursor={{ fill: '#27272a55' }}
+                contentStyle={{
+                  backgroundColor: '#18181b',
+                  border: '1px solid #3f3f46',
+                  borderRadius: 8,
+                  fontSize: 12,
+                }}
+                formatter={(v: number | string) => fmt(Number(v))}
+                labelStyle={{ color: '#e4e4e7' }}
+              />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              {series.map((s, i) => (
+                <Bar
+                  key={s}
+                  dataKey={s}
+                  stackId="usage"
+                  fill={AGENT_BAR_COLORS[i % AGENT_BAR_COLORS.length]}
+                  radius={
+                    i === series.length - 1 ? [3, 3, 0, 0] : [0, 0, 0, 0]
+                  }
+                />
+              ))}
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </section>
+  );
+};
+
+const ToggleBtn: React.FC<{
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}> = ({ label, active, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
+      active
+        ? 'bg-indigo-500/15 text-indigo-300'
+        : 'text-ink-400 hover:text-ink-200'
+    }`}
+  >
+    {label}
+  </button>
+);
+
+/** Per-key rollup table with an inline share bar (console-style breakdown). */
+const BreakdownTable: React.FC<{ summary: UsageDailySummary }> = ({
+  summary,
+}) => {
+  const { t } = useTranslation();
+  const rows = useMemo(() => {
+    const byKey = new Map<
+      string,
+      {
+        label: string;
+        requests: number;
+        failed: number;
+        prompt: number;
+        completion: number;
+        tokens: number;
+        cost: number;
+      }
+    >();
+    for (const r of summary.daily) {
+      const label = r.label || r.key || 'unknown';
+      const b = byKey.get(label) ?? {
+        label,
+        requests: 0,
+        failed: 0,
+        prompt: 0,
+        completion: 0,
+        tokens: 0,
+        cost: 0,
+      };
+      b.requests += r.requests;
+      b.failed += r.failed_requests;
+      b.prompt += r.prompt_tokens;
+      b.completion += r.completion_tokens;
+      b.tokens += r.total_tokens;
+      b.cost += r.cost_cents;
+      byKey.set(label, b);
+    }
+    // Share bar keys off cost when anything is priced, else tokens — same
+    // fallback logic as the hero metric default.
+    const hasCost = [...byKey.values()].some((b) => b.cost > 0);
+    const total = [...byKey.values()].reduce(
+      (acc, b) => acc + (hasCost ? b.cost : b.tokens),
+      0,
+    );
+    return [...byKey.values()]
+      .sort((a, b) => (hasCost ? b.cost - a.cost : b.tokens - a.tokens))
+      .map((b, i) => ({
+        ...b,
+        share: total > 0 ? ((hasCost ? b.cost : b.tokens) / total) * 100 : 0,
+        color: AGENT_BAR_COLORS[i % AGENT_BAR_COLORS.length],
+      }));
+  }, [summary]);
+
+  if (rows.length === 0) return null;
+
+  const dimHeader =
+    summary.group_by === 'agent'
+      ? t('aiUsage.colAgent', 'Agent')
+      : t('aiUsage.colModel', 'Model');
+
+  return (
+    <section className="overflow-hidden rounded-xl border border-ink-800 bg-ink-900/60">
+      <div className="border-b border-ink-800 px-5 py-3">
+        <h3 className="text-sm font-semibold text-ink-200">
+          {t('aiUsage.breakdownTitle', 'Breakdown')}
+        </h3>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-ink-900/80 text-xs font-medium uppercase tracking-wide text-ink-500">
+            <tr>
+              <th className="px-5 py-2">{dimHeader}</th>
+              <th className="px-5 py-2 text-right">
+                {t('aiUsage.colRuns', 'Runs')}
+              </th>
+              <th className="px-5 py-2 text-right">
+                {t('aiUsage.colPromptTokens', 'Prompt tokens')}
+              </th>
+              <th className="px-5 py-2 text-right">
+                {t('aiUsage.colCompletionTokens', 'Completion tokens')}
+              </th>
+              <th className="px-5 py-2 text-right">
+                {t('aiUsage.colTotalTokens', 'Total tokens')}
+              </th>
+              <th className="px-5 py-2 text-right">
+                {t('aiUsage.colCost', 'Cost')}
+              </th>
+              <th className="px-5 py-2 text-right">
+                {t('aiUsage.colFailed', 'Failed')}
+              </th>
+              <th className="w-40 px-5 py-2">
+                {t('aiUsage.colShare', 'Share')}
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-ink-800">
+            {rows.map((row) => (
+              <tr key={row.label} className="transition-colors hover:bg-ink-900">
+                <td className="px-5 py-2">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="h-2.5 w-2.5 flex-shrink-0 rounded-sm"
+                      style={{ backgroundColor: row.color }}
+                    />
+                    <span className="truncate font-medium text-ink-100">
+                      {row.label}
+                    </span>
+                  </div>
+                </td>
+                <td className="px-5 py-2 text-right tabular-nums text-ink-300">
+                  {row.requests.toLocaleString()}
+                </td>
+                <td className="px-5 py-2 text-right tabular-nums text-ink-300">
+                  {formatTokens(row.prompt)}
+                </td>
+                <td className="px-5 py-2 text-right tabular-nums text-ink-300">
+                  {formatTokens(row.completion)}
+                </td>
+                <td className="px-5 py-2 text-right tabular-nums font-medium text-ink-100">
+                  {formatTokens(row.tokens)}
+                </td>
+                <td className="px-5 py-2 text-right tabular-nums font-medium text-ink-100">
+                  {formatCost(row.cost)}
+                </td>
+                <td className="px-5 py-2 text-right tabular-nums">
+                  {row.failed === 0 ? (
+                    <span className="text-ink-500">0</span>
+                  ) : (
+                    <span className="rounded bg-red-500/10 px-1.5 py-0.5 text-xs font-medium text-red-300">
+                      {row.failed}
+                    </span>
+                  )}
+                </td>
+                <td className="px-5 py-2">
+                  <div className="flex items-center gap-2">
+                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-ink-800">
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${Math.max(row.share, 1)}%`,
+                          backgroundColor: row.color,
+                        }}
+                      />
+                    </div>
+                    <span className="w-10 text-right text-xs tabular-nums text-ink-400">
+                      {row.share.toFixed(0)}%
+                    </span>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </section>
   );
 };
 
+
 const RUNS_PAGE_SIZE = 25;
 
-const RecentRunsTable: React.FC<{ refreshKey: number }> = ({ refreshKey }) => {
+const RecentRunsTable: React.FC<{ refreshKey: number; days: number }> = ({
+  refreshKey,
+  days,
+}) => {
   const { t } = useTranslation();
   const [page, setPage] = useState(1);
   const [items, setItems] = useState<UsageRunItem[]>([]);
@@ -671,7 +813,7 @@ const RecentRunsTable: React.FC<{ refreshKey: number }> = ({ refreshKey }) => {
   useEffect(() => {
     let cancelled = false;
     aiLibraryService
-      .getUsageRuns({ page, pageSize: RUNS_PAGE_SIZE, days: 30 })
+      .getUsageRuns({ page, pageSize: RUNS_PAGE_SIZE, days })
       .then((resp) => {
         if (cancelled) return;
         setItems(resp.items);
@@ -683,7 +825,7 @@ const RecentRunsTable: React.FC<{ refreshKey: number }> = ({ refreshKey }) => {
     return () => {
       cancelled = true;
     };
-  }, [page, refreshKey]);
+  }, [page, refreshKey, days]);
 
   const from = total === 0 ? 0 : (page - 1) * RUNS_PAGE_SIZE + 1;
   const to = Math.min(page * RUNS_PAGE_SIZE, total);
@@ -692,7 +834,9 @@ const RecentRunsTable: React.FC<{ refreshKey: number }> = ({ refreshKey }) => {
     <section className="overflow-hidden rounded-xl border border-ink-800 bg-ink-900/60">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-ink-800 px-5 py-3">
         <h3 className="text-sm font-semibold text-ink-200">
-          {t('aiUsage.runsTitle', 'Recent calls (last 30 days)')}
+          {t('aiUsage.runsTitleRange', 'Recent calls (last {{days}} days)', {
+            days,
+          })}
         </h3>
         <div className="flex items-center gap-2 text-xs text-ink-400">
           <span className="tabular-nums">

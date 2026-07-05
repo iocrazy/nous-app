@@ -36,6 +36,7 @@ import type {
   CreateSkillPayload,
   UsageAggregate,
   UsageDailySummary,
+  UsageGroupBy,
   UsageRunsPage,
   UsageScope,
 } from '../types';
@@ -387,10 +388,14 @@ export const aiLibraryService = {
   },
 
   /** Caller's own daily × model rollup (for the usage charts). */
-  async getUsageDaily(days = 30): Promise<UsageDailySummary> {
-    const resp = await fetch(`${base()}/usage/daily?days=${days}`, {
-      headers: await getAuthHeaders(),
-    });
+  async getUsageDaily(
+    days = 30,
+    groupBy: UsageGroupBy = 'model',
+  ): Promise<UsageDailySummary> {
+    const resp = await fetch(
+      `${base()}/usage/daily?days=${days}&group_by=${groupBy}`,
+      { headers: await getAuthHeaders() },
+    );
     return handle<UsageDailySummary>(resp);
   },
 

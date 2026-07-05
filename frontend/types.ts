@@ -1386,19 +1386,28 @@ export interface UsageRunsPage {
   page_size: number;
 }
 
-// Daily × model rollup — GET /api/v1/ai-library/usage/daily (caller-scoped).
+// Daily rollup grouped by model or agent — GET /api/v1/ai-library/usage/daily.
 export interface UsageDailyRow {
   date: string;
-  model: string | null;
-  provider: string | null;
+  /** Group key: model name, or agent uuid when group_by=agent. */
+  key: string | null;
+  /** Display label (agent name resolved server-side; = key for models). */
+  label: string | null;
   requests: number;
+  failed_requests: number;
+  prompt_tokens: number;
+  completion_tokens: number;
   total_tokens: number;
   cost_cents: number;
 }
 
+export type UsageGroupBy = 'model' | 'agent';
+
 export interface UsageDailySummary {
   days: number;
+  group_by: UsageGroupBy;
   total_requests: number;
+  total_failed: number;
   total_tokens: number;
   total_cost_cents: number;
   daily: UsageDailyRow[];

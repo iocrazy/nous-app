@@ -102,17 +102,21 @@ async def test_usage_daily_scopes_and_totals():
         return [
             {
                 "date": "2026-07-03",
-                "model": "deepseek-v4-flash",
-                "provider": "deepseek",
+                "key": "deepseek-v4-flash",
                 "requests": 10,
+                "failed_requests": 3,
+                "prompt_tokens": 30000,
+                "completion_tokens": 7000,
                 "total_tokens": 37000,
                 "cost_cents": "3.1",
             },
             {
                 "date": "2026-07-04",
-                "model": "doubao-seed-2-0-lite-260428",
-                "provider": "doubao",
+                "key": "doubao-seed-2-0-lite-260428",
                 "requests": 2,
+                "failed_requests": 0,
+                "prompt_tokens": 2000,
+                "completion_tokens": 588,
                 "total_tokens": 2588,
                 "cost_cents": "0",
             },
@@ -120,16 +124,70 @@ async def test_usage_daily_scopes_and_totals():
 
     with patch("app.api.ai_library_router.get_agent_runs_repository") as repo_factory:
         repo = MagicMock()
-        repo.daily_usage_by_model = AsyncMock(side_effect=_fake_daily)
+        repo.daily_usage = AsyncMock(side_effect=_fake_daily)
         repo_factory.return_value = repo
 
         resp = await get_usage_daily(_auth(), days=30)
 
     assert captured["user_id"] == UUID(USER_ID)
+    assert captured["group_by"] == "model"
+    assert resp["group_by"] == "model"
     assert resp["total_requests"] == 12
+    assert resp["total_failed"] == 3
     assert resp["total_tokens"] == 39588
     assert resp["total_cost_cents"] == pytest.approx(3.1)
-    assert len(resp["daily"]) == 2
+    # model keys label as themselves
+    assert resp["daily"][0]["label"] == "deepseek-v4-flash"
+
+
+@pytest.mark.asyncio
+async def test_usage_daily_agent_grouping_enriches_labels():
+    """group_by=agent buckets carry uuids — endpoint resolves display names."""
+    from app.api.ai_library_router import get_usage_daily
+
+    async def _fake_daily(**kwargs):
+        return [
+            {
+                "date": "2026-07-04",
+                "key": AGENT_ID,
+                "requests": 4,
+                "failed_requests": 1,
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "cost_cents": "0.2",
+            }
+        ]
+
+    agent_repo = MagicMock()
+    agent_repo.get_by_id = AsyncMock(
+        return_value={"slug": "topic-scorer", "name": "Topic-Scorer"}
+    )
+
+    with (
+        patch("app.api.ai_library_router.get_agent_runs_repository") as repo_factory,
+        patch("app.api.ai_library_router._repos", return_value=(agent_repo, None)),
+    ):
+        repo = MagicMock()
+        repo.daily_usage = AsyncMock(side_effect=_fake_daily)
+        repo_factory.return_value = repo
+
+        resp = await get_usage_daily(_auth(), days=7, group_by="agent")
+
+    assert resp["group_by"] == "agent"
+    assert resp["daily"][0]["label"] == "Topic-Scorer"
+    assert resp["daily"][0]["key"] == AGENT_ID
+
+
+@pytest.mark.asyncio
+async def test_usage_daily_rejects_bad_group_by():
+    from fastapi import HTTPException
+
+    from app.api.ai_library_router import get_usage_daily
+
+    with pytest.raises(HTTPException) as exc:
+        await get_usage_daily(_auth(), days=7, group_by="team")
+    assert exc.value.status_code == 400
 
 
 @pytest.mark.asyncio
