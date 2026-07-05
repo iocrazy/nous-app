@@ -302,7 +302,9 @@ class ConversationService:
         self, *, conversation_id: int, user_id: str, agent_id: str
     ) -> dict[str, Any]:
         await self._require_group(conversation_id)
-        await self._require_role(conversation_id, user_id, frozenset({"owner", "admin"}))
+        await self._require_role(
+            conversation_id, user_id, frozenset({"owner", "admin"})
+        )
         removed = await self._repo.remove_agent_member(
             conversation_id=conversation_id, agent_id=agent_id
         )
@@ -317,7 +319,9 @@ class ConversationService:
         type: Optional[str] = None,
     ) -> dict[str, Any]:
         await self._require_group(conversation_id)
-        await self._require_role(conversation_id, user_id, frozenset({"owner", "admin"}))
+        await self._require_role(
+            conversation_id, user_id, frozenset({"owner", "admin"})
+        )
         if name is not None:
             name = name.strip()
             if not name:

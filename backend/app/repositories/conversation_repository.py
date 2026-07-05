@@ -275,9 +275,7 @@ class ConversationRepository:
         )
         return bool(n)
 
-    async def remove_agent_member(
-        self, *, conversation_id: int, agent_id: str
-    ) -> bool:
+    async def remove_agent_member(self, *, conversation_id: int, agent_id: str) -> bool:
         n = await db_engine.execute(
             """
             DELETE FROM public.conversation_members

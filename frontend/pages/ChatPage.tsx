@@ -4,7 +4,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { MessageSquare } from 'lucide-react';
+import { MessageSquare, Settings2 } from 'lucide-react';
 
 import { useAuth } from '../contexts/AuthContext';
 import { useTeamContext } from '../contexts/TeamContext';
@@ -23,6 +23,7 @@ import { MessageList } from '../components/chat/MessageList';
 import { Composer } from '../components/chat/Composer';
 import { TypingIndicator } from '../components/chat/TypingIndicator';
 import CreateGroupModal from '../components/chat/CreateGroupModal';
+import GroupSettingsDrawer from '../components/chat/GroupSettingsDrawer';
 import ResourcePicker from '../components/chat/ResourcePicker';
 
 import type { Channel, ChatMessage, ResourceItem } from '../types';
@@ -54,6 +55,7 @@ export function ChatPage(): React.ReactElement {
   const [sending, setSending] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   /**
    * When non-null, the user has opened a DM with an agent (by slug).
@@ -650,14 +652,26 @@ export function ChatPage(): React.ReactElement {
                   </span>
                 </>
               )}
-              {activeChannel && onlineUserIds.length > 0 && (
-                <div className="ml-auto flex items-center gap-[5px] flex-shrink-0">
-                  <span className="w-[6px] h-[6px] rounded-full bg-emerald-400 flex-shrink-0" />
-                  <span className="text-[11.5px] text-content-3">
-                    {t('chat.typing.online', { count: onlineUserIds.length })}
-                  </span>
-                </div>
-              )}
+              <div className="ml-auto flex items-center gap-[10px] flex-shrink-0">
+                {activeChannel && onlineUserIds.length > 0 && (
+                  <div className="flex items-center gap-[5px]">
+                    <span className="w-[6px] h-[6px] rounded-full bg-emerald-400 flex-shrink-0" />
+                    <span className="text-[11.5px] text-content-3">
+                      {t('chat.typing.online', { count: onlineUserIds.length })}
+                    </span>
+                  </div>
+                )}
+                {activeChannel && activeChannel.type !== 'dm' && (
+                  <button
+                    type="button"
+                    onClick={() => setShowSettings(true)}
+                    title={t('chat.groupSettings.title')}
+                    className="w-[26px] h-[26px] rounded-[7px] grid place-items-center text-content-3 hover:text-content hover:bg-white/[.06] transition-colors"
+                  >
+                    <Settings2 size={14} />
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Body: message list or empty state */}
@@ -722,6 +736,23 @@ export function ChatPage(): React.ReactElement {
           teamId={selectedTeamId}
           onClose={() => setShowPicker(false)}
           onSelect={handleSendMedia}
+        />
+      )}
+      {activeChannel && selectedTeamId && currentUserId && (
+        <GroupSettingsDrawer
+          channel={activeChannel}
+          teamId={selectedTeamId}
+          currentUserId={currentUserId}
+          open={showSettings}
+          onClose={() => setShowSettings(false)}
+          onChannelUpdated={(ch) =>
+            setChannels((prev) => prev.map((c) => (c.id === ch.id ? { ...c, ...ch } : c)))
+          }
+          onLeftOrDissolved={() => {
+            setShowSettings(false);
+            setChannels((prev) => prev.filter((c) => c.id !== activeChannel.id));
+            setActiveId(null);
+          }}
         />
       )}
     </div>

@@ -150,9 +150,7 @@ async def set_member_role(
 
 
 @router.post("/{conversation_id}/transfer-owner")
-async def transfer_owner(
-    conversation_id: int, payload: OwnerTransfer, auth: AuthDep
-):
+async def transfer_owner(conversation_id: int, payload: OwnerTransfer, auth: AuthDep):
     svc = get_conversation_service()
     try:
         return await svc.transfer_ownership(

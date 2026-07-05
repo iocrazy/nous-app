@@ -1,5 +1,5 @@
 import { getAuthHeaders } from './parserService';
-import type { Channel, ChatMessage } from '../types';
+import type { Channel, ChatMessage, ConversationMember } from '../types';
 
 const API_BASE =
   ('VITE_API_URL' in import.meta.env ? import.meta.env.VITE_API_URL : '') ||
@@ -179,4 +179,49 @@ export const conversationService = {
     ).then((row) => ({
       promoted_resource_id: String(row.promoted_resource_id),
     })),
+
+  // ── Group management (owner / admin / member roles) ─────────────────────
+
+  listMembers: (conversationId: string) =>
+    req<ConversationMember[]>(`/conversations/${conversationId}/members`),
+
+  removeMember: (conversationId: string, userId: string) =>
+    req<{ removed: boolean }>(
+      `/conversations/${conversationId}/members/${userId}`,
+      { method: 'DELETE' },
+    ),
+
+  setMemberRole: (conversationId: string, userId: string, role: 'admin' | 'member') =>
+    req<{ updated: boolean; role: string }>(
+      `/conversations/${conversationId}/members/${userId}/role`,
+      { method: 'PATCH', body: JSON.stringify({ role }) },
+    ),
+
+  transferOwner: (conversationId: string, toUserId: string) =>
+    req<{ transferred: boolean }>(
+      `/conversations/${conversationId}/transfer-owner`,
+      { method: 'POST', body: JSON.stringify({ to_user_id: toUserId }) },
+    ),
+
+  removeAgent: (conversationId: string, agentId: string) =>
+    req<{ removed: boolean }>(
+      `/conversations/${conversationId}/agents/${agentId}`,
+      { method: 'DELETE' },
+    ),
+
+  updateChannel: async (
+    conversationId: string,
+    patch: { name?: string; type?: 'group' | 'public' },
+  ): Promise<Channel> =>
+    toConversation(
+      await req<ConversationRow>(`/conversations/${conversationId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      }),
+    ),
+
+  dissolveChannel: (conversationId: string) =>
+    req<{ archived: boolean }>(`/conversations/${conversationId}`, {
+      method: 'DELETE',
+    }),
 };

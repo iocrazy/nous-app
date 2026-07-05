@@ -27,7 +27,9 @@ OUTSIDER = "user-outsider"
 ROLES = {OWNER: "owner", ADMIN: "admin", MEMBER: "member"}
 
 
-def _make_repo(conv_type: str = "group", roles: dict[str, str] | None = None) -> AsyncMock:
+def _make_repo(
+    conv_type: str = "group", roles: dict[str, str] | None = None
+) -> AsyncMock:
     repo = AsyncMock()
     role_map = ROLES if roles is None else roles
 
@@ -77,7 +79,9 @@ async def test_list_members_ok_for_member():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("actor,target", [(OWNER, MEMBER), (OWNER, ADMIN), (ADMIN, MEMBER)])
+@pytest.mark.parametrize(
+    "actor,target", [(OWNER, MEMBER), (OWNER, ADMIN), (ADMIN, MEMBER)]
+)
 async def test_remove_member_allowed(actor: str, target: str):
     repo = _make_repo()
     out = await _svc(repo).remove_member(
@@ -88,7 +92,9 @@ async def test_remove_member_allowed(actor: str, target: str):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("actor,target", [(ADMIN, ADMIN), (MEMBER, ADMIN), (MEMBER, MEMBER)])
+@pytest.mark.parametrize(
+    "actor,target", [(ADMIN, ADMIN), (MEMBER, ADMIN), (MEMBER, MEMBER)]
+)
 async def test_remove_member_forbidden(actor: str, target: str):
     # ADMIN removing itself is the leave path (allowed) — use a second admin.
     roles = {**ROLES, "user-admin2": "admin"}
