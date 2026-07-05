@@ -82,10 +82,35 @@
 - Locations：Overview / Relationships / Scout Sheet；卡片带 scenes/chars 计数、描述、Generate（AI 场景图）
 - Props：Overview / List；空态 Prop Sheet 引导；手动登记
 
+## 第三批参考 + 用户对现有实现的批评（2026-07-05）
+
+### laper 新观察
+- **段落块悬浮**（图 37）：hover 到段落块显示段落编号（左侧 `16 ::` 手柄样式）。
+- **写作热度图**（图 38）：右上角图标弹「Writing」面板 = 类 GitHub 贡献热度图（Activity 按月网格）+ 顶部数字卡（Chats 21 / Token Value $0.09 / Total Tokens 94K / Member Days）+ Tokens Last-30-days 折线。**用户要这个**（写作/AI 用量可视化）。
+- **Beats ↔ Script 关联悬浮**（图 39）：Beats 卡（Enter VOID · 10'-20' · 描述 + ✎）悬浮在 script 左侧空白处——但**用户说「目前没看到怎么关联」，让我思考**。→ 设计空间：Beats 应锚定到 script 的 scene/节点上（时间轴节拍 ↔ 剧本场景双向定位）。
+- **Ep 多集**（图 45）：Episodes 可 `+` 加 Ep（Ep1/2/3），路由 `laper.ai/app/project/<projectId>/EPISODE_<id>/script`。→ **Episode 是路由层级**，切 Ep 换整套 Script/Beats/Storyboard/Scenes。**关注路由设计**。
+
+### ⭐ 用户对 MediaHub 现有实现的批评（Phase B 要改的）
+1. **阶段条做成了 tab（图 42）——错**。「上面应该是流程节点，但做成了 tab，应该类似节点样式的上下游关联」。参考 laper Production 画布（图 40）：Scene → Performance Description → Text Storyboard → Storyboard Frame 是**画布上左→右连线的上下游流程节点**，不是顶部 tab 条。→ 阶段/流程要节点化、有连线、体现上下游。
+2. **现有 script 模块很乱（图 43）+ 报错（图 44 已修，见下）**。Script Assets 侧栏（Story Outline/Worldview/Characters/Locations/Props/Plot Points）+ Import Script / Create Story 空态 + AI Chat 抽屉（Execute/Plan First/Dry Run 模式）——用户觉得整体乱，让我看怎么调整。
+3. **⭐ 核心设计澄清（节点式 vs 文字式）**：用户原话「我记得之前是节点式的剧本，应该是显示文字样式的剧本，可以节点化，对吧（节点就方便预览和调整顺序）」。
+   → **主视图 = laper 那种文字剧本样式**（好莱坞/亚洲格式化文本，图 6/32），**不是** MediaHub 现在的纯节点画布。
+   → **但底层节点化保留**，用于「预览 + 调顺序」（拖场景换序、AI 按 node 操作）。
+   → 结论：**文字为主视图、节点为结构与操作层**。二者是同一份数据的两种呈现（就像 Hollywood/Asian 是渲染层）。这统一了之前所有观察：scene 容器块、拖动换序、AI replace node、版本 diff 到 node。
+
+### 已修的现有 bug（本轮连带）
+- 创建脚本/分镜 500（str team_id 未 coerce bigint）→ #1011 v0.25.102
+- 打开脚本编辑器崩溃（缺 TaskManagerProvider）→ #1012 v0.25.105
+- Generate Story Outline 500 + expand/branches/storyboard 同病（4 端点 task_tracking.dbos_workflow_id NOT NULL 未串 wf_id，自 23ca9d28 一直坏）→ #1017 v0.25.106
+- 教训：这几个都是「无人使用面的连环隐藏 bug」，和 Phase A 救活 project-files 面同一模式。现有 script/storyboard 后端虽在，但前端链路多处腐坏，Phase B 要连地基一起校。
+
 ## 已定（用户拍板）
 - **PC 端优先**，移动端以后再说
 - laper screenwriting = MediaHub project（结构直接映射）
 - 首个深挖模块 = Script
+- **主视图文字剧本 + 节点化底层**（不是纯节点画布）
+- **阶段/流程节点化**（画布上下游连线，不是 tab 条）
+- Episode 是路由层级（切 Ep 换整套模块）
 
 ## 待收集
 - Beats 时间轴编排的交互细节 + 与 Script scene 的对应关系（用户要补的联动）
