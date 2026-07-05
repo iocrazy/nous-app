@@ -62,6 +62,7 @@ async def generate_outline(
                 "premise": body.premise,
                 "chapter_count": body.chapter_count,
                 "style_guide": body.style_guide,
+                "user_id": auth.user_id,
             },
             workflow_id=wf_id,
         )
