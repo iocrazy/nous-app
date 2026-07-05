@@ -55,6 +55,12 @@ export interface AIChatPanelProps {
    *  scopes sessions to the agent only (no project filter). Existing callers that
    *  pass projectId but not agentSlug are completely unaffected. */
   agentSlug?: string;
+  /** Controlled session-history overlay (FloatingChatWidget). When defined,
+   *  the inline SESSIONS section is hidden and the session list renders as a
+   *  left slide-over instead — opened by the widget's title-bar button.
+   *  Callers that omit it (ChatPage) keep the inline list, unaffected. */
+  sessionsOverlayOpen?: boolean;
+  onSessionsOverlayClose?: () => void;
 }
 
 function formatTimestamp(isoString?: string | null): string {
@@ -118,6 +124,8 @@ export function AIChatPanel({
   onApplyContent,
   onClose,
   agentSlug,
+  sessionsOverlayOpen,
+  onSessionsOverlayClose,
 }: AIChatPanelProps): React.ReactElement {
   const { t } = useTranslation();
   const { addToast } = useToast();
@@ -483,7 +491,7 @@ export function AIChatPanel({
   const hasMessages = messages.length > 0 || sending;
 
   return (
-    <div className="w-full h-full flex-1 flex flex-col bg-ink-900 overflow-hidden min-h-0">
+    <div className="relative w-full h-full flex-1 flex flex-col bg-ink-900 overflow-hidden min-h-0">
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-ink-800 flex-shrink-0">
         <span className="text-sm font-medium text-ink-200 flex-1">AI Chat</span>
@@ -526,14 +534,58 @@ export function AIChatPanel({
         hideWhenEmpty
       />
 
-      {/* Session list */}
-      <SessionList
-        sessions={sessionItems}
-        activeSessionId={activeSessionId}
-        onSelect={handleSelectSession}
-        onNew={handleNewSession}
-        onDelete={handleDeleteSession}
-      />
+      {/* Session list — inline by default; when the host widget controls a
+          history overlay (sessionsOverlayOpen defined), render a left
+          slide-over instead (Laper-style Chat History). */}
+      {sessionsOverlayOpen === undefined ? (
+        <SessionList
+          sessions={sessionItems}
+          activeSessionId={activeSessionId}
+          onSelect={handleSelectSession}
+          onNew={handleNewSession}
+          onDelete={handleDeleteSession}
+        />
+      ) : (
+        <>
+          {sessionsOverlayOpen && (
+            <button
+              type="button"
+              aria-label="Close session history"
+              onClick={onSessionsOverlayClose}
+              className="absolute inset-0 z-10 cursor-default bg-black/30"
+            />
+          )}
+          <div
+            aria-hidden={!sessionsOverlayOpen}
+            className={`absolute inset-y-0 left-0 z-20 flex w-64 flex-col border-r border-ink-800 bg-ink-900 shadow-2xl transition-transform duration-200 ease-out ${
+              sessionsOverlayOpen
+                ? 'translate-x-0'
+                : '-translate-x-full pointer-events-none'
+            }`}
+          >
+            <div className="flex items-center justify-between border-b border-ink-800 px-3 py-2">
+              <span className="text-sm font-medium text-ink-200">
+                Chat History
+              </span>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <SessionList
+                sessions={sessionItems}
+                activeSessionId={activeSessionId}
+                onSelect={(id) => {
+                  handleSelectSession(id);
+                  onSessionsOverlayClose?.();
+                }}
+                onNew={() => {
+                  handleNewSession();
+                  onSessionsOverlayClose?.();
+                }}
+                onDelete={handleDeleteSession}
+              />
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Messages area */}
       <div className="flex-1 overflow-y-auto px-3 py-3 min-h-0">

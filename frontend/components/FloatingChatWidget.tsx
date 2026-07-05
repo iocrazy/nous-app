@@ -17,7 +17,7 @@
  * Keyboard: ⌘I / Ctrl+I toggles, ESC minimizes.
  */
 
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { GripHorizontal, MessageSquare, Minus } from 'lucide-react';
 
 import { AIChatPanel } from './AIChatPanel';
@@ -42,6 +42,9 @@ export function FloatingChatWidget(): React.ReactElement {
   const setRect = useGlobalChatStore((s) => s.setRect);
 
   const minimize = useCallback(() => setOpen(false), [setOpen]);
+  // Laper-style Chat History: the title-bar grip button slides the session
+  // list out from the left edge of the window.
+  const [sessionsOpen, setSessionsOpen] = useState(false);
 
   // Keyboard: ⌘I / Ctrl+I toggle, ESC minimize.
   useEffect(() => {
@@ -157,7 +160,7 @@ export function FloatingChatWidget(): React.ReactElement {
         title="AI Chat (⌘I)"
         aria-label="Open AI Chat"
         data-testid="sb-toggle-chat"
-        className="fixed bottom-4 right-4 z-30 flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600 text-white shadow-lg transition-all hover:bg-indigo-500 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+        className="fixed bottom-20 right-4 z-30 flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600 text-white shadow-lg transition-all hover:bg-indigo-500 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-indigo-400"
       >
         <MessageSquare size={20} />
       </button>
@@ -177,7 +180,15 @@ export function FloatingChatWidget(): React.ReactElement {
         onPointerDown={onDragStart}
         className="flex h-8 flex-shrink-0 cursor-grab select-none items-center gap-2 border-b border-ink-800 bg-ink-900/95 px-2 active:cursor-grabbing"
       >
-        <GripHorizontal size={14} className="text-ink-500" />
+        <button
+          type="button"
+          onClick={() => setSessionsOpen((v) => !v)}
+          title="Chat History"
+          aria-label="Toggle session history"
+          className="rounded p-1 text-ink-400 hover:bg-ink-800 hover:text-ink-200"
+        >
+          <GripHorizontal size={14} />
+        </button>
         {pageContext?.moduleLabel && (
           <span className="rounded bg-indigo-500/10 px-1.5 py-0.5 text-[11px] font-medium text-indigo-400">
             {pageContext.moduleLabel}
@@ -205,6 +216,8 @@ export function FloatingChatWidget(): React.ReactElement {
           contextId={pageContext?.contextId}
           onApplyContent={pageContext?.onApplyContent}
           onClose={minimize}
+          sessionsOverlayOpen={sessionsOpen}
+          onSessionsOverlayClose={() => setSessionsOpen(false)}
         />
       </div>
 
