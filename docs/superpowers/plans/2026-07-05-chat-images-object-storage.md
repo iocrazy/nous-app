@@ -1,7 +1,32 @@
 # Small-Image Object Storage Migration (Supabase Storage) — Plan
 
-**Date:** 2026-07-05 · **Status:** PLANNED (awaiting scheduling)
+**Date:** 2026-07-05 · **Status:** ✅ LIVE (Phase 1 shipped + Phase 2 go-live done 2026-07-05)
 **Decision context:** user discussion 2026-07-05 — workload-split architecture approved in principle.
+
+## Final deployed state (2026-07-05)
+
+- Prod flag ON (`FEATURE_CHAT_MEDIA_OBJECT_STORE=true`, host .env). Rollback = remove flag + stop-t0/start.
+- storage-api: **file backend**, both stacks. Disk location moved off volume1
+  (7TB SSD) to **`/volume2/sources/MediaHub.library/object-storage`** (56TB).
+- Tenant naming de-stubbed: `STORAGE_TENANT_ID=mediahub`, `GLOBAL_S3_BUCKET: media`
+  → final object path `…/object-storage/media/mediahub/chat-media/t{scope}/{sha[:2]}/{sha[2:4]}/{sha}.ext`.
+- `FILE_SIZE_LIMIT` raised 50MB → 5GB (both stacks, user request).
+- **Ops iron law learned:** touching ONE service in the drifted supabase stack
+  requires `docker compose up -d --no-deps <svc>` — a bare `compose up` cascaded
+  db/rest/realtime and took PostgREST down ~7min (502s). Also: recreating a
+  long-untouched container can expose missing env (storage needed
+  `PGRST_JWT_SECRET` added to compose).
+- **Post-go-live review catch (v0.25.121):** vision signed URLs were built on the
+  LAN `SUPABASE_URL` — unreachable by cloud providers, silently breaking vision
+  for sb:// images. Vision now defaults to base64 bytes for object-store images;
+  signed URLs are opt-in via `STORAGE_SIGNED_URL_PUBLIC_BASE` (set only to a
+  genuinely public base; the public kong entry does not currently route
+  /storage/v1, so leave empty until that's configured).
+- Known non-blocking leftovers: imgproxy compose line still mounts the old
+  volume1 path (unused; sync if imgproxy transforms are ever enabled); dev stack
+  drift (missing `generated_media` table, mig 307+ never applied to dev);
+  chat-message soft-delete does not delete its generated_media row/object
+  (pre-existing, true for filesystem too).
 
 ## Problem & Decision
 

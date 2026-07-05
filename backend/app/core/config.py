@@ -115,6 +115,16 @@ class Settings(BaseSettings):
         "written sb:// rows readable. Flip only after verifying storage-api "
         "is deployed + healthy on the target stack (Phase 2 ops gate).",
     )
+    STORAGE_SIGNED_URL_PUBLIC_BASE: str = Field(
+        default="",
+        description="OPTIONAL public base URL (scheme+host[+port]) for storage "
+        "signed URLs handed to CLOUD model providers (agent vision). Empty "
+        "(default) = vision inlines object-store images as base64 data URLs, "
+        "which always works. Set this ONLY to a base the provider can reach "
+        "from the public internet (e.g. https://sb-mediahub.example.com:88) — "
+        "our SUPABASE_URL is a LAN address, and a LAN-based signed URL "
+        "silently breaks vision for object-store images.",
+    )
 
     # ============================================
     # 下载设置
