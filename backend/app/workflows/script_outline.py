@@ -30,11 +30,23 @@ async def generate_outline_chapters(
     premise: str,
     chapter_count: int,
     style_guide: Optional[str],
+    user_id: Optional[str] = None,
 ) -> list[dict[str, Any]]:
     """Run the LLM outline call. Returns list of {title, summary} dicts."""
+    from app.services.ai.providers.ai_provider_helpers import (
+        resolve_script_provider_config,
+    )
     from app.services.storyboard.script.script_ai_service import ScriptAIService
 
-    ai_svc = ScriptAIService()
+    provider_key, provider_config, _model, agent_slug = (
+        await resolve_script_provider_config(user_id)
+    )
+    ai_svc = ScriptAIService(
+        user_id=user_id,
+        agent_slug=agent_slug,
+        provider_key=provider_key,
+        provider_config=provider_config,
+    )
     chapters = await ai_svc.generate_outline(premise, chapter_count, style_guide)
     logger.info(f"[script_outline][step] LLM returned {len(chapters)} chapters")
     return chapters
@@ -77,17 +89,26 @@ async def script_outline_workflow(
     *,
     chapter_count: int = 5,
     style_guide: Optional[str] = None,
+    user_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """DBOS port of generate_script_outline.
 
     - input: script_id (uuid str) + premise + chapter_count + style_guide
+      + user_id
     - output: {status, chapter_count, chapter_ids}
     - side-effects: inserts N rows into script_chapters
+
+    ``user_id`` is optional (default None) so in-flight/replayed workflows
+    started before this field existed keep working — DBOS input is frozen
+    at workflow start, so old rows replay with no user_id and fall back to
+    the service's env-key path (unchanged prior behaviour).
 
     Note: the legacy task accepted `task_id` for task_tracking progress
     events. DBOS owns the workflow lifecycle now — TaskCenter UI should
     subscribe to dbos workflow status (D4 work) instead of the
     task_tracking bridge.
     """
-    chapters = await generate_outline_chapters(premise, chapter_count, style_guide)
+    chapters = await generate_outline_chapters(
+        premise, chapter_count, style_guide, user_id
+    )
     return await persist_outline_chapters(script_id, chapters)
