@@ -34,6 +34,7 @@ from app.services.ai.permissions.agent_chat_caps import agent_chat_caps
 from app.services.ai.prompts.prompt_composer import ComposerInput, PromptComposer
 from app.services.ai.runner.run_recorder import RunRecorder
 from app.services.chat.conversation_memory_service import build_memory_block
+from app.services.library.media_storage import ObjectStore, resolve_media_source
 
 # One-liner injected into request_instructions so the LLM knows that conversation
 # text from other users is untrusted data (CHAT-AGENT-07, prompt-injection guard).
@@ -162,26 +163,35 @@ async def _inject_image_blocks(
                 f"media={gm_id} bytes={row.get('file_size_bytes')}"
             )
             continue
-        path = Path(f"{settings.DOWNLOAD_PATH}/{row['file_path']}")
+        mime = row.get("mime") or "image/png"
+        # Object-store images: hand the provider a short-TTL signed URL — it
+        # fetches directly, no base64 (kills the +33% token tax). Filesystem
+        # images: read local bytes and inline as a base64 data URL (providers
+        # can't reach our auth-gated endpoints). Either failure skips the
+        # image (degrades to the placeholder) rather than killing the turn.
+        loc = resolve_media_source(row["file_path"])
         try:
-            data = await asyncio.to_thread(path.read_bytes)
-        except OSError as exc:
+            if loc.is_object_store:
+                image_ref = await ObjectStore(loc.bucket).signed_url(
+                    loc.key, ttl_seconds=300
+                )
+            else:
+                path = Path(f"{settings.DOWNLOAD_PATH}/{loc.rel_path}")
+                data = await asyncio.to_thread(path.read_bytes)
+                b64 = base64.b64encode(data).decode("ascii")
+                image_ref = f"data:{mime};base64,{b64}"
+        except Exception as exc:
             logger.warning(
                 f"[conversation_agent_turn] vision_read_failed: "
                 f"media={gm_id} error={exc!r}"
             )
             continue
-        b64 = base64.b64encode(data).decode("ascii")
-        mime = row.get("mime") or "image/png"
         alt = str(body.get("alt") or "image")
         history[idx] = {
             "role": history[idx]["role"],
             "content": [
                 {"type": "text", "text": f"[image: {alt}]"},
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:{mime};base64,{b64}"},
-                },
+                {"type": "image_url", "image_url": {"url": image_ref}},
             ],
         }
         injected += 1

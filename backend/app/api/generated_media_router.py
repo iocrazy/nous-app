@@ -15,17 +15,44 @@ import os
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from app.core.config import settings
 from app.core.deps import AuthDep
 from app.repositories.generated_media_repository import GeneratedMediaRepository
+from app.services.library.media_storage import ObjectStore, resolve_media_source
 from app.services.library.promote_generated_media_service import (
     PromoteGeneratedMediaService,
 )
 from app.services.library.resources_service import _resolve_personal_team_id
 
 router = APIRouter(prefix="/generated-media", tags=["generated-media"])
+
+
+async def _serve_media_row(row: dict, *, headers: Optional[dict] = None):
+    """Serve a generated_media row's bytes from whichever backend holds it.
+
+    Filesystem rows keep the efficient FileResponse (sendfile). Object-store
+    rows are stream-proxied through the backend — the endpoint contract (same
+    URL, same auth gate, same cache headers) is preserved and the storage host
+    stays hidden; the browser needs no change. Small images only, so buffering
+    is fine. Raises 404 on a missing/escaping file either way.
+    """
+    mime = row.get("mime") or "application/octet-stream"
+    loc = resolve_media_source(row["file_path"])
+    if loc.is_object_store:
+        try:
+            data = await ObjectStore(loc.bucket).get_bytes(loc.key)
+        except Exception:
+            raise HTTPException(status_code=404, detail="file missing")
+        return Response(content=data, media_type=mime, headers=headers)
+    base = os.path.realpath(settings.DOWNLOAD_PATH)
+    real = os.path.realpath(os.path.join(settings.DOWNLOAD_PATH, loc.rel_path))
+    if not (real == base or real.startswith(base + os.sep)):
+        raise HTTPException(status_code=404, detail="not found")
+    if not os.path.isfile(real):
+        raise HTTPException(status_code=404, detail="file missing")
+    return FileResponse(real, media_type=mime, headers=headers)
 
 
 async def _scope(auth) -> int:
@@ -59,16 +86,8 @@ async def get_generation_cover(gen_id: int):
         raise HTTPException(status_code=404, detail="not found")
     if row.get("media_kind") != "image":
         raise HTTPException(status_code=404, detail="no cover")
-    base = os.path.realpath(settings.DOWNLOAD_PATH)
-    real = os.path.realpath(os.path.join(settings.DOWNLOAD_PATH, row["file_path"]))
-    if not (real == base or real.startswith(base + os.sep)):
-        raise HTTPException(status_code=404, detail="not found")
-    if not os.path.isfile(real):
-        raise HTTPException(status_code=404, detail="file missing")
-    return FileResponse(
-        real,
-        media_type=row.get("mime") or "application/octet-stream",
-        headers={"Cache-Control": "public, max-age=604800, immutable"},
+    return await _serve_media_row(
+        row, headers={"Cache-Control": "public, max-age=604800, immutable"}
     )
 
 
@@ -77,13 +96,7 @@ async def get_generation_file(gen_id: int, auth: AuthDep):
     row = await GeneratedMediaRepository().get(gen_id, await _scope(auth))
     if not row:
         raise HTTPException(status_code=404, detail="not found")
-    base = os.path.realpath(settings.DOWNLOAD_PATH)
-    real = os.path.realpath(os.path.join(settings.DOWNLOAD_PATH, row["file_path"]))
-    if not (real == base or real.startswith(base + os.sep)):
-        raise HTTPException(status_code=404, detail="not found")
-    if not os.path.isfile(real):
-        raise HTTPException(status_code=404, detail="file missing")
-    return FileResponse(real, media_type=row.get("mime") or "application/octet-stream")
+    return await _serve_media_row(row)
 
 
 @router.get("/{gen_id}")
