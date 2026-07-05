@@ -330,23 +330,43 @@ export function AIModelsPage() {
     let values: Record<string, unknown>
     try {
       values = await form.validate()
-    } catch {
+    } catch (err) {
+      // Surface the reason instead of silently no-op'ing (a spinning /
+      // dead button with no feedback). validate() only rejects in 'new'
+      // mode where the provider fields are required + mounted.
+      Message.error('Please fill the required provider fields')
+      console.error('[AddModels] form validate failed:', err)
       return
     }
+    // Provider fields: in 'add' mode the actual_provider / base_url / app_id
+    // Form.Items are NOT mounted (they live in the 'new' branch), so
+    // form.validate() returns them as undefined — sending that produced a
+    // 422 (missing actual_provider). Source them from the target provider
+    // group directly; the backend inherits the key from a sibling model.
+    const providerFields =
+      modalMode === 'add'
+        ? {
+            actual_provider: modalGroup?.provider ?? '',
+            base_url: modalGroup?.base_url ?? '',
+            app_id: modalGroup?.app_id ?? '',
+            api_key: '', // blank → backend inherits from a sibling
+          }
+        : {
+            actual_provider: (values.actual_provider as string) ?? '',
+            base_url: (values.base_url as string) ?? '',
+            app_id: (values.app_id as string) ?? '',
+            api_key: (values.api_key as string) ?? '',
+          }
     setSaving(true)
     let ok = 0
-    const failed: string[] = []
+    const failures: string[] = []
     for (const model of selectedModels) {
       const payload = {
         name: sanitizeName(model),
         display_name: model,
         type: guessType(model),
-        actual_provider: values.actual_provider as string,
         actual_model: model,
-        // 'new' provider → the typed key; 'add' → blank, backend inherits it.
-        api_key: (values.api_key as string) || '',
-        base_url: (values.base_url as string) || '',
-        app_id: (values.app_id as string) || '',
+        ...providerFields,
         pricing_type: 'per_hour',
         pricing_value: 0,
         is_enabled: true,
@@ -358,15 +378,19 @@ export function AIModelsPage() {
           headers,
           body: JSON.stringify(payload),
         })
-        if (res.ok) ok += 1
-        else failed.push(model)
-      } catch {
-        failed.push(model)
+        if (res.ok) {
+          ok += 1
+        } else {
+          const body = await res.text().catch(() => '')
+          failures.push(`${model} (HTTP ${res.status}${body ? `: ${body.slice(0, 120)}` : ''})`)
+        }
+      } catch (err) {
+        failures.push(`${model} (${err instanceof Error ? err.message : 'network error'})`)
       }
     }
     setSaving(false)
     if (ok) Message.success(`Added ${ok} model${ok > 1 ? 's' : ''}`)
-    if (failed.length) Message.error(`Failed: ${failed.join(', ')}`)
+    if (failures.length) Message.error(`Failed: ${failures.join('; ')}`)
     setModalVisible(false)
     fetchModels()
   }
