@@ -20,7 +20,8 @@ import { ExportDialog } from '../../features/script/components/ExportDialog';
 import { ViewControls } from '../../features/script/components/ViewControls';
 import { GridView } from '../../features/script/views/GridView';
 import { ListView } from '../../features/script/views/ListView';
-import { AIChatDrawer } from '../../components/AIChatDrawer';
+import { FloatingChatWidget } from '../../components/FloatingChatWidget';
+import { useGlobalChatStore } from '../../stores/globalChatStore';
 import {
   fetchScriptProject,
   updateScriptProject,
@@ -61,6 +62,25 @@ export function ScriptEditorPage() {
 
   // Auto-save timer ref
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Register this page's chat context with the global floating chat:
+  // new sessions created here get stamped script:{scriptId}, and "Apply"
+  // writes the assistant content into the currently-edited chapter node.
+  useEffect(() => {
+    useGlobalChatStore.getState().setPageContext({
+      projectId: projectId ?? '',
+      contextType: 'script',
+      contextId: scriptId,
+      moduleLabel: 'Script',
+      onApplyContent: (content: string) => {
+        const editingId = useScriptCanvasStore.getState().editingNodeId;
+        if (editingId) {
+          useScriptCanvasStore.getState().updateNodeData(editingId, { content });
+        }
+      },
+    });
+    return () => useGlobalChatStore.getState().setPageContext(null);
+  }, [projectId, scriptId]);
 
   // Load script on mount
   useEffect(() => {
@@ -219,7 +239,7 @@ export function ScriptEditorPage() {
             saving={saving}
           />
           {/* AI Chat is opened via the bottom-right floating button
-              rendered by AIChatDrawer (⌘I to toggle). */}
+              rendered by FloatingChatWidget (⌘I to toggle). */}
 
 
           {/* Sidebar + main content */}
@@ -253,7 +273,7 @@ export function ScriptEditorPage() {
               )}
             </div>
 
-            {/* AIChatDrawer mounted below — its FAB lives bottom-right
+            {/* FloatingChatWidget mounted below — its FAB lives bottom-right
                 of the viewport, so it doesn't belong inline here. */}
           </div>
         </>
@@ -308,20 +328,11 @@ export function ScriptEditorPage() {
         />
       )}
 
-      {/* AI Chat Drawer — FAB bottom-right + slide-in panel.
-          onApply writes the assistant content into whichever chapter
-          node the user is currently editing. */}
-      <AIChatDrawer
-        projectId={projectId ?? ''}
-        contextType="script"
-        contextId={scriptId}
-        onApplyContent={(content) => {
-          const editingId = useScriptCanvasStore.getState().editingNodeId;
-          if (editingId) {
-            useScriptCanvasStore.getState().updateNodeData(editingId, { content });
-          }
-        }}
-      />
+      {/* Global floating AI chat — this fullscreen route lives outside
+          AppLayout, so it hosts its own widget instance. Page context is
+          registered in the effect above; onApply writes assistant content
+          into whichever chapter node the user is currently editing. */}
+      <FloatingChatWidget />
     </div>
   );
 }
