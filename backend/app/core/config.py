@@ -105,6 +105,16 @@ class Settings(BaseSettings):
         "summary + agent_memory recall into conversation agent turns, and "
         "compact after turns. Off (default) = Phase 1 behavior (20-msg tail).",
     )
+    FEATURE_CHAT_MEDIA_OBJECT_STORE: bool = Field(
+        default=False,
+        description="Route new chat/AI-generated small-image writes to the "
+        "Supabase Storage `chat-media` bucket (sb:// paths) instead of the "
+        "filesystem. Off (default) = every write stays on the filesystem "
+        "(current behavior). Readers auto-resolve either path shape, so "
+        "flipping on is forward-only and rollback (flag off) keeps already-"
+        "written sb:// rows readable. Flip only after verifying storage-api "
+        "is deployed + healthy on the target stack (Phase 2 ops gate).",
+    )
 
     # ============================================
     # 下载设置

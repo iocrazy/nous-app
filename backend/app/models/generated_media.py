@@ -40,6 +40,9 @@ class GeneratedMedia(Base):
     mime: Mapped[str | None] = mapped_column(Text)
     file_path: Mapped[str] = mapped_column(Text, nullable=False)
     file_size_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    # sha256 of the bytes; populated only for object-store writes (dedup +
+    # integrity). NULL for every filesystem row. Migration 337.
+    content_sha256: Mapped[str | None] = mapped_column(Text)
     origin_kind: Mapped[str] = mapped_column(Text, nullable=False)
     origin_run_id: Mapped[str | None] = mapped_column(Text)
     agent_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
