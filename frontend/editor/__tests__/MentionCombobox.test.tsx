@@ -264,3 +264,14 @@ describe('SceneBlock @ mention integration', () => {
     expect(ops[0]).toMatchObject({ op: 'update', element_id: 'el_c', payload: { type: 'action' } });
   });
 });
+
+it('quote-bearing mention cannot break out of the data-mention attribute (stored XSS)', () => {
+  const html = buildElementHtml('@x"onmouseover="alert(1)', []);
+  expect(html).not.toContain('"onmouseover');
+  expect(html).toContain('&quot;');
+  const host = document.createElement('div');
+  host.innerHTML = html;
+  const chip = host.querySelector('[data-mention]') as HTMLElement;
+  expect(chip.getAttribute('onmouseover')).toBeNull();
+  expect(chip.dataset.mention).toBe('x"onmouseover="alert(1)');
+});

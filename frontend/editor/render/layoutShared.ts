@@ -146,8 +146,13 @@ export function ElementLine({
 
 /** Minimal text escape — element text is plain text, never markup. */
 function escapeHtml(text: string): string {
+  // Quotes MUST be escaped: this output lands inside double-quoted HTML
+  // attributes (data-mention="...") via innerHTML — a bare " breaks out of
+  // the attribute and injects live event handlers (stored XSS).
   return text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
