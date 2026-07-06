@@ -31,6 +31,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -427,26 +428,82 @@ class GraphMemoryService:
         await self._ensure_config()
         return self.config.enabled
 
+    # Sync-redis socket timeouts for the FalkorDB client (seconds). The
+    # driver's default is NO timeout — a hung FalkorDB then hangs whatever
+    # thread runs the query indefinitely. See _build_driver.
+    _FALKOR_CONNECT_TIMEOUT_S = 5.0
+    _FALKOR_SOCKET_TIMEOUT_S = 15.0
+    # Cap on driver construction itself (FalkorDB() probes the server).
+    _FALKOR_BUILD_TIMEOUT_S = 20.0
+
+    def _build_driver(self, *, database: str) -> Optional[Any]:
+        """Construct the FalkorDriver on a THROWAWAY THREAD with socket
+        timeouts — never inline on the event loop.
+
+        Two landmines in graphiti's FalkorDriver (2026-07-06 P0, the 2h
+        loop freeze — see bug_backend_loop_freeze_healthcheck_blindspot):
+
+        1. Its default FalkorDB client is a SYNC redis.Redis with NO
+           socket timeouts, so any query against a hung server blocks
+           its thread forever. We inject our own client with timeouts.
+        2. Its __init__ does ``loop.create_task(build_indices...)`` when
+           it sees a running event loop — scheduling sync-redis work ON
+           the loop. Built on a plain thread there is no running loop,
+           so that branch falls through to its RuntimeError/pass path
+           and nothing ever lands on our loop.
+        """
+        from falkordb import FalkorDB
+        from graphiti_core.driver.falkordb_driver import FalkorDriver
+
+        result: dict[str, Any] = {}
+
+        def _construct() -> None:
+            try:
+                falkor = FalkorDB(
+                    host=self.config.falkordb_host,
+                    port=self.config.falkordb_port,
+                    socket_connect_timeout=self._FALKOR_CONNECT_TIMEOUT_S,
+                    socket_timeout=self._FALKOR_SOCKET_TIMEOUT_S,
+                )
+                result["driver"] = FalkorDriver(falkor_db=falkor, database=database)
+            except Exception as exc:  # noqa: BLE001
+                result["error"] = exc
+
+        thread = threading.Thread(
+            target=_construct, name="falkor-driver-build", daemon=True
+        )
+        thread.start()
+        thread.join(timeout=self._FALKOR_BUILD_TIMEOUT_S)
+        if thread.is_alive():
+            # Construction hung (server half-up). The daemon thread leaks
+            # until its socket timeout fires; the loop stays healthy.
+            logger.error(
+                "[graph_memory] FalkorDriver construction timed out after "
+                f"{self._FALKOR_BUILD_TIMEOUT_S}s; disabling"
+            )
+            return None
+        if "error" in result:
+            raise result["error"]
+        return result.get("driver")
+
     def _build_client(self, *, database: str) -> Optional[Any]:
         """Build a fresh Graphiti pointed at one FalkorDB graph (``database``).
 
-        Construction is network-free (the driver connects lazily on first
-        query). Returns ``None`` on any import/build failure so callers degrade
+        Returns ``None`` on any import/build failure so callers degrade
         per the safety contract. Used both for the cached default client
         (ingestion) and for per-group search clients — graphiti's FalkorDB
         driver maps ``group_id`` to the graph name, so reads must target the
-        specific group's graph rather than the default one."""
+        specific group's graph rather than the default one. Driver
+        construction goes through ``_build_driver`` (thread + timeouts) —
+        it is NOT network-free, despite what graphiti's docs imply."""
         if not self.config.operative():
             return None
         try:
             from graphiti_core import Graphiti
-            from graphiti_core.driver.falkordb_driver import FalkorDriver
 
-            driver = FalkorDriver(
-                host=self.config.falkordb_host,
-                port=self.config.falkordb_port,
-                database=database,
-            )
+            driver = self._build_driver(database=database)
+            if driver is None:
+                return None
             llm_client, embedder, cross_encoder = _build_llm_and_embedder(self.config)
             kwargs: dict[str, Any] = {"graph_driver": driver}
             if llm_client is not None:
