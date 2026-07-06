@@ -602,6 +602,7 @@ async def serve_resource_cover(resource_id: str):
         import mimetypes
 
         from app.core.config import settings
+        from app.services.media.nginx_direct import maybe_direct_redirect
 
         # Try thumbnail first, then cover image (independent uploads).
         for field in ("thumbnail_path", "cover_image_path"):
@@ -612,6 +613,11 @@ async def serve_resource_cover(resource_id: str):
                 continue
             full_path = Path(settings.DOWNLOAD_PATH) / rel_path
             if full_path.exists():
+                # nginx direct serve (P3): bytes leave the Python process —
+                # 302 to the signed :8081 URL when the DB toggle is on.
+                redirect = await maybe_direct_redirect(rel_path)
+                if redirect is not None:
+                    return redirect
                 mime, _ = mimetypes.guess_type(str(full_path))
                 return FileResponse(
                     path=str(full_path),
@@ -668,6 +674,9 @@ async def serve_resource_cover(resource_id: str):
             if full_path.exists():
                 size = resource.get("file_size_bytes") or 0
                 if mime_type.startswith("image/") and 0 < size <= 512_000:
+                    redirect = await maybe_direct_redirect(file_path)
+                    if redirect is not None:
+                        return redirect
                     mime, _ = mimetypes.guess_type(str(full_path))
                     return FileResponse(
                         path=str(full_path),
