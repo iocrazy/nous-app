@@ -81,9 +81,11 @@ interface AgentEditorProps {
    * (ideally) select the new slug so the user lands on their fresh copy.
    */
   onAgentForked?: (newSlug: string) => void;
+  /** Called after this agent is deleted so the parent can navigate away. */
+  onAgentDeleted?: () => void;
 }
 
-export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked }) => {
+export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, onAgentDeleted }) => {
   const { t } = useTranslation();
   const { userProfile, aiSettings } = useAuth();
   const { addToast } = useToast();
@@ -297,6 +299,28 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
    * sweeper will re-pause within ~60 s — callers should bump the budget
    * first to avoid the flap.
    */
+  // Hard-delete this user-owned agent (presets never see the menu item).
+  const handleDeleteAgent = async (): Promise<void> => {
+    // eslint-disable-next-line no-alert
+    if (!window.confirm(
+      t('aiLibrary.agents.deleteConfirm',
+        'Delete this agent? Its runs and skill bindings are removed; chat history stays readable.'),
+    )) return;
+    try {
+      await aiLibraryService.deleteAgent(slug);
+      addToast(t('aiLibrary.agents.deletedToast', 'Agent deleted'), 'success');
+      // Sidebar keeps its own agents list — nudge it to reload.
+      window.dispatchEvent(new CustomEvent('ai-library:agents-changed'));
+      onAgentDeleted?.();
+    } catch (err) {
+      console.error('[AgentEditor] deleteAgent failed:', err);
+      addToast(
+        t('aiLibrary.agents.saveError', { error: friendlyError(err) }),
+        'error',
+      );
+    }
+  };
+
   // 复位: drop the caller's override layer so the preset falls back to the
   // admin/system defaults (DELETE /agents/{slug}/override). NOTE: its
   // `resetting` state is declared with the other hooks at the top — a
@@ -437,6 +461,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
               setDraft(buildDraft(updated));
             }}
             onDuplicate={openForkModal}
+            onDelete={isPreset ? undefined : handleDeleteAgent}
           />
           {!readOnly && (
             <button

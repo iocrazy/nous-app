@@ -22,6 +22,7 @@ export const AgentsPage: React.FC = () => {
       <AgentsTab
         slug={urlSlug}
         onSlugChange={(next) => navigate(`${prefix}${agentsBase}/${next}`)}
+        onAgentDeleted={() => navigate(`${prefix}${agentsBase}`)}
       />
     </div>
   );

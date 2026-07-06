@@ -1,1 +1,16 @@
-{"projectId":"prj_qGVZMaiuKGXeTylytauhdCitmOjb","orgId":"team_t6T8I3LXRuv8otncAG9O8DnA","projectName":"frontend"}
+{
+  "projectId": "prj_qGVZMaiuKGXeTylytauhdCitmOjb",
+  "orgId": "team_t6T8I3LXRuv8otncAG9O8DnA",
+  "projectName": "mediahub",
+  "settings": {
+    "createdAt": 1770125858248,
+    "framework": "vite",
+    "devCommand": null,
+    "installCommand": null,
+    "buildCommand": "npm run build",
+    "outputDirectory": "dist",
+    "rootDirectory": "frontend",
+    "directoryListing": false,
+    "nodeVersion": "24.x"
+  }
+}
