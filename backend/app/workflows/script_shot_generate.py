@@ -4,13 +4,30 @@
 Reuses the storyboard image-provider chain (``StoryboardAIService.generate_image``
 → ``provider_registry.get_image_provider``) rather than a parallel generator:
 step1 composes a prompt from the shot's cinematography tags + description + the
-scene heading and runs the provider; step2 writes the produced URL onto the
-shot row via ``ScriptShotRepository.update_status`` (the status write lane).
+scene heading and runs the provider; step2 persists the produced image through
+the Tier-1 ``generated_media`` store (the durable single point) and rewrites the
+shot's ``image_url`` / ``thumbnail_url`` to same-origin serving URLs so the
+stored value can never rot when the provider's ephemeral CDN url expires (L5).
+
+Durability (L5 go-live gate): the image provider hands back an EPHEMERAL CDN
+url. Writing that straight onto the shot would rot. So between generation and
+the status write we ``register_generated_media(...)`` — downloading the blob
+into Tier-1 (filesystem, or the object store when the flag is on) and inserting
+a ``generated_media`` row. The shot then stores durable relative URLs:
+    - ``image_url``     = ``/api/v1/generated-media/{gen_id}/cover``
+    - ``thumbnail_url`` = ``/api/v1/generated-media/{gen_id}/cover``
+Both point at ``/cover`` (the UNAUTHENTICATED serving endpoint) because the
+storyboard ShotCard renders them in a bare ``<img src>`` — the auth-gated
+``/file`` endpoint can't carry a Bearer header from an ``<img>`` tag. ``/cover``
+serves the full image bytes (there is no downscaled thumbnail), so full-res and
+img-safe coincide. Frontend serves same-origin via the Vercel rewrite.
+Persistence is best-effort: on ANY failure the provider url is kept (logged
+loudly) rather than failing the whole generation.
 
 Status machine (route-C aware — ``phase`` is trigger-owned, but ``shot.status``
 is a BUSINESS column this workflow may write):
     - the dispatching endpoint sets ``status='generating'`` before dispatch;
-    - on success this workflow sets ``status='done'`` + ``image_url``;
+    - on success this workflow sets ``status='done'`` + durable urls;
     - on ANY failure it sets ``status='failed'`` and then ``raise``s, so DBOS
       records the workflow FAILED (task_tracking mirror marks the task failed)
       while the shot row honestly shows the failed state for the retry UI.
@@ -107,13 +124,113 @@ async def generate_shot_image_step(
     return image_url
 
 
+async def _resolve_scope_id(scene: Optional[dict[str, Any]], user_id: str) -> int:
+    """Owning team for the shot: scene(script_id)→script_projects(team_id).
+
+    Falls back to the caller's personal team when the chain yields no team_id
+    (e.g. a script row missing team_id). Ids come off ORM rows as native ints;
+    they are coerced to ``int`` before use (#1006 — never compare/pass a bigint
+    across the int/str seam)."""
+    script_id = (scene or {}).get("script_id")
+    if script_id is not None:
+        from app.repositories.script_repository import get_script_project_repository
+
+        script = await get_script_project_repository().get_by_id(str(script_id))
+        team_id = (script or {}).get("team_id")
+        if team_id is not None:
+            return int(team_id)
+    from app.services.library.resources_service import _resolve_personal_team_id
+
+    return int(await _resolve_personal_team_id(str(user_id)))
+
+
 @DBOS.step()
-async def mark_shot_done(shot_id: str, image_url: str) -> None:
-    """Write the produced url + ``status='done'`` onto the shot (status lane)."""
+async def persist_generation(
+    shot_id: str,
+    provider_url: str,
+    model: str,
+    provider: str,
+    user_id: Optional[str],
+) -> dict[str, str]:
+    """Persist the provider's ephemeral image through the generated-media store.
+
+    Returns durable same-origin ``{image_url, thumbnail_url}`` (both ``/cover``,
+    see module docstring). Best-effort: on ANY failure — missing user_id,
+    unresolvable scope, download error, insert error — keeps the provider url
+    for both fields and logs loudly. Durability is the point of this step, so a
+    fallback is a real regression worth a WARNING, but it must never fail the
+    generation the user already paid for."""
+    from app.repositories.script_shot_repository import get_script_shot_repository
+    from app.services.library.generated_media_service import (
+        GenerationOrigin,
+        register_generated_media,
+    )
+
+    if not user_id:
+        logger.warning(
+            "[script_shot_generate][persist] shot {} has no user_id — keeping "
+            "EPHEMERAL provider url (will rot): {}",
+            shot_id,
+            provider_url,
+        )
+        return {"image_url": provider_url, "thumbnail_url": provider_url}
+
+    try:
+        shot = await get_script_shot_repository().get_by_id(shot_id)
+        if not shot:
+            raise ValueError(f"Shot not found: {shot_id}")
+        from app.repositories.script_scene_repository import (
+            get_script_scene_repository,
+        )
+
+        scene = await get_script_scene_repository().get_by_id(str(shot.get("scene_id")))
+        prompt = _compose_prompt(shot, scene)
+        scope_id = await _resolve_scope_id(scene, str(user_id))
+
+        row = await register_generated_media(
+            user_id=str(user_id),
+            scope_id=scope_id,
+            source_url=provider_url,
+            mime="image/png",
+            origin=GenerationOrigin(
+                kind="shot_generate",
+                node_id=str(shot_id),
+                prompt=prompt,
+                model=model,
+                provider=provider,
+                derivation_kind="shot_generate",
+            ),
+        )
+        gen_id = row.get("id")
+        if gen_id is None:
+            raise RuntimeError("register_generated_media returned no id")
+        durable = f"/api/v1/generated-media/{gen_id}/cover"
+        logger.info(
+            "[script_shot_generate][persist] shot {} → generated_media {} ({})",
+            shot_id,
+            gen_id,
+            durable,
+        )
+        return {"image_url": durable, "thumbnail_url": durable}
+    except Exception:
+        logger.opt(exception=True).warning(
+            "[script_shot_generate][persist] durable persist FAILED for shot {} "
+            "— keeping EPHEMERAL provider url (will rot): {}",
+            shot_id,
+            provider_url,
+        )
+        return {"image_url": provider_url, "thumbnail_url": provider_url}
+
+
+@DBOS.step()
+async def mark_shot_done(
+    shot_id: str, image_url: str, thumbnail_url: Optional[str] = None
+) -> None:
+    """Write the produced urls + ``status='done'`` onto the shot (status lane)."""
     from app.repositories.script_shot_repository import get_script_shot_repository
 
     await get_script_shot_repository().update_status(
-        shot_id, "done", image_url=image_url
+        shot_id, "done", image_url=image_url, thumbnail_url=thumbnail_url
     )
 
 
@@ -143,9 +260,14 @@ async def script_shot_generate_workflow(
     re-raised (route-C: DBOS records FAILED; shot.status is a business column).
     ``user_id`` is optional (frozen DBOS input compat)."""
     try:
-        image_url = await generate_shot_image_step(shot_id, model, provider)
-        await mark_shot_done(shot_id, image_url)
-        return {"status": "success", "shot_id": shot_id, "image_url": image_url}
+        provider_url = await generate_shot_image_step(shot_id, model, provider)
+        urls = await persist_generation(shot_id, provider_url, model, provider, user_id)
+        await mark_shot_done(shot_id, urls["image_url"], urls["thumbnail_url"])
+        return {
+            "status": "success",
+            "shot_id": shot_id,
+            "image_url": urls["image_url"],
+        }
     except Exception:
         await mark_shot_failed(shot_id)
         raise
