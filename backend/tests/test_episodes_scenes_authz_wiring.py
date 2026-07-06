@@ -121,7 +121,11 @@ def _foreign_team(monkeypatch):
 
     monkeypatch.setattr(ScriptChapterRepository, "get_by_id", fake_chapter_get)
     monkeypatch.setattr(ScriptProjectRepository, "get_by_id", fake_project_get)
-    monkeypatch.setattr(guards, "get_team_id_for_user", fake_team)
+
+    async def fake_member(team_id, user_id):
+        return False
+
+    monkeypatch.setattr(guards, "_is_team_member", fake_member)
 
 
 @pytest.mark.asyncio
@@ -173,7 +177,11 @@ async def test_canvas_update_chapter_persists_position(client, monkeypatch):
 
     monkeypatch.setattr(ScriptChapterRepository, "get_by_id", fake_chapter_get)
     monkeypatch.setattr(ScriptProjectRepository, "get_by_id", fake_project_get)
-    monkeypatch.setattr(guards, "get_team_id_for_user", fake_team)
+
+    async def fake_member(team_id, user_id):
+        return True
+
+    monkeypatch.setattr(guards, "_is_team_member", fake_member)
     monkeypatch.setattr(ScriptService, "update_chapter", fake_update)
 
     resp = await client.put(
