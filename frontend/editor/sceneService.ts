@@ -260,10 +260,29 @@ export type ShotInput = Partial<
   >
 >;
 
+/**
+ * The generate endpoint answers 404 when `FEATURE_SHOT_GENERATE` is off (the
+ * flag hides the endpoint's existence). We surface that as a distinct error so
+ * the UI can degrade every Generate control for the session rather than treating
+ * it like a transient failure.
+ */
+export class ShotGenerateDisabledError extends Error {
+  constructor() {
+    super('shot_generate_disabled');
+    this.name = 'ShotGenerateDisabledError';
+  }
+}
+
 export async function listShots(sceneId: string): Promise<Shot[]> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${apiBase()}/scenes/${sceneId}/shots`, { headers });
   return unwrapResponse<Shot[]>(res);
+}
+
+export async function getShot(shotId: string): Promise<Shot> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${apiBase()}/shots/${shotId}`, { headers });
+  return unwrapResponse<Shot>(res);
 }
 
 export async function createShot(sceneId: string, data: ShotInput = {}): Promise<Shot> {
@@ -315,6 +334,25 @@ export async function autoStoryboard(sceneId: string): Promise<string> {
     method: 'POST',
     headers: { ...headers, 'Content-Type': 'application/json' },
   });
+  const body = await handleResponse<{ success: boolean; task_id: string }>(res);
+  return body.task_id;
+}
+
+/**
+ * Dispatch async single-shot image generation. Returns the FLAT
+ * { success, task_id } envelope; the endpoint sets `status='generating'` before
+ * dispatch and the workflow flips it to 'done' + image_url or 'failed'. A 404
+ * means the feature flag is off → throws ShotGenerateDisabledError so the UI can
+ * degrade globally (the guard runs before the flag check, so an access 403/404
+ * is indistinguishable here and also correctly degrades — see router note).
+ */
+export async function generateShot(shotId: string): Promise<string> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${apiBase()}/shots/${shotId}/generate`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+  });
+  if (res.status === 404) throw new ShotGenerateDisabledError();
   const body = await handleResponse<{ success: boolean; task_id: string }>(res);
   return body.task_id;
 }

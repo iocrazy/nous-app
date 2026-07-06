@@ -1350,7 +1350,8 @@
       "mediumWide": "中远景",
       "wide": "远景",
       "extremeWide": "极远景"
-    }
+    },
+    "readOnlyBanner": "此旧版分镜已只读 — 镜头现已迁入剧本编辑器"
   },
   "canvas": {
     "addImage": "+ 添加图片",
@@ -2451,6 +2452,7 @@
     "shotFocalPlaceholder": "35mm",
     "shotDescription": "镜头描述",
     "shotDescPlaceholder": "描述这个镜头…",
-    "shotGenerate": "生成"
+    "shotGenerate": "生成",
+    "shotGenerateComingSoon": "图像生成即将上线"
   }
 }

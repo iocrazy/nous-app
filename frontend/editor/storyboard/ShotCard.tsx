@@ -39,8 +39,10 @@ export interface ShotCardProps {
   index: number;
   onUpdate: (shotId: string, data: Partial<Shot>) => void;
   onDelete: (shotId: string) => void;
-  /** Generate wiring (Task 5). Undefined → the button renders disabled. */
+  /** Generate dispatch. Undefined → the button renders disabled. */
   onGenerate?: (shotId: string) => void;
+  /** Session-level degrade: the generate feature flag is off (a 404 was seen). */
+  generateDisabled?: boolean;
   reorder: ShotReorderApi;
 }
 
@@ -52,7 +54,15 @@ function edgeFromPointer(el: HTMLElement, clientY: number): 'before' | 'after' {
   return clientY < rect.top + rect.height / 2 ? 'before' : 'after';
 }
 
-function ShotCardImpl({ shot, index, onUpdate, onDelete, onGenerate, reorder }: ShotCardProps) {
+function ShotCardImpl({
+  shot,
+  index,
+  onUpdate,
+  onDelete,
+  onGenerate,
+  generateDisabled = false,
+  reorder,
+}: ShotCardProps) {
   const { t } = useTranslation();
 
   // Description: local state + debounced commit. `editedRef` gates the effect so
@@ -180,7 +190,7 @@ function ShotCardImpl({ shot, index, onUpdate, onDelete, onGenerate, reorder }: 
             )}
             {shot.status === 'failed' && (
               <span className="mh-shot-status failed" aria-label={t('editor.shotStatusFailed')}>
-                {t('editor.shotRetry')}
+                {t('editor.shotStatusFailed')}
               </span>
             )}
           </div>
@@ -237,10 +247,11 @@ function ShotCardImpl({ shot, index, onUpdate, onDelete, onGenerate, reorder }: 
           <button
             type="button"
             className="mh-shot-generate"
-            disabled={!generateReady || shot.status === 'generating'}
-            onClick={generateReady ? () => onGenerate?.(shot.id) : undefined}
+            disabled={!generateReady || generateDisabled || shot.status === 'generating'}
+            title={generateDisabled ? t('editor.shotGenerateComingSoon') : undefined}
+            onClick={generateReady && !generateDisabled ? () => onGenerate?.(shot.id) : undefined}
           >
-            {t('editor.shotGenerate')}
+            {shot.status === 'failed' ? t('editor.shotRetry') : t('editor.shotGenerate')}
           </button>
         </footer>
       </article>

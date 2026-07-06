@@ -15,23 +15,34 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string) => k }),
 }));
 
-const svc = vi.hoisted(() => ({
-  listShots: vi.fn(),
-  createShot: vi.fn(),
-  updateShot: vi.fn(),
-  deleteShot: vi.fn(),
-  moveShot: vi.fn(),
-  autoStoryboard: vi.fn(),
-  // EditorShell also pulls these from the module:
-  listScenes: vi.fn(),
-  listEpisodes: vi.fn(),
-  convertToScenes: vi.fn(),
-  createScene: vi.fn(),
-  applyOps: vi.fn(),
-  moveScene: vi.fn(),
-  updateSceneMeta: vi.fn(),
-  newElementId: () => 'el_test0001',
-}));
+const svc = vi.hoisted(() => {
+  class ShotGenerateDisabledError extends Error {
+    constructor() {
+      super('shot_generate_disabled');
+      this.name = 'ShotGenerateDisabledError';
+    }
+  }
+  return {
+    listShots: vi.fn(),
+    getShot: vi.fn(),
+    createShot: vi.fn(),
+    updateShot: vi.fn(),
+    deleteShot: vi.fn(),
+    moveShot: vi.fn(),
+    autoStoryboard: vi.fn(),
+    generateShot: vi.fn(),
+    ShotGenerateDisabledError,
+    // EditorShell also pulls these from the module:
+    listScenes: vi.fn(),
+    listEpisodes: vi.fn(),
+    convertToScenes: vi.fn(),
+    createScene: vi.fn(),
+    applyOps: vi.fn(),
+    moveScene: vi.fn(),
+    updateSceneMeta: vi.fn(),
+    newElementId: () => 'el_test0001',
+  };
+});
 vi.mock('../sceneService', () => svc);
 
 vi.mock('../../services/scriptService', () => ({
@@ -163,6 +174,49 @@ describe('StoryboardView', () => {
     });
     // jsdom rects are zero-sized → pointer lands on the "after" half.
     expect(svc.moveShot).toHaveBeenCalledWith('900', { after_shot_id: '901' });
+  });
+
+  it('generates a shot: dispatch → optimistic generating → poll to done thumbnail', async () => {
+    vi.useFakeTimers();
+    svc.listShots.mockResolvedValue([shot({ id: '900', status: 'empty' })]);
+    svc.generateShot.mockResolvedValue('gen-task');
+    svc.getShot.mockResolvedValue(
+      shot({ id: '900', status: 'done', thumbnail_url: 'https://x/t.png' }),
+    );
+    render(<StoryboardView scenes={[scene({ id: '200' })]} scriptId="1" />);
+    await act(async () => {}); // flush mount load
+
+    expect(screen.queryByRole('img')).toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByText('editor.shotGenerate'));
+    });
+    expect(svc.generateShot).toHaveBeenCalledWith('900');
+
+    // First poll tick sees status='done' → the thumbnail lands on screen.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(screen.getByRole('img')).toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  // MUST stay last in this describe: a 404 flips a module-level session flag that
+  // degrades every subsequent Generate button (it survives remounts by design).
+  it('degrades every Generate control when the endpoint 404s (flag off)', async () => {
+    svc.listShots.mockResolvedValue([shot({ id: '900', status: 'empty' })]);
+    svc.generateShot.mockRejectedValue(new svc.ShotGenerateDisabledError());
+    render(<StoryboardView scenes={[scene({ id: '200' })]} scriptId="1" />);
+    await waitFor(() => expect(screen.getByTestId('shot-card')).toBeInTheDocument());
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('editor.shotGenerate'));
+    });
+    expect(svc.generateShot).toHaveBeenCalledWith('900');
+    await waitFor(() => expect(screen.getByText('editor.shotGenerate')).toBeDisabled());
+    expect(screen.getByText('editor.shotGenerate')).toHaveAttribute(
+      'title',
+      'editor.shotGenerateComingSoon',
+    );
   });
 });
 

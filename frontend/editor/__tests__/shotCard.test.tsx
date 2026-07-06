@@ -143,8 +143,54 @@ describe('ShotCard — drag wiring', () => {
     expect(reorder.onDrop).toHaveBeenCalled();
   });
 
-  it('generate button is disabled without a handler (Task 5 wiring)', () => {
+  it('generate button is disabled without a handler', () => {
     render(<ShotCard shot={shot({})} index={1} onUpdate={vi.fn()} onDelete={vi.fn()} reorder={noReorder()} />);
+    expect(screen.getByText('editor.shotGenerate')).toBeDisabled();
+  });
+});
+
+describe('ShotCard — generate', () => {
+  it('dispatches generate on click when wired', () => {
+    const onGenerate = vi.fn();
+    render(<ShotCard shot={shot({})} index={1} onUpdate={vi.fn()} onDelete={vi.fn()} onGenerate={onGenerate} reorder={noReorder()} />);
+    fireEvent.click(screen.getByText('editor.shotGenerate'));
+    expect(onGenerate).toHaveBeenCalledWith('900');
+  });
+
+  it('degrades to a disabled coming-soon button when the feature is off', () => {
+    const onGenerate = vi.fn();
+    render(
+      <ShotCard
+        shot={shot({})}
+        index={1}
+        onUpdate={vi.fn()}
+        onDelete={vi.fn()}
+        onGenerate={onGenerate}
+        generateDisabled
+        reorder={noReorder()}
+      />,
+    );
+    const btn = screen.getByText('editor.shotGenerate');
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute('title', 'editor.shotGenerateComingSoon');
+    fireEvent.click(btn);
+    expect(onGenerate).not.toHaveBeenCalled();
+  });
+
+  it('reads Retry on a failed shot and re-dispatches on click', () => {
+    const onGenerate = vi.fn();
+    render(
+      <ShotCard shot={shot({ status: 'failed' })} index={1} onUpdate={vi.fn()} onDelete={vi.fn()} onGenerate={onGenerate} reorder={noReorder()} />,
+    );
+    const retry = screen.getByText('editor.shotRetry');
+    fireEvent.click(retry);
+    expect(onGenerate).toHaveBeenCalledWith('900');
+  });
+
+  it('disables the button while generating', () => {
+    render(
+      <ShotCard shot={shot({ status: 'generating' })} index={1} onUpdate={vi.fn()} onDelete={vi.fn()} onGenerate={vi.fn()} reorder={noReorder()} />,
+    );
     expect(screen.getByText('editor.shotGenerate')).toBeDisabled();
   });
 });

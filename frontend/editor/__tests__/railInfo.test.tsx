@@ -79,19 +79,20 @@ describe('railDerive', () => {
 });
 
 describe('RailModules', () => {
-  it('marks Script + Scenes selectable and keeps Beats / Storyboard disabled', () => {
+  it('marks Script / Storyboard / Scenes selectable and keeps only Beats disabled', () => {
     render(<RailModules activeView="script" onSelect={vi.fn()} />);
     const buttons = screen.getAllByRole('button');
     expect(buttons).toHaveLength(4);
     // Script — selectable and active (current view).
     expect(buttons[0]).toBeEnabled();
     expect(buttons[0]).toHaveClass('active');
-    // Beats / Storyboard — disabled placeholders.
+    // Beats — the last disabled placeholder.
     expect(buttons[1]).toBeDisabled();
     expect(buttons[1]).toHaveAttribute('title', 'editor.comingPhase2');
-    expect(buttons[2]).toBeDisabled();
-    expect(buttons[2]).toHaveAttribute('title', 'editor.comingPhase2');
-    // Scenes — now selectable (node view), not the active one yet.
+    // Storyboard — now selectable (shot board, Phase B P3), not active yet.
+    expect(buttons[2]).toBeEnabled();
+    expect(buttons[2]).not.toHaveClass('active');
+    // Scenes — selectable (node view), not the active one yet.
     expect(buttons[3]).toBeEnabled();
     expect(buttons[3]).not.toHaveClass('active');
   });

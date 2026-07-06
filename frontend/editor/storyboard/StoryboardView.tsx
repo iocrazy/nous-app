@@ -22,8 +22,11 @@ import {
   autoStoryboard,
   createShot,
   deleteShot,
+  generateShot,
+  getShot,
   listShots,
   moveShot,
+  ShotGenerateDisabledError,
   updateShot,
   type Shot,
 } from '../sceneService';
@@ -33,6 +36,13 @@ import type { SceneDoc } from '../types';
 
 /** How long an armed Auto Storyboard "Confirm?" stays live before auto-disarming. */
 const CONFIRM_WINDOW_MS = 3000;
+
+/**
+ * Session-level memory: once the generate endpoint 404s (feature flag off), every
+ * Generate button degrades for the rest of the session. Module-scoped so it
+ * survives StoryboardView remounts (switching rail views unmounts the board).
+ */
+let generateFeatureOff = false;
 
 export interface StoryboardViewProps {
   scenes: SceneDoc[];
@@ -57,6 +67,7 @@ export function StoryboardView({ scenes, scriptId }: StoryboardViewProps) {
   const [shotsByScene, setShotsByScene] = useState<ShotsByScene>({});
   const [autoBusy, setAutoBusy] = useState<Record<string, boolean>>({});
   const [confirmingAuto, setConfirmingAuto] = useState<string | null>(null);
+  const [generateDisabled, setGenerateDisabled] = useState(generateFeatureOff);
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Drag reorder is column-scoped: a shot may only drop within its own scene.
@@ -99,6 +110,19 @@ export function StoryboardView({ scenes, scriptId }: StoryboardViewProps) {
       console.error('[StoryboardView] failed to reload scene shots', err);
     }
   }, []);
+
+  // Merge a partial into one shot in-place (optimistic status flips, poll results).
+  const patchShotLocal = useCallback(
+    (sceneId: string, shotId: string, patch: Partial<Shot>) => {
+      setShotsByScene((prev) => ({
+        ...prev,
+        [String(sceneId)]: (prev[String(sceneId)] ?? []).map((s) =>
+          String(s.id) === String(shotId) ? { ...s, ...patch } : s,
+        ),
+      }));
+    },
+    [],
+  );
 
   const runAuto = useCallback(
     async (sceneId: string) => {
@@ -190,6 +214,44 @@ export function StoryboardView({ scenes, scriptId }: StoryboardViewProps) {
     [refreshScene],
   );
 
+  // Generate a single shot's image: optimistic 'generating', dispatch, then poll
+  // getShot until the workflow lands 'done'/'failed'. A flag-off 404 degrades
+  // every Generate control for the session; a dispatch failure or poll timeout
+  // (attempt cap) shows the failed state with its Retry affordance.
+  const handleGenerate = useCallback(
+    async (sceneId: string, shot: Shot) => {
+      const prevStatus = shot.status;
+      patchShotLocal(sceneId, shot.id, { status: 'generating' });
+      try {
+        await generateShot(shot.id);
+      } catch (err) {
+        if (err instanceof ShotGenerateDisabledError) {
+          generateFeatureOff = true;
+          setGenerateDisabled(true);
+          patchShotLocal(sceneId, shot.id, { status: prevStatus });
+          return;
+        }
+        console.error('[StoryboardView] generateShot dispatch failed', err);
+        patchShotLocal(sceneId, shot.id, { status: 'failed' });
+        return;
+      }
+      startPoll(
+        async () => {
+          const fresh = await getShot(shot.id);
+          if (fresh.status === 'done' || fresh.status === 'failed') {
+            patchShotLocal(sceneId, shot.id, fresh);
+            return true;
+          }
+          return false;
+        },
+        (settled) => {
+          if (!settled) patchShotLocal(sceneId, shot.id, { status: 'failed' });
+        },
+      );
+    },
+    [patchShotLocal, startPoll],
+  );
+
   const beginDrag = useCallback((shotId: string, sceneId: string) => {
     draggingRef.current = { shotId, sceneId: String(sceneId) };
     setDragging({ shotId, sceneId: String(sceneId) });
@@ -264,6 +326,8 @@ export function StoryboardView({ scenes, scriptId }: StoryboardViewProps) {
                     index={shotIdx + 1}
                     onUpdate={(shotId, data) => handleUpdateShot(scene.id, shotId, data)}
                     onDelete={(shotId) => handleDeleteShot(scene.id, shotId)}
+                    onGenerate={() => handleGenerate(scene.id, shot)}
+                    generateDisabled={generateDisabled}
                     reorder={{
                       isDragging: dragging?.shotId === shot.id,
                       dropEdge,

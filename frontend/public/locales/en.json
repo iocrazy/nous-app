@@ -1350,7 +1350,8 @@
       "mediumWide": "Medium Wide",
       "wide": "Wide",
       "extremeWide": "Extreme Wide"
-    }
+    },
+    "readOnlyBanner": "This legacy storyboard is read-only — shots now live in the script editor"
   },
   "canvas": {
     "addImage": "+ Add Image",
@@ -2451,6 +2452,7 @@
     "shotFocalPlaceholder": "35mm",
     "shotDescription": "Shot description",
     "shotDescPlaceholder": "Describe this shot…",
-    "shotGenerate": "Generate"
+    "shotGenerate": "Generate",
+    "shotGenerateComingSoon": "Image generation is coming soon"
   }
 }
