@@ -16,7 +16,7 @@
  * machine, debounced input, paste, IME) stays in SceneBlock and flows down
  * through `handlers`, so this component is purely presentational.
  */
-import { ElementLine } from './layoutShared';
+import { ElementLine, type LineMention } from './layoutShared';
 import type { LayoutHandlers } from './HollywoodLayout';
 import type { ElementType, ScriptElement } from '../types';
 
@@ -44,9 +44,22 @@ export interface AsianLayoutProps {
   elements: ScriptElement[];
   focusedElementId: string | null;
   handlers: LayoutHandlers;
+  /** The open mention picker (if any) — its ARIA is applied to the matching line. */
+  mention?: LineMention | null;
+  /** Copilot-selected element ids (their gutter ticks render pressed). */
+  selectedIds?: Set<string>;
+  /** Gutter-tick click → copilot selection (Task 11). */
+  onTickClick?: (elementId: string, shiftKey: boolean) => void;
 }
 
-export function AsianLayout({ elements, focusedElementId, handlers }: AsianLayoutProps) {
+export function AsianLayout({
+  elements,
+  focusedElementId,
+  handlers,
+  mention,
+  selectedIds,
+  onTickClick,
+}: AsianLayoutProps) {
   return (
     <>
       {elements.map((el) => {
@@ -63,6 +76,13 @@ export function AsianLayout({ elements, focusedElementId, handlers }: AsianLayou
               element={el}
               lineClass={ASIAN_LINE_CLASS[el.type]}
               focused={focusedElementId === el.id}
+              selected={selectedIds?.has(el.id)}
+              onTickClick={onTickClick}
+              mentionAria={
+                mention && mention.elementId === el.id
+                  ? { listboxId: mention.listboxId, activeOptionId: mention.activeOptionId }
+                  : undefined
+              }
               {...handlers}
             />
             {suffix && (

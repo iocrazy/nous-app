@@ -1,5 +1,4 @@
-import { createRef } from 'react';
-import { render, screen, cleanup, fireEvent, act, within } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // i18n: echo the key so assertions are language-independent.
@@ -43,7 +42,7 @@ vi.mock('../useSceneSync', async () => {
   };
 });
 
-import { MentionCombobox, type MentionComboboxHandle } from '../components/MentionCombobox';
+import { MentionCombobox, filterMentionCandidates } from '../components/MentionCombobox';
 import { buildElementHtml } from '../render/layoutShared';
 import { HollywoodLayout, type LayoutHandlers } from '../render/HollywoodLayout';
 import { MentionNamesContext } from '../render/layoutShared';
@@ -55,23 +54,44 @@ afterEach(() => {
   sync.dispatch.mockReset();
 });
 
-// ─── MentionCombobox (presentational + keyboard handle) ──────────────────────
+// ─── MentionCombobox (presentational listbox; ARIA lives on the focused line) ─
 
 describe('MentionCombobox', () => {
-  it('renders an ARIA combobox/listbox with one option per candidate', () => {
+  it('renders a listbox with one option per candidate, ids derived from listboxId', () => {
     render(
       <MentionCombobox
         candidates={['Ada', 'Blythe', 'Cy']}
         query=""
+        listboxId="lb"
+        activeIndex={0}
         onSelect={vi.fn()}
-        onClose={vi.fn()}
+        onHover={vi.fn()}
       />,
     );
-    const combobox = screen.getByRole('combobox');
-    expect(combobox).toHaveAttribute('aria-expanded', 'true');
-    expect(combobox).toHaveAttribute('aria-haspopup', 'listbox');
-    expect(screen.getByRole('listbox')).toBeInTheDocument();
-    expect(screen.getAllByRole('option')).toHaveLength(3);
+    // The popup is ONLY a listbox now — the combobox role lives on the line.
+    expect(screen.queryByRole('combobox')).toBeNull();
+    const listbox = screen.getByRole('listbox');
+    expect(listbox).toHaveAttribute('id', 'lb');
+    const options = screen.getAllByRole('option');
+    expect(options).toHaveLength(3);
+    expect(options[0]).toHaveAttribute('id', 'lb-opt-0');
+    expect(options[0]).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('reflects the controlled activeIndex on aria-selected', () => {
+    render(
+      <MentionCombobox
+        candidates={['Ada', 'Blythe', 'Cy']}
+        query=""
+        listboxId="lb"
+        activeIndex={1}
+        onSelect={vi.fn()}
+        onHover={vi.fn()}
+      />,
+    );
+    const options = screen.getAllByRole('option');
+    expect(options[0]).toHaveAttribute('aria-selected', 'false');
+    expect(options[1]).toHaveAttribute('aria-selected', 'true');
   });
 
   it('filters candidates by query, case-insensitively', () => {
@@ -79,33 +99,17 @@ describe('MentionCombobox', () => {
       <MentionCombobox
         candidates={['Ada', 'Blythe', 'Cy']}
         query="y"
+        listboxId="lb"
+        activeIndex={0}
         onSelect={vi.fn()}
-        onClose={vi.fn()}
+        onHover={vi.fn()}
       />,
     );
     const options = screen.getAllByRole('option');
     expect(options).toHaveLength(2); // Blythe, Cy
     expect(options.map((o) => o.textContent)).toEqual(['Blythe', 'Cy']);
-  });
-
-  it('navigates with the imperative handle and confirms the active candidate', () => {
-    const onSelect = vi.fn();
-    const ref = createRef<MentionComboboxHandle>();
-    render(
-      <MentionCombobox
-        ref={ref}
-        candidates={['Ada', 'Blythe', 'Cy']}
-        query=""
-        onSelect={onSelect}
-        onClose={vi.fn()}
-      />,
-    );
-    // Starts on the first candidate; one move down lands on the second.
-    act(() => ref.current!.move(1));
-    act(() => {
-      ref.current!.confirm();
-    });
-    expect(onSelect).toHaveBeenCalledWith('Blythe');
+    // Pure filter helper is exported and shared with SceneBlock.
+    expect(filterMentionCandidates(['Ada', 'Blythe', 'Cy'], 'y')).toEqual(['Blythe', 'Cy']);
   });
 
   it('selects on option click without stealing focus (mousedown default prevented)', () => {
@@ -114,32 +118,29 @@ describe('MentionCombobox', () => {
       <MentionCombobox
         candidates={['Ada', 'Blythe']}
         query=""
+        listboxId="lb"
+        activeIndex={0}
         onSelect={onSelect}
-        onClose={vi.fn()}
+        onHover={vi.fn()}
       />,
     );
     fireEvent.mouseDown(screen.getByText('Blythe'));
     expect(onSelect).toHaveBeenCalledWith('Blythe');
   });
 
-  it('shows a no-match hint and confirm is a no-op when nothing matches', () => {
-    const onSelect = vi.fn();
-    const ref = createRef<MentionComboboxHandle>();
+  it('shows a no-match hint and renders no options when nothing matches', () => {
     render(
       <MentionCombobox
-        ref={ref}
         candidates={['Ada', 'Blythe']}
         query="zzz"
-        onSelect={onSelect}
-        onClose={vi.fn()}
+        listboxId="lb"
+        activeIndex={0}
+        onSelect={vi.fn()}
+        onHover={vi.fn()}
       />,
     );
     expect(screen.queryAllByRole('option')).toHaveLength(0);
     expect(screen.getByText('editor.mentionNoMatch')).toBeInTheDocument();
-    act(() => {
-      expect(ref.current!.confirm()).toBe(false);
-    });
-    expect(onSelect).not.toHaveBeenCalled();
   });
 });
 
@@ -222,6 +223,31 @@ describe('SceneBlock @ mention integration', () => {
     expect(payload.text).toContain('@Blythe');
     // Combobox closed after selection.
     expect(screen.queryByTestId('mention-combobox')).toBeNull();
+  });
+
+  it('puts the ARIA combobox on the focused line and points activedescendant at the active option', () => {
+    render(
+      <SceneBlock
+        scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])}
+        index={0}
+        mentionCandidates={['Ada', 'Blythe']}
+      />,
+    );
+    const line = document.querySelector('[data-el-id="el_a"]') as HTMLElement;
+    fireEvent.keyDown(line, { key: '@' });
+    fireEvent.keyDown(line, { key: 'ArrowDown' });
+
+    // The line (not the popup) is the combobox — AT announces the active option.
+    expect(line).toHaveAttribute('role', 'combobox');
+    expect(line).toHaveAttribute('aria-expanded', 'true');
+    const controls = line.getAttribute('aria-controls');
+    expect(controls).toBeTruthy();
+    expect(screen.getByRole('listbox')).toHaveAttribute('id', controls!);
+    const activeId = line.getAttribute('aria-activedescendant');
+    expect(activeId).toBeTruthy();
+    const activeOption = document.getElementById(activeId!);
+    expect(activeOption).toHaveAttribute('aria-selected', 'true');
+    expect(activeOption?.textContent).toBe('Blythe'); // ArrowDown moved to the 2nd
   });
 
   it('closes on Escape with no dispatched op', () => {

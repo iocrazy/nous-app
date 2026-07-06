@@ -16,6 +16,14 @@ const svc = vi.hoisted(() => ({
 }));
 vi.mock('../sceneService', () => svc);
 
+// EditorShell (Task 10) also reads chapters + shows convert toasts.
+vi.mock('../../services/scriptService', () => ({
+  fetchScriptProject: vi.fn().mockResolvedValue({ chapters: [] }),
+}));
+vi.mock('../../components/Toast', () => ({
+  useToast: () => ({ addToast: vi.fn() }),
+}));
+
 const resolveSpy = vi.hoisted(() => vi.fn());
 vi.mock('../useSceneSync', () => ({
   useSceneSync: (scene: { elements: unknown[]; content_version: number }) => ({

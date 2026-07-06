@@ -2381,6 +2381,25 @@
     "statCharacters": "角色",
     "statLocations": "地点",
     "cast": "角色表",
-    "castEmpty": "暂无角色"
+    "castEmpty": "暂无角色",
+    "convertToScenes": "转换为场景",
+    "converting": "转换中…",
+    "convertStarted": "正在把章节转换为场景…",
+    "convertDone": "章节已转换为场景",
+    "convertFailed": "无法转换该章节",
+    "untitledChapter": "未命名章节",
+    "chapterEmpty": "该章节暂无文本。",
+    "copilot": "Copilot",
+    "copilotAttached": "已附加",
+    "copilotSceneElements": "场景 {{scene}} · {{count}} 个元素",
+    "copilotPolish": "格式清理",
+    "copilotApplying": "清理中…",
+    "copilotSummarize": "概要提炼",
+    "copilotSummarizeSoon": "将随节点视图推出（Phase 2）",
+    "copilotComingPhase2": "Phase 2 推出",
+    "copilotRequest": "Copilot 请求",
+    "copilotEdits": "本轮 {{count}} 处修改",
+    "copilotUndo": "撤销",
+    "copilotFailed": "无法应用——文本未改动。"
   }
 }

@@ -21,6 +21,14 @@ const svc = vi.hoisted(() => ({
 }));
 vi.mock('../sceneService', () => svc);
 
+// EditorShell (Task 10) also reads chapters + shows convert toasts.
+vi.mock('../../services/scriptService', () => ({
+  fetchScriptProject: vi.fn().mockResolvedValue({ chapters: [] }),
+}));
+vi.mock('../../components/Toast', () => ({
+  useToast: () => ({ addToast: vi.fn() }),
+}));
+
 // useSceneSync: stateful mock so optimistic edits render; no network.
 vi.mock('../useSceneSync', async () => {
   const React = await import('react');

@@ -16,14 +16,35 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { applyOps, createScene, listScenes, newElementId } from '../sceneService';
+import {
+  applyOps,
+  convertToScenes,
+  createScene,
+  listScenes,
+  moveScene,
+  newElementId,
+} from '../sceneService';
+import { fetchScriptProject } from '../../services/scriptService';
+import { useToast } from '../../components/Toast';
 import type { CursorState } from '../editorMachine';
 import type { ElementOp, ElementType, SceneDoc } from '../types';
+import type { ScriptChapter } from '../../types';
 import { useEditorState, type EditorFormat, type EditorMode } from '../useEditorState';
 import type { SaveState } from '../useSceneSync';
 import { persistFormat, readStoredFormat } from '../formatStorage';
+import {
+  WINDOW_THRESHOLD,
+  computeSceneWindow,
+  estimateSceneHeight,
+  type SceneWindow,
+} from '../windowing';
 import { EDITOR_SHELL_STYLES } from './editorShellStyles';
-import { SceneBlock, type TypeCommand, type SceneSyncStatus } from './SceneBlock';
+import {
+  SceneBlock,
+  type TypeCommand,
+  type SceneSyncStatus,
+  type SceneReorderApi,
+} from './SceneBlock';
 import { SceneRail } from './SceneRail';
 import { RailModules } from './RailModules';
 import { RailEntities } from './RailEntities';
@@ -33,10 +54,15 @@ import { WritingPanel, deriveStatistics } from './WritingPanel';
 import { SaveIndicator, aggregateSaveState } from './SaveIndicator';
 import { ConflictBar } from './ConflictBar';
 import { ColdStart } from './EmptyStates';
+import { ChapterFallback } from './ChapterFallback';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
 const DOC_MODES: EditorMode[] = ['script', 'outline', 'cover'];
+
+/** Poll cadence + cap while waiting for a chapter's converted scenes to appear. */
+const CONVERT_POLL_MS = 5000;
+const CONVERT_POLL_MAX = 12;
 
 export function EditorShell({ scriptId }: { scriptId: string }) {
   const { t } = useTranslation();
@@ -45,21 +71,40 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
   const initialFormat = useMemo(() => readStoredFormat(scriptId) ?? undefined, [scriptId]);
   const { state, setMode, setFormat, toggleTheme, setActiveScene, setCursor, setNextInsertType } =
     useEditorState({ initialFormat });
+  const { addToast } = useToast();
   const [scenes, setScenes] = useState<SceneDoc[]>([]);
+  const [chapters, setChapters] = useState<ScriptChapter[]>([]);
+  const [converting, setConverting] = useState<Record<string, boolean>>({});
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const [typeCommand, setTypeCommand] = useState<TypeCommand | null>(null);
   const [syncStates, setSyncStates] = useState<Record<string, SceneSyncStatus>>({});
   const [pendingFocusId, setPendingFocusId] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [copilotSceneId, setCopilotSceneId] = useState<string | null>(null);
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ sceneId: string; edge: 'before' | 'after' } | null>(
+    null,
+  );
+  const [sceneWindow, setSceneWindow] = useState<SceneWindow>({ start: 0, end: 10 });
 
   const shellRef = useRef<HTMLDivElement | null>(null);
+  const sheetScrollRef = useRef<HTMLDivElement | null>(null);
   const cursorRef = useRef<CursorState | null>(null);
   const nonceRef = useRef(0);
+  const convertTimersRef = useRef<Set<ReturnType<typeof setInterval>>>(new Set());
+  const scenesRef = useRef<SceneDoc[]>(scenes);
   cursorRef.current = state.cursor;
+  scenesRef.current = scenes;
 
   const handleSyncStateChange = useCallback((sceneId: string, status: SceneSyncStatus) => {
     setSyncStates((prev) => ({ ...prev, [sceneId]: status }));
+  }, []);
+
+  // Keep the summoned copilot card to a single scene at a time (Task 11).
+  const handleCopilotActivate = useCallback((sceneId: string | null) => {
+    setCopilotSceneId(sceneId);
   }, []);
 
   const reload = useCallback(async () => {
@@ -70,6 +115,17 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
     } catch (err) {
       console.error('[EditorShell] failed to load scenes', err);
       setLoadState('error');
+    }
+  }, [scriptId]);
+
+  // Chapters power the legacy prose fallback (Task 10). Failure is non-fatal:
+  // the scene editor still works, we just cannot offer the Convert cards.
+  const loadChapters = useCallback(async () => {
+    try {
+      const project = await fetchScriptProject(scriptId);
+      setChapters(project.chapters ?? []);
+    } catch (err) {
+      console.error('[EditorShell] failed to load chapters', err);
     }
   }, [scriptId]);
 
@@ -87,10 +143,20 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
         console.error('[EditorShell] failed to load scenes', err);
         setLoadState('error');
       });
+    loadChapters();
     return () => {
       cancelled = true;
     };
-  }, [scriptId]);
+  }, [scriptId, loadChapters]);
+
+  // Stop any in-flight convert polls when the shell unmounts.
+  useEffect(() => {
+    const timers = convertTimersRef.current;
+    return () => {
+      timers.forEach((t) => clearInterval(t));
+      timers.clear();
+    };
+  }, []);
 
   // Viewport auto-highlight: mark the most-visible SceneBlock active. jsdom has
   // no IntersectionObserver, so feature-detect and no-op there.
@@ -124,7 +190,128 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
     [setActiveScene],
   );
 
-  const handleFocusElement = useCallback((cursor: CursorState) => setCursor(cursor), [setCursor]);
+  const handleFocusElement = useCallback(
+    (cursor: CursorState) => {
+      setCursor(cursor);
+      setEditing(true);
+    },
+    [setCursor],
+  );
+
+  // Esc left an element line: normal focus order resumes (data-editing=false).
+  const handleExitEditing = useCallback(() => setEditing(false), []);
+
+  // ── Scene reorder (Task 10): moveScene({before|after}) then reload ─────────
+  const moveSceneRelative = useCallback(
+    async (sceneId: string, edge: 'before' | 'after', anchorSceneId: string) => {
+      if (sceneId === anchorSceneId) return;
+      try {
+        await moveScene(
+          sceneId,
+          edge === 'before'
+            ? { before_scene_id: anchorSceneId }
+            : { after_scene_id: anchorSceneId },
+        );
+        await reload();
+      } catch (err) {
+        console.error('[EditorShell] moveScene failed', err);
+      }
+    },
+    [reload],
+  );
+
+  const handleReorderDrop = useCallback(
+    (targetSceneId: string, edge: 'before' | 'after') => {
+      const draggedId = dragging;
+      setDragging(null);
+      setDropTarget(null);
+      if (draggedId) void moveSceneRelative(draggedId, edge, targetSceneId);
+    },
+    [dragging, moveSceneRelative],
+  );
+
+  // Keyboard reorder: Alt+Arrow moves the scene past its neighbour (spec §3.5).
+  const handleKeyboardMove = useCallback(
+    (sceneId: string, direction: 'up' | 'down') => {
+      const ordered = scenesRef.current;
+      const idx = ordered.findIndex((s) => s.id === sceneId);
+      if (idx === -1) return;
+      if (direction === 'up' && idx > 0) {
+        void moveSceneRelative(sceneId, 'before', ordered[idx - 1].id);
+      } else if (direction === 'down' && idx < ordered.length - 1) {
+        void moveSceneRelative(sceneId, 'after', ordered[idx + 1].id);
+      }
+    },
+    [moveSceneRelative],
+  );
+
+  const reorder: SceneReorderApi = useMemo(
+    () => ({
+      draggingId: dragging,
+      dropTarget,
+      onDragStart: (sceneId) => setDragging(sceneId),
+      onDragEnd: () => {
+        setDragging(null);
+        setDropTarget(null);
+      },
+      onDragOver: (sceneId, edge) =>
+        setDropTarget((prev) =>
+          prev && prev.sceneId === sceneId && prev.edge === edge ? prev : { sceneId, edge },
+        ),
+      onDrop: handleReorderDrop,
+      onKeyboardMove: handleKeyboardMove,
+    }),
+    [dragging, dropTarget, handleReorderDrop, handleKeyboardMove],
+  );
+
+  // ── Legacy chapter → scenes conversion (Task 10) ──────────────────────────
+  // We dispatch the backend convert workflow, then POLL listScenes until scenes
+  // for this chapter materialise (or the cap is hit). Polling — rather than the
+  // TaskManager realtime path — is chosen deliberately: it observes the exact
+  // end state we care about (scenes with this chapter_id) instead of a task row,
+  // is self-contained, and needs no realtime subscription for this rare action.
+  const handleConvertChapter = useCallback(
+    async (chapterId: string) => {
+      setConverting((prev) => ({ ...prev, [chapterId]: true }));
+      try {
+        await convertToScenes(scriptId, chapterId);
+        addToast(t('editor.convertStarted'), 'info');
+      } catch (err) {
+        console.error('[EditorShell] convertToScenes failed', err);
+        addToast(t('editor.convertFailed'), 'error');
+        setConverting((prev) => ({ ...prev, [chapterId]: false }));
+        return;
+      }
+
+      let attempts = 0;
+      const timer = setInterval(async () => {
+        attempts += 1;
+        let done = false;
+        try {
+          const rows = await listScenes(scriptId);
+          const sorted = [...rows].sort((a, b) => a.sort_order - b.sort_order);
+          setScenes(sorted);
+          done = sorted.some((s) => s.chapter_id === chapterId);
+        } catch (err) {
+          // Errors still count toward the give-up cap: a persistent fetch
+          // failure must not leak the interval or pin the button on
+          // "Converting…" forever.
+          console.error('[EditorShell] convert poll failed', err);
+        }
+        if (done || attempts >= CONVERT_POLL_MAX) {
+          clearInterval(timer);
+          convertTimersRef.current.delete(timer);
+          setConverting((prev) => ({ ...prev, [chapterId]: false }));
+          if (done) {
+            await loadChapters();
+            addToast(t('editor.convertDone'), 'success');
+          }
+        }
+      }, CONVERT_POLL_MS);
+      convertTimersRef.current.add(timer);
+    },
+    [scriptId, addToast, t, loadChapters],
+  );
 
   const handleSelectType = useCallback(
     (type: ElementType) => {
@@ -199,6 +386,53 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
   const railCharacters = useMemo(() => deriveRailCharacters(scenes), [scenes]);
   const railLocations = useMemo(() => deriveRailLocations(scenes), [scenes]);
 
+  // Legacy chapters with no scene pointing at them → read-only prose fallbacks.
+  const orphanChapters = useMemo(() => {
+    const claimed = new Set(scenes.map((s) => s.chapter_id).filter(Boolean));
+    return chapters.filter((ch) => !claimed.has(ch.id));
+  }, [scenes, chapters]);
+
+  // Windowing: above the threshold, only mount scenes near the viewport. Heights
+  // are estimated per scene (element count) and cached across renders.
+  const windowed = scenes.length > WINDOW_THRESHOLD;
+  const sceneHeights = useMemo(
+    () => scenes.map((s) => estimateSceneHeight(s.elements.length)),
+    [scenes],
+  );
+
+  const recomputeWindow = useCallback(() => {
+    if (!windowed) return;
+    const el = sheetScrollRef.current;
+    const next = computeSceneWindow(
+      sceneHeights,
+      el?.scrollTop ?? 0,
+      el?.clientHeight ?? 0,
+    );
+    setSceneWindow((prev) => (prev.start === next.start && prev.end === next.end ? prev : next));
+  }, [windowed, sceneHeights]);
+
+  // Seed the window from the current scroll offset whenever the scene set or
+  // windowing toggle changes; rAF-throttled scroll keeps it in step thereafter.
+  useEffect(() => {
+    if (!windowed) return;
+    recomputeWindow();
+    const el = sheetScrollRef.current;
+    if (!el) return;
+    let raf = 0;
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        recomputeWindow();
+      });
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [windowed, recomputeWindow]);
+
   // Aggregate every scene's save state into one headline (worst-wins). Only the
   // currently loaded scenes count, so a deleted scene's stale state drops out.
   const perSceneState = (s: SceneDoc): SaveState => syncStates[s.id]?.saveState ?? 'saved';
@@ -232,7 +466,13 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
   };
 
   return (
-    <div className="mh-editor-shell" data-theme={state.theme} data-editor-shell ref={shellRef}>
+    <div
+      className="mh-editor-shell"
+      data-theme={state.theme}
+      data-editing={editing ? 'true' : 'false'}
+      data-editor-shell
+      ref={shellRef}
+    >
       <style>{EDITOR_SHELL_STYLES}</style>
 
       {loadState === 'loading' && (
@@ -346,7 +586,7 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
               <ColdStart onCreateStory={handleCreateStory} />
             </div>
           ) : (
-            <div className="mh-sheet-scroll">
+            <div className="mh-sheet-scroll" ref={sheetScrollRef}>
               {conflictScene && (
                 <ConflictBar
                   onKeepMine={() => resolveConflict('mine')}
@@ -367,18 +607,48 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
                       <p className="mh-doc-p">{t('editor.outlinePlaceholder')}</p>
                     </div>
                   ) : (
-                    scenes.map((s, i) => (
-                      <SceneBlock
-                        key={s.id}
-                        scene={s}
-                        index={i}
-                        format={state.format}
-                        mentionCandidates={mentionCandidates}
-                        onFocusElement={handleFocusElement}
-                        onSyncStateChange={handleSyncStateChange}
-                        typeCommand={typeCommand ?? undefined}
-                      />
-                    ))
+                    <>
+                      {scenes.map((s, i) => {
+                        const mounted =
+                          !windowed || (i >= sceneWindow.start && i <= sceneWindow.end);
+                        if (!mounted) {
+                          return (
+                            <div
+                              key={s.id}
+                              className="mh-scene-placeholder"
+                              data-testid="scene-placeholder"
+                              data-scene-id={s.id}
+                              style={{ height: sceneHeights[i] }}
+                              aria-hidden="true"
+                            />
+                          );
+                        }
+                        return (
+                          <SceneBlock
+                            key={s.id}
+                            scene={s}
+                            index={i}
+                            format={state.format}
+                            mentionCandidates={mentionCandidates}
+                            onFocusElement={handleFocusElement}
+                            onSyncStateChange={handleSyncStateChange}
+                            onExitEditing={handleExitEditing}
+                            reorder={reorder}
+                            copilotActiveSceneId={copilotSceneId}
+                            onCopilotActivate={handleCopilotActivate}
+                            typeCommand={typeCommand ?? undefined}
+                          />
+                        );
+                      })}
+                      {orphanChapters.map((ch) => (
+                        <ChapterFallback
+                          key={ch.id}
+                          chapter={ch}
+                          converting={!!converting[ch.id]}
+                          onConvert={handleConvertChapter}
+                        />
+                      ))}
+                    </>
                   )}
                 </div>
               </div>

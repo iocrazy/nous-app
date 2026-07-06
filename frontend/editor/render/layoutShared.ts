@@ -21,6 +21,7 @@ import {
   type ClipboardEvent,
   type FormEvent,
   type KeyboardEvent,
+  type MouseEvent,
 } from 'react';
 import type { ElementType, ScriptElement } from '../types';
 
@@ -59,6 +60,26 @@ export function buildElementHtml(text: string, mentionNames: string[]): string {
   return out;
 }
 
+/**
+ * When a mention picker is open on THIS line, the line itself becomes the ARIA
+ * combobox (WAI-ARIA activedescendant pattern): the focused contentEditable owns
+ * `role=combobox` + `aria-expanded` + `aria-controls` + `aria-activedescendant`,
+ * while the popup is only the `role=listbox`. Screen readers announce the active
+ * option because the descendant lives on the focused element, not an unfocused
+ * popup (PR-F3 review carry-over).
+ */
+export interface LineMentionAria {
+  /** id of the popup listbox this line controls. */
+  listboxId: string;
+  /** id of the active option, or undefined when the filtered list is empty. */
+  activeOptionId?: string;
+}
+
+/** A mention picker anchored to one element line, threaded through the engines. */
+export interface LineMention extends LineMentionAria {
+  elementId: string;
+}
+
 export const ELEMENT_TICK_CLASS: Record<ElementType, string> = {
   action: 't-action',
   dialogue: 't-dialogue',
@@ -75,6 +96,12 @@ export interface ElementLineProps {
   lineClass: string;
   focused: boolean;
   placeholder?: string;
+  /** When set, this line is the open mention combobox (ARIA lives here, not the popup). */
+  mentionAria?: LineMentionAria;
+  /** Copilot selection state for this row's gutter tick (Task 11). */
+  selected?: boolean;
+  /** Clicking the gutter tick selects the element for the copilot (Task 11). */
+  onTickClick?: (elementId: string, shiftKey: boolean) => void;
   onInput: (elementId: string, text: string) => void;
   onKeyDown: (elementId: string, e: KeyboardEvent<HTMLDivElement>) => void;
   onFocus: (elementId: string) => void;
@@ -88,6 +115,9 @@ export function ElementLine({
   lineClass,
   focused,
   placeholder,
+  mentionAria,
+  selected,
+  onTickClick,
   onInput,
   onKeyDown,
   onFocus,
@@ -126,19 +156,43 @@ export function ElementLine({
 
   const isTransition = element.type === 'transition';
 
+  // The gutter tick is a colour marker by default; when copilot selection is
+  // wired in it becomes a small toggle button that summons the card (Task 11).
+  const tick = onTickClick
+    ? createElement('button', {
+        type: 'button',
+        className: `mh-el-tick tick-btn ${ELEMENT_TICK_CLASS[element.type]}${
+          selected ? ' selected' : ''
+        }`,
+        // Pointer-summon affordance; kept out of the tab order in Phase 1.
+        tabIndex: -1,
+        'aria-pressed': selected ? 'true' : 'false',
+        'aria-label': 'Select element',
+        'data-tick-id': element.id,
+        onMouseDown: (e: MouseEvent) => e.preventDefault(),
+        onClick: (e: MouseEvent) => onTickClick(element.id, e.shiftKey),
+      })
+    : createElement('span', {
+        className: `mh-el-tick ${ELEMENT_TICK_CLASS[element.type]}`,
+        'aria-hidden': 'true',
+      });
+
   return createElement(
     'div',
     { className: `mh-el-row${focused ? ' focused' : ''}${isTransition ? ' transition-row' : ''}` },
-    createElement('span', {
-      className: `mh-el-tick ${ELEMENT_TICK_CLASS[element.type]}`,
-      'aria-hidden': 'true',
-    }),
+    tick,
     createElement('div', {
       ref: editableRef,
       className: `mh-el-editable mh-el-line ${lineClass}`,
       contentEditable: true,
       suppressContentEditableWarning: true,
-      role: 'textbox',
+      // When a mention picker is open on this line, the line IS the combobox so
+      // AT announces the active option; otherwise it is a plain textbox.
+      role: mentionAria ? 'combobox' : 'textbox',
+      'aria-expanded': mentionAria ? 'true' : undefined,
+      'aria-controls': mentionAria ? mentionAria.listboxId : undefined,
+      'aria-haspopup': mentionAria ? 'listbox' : undefined,
+      'aria-activedescendant': mentionAria?.activeOptionId,
       tabIndex: 0,
       'data-el-id': element.id,
       'data-el-type': element.type,

@@ -15,7 +15,16 @@
  * debounced 600ms; text input debounces 500ms. The `::` drag handle is a
  * render-only placeholder here — real reordering is Task 10.
  */
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type KeyboardEvent,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   onBackspaceAtStart,
@@ -25,14 +34,16 @@ import {
   type CursorState,
   type MachineResult,
 } from '../editorMachine';
-import { applyLocal } from '../opBuilder';
+import { applyLocal, buildInverse } from '../opBuilder';
 import { newElementId, updateSceneMeta } from '../sceneService';
+import { buildPolishOps } from '../copilotService';
 import type { ElementOp, ElementType, ScriptElement, SceneDoc } from '../types';
 import { useSceneSync } from '../useSceneSync';
 import { HollywoodLayout } from '../render/HollywoodLayout';
 import { AsianLayout } from '../render/AsianLayout';
-import { MentionNamesContext } from '../render/layoutShared';
-import { MentionCombobox, type MentionComboboxHandle } from './MentionCombobox';
+import { MentionNamesContext, type LineMention } from '../render/layoutShared';
+import { MentionCombobox, filterMentionCandidates } from './MentionCombobox';
+import { CopilotCard, type CopilotPhase } from './CopilotCard';
 import { EmptySceneHint } from './EmptyStates';
 import type { EditorFormat } from '../useEditorState';
 import type { SaveState } from '../useSceneSync';
@@ -41,6 +52,23 @@ import type { SaveState } from '../useSceneSync';
 export interface SceneSyncStatus {
   saveState: SaveState;
   resolveConflict: (choice: 'mine' | 'theirs') => void;
+}
+
+/**
+ * Drag + keyboard scene-reorder wiring, owned by the shell (which knows the full
+ * ordered scene list and calls moveScene). One handle drives both paths: HTML5
+ * DnD on the `::` grip, and Alt+Arrow while the grip is focused (spec §3.5).
+ */
+export interface SceneReorderApi {
+  /** The scene currently being dragged (for aria-grabbed + drop-target styling). */
+  draggingId: string | null;
+  /** The active drop target: which scene and which edge the line will sit on. */
+  dropTarget: { sceneId: string; edge: 'before' | 'after' } | null;
+  onDragStart: (sceneId: string) => void;
+  onDragEnd: () => void;
+  onDragOver: (sceneId: string, edge: 'before' | 'after') => void;
+  onDrop: (sceneId: string, edge: 'before' | 'after') => void;
+  onKeyboardMove: (sceneId: string, direction: 'up' | 'down') => void;
 }
 
 /** An open @-mention / character-cue picker anchored to one element line. */
@@ -86,6 +114,20 @@ export interface SceneBlockProps {
   mentionCandidates?: string[];
   /** Reports this scene's save state up so the shell can aggregate it. */
   onSyncStateChange?: (sceneId: string, status: SceneSyncStatus) => void;
+  /** Drag/keyboard reorder wiring (Task 10); absent = reorder disabled. */
+  reorder?: SceneReorderApi;
+  /** Called when Esc leaves an element line so the shell can drop `data-editing`. */
+  onExitEditing?: () => void;
+  /** The scene that currently owns the copilot card (shell keeps it to one). */
+  copilotActiveSceneId?: string | null;
+  /** Notifies the shell which scene (if any) now holds a copilot selection. */
+  onCopilotActivate?: (sceneId: string | null) => void;
+}
+
+/** Which half of a block the pointer is over → the drop edge. */
+function edgeFromPointer(el: HTMLElement, clientY: number): 'before' | 'after' {
+  const rect = el.getBoundingClientRect();
+  return clientY < rect.top + rect.height / 2 ? 'before' : 'after';
 }
 
 export function SceneBlock({
@@ -96,11 +138,38 @@ export function SceneBlock({
   format = 'hollywood',
   mentionCandidates = [],
   onSyncStateChange,
+  reorder,
+  onExitEditing,
+  copilotActiveSceneId,
+  onCopilotActivate,
 }: SceneBlockProps) {
   const { t } = useTranslation();
   const sync = useSceneSync(scene);
   const [focusedElementId, setFocusedElementId] = useState<string | null>(null);
   const [mention, setMention] = useState<MentionState | null>(null);
+  // Mention nav state owned HERE (the combobox is presentational): the active
+  // option index + the shared listbox id feed both the popup and the ARIA
+  // combobox attributes that ride on the focused line.
+  const mentionListId = useId();
+  const [mentionActive, setMentionActive] = useState(0);
+  // Copilot (Task 11): elements selected via their gutter ticks + this turn's
+  // applied-edit count and the inverse batch that undoes them.
+  const [copilotSelection, setCopilotSelection] = useState<string[]>([]);
+  const [copilotAnchor, setCopilotAnchor] = useState<string | null>(null);
+  const [copilotEdits, setCopilotEdits] = useState<number | null>(null);
+  const [copilotInverse, setCopilotInverse] = useState<ElementOp[] | null>(null);
+  // Copilot-OWNED lifecycle: 'applying' only between our own dispatch and the
+  // FIRST terminal saveState after it. Deriving the phase from the shared
+  // scene saveState alone misreports unrelated saves (a normal edit after a
+  // polish would flip the card back to "Polishing…") — review finding F4-2.
+  const [copilotStatus, setCopilotStatus] = useState<'applying' | 'done' | 'failed' | null>(null);
+  useEffect(() => {
+    if (copilotStatus !== 'applying') return;
+    if (sync.saveState === 'saved') setCopilotStatus('done');
+    else if (sync.saveState === 'retrying' || sync.saveState === 'conflict') {
+      setCopilotStatus('failed');
+    }
+  }, [copilotStatus, sync.saveState]);
   const [meta, setMeta] = useState<SceneMeta>({
     heading_int_ext: scene.heading_int_ext ?? '',
     location_text: scene.location_text ?? '',
@@ -113,10 +182,26 @@ export function SceneBlock({
   const inputTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const metaTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mentionRef = useRef<MentionState | null>(null);
-  const comboboxRef = useRef<MentionComboboxHandle | null>(null);
+
+  // Filtered candidates for the open picker; kept in a ref so the keydown
+  // handler (a stable callback) reads the latest list without re-subscribing.
+  const mentionFiltered = useMemo(
+    () => (mention ? filterMentionCandidates(mentionCandidates, mention.query) : []),
+    [mention, mentionCandidates],
+  );
+  const mentionFilteredRef = useRef<string[]>(mentionFiltered);
+  const mentionActiveRef = useRef(0);
 
   elementsRef.current = sync.elements;
   mentionRef.current = mention;
+  mentionFilteredRef.current = mentionFiltered;
+  mentionActiveRef.current = mentionActive;
+
+  // Reset the active option to the top whenever the picker opens or its filter
+  // changes (typing narrows the list); nav-only changes must NOT reset it.
+  useEffect(() => {
+    setMentionActive(0);
+  }, [mention?.elementId, mention?.query, mentionCandidates]);
 
   useEffect(() => {
     const inputTimers = inputTimersRef.current;
@@ -144,8 +229,6 @@ export function SceneBlock({
     },
     [sync],
   );
-
-  const closeMention = useCallback(() => setMention(null), []);
 
   // Caret-safe imperative write: the focused row is never repainted by React
   // (protects the caret), so a mention insertion writes the DOM node directly
@@ -204,19 +287,29 @@ export function SceneBlock({
       // While the mention picker is open on this line, it owns the nav keys.
       const mentionOpen = mentionRef.current;
       if (mentionOpen && mentionOpen.elementId === elementId) {
+        const filtered = mentionFilteredRef.current;
         if (e.key === 'ArrowDown') {
           e.preventDefault();
-          comboboxRef.current?.move(1);
+          if (filtered.length > 0) {
+            setMentionActive((prev) => (prev + 1 + filtered.length) % filtered.length);
+          }
           return;
         }
         if (e.key === 'ArrowUp') {
           e.preventDefault();
-          comboboxRef.current?.move(-1);
+          if (filtered.length > 0) {
+            setMentionActive((prev) => (prev - 1 + filtered.length) % filtered.length);
+          }
           return;
         }
         if (e.key === 'Enter') {
           e.preventDefault();
-          if (!comboboxRef.current?.confirm()) setMention(null);
+          const active = mentionActiveRef.current;
+          if (filtered.length > 0 && active >= 0 && active < filtered.length) {
+            handleMentionSelect(filtered[active]);
+          } else {
+            setMention(null);
+          }
           return;
         }
         if (e.key === 'Escape') {
@@ -247,6 +340,15 @@ export function SceneBlock({
         return;
       }
 
+      // Esc leaves the element line: blur so Tab resumes the page's normal focus
+      // order, and tell the shell to drop `data-editing` (spec §3.5 a11y).
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.currentTarget.blur();
+        onExitEditing?.();
+        return;
+      }
+
       if (e.key === 'Tab') {
         e.preventDefault();
         applyResult(e.shiftKey ? onShiftTab(els, cursor) : onTab(els, cursor));
@@ -267,7 +369,7 @@ export function SceneBlock({
         applyResult(result);
       }
     },
-    [scene.id, applyResult, sync, openMention],
+    [scene.id, applyResult, sync, openMention, handleMentionSelect, onExitEditing],
   );
 
   const handleInput = useCallback(
@@ -385,19 +487,158 @@ export function SceneBlock({
 
   const LayoutEngine = format === 'asian' ? AsianLayout : HollywoodLayout;
 
+  // The focused line IS the ARIA combobox when a picker is open — feed the layout
+  // engine the listbox id + active option id so it wires them onto that line.
+  const lineMention: LineMention | null = mention
+    ? {
+        elementId: mention.elementId,
+        listboxId: mentionListId,
+        activeOptionId:
+          mentionFiltered.length > 0 ? `${mentionListId}-opt-${mentionActive}` : undefined,
+      }
+    : null;
+
+  // ── Reorder wiring (Task 10) ──────────────────────────────────────────────
+  const isDragging = reorder?.draggingId === scene.id;
+  const dropEdge =
+    reorder?.dropTarget && reorder.dropTarget.sceneId === scene.id
+      ? reorder.dropTarget.edge
+      : null;
+
+  const handleHandleKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
+    if (!reorder || !e.altKey) return;
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      reorder.onKeyboardMove(scene.id, 'up');
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      reorder.onKeyboardMove(scene.id, 'down');
+    }
+  };
+
+  const handleBlockDragOver = (e: DragEvent<HTMLDivElement>) => {
+    if (!reorder || !reorder.draggingId || reorder.draggingId === scene.id) return;
+    // preventDefault marks this a valid drop target (HTML5 DnD contract).
+    e.preventDefault();
+    reorder.onDragOver(scene.id, edgeFromPointer(e.currentTarget, e.clientY));
+  };
+  const handleBlockDrop = (e: DragEvent<HTMLDivElement>) => {
+    if (!reorder || !reorder.draggingId) return;
+    e.preventDefault();
+    reorder.onDrop(scene.id, edgeFromPointer(e.currentTarget, e.clientY));
+  };
+
+  // ── Copilot summon (Task 11) ──────────────────────────────────────────────
+  const clearCopilot = useCallback(() => {
+    setCopilotSelection([]);
+    setCopilotAnchor(null);
+    setCopilotEdits(null);
+    setCopilotInverse(null);
+    setCopilotStatus(null);
+  }, []);
+
+  const handleTickClick = useCallback(
+    (elementId: string, shiftKey: boolean) => {
+      // Any selection change starts a fresh turn (drop last turn's undo/edits).
+      setCopilotEdits(null);
+      setCopilotInverse(null);
+      const els = elementsRef.current;
+      if (shiftKey && copilotAnchor) {
+        const a = els.findIndex((e) => e.id === copilotAnchor);
+        const b = els.findIndex((e) => e.id === elementId);
+        if (a !== -1 && b !== -1) {
+          const [lo, hi] = a <= b ? [a, b] : [b, a];
+          setCopilotSelection(els.slice(lo, hi + 1).map((e) => e.id));
+          return;
+        }
+      }
+      // Plain click: single-select, or toggle off if it was the only selection.
+      setCopilotSelection((prev) => (prev.length === 1 && prev[0] === elementId ? [] : [elementId]));
+      setCopilotAnchor(elementId);
+    },
+    [copilotAnchor],
+  );
+
+  const handlePolish = useCallback(() => {
+    const els = elementsRef.current;
+    const ops = buildPolishOps(els, copilotSelection);
+    if (ops.length === 0) {
+      setCopilotEdits(0);
+      setCopilotInverse(null);
+      setCopilotStatus('done');
+      return;
+    }
+    const inverse = buildInverse(ops, els);
+    sync.dispatchOps(ops, applyLocal(els, ops));
+    setCopilotEdits(ops.length);
+    setCopilotInverse(inverse);
+    setCopilotStatus('applying');
+  }, [copilotSelection, sync]);
+
+  const handleCopilotUndo = useCallback(() => {
+    const inverse = copilotInverse;
+    if (!inverse || inverse.length === 0) return;
+    sync.dispatchOps(inverse, applyLocal(elementsRef.current, inverse));
+    setCopilotEdits(null);
+    setCopilotInverse(null);
+    setCopilotStatus(null);
+  }, [copilotInverse, sync]);
+
+  // Tell the shell which scene owns the card; if another scene takes over, drop
+  // our selection so only one card is ever summoned (spec: non-persistent).
+  const hasCopilotSelection = copilotSelection.length > 0;
+  useEffect(() => {
+    if (hasCopilotSelection) onCopilotActivate?.(scene.id);
+  }, [hasCopilotSelection, scene.id, onCopilotActivate]);
+  useEffect(() => {
+    if (
+      hasCopilotSelection &&
+      copilotActiveSceneId != null &&
+      copilotActiveSceneId !== scene.id
+    ) {
+      clearCopilot();
+    }
+  }, [copilotActiveSceneId, hasCopilotSelection, scene.id, clearCopilot]);
+
+  const copilotSelectedIds = useMemo(() => new Set(copilotSelection), [copilotSelection]);
+
+  const copilotPhase: CopilotPhase = (() => {
+    if (copilotEdits === null || copilotStatus === null) return 'attached';
+    if (copilotStatus === 'applying') return 'applying';
+    if (copilotStatus === 'failed') return 'failed';
+    return 'done';
+  })();
+
   return (
     <div
-      className="mh-scene-block"
+      className={`mh-scene-block${isDragging ? ' dragging' : ''}`}
       ref={containerRef}
       data-testid="scene-block"
       data-scene-id={scene.id}
+      onDragOver={reorder ? handleBlockDragOver : undefined}
+      onDrop={reorder ? handleBlockDrop : undefined}
     >
+      {dropEdge === 'before' && (
+        <div className="mh-drop-indicator before" data-testid="drop-indicator" aria-hidden="true" />
+      )}
       <button
         type="button"
         className="mh-drag-handle"
         aria-label={t('editor.dragScene')}
-        aria-grabbed="false"
-        tabIndex={-1}
+        aria-grabbed={reorder ? isDragging : undefined}
+        draggable={!!reorder}
+        tabIndex={reorder ? 0 : -1}
+        onDragStart={
+          reorder
+            ? (e) => {
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', scene.id);
+                reorder.onDragStart(scene.id);
+              }
+            : undefined
+        }
+        onDragEnd={reorder ? () => reorder.onDragEnd() : undefined}
+        onKeyDown={handleHandleKeyDown}
       >
         ::
       </button>
@@ -446,6 +687,9 @@ export function SceneBlock({
         <LayoutEngine
           elements={sync.elements}
           focusedElementId={focusedElementId}
+          mention={lineMention}
+          selectedIds={copilotSelectedIds}
+          onTickClick={handleTickClick}
           handlers={{
             onInput: handleInput,
             onKeyDown: handleKeyDown,
@@ -461,13 +705,30 @@ export function SceneBlock({
 
       {mention && (
         <MentionCombobox
-          ref={comboboxRef}
           candidates={mentionCandidates}
           query={mention.query}
+          listboxId={mentionListId}
+          activeIndex={mentionActive}
           position={mention.position}
           onSelect={handleMentionSelect}
-          onClose={closeMention}
+          onHover={setMentionActive}
         />
+      )}
+
+      {hasCopilotSelection && (
+        <CopilotCard
+          sceneNumber={index + 1}
+          selectedCount={copilotSelection.length}
+          phase={copilotPhase}
+          editsThisTurn={copilotEdits}
+          canUndo={!!copilotInverse && copilotInverse.length > 0}
+          onPolish={handlePolish}
+          onUndo={handleCopilotUndo}
+        />
+      )}
+
+      {dropEdge === 'after' && (
+        <div className="mh-drop-indicator after" data-testid="drop-indicator" aria-hidden="true" />
       )}
     </div>
   );

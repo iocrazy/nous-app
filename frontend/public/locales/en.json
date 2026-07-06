@@ -2381,6 +2381,25 @@
     "statCharacters": "Characters",
     "statLocations": "Locations",
     "cast": "Cast",
-    "castEmpty": "No characters yet"
+    "castEmpty": "No characters yet",
+    "convertToScenes": "Convert to Scenes",
+    "converting": "Converting…",
+    "convertStarted": "Converting chapter to scenes…",
+    "convertDone": "Chapter converted to scenes",
+    "convertFailed": "Could not convert this chapter",
+    "untitledChapter": "Untitled Chapter",
+    "chapterEmpty": "This chapter has no text yet.",
+    "copilot": "Copilot",
+    "copilotAttached": "Attached",
+    "copilotSceneElements": "Scene {{scene}} · {{count}} elements",
+    "copilotPolish": "Polish format",
+    "copilotApplying": "Polishing…",
+    "copilotSummarize": "Summarize outline",
+    "copilotSummarizeSoon": "Coming with node view (Phase 2)",
+    "copilotComingPhase2": "Coming in Phase 2",
+    "copilotRequest": "Copilot request",
+    "copilotEdits": "{{count}} edits this turn",
+    "copilotUndo": "Undo",
+    "copilotFailed": "Could not apply — your text is unchanged."
   }
 }
