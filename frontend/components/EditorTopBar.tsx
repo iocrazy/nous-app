@@ -241,11 +241,15 @@ export function EditorTopBar({
               icon={<Download size={14} />}
               onClick={() => handleProjectMenuAction(() => onExport?.())}
             />
-            <PlainMenuItem
-              label="Import..."
-              icon={<Upload size={14} />}
-              onClick={() => handleProjectMenuAction(() => onImport?.())}
-            />
+            {/* Hidden when no handler: legacy storyboard is read-only (P3),
+                an enabled-looking dead menu item would mislead. */}
+            {onImport && (
+              <PlainMenuItem
+                label="Import..."
+                icon={<Upload size={14} />}
+                onClick={() => handleProjectMenuAction(() => onImport())}
+              />
+            )}
 
             <div className="border-t border-ink-700 my-1" />
 

@@ -81,6 +81,20 @@ function ShotCardImpl({
     }, DESCRIPTION_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [desc, shot.id, shot.description, onUpdate]);
+  // FLUSH, don't drop (spec §3.6 guard, mirrors SceneBlock): switching rail
+  // views within the 600ms debounce unmounts this card — commit the pending
+  // description instead of discarding the keystrokes.
+  const flushRef = useRef({ desc, shot, onUpdate });
+  flushRef.current = { desc, shot, onUpdate };
+  useEffect(
+    () => () => {
+      const { desc: d, shot: s, onUpdate: commit } = flushRef.current;
+      if (editedRef.current && d !== (s.description ?? '')) {
+        commit(s.id, { description: d });
+      }
+    },
+    [],
+  );
 
   const handleDescChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     editedRef.current = true;
