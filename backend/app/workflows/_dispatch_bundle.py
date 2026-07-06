@@ -59,7 +59,10 @@ from app.workflows.storyboard import (  # noqa: F401
     storyboard_video_analysis_workflow,
     storyboard_video_workflow,
 )
-from app.workflows.thumbnail import thumbnail_workflow  # noqa: F401
+from app.workflows.thumbnail import (  # noqa: F401
+    thumbnail_backfill_workflow,
+    thumbnail_workflow,
+)
 from app.workflows.transcode import transcode_workflow  # noqa: F401
 from app.workflows.upload_postprocess import (  # noqa: F401
     upload_postprocess_workflow,
