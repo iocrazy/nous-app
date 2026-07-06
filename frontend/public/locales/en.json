@@ -2360,7 +2360,6 @@
     "moduleScenes": "Scenes",
     "comingPhase2": "Coming in Phase 2",
     "nodesViewLabel": "Scene Map",
-    "nodesElementCount": "{{count}} elements",
     "nodesEmptyScene": "Empty scene",
     "nodesUntitledScene": "Untitled scene",
     "nodesUntitledChapter": "Untitled chapter",
@@ -2409,6 +2408,8 @@
     "copilotRequest": "Copilot request",
     "copilotEdits": "{{count}} edits this turn",
     "copilotUndo": "Undo",
-    "copilotFailed": "Could not apply — your text is unchanged."
+    "copilotFailed": "Could not apply — your text is unchanged.",
+    "nodesElementCount_one": "{{count}} element",
+    "nodesElementCount_other": "{{count}} elements"
   }
 }

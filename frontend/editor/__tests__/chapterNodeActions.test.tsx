@@ -156,3 +156,17 @@ describe('ChapterActionsNode', () => {
     await waitFor(() => expect(node).not.toHaveAttribute('aria-busy'));
   });
 });
+
+it('convert predicate matches native-int chapter_id rows (#1006 coercion)', async () => {
+  // SceneDoc.chapter_id is typed string but the backend returns native ints —
+  // the poll predicate must coerce both sides or convert hangs busy 60s.
+  sceneSvc.convertToScenes.mockResolvedValue('task-1');
+  const { startPoll } = renderNode({});
+  const btn = screen.getByRole('button', { name: 'editor.nodesActionConvert' });
+  fireEvent.click(btn);
+  fireEvent.click(btn); // inline confirm
+  await waitFor(() => expect(startPoll).toHaveBeenCalledTimes(1));
+  const [predicate] = startPoll.mock.calls[0];
+  expect(predicate({ scenes: [{ chapter_id: 100 }], chapters: [] })).toBe(true);
+  expect(predicate({ scenes: [{ chapter_id: 999 }], chapters: [] })).toBe(false);
+});

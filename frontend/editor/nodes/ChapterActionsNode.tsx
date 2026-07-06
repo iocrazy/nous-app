@@ -109,7 +109,7 @@ function ChapterActionsNodeImpl({ id, data }: NodeProps) {
       }
       const predicate: PollPredicate =
         kind === 'convert'
-          ? (poll) => poll.scenes.some((s) => s.chapter_id === chapterId)
+          ? (poll) => poll.scenes.some((s) => String(s.chapter_id) === chapterId)
           : (poll) =>
               poll.chapters.filter((c) => String(c.parent_chapter_id) === chapterId).length >
               baselineChildren;

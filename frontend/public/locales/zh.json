@@ -2360,7 +2360,6 @@
     "moduleScenes": "场景",
     "comingPhase2": "第二阶段推出",
     "nodesViewLabel": "场景图",
-    "nodesElementCount": "{{count}} 个元素",
     "nodesEmptyScene": "空场景",
     "nodesUntitledScene": "未命名场景",
     "nodesUntitledChapter": "未命名章节",
@@ -2409,6 +2408,7 @@
     "copilotRequest": "Copilot 请求",
     "copilotEdits": "本轮 {{count}} 处修改",
     "copilotUndo": "撤销",
-    "copilotFailed": "无法应用——文本未改动。"
+    "copilotFailed": "无法应用——文本未改动。",
+    "nodesElementCount_other": "{{count}} 个元素"
   }
 }
