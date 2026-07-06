@@ -55,7 +55,7 @@ class _FakeStore:
         return []
 
     async def append_user_message(
-        self, *, session_id: Any, user_id: str, content: str
+        self, *, session_id: Any, user_id: str, content: str, attachments: Any = None
     ) -> Dict[str, Any]:
         return {
             "id": "msg-1",
