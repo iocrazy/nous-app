@@ -346,6 +346,24 @@ class AgentRepository:
             logger.error(f"Failed to delete override for agent {agent_id}: {e}")
             return False
 
+    async def delete_agent(self, agent_id: UUID) -> bool:
+        """Hard-delete one NON-PRESET agent. Returns True iff a row was
+        deleted. The preset guard is enforced here as well as at the router
+        so a future caller can't nuke a system agent by accident — every FK
+        referencing ai_agents declares CASCADE or SET NULL (verified against
+        prod information_schema, 2026-07-07), so the row delete is safe."""
+        try:
+            stmt = delete(AiAgents).where(
+                AiAgents.id == agent_id,
+                AiAgents.is_system_preset.is_(False),
+            )
+            async with write_scope() as session:
+                result = await session.execute(stmt)
+                return (result.rowcount or 0) > 0
+        except Exception as e:
+            logger.error(f"Failed to delete agent {agent_id}: {e}")
+            return False
+
     async def list_presets(self) -> List[Dict[str, Any]]:
         """All system-preset agents (the admin catalog), ordered by name."""
         try:

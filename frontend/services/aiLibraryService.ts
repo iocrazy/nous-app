@@ -153,6 +153,18 @@ export const aiLibraryService = {
     return handle<AILibraryAgent>(resp);
   },
 
+  /** Hard-delete a user-owned agent. 403 for system presets / non-creators. */
+  async deleteAgent(slug: string): Promise<void> {
+    const resp = await fetch(`${base()}/agents/${encodeURIComponent(slug)}`, {
+      method: 'DELETE',
+      headers: await getAuthHeaders(),
+    });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(`${resp.status}: ${text}`);
+    }
+  },
+
   /** Reset a system preset to its defaults — drop the caller's override
    *  layer (mig 341). Returns the refreshed (merged) agent. */
   async deleteAgentOverride(

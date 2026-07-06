@@ -639,6 +639,49 @@ async def update_agent(
 
 
 @router.delete(
+    "/agents/{slug}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a user-owned agent (system presets cannot be deleted)",
+)
+async def delete_agent(slug: str, auth: AuthDep) -> None:
+    """Hard-delete a NON-PRESET agent the caller created.
+
+    - 404: no such agent.
+    - 403: system preset (seed files stay authoritative — reset an
+      override instead) or the caller is not the creator.
+    Every FK referencing ai_agents cascades or nulls out, so runs /
+    skills bindings / overrides clean themselves up; direct-chat
+    sessions survive with a null agent join (history stays readable).
+    """
+    agent_repo, _ = _repos()
+    user_uuid = _coerce_user_uuid(auth.user_id)
+
+    agent = await agent_repo.get_by_slug(slug)
+    if agent is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"agent '{slug}' not found",
+        )
+    if agent.get("is_system_preset"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="system presets cannot be deleted — reset the override instead",
+        )
+    if str(agent.get("user_id") or "") != str(user_uuid):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="only the agent's creator can delete it",
+        )
+    deleted = await agent_repo.delete_agent(UUID(str(agent["id"])))
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="delete failed — see server logs",
+        )
+    logger.info(f"agent '{slug}' deleted by {auth.user_id}")
+
+
+@router.delete(
     "/agents/{slug}/override",
     response_model=AgentOut,
     summary="Reset a system preset to its defaults (drop the caller's override)",

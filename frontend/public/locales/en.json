@@ -1997,7 +1997,10 @@
       "overrideActive": "Customized ({{scope}} layer) — your edits apply only to you; the system default is untouched.",
       "presetOverrideHint": "System agent — edits are saved as your personal customization (visible only to you) and can be reset anytime.",
       "resetToDefaults": "Reset to defaults",
-      "overrideResetToast": "Restored system defaults"
+      "overrideResetToast": "Restored system defaults",
+      "delete": "Delete agent",
+      "deleteConfirm": "Delete this agent? Its runs and skill bindings are removed; chat history stays readable.",
+      "deletedToast": "Agent deleted"
     },
     "skills": {
       "addFile": "+ Add file",

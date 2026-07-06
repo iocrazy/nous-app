@@ -15,9 +15,11 @@ interface AgentsTabProps {
   /** Called when the user forks an agent and we need to navigate to the
    *  new slug. AgentsPage wires this to react-router navigate. */
   onSlugChange?: (slug: string) => void;
+  /** Called after the selected agent is deleted — navigate back to the list. */
+  onAgentDeleted?: () => void;
 }
 
-export const AgentsTab: React.FC<AgentsTabProps> = ({ slug, onSlugChange }) => {
+export const AgentsTab: React.FC<AgentsTabProps> = ({ slug, onSlugChange, onAgentDeleted }) => {
   const { t } = useTranslation();
   const [hasAgents, setHasAgents] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +77,7 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({ slug, onSlugChange }) => {
         onAgentForked={(newSlug) => {
           if (onSlugChange) onSlugChange(newSlug);
         }}
+        onAgentDeleted={onAgentDeleted}
       />
     </div>
   );

@@ -140,6 +140,15 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
     void loadAgents();
   }, [loadAgents]);
 
+  // Editor-side mutations (delete today; anything tomorrow) announce
+  // themselves via this event — the sidebar owns its agents list and
+  // there is no shared store to invalidate.
+  useEffect(() => {
+    const onChanged = () => void loadAgents();
+    window.addEventListener('ai-library:agents-changed', onChanged);
+    return () => window.removeEventListener('ai-library:agents-changed', onChanged);
+  }, [loadAgents]);
+
   const handleAgentCreated = async (newSlug: string) => {
     setShowNewAgentModal(false);
     await loadAgents();

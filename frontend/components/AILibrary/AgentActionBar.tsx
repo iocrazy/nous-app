@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Copy, GitFork, MoreHorizontal, Pause, Play, Plus } from 'lucide-react';
+import { Copy, GitFork, MoreHorizontal, Pause, Play, Plus,
+  Trash2,
+} from 'lucide-react';
 import type { AILibraryAgent } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { createIssue } from '../../services/issuesService';
@@ -46,10 +48,12 @@ interface AgentActionBarProps {
   onAgentUpdated: (agent: AILibraryAgent) => void;
   /** Opens the fork modal (Duplicate in the overflow menu). */
   onDuplicate?: () => void;
+  /** Deletes this user-owned agent (hidden for system presets). */
+  onDelete?: () => void;
 }
 
 export const AgentActionBar: React.FC<AgentActionBarProps> = ({
-  agent, readOnly, onAgentUpdated, onDuplicate,
+  agent, readOnly, onAgentUpdated, onDuplicate, onDelete,
 }) => {
   const { t } = useTranslation();
   const { addToast } = useToast();
@@ -181,6 +185,19 @@ export const AgentActionBar: React.FC<AgentActionBarProps> = ({
               >
                 <GitFork size={12} />
                 {t('aiLibrary.agents.duplicate', 'Duplicate')}
+              </button>
+            )}
+            {onDelete && !agent.is_system_preset && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onDelete();
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-red-400 hover:bg-red-500/10"
+              >
+                <Trash2 size={12} />
+                {t('aiLibrary.agents.delete', 'Delete agent')}
               </button>
             )}
           </div>
