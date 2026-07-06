@@ -356,3 +356,147 @@ export async function generateShot(shotId: string): Promise<string> {
   const body = await handleResponse<{ success: boolean; task_id: string }>(res);
   return body.task_id;
 }
+
+// ---------------------------------------------------------------------------
+// Version history (Phase B P4 — commit tags + diff + rollback over script_ops)
+// ---------------------------------------------------------------------------
+
+/**
+ * The per-scene snapshot a commit stores in `scene_ids` — enough to render a
+ * scene add/remove in a diff without a live fetch. Ids are strings end-to-end
+ * (Snowflake bigint; never Number()-coerced).
+ */
+export interface SceneSnapshot {
+  id: string;
+  sort_order: number | null;
+  heading_int_ext: string | null;
+  location_text: string | null;
+}
+
+/**
+ * A version tag over the append-only op ledger: a per-scene op_seq watermark map
+ * plus the scene-set snapshot at commit time. Content is NOT copied — the ledger
+ * already holds it, so a diff replays it on demand.
+ */
+export interface ScriptCommit {
+  id: string;
+  script_id: string;
+  message: string;
+  watermarks: Record<string, number>;
+  scene_ids: SceneSnapshot[];
+  created_by: string;
+  created_at: string;
+}
+
+export type DiffKind = 'added' | 'removed' | 'changed' | 'moved';
+
+/** One element-level change within a scene diff (aligned by element id). */
+export interface DiffChange {
+  kind: DiffKind;
+  id: string;
+  before: ScriptElement | null;
+  after: ScriptElement | null;
+}
+
+/** The changes for one scene present on both sides of a diff. */
+export interface SceneDiff {
+  scene_id: string;
+  elements: DiffChange[];
+}
+
+/**
+ * The diff of one commit against another (or against the live 'current' state):
+ * per-scene element changes, plus scene-set adds/removes. Only scenes with
+ * changes appear in `scenes`.
+ */
+export interface CommitDiff {
+  scenes: SceneDiff[];
+  scenes_added: SceneSnapshot[];
+  scenes_removed: SceneSnapshot[];
+}
+
+export type RollbackSceneStatus = 'unchanged' | 'rolled_back' | 'failed';
+
+/** One scene's outcome in a rollback (a partial failure lists every scene). */
+export interface RollbackSceneResult {
+  scene_id: string;
+  status: RollbackSceneStatus;
+  error_code?: string;
+  error?: string;
+}
+
+/**
+ * A rollback result. `partial_failure` is true when at least one scene failed;
+ * the endpoint still answers 200 (not an HTTP error) so the caller can surface
+ * the per-scene detail and offer a retry. `not_deleted` are scenes created after
+ * the commit (reported, not deleted); `not_resurrected` are scenes that existed
+ * at commit time but are gone now (reported, not restored).
+ */
+export interface RollbackResult {
+  commit_id: string;
+  results: RollbackSceneResult[];
+  not_deleted: string[];
+  not_resurrected: string[];
+  partial_failure: boolean;
+}
+
+export async function listCommits(scriptId: string): Promise<ScriptCommit[]> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${apiBase()}/scripts/${scriptId}/commits`, { headers });
+  return unwrapResponse<ScriptCommit[]>(res);
+}
+
+export async function createCommit(
+  scriptId: string,
+  message: string,
+): Promise<ScriptCommit> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${apiBase()}/scripts/${scriptId}/commits`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message }),
+  });
+  return unwrapResponse<ScriptCommit>(res);
+}
+
+/**
+ * Diff `commitId` against `against` (another commit id, or 'current' for the
+ * live state). Returns the element-level scene changes plus scene-set adds.
+ */
+export async function diffCommit(
+  scriptId: string,
+  commitId: string,
+  against: string = 'current',
+): Promise<CommitDiff> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(
+    `${apiBase()}/scripts/${scriptId}/commits/${commitId}/diff?against=${encodeURIComponent(against)}`,
+    { headers },
+  );
+  return unwrapResponse<CommitDiff>(res);
+}
+
+/**
+ * Roll every scene back to its watermark in `commitId` (synchronous). A partial
+ * failure is NOT an HTTP error — inspect `partial_failure` / `results` on the
+ * returned object.
+ */
+export async function rollbackCommit(
+  scriptId: string,
+  commitId: string,
+): Promise<RollbackResult> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(
+    `${apiBase()}/scripts/${scriptId}/commits/${commitId}/rollback`,
+    {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+    },
+  );
+  return unwrapResponse<RollbackResult>(res);
+}
+
+export async function deleteCommit(commitId: string): Promise<void> {
+  const headers = await getAuthHeaders();
+  await fetch(`${apiBase()}/commits/${commitId}`, { method: 'DELETE', headers });
+}

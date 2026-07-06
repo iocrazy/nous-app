@@ -205,44 +205,17 @@ async def convert_to_scenes(
 async def convert_to_storyboard(
     auth: AuthDep, body: ConvertToStoryboardRequest
 ) -> Dict[str, Any]:
-    """Dispatch async chapter→storyboard conversion. Returns task_id.
+    """Retired (Phase B P4 cutover): 410 Gone.
 
-    The chapter + project style-guide reads now happen INSIDE the workflow
-    (``script_ai_scenes_step``); the endpoint only verifies access and
-    dispatches chapter_id + storyboard_project_id.
+    This was the bridge that converted a chapter into legacy-workbench storyboard
+    nodes (``script_to_storyboard_workflow`` → storyboard_nodes /
+    script_storyboard_links). The workbench is retired and its ``/storyboard/*``
+    routes are 410-tombstoned; storyboarding now lives in the script editor as
+    per-scene shots. The endpoint stays mounted (bookmarks / stale clients) but
+    answers 410 rather than writing to the deprecated tables. The unused
+    ``script_to_storyboard_workflow`` is left in place until the deferred
+    table-rename migration removes it together with the tables it targets.
     """
-    try:
-        await verify_script_access(body.script_id, auth)
-        mgr = get_task_manager()
-        wf_id = str(_uuid.uuid4())
-        task_id = await mgr.create(
-            user_id=auth.user_id,
-            task_type="script_to_storyboard",
-            title="Convert chapter to storyboard",
-            dbos_workflow_id=wf_id,
-        )
+    from app.api.sb_gone_router import LEGACY_STORYBOARD_GONE_DETAIL
 
-        from app.services.infra.dbos_orchestrator import start_workflow_routed
-        from app.workflows.script_ai_workflows import script_to_storyboard_workflow
-
-        await start_workflow_routed(
-            "script_to_storyboard",
-            dbos_workflow_callable=script_to_storyboard_workflow,
-            dbos_workflow_kwargs={
-                "script_id": body.script_id,
-                "chapter_id": body.chapter_id,
-                "storyboard_project_id": body.storyboard_project_id,
-                "user_id": auth.user_id,
-            },
-            workflow_id=wf_id,
-        )
-
-        return {"success": True, "task_id": task_id}
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error(f"[ScriptAI] convert_to_storyboard failed: {exc}")
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to convert chapter to storyboard",
-        )
+    raise HTTPException(status_code=410, detail=LEGACY_STORYBOARD_GONE_DETAIL)
