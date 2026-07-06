@@ -1983,7 +1983,11 @@
         "lastFire": "上次",
         "lastIssue": "最近 Issue",
         "cronUtcHint": "Cron 时间按 UTC 解释 — 你的时区是 UTC{{offset}}。"
-      }
+      },
+      "overrideActive": "已自定义（{{scope}} 层）— 修改仅对你生效，系统默认参数不受影响。",
+      "presetOverrideHint": "系统智能体 — 修改将保存为你的个人自定义（仅自己可见），可随时恢复默认。",
+      "resetToDefaults": "恢复默认",
+      "overrideResetToast": "已恢复系统默认"
     },
     "skills": {
       "addFile": "+ 添加文件",
@@ -2074,7 +2078,9 @@
       "readTeamFilesDesc": "允许 Agent 在被召唤时读取所在群组团队的素材。",
       "autoBroadcast": "主动播报",
       "autoBroadcastDesc": "允许 Agent 向所在群组发送自动更新（如任务完成）。"
-    }
+    },
+    "myAgentsSection": "我的智能体",
+    "customized": "已自定义"
   },
   "aiUsage": {
     "title": "AI 使用统计",
