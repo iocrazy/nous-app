@@ -155,3 +155,30 @@ describe('listScenes — bigint id string safety', () => {
     expect(scenes[0].id).toBe('324520385049690');
   });
 });
+
+it('normalizes backend content_json rows into SceneDoc.elements', async () => {
+  const row = {
+    id: '324564631057459',
+    script_id: '324564621063214',
+    chapter_id: null,
+    heading_int_ext: 'INT',
+    location_text: 'Blank Studio',
+    time_of_day: 'NIGHT',
+    content_version: 1,
+    content_json: [{ id: 'el_a', type: 'action', text: 'Rain.' }],
+    sort_order: 1000,
+  };
+  stubJson({ success: true, data: [row] });
+  const scenes = await listScenes('324564621063214');
+  expect(scenes[0].elements).toEqual([{ id: 'el_a', type: 'action', text: 'Rain.' }]);
+  expect('content_json' in scenes[0]).toBe(false);
+});
+
+it('defaults elements to [] when a row has null content_json', async () => {
+  stubJson({
+    success: true,
+    data: [{ id: '1', script_id: '2', content_version: 0, content_json: null, sort_order: 0 }],
+  });
+  const scenes = await listScenes('2');
+  expect(scenes[0].elements).toEqual([]);
+});

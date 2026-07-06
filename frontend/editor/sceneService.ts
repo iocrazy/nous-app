@@ -39,16 +39,34 @@ export class OpRejectedError extends Error {
   }
 }
 
+/**
+ * Backend scene ROWS carry the element list as `content_json` (only the
+ * elements/ops endpoint responds with `elements`). Normalize every row into
+ * the SceneDoc shape here so no component ever sees the raw column name —
+ * caught live on the first real-device pass (mocked fixtures used SceneDoc
+ * directly and could never surface the mismatch).
+ */
+type SceneRow = Omit<SceneDoc, 'elements'> & {
+  elements?: ScriptElement[] | null;
+  content_json?: ScriptElement[] | null;
+};
+
+function toSceneDoc(row: SceneRow): SceneDoc {
+  const { content_json, elements, ...rest } = row;
+  return { ...rest, elements: elements ?? content_json ?? [] };
+}
+
 export async function listScenes(scriptId: string): Promise<SceneDoc[]> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${apiBase()}/scripts/${scriptId}/scenes`, { headers });
-  return unwrapResponse<SceneDoc[]>(res);
+  const rows = await unwrapResponse<SceneRow[]>(res);
+  return rows.map(toSceneDoc);
 }
 
 export async function getScene(sceneId: string): Promise<SceneDoc> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${apiBase()}/scenes/${sceneId}`, { headers });
-  return unwrapResponse<SceneDoc>(res);
+  return toSceneDoc(await unwrapResponse<SceneRow>(res));
 }
 
 export async function createScene(
@@ -61,7 +79,7 @@ export async function createScene(
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
-  return unwrapResponse<SceneDoc>(res);
+  return toSceneDoc(await unwrapResponse<SceneRow>(res));
 }
 
 export async function updateSceneMeta(
@@ -74,7 +92,7 @@ export async function updateSceneMeta(
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
-  return unwrapResponse<SceneDoc>(res);
+  return toSceneDoc(await unwrapResponse<SceneRow>(res));
 }
 
 export async function deleteScene(sceneId: string): Promise<void> {
