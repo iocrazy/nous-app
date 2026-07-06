@@ -86,9 +86,26 @@ async def lifespan(app: FastAPI):
     await start_lifecycle_bus()
     await probe_event_loop_ready()
 
+    # Loop-freeze detection (2026-07-06 P0): bump the healthz-lite
+    # heartbeat from THIS loop every 10s. Once the loop has beaten at
+    # least once, a heartbeat older than HEALTHZ_LOOP_STALE_S flips
+    # /healthz/lite to 503 → autoheal restarts the container. Started
+    # LAST in the startup sequence so a hung startup hook never counts
+    # as "proven alive" (preserves the 2026-05-27 no-restart-storm
+    # guarantee — see healthz_lite module docstring).
+    async def _loop_heartbeat() -> None:
+        while True:
+            _healthz_lite.beat()
+            await asyncio.sleep(10)
+
+    app.state.loop_heartbeat_task = asyncio.create_task(
+        _loop_heartbeat(), name="healthz-loop-heartbeat"
+    )
+
     yield logger.success(f"{settings.APP_NAME}启动成功")
 
     # ── Shutdown ─────────────────────────────────────────────────
+    app.state.loop_heartbeat_task.cancel()
     await shutdown_all(app)
     try:
         # HTTPServer.shutdown() blocks up to ~500ms waiting on serve_forever's
