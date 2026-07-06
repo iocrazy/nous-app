@@ -64,6 +64,11 @@ class ComposerInput:
     # Phase A: agent-memory recall results (MemoryContext-scoped). Rendered
     # post-boundary as <agent_memory> when non-empty; omitted when [].
     agent_memory_facts: list[str] = field(default_factory=list)
+    # Agent-overrides (mig 341): when set, the composed prompt/model reflect
+    # the caller's per-user / per-team customization of system presets.
+    # Background pipelines leave these None → pristine system agent.
+    override_user_id: Optional[Any] = None
+    override_team_id: Optional[int] = None
 
 
 class PromptComposer:
@@ -83,7 +88,16 @@ class PromptComposer:
         Raises :class:`AgentNotFoundError` if the slug is unknown.
         """
         assert self.agent_repo is not None and self.skill_repo is not None
-        agent = await self.agent_repo.get_by_slug(inp.agent_slug)
+        # Pass override kwargs only when a caller context exists — keeps
+        # duck-typed repo fakes (tests) and any legacy repo signature working.
+        if inp.override_user_id is not None or inp.override_team_id is not None:
+            agent = await self.agent_repo.get_by_slug(
+                inp.agent_slug,
+                override_user_id=inp.override_user_id,
+                override_team_id=inp.override_team_id,
+            )
+        else:
+            agent = await self.agent_repo.get_by_slug(inp.agent_slug)
         if not agent:
             raise AgentNotFoundError(f"agent slug not found: {inp.agent_slug}")
 

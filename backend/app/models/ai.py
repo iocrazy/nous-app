@@ -382,6 +382,60 @@ class MediahubModels(Base):
     last_tested_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True))
 
 
+class AgentOverrides(Base):
+    """Per-user / per-team customization layer over SYSTEM PRESET agents.
+
+    Effective agent = user override ?? team override ?? system row (whole-field
+    semantics: NULL column = inherit). Reset-to-defaults = delete the row.
+    The ai_agents row (and therefore every agent_id FK) never changes.
+    See migration 341.
+    """
+
+    __tablename__ = "agent_overrides"
+    __table_args__ = (
+        CheckConstraint(
+            "((user_id IS NOT NULL)::int + (team_id IS NOT NULL)::int) = 1",
+            name="agent_overrides_one_scope",
+        ),
+        PrimaryKeyConstraint("id", name="agent_overrides_pkey"),
+        Index(
+            "ux_agent_overrides_user",
+            "agent_id",
+            "user_id",
+            postgresql_where="(user_id IS NOT NULL)",
+            unique=True,
+        ),
+        Index(
+            "ux_agent_overrides_team",
+            "agent_id",
+            "team_id",
+            postgresql_where="(team_id IS NOT NULL)",
+            unique=True,
+        ),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")
+    )
+    agent_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid)
+    team_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    identity_md: Mapped[Optional[str]] = mapped_column(Text)
+    soul_md: Mapped[Optional[str]] = mapped_column(Text)
+    agent_md: Mapped[Optional[str]] = mapped_column(Text)
+    model: Mapped[Optional[str]] = mapped_column(Text)
+    temperature: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric)
+    max_tokens: Mapped[Optional[int]] = mapped_column(Integer)
+    fallback_models: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text()))
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+
+
 class AgentMemory(Base):
     __tablename__ = "agent_memory"
     __table_args__ = (

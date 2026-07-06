@@ -414,7 +414,13 @@ class AILibraryChatService:
         # fallback chain wrapping adapter, memory recall pre-fetched).
         agent_repo = get_agent_repository()
         skill_repo = get_skill_repository()
-        agent_record = await agent_repo.get_by_slug(agent_slug)
+        # Agent-overrides (mig 341): 1:1 chat resolves the CALLER's
+        # customization — user layer over the session's team layer.
+        agent_record = await agent_repo.get_by_slug(
+            agent_slug,
+            override_user_id=user_id,
+            override_team_id=session.get("team_id"),
+        )
         if not agent_record:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -535,6 +541,8 @@ class AILibraryChatService:
                     graph_facts=stack.graph_facts,
                     user_context=stack.user_context,
                     agent_memory_facts=stack.agent_memory_facts,
+                    override_user_id=user_id,
+                    override_team_id=session.get("team_id"),
                 )
             )
 

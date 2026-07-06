@@ -38,6 +38,7 @@ from app.models.agents import (  # noqa: F401
 )
 from app.models.ai import (  # noqa: F401
     AgentMemory,
+    AgentOverrides,
     AiAgents,
     AiAgentVersions,
     AiModelPrices,
@@ -181,6 +182,7 @@ __all__ = [
     "AgentWorkers",
     # ai
     "AgentMemory",
+    "AgentOverrides",
     "AiAgentVersions",
     "AiAgents",
     "AiModelPrices",
