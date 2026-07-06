@@ -10,6 +10,7 @@ import {
   convertToScenes,
   listScenes,
   newElementId,
+  updateChapterPosition,
   OpRejectedError,
   VersionConflictError,
 } from '../sceneService';
@@ -118,6 +119,25 @@ describe('convertToScenes — flat dispatch envelope', () => {
     expect(spy.mock.calls[0][0]).toBe(
       'https://api.test/api/v1/scripts/s1/chapters/c1/convert-to-scenes',
     );
+  });
+});
+
+describe('updateChapterPosition — canvas position write', () => {
+  it('PUTs the two coordinates to the chapter canvas endpoint', async () => {
+    const spy = stubJson({ success: true, data: { id: '100' } });
+    await updateChapterPosition('100', { position_x: 12, position_y: -3 });
+    const url = spy.mock.calls[0][0] as string;
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(url).toBe('https://api.test/api/v1/scripts/projects/chapters/100');
+    expect(init.method).toBe('PUT');
+    expect(JSON.parse(init.body as string)).toEqual({ position_x: 12, position_y: -3 });
+  });
+
+  it('rejects on a non-2xx response instead of swallowing it', async () => {
+    stubJson({ success: false }, 500);
+    await expect(
+      updateChapterPosition('100', { position_x: 0, position_y: 0 }),
+    ).rejects.toThrow();
   });
 });
 

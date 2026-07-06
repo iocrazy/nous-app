@@ -116,11 +116,14 @@ export async function updateChapterPosition(
   pos: { position_x: number; position_y: number },
 ): Promise<void> {
   const headers = await getAuthHeaders();
-  await fetch(`${apiBase()}/scripts/projects/chapters/${chapterId}`, {
+  const res = await fetch(`${apiBase()}/scripts/projects/chapters/${chapterId}`, {
     method: 'PUT',
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify(pos),
   });
+  // Surface a non-2xx (403/422/500) as a rejection so the caller's
+  // `.catch(console.error)` fires instead of silently swallowing it.
+  await unwrapResponse(res);
 }
 
 export async function applyOps(

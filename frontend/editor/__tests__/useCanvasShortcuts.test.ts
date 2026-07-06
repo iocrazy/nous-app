@@ -100,4 +100,14 @@ describe('useCanvasShortcuts', () => {
     expect(h.onZoomOut).toHaveBeenCalledTimes(1);
     expect(h.onFitView).toHaveBeenCalledTimes(1);
   });
+
+  it('leaves Ctrl/Cmd + =/- to the browser zoom (no canvas zoom)', () => {
+    const h = makeHandlers();
+    renderHook(() => useCanvasShortcuts({ current: container }, h));
+
+    keydown(container, { key: '=', ctrlKey: true });
+    keydown(container, { key: '-', metaKey: true });
+    expect(h.onZoomIn).not.toHaveBeenCalled();
+    expect(h.onZoomOut).not.toHaveBeenCalled();
+  });
 });

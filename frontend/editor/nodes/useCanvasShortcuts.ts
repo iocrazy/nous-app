@@ -55,11 +55,12 @@ export function handleCanvasKey(e: KeyboardEvent, h: CanvasShortcutHandlers): vo
       break;
     case '+':
     case '=': // unshifted `+` on most layouts
-      h.onZoomIn();
+      // Bare +/= only — Ctrl/Cmd+= is the browser's own zoom, leave it alone.
+      if (!mod) h.onZoomIn();
       break;
     case '-':
     case '_':
-      h.onZoomOut();
+      if (!mod) h.onZoomOut();
       break;
     case 'f':
     case 'F':
