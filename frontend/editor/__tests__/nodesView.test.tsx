@@ -232,6 +232,38 @@ describe('NodesView', () => {
         expect(svc.updateSceneMeta).toHaveBeenCalledTimes(1);
         expect(svc.updateSceneMeta).toHaveBeenCalledWith('200', { position_x: 5, position_y: 6 });
       });
+
+      it('persists the whole selection when one selected node is dragged solo', () => {
+        // React Flow routes a solo drag of a node that sits inside an active
+        // multi-selection through onNodeDragStop (not onSelectionDragStop); the
+        // view must still flush every selected scene, not just the grabbed one.
+        svc.updateSceneMeta.mockResolvedValue(scene({}));
+        render(
+          <NodesView
+            scenes={[scene({ id: '200' }), scene({ id: '201' })]}
+            chapters={[]}
+            onOpenScene={vi.fn()}
+            scriptId="1"
+            onReload={vi.fn()}
+          />,
+        );
+        const sceneIds = (capturedProps.nodes as Array<Record<string, unknown>>)
+          .filter((n) => n.type === 'sceneNode')
+          .map((n) => n.id as string);
+        // Select both scene nodes through the real change pipeline.
+        act(() => {
+          (capturedProps.onNodesChange as (c: unknown[]) => void)(
+            sceneIds.map((id) => ({ id, type: 'select', selected: true })),
+          );
+        });
+
+        // Grab one selected node and drop it individually.
+        (capturedProps.onNodeDragStop as (e: unknown, n: unknown) => void)({}, findNode('sceneNode'));
+        vi.advanceTimersByTime(500);
+
+        expect(svc.updateSceneMeta).toHaveBeenCalledTimes(2);
+        expect(svc.updateSceneMeta.mock.calls.map((c) => c[0]).sort()).toEqual(['200', '201']);
+      });
     });
   });
 
