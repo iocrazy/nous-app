@@ -14,6 +14,7 @@ import {
   Loader2,
   Layers,
 } from 'lucide-react';
+import { formatCappedCount } from '../utils/cappedCount';
 import { useTranslation } from 'react-i18next';
 import { useResourcesContext } from '../contexts/ResourcesContext';
 import type { SmartCollection } from '../types';
@@ -256,7 +257,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
               <Download size={15} className="shrink-0 opacity-70" />
               <span className="flex-1 truncate">{t('resources.downloads')}</span>
               {downloadsCount !== null && downloadsCount > 0 && (
-                <span className={`text-[11px] ${cText500} tabular-nums`}>{downloadsCount}</span>
+                <span className={`text-[11px] ${cText500} tabular-nums`}>{formatCappedCount(downloadsCount)}</span>
               )}
             </button>
 
@@ -271,7 +272,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
                 <FolderOpen size={15} className="shrink-0 opacity-70" />
                 <span className="flex-1 truncate">{t('resources.myResources')}</span>
                 {myResourcesCount !== null && myResourcesCount > 0 && (
-                  <span className={`text-[11px] ${cText500} tabular-nums`}>{myResourcesCount}</span>
+                  <span className={`text-[11px] ${cText500} tabular-nums`}>{formatCappedCount(myResourcesCount)}</span>
                 )}
               </button>
               <button
