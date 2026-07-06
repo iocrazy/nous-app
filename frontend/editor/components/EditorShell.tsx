@@ -286,22 +286,26 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
       let attempts = 0;
       const timer = setInterval(async () => {
         attempts += 1;
+        let done = false;
         try {
           const rows = await listScenes(scriptId);
           const sorted = [...rows].sort((a, b) => a.sort_order - b.sort_order);
           setScenes(sorted);
-          const done = sorted.some((s) => s.chapter_id === chapterId);
-          if (done || attempts >= CONVERT_POLL_MAX) {
-            clearInterval(timer);
-            convertTimersRef.current.delete(timer);
-            setConverting((prev) => ({ ...prev, [chapterId]: false }));
-            if (done) {
-              await loadChapters();
-              addToast(t('editor.convertDone'), 'success');
-            }
-          }
+          done = sorted.some((s) => s.chapter_id === chapterId);
         } catch (err) {
+          // Errors still count toward the give-up cap: a persistent fetch
+          // failure must not leak the interval or pin the button on
+          // "Converting…" forever.
           console.error('[EditorShell] convert poll failed', err);
+        }
+        if (done || attempts >= CONVERT_POLL_MAX) {
+          clearInterval(timer);
+          convertTimersRef.current.delete(timer);
+          setConverting((prev) => ({ ...prev, [chapterId]: false }));
+          if (done) {
+            await loadChapters();
+            addToast(t('editor.convertDone'), 'success');
+          }
         }
       }, CONVERT_POLL_MS);
       convertTimersRef.current.add(timer);

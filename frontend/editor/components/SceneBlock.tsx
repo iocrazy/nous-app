@@ -158,6 +158,18 @@ export function SceneBlock({
   const [copilotAnchor, setCopilotAnchor] = useState<string | null>(null);
   const [copilotEdits, setCopilotEdits] = useState<number | null>(null);
   const [copilotInverse, setCopilotInverse] = useState<ElementOp[] | null>(null);
+  // Copilot-OWNED lifecycle: 'applying' only between our own dispatch and the
+  // FIRST terminal saveState after it. Deriving the phase from the shared
+  // scene saveState alone misreports unrelated saves (a normal edit after a
+  // polish would flip the card back to "Polishing…") — review finding F4-2.
+  const [copilotStatus, setCopilotStatus] = useState<'applying' | 'done' | 'failed' | null>(null);
+  useEffect(() => {
+    if (copilotStatus !== 'applying') return;
+    if (sync.saveState === 'saved') setCopilotStatus('done');
+    else if (sync.saveState === 'retrying' || sync.saveState === 'conflict') {
+      setCopilotStatus('failed');
+    }
+  }, [copilotStatus, sync.saveState]);
   const [meta, setMeta] = useState<SceneMeta>({
     heading_int_ext: scene.heading_int_ext ?? '',
     location_text: scene.location_text ?? '',
@@ -522,6 +534,7 @@ export function SceneBlock({
     setCopilotAnchor(null);
     setCopilotEdits(null);
     setCopilotInverse(null);
+    setCopilotStatus(null);
   }, []);
 
   const handleTickClick = useCallback(
@@ -552,12 +565,14 @@ export function SceneBlock({
     if (ops.length === 0) {
       setCopilotEdits(0);
       setCopilotInverse(null);
+      setCopilotStatus('done');
       return;
     }
     const inverse = buildInverse(ops, els);
     sync.dispatchOps(ops, applyLocal(els, ops));
     setCopilotEdits(ops.length);
     setCopilotInverse(inverse);
+    setCopilotStatus('applying');
   }, [copilotSelection, sync]);
 
   const handleCopilotUndo = useCallback(() => {
@@ -566,6 +581,7 @@ export function SceneBlock({
     sync.dispatchOps(inverse, applyLocal(elementsRef.current, inverse));
     setCopilotEdits(null);
     setCopilotInverse(null);
+    setCopilotStatus(null);
   }, [copilotInverse, sync]);
 
   // Tell the shell which scene owns the card; if another scene takes over, drop
@@ -587,9 +603,9 @@ export function SceneBlock({
   const copilotSelectedIds = useMemo(() => new Set(copilotSelection), [copilotSelection]);
 
   const copilotPhase: CopilotPhase = (() => {
-    if (copilotEdits === null) return 'attached';
-    if (sync.saveState === 'saving') return 'applying';
-    if (sync.saveState === 'retrying' || sync.saveState === 'conflict') return 'failed';
+    if (copilotEdits === null || copilotStatus === null) return 'attached';
+    if (copilotStatus === 'applying') return 'applying';
+    if (copilotStatus === 'failed') return 'failed';
     return 'done';
   })();
 
