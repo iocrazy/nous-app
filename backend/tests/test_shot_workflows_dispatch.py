@@ -79,9 +79,8 @@ async def test_auto_storyboard_threads_shared_wf_id(monkeypatch, mock_task_manag
     assert wf_id is not None
     uuid.UUID(wf_id)
     assert wf_id == dispatched_id
-    assert mock_task_manager.create.call_args.kwargs["task_type"] == (
-        "script_shot_breakdown"
-    )
+    assert mock_task_manager.create.call_args.kwargs["task_type"] == "shot_breakdown"
+    assert len("shot_breakdown") <= 20  # task_tracking.task_type VARCHAR(20)
     assert dispatch.call_args.args[0] == "script_shot_breakdown"
     assert dispatch.call_args.kwargs["dbos_workflow_kwargs"] == {
         "scene_id": _SCENE,
@@ -123,9 +122,8 @@ async def test_generate_shot_sets_generating_and_threads_wf_id(
     repo.update_status.assert_awaited_once_with(_SHOT, "generating")
     wf_id = mock_task_manager.create.call_args.kwargs.get("dbos_workflow_id")
     assert wf_id == dispatch.call_args.kwargs.get("workflow_id")
-    assert mock_task_manager.create.call_args.kwargs["task_type"] == (
-        "script_shot_generate"
-    )
+    assert mock_task_manager.create.call_args.kwargs["task_type"] == "shot_generate"
+    assert len("shot_generate") <= 20  # task_tracking.task_type VARCHAR(20)
     assert dispatch.call_args.args[0] == "script_shot_generate"
     assert dispatch.call_args.kwargs["dbos_workflow_kwargs"] == {
         "shot_id": _SHOT,
