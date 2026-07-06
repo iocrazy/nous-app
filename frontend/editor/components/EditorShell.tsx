@@ -25,6 +25,7 @@ import {
   moveScene,
   newElementId,
   type Episode,
+  type ScriptCommit,
 } from '../sceneService';
 import { fetchScriptProject } from '../../services/scriptService';
 import { useToast } from '../../components/Toast';
@@ -52,6 +53,7 @@ import { SceneRail } from './SceneRail';
 import { RailModules, type RailView } from './RailModules';
 import { NodesView } from '../nodes/NodesView';
 import { StoryboardView } from '../storyboard/StoryboardView';
+import { VersionDiff } from '../versions/VersionDiff';
 import { OutlineView } from './OutlineView';
 import { EpisodePanel } from './EpisodePanel';
 import { RailEntities } from './RailEntities';
@@ -91,6 +93,11 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
   // Central-column view: the script sheet or the scene-node projection. The top
   // Script/Outline/Cover tabs are a separate axis and stay put (spec §3.1).
   const [railView, setRailView] = useState<RailView>('script');
+  // Version diff (Phase B P4): when set, the centre pane swaps to the diff view
+  // (comparing this commit against the live 'current' state), taking precedence
+  // over the rail views. A shell-level state — the simplest surface consistent
+  // with how railView already gates the centre pane.
+  const [diffCommit, setDiffCommit] = useState<ScriptCommit | null>(null);
   const [pendingOpenSceneId, setPendingOpenSceneId] = useState<string | null>(null);
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [panelCollapsed, setPanelCollapsed] = useState(false);
@@ -174,6 +181,33 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
   const reloadAll = useCallback(async () => {
     await Promise.all([reload(), loadChapters()]);
   }, [reload, loadChapters]);
+
+  // ── Version history (Phase B P4) ───────────────────────────────────────────
+  // Compare opens the centre-pane diff for a commit; selecting any rail view or
+  // doc tab closes it (the diff is a modal-ish takeover of the centre pane).
+  const handleCompareCommit = useCallback((commit: ScriptCommit) => {
+    setDiffCommit(commit);
+  }, []);
+
+  // A rollback wrote new ops server-side — drop the stale optimistic overlay and
+  // re-fetch the scenes so the sheet reflects the rolled-back content.
+  const handleRolledBack = useCallback(() => {
+    setLiveElements({});
+    void reload();
+  }, [reload]);
+
+  const selectRailView = useCallback((view: RailView) => {
+    setDiffCommit(null);
+    setRailView(view);
+  }, []);
+
+  const selectMode = useCallback(
+    (m: EditorMode) => {
+      setDiffCommit(null);
+      setMode(m);
+    },
+    [setMode],
+  );
 
   // Shared "dispatch a slow chapter workflow, then poll for its output" driver —
   // used by the legacy Convert card here and by the node view's chapter actions.
@@ -636,7 +670,7 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
                 )}
               </div>
             </div>
-            <RailModules activeView={railView} onSelect={setRailView} />
+            <RailModules activeView={railView} onSelect={selectRailView} />
             <div className="mh-rail-scroll">
               <RailEntities
                 characters={railCharacters}
@@ -672,7 +706,7 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
                 role="tab"
                 className="mh-doc-tab"
                 aria-selected={state.mode === m}
-                onClick={() => setMode(m)}
+                onClick={() => selectMode(m)}
               >
                 {tabLabel[m]}
               </button>
@@ -692,7 +726,14 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
         </div>
 
         <div className="mh-page-frame">
-          {railView === 'nodes' ? (
+          {diffCommit ? (
+            <VersionDiff
+              scriptId={scriptId}
+              commit={diffCommit}
+              scenes={scenes}
+              onBack={() => setDiffCommit(null)}
+            />
+          ) : railView === 'nodes' ? (
             <NodesView
               scenes={scenes}
               chapters={chapters}
@@ -847,6 +888,9 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
               scenes={statsScenes}
               format={state.format}
               onFormatChange={handleFormatChange}
+              scriptId={scriptId}
+              onCompareCommit={handleCompareCommit}
+              onRolledBack={handleRolledBack}
             />
           </>
         )}
