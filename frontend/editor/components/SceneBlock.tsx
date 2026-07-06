@@ -36,7 +36,12 @@ import {
 } from '../editorMachine';
 import { applyLocal, buildInverse } from '../opBuilder';
 import { newElementId, updateSceneMeta } from '../sceneService';
-import { buildPolishOps } from '../copilotService';
+import {
+  buildPolishOps,
+  requestCopilotOps,
+  CopilotDisabledError,
+  OpRejectedError,
+} from '../copilotService';
 import type { ElementOp, ElementType, ScriptElement, SceneDoc } from '../types';
 import { useSceneSync } from '../useSceneSync';
 import { HollywoodLayout } from '../render/HollywoodLayout';
@@ -196,6 +201,20 @@ export function SceneBlock({
       setCopilotStatus('failed');
     }
   }, [copilotStatus, sync.saveState]);
+  // Free-text reconciler (Task 8): the instruction box, the in-flight LLM
+  // round-trip ('thinking' precedes any dispatch, so it is tracked separately
+  // from the dispatch-driven copilotStatus), a pending proposal awaiting review,
+  // the done-state summary, a 422 detail, and the 404 (flag-off) memory that
+  // disables the box for the rest of this session.
+  const [copilotInstruction, setCopilotInstruction] = useState('');
+  const [copilotRequest, setCopilotRequest] = useState<'idle' | 'thinking'>('idle');
+  const [copilotProposal, setCopilotProposal] = useState<{
+    ops: ElementOp[];
+    summary: string;
+  } | null>(null);
+  const [copilotSummary, setCopilotSummary] = useState<string | null>(null);
+  const [copilotFailedDetail, setCopilotFailedDetail] = useState<string | null>(null);
+  const [copilotDisabled, setCopilotDisabled] = useState(false);
   const [meta, setMeta] = useState<SceneMeta>({
     heading_int_ext: scene.heading_int_ext ?? '',
     location_text: scene.location_text ?? '',
@@ -649,6 +668,13 @@ export function SceneBlock({
     setCopilotEdits(null);
     setCopilotInverse(null);
     setCopilotStatus(null);
+    setCopilotInstruction('');
+    setCopilotRequest('idle');
+    setCopilotProposal(null);
+    setCopilotSummary(null);
+    setCopilotFailedDetail(null);
+    // copilotDisabled is intentionally NOT reset: the 404 flag-off memory
+    // persists for the session so we don't re-probe a known-off endpoint.
   }, []);
 
   const handleTickClick = useCallback(
@@ -656,6 +682,10 @@ export function SceneBlock({
       // Any selection change starts a fresh turn (drop last turn's undo/edits).
       setCopilotEdits(null);
       setCopilotInverse(null);
+      setCopilotSummary(null);
+      setCopilotProposal(null);
+      setCopilotFailedDetail(null);
+      setCopilotStatus(null);
       const els = elementsRef.current;
       if (shiftKey && copilotAnchor) {
         const a = els.findIndex((e) => e.id === copilotAnchor);
@@ -696,7 +726,83 @@ export function SceneBlock({
     setCopilotEdits(null);
     setCopilotInverse(null);
     setCopilotStatus(null);
+    setCopilotSummary(null);
   }, [copilotInverse, sync]);
+
+  // Apply reconciled ops the same way Polish does: store the inverse for Undo,
+  // dispatch through the scene's op queue, and hand the phase to the shared
+  // saveState-driven copilotStatus so it settles applying → done.
+  const applyCopilotOps = useCallback(
+    (ops: ElementOp[], summary: string) => {
+      const els = elementsRef.current;
+      const inverse = buildInverse(ops, els);
+      // If-Match uses sync's CURRENT version; the ops were generated against
+      // base_version. If a local edit advanced the version since the request
+      // started, dispatch will 409 and flow through the existing conflict path
+      // (acceptable — zero new concurrency surface, spec §2.2).
+      sync.dispatchOps(ops, applyLocal(els, ops));
+      setCopilotEdits(ops.length);
+      setCopilotInverse(inverse);
+      setCopilotSummary(summary);
+      setCopilotProposal(null);
+      setCopilotInstruction('');
+      setCopilotRequest('idle');
+      setCopilotStatus('applying');
+    },
+    [sync],
+  );
+
+  const handleCopilotSubmit = useCallback(() => {
+    const instruction = copilotInstruction.trim();
+    if (!instruction || copilotDisabled) return;
+    // Fresh turn: drop any prior result/undo/proposal/error.
+    setCopilotEdits(null);
+    setCopilotInverse(null);
+    setCopilotSummary(null);
+    setCopilotProposal(null);
+    setCopilotFailedDetail(null);
+    setCopilotStatus(null);
+    setCopilotRequest('thinking');
+    const readVersion = sync.version;
+    requestCopilotOps(scene.id, instruction, readVersion)
+      .then((result) => {
+        if (result.proposal) {
+          // Stale read: do NOT auto-apply — park for review (Apply/Discard).
+          setCopilotProposal({ ops: result.ops, summary: result.summary });
+          setCopilotRequest('idle');
+          return;
+        }
+        applyCopilotOps(result.ops, result.summary);
+      })
+      .catch((err) => {
+        setCopilotRequest('idle');
+        if (err instanceof CopilotDisabledError) {
+          // Flag off (404): disable the box for the session — don't re-probe.
+          setCopilotDisabled(true);
+          return;
+        }
+        if (err instanceof OpRejectedError) {
+          // 422: elements untouched; surface the op code, keep the instruction.
+          setCopilotFailedDetail(String(err.code));
+          setCopilotStatus('failed');
+          return;
+        }
+        console.error('[SceneBlock] copilot request failed', err);
+        setCopilotFailedDetail(null);
+        setCopilotStatus('failed');
+      });
+  }, [copilotInstruction, copilotDisabled, scene.id, sync.version, applyCopilotOps]);
+
+  const handleCopilotApply = useCallback(() => {
+    const proposal = copilotProposal;
+    if (!proposal) return;
+    applyCopilotOps(proposal.ops, proposal.summary);
+  }, [copilotProposal, applyCopilotOps]);
+
+  const handleCopilotDiscard = useCallback(() => {
+    setCopilotProposal(null);
+    setCopilotRequest('idle');
+  }, []);
 
   // Tell the shell which scene owns the card; if another scene takes over, drop
   // our selection so only one card is ever summoned (spec: non-persistent).
@@ -717,9 +823,11 @@ export function SceneBlock({
   const copilotSelectedIds = useMemo(() => new Set(copilotSelection), [copilotSelection]);
 
   const copilotPhase: CopilotPhase = (() => {
+    if (copilotRequest === 'thinking') return 'applying';
+    if (copilotProposal) return 'proposal';
+    if (copilotStatus === 'failed') return 'failed';
     if (copilotEdits === null || copilotStatus === null) return 'attached';
     if (copilotStatus === 'applying') return 'applying';
-    if (copilotStatus === 'failed') return 'failed';
     return 'done';
   })();
 
@@ -860,6 +968,14 @@ export function SceneBlock({
           canUndo={!!copilotInverse && copilotInverse.length > 0}
           onPolish={handlePolish}
           onUndo={handleCopilotUndo}
+          instruction={copilotInstruction}
+          onInstructionChange={setCopilotInstruction}
+          onSubmit={handleCopilotSubmit}
+          freeTextDisabled={copilotDisabled}
+          summary={copilotSummary}
+          failedDetail={copilotFailedDetail}
+          onApply={handleCopilotApply}
+          onDiscard={handleCopilotDiscard}
         />
       )}
 

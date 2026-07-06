@@ -103,7 +103,7 @@ describe('copilotService', () => {
 // ─── CopilotCard presentational ──────────────────────────────────────────────
 
 describe('CopilotCard', () => {
-  it('renders Summarize + free-text as disabled Phase-2 placeholders', () => {
+  it('keeps Summarize a disabled placeholder but unlocks the free-text box', () => {
     render(
       <CopilotCard
         sceneNumber={1}
@@ -113,11 +113,17 @@ describe('CopilotCard', () => {
         canUndo={false}
         onPolish={vi.fn()}
         onUndo={vi.fn()}
+        instruction=""
+        onInstructionChange={vi.fn()}
+        onSubmit={vi.fn()}
       />,
     );
     expect(screen.getByText('editor.copilotSummarize')).toBeDisabled();
-    expect(screen.getByPlaceholderText('editor.copilotComingPhase2')).toBeDisabled();
-    // Polish is the only live action.
+    // Free-text is now live (Task 8): the box is enabled with the request
+    // placeholder; Send is disabled only until the writer types something.
+    expect(screen.getByPlaceholderText('editor.copilotRequestPlaceholder')).toBeEnabled();
+    expect(screen.getByText('editor.copilotSend')).toBeDisabled();
+    // Polish stays live.
     expect(screen.getByText('editor.copilotPolish')).toBeEnabled();
   });
 
