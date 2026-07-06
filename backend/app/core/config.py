@@ -126,6 +126,15 @@ class Settings(BaseSettings):
         "written sb:// rows readable. Flip only after verifying storage-api "
         "is deployed + healthy on the target stack (Phase 2 ops gate).",
     )
+    FEATURE_SHOT_GENERATE: bool = Field(
+        default=False,
+        description="Enable single-shot image generation (POST "
+        "/shots/{id}/generate): dispatches a DBOS workflow that runs the "
+        "storyboard image-provider chain and writes the produced URL onto the "
+        "shot row. Off (default) = the endpoint 404s (existence hidden) — this "
+        "is an independent switch for the image-generation cost surface. Flip "
+        "true once the generate chain is validated on the target stack.",
+    )
     STORAGE_SIGNED_URL_PUBLIC_BASE: str = Field(
         default="",
         description="OPTIONAL public base URL (scheme+host[+port]) for storage "

@@ -16,15 +16,18 @@ parameter-tag / description whitelist only (the repository's ``update`` lane),
 and the status machine flows through the generate workflow.
 """
 
+import uuid as _uuid
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 
+from app.core.config import settings
 from app.core.deps import AuthDep
 from app.core.scope_guards import verify_scene_access, verify_shot_access
 from app.repositories.script_shot_repository import get_script_shot_repository
 from app.schemas.script import ShotCreate, ShotMoveRequest, ShotUpdate
+from app.services.infra.unified_task_manager import get_task_manager
 
 router = APIRouter()
 
@@ -137,3 +140,98 @@ async def move_shot(
     except Exception as exc:
         logger.error(f"[Shots] move {shot_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to move shot")
+
+
+@router.post("/scenes/{scene_id}/auto-storyboard")
+async def auto_storyboard(
+    scene_id: str,
+    auth: AuthDep,
+    _guard: None = Depends(verify_scene_access),
+) -> Dict[str, Any]:
+    """Dispatch async AI breakdown of a scene into a storyboard shot list.
+
+    Returns the flat ``{"success", "task_id"}`` envelope immediately; the
+    breakdown workflow reads the scene elements, asks the model for 3-8 shots,
+    and persists them (status='empty') in one transaction."""
+    try:
+        mgr = get_task_manager()
+        wf_id = str(_uuid.uuid4())
+        task_id = await mgr.create(
+            user_id=auth.user_id,
+            task_type="script_shot_breakdown",
+            title="Auto storyboard scene",
+            dbos_workflow_id=wf_id,
+        )
+
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
+        from app.workflows.script_shot_breakdown import (
+            script_shot_breakdown_workflow,
+        )
+
+        await start_workflow_routed(
+            "script_shot_breakdown",
+            dbos_workflow_callable=script_shot_breakdown_workflow,
+            dbos_workflow_kwargs={
+                "scene_id": scene_id,
+                "user_id": auth.user_id,
+            },
+            workflow_id=wf_id,
+        )
+        return {"success": True, "task_id": task_id}
+    except Exception as exc:
+        logger.error(f"[Shots] auto-storyboard for scene {scene_id} failed: {exc}")
+        raise HTTPException(
+            status_code=500, detail="Failed to dispatch auto-storyboard"
+        )
+
+
+@router.post("/shots/{shot_id}/generate")
+async def generate_shot(
+    shot_id: str,
+    auth: AuthDep,
+    _guard: None = Depends(verify_shot_access),
+) -> Dict[str, Any]:
+    """Dispatch async single-shot image generation (flag-gated).
+
+    - flag ``FEATURE_SHOT_GENERATE`` off → 404 (endpoint existence hidden).
+    - sets ``status='generating'`` before dispatch; the workflow flips it to
+      'done' + image_url on success, or 'failed' on error.
+
+    LOW (known, accepted): ``verify_shot_access`` is a Depends and runs BEFORE
+    this body, so a caller WITHOUT shot access gets the guard's 403/404 whether
+    or not the flag is on — that leaks nothing about the flag (403/404 is
+    access-scoped, not existence-scoped) and the 404-hides-existence guarantee
+    still holds for callers WITH access."""
+    if not settings.FEATURE_SHOT_GENERATE:
+        raise HTTPException(status_code=404, detail="Not Found")
+    try:
+        repo = get_script_shot_repository()
+        await repo.update_status(shot_id, "generating")
+
+        mgr = get_task_manager()
+        wf_id = str(_uuid.uuid4())
+        task_id = await mgr.create(
+            user_id=auth.user_id,
+            task_type="script_shot_generate",
+            title="Generate shot image",
+            dbos_workflow_id=wf_id,
+        )
+
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
+        from app.workflows.script_shot_generate import script_shot_generate_workflow
+
+        await start_workflow_routed(
+            "script_shot_generate",
+            dbos_workflow_callable=script_shot_generate_workflow,
+            dbos_workflow_kwargs={
+                "shot_id": shot_id,
+                "user_id": auth.user_id,
+            },
+            workflow_id=wf_id,
+        )
+        return {"success": True, "task_id": task_id}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"[Shots] generate {shot_id} failed: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to dispatch shot generate")
