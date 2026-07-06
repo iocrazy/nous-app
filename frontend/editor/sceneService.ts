@@ -105,6 +105,24 @@ export async function deleteScene(sceneId: string): Promise<void> {
   await fetch(`${apiBase()}/scenes/${sceneId}`, { method: 'DELETE', headers });
 }
 
+/**
+ * Persist a chapter node's canvas position (Phase B Task 3). PUTs the two
+ * coordinates to the script-canvas chapter endpoint; the server passes them
+ * straight through (ScriptChapterUpdate.position_x/y). Chapter ids are strings
+ * end-to-end (Snowflake bigint) — never Number()-coerced.
+ */
+export async function updateChapterPosition(
+  chapterId: string,
+  pos: { position_x: number; position_y: number },
+): Promise<void> {
+  const headers = await getAuthHeaders();
+  await fetch(`${apiBase()}/scripts/projects/chapters/${chapterId}`, {
+    method: 'PUT',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(pos),
+  });
+}
+
 export async function applyOps(
   sceneId: string,
   ops: ElementOp[],

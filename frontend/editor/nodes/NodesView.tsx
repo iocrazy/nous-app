@@ -37,7 +37,7 @@ import { GuideOverlay } from './GuideOverlay';
 import { computeAlignmentGuides, type AlignmentGuides, type Rect } from './alignmentGuides';
 import { useCanvasShortcuts } from './useCanvasShortcuts';
 import { useConvertPoll } from '../useConvertPoll';
-import { updateSceneMeta } from '../sceneService';
+import { updateSceneMeta, updateChapterPosition } from '../sceneService';
 import type { SceneDoc } from '../types';
 import type { ScriptChapter } from '../../types';
 
@@ -128,23 +128,30 @@ export function NodesView({ scenes, chapters, onOpenScene, scriptId, onReload }:
     };
   }, []);
 
-  // Debounce-persist every scene node in `changed`. Chapter nodes are
-  // projection-only in Task 1 and skipped (Task 3 wires their persistence).
+  // Debounce-persist every scene/chapter node in `changed`, each through its own
+  // lane: sceneNode → updateSceneMeta, chapterNode → updateChapterPosition. The
+  // timer map is keyed by the full node id (`sc-`/`ch-` prefixed), so the two
+  // lanes never collide even when a scene and chapter share a numeric id.
   const persistPositions = useCallback((changed: Node[]) => {
     const timers = timersRef.current;
     for (const node of changed) {
-      if (node.type !== 'sceneNode') continue;
-      const sceneId = node.id.slice(ID_PREFIX_LEN);
+      if (node.type !== 'sceneNode' && node.type !== 'chapterNode') continue;
+      const key = String(node.id);
+      const entityId = key.slice(ID_PREFIX_LEN);
       const position_x = Math.round(node.position.x);
       const position_y = Math.round(node.position.y);
-      const existing = timers.get(sceneId);
+      const write =
+        node.type === 'chapterNode'
+          ? () => updateChapterPosition(entityId, { position_x, position_y })
+          : () => updateSceneMeta(entityId, { position_x, position_y });
+      const existing = timers.get(key);
       if (existing) clearTimeout(existing);
       timers.set(
-        sceneId,
+        key,
         setTimeout(() => {
-          timers.delete(sceneId);
-          updateSceneMeta(sceneId, { position_x, position_y }).catch((err) =>
-            console.error('[NodesView] failed to persist scene position', err),
+          timers.delete(key);
+          write().catch((err) =>
+            console.error('[NodesView] failed to persist node position', err),
           );
         }, DRAG_PERSIST_MS),
       );

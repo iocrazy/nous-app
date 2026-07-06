@@ -34,7 +34,9 @@ vi.mock('@xyflow/react', async (importOriginal) => {
 
 const svc = vi.hoisted(() => ({
   updateSceneMeta: vi.fn(),
+  updateChapterPosition: vi.fn(),
   listScenes: vi.fn(),
+  listShots: vi.fn(),
   convertToScenes: vi.fn(),
   moveScene: vi.fn(),
   createScene: vi.fn(),
@@ -102,6 +104,11 @@ function findNode(type: string): Record<string, unknown> {
   return node;
 }
 
+beforeEach(() => {
+  // Shot-cover fetch degrades to "no covers" unless a test opts in.
+  svc.listShots.mockResolvedValue([]);
+});
+
 afterEach(() => {
   cleanup();
   capturedProps = {};
@@ -157,7 +164,8 @@ describe('NodesView', () => {
       });
     });
 
-    it('does not persist when a read-only chapter node is dragged', () => {
+    it('persists a dragged chapter position via updateChapterPosition', () => {
+      svc.updateChapterPosition.mockResolvedValue(undefined);
       render(
         <NodesView
           scenes={[]}
@@ -167,10 +175,18 @@ describe('NodesView', () => {
           onReload={vi.fn()}
         />,
       );
-      const chapterNode = { ...findNode('chapterNode'), position: { x: 10, y: 20 } };
+      const chapterNode = { ...findNode('chapterNode'), position: { x: 10.2, y: 20.9 } };
 
       (capturedProps.onNodeDragStop as (e: unknown, n: unknown) => void)({}, chapterNode);
+      expect(svc.updateChapterPosition).not.toHaveBeenCalled();
+
       vi.advanceTimersByTime(500);
+      // Chapter id is the `ch-` prefix stripped, String()-coerced.
+      expect(svc.updateChapterPosition).toHaveBeenCalledWith('100', {
+        position_x: 10,
+        position_y: 21,
+      });
+      // Scene lane is never touched by a chapter drag.
       expect(svc.updateSceneMeta).not.toHaveBeenCalled();
     });
   });
@@ -242,9 +258,14 @@ describe('NodesView', () => {
 
         (capturedProps.onSelectionDragStop as (e: unknown, n: unknown) => void)({}, dragged);
         vi.advanceTimersByTime(500);
-        // Only the scene node persists; the chapter is projection-only in Task 1.
+        // Each node persists through its own lane: scene → updateSceneMeta,
+        // chapter → updateChapterPosition (Task 3).
         expect(svc.updateSceneMeta).toHaveBeenCalledTimes(1);
         expect(svc.updateSceneMeta).toHaveBeenCalledWith('200', { position_x: 5, position_y: 6 });
+        expect(svc.updateChapterPosition).toHaveBeenCalledWith('100', {
+          position_x: 5,
+          position_y: 6,
+        });
       });
 
       it('persists the whole selection when one selected node is dragged solo', () => {
