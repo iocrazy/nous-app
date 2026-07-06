@@ -30,6 +30,8 @@ export interface PageChatContext {
  *  agent. Consumed (cleared) by AIChatPanel once applied; never persisted. */
 export interface ChatRequest {
   agentSlug: string;
+  /** Optional: also resume THIS session (Sessions page "Open in Chat"). */
+  sessionId?: string;
   nonce: number;
 }
 
@@ -51,8 +53,9 @@ interface GlobalChatState {
     rect: Partial<Pick<GlobalChatState, 'right' | 'bottom' | 'width' | 'height'>>,
   ) => void;
   setPageContext: (ctx: PageChatContext | null) => void;
-  /** Open the floating chat targeted at an agent (Chat section entry). */
-  requestChat: (agentSlug: string) => void;
+  /** Open the floating chat targeted at an agent (Chat section entry);
+   *  pass sessionId to also resume a specific session (Sessions page). */
+  requestChat: (agentSlug: string, sessionId?: string) => void;
   consumeChatRequest: () => void;
 }
 
@@ -75,10 +78,10 @@ export const useGlobalChatStore = create<GlobalChatState>()(
       toggle: () => set((s) => ({ open: !s.open })),
       setRect: (rect) => set(rect),
       setPageContext: (ctx) => set({ pageContext: ctx }),
-      requestChat: (agentSlug) =>
+      requestChat: (agentSlug, sessionId) =>
         set((s) => ({
           open: true,
-          chatRequest: { agentSlug, nonce: (s.chatRequest?.nonce ?? 0) + 1 },
+          chatRequest: { agentSlug, sessionId, nonce: (s.chatRequest?.nonce ?? 0) + 1 },
         })),
       consumeChatRequest: () => set({ chatRequest: null }),
     }),

@@ -2094,7 +2094,8 @@
       "msgCount": "{{count}} msgs",
       "pickOne": "Select a session to view its transcript.",
       "noMessages": "No messages in this session.",
-      "deleteConfirm": "Delete this session and its messages?"
+      "deleteConfirm": "Delete this session and its messages?",
+      "openInChat": "Open in Chat"
     },
     "insightsSection": "Insights",
     "openChatWith": "Chat with {{name}}",
