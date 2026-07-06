@@ -2325,6 +2325,11 @@
     "statisticsSoon": "统计信息将随场景编辑器一同推出。",
     "hintTab": "切换元素",
     "hintEnter": "新建元素",
-    "hintMention": "提及"
+    "hintMention": "提及",
+    "dragScene": "重排场景",
+    "intExt": "内景或外景",
+    "location": "地点",
+    "locationPlaceholder": "地点",
+    "timeOfDay": "时间"
   }
 }

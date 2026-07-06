@@ -16,6 +16,8 @@ export const EDITOR_SHELL_STYLES = `
   --ink:#1c1830; --ink-soft:#5b5771; --ink-faint:#8d89a6;
   --indigo:#4f3ee0; --indigo-deep:#3c2ec4; --indigo-soft:#ece9fb;
   --violet:#8b30e0; --violet-soft:#f4eafd;
+  --tick-action:#726e88; --tick-dialogue:var(--indigo); --tick-character:var(--violet);
+  --tick-paren:#c3bdd8; --tick-transition:#b45309; --tick-comment:#0d9488; --tick-subtitle:#8d89a6;
   --sheet-bg:#ffffff; --sheet-bg-2:#fbfaff; --sheet-border:#e6e2f5;
   --sheet-ink:#211c34; --sheet-ink-soft:#6a6580;
   --green:#12945a; --green-soft:#e2f6ec; --red:#e0435a;
@@ -33,6 +35,8 @@ export const EDITOR_SHELL_STYLES = `
   --ink:#f0eafb; --ink-soft:#b9aed1; --ink-faint:#8a7fa1;
   --indigo:#9184f7; --indigo-deep:#b3a6ff; --indigo-soft:#2c2547;
   --violet:#cc93f7; --violet-soft:#372a49;
+  --tick-action:#a199b8; --tick-dialogue:var(--indigo); --tick-character:var(--violet);
+  --tick-paren:#5c5372; --tick-transition:#f2c464; --tick-comment:#2dd4bf; --tick-subtitle:#8a7fa1;
   --sheet-bg:#130f1b; --sheet-bg-2:#171223; --sheet-border:#2c2438;
   --sheet-ink:#ece5fa; --sheet-ink-soft:#9b8fb5;
   --green:#57e0a1; --green-soft:#1c3129; --red:#ff7a8a;
@@ -171,8 +175,58 @@ export const EDITOR_SHELL_STYLES = `
   pointer-events:none; z-index:0;
 }
 .mh-sheet-inner{ position:relative; z-index:1; }
-.mh-scene-block{ margin-bottom:26px; }
+.mh-scene-block{ margin-bottom:26px; position:relative; padding-left:4px; }
+.mh-drag-handle{
+  position:absolute; left:-16px; top:0; color:var(--ink-faint);
+  font-size:13px; font-weight:700; letter-spacing:1px; cursor:grab;
+  user-select:none; opacity:0; font-family:var(--sans); background:none; border:none;
+}
+.mh-scene-block:hover .mh-drag-handle,
+.mh-scene-block:focus-within .mh-drag-handle{ opacity:1; }
 .mh-scene-headrow{ display:flex; align-items:center; gap:8px; margin-bottom:13px; flex-wrap:wrap; }
+.mh-scene-select{
+  font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:0.03em;
+  padding:4px 8px; border-radius:6px; border:1px solid var(--sheet-border);
+  background:var(--surface-2); color:var(--sheet-ink-soft); cursor:pointer;
+}
+.mh-scene-loc-input{
+  font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:0.03em;
+  padding:4px 9px; border-radius:6px; border:1px solid var(--sheet-border);
+  background:var(--surface-2); color:var(--sheet-ink); min-width:130px;
+}
+
+/* ===== ELEMENT ROWS (Hollywood layout engine) ===== */
+.mh-el-row{ display:flex; align-items:flex-start; gap:9px; margin:0 0 7px; }
+.mh-el-tick{ width:3px; border-radius:2px; flex-shrink:0; align-self:stretch; min-height:18px; margin-top:3px; }
+.mh-el-tick.t-action{ background:var(--tick-action); }
+.mh-el-tick.t-dialogue{ background:var(--tick-dialogue); box-shadow:var(--tick-glow); }
+.mh-el-tick.t-character{ background:var(--tick-character); box-shadow:var(--tick-glow); }
+.mh-el-tick.t-paren{ background:var(--tick-paren); }
+.mh-el-tick.t-transition{ background:var(--tick-transition); }
+.mh-el-tick.t-comment{ background:var(--tick-comment); }
+.mh-el-tick.t-subtitle{ background:var(--tick-subtitle); }
+.mh-el-editable{
+  font-size:13.5px; line-height:1.7; flex:1; outline:none;
+  font-family:var(--mono); color:var(--sheet-ink);
+  white-space:pre-wrap; word-break:break-word; min-height:1.7em;
+}
+.mh-el-editable:empty::before{
+  content:attr(data-placeholder); color:var(--sheet-ink-soft); font-style:italic;
+}
+.mh-el-row.focused .mh-el-editable{
+  box-shadow:0 0 0 2px color-mix(in srgb, var(--indigo) 32%, transparent);
+  border-radius:4px;
+}
+/* Hollywood metrics — spec D8 column 1 */
+.hw-action{ text-align:left; }
+.hw-character{ margin-left:38%; text-transform:uppercase; font-weight:700; letter-spacing:0.03em; color:var(--tick-character); }
+.hw-dialogue{ margin:0 22%; }
+.hw-paren{ margin:0 30%; font-style:italic; color:var(--sheet-ink-soft); }
+.hw-transition{ text-align:right; text-transform:uppercase; font-weight:700; letter-spacing:0.04em; color:var(--sheet-ink-soft); }
+.hw-comment{ border-left:3px solid var(--tick-comment); padding-left:8px; color:var(--sheet-ink-soft); font-style:italic; }
+.hw-subtitle{ text-align:center; font-style:italic; color:var(--sheet-ink-soft); }
+.mh-el-row.transition-row{ justify-content:flex-end; }
+.mh-el-row.transition-row .mh-el-tick{ display:none; }
 .mh-scene-num-badge{
   width:24px; height:24px; border-radius:7px; background:var(--ink);
   color:var(--surface); font-size:11px; font-weight:700; font-family:var(--mono);

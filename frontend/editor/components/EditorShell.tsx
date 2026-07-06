@@ -20,6 +20,7 @@ import { listScenes } from '../sceneService';
 import type { SceneDoc } from '../types';
 import { useEditorState, type EditorMode } from '../useEditorState';
 import { EDITOR_SHELL_STYLES } from './editorShellStyles';
+import { SceneBlock } from './SceneBlock';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -197,40 +198,7 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
                       <p className="mh-doc-p">{t('editor.outlinePlaceholder')}</p>
                     </div>
                   ) : (
-                    scenes.map((s, i) => {
-                      const ext = (s.heading_int_ext ?? '').toUpperCase() === 'EXT';
-                      return (
-                        <div className="mh-scene-block" key={s.id}>
-                          <div className="mh-scene-headrow">
-                            <span className="mh-scene-num-badge">{i + 1}</span>
-                            <span className={`mh-scene-chip ${ext ? 'ie-ext' : 'ie-int'}`}>
-                              {ext ? 'EXT' : 'INT'}
-                            </span>
-                            {s.location_text && (
-                              <span className="mh-scene-chip loc">
-                                {s.location_text.toUpperCase()}
-                              </span>
-                            )}
-                            {s.time_of_day && (
-                              <span className="mh-scene-chip loc">
-                                {s.time_of_day.toUpperCase()}
-                              </span>
-                            )}
-                          </div>
-                          {s.elements.length === 0 ? (
-                            <div className="mh-el-line mh-placeholder-line">
-                              {t('editor.emptyScene')}
-                            </div>
-                          ) : (
-                            s.elements.map((el) => (
-                              <div className="mh-el-line" key={el.id}>
-                                {el.text}
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      );
-                    })
+                    scenes.map((s, i) => <SceneBlock key={s.id} scene={s} index={i} />)
                   )}
                 </div>
               </div>

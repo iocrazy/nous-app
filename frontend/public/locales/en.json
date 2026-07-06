@@ -2325,6 +2325,11 @@
     "statisticsSoon": "Statistics arrive with the scene editor.",
     "hintTab": "cycles element",
     "hintEnter": "new element",
-    "hintMention": "mention"
+    "hintMention": "mention",
+    "dragScene": "Reorder Scene",
+    "intExt": "Interior or Exterior",
+    "location": "Location",
+    "locationPlaceholder": "Location",
+    "timeOfDay": "Time of Day"
   }
 }
