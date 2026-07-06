@@ -2299,7 +2299,6 @@
   },
   "editor": {
     "brand": "MediaHub Projects",
-    "episodeOne": "Ep 1 — Pilot",
     "scenesLabel": "场景",
     "scenesNav": "场景导航",
     "sceneCount": "{{count}} 个场景 · 剧本",
@@ -2321,7 +2320,6 @@
     "loading": "正在加载场景…",
     "loadError": "无法加载此剧本，请重试。",
     "coverPlaceholder": "封面编辑器 — 第二阶段推出",
-    "outlinePlaceholder": "大纲编辑将在第二阶段推出，当前视图为只读。",
     "statisticsSoon": "统计信息将随场景编辑器一同推出。",
     "hintTab": "切换元素",
     "hintEnter": "新建元素",
@@ -2410,6 +2408,23 @@
     "copilotUndo": "撤销",
     "copilotFailed": "无法应用——文本未改动。",
     "nodesElementCount_other": "{{count}} 个元素",
-    "nodesElementCount_one": "{{count}} 个元素"
+    "nodesElementCount_one": "{{count}} 个元素",
+    "outlineLabel": "故事大纲",
+    "outlineUnassigned": "未分组",
+    "outlineEmptyGroup": "暂无场景",
+    "outlineOpenScene": "在剧本中打开场景",
+    "editSceneHeading": "编辑场景标题",
+    "sceneHeadingEmpty": "设置场景标题",
+    "episodesTitle": "剧集",
+    "newEpisode": "新建剧集",
+    "manageEpisodes": "管理剧集",
+    "episodeFallback": "Ep 1",
+    "epCurrent": "当前",
+    "epDelete": "删除剧集",
+    "epDeleteBlocked": "剧集下有剧本，无法删除",
+    "epRename": "重命名剧集",
+    "epScriptsTitle": "该剧集的剧本数",
+    "epClose": "关闭剧集面板",
+    "episodeActionFailed": "剧集操作失败，请重试。"
   }
 }

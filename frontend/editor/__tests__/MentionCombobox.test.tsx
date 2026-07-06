@@ -161,6 +161,30 @@ describe('mention chips', () => {
     expect(buildElementHtml('', [])).toBe('');
   });
 
+  it('chips a multi-word KNOWN CAST name as one whole token', () => {
+    const html = buildElementHtml('with @John Smith arriving', ['John Smith']);
+    expect(html).toContain('data-mention="John Smith"');
+    expect(html).toMatch(/class="mh-mention"[^>]*>@John Smith</);
+    // The trailing word is plain text, not swallowed into the chip.
+    expect(html).toContain(' arriving');
+  });
+
+  it('chips only the first word of an UNKNOWN multi-word name', () => {
+    const html = buildElementHtml('with @John Smith arriving', []);
+    expect(html).toContain('data-mention="John"');
+    expect(html).toMatch(/class="mh-mention unknown"[^>]*>@John</);
+    // "Smith" stays plain text — no second chip.
+    expect(html).not.toContain('data-mention="Smith"');
+    expect(html).toContain('Smith arriving');
+  });
+
+  it('does not over-match a known name across a word boundary', () => {
+    // "John Smith" must NOT chip "@John Smithers" (the boundary char is a letter).
+    const html = buildElementHtml('@John Smithers', ['John Smith']);
+    expect(html).toContain('data-mention="John"');
+    expect(html).not.toContain('data-mention="John Smith"');
+  });
+
   it('renders the chip span in the editable row through the layout engine', () => {
     const noop: LayoutHandlers = {
       onInput: vi.fn(),
@@ -248,6 +272,27 @@ describe('SceneBlock @ mention integration', () => {
     const activeOption = document.getElementById(activeId!);
     expect(activeOption).toHaveAttribute('aria-selected', 'true');
     expect(activeOption?.textContent).toBe('Blythe'); // ArrowDown moved to the 2nd
+  });
+
+  it('collapses the combobox aria when the filter matches nothing', () => {
+    render(
+      <SceneBlock
+        scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])}
+        index={0}
+        mentionCandidates={['Ada', 'Blythe']}
+      />,
+    );
+    const line = document.querySelector('[data-el-id="el_a"]') as HTMLElement;
+    fireEvent.keyDown(line, { key: '@' });
+    // Type a query no candidate matches → the listbox has no options.
+    line.textContent = '@zzz';
+    fireEvent.input(line);
+
+    // The line stays a combobox but collapses: no dangling controls/descendant.
+    expect(line).toHaveAttribute('role', 'combobox');
+    expect(line).toHaveAttribute('aria-expanded', 'false');
+    expect(line).not.toHaveAttribute('aria-controls');
+    expect(line).not.toHaveAttribute('aria-activedescendant');
   });
 
   it('closes on Escape with no dispatched op', () => {

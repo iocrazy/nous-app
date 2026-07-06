@@ -57,7 +57,11 @@ export function HollywoodLayout({
           onTickClick={onTickClick}
           mentionAria={
             mention && mention.elementId === el.id
-              ? { listboxId: mention.listboxId, activeOptionId: mention.activeOptionId }
+              ? {
+                  listboxId: mention.listboxId,
+                  activeOptionId: mention.activeOptionId,
+                  expanded: mention.expanded,
+                }
               : undefined
           }
           {...handlers}

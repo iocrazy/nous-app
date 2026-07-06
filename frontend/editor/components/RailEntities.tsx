@@ -25,7 +25,14 @@ export function RailEntities({ characters, locations, onSelect }: RailEntitiesPr
   return (
     <>
       <section className="mh-rail-section" aria-label={t('editor.charactersLabel')}>
-        <div className="mh-rail-section-label">{t('editor.charactersLabel')}</div>
+        <div className="mh-rail-section-head">
+          <span className="mh-rail-section-label">{t('editor.charactersLabel')}</span>
+          {characters.length > 0 && (
+            <span className="mh-rail-count-badge" data-testid="rail-characters-count">
+              {characters.length}
+            </span>
+          )}
+        </div>
         {characters.length === 0 ? (
           <div className="mh-rail-empty">{t('editor.charactersEmpty')}</div>
         ) : (
@@ -53,7 +60,14 @@ export function RailEntities({ characters, locations, onSelect }: RailEntitiesPr
       </section>
 
       <section className="mh-rail-section" aria-label={t('editor.locationsLabel')}>
-        <div className="mh-rail-section-label">{t('editor.locationsLabel')}</div>
+        <div className="mh-rail-section-head">
+          <span className="mh-rail-section-label">{t('editor.locationsLabel')}</span>
+          {locations.length > 0 && (
+            <span className="mh-rail-count-badge" data-testid="rail-locations-count">
+              {locations.length}
+            </span>
+          )}
+        </div>
         {locations.length === 0 ? (
           <div className="mh-rail-empty">{t('editor.locationsEmpty')}</div>
         ) : (

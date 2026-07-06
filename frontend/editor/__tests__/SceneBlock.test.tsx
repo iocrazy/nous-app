@@ -139,6 +139,8 @@ describe('SceneBlock element editing', () => {
   it('writes scene meta through updateSceneMeta after the debounce', () => {
     vi.useFakeTimers();
     render(<SceneBlock scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])} index={0} />);
+    // Head row starts as a typographic slug — click it to reveal the selects.
+    fireEvent.click(screen.getByRole('button', { name: 'editor.editSceneHeading' }));
     const locationInput = screen.getByLabelText('editor.location');
     fireEvent.change(locationInput, { target: { value: 'Rooftop Access' } });
 
@@ -148,6 +150,71 @@ describe('SceneBlock element editing', () => {
     expect(svc.updateSceneMeta).toHaveBeenCalledWith(
       '900',
       expect.objectContaining({ location_text: 'Rooftop Access' }),
+    );
+  });
+});
+
+describe('SceneBlock live-stats lift (Task 6 ⑥)', () => {
+  it('reports optimistic elements up (debounced 1s) after an edit', () => {
+    vi.useFakeTimers();
+    const onElementsChange = vi.fn();
+    render(
+      <SceneBlock
+        scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])}
+        index={0}
+        onElementsChange={onElementsChange}
+      />,
+    );
+    const row = document.querySelector('[data-el-id="el_a"]') as HTMLElement;
+    fireEvent.keyDown(row, { key: 'Tab' }); // action → character (optimistic)
+    onElementsChange.mockClear();
+
+    // Nothing lifted until the 1s debounce elapses.
+    expect(onElementsChange).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1000);
+
+    expect(onElementsChange).toHaveBeenCalledWith(
+      '900',
+      expect.arrayContaining([expect.objectContaining({ id: 'el_a', type: 'character' })]),
+    );
+  });
+});
+
+describe('SceneBlock typographic head row (Task 4.5)', () => {
+  it('renders a read-mode heading slug by default, not the selects', () => {
+    render(<SceneBlock scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])} index={0} />);
+    // Hollywood slug from INT / Blank Studio / NIGHT.
+    expect(screen.getByRole('button', { name: 'editor.editSceneHeading' })).toHaveTextContent(
+      'INT. BLANK STUDIO - NIGHT',
+    );
+    expect(screen.queryByLabelText('editor.location')).toBeNull();
+    expect(screen.queryByLabelText('editor.intExt')).toBeNull();
+  });
+
+  it('reveals the three selects on click and returns to read mode on blur', () => {
+    render(<SceneBlock scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])} index={0} />);
+    fireEvent.click(screen.getByRole('button', { name: 'editor.editSceneHeading' }));
+
+    expect(screen.getByLabelText('editor.intExt')).toBeInTheDocument();
+    expect(screen.getByLabelText('editor.location')).toBeInTheDocument();
+    expect(screen.getByLabelText('editor.timeOfDay')).toBeInTheDocument();
+
+    // Blur to somewhere outside the head row → read mode returns.
+    fireEvent.blur(screen.getByLabelText('editor.location'), { relatedTarget: document.body });
+    expect(screen.queryByLabelText('editor.location')).toBeNull();
+    expect(screen.getByRole('button', { name: 'editor.editSceneHeading' })).toBeInTheDocument();
+  });
+
+  it('reflects edited meta in the read-mode slug', () => {
+    render(<SceneBlock scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])} index={0} />);
+    fireEvent.click(screen.getByRole('button', { name: 'editor.editSceneHeading' }));
+    fireEvent.change(screen.getByLabelText('editor.location'), {
+      target: { value: 'Rooftop Access' },
+    });
+    fireEvent.blur(screen.getByLabelText('editor.location'), { relatedTarget: document.body });
+
+    expect(screen.getByRole('button', { name: 'editor.editSceneHeading' })).toHaveTextContent(
+      'INT. ROOFTOP ACCESS - NIGHT',
     );
   });
 });

@@ -20,14 +20,16 @@ import {
   applyOps,
   convertToScenes,
   createScene,
+  listEpisodes,
   listScenes,
   moveScene,
   newElementId,
+  type Episode,
 } from '../sceneService';
 import { fetchScriptProject } from '../../services/scriptService';
 import { useToast } from '../../components/Toast';
 import type { CursorState } from '../editorMachine';
-import type { ElementOp, ElementType, SceneDoc } from '../types';
+import type { ElementOp, ElementType, ScriptElement, SceneDoc } from '../types';
 import type { ScriptChapter } from '../../types';
 import { useEditorState, type EditorFormat, type EditorMode } from '../useEditorState';
 import type { SaveState } from '../useSceneSync';
@@ -49,6 +51,8 @@ import {
 import { SceneRail } from './SceneRail';
 import { RailModules, type RailView } from './RailModules';
 import { NodesView } from '../nodes/NodesView';
+import { OutlineView } from './OutlineView';
+import { EpisodePanel } from './EpisodePanel';
 import { RailEntities } from './RailEntities';
 import { deriveRailCharacters, deriveRailLocations } from '../railDerive';
 import { ElementToolbar } from './ElementToolbar';
@@ -72,6 +76,15 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
   const { addToast } = useToast();
   const [scenes, setScenes] = useState<SceneDoc[]>([]);
   const [chapters, setChapters] = useState<ScriptChapter[]>([]);
+  // Episode dimension (Task 5): the owning project, this script's episode, and
+  // the project's episode list power the rail Ep selector + management panel.
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [currentEpisodeId, setCurrentEpisodeId] = useState<string | null>(null);
+  const [episodes, setEpisodes] = useState<Episode[]>([]);
+  const [episodePanelOpen, setEpisodePanelOpen] = useState(false);
+  // Live (optimistic) elements lifted from each SceneBlock so Statistics + rail
+  // entities reflect in-flight edits, not just the last loaded snapshot (Task 6 ⑥).
+  const [liveElements, setLiveElements] = useState<Record<string, ScriptElement[]>>({});
   const [converting, setConverting] = useState<Record<string, boolean>>({});
   const [loadState, setLoadState] = useState<LoadState>('loading');
   // Central-column view: the script sheet or the scene-node projection. The top
@@ -119,16 +132,43 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
     }
   }, [scriptId]);
 
-  // Chapters power the legacy prose fallback (Task 10). Failure is non-fatal:
-  // the scene editor still works, we just cannot offer the Convert cards.
+  // Chapters power the legacy prose fallback (Task 10); the same fetch carries
+  // the owning project id + this script's episode (Task 5). Failure is
+  // non-fatal: the scene editor still works, we just lose the Convert cards and
+  // the episode selector falls back to its "Ep 1" label.
   const loadChapters = useCallback(async () => {
     try {
       const project = await fetchScriptProject(scriptId);
       setChapters(project.chapters ?? []);
+      setProjectId(project.project_id ?? null);
+      setCurrentEpisodeId(project.episode_id ?? null);
     } catch (err) {
       console.error('[EditorShell] failed to load chapters', err);
     }
   }, [scriptId]);
+
+  // The project's episode list feeds the rail Ep selector + management panel.
+  const loadEpisodes = useCallback(async (pid: string) => {
+    try {
+      setEpisodes(await listEpisodes(pid));
+    } catch (err) {
+      console.error('[EditorShell] failed to load episodes', err);
+    }
+  }, []);
+
+  // After an episode mutation (rename / create / delete / reassign) re-fetch the
+  // project (its episode_id may have changed) and the episode list.
+  const reloadEpisodes = useCallback(async () => {
+    const project = await fetchScriptProject(scriptId).catch((err) => {
+      console.error('[EditorShell] failed to reload project', err);
+      return null;
+    });
+    if (project) {
+      setProjectId(project.project_id ?? null);
+      setCurrentEpisodeId(project.episode_id ?? null);
+      if (project.project_id) await loadEpisodes(project.project_id);
+    }
+  }, [scriptId, loadEpisodes]);
 
   const reloadAll = useCallback(async () => {
     await Promise.all([reload(), loadChapters()]);
@@ -157,6 +197,11 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
       cancelled = true;
     };
   }, [scriptId, loadChapters]);
+
+  // Once the owning project is known, load its episode list for the selector.
+  useEffect(() => {
+    if (projectId) void loadEpisodes(projectId);
+  }, [projectId, loadEpisodes]);
 
   // Viewport auto-highlight: mark the most-visible SceneBlock active. jsdom has
   // no IntersectionObserver, so feature-detect and no-op there.
@@ -190,16 +235,19 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
     [setActiveScene],
   );
 
-  // Jump from a scene node (double-click) back to the script sheet, landing on
-  // that scene: switch views, mark it active, and defer the scroll+focus until
-  // the sheet has re-rendered (the node canvas unmounts on the same tick).
+  // Jump from a scene node (double-click) or an outline row (click) back to the
+  // script sheet, landing on that scene: switch BOTH axes to Script (the
+  // railView node/script axis AND the top Script/Outline/Cover tab), mark it
+  // active, and defer the scroll+focus until the sheet has re-rendered (the node
+  // canvas / outline unmounts on the same tick).
   const handleOpenScene = useCallback(
     (sceneId: string) => {
       setRailView('script');
+      setMode('script');
       setActiveScene(sceneId);
       setPendingOpenSceneId(sceneId);
     },
-    [setActiveScene],
+    [setActiveScene, setMode],
   );
 
   useEffect(() => {
@@ -214,6 +262,9 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
     setPendingOpenSceneId(null);
   }, [pendingOpenSceneId, railView, scenes]);
 
+  // Focusing an element line raises the editing-state flag, which the shell
+  // exposes as data-editing="true" — a pure CSS hook that lights up the element
+  // toolbar (see editorShellStyles). It does NOT change focus or a11y behaviour.
   const handleFocusElement = useCallback(
     (cursor: CursorState) => {
       setCursor(cursor);
@@ -222,7 +273,9 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
     [setCursor],
   );
 
-  // Esc left an element line: normal focus order resumes (data-editing=false).
+  // Esc left the element line: clear the editing-state flag so data-editing
+  // flips back to "false" and the toolbar emphasis relaxes. Native focus order
+  // is unaffected — this is only a styling marker.
   const handleExitEditing = useCallback(() => setEditing(false), []);
 
   // ── Scene reorder (Task 10): moveScene({before|after}) then reload ─────────
@@ -384,12 +437,34 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
     return state.nextInsertType;
   })();
 
+  // Current episode's display title for the rail selector (#1006: compare ids
+  // as strings). Falls back to "Ep 1" when the script has no episode yet.
+  const currentEpisodeTitle = useMemo(() => {
+    const ep = episodes.find(
+      (e) => currentEpisodeId != null && String(e.id) === String(currentEpisodeId),
+    );
+    return ep?.title ?? t('editor.episodeFallback');
+  }, [episodes, currentEpisodeId, t]);
+
+  const handleElementsChange = useCallback((sceneId: string, elements: ScriptElement[]) => {
+    setLiveElements((prev) => ({ ...prev, [sceneId]: elements }));
+  }, []);
+
+  // Scenes with each block's live optimistic elements overlaid (Task 6 ⑥) — the
+  // single source every derivation reads so Statistics, the CAST list and the
+  // rail entity sections update as the writer types (debounced 1s upstream).
+  // Stale ids (a since-removed scene) drop out because we map over `scenes`.
+  const statsScenes = useMemo(
+    () => scenes.map((s) => (liveElements[s.id] ? { ...s, elements: liveElements[s.id] } : s)),
+    [scenes, liveElements],
+  );
+
   // Script-wide CAST names feed the @-mention / character-cue picker.
-  const mentionCandidates = useMemo(() => deriveStatistics(scenes).cast, [scenes]);
+  const mentionCandidates = useMemo(() => deriveStatistics(statsScenes).cast, [statsScenes]);
 
   // Rail entity sections (laper info architecture) — Characters + Locations.
-  const railCharacters = useMemo(() => deriveRailCharacters(scenes), [scenes]);
-  const railLocations = useMemo(() => deriveRailLocations(scenes), [scenes]);
+  const railCharacters = useMemo(() => deriveRailCharacters(statsScenes), [statsScenes]);
+  const railLocations = useMemo(() => deriveRailLocations(statsScenes), [statsScenes]);
 
   // Legacy chapters with no scene pointing at them → read-only prose fallbacks.
   const orphanChapters = useMemo(() => {
@@ -483,6 +558,8 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
     <div
       className="mh-editor-shell"
       data-theme={state.theme}
+      // Styling hook consumed by editorShellStyles: "true" while a script line
+      // is focused lights up the element toolbar. Not a focus/a11y signal.
       data-editing={editing ? 'true' : 'false'}
       data-editor-shell
       ref={shellRef}
@@ -533,11 +610,29 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
                   ‹
                 </button>
               </div>
-              <div className="mh-ep-selector">
-                <div className="mh-ep-name">{t('editor.episodeOne')}</div>
-                <div className="mh-ep-sub">
-                  {t('editor.sceneCount', { count: scenes.length })}
-                </div>
+              <div className="mh-ep-selector-wrap">
+                <button
+                  type="button"
+                  className="mh-ep-selector"
+                  aria-expanded={episodePanelOpen}
+                  aria-label={t('editor.manageEpisodes')}
+                  onClick={() => setEpisodePanelOpen((v) => !v)}
+                >
+                  <div className="mh-ep-name">{currentEpisodeTitle}</div>
+                  <div className="mh-ep-sub">
+                    {t('editor.sceneCount', { count: scenes.length })}
+                  </div>
+                </button>
+                {episodePanelOpen && projectId && (
+                  <EpisodePanel
+                    scriptId={scriptId}
+                    projectId={projectId}
+                    episodes={episodes}
+                    currentEpisodeId={currentEpisodeId}
+                    onChanged={reloadEpisodes}
+                    onClose={() => setEpisodePanelOpen(false)}
+                  />
+                )}
               </div>
             </div>
             <RailModules activeView={railView} onSelect={setRailView} />
@@ -547,12 +642,19 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
                 locations={railLocations}
                 onSelect={handleSelectScene}
               />
-              <div className="mh-rail-section-label">{t('editor.scenesLabel')}</div>
-              <SceneRail
-                scenes={scenes}
-                activeSceneId={state.activeSceneId}
-                onSelect={handleSelectScene}
-              />
+              <section className="mh-rail-section" aria-label={t('editor.scenesLabel')}>
+                <div className="mh-rail-section-head">
+                  <span className="mh-rail-section-label">{t('editor.scenesLabel')}</span>
+                  {scenes.length > 0 && (
+                    <span className="mh-rail-count-badge">{scenes.length}</span>
+                  )}
+                </div>
+                <SceneRail
+                  scenes={scenes}
+                  activeSceneId={state.activeSceneId}
+                  onSelect={handleSelectScene}
+                />
+              </section>
             </div>
           </>
         )}
@@ -624,16 +726,23 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
               <div className="mh-sheet">
                 <div className="mh-sheet-inner">
                   {state.mode === 'outline' ? (
-                    <div className="mh-doc-outline" data-testid="outline-placeholder">
-                      <div className="mh-doc-title">{t('editor.episodeOne')}</div>
-                      <p className="mh-doc-p">{t('editor.outlinePlaceholder')}</p>
-                    </div>
+                    <OutlineView
+                      scenes={scenes}
+                      chapters={chapters}
+                      onOpenScene={handleOpenScene}
+                      onReload={reloadAll}
+                    />
                   ) : (
                     <>
                       {scenes.map((s, i) => {
                         const mounted =
                           !windowed || (i >= sceneWindow.start && i <= sceneWindow.end);
                         if (!mounted) {
+                          // A windowed-out scene is still a valid drop target so a
+                          // drag can cross the mounted window: dropping on the
+                          // placeholder lands the dragged scene BEFORE it. Keyboard
+                          // reorder (Alt+Arrow) covers the a11y path, so the
+                          // decorative placeholder stays aria-hidden.
                           return (
                             <div
                               key={s.id}
@@ -642,6 +751,22 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
                               data-scene-id={s.id}
                               style={{ height: sceneHeights[i] }}
                               aria-hidden="true"
+                              onDragOver={
+                                reorder.draggingId
+                                  ? (e) => {
+                                      e.preventDefault();
+                                      reorder.onDragOver(s.id, 'before');
+                                    }
+                                  : undefined
+                              }
+                              onDrop={
+                                reorder.draggingId
+                                  ? (e) => {
+                                      e.preventDefault();
+                                      reorder.onDrop(s.id, 'before');
+                                    }
+                                  : undefined
+                              }
                             />
                           );
                         }
@@ -658,6 +783,7 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
                             reorder={reorder}
                             copilotActiveSceneId={copilotSceneId}
                             onCopilotActivate={handleCopilotActivate}
+                            onElementsChange={handleElementsChange}
                             typeCommand={typeCommand ?? undefined}
                           />
                         );
@@ -715,7 +841,7 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
               </button>
             </div>
             <WritingPanel
-              scenes={scenes}
+              scenes={statsScenes}
               format={state.format}
               onFormatChange={handleFormatChange}
             />

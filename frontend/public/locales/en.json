@@ -2299,7 +2299,6 @@
   },
   "editor": {
     "brand": "MediaHub Projects",
-    "episodeOne": "Ep 1 — Pilot",
     "scenesLabel": "Scenes",
     "scenesNav": "Scenes",
     "sceneCount": "{{count}} scenes · Script",
@@ -2321,7 +2320,6 @@
     "loading": "Loading Scenes…",
     "loadError": "Could not load this script. Please try again.",
     "coverPlaceholder": "Cover Editor — Coming in Phase 2",
-    "outlinePlaceholder": "Outline editing arrives in Phase 2. This view is read-only for now.",
     "statisticsSoon": "Statistics arrive with the scene editor.",
     "hintTab": "cycles element",
     "hintEnter": "new element",
@@ -2410,6 +2408,23 @@
     "copilotUndo": "Undo",
     "copilotFailed": "Could not apply — your text is unchanged.",
     "nodesElementCount_one": "{{count}} element",
-    "nodesElementCount_other": "{{count}} elements"
+    "nodesElementCount_other": "{{count}} elements",
+    "outlineLabel": "Story Outline",
+    "outlineUnassigned": "Unassigned",
+    "outlineEmptyGroup": "No scenes yet",
+    "outlineOpenScene": "Open scene in Script",
+    "editSceneHeading": "Edit scene heading",
+    "sceneHeadingEmpty": "Set scene heading",
+    "episodesTitle": "Episodes",
+    "newEpisode": "New Episode",
+    "manageEpisodes": "Manage episodes",
+    "episodeFallback": "Ep 1",
+    "epCurrent": "Current",
+    "epDelete": "Delete episode",
+    "epDeleteBlocked": "Episode has scripts — cannot delete",
+    "epRename": "Rename episode",
+    "epScriptsTitle": "Scripts in this episode",
+    "epClose": "Close episodes",
+    "episodeActionFailed": "Could not update episodes. Please try again."
   }
 }
