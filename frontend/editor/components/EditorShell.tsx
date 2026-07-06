@@ -32,6 +32,7 @@ import type { ScriptChapter } from '../../types';
 import { useEditorState, type EditorFormat, type EditorMode } from '../useEditorState';
 import type { SaveState } from '../useSceneSync';
 import { persistFormat, readStoredFormat } from '../formatStorage';
+import { useConvertPoll } from '../useConvertPoll';
 import {
   WINDOW_THRESHOLD,
   computeSceneWindow,
@@ -60,10 +61,6 @@ import { ChapterFallback } from './ChapterFallback';
 type LoadState = 'loading' | 'ready' | 'error';
 
 const DOC_MODES: EditorMode[] = ['script', 'outline', 'cover'];
-
-/** Poll cadence + cap while waiting for a chapter's converted scenes to appear. */
-const CONVERT_POLL_MS = 5000;
-const CONVERT_POLL_MAX = 12;
 
 export function EditorShell({ scriptId }: { scriptId: string }) {
   const { t } = useTranslation();
@@ -98,7 +95,6 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
   const sheetScrollRef = useRef<HTMLDivElement | null>(null);
   const cursorRef = useRef<CursorState | null>(null);
   const nonceRef = useRef(0);
-  const convertTimersRef = useRef<Set<ReturnType<typeof setInterval>>>(new Set());
   const scenesRef = useRef<SceneDoc[]>(scenes);
   cursorRef.current = state.cursor;
   scenesRef.current = scenes;
@@ -134,6 +130,14 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
     }
   }, [scriptId]);
 
+  const reloadAll = useCallback(async () => {
+    await Promise.all([reload(), loadChapters()]);
+  }, [reload, loadChapters]);
+
+  // Shared "dispatch a slow chapter workflow, then poll for its output" driver —
+  // used by the legacy Convert card here and by the node view's chapter actions.
+  const { startPoll } = useConvertPoll(scriptId);
+
   useEffect(() => {
     let cancelled = false;
     setLoadState('loading');
@@ -153,15 +157,6 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
       cancelled = true;
     };
   }, [scriptId, loadChapters]);
-
-  // Stop any in-flight convert polls when the shell unmounts.
-  useEffect(() => {
-    const timers = convertTimersRef.current;
-    return () => {
-      timers.forEach((t) => clearInterval(t));
-      timers.clear();
-    };
-  }, []);
 
   // Viewport auto-highlight: mark the most-visible SceneBlock active. jsdom has
   // no IntersectionObserver, so feature-detect and no-op there.
@@ -294,11 +289,10 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
   );
 
   // ── Legacy chapter → scenes conversion (Task 10) ──────────────────────────
-  // We dispatch the backend convert workflow, then POLL listScenes until scenes
-  // for this chapter materialise (or the cap is hit). Polling — rather than the
-  // TaskManager realtime path — is chosen deliberately: it observes the exact
-  // end state we care about (scenes with this chapter_id) instead of a task row,
-  // is self-contained, and needs no realtime subscription for this rare action.
+  // Dispatch the backend convert workflow, then poll (via useConvertPoll) until
+  // scenes for this chapter materialise. Polling — rather than the TaskManager
+  // realtime path — is chosen deliberately: it observes the exact end state we
+  // care about (scenes with this chapter_id) instead of a task row.
   const handleConvertChapter = useCallback(
     async (chapterId: string) => {
       setConverting((prev) => ({ ...prev, [chapterId]: true }));
@@ -311,35 +305,17 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
         setConverting((prev) => ({ ...prev, [chapterId]: false }));
         return;
       }
-
-      let attempts = 0;
-      const timer = setInterval(async () => {
-        attempts += 1;
-        let done = false;
-        try {
-          const rows = await listScenes(scriptId);
-          const sorted = [...rows].sort((a, b) => a.sort_order - b.sort_order);
-          setScenes(sorted);
-          done = sorted.some((s) => s.chapter_id === chapterId);
-        } catch (err) {
-          // Errors still count toward the give-up cap: a persistent fetch
-          // failure must not leak the interval or pin the button on
-          // "Converting…" forever.
-          console.error('[EditorShell] convert poll failed', err);
-        }
-        if (done || attempts >= CONVERT_POLL_MAX) {
-          clearInterval(timer);
-          convertTimersRef.current.delete(timer);
+      startPoll(
+        (data) => data.scenes.some((s) => s.chapter_id === chapterId),
+        (settled, data) => {
+          setScenes([...data.scenes].sort((a, b) => a.sort_order - b.sort_order));
+          setChapters(data.chapters);
           setConverting((prev) => ({ ...prev, [chapterId]: false }));
-          if (done) {
-            await loadChapters();
-            addToast(t('editor.convertDone'), 'success');
-          }
-        }
-      }, CONVERT_POLL_MS);
-      convertTimersRef.current.add(timer);
+          if (settled) addToast(t('editor.convertDone'), 'success');
+        },
+      );
     },
-    [scriptId, addToast, t, loadChapters],
+    [scriptId, addToast, t, startPoll],
   );
 
   const handleSelectType = useCallback(
@@ -614,7 +590,13 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
 
         <div className="mh-page-frame">
           {railView === 'nodes' ? (
-            <NodesView scenes={scenes} chapters={chapters} onOpenScene={handleOpenScene} />
+            <NodesView
+              scenes={scenes}
+              chapters={chapters}
+              onOpenScene={handleOpenScene}
+              scriptId={scriptId}
+              onReload={reloadAll}
+            />
           ) : state.mode === 'cover' ? (
             <div className="mh-sheet-scroll">
               <div className="mh-cover-card" data-testid="cover-placeholder">

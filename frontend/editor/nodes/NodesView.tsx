@@ -1,31 +1,31 @@
 /**
- * NodesView — the scene/chapter flow projection surface (Phase B Task 2).
+ * NodesView — the scene/chapter flow projection surface (Phase B Task 2-3).
  *
  * Renders the mapper's node/edge graph in a controlled @xyflow/react canvas.
  * Scene nodes are draggable; a drag-stop persists the new coordinates via
  * `updateSceneMeta` (debounced 500ms per scene so a flurry of small moves
  * collapses into one write). Double-clicking a scene node jumps back to the
- * script view through `onOpenScene`. Chapter nodes are read-only here — their
- * action bar (Expand / Branch / Convert) lands in Task 3.
+ * script view through `onOpenScene`. Chapter nodes carry an inline action bar
+ * (Expand / Branch / Convert) — dispatched + polled through a context so the
+ * node components don't thread callbacks through React Flow's node `data`.
  */
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   Background,
   BackgroundVariant,
   Controls,
-  Handle,
-  Position,
   applyNodeChanges,
   type Edge,
   type Node,
   type NodeChange,
-  type NodeProps,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useTranslation } from 'react-i18next';
-import { mapToFlow, type ChapterNodeData } from './sceneNodeMapper';
+import { mapToFlow } from './sceneNodeMapper';
 import { SceneFlowNode } from './SceneFlowNode';
+import { ChapterActionsNode, ChapterActionContext } from './ChapterActionsNode';
+import { useConvertPoll } from '../useConvertPoll';
 import { updateSceneMeta } from '../sceneService';
 import type { SceneDoc } from '../types';
 import type { ScriptChapter } from '../../types';
@@ -35,38 +35,23 @@ const DRAG_PERSIST_MS = 500;
 /** Length of the `sc-` / `ch-` id prefixes the mapper emits. */
 const ID_PREFIX_LEN = 3;
 
-/** Minimal read-only chapter card (Task 3 swaps in the action-bar version). */
-function ChapterReadonlyNodeImpl({ data }: NodeProps) {
-  const { t } = useTranslation();
-  const d = data as unknown as ChapterNodeData;
-  return (
-    <div className="mh-flow-node mh-flow-chapter">
-      <Handle type="target" position={Position.Top} className="mh-flow-handle" />
-      <div className="mh-flow-chapter-head">
-        {d.chapterNumber ? <span className="mh-scene-num-badge">{d.chapterNumber}</span> : null}
-        <span className="mh-flow-chapter-title">
-          {d.title || t('editor.nodesUntitledChapter')}
-        </span>
-      </div>
-      {d.summary ? <div className="mh-flow-chapter-summary">{d.summary}</div> : null}
-      <Handle type="source" position={Position.Bottom} className="mh-flow-handle" />
-    </div>
-  );
-}
-const ChapterReadonlyNode = memo(ChapterReadonlyNodeImpl);
-
-const NODE_TYPES = { sceneNode: SceneFlowNode, chapterNode: ChapterReadonlyNode };
+const NODE_TYPES = { sceneNode: SceneFlowNode, chapterNode: ChapterActionsNode };
 
 export interface NodesViewProps {
   scenes: SceneDoc[];
   chapters: ScriptChapter[];
   onOpenScene: (sceneId: string) => void;
+  /** Owning script — chapter actions dispatch against it. */
+  scriptId: string;
+  /** Refresh scenes+chapters after a chapter action settles. */
+  onReload: () => void | Promise<void>;
 }
 
-export function NodesView({ scenes, chapters, onOpenScene }: NodesViewProps) {
+export function NodesView({ scenes, chapters, onOpenScene, scriptId, onReload }: NodesViewProps) {
   const { t } = useTranslation();
   const graph = useMemo(() => mapToFlow(scenes, chapters), [scenes, chapters]);
   const [nodes, setNodes] = useState<Node[]>(() => graph.nodes as Node[]);
+  const { startPoll } = useConvertPoll(scriptId);
 
   // Re-seed when the projection changes (scene added / removed / reparented).
   // Drag-in-progress positions are transient client state; a structural change
@@ -117,21 +102,28 @@ export function NodesView({ scenes, chapters, onOpenScene }: NodesViewProps) {
     [onOpenScene],
   );
 
+  const actionContext = useMemo(
+    () => ({ scriptId, chapters, startPoll, onReload }),
+    [scriptId, chapters, startPoll, onReload],
+  );
+
   return (
     <div className="mh-nodes-view" data-testid="nodes-view" aria-label={t('editor.nodesViewLabel')}>
-      <ReactFlow
-        nodes={nodes}
-        edges={graph.edges as Edge[]}
-        nodeTypes={NODE_TYPES}
-        onNodesChange={onNodesChange}
-        onNodeDragStop={onNodeDragStop}
-        onNodeDoubleClick={onNodeDoubleClick}
-        fitView
-        proOptions={{ hideAttribution: true }}
-      >
-        <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
-        <Controls showInteractive={false} />
-      </ReactFlow>
+      <ChapterActionContext.Provider value={actionContext}>
+        <ReactFlow
+          nodes={nodes}
+          edges={graph.edges as Edge[]}
+          nodeTypes={NODE_TYPES}
+          onNodesChange={onNodesChange}
+          onNodeDragStop={onNodeDragStop}
+          onNodeDoubleClick={onNodeDoubleClick}
+          fitView
+          proOptions={{ hideAttribution: true }}
+        >
+          <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
+          <Controls showInteractive={false} />
+        </ReactFlow>
+      </ChapterActionContext.Provider>
     </div>
   );
 }

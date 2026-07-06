@@ -101,6 +101,8 @@ describe('NodesView', () => {
         scenes={[scene({ id: '200', chapter_id: '100' }), scene({ id: '201', chapter_id: null })]}
         chapters={[chapter({ id: '100' })]}
         onOpenScene={vi.fn()}
+        scriptId="1"
+        onReload={vi.fn()}
       />,
     );
     const nodes = capturedProps.nodes as Array<Record<string, unknown>>;
@@ -120,7 +122,13 @@ describe('NodesView', () => {
     it('persists a dragged scene position after the debounce window', () => {
       svc.updateSceneMeta.mockResolvedValue(scene({}));
       render(
-        <NodesView scenes={[scene({ id: '200' })]} chapters={[]} onOpenScene={vi.fn()} />,
+        <NodesView
+          scenes={[scene({ id: '200' })]}
+          chapters={[]}
+          onOpenScene={vi.fn()}
+          scriptId="1"
+          onReload={vi.fn()}
+        />,
       );
       const sceneNode = { ...findNode('sceneNode'), position: { x: 250.4, y: 360.7 } };
 
@@ -137,7 +145,13 @@ describe('NodesView', () => {
 
     it('does not persist when a read-only chapter node is dragged', () => {
       render(
-        <NodesView scenes={[]} chapters={[chapter({ id: '100' })]} onOpenScene={vi.fn()} />,
+        <NodesView
+          scenes={[]}
+          chapters={[chapter({ id: '100' })]}
+          onOpenScene={vi.fn()}
+          scriptId="1"
+          onReload={vi.fn()}
+        />,
       );
       const chapterNode = { ...findNode('chapterNode'), position: { x: 10, y: 20 } };
 
@@ -149,7 +163,15 @@ describe('NodesView', () => {
 
   it('jumps to the scene on double-click via onOpenScene', () => {
     const onOpenScene = vi.fn();
-    render(<NodesView scenes={[scene({ id: '200' })]} chapters={[]} onOpenScene={onOpenScene} />);
+    render(
+      <NodesView
+        scenes={[scene({ id: '200' })]}
+        chapters={[]}
+        onOpenScene={onOpenScene}
+        scriptId="1"
+        onReload={vi.fn()}
+      />,
+    );
 
     (capturedProps.onNodeDoubleClick as (e: unknown, n: unknown) => void)({}, findNode('sceneNode'));
     expect(onOpenScene).toHaveBeenCalledWith('200');

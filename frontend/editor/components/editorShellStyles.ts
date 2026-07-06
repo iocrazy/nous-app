@@ -625,4 +625,16 @@ export const EDITOR_SHELL_STYLES = `
   margin-top:7px; font-size:12px; line-height:1.5; color:var(--ink-soft);
   display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
 }
+.mh-flow-chapter[aria-busy='true']{ opacity:0.75; }
+.mh-flow-actions{ margin-top:10px; display:flex; flex-wrap:wrap; gap:6px; }
+.mh-flow-action{
+  font-family:var(--sans); font-size:11px; font-weight:600;
+  padding:4px 9px; border-radius:var(--radius-sm); cursor:pointer;
+  background:var(--surface); color:var(--ink-soft); border:1px solid var(--surface-border);
+}
+.mh-flow-action:hover:not(:disabled){ background:var(--surface-2); color:var(--ink); }
+.mh-flow-action:disabled{ opacity:0.5; cursor:default; }
+.mh-flow-action.confirming{
+  background:var(--indigo); color:var(--accent-on); border-color:var(--indigo);
+}
 `;
