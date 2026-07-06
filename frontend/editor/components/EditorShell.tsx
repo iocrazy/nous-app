@@ -25,7 +25,7 @@ import { EDITOR_SHELL_STYLES } from './editorShellStyles';
 import { SceneBlock, type TypeCommand } from './SceneBlock';
 import { SceneRail } from './SceneRail';
 import { ElementToolbar } from './ElementToolbar';
-import { WritingPanel } from './WritingPanel';
+import { WritingPanel, deriveStatistics } from './WritingPanel';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -156,6 +156,9 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
     }
     return state.nextInsertType;
   })();
+
+  // Script-wide CAST names feed the @-mention / character-cue picker.
+  const mentionCandidates = useMemo(() => deriveStatistics(scenes).cast, [scenes]);
 
   const tabLabel: Record<EditorMode, string> = {
     script: t('editor.tabScript'),
@@ -290,6 +293,7 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
                         scene={s}
                         index={i}
                         format={state.format}
+                        mentionCandidates={mentionCandidates}
                         onFocusElement={handleFocusElement}
                         typeCommand={typeCommand ?? undefined}
                       />

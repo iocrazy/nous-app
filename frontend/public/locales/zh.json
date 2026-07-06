@@ -2351,6 +2351,8 @@
     "format": "格式",
     "hollywood": "好莱坞",
     "asian": "亚洲",
+    "mentionListLabel": "提及角色",
+    "mentionNoMatch": "没有匹配的角色",
     "statistics": "统计",
     "statScenes": "场景",
     "statWords": "字数",

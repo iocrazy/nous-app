@@ -2351,6 +2351,8 @@
     "format": "Format",
     "hollywood": "Hollywood",
     "asian": "Asian",
+    "mentionListLabel": "Mention a character",
+    "mentionNoMatch": "No matching character",
     "statistics": "Statistics",
     "statScenes": "Scenes",
     "statWords": "Words",

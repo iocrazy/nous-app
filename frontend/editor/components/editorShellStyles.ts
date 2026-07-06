@@ -326,6 +326,30 @@ export const EDITOR_SHELL_STYLES = `
 .mh-el-line{ font-size:13.5px; line-height:1.7; color:var(--sheet-ink); margin-bottom:7px; }
 .mh-placeholder-line{ color:var(--sheet-ink-soft); font-style:italic; }
 
+/* ===== @ MENTION CHIPS + PICKER ===== */
+.mh-mention{
+  color:var(--indigo-deep); background:var(--indigo-soft);
+  border-radius:5px; padding:0 4px; font-weight:600;
+  box-decoration-break:clone; -webkit-box-decoration-break:clone;
+}
+.mh-mention.unknown{ color:var(--ink-faint); background:var(--surface-2); font-weight:500; }
+.mh-mention-pop{
+  z-index:20; min-width:180px; max-width:260px; margin-top:2px;
+  background:var(--surface); border:1px solid var(--surface-border);
+  border-radius:var(--radius-md); box-shadow:var(--shadow-float);
+  padding:5px; font-family:var(--sans);
+}
+.mh-mention-list{ list-style:none; margin:0; padding:0; max-height:220px; overflow-y:auto; }
+.mh-mention-opt{
+  padding:7px 10px; border-radius:var(--radius-sm); font-size:12.5px;
+  color:var(--ink-soft); cursor:pointer; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis;
+}
+.mh-mention-opt:hover,
+.mh-mention-opt.active{ background:var(--indigo-soft); color:var(--indigo-deep); }
+.mh-mention-opt[aria-selected='true']{ font-weight:600; }
+.mh-mention-empty{ padding:8px 10px; font-size:12px; color:var(--ink-faint); }
+
 /* Outline / Cover placeholders (read-only in Phase 1) */
 .mh-doc-outline{ font-family:var(--sans); color:var(--sheet-ink); }
 .mh-doc-title{ font-size:25px; font-weight:800; letter-spacing:-0.01em; margin-bottom:20px; }
