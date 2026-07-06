@@ -17,7 +17,13 @@ import { useTranslation } from 'react-i18next';
 import type { SceneDoc } from '../types';
 import type { EditorFormat } from '../useEditorState';
 
-const CAST_COLORS = ['var(--red)', 'var(--green)', 'var(--violet)', 'var(--indigo)', 'var(--amber)'];
+export const CAST_COLORS = [
+  'var(--red)',
+  'var(--green)',
+  'var(--violet)',
+  'var(--indigo)',
+  'var(--amber)',
+];
 
 export interface EditorStatistics {
   scenes: number;

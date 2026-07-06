@@ -24,6 +24,9 @@ import { persistFormat, readStoredFormat } from '../formatStorage';
 import { EDITOR_SHELL_STYLES } from './editorShellStyles';
 import { SceneBlock, type TypeCommand } from './SceneBlock';
 import { SceneRail } from './SceneRail';
+import { RailModules } from './RailModules';
+import { RailEntities } from './RailEntities';
+import { deriveRailCharacters, deriveRailLocations } from '../railDerive';
 import { ElementToolbar } from './ElementToolbar';
 import { WritingPanel, deriveStatistics } from './WritingPanel';
 
@@ -160,6 +163,10 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
   // Script-wide CAST names feed the @-mention / character-cue picker.
   const mentionCandidates = useMemo(() => deriveStatistics(scenes).cast, [scenes]);
 
+  // Rail entity sections (laper info architecture) — Characters + Locations.
+  const railCharacters = useMemo(() => deriveRailCharacters(scenes), [scenes]);
+  const railLocations = useMemo(() => deriveRailLocations(scenes), [scenes]);
+
   const tabLabel: Record<EditorMode, string> = {
     script: t('editor.tabScript'),
     outline: t('editor.tabOutline'),
@@ -221,12 +228,20 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
                 </div>
               </div>
             </div>
-            <div className="mh-rail-section-label">{t('editor.scenesLabel')}</div>
-            <SceneRail
-              scenes={scenes}
-              activeSceneId={state.activeSceneId}
-              onSelect={handleSelectScene}
-            />
+            <RailModules />
+            <div className="mh-rail-scroll">
+              <RailEntities
+                characters={railCharacters}
+                locations={railLocations}
+                onSelect={handleSelectScene}
+              />
+              <div className="mh-rail-section-label">{t('editor.scenesLabel')}</div>
+              <SceneRail
+                scenes={scenes}
+                activeSceneId={state.activeSceneId}
+                onSelect={handleSelectScene}
+              />
+            </div>
           </>
         )}
       </nav>

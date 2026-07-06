@@ -128,6 +128,41 @@ export const EDITOR_SHELL_STYLES = `
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
 
+/* ===== RAIL INFO ARCHITECTURE (modules nav + Characters/Locations) ===== */
+.mh-rail-modules{ padding:2px 10px 6px; display:flex; flex-direction:column; gap:2px; }
+.mh-rail-module{
+  display:flex; align-items:center; gap:9px; width:100%; text-align:left;
+  padding:8px 9px; border-radius:var(--radius-sm);
+  font-family:var(--sans); font-size:12.5px; font-weight:600;
+  color:var(--ink-soft); background:none; border:1px solid transparent; cursor:pointer;
+}
+.mh-rail-module:hover:not(:disabled){ background:var(--surface-2); }
+.mh-rail-module:disabled{ opacity:0.5; cursor:default; }
+.mh-rail-module.active{ background:var(--indigo-soft); color:var(--indigo-deep); border-color:var(--surface-border); }
+.mh-rail-module-glyph{
+  width:16px; text-align:center; flex-shrink:0;
+  font-family:var(--mono); font-size:12px; color:var(--ink-faint);
+}
+.mh-rail-module.active .mh-rail-module-glyph{ color:var(--indigo-deep); }
+/* One scroll region for Characters + Locations + Scenes; the modules nav and
+   Episode selector above it stay fixed (navigation never scrolls away). */
+.mh-rail-scroll{ flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; }
+.mh-rail-scroll .mh-scene-list{ flex:0 0 auto; overflow:visible; }
+.mh-rail-section{ display:flex; flex-direction:column; }
+.mh-rail-entity-list{ padding:0 10px 6px; display:flex; flex-direction:column; gap:1px; }
+.mh-rail-entity-row{
+  display:flex; align-items:center; gap:8px; width:100%; text-align:left;
+  padding:6px 9px; border-radius:var(--radius-sm);
+  font-family:var(--sans); color:var(--ink-soft); background:none; border:none; cursor:pointer;
+}
+.mh-rail-entity-row:hover{ background:var(--surface-2); }
+.mh-rail-entity-name{
+  flex:1; min-width:0; font-size:12.5px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.mh-rail-entity-count{ flex-shrink:0; font-size:10.5px; color:var(--ink-faint); font-family:var(--mono); }
+.mh-rail-empty{ padding:2px 16px 8px; font-size:11.5px; color:var(--ink-faint); }
+
 /* ===== ICON BUTTONS (collapse toggles, theme toggle) ===== */
 .mh-icon-btn{
   display:flex; align-items:center; justify-content:center;
