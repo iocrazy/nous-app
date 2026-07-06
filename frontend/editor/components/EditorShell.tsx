@@ -613,10 +613,13 @@ export function EditorShell({
 
   // ── Live op streaming (Phase B P5 / C2) ────────────────────────────────────
   // Each mounted SceneBlock registers its applyRemoteOps here; the realtime hook
-  // routes an incoming script_ops row to the matching scene. A row for a scene
-  // that isn't currently mounted (windowed out) is dropped — that scene reloads
-  // its snapshot on remount and the SUBSCRIBED reconcile refreshes all scenes.
+  // routes an incoming script_ops row to the matching scene. When a row arrives
+  // for a scene that is NOT currently mounted (windowed out above the virtualize
+  // threshold), there is no handler to apply it — we record that scene id in
+  // `droppedScenes` so the block refetches its (now stale) snapshot the moment it
+  // remounts, rather than showing pre-op text until the next reload.
   const remoteApplyRef = useRef<Map<string, (row: RemoteOpRow) => void>>(new Map());
+  const [droppedScenes, setDroppedScenes] = useState<ReadonlySet<string>>(new Set());
   const registerRemoteApply = useCallback(
     (sceneId: string, apply: ((row: RemoteOpRow) => void) | null) => {
       if (apply) remoteApplyRef.current.set(sceneId, apply);
@@ -626,7 +629,22 @@ export function EditorShell({
   );
   const getSceneIds = useCallback(() => scenesRef.current.map((s) => String(s.id)), []);
   const dispatchToScene = useCallback((sceneId: string, row: RemoteOpRow) => {
-    remoteApplyRef.current.get(sceneId)?.(row);
+    const handler = remoteApplyRef.current.get(sceneId);
+    if (handler) {
+      handler(row);
+      return;
+    }
+    // No mounted block for this scene — remember it so the block refetches on
+    // remount (M1). Snapshot ids compare as strings (scenesRef holds strings).
+    setDroppedScenes((prev) => (prev.has(sceneId) ? prev : new Set(prev).add(sceneId)));
+  }, []);
+  const handleRemoteStaleHandled = useCallback((sceneId: string) => {
+    setDroppedScenes((prev) => {
+      if (!prev.has(sceneId)) return prev;
+      const next = new Set(prev);
+      next.delete(sceneId);
+      return next;
+    });
   }, []);
   useScriptOpsRealtime(COLLAB_ENABLED ? scriptId : null, {
     getSceneIds,
@@ -932,6 +950,10 @@ export function EditorShell({
                             selfActorId={currentUserId}
                             onRegisterRemoteApply={
                               COLLAB_ENABLED ? registerRemoteApply : undefined
+                            }
+                            remoteStale={COLLAB_ENABLED && droppedScenes.has(s.id)}
+                            onRemoteStaleHandled={
+                              COLLAB_ENABLED ? handleRemoteStaleHandled : undefined
                             }
                           />
                         );

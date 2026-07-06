@@ -161,6 +161,11 @@ export interface SceneBlockProps {
   /** Registers this scene's applyRemoteOps with the shell's op-stream router
    *  (called with null on unmount). */
   onRegisterRemoteApply?: (sceneId: string, apply: ((row: RemoteOpRow) => void) | null) => void;
+  /** True when a remote op for this scene arrived while it was unmounted
+   *  (windowed out); the block refetches its scene on (re)mount to shed the
+   *  stale snapshot, then calls onRemoteStaleHandled to clear the flag (C2). */
+  remoteStale?: boolean;
+  onRemoteStaleHandled?: (sceneId: string) => void;
 }
 
 /** Which half of a block the pointer is over → the drop edge. */
@@ -185,6 +190,8 @@ export function SceneBlock({
   focusPresence,
   selfActorId,
   onRegisterRemoteApply,
+  remoteStale,
+  onRemoteStaleHandled,
 }: SceneBlockProps) {
   const { t } = useTranslation();
   const sync = useSceneSync(scene, { selfActorId });
@@ -575,6 +582,14 @@ export function SceneBlock({
     onRegisterRemoteApply(scene.id, sync.applyRemoteOps);
     return () => onRegisterRemoteApply(scene.id, null);
   }, [scene.id, sync.applyRemoteOps, onRegisterRemoteApply]);
+
+  // A remote op landed for this scene while it was windowed out — the snapshot
+  // we mounted from may be stale, so refetch once and clear the flag (C2 / M1).
+  useEffect(() => {
+    if (!remoteStale) return;
+    sync.reconcile();
+    onRemoteStaleHandled?.(scene.id);
+  }, [remoteStale, scene.id, sync.reconcile, onRemoteStaleHandled]);
 
   // Lift optimistic elements to the shell for live Statistics + rail entities
   // (Task 6 ⑥), debounced 1s so a burst of keystrokes collapses into one update.

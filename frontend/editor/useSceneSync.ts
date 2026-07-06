@@ -60,6 +60,9 @@ export interface SceneSync {
   resolveConflict(choice: 'mine' | 'theirs'): void;
   /** Apply (or reconcile from) a remote op row streamed for THIS scene (C2). */
   applyRemoteOps(row: RemoteOpRow): void;
+  /** Refetch this scene as truth — used when it was windowed out while a remote
+   *  op arrived (its snapshot may be stale on remount). */
+  reconcile(): void;
   flush(): Promise<void>;
 }
 
@@ -322,7 +325,9 @@ export function useSceneSync(scene: SceneDoc, options?: SceneSyncOptions): Scene
         return;
       }
       if (!mountedRef.current) return;
-      if (hadPending) {
+      // Re-check after the await: a keystroke during the fetch enqueued local
+      // work, so adopting the server view now would clobber it — diverge instead.
+      if (hadPending || queueRef.current.length > 0) {
         conflictVersionRef.current = fresh.content_version;
         conflictTheirsRef.current = fresh.elements;
         setConflict({ mine: elementsRef.current, theirs: fresh.elements });
@@ -342,8 +347,22 @@ export function useSceneSync(scene: SceneDoc, options?: SceneSyncOptions): Scene
     [releaseFlushWaiters],
   );
 
+  // Freeze the local queue and refetch the scene as truth. Shared by guard 3 of
+  // applyRemoteOps and by the shell's "this scene was windowed out while a remote
+  // op arrived" remount refetch. Diverges (conflict) when local edits are pending,
+  // otherwise adopts the server view cleanly.
+  const reconcile = useCallback(() => {
+    const hadPending = queueRef.current.length > 0 || frozenRef.current;
+    frozenRef.current = true;
+    void reconcileFromServer(hadPending);
+  }, [reconcileFromServer]);
+
   // Apply a remote op row for THIS scene (C2). Three guards, in order:
   //  1. self-echo (our own actor) or stale (op_seq already applied) → ignore.
+  //     NB: a single user with the SAME script open in two tabs shares one
+  //     actor id, so each tab drops the other's rows here — the two tabs do NOT
+  //     live-stream to each other. They converge lazily via the 409/reconcile
+  //     path on the next write (accepted edge; multi-tab same-user is rare).
   //  2. exact next seq on a CLEAN local state → splice the forward ops onto the
   //     optimistic view and advance the version (no network round-trip).
   //  3. gap / malformed / local dirty → freeze and reconcile from the server;
@@ -370,14 +389,11 @@ export function useSceneSync(scene: SceneDoc, options?: SceneSyncOptions): Scene
         return;
       }
 
-      // Guard 3: reconcile from truth. Freeze first so an in-flight pump cannot
-      // advance the version underneath the refetch. `hadPending` decides whether
-      // we diverge (conflict) or cleanly adopt.
-      const hadPending = queueRef.current.length > 0 || frozenRef.current;
-      frozenRef.current = true;
-      void reconcileFromServer(hadPending);
+      // Guard 3: reconcile from truth (freeze first so an in-flight pump cannot
+      // advance the version underneath the refetch).
+      reconcile();
     },
-    [reconcileFromServer],
+    [reconcile],
   );
 
   const flush = useCallback((): Promise<void> => {
@@ -417,6 +433,7 @@ export function useSceneSync(scene: SceneDoc, options?: SceneSyncOptions): Scene
     dispatchOps,
     resolveConflict,
     applyRemoteOps,
+    reconcile,
     flush,
   };
 }

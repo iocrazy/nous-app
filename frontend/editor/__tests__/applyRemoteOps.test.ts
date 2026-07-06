@@ -221,3 +221,47 @@ describe('guard 3 — dirty local state diverges into conflict', () => {
     expect(result.current.conflict).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// reconcile() — the windowed-out remount refetch (M1)
+// ---------------------------------------------------------------------------
+describe('reconcile — refetch this scene as truth', () => {
+  it('adopts the server snapshot when local state is clean', async () => {
+    const fresh = makeScene({ content_version: 7, elements: [el('el_00000042', 'server')] });
+    mockGetScene.mockResolvedValue(fresh);
+
+    const { result } = renderHook(() => useSceneSync(makeScene({ content_version: 1 })));
+    act(() => result.current.reconcile());
+    await drain();
+
+    expect(mockGetScene).toHaveBeenCalledTimes(1);
+    expect(result.current.version).toBe(7);
+    expect(result.current.elements).toEqual([el('el_00000042', 'server')]);
+    expect(result.current.saveState).toBe('saved');
+    expect(result.current.conflict).toBeNull();
+  });
+
+  it('diverges into conflict when local edits are pending', async () => {
+    mockApplyOps.mockReturnValue(deferred<never>().promise);
+    mockGetScene.mockResolvedValue(
+      makeScene({ content_version: 5, elements: [el('el_00000001', 'theirs')] }),
+    );
+
+    const { result } = renderHook(() => useSceneSync(makeScene({ content_version: 1 })));
+    act(() =>
+      result.current.dispatchOps(
+        [{ op: 'update', element_id: 'el_00000001', payload: { text: 'mine' } }],
+        [el('el_00000001', 'mine')],
+      ),
+    );
+    act(() => result.current.reconcile());
+    await drain();
+
+    expect(mockGetScene).toHaveBeenCalledTimes(1);
+    expect(result.current.saveState).toBe('conflict');
+    expect(result.current.conflict).toEqual({
+      mine: [el('el_00000001', 'mine')],
+      theirs: [el('el_00000001', 'theirs')],
+    });
+  });
+});
