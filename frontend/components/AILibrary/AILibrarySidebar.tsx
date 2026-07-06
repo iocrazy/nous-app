@@ -1,3 +1,9 @@
+// frontend/components/AILibrary/AILibrarySidebar.tsx
+// AI Library secondary sidebar — v2.1 IA (docs/superpowers design proposal):
+// use-layer first (Dashboard / Runtime / Chat), manage-layer after
+// (Agents with My-on-top + System collapsed, Skills), Insights last.
+// Tasks deliberately have NO entry here — 待办事项 lives in the main nav.
+
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -8,14 +14,17 @@ import {
   ChevronLeft,
   ChevronRight,
   Cpu,
+  LayoutDashboard,
   Library,
   MessageSquare,
+  MessagesSquare,
   Plus,
 } from 'lucide-react';
 import type { AILibraryAgent } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAgentRuns } from '../../hooks/useAgentRuns';
+import { useGlobalChatStore } from '../../stores/globalChatStore';
 import { NewAgentModal } from '../AILibrary/NewAgentModal';
 import { getAgentIcon } from '../AILibrary/agentIcons';
 
@@ -25,6 +34,8 @@ interface AILibrarySidebarProps {
   collapsed: boolean;
   onToggleCollapse: () => void;
 }
+
+const SYSTEM_COLLAPSED_KEY = 'aiLibrary.systemAgentsCollapsed';
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
@@ -74,16 +85,37 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
   const location = useLocation();
   const { currentUserId } = useAuth();
   const { runningAgentIds } = useAgentRuns(currentUserId);
+  const requestChat = useGlobalChatStore((s) => s.requestChat);
 
   const [agents, setAgents] = useState<AILibraryAgent[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showNewAgentModal, setShowNewAgentModal] = useState(false);
+  const [systemCollapsed, setSystemCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(SYSTEM_COLLAPSED_KEY) !== 'false';
+    } catch {
+      return true;
+    }
+  });
+
+  const toggleSystemCollapsed = () => {
+    setSystemCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(SYSTEM_COLLAPSED_KEY, String(next));
+      } catch {
+        /* ignore — collapse state is cosmetic */
+      }
+      return next;
+    });
+  };
 
   const activeAgentSlug = (() => {
     const match = location.pathname.match(/\/ai-library\/agents\/([^/]+)/);
     return match ? match[1] : null;
   })();
+  const dashboardActive = /\/ai-library\/?$/.test(location.pathname);
   const skillsActive = /\/ai-library\/skills(\/|$)/.test(location.pathname);
   const sessionsActive = /\/ai-library\/sessions(\/|$)/.test(location.pathname);
   const usageActive = /\/ai-library\/usage(\/|$)/.test(location.pathname);
@@ -114,6 +146,79 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
     navigate(`${urlPrefix}/ai-library/agents/${newSlug}`);
   };
 
+  const renderAgent = (agent: AILibraryAgent) => {
+    const Icon = getAgentIcon(agent.icon);
+    const active = activeAgentSlug === agent.slug;
+    const isRunning = runningAgentIds.has(agent.id);
+    const isPausedBudget = agent.paused_reason === 'budget';
+    const isPausedManual = agent.paused_reason === 'manual';
+    const pausedTitle = isPausedBudget
+      ? t('sidebar.agentPausedBudget', 'Paused: monthly budget exceeded')
+      : isPausedManual
+      ? t('sidebar.agentPausedManual', 'Paused by admin')
+      : null;
+
+    const statusTrailing = isRunning ? (
+      <span
+        className="relative flex h-2 w-2 flex-shrink-0"
+        title={t('sidebar.agentRunning', 'Running...')}
+        aria-label={t('sidebar.agentRunning', 'Running...')}
+      >
+        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+        <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+      </span>
+    ) : isPausedBudget ? (
+      <AlertTriangle
+        size={12}
+        className="flex-shrink-0 text-amber-500"
+        aria-label={pausedTitle ?? undefined}
+      />
+    ) : isPausedManual ? (
+      <AlertTriangle
+        size={12}
+        className="flex-shrink-0 text-ink-500"
+        aria-label={pausedTitle ?? undefined}
+      />
+    ) : null;
+
+    // Agent-overrides (mig 341): presets the caller (or their teams)
+    // customized get a dot — reset lives in the editor.
+    const customized = (agent.override_scopes?.length ?? 0) > 0;
+    const customizedDot = customized ? (
+      <span
+        className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-indigo-400"
+        title={t('aiLibrary.customized', 'Customized')}
+        aria-label={t('aiLibrary.customized', 'Customized')}
+      />
+    ) : null;
+
+    const trailing: React.ReactNode =
+      customized || statusTrailing ? (
+        <div className="flex items-center gap-1">
+          {customizedDot}
+          {statusTrailing}
+        </div>
+      ) : null;
+
+    return (
+      <NavItem
+        key={agent.slug}
+        icon={Icon}
+        label={agent.name}
+        active={active}
+        onClick={() => navigate(`${urlPrefix}/ai-library/agents/${agent.slug}`)}
+        trailing={trailing}
+        title={
+          pausedTitle
+            ? `${agent.name} — ${pausedTitle}`
+            : isRunning
+            ? `${agent.name} (running)`
+            : agent.name
+        }
+      />
+    );
+  };
+
   if (collapsed) {
     return (
       <div className="relative w-4 flex-shrink-0">
@@ -129,9 +234,15 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
     );
   }
 
+  const chatAgents = agents.filter((a) => a.chat_permissions?.enabled);
+  const myAgents = agents.filter((a) => !a.is_system_preset);
+  const systemAgents = agents.filter((a) => a.is_system_preset);
+  const systemHasAlert = systemAgents.some((a) => a.paused_reason);
+  const liveCount = runningAgentIds.size;
+
   return (
     <>
-      <div className={`group relative flex w-52 flex-col border-r border-ink-800/40`}>
+      <div className={`group relative flex w-52 flex-col overflow-y-auto border-r border-ink-800/40`}>
         {/* Header */}
         <div className="px-4 pt-4 pb-3">
           <span className="text-sm font-semibold text-ink-200">
@@ -139,7 +250,81 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
           </span>
         </div>
 
-        {/* Agents */}
+        {/* Dashboard */}
+        <div className="px-2">
+          <NavItem
+            icon={LayoutDashboard}
+            label={t('sidebar.dashboard', 'Dashboard')}
+            active={dashboardActive}
+            onClick={() => navigate(`${urlPrefix}/ai-library`)}
+            trailing={
+              liveCount > 0 ? (
+                <span
+                  className="flex items-center gap-1 text-[10px] font-medium text-emerald-400"
+                  title={t('sidebar.liveRuns', '{{count}} running', { count: liveCount })}
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  {liveCount}
+                </span>
+              ) : undefined
+            }
+          />
+        </div>
+
+        {/* Divider */}
+        <div className="mx-3 my-2 border-t border-ink-800/80" />
+
+        {/* Runtime */}
+        <div className="px-2">
+          <SectionLabel>{t('aiLibrary.runtimeSection', 'Runtime')}</SectionLabel>
+          <div className="mt-1 flex flex-col gap-0.5">
+            <NavItem
+              icon={Cpu}
+              label={t('sidebar.workforce', 'Workforce')}
+              active={workforceActive}
+              onClick={() => navigate(`${urlPrefix}/ai-library/workforce`)}
+            />
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div className="mx-3 my-2 border-t border-ink-800/80" />
+
+        {/* Chat — use-layer: sessions + chat-enabled agents (click = talk) */}
+        <div className="px-2">
+          <SectionLabel>{t('aiLibrary.chatSection', 'Chat')}</SectionLabel>
+          <div className="mt-1 flex flex-col gap-0.5">
+            <NavItem
+              icon={MessageSquare}
+              label={t('sidebar.sessions', 'Sessions')}
+              active={sessionsActive}
+              onClick={() => navigate(`${urlPrefix}/ai-library/sessions`)}
+            />
+            {chatAgents.map((agent) => {
+              const Icon = getAgentIcon(agent.icon);
+              return (
+                <NavItem
+                  key={`chat-${agent.slug}`}
+                  icon={Icon}
+                  label={agent.name}
+                  active={false}
+                  onClick={() => requestChat(agent.slug)}
+                  title={t('aiLibrary.openChatWith', 'Chat with {{name}}', {
+                    name: agent.name,
+                  })}
+                  trailing={
+                    <MessagesSquare size={12} className="flex-shrink-0 text-ink-600" />
+                  }
+                />
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div className="mx-3 my-2 border-t border-ink-800/80" />
+
+        {/* Agents — manage-layer */}
         <div className="px-2">
           <div className="flex items-center justify-between px-2">
             <SectionLabel>{t('aiLibrary.agentsSection', 'Agents')}</SectionLabel>
@@ -171,134 +356,41 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
                   {t('aiLibrary.retry', 'Retry')}
                 </button>
               </div>
-            ) : agents.length === 0 ? (
-              <div className="px-3 py-1 text-[11px] text-ink-600">
-                {t('aiLibrary.noAgents', 'No agents yet')}
-              </div>
             ) : (
-              (() => {
-                const renderAgent = (agent: (typeof agents)[number]) => {
-                const Icon = getAgentIcon(agent.icon);
-                const active = activeAgentSlug === agent.slug;
-                const isRunning = runningAgentIds.has(agent.id);
-                const isPausedBudget = agent.paused_reason === 'budget';
-                const isPausedManual = agent.paused_reason === 'manual';
-                const pausedTitle = isPausedBudget
-                  ? t(
-                      'sidebar.agentPausedBudget',
-                      'Paused: monthly budget exceeded',
-                    )
-                  : isPausedManual
-                  ? t('sidebar.agentPausedManual', 'Paused by admin')
-                  : null;
+              <>
+                {myAgents.length === 0 ? (
+                  <div className="px-3 py-1 text-[11px] text-ink-600">
+                    {t('aiLibrary.noMyAgents', 'No custom agents yet')}
+                  </div>
+                ) : (
+                  myAgents.map(renderAgent)
+                )}
 
-                const isChatEnabled = agent.chat_permissions?.enabled;
-
-                const statusTrailing = isRunning ? (
-                  <span
-                    className="relative flex h-2 w-2 flex-shrink-0"
-                    title={t('sidebar.agentRunning', 'Running...')}
-                    aria-label={t('sidebar.agentRunning', 'Running...')}
-                  >
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-                  </span>
-                ) : isPausedBudget ? (
-                  <AlertTriangle
-                    size={12}
-                    className="flex-shrink-0 text-amber-500"
-                    aria-label={pausedTitle ?? undefined}
-                  />
-                ) : isPausedManual ? (
-                  <AlertTriangle
-                    size={12}
-                    className="flex-shrink-0 text-ink-500"
-                    aria-label={pausedTitle ?? undefined}
-                  />
-                ) : null;
-
-                // Agent-overrides (mig 341): presets the caller (or their
-                // teams) customized get a dot — reset lives in the editor.
-                const customized = (agent.override_scopes?.length ?? 0) > 0;
-                const customizedDot = customized ? (
-                  <span
-                    className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-indigo-400"
-                    title={t('aiLibrary.customized', 'Customized')}
-                    aria-label={t('aiLibrary.customized', 'Customized')}
-                  />
-                ) : null;
-
-                const trailing: React.ReactNode =
-                  isChatEnabled || customized ? (
-                    <div className="flex items-center gap-1">
-                      {customizedDot}
-                      {isChatEnabled && (
-                        <span className="rounded px-1.5 py-0.5 text-[10px] font-medium text-indigo-300 bg-indigo-500/15">
-                          {t('aiLibrary.permissions.tab')}
-                        </span>
-                      )}
-                      {statusTrailing}
-                    </div>
-                  ) : (
-                    statusTrailing
-                  );
-
-                return (
-                  <NavItem
-                    key={agent.slug}
-                    icon={Icon}
-                    label={agent.name}
-                    active={active}
-                    onClick={() =>
-                      navigate(`${urlPrefix}/ai-library/agents/${agent.slug}`)
-                    }
-                    trailing={trailing}
-                    title={
-                      pausedTitle
-                        ? `${agent.name} — ${pausedTitle}`
-                        : isRunning
-                        ? `${agent.name} (running)`
-                        : agent.name
-                    }
-                  />
-                );
-                };
-
-                const presets = agents.filter((a) => a.is_system_preset);
-                const mine = agents.filter((a) => !a.is_system_preset);
-                return (
+                {systemAgents.length > 0 && (
                   <>
-                    {presets.map(renderAgent)}
-                    {mine.length > 0 && (
-                      <>
-                        <div className="mt-2 px-2">
-                          <SectionLabel>
-                            {t('aiLibrary.myAgentsSection', 'My Agents')}
-                          </SectionLabel>
-                        </div>
-                        {mine.map(renderAgent)}
-                      </>
-                    )}
+                    <button
+                      type="button"
+                      onClick={toggleSystemCollapsed}
+                      className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-[12px] text-ink-500 hover:text-ink-300 hover:bg-ink-800/40 transition-colors"
+                      aria-expanded={!systemCollapsed}
+                    >
+                      <span className="text-[9px]">{systemCollapsed ? '▸' : '▾'}</span>
+                      <span className="flex-1 text-left">
+                        {t('aiLibrary.systemAgents', 'System')}
+                        <span className="ml-1 text-ink-600">({systemAgents.length})</span>
+                      </span>
+                      {systemCollapsed && systemHasAlert && (
+                        <span
+                          className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-amber-500"
+                          title={t('aiLibrary.systemAgentsAlert', 'A system agent is paused')}
+                        />
+                      )}
+                    </button>
+                    {!systemCollapsed && systemAgents.map(renderAgent)}
                   </>
-                );
-              })()
+                )}
+              </>
             )}
-          </div>
-        </div>
-
-        {/* Divider */}
-        <div className="mx-3 my-2 border-t border-ink-800/80" />
-
-        {/* Chat */}
-        <div className="px-2">
-          <SectionLabel>{t('aiLibrary.chatSection', 'Chat')}</SectionLabel>
-          <div className="mt-1 flex flex-col gap-0.5">
-            <NavItem
-              icon={MessageSquare}
-              label={t('sidebar.sessions', 'Sessions')}
-              active={sessionsActive}
-              onClick={() => navigate(`${urlPrefix}/ai-library/sessions`)}
-            />
           </div>
         </div>
 
@@ -321,25 +413,9 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
         {/* Divider */}
         <div className="mx-3 my-2 border-t border-ink-800/80" />
 
-        {/* Runtime */}
-        <div className="px-2">
-          <SectionLabel>{t('aiLibrary.runtimeSection', 'Runtime')}</SectionLabel>
-          <div className="mt-1 flex flex-col gap-0.5">
-            <NavItem
-              icon={Cpu}
-              label={t('sidebar.workforce', 'Workforce')}
-              active={workforceActive}
-              onClick={() => navigate(`${urlPrefix}/ai-library/workforce`)}
-            />
-          </div>
-        </div>
-
-        {/* Divider */}
-        <div className="mx-3 my-2 border-t border-ink-800/80" />
-
-        {/* Usage + Memory */}
+        {/* Insights */}
         <div className="px-2 pb-3">
-          <SectionLabel>{t('aiLibrary.usageSection', 'Usage')}</SectionLabel>
+          <SectionLabel>{t('aiLibrary.insightsSection', 'Insights')}</SectionLabel>
           <div className="mt-1 flex flex-col gap-0.5">
             <NavItem
               icon={BarChart3}

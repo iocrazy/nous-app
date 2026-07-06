@@ -25,6 +25,16 @@ export interface PageChatContext {
   onApplyContent?: (content: string) => void;
 }
 
+/** One-shot "open the panel and talk to THIS agent" request (AI Library
+ *  sidebar's Chat section). Nonce disambiguates repeat clicks on the same
+ *  agent. Consumed (cleared) by AIChatPanel once applied; never persisted. */
+export interface ChatRequest {
+  agentSlug: string;
+  /** Optional: also resume THIS session (Sessions page "Open in Chat"). */
+  sessionId?: string;
+  nonce: number;
+}
+
 interface GlobalChatState {
   open: boolean;
   /** Window rect, anchored bottom-right (offsets in px). */
@@ -34,6 +44,8 @@ interface GlobalChatState {
   height: number;
   /** Live context registered by the current page (not persisted). */
   pageContext: PageChatContext | null;
+  /** Pending open-with-agent request (not persisted). */
+  chatRequest: ChatRequest | null;
 
   setOpen: (open: boolean) => void;
   toggle: () => void;
@@ -41,6 +53,10 @@ interface GlobalChatState {
     rect: Partial<Pick<GlobalChatState, 'right' | 'bottom' | 'width' | 'height'>>,
   ) => void;
   setPageContext: (ctx: PageChatContext | null) => void;
+  /** Open the floating chat targeted at an agent (Chat section entry);
+   *  pass sessionId to also resume a specific session (Sessions page). */
+  requestChat: (agentSlug: string, sessionId?: string) => void;
+  consumeChatRequest: () => void;
 }
 
 export const CHAT_MIN_W = 340;
@@ -56,11 +72,18 @@ export const useGlobalChatStore = create<GlobalChatState>()(
       width: 400,
       height: 620,
       pageContext: null,
+      chatRequest: null,
 
       setOpen: (open) => set({ open }),
       toggle: () => set((s) => ({ open: !s.open })),
       setRect: (rect) => set(rect),
       setPageContext: (ctx) => set({ pageContext: ctx }),
+      requestChat: (agentSlug, sessionId) =>
+        set((s) => ({
+          open: true,
+          chatRequest: { agentSlug, sessionId, nonce: (s.chatRequest?.nonce ?? 0) + 1 },
+        })),
+      consumeChatRequest: () => set({ chatRequest: null }),
     }),
     {
       name: 'mediahub.global_chat',

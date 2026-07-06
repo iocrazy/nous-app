@@ -39,11 +39,12 @@ from app.api.projects_router import router as projects_router
 from app.api.realtime_router import router as realtime_router
 from app.api.resources_router import router as resources_router
 from app.api.reviews_router import router as reviews_router
-from app.api.sb_ai_router import router as sb_ai_router
-from app.api.sb_canvas_router import router as sb_canvas_router
-from app.api.sb_characters_router import router as sb_characters_router
-from app.api.sb_export_router import router as sb_export_router
-from app.api.sb_projects_router import router as sb_projects_router
+
+# Legacy storyboard workbench routers (sb_projects / sb_canvas / sb_characters /
+# sb_ai / sb_export) retired in the Phase B P4 cutover — the storyboarding
+# surface now lives in the script editor (script_shots_router). Their
+# ``/storyboard/*`` paths are 410-tombstoned by sb_gone_router below.
+from app.api.sb_gone_router import router as sb_gone_router
 from app.api.script_ai_router import router as script_ai_router
 from app.api.script_assets_router import router as script_assets_router
 from app.api.script_canvas_router import router as script_canvas_router
@@ -52,6 +53,7 @@ from app.api.script_import_router import router as script_import_router
 from app.api.script_projects_router import router as script_projects_router
 from app.api.script_scenes_router import router as script_scenes_router
 from app.api.script_shots_router import router as script_shots_router
+from app.api.script_versions_router import router as script_versions_router
 from app.api.search_router import router as search_router
 from app.api.shares_router import router as shares_router
 from app.api.skills_router import router as skills_router
@@ -171,11 +173,10 @@ api_router.include_router(router=error_report_router, tags=["Error Reporting"])
 
 api_router.include_router(router=admin_router, tags=["Admin"])
 
-api_router.include_router(router=sb_projects_router, tags=["Storyboard Projects"])
-api_router.include_router(router=sb_canvas_router, tags=["Storyboard Canvas"])
-api_router.include_router(router=sb_characters_router, tags=["Storyboard Characters"])
-api_router.include_router(router=sb_ai_router, tags=["Storyboard AI"])
-api_router.include_router(router=sb_export_router, tags=["Storyboard Export"])
+# Retired legacy storyboard workbench — 410 Gone for every /storyboard/* path
+# (the five sb_* routers are no longer registered; the shot board lives in the
+# script editor now). Tables are left in place (deferred cutover migration).
+api_router.include_router(router=sb_gone_router, tags=["Storyboard (retired)"])
 
 api_router.include_router(router=style_templates_router, tags=["Style Templates"])
 
@@ -189,6 +190,7 @@ api_router.include_router(router=script_import_router, tags=["Script Import"])
 api_router.include_router(router=script_export_router, tags=["Script Export"])
 api_router.include_router(router=script_scenes_router, tags=["Script Scenes"])
 api_router.include_router(router=script_shots_router, tags=["Script Shots"])
+api_router.include_router(router=script_versions_router, tags=["Script Versions"])
 api_router.include_router(router=episodes_router, tags=["Episodes"])
 
 api_router.include_router(router=ai_library_router, tags=["AI Library"])

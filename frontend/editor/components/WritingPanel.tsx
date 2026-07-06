@@ -16,6 +16,8 @@
 import { useTranslation } from 'react-i18next';
 import type { SceneDoc } from '../types';
 import type { EditorFormat } from '../useEditorState';
+import type { ScriptCommit } from '../sceneService';
+import { VersionPanel } from '../versions/VersionPanel';
 
 export const CAST_COLORS = [
   'var(--red)',
@@ -68,14 +70,37 @@ export interface WritingPanelProps {
   scenes: SceneDoc[];
   format: EditorFormat;
   onFormatChange: (format: EditorFormat) => void;
+  // Version history (Phase B P4). Optional so the panel renders standalone
+  // (statistics-only) when no script is bound — e.g. the deriveStatistics tests.
+  scriptId?: string;
+  onCompareCommit?: (commit: ScriptCommit) => void;
+  onRolledBack?: () => void;
 }
 
-export function WritingPanel({ scenes, format, onFormatChange }: WritingPanelProps) {
+export function WritingPanel({
+  scenes,
+  format,
+  onFormatChange,
+  scriptId,
+  onCompareCommit,
+  onRolledBack,
+}: WritingPanelProps) {
   const { t } = useTranslation();
   const stats = deriveStatistics(scenes);
 
   return (
     <div className="mh-panel-body">
+      {scriptId && onCompareCommit && onRolledBack && (
+        <>
+          <VersionPanel
+            scriptId={scriptId}
+            onCompare={onCompareCommit}
+            onRolledBack={onRolledBack}
+          />
+          <div className="mh-divider" />
+        </>
+      )}
+
       <div>
         <div className="mh-field-label">{t('editor.format')}</div>
         <div className="mh-segmented" role="group" aria-label={t('editor.format')}>

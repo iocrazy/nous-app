@@ -10,12 +10,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Check, MessageSquare, Pencil, Search, Trash2, X } from 'lucide-react';
+import { Check, MessageSquare, MessagesSquare, Pencil, Search, Trash2, X } from 'lucide-react';
 
 import type { AIChatMessage, ChatSession } from '../types';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { MessageBubble } from '../components/chat/AIChatBubble';
 import { useToast } from '../components/Toast';
+import { useGlobalChatStore } from '../stores/globalChatStore';
 
 function formatWhen(iso?: string | null): string {
   if (!iso) return '';
@@ -44,11 +45,28 @@ export const SessionsPage: React.FC = () => {
   const [detailLoading, setDetailLoading] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
+  const [agentFilter, setAgentFilter] = useState<string | null>(null);
+  const requestChat = useGlobalChatStore((s) => s.requestChat);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const selected = useMemo(
     () => sessions.find((s) => s.id === sessionId) ?? null,
     [sessions, sessionId],
+  );
+
+  // Agent filter chips: derived client-side (list is capped at 100 rows),
+  // ordered by session count so the busiest agents come first.
+  const agentChips = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const s of sessions) {
+      if (s.agent_slug) counts.set(s.agent_slug, (counts.get(s.agent_slug) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [sessions]);
+
+  const visibleSessions = useMemo(
+    () => (agentFilter ? sessions.filter((s) => s.agent_slug === agentFilter) : sessions),
+    [sessions, agentFilter],
   );
 
   const loadSessions = useCallback(async (q: string) => {
@@ -161,15 +179,36 @@ export const SessionsPage: React.FC = () => {
             className="w-full rounded-md border border-ink-800 bg-ink-900/40 py-1.5 pl-8 pr-3 text-[13px] text-ink-200 placeholder-ink-600 focus:border-indigo-500/50 focus:outline-none"
           />
         </div>
+        {agentChips.length > 1 && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {agentChips.map(([slug, count]) => {
+              const on = agentFilter === slug;
+              return (
+                <button
+                  key={slug}
+                  type="button"
+                  onClick={() => setAgentFilter(on ? null : slug)}
+                  className={`rounded-full border px-2 py-0.5 text-[11px] transition-colors ${
+                    on
+                      ? 'border-indigo-500/50 bg-indigo-500/15 text-indigo-300'
+                      : 'border-ink-800 text-ink-500 hover:text-ink-300 hover:border-ink-700'
+                  }`}
+                >
+                  {slug} <span className="opacity-60">{count}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
         <div className="flex-1 space-y-1 overflow-y-auto pr-1 min-h-0">
           {listLoading ? (
             <div className="px-2 py-4 text-sm text-ink-500">{t('common.loading')}</div>
-          ) : sessions.length === 0 ? (
+          ) : visibleSessions.length === 0 ? (
             <div className="px-2 py-4 text-sm text-ink-500">
               {t('aiLibrary.sessions.empty', 'No sessions yet — start one from the chat panel.')}
             </div>
           ) : (
-            sessions.map((s) => {
+            visibleSessions.map((s) => {
               const active = s.id === sessionId;
               return (
                 <div
@@ -271,11 +310,23 @@ export const SessionsPage: React.FC = () => {
                   {selected.agent_slug}
                 </span>
               )}
-              {selected?.total_tokens != null && (
-                <span className="ml-auto text-[11px] text-ink-600">
-                  {selected.total_tokens} tokens
-                </span>
-              )}
+              <div className="ml-auto flex items-center gap-3">
+                {selected?.total_tokens != null && (
+                  <span className="text-[11px] text-ink-600">
+                    {selected.total_tokens} tokens
+                  </span>
+                )}
+                {selected?.agent_slug && (
+                  <button
+                    type="button"
+                    onClick={() => requestChat(selected.agent_slug!, selected.id)}
+                    className="flex items-center gap-1.5 rounded-md border border-indigo-500/40 bg-indigo-500/10 px-2.5 py-1 text-[12px] text-indigo-300 transition-colors hover:bg-indigo-500/20"
+                  >
+                    <MessagesSquare size={13} />
+                    {t('aiLibrary.sessions.openInChat', 'Open in Chat')}
+                  </button>
+                )}
+              </div>
             </div>
             <div className="flex-1 overflow-y-auto px-4 py-4 min-h-0">
               {(messages ?? []).length === 0 ? (

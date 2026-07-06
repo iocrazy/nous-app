@@ -67,7 +67,9 @@
     "agentPausedManual": "Paused by admin",
     "memory": "My Memory",
     "workforce": "Workforce",
-    "sessions": "Sessions"
+    "sessions": "Sessions",
+    "dashboard": "Dashboard",
+    "liveRuns": "{{count}} running"
   },
   "user": {
     "profile": "Profile",
@@ -1071,6 +1073,12 @@
       "files": "Files",
       "shares": "Shares",
       "trash": "Trash"
+    },
+    "storyboardMoved": {
+      "title": "Storyboarding has moved",
+      "body": "Storyboards now live inside each script's editor as its shot board. Open a script to start boarding scenes.",
+      "goToScripts": "Go to Scripts",
+      "toast": "Storyboard has moved into the script editor"
     },
     "totalProjects": "{{count}} projects",
     "searchProjects": "Search projects",
@@ -2092,7 +2100,21 @@
       "msgCount": "{{count}} msgs",
       "pickOne": "Select a session to view its transcript.",
       "noMessages": "No messages in this session.",
-      "deleteConfirm": "Delete this session and its messages?"
+      "deleteConfirm": "Delete this session and its messages?",
+      "openInChat": "Open in Chat"
+    },
+    "insightsSection": "Insights",
+    "openChatWith": "Chat with {{name}}",
+    "noMyAgents": "No custom agents yet",
+    "systemAgents": "System",
+    "systemAgentsAlert": "A system agent is paused",
+    "dashboard": {
+      "loadError": "Failed to load usage",
+      "todayRuns": "Runs today",
+      "todayTokens": "Tokens today",
+      "weekRuns": "Runs · 7d",
+      "weekTokens": "Tokens · 7d",
+      "topModels": "Top models · 7d"
     }
   },
   "aiUsage": {
@@ -2467,6 +2489,37 @@
     "shotDescription": "Shot description",
     "shotDescPlaceholder": "Describe this shot…",
     "shotGenerate": "Generate",
-    "shotGenerateComingSoon": "Image generation is coming soon"
+    "shotGenerateComingSoon": "Image generation is coming soon",
+    "versionHistory": "Version History",
+    "saveVersion": "Save Version",
+    "versionMessagePlaceholder": "Describe this version…",
+    "versionSaveConfirm": "Save",
+    "versionCancel": "Cancel",
+    "versionSaving": "Saving…",
+    "versionEmpty": "No saved versions yet",
+    "versionCompare": "Compare",
+    "versionRollback": "Roll Back",
+    "versionRollbackConfirm": "Confirm?",
+    "versionDelete": "Delete",
+    "versionDeleteConfirm": "Delete?",
+    "versionSaveFailed": "Could not save this version",
+    "versionRolledBack": "Rolled back to this version",
+    "versionRollbackFailed": "Could not roll back to this version",
+    "versionRollbackPartial": "Some scenes could not be rolled back",
+    "versionRollbackSceneFailed": "A scene could not be rolled back ({{code}})",
+    "versionDeleteFailed": "Could not delete this version",
+    "diffBack": "Back",
+    "diffCurrent": "Current",
+    "diffLoading": "Loading changes…",
+    "diffLoadError": "Could not load this comparison. Please try again.",
+    "diffNoChanges": "No changes between these versions",
+    "diffSceneSet": "Scene changes",
+    "diffSceneAdded": "Scene added",
+    "diffSceneRemoved": "Scene removed",
+    "diffKindAdded": "Added",
+    "diffKindRemoved": "Removed",
+    "diffKindChanged": "Changed",
+    "diffKindMoved": "Moved",
+    "diffEmptyLine": "(empty line)"
   }
 }

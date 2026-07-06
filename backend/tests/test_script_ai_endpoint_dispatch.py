@@ -166,9 +166,14 @@ async def test_create_branches_threads_shared_wf_id(
     _assert_shared_valid_uuid(mock_task_manager.create, dispatch)
 
 
-async def test_convert_to_storyboard_threads_shared_wf_id(
+async def test_convert_to_storyboard_is_retired_410(
     monkeypatch, mock_task_manager, mock_verify_access
 ):
+    """Retired in the Phase B P4 cutover: the script→legacy-workbench bridge no
+    longer dispatches a workflow (it wrote the now-deprecated storyboard_nodes /
+    script_storyboard_links tables) — it raises 410 Gone instead."""
+    from fastapi import HTTPException
+
     dispatch = AsyncMock(return_value={"mode": "dbos"})
     monkeypatch.setattr(
         "app.services.infra.dbos_orchestrator.start_workflow_routed", dispatch
@@ -178,9 +183,10 @@ async def test_convert_to_storyboard_threads_shared_wf_id(
         script_id=str(uuid.uuid4()),
         chapter_id=str(uuid.uuid4()),
     )
-    result = await script_ai_router.convert_to_storyboard(_auth(), body)
+    with pytest.raises(HTTPException) as exc:
+        await script_ai_router.convert_to_storyboard(_auth(), body)
 
-    assert result["success"] is True
-    mock_task_manager.create.assert_awaited_once()
-    dispatch.assert_awaited_once()
-    _assert_shared_valid_uuid(mock_task_manager.create, dispatch)
+    assert exc.value.status_code == 410
+    # No task row created and nothing dispatched — the endpoint short-circuits.
+    mock_task_manager.create.assert_not_awaited()
+    dispatch.assert_not_awaited()
