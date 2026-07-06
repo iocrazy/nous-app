@@ -133,6 +133,32 @@ async def test_generate_shot_sets_generating_and_threads_wf_id(
     }
 
 
+async def test_generate_shot_rolls_status_back_to_empty_on_dispatch_failure(
+    monkeypatch, mock_task_manager
+):
+    """If dispatch fails AFTER status was flipped to 'generating', the endpoint
+    rolls the shot back to 'empty' (the workflow never ran) and 500s — never
+    leaves the shot stuck 'generating' with no live task."""
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(shots_router.settings, "FEATURE_SHOT_GENERATE", True)
+    repo = MagicMock()
+    repo.update_status = AsyncMock()
+    monkeypatch.setattr(shots_router, "get_script_shot_repository", lambda: repo)
+
+    dispatch = AsyncMock(side_effect=RuntimeError("dbos down"))
+    monkeypatch.setattr(
+        "app.services.infra.dbos_orchestrator.start_workflow_routed", dispatch
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await shots_router.generate_shot(_SHOT, _auth())
+    assert exc_info.value.status_code == 500
+    # Ordered: 'generating' first, then rolled back to 'empty' on failure.
+    assert repo.update_status.await_args_list[0].args == (_SHOT, "generating")
+    assert repo.update_status.await_args_list[-1].args == (_SHOT, "empty")
+
+
 # ---------------------------------------------------------------------------
 # scene_to_shots service: prompt-injection fence + shape validation
 # ---------------------------------------------------------------------------
@@ -183,9 +209,7 @@ async def test_scene_to_shots_normalizes_and_drops_off_vocab():
         '{"shot_type":"BOGUS"}'
         "]}"
     )
-    with patch.object(
-        ScriptAIService, "_run_agent", AsyncMock(return_value=payload)
-    ):
+    with patch.object(ScriptAIService, "_run_agent", AsyncMock(return_value=payload)):
         shots = await ScriptAIService().scene_to_shots(
             [{"type": "action", "text": "x"}]
         )
@@ -195,6 +219,26 @@ async def test_scene_to_shots_normalizes_and_drops_off_vocab():
     assert shots[0]["camera_angle"] == "EYE"  # 'eye' normalized
     assert shots[0]["camera_movement"] is None  # 'ZOOM' off-vocab → dropped
     assert shots[0]["description"] == "Anna enters"
+
+
+async def test_scene_to_shots_clips_overlong_focal_length():
+    """focal_length maps to VARCHAR(20); the AI path has no Pydantic guard, so an
+    overlong value must clip to 20 chars (else create_many 22001-aborts)."""
+    from app.services.storyboard.script.script_ai_service import ScriptAIService
+
+    long_focal = "35mm-anamorphic-vintage"  # 23 chars > 20
+    assert len(long_focal) > 20
+    payload = (
+        '{"shots":[{"shot_type":"WIDE","focal_length":"'
+        + long_focal
+        + '","description":"d"}]}'
+    )
+    with patch.object(ScriptAIService, "_run_agent", AsyncMock(return_value=payload)):
+        shots = await ScriptAIService().scene_to_shots(
+            [{"type": "action", "text": "x"}]
+        )
+    assert len(shots[0]["focal_length"]) == 20
+    assert shots[0]["focal_length"] == long_focal[:20]
 
 
 async def test_scene_to_shots_raises_on_non_object():

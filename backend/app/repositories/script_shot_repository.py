@@ -172,19 +172,36 @@ class ScriptShotRepository:
         """Bulk-insert an ordered shot list for a scene in ONE transaction.
 
         Used by Auto Storyboard to land an AI-generated breakdown atomically.
-        ``shot_number`` is the 1-based sequence, ``sort_order`` a fresh STEP
-        ladder, and ``status`` defaults to ``'empty'`` (a caller-supplied status
-        is ignored — creation never sets a produced state). Returns the created
+        APPENDS to whatever the scene already holds: ``shot_number`` continues
+        from the scene's current ``MAX(shot_number)`` and ``sort_order`` from
+        ``MAX(sort_order) + STEP`` — so re-running Auto Storyboard adds a fresh
+        batch rather than colliding numbers or clobbering the user's manual
+        shots. ``status`` defaults to ``'empty'`` (a caller-supplied status is
+        ignored — creation never sets a produced state). Returns the created
         rows in order."""
         sid = _bigint(scene_id)
         try:
             out: List[Dict[str, Any]] = []
             async with write_scope() as session:
+                base_num = (
+                    await session.scalar(
+                        select(func.max(ScriptShots.shot_number)).where(
+                            ScriptShots.scene_id == sid
+                        )
+                    )
+                ) or 0
+                base_sort = (
+                    await session.scalar(
+                        select(func.max(ScriptShots.sort_order)).where(
+                            ScriptShots.scene_id == sid
+                        )
+                    )
+                ) or 0
                 for idx, shot in enumerate(shots, start=1):
                     values = _shot_write_values(shot)
                     values["scene_id"] = sid
-                    values["shot_number"] = idx
-                    values["sort_order"] = idx * STEP
+                    values["shot_number"] = base_num + idx
+                    values["sort_order"] = base_sort + idx * STEP
                     values.pop("status", None)  # empty on create (server default)
                     result = await session.execute(
                         insert(ScriptShots).values(**values).returning(ScriptShots)

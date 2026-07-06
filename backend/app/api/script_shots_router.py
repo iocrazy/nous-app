@@ -204,10 +204,9 @@ async def generate_shot(
     still holds for callers WITH access."""
     if not settings.FEATURE_SHOT_GENERATE:
         raise HTTPException(status_code=404, detail="Not Found")
+    repo = get_script_shot_repository()
+    await repo.update_status(shot_id, "generating")
     try:
-        repo = get_script_shot_repository()
-        await repo.update_status(shot_id, "generating")
-
         mgr = get_task_manager()
         wf_id = str(_uuid.uuid4())
         task_id = await mgr.create(
@@ -230,8 +229,16 @@ async def generate_shot(
             workflow_id=wf_id,
         )
         return {"success": True, "task_id": task_id}
-    except HTTPException:
-        raise
     except Exception as exc:
-        logger.error(f"[Shots] generate {shot_id} failed: {exc}")
+        # Dispatch failed AFTER we flipped status to 'generating' but BEFORE the
+        # workflow ever ran — roll back to 'empty' (the honest initial state; the
+        # generate workflow, not this endpoint, owns the 'failed' state). Without
+        # this the shot would be stuck 'generating' forever with no live task.
+        logger.error(f"[Shots] generate {shot_id} dispatch failed: {exc}")
+        try:
+            await repo.update_status(shot_id, "empty")
+        except Exception as rollback_exc:  # noqa: BLE001
+            logger.error(
+                f"[Shots] generate {shot_id} status rollback failed: {rollback_exc}"
+            )
         raise HTTPException(status_code=500, detail="Failed to dispatch shot generate")

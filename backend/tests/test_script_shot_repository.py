@@ -154,9 +154,12 @@ async def test_create_empty_scene_starts_at_1000():
 @pytest.mark.asyncio
 async def test_create_many_single_transaction_numbers_and_drops_status():
     """create_many inserts every shot in ONE session, numbering shot_number
-    1..N and sort_order 1000..N*1000, and drops a caller-supplied status."""
+    1..N and sort_order 1000..N*1000 for an EMPTY scene (base 0), and drops a
+    caller-supplied status."""
     session = _CaptureSession(
         [
+            _FakeResult(scalar_first=None),  # MAX(shot_number) → 0
+            _FakeResult(scalar_first=None),  # MAX(sort_order) → 0
             _FakeResult(scalar_first=_shot_obj(shot_number=1, sort_order=1000)),
             _FakeResult(scalar_first=_shot_obj(shot_number=2, sort_order=2000)),
             _FakeResult(scalar_first=_shot_obj(shot_number=3, sort_order=3000)),
@@ -170,17 +173,43 @@ async def test_create_many_single_transaction_numbers_and_drops_status():
     with patch.object(shot_mod, "write_scope", lambda: _ScopeCtx(session)):
         out = await ScriptShotRepository().create_many(str(_SCENE_ID), shots)
 
-    # One session, three INSERTs (atomic breakdown).
-    assert len(session.statements) == 3
+    # One session: 2 MAX scalars + 3 INSERTs (atomic breakdown).
+    assert len(session.statements) == 5
     assert len(out) == 3
-    for i, stmt in enumerate(session.statements, start=1):
+    for i, stmt in enumerate(session.statements[2:], start=1):
         sql, params = _rendered(stmt)
         assert sql.strip().upper().startswith("INSERT INTO PUBLIC.SCRIPT_SHOTS")
-        assert i in params.values()  # shot_number = sequence
-        assert i * 1000 in params.values()  # sort_order ladder
+        assert i in params.values()  # shot_number = base(0) + sequence
+        assert i * 1000 in params.values()  # sort_order ladder from base 0
         assert _SCENE_ID in params.values()  # bigint-coerced scene_id
         # The smuggled 'done' status never reaches any INSERT (server default).
         assert "done" not in params.values()
+
+
+@pytest.mark.asyncio
+async def test_create_many_appends_offset_from_existing_max():
+    """A scene that already holds shots (MAX shot_number=2, sort_order=2000)
+    gets the new batch APPENDED: shot_number 3/4/5, sort_order 3000/4000/5000 —
+    no collision with, or clobber of, the user's existing shots."""
+    session = _CaptureSession(
+        [
+            _FakeResult(scalar_first=2),  # MAX(shot_number) → 2
+            _FakeResult(scalar_first=2000),  # MAX(sort_order) → 2000
+            _FakeResult(scalar_first=_shot_obj(shot_number=3, sort_order=3000)),
+            _FakeResult(scalar_first=_shot_obj(shot_number=4, sort_order=4000)),
+            _FakeResult(scalar_first=_shot_obj(shot_number=5, sort_order=5000)),
+        ]
+    )
+    shots = [{"shot_type": "WIDE"}, {"shot_type": "MEDIUM"}, {"shot_type": "CLOSE"}]
+    with patch.object(shot_mod, "write_scope", lambda: _ScopeCtx(session)):
+        out = await ScriptShotRepository().create_many(str(_SCENE_ID), shots)
+
+    assert len(out) == 3
+    inserts = session.statements[2:]
+    for offset, stmt in enumerate(inserts):
+        _, params = _rendered(stmt)
+        assert (3 + offset) in params.values()  # shot_number 3,4,5
+        assert (3000 + offset * 1000) in params.values()  # sort_order 3000,4000,5000
 
 
 # ── update: whitelist excludes status + URLs ─────────────────────────────

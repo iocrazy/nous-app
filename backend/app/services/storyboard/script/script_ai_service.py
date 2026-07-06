@@ -57,16 +57,19 @@ MAX_BRANCH_LABEL_LENGTH = 100
 # Agent slug in ai_agents table (seeded by migration 138 + seed_loader)
 AGENT_SLUG = "script_ai"
 
-# Shot cinematography vocabularies (Phase B P3). The model is told to pick from
-# these; the persist step (script_shot_breakdown) does not hard-reject an
-# off-vocab value (VARCHAR(20) stores it) but the prompt anchors the model here
-# and the frontend shot-card tag cycler uses the same lists.
+# Shot cinematography vocabularies (Phase B P3). The prompt anchors the model to
+# these; ``_normalize_shots`` then coerces each tag to its vocabulary (off-vocab
+# → dropped), and the frontend shot-card tag cycler uses the same lists.
 SHOT_TYPES = ("WIDE", "MEDIUM", "CLOSE", "ECU", "OTS", "POV", "INSERT")
 CAMERA_ANGLES = ("EYE", "LOW", "HIGH", "DUTCH", "TOP")
 CAMERA_MOVEMENTS = ("STATIC", "PAN", "TILT", "DOLLY", "TRACK", "HANDHELD")
 
 # Per-field caps for a normalized shot (defensive against a runaway model).
 MAX_SHOT_TEXT_LENGTH = 500
+# focal_length maps to script_shots.focal_length VARCHAR(20). The AI path has no
+# Pydantic length guard (unlike the manual ShotCreate schema), so an overlong
+# value must be clipped here or the whole create_many transaction 22001-aborts.
+MAX_FOCAL_LENGTH = 20
 
 
 def _coerce_vocab(value: Any, vocab: tuple) -> Optional[str]:
@@ -82,12 +85,13 @@ def _coerce_vocab(value: Any, vocab: tuple) -> Optional[str]:
     return v if v in vocab else None
 
 
-def _clip(value: Any) -> Optional[str]:
-    """Coerce a free-text shot field to a clipped string, or None if blank."""
+def _clip(value: Any, max_len: int = MAX_SHOT_TEXT_LENGTH) -> Optional[str]:
+    """Coerce a free-text shot field to a ``max_len``-clipped string, or None if
+    blank. ``max_len`` guards VARCHAR columns on the AI path (no Pydantic)."""
     if value is None:
         return None
     text = str(value).strip()
-    return text[:MAX_SHOT_TEXT_LENGTH] if text else None
+    return text[:max_len] if text else None
 
 
 def _flatten_ws(text: Any) -> str:
@@ -511,7 +515,7 @@ class ScriptAIService:
                 "camera_movement": _coerce_vocab(
                     shot.get("camera_movement"), CAMERA_MOVEMENTS
                 ),
-                "focal_length": _clip(shot.get("focal_length")),
+                "focal_length": _clip(shot.get("focal_length"), MAX_FOCAL_LENGTH),
                 "lighting": _clip(shot.get("lighting")),
                 "description": _clip(shot.get("description")),
             }
@@ -551,7 +555,7 @@ class ScriptAIService:
             "Task: break one screenplay scene into a shot list for a "
             "storyboard.\n"
             "Produce 3-8 shots that cover the scene's action in shooting order.\n"
-            'Return ONLY strict JSON — no prose, no markdown fences — shaped '
+            "Return ONLY strict JSON — no prose, no markdown fences — shaped "
             'EXACTLY: {"shots": [ ...shot objects... ]}\n'
             "Each shot object MUST have exactly these keys:\n"
             f'- "shot_type": one of {", ".join(SHOT_TYPES)}\n'
