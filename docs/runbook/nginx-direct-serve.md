@@ -41,18 +41,29 @@
    curl -s -o /dev/null -w '%{http_code}\n' 'http://127.0.0.1:8081/health'
    ```
 
+## 前置:在 :88 反代加 /f/ 转发(与 /stream/ 同法)
+
+⚠️ 实测(2026-07-06):**8081 从外网不可达** —— 浏览器只到得了 `:88`,那是
+群晖系统层 nginx 在做 path 反代(`/api/*`→backend :8880、`/stream/*`→HLS
+容器 :8081,后者是当年 HLS 上线时加的规则)。所以 `/f/` 需要同样加一条:
+
+- 群晖 DSM 反向代理(或当年配 /stream/ 的同一处 nginx 规则):
+  `https://mediahubserver.heygo.cn:88/f/*` → `http://127.0.0.1:8081/f/*`
+- 验证:`curl -s -o /dev/null -w '%{http_code}' 'https://mediahubserver.heygo.cn:88/f/x'`
+  应为 **403**(签名闸生效)而非 404/502。
+
 ## 打开 DB 开关(Supabase SQL,随时可关)
 
 ```sql
 INSERT INTO public.system_settings (key, value)
 VALUES ('nginx_direct_serve',
         '{"enabled": true,
-          "base_url": "https://mediahubserver.heygo.cn:8081",
+          "base_url": "https://mediahubserver.heygo.cn:88",
           "ttl_seconds": 86400}'::jsonb)
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 ```
 
-> base_url 必须是浏览器可达的 :8081 通路(与现有 HLS 播放同一入口)。
+> base_url = **:88**(经系统反代到 8081),不是 8081 本身 —— 8081 外网不可达。
 > 后端配置缓存 60s —— 开关变更 1 分钟内生效。
 
 ## 验证(开启后)
