@@ -2,6 +2,7 @@ import { useParams } from 'react-router-dom';
 import { ToastProvider } from '../../components/Toast';
 import { TaskManagerProvider } from '../../contexts/TaskManagerContext';
 import { ScriptEditorPage } from './ScriptEditorPage';
+import { EditorShell } from '../../editor/components/EditorShell';
 
 /**
  * Fullscreen route — mounted OUTSIDE AppLayout (see router.tsx),
@@ -20,11 +21,16 @@ import { ScriptEditorPage } from './ScriptEditorPage';
  */
 export function ScriptEditor() {
   const { scriptId } = useParams<{ scriptId: string }>();
-  void scriptId;
+  // v2 editor is flag-dark (VITE_FEATURE_SCRIPT_V2); off → legacy editor.
+  const v2Enabled = import.meta.env.VITE_FEATURE_SCRIPT_V2 === 'true';
   return (
     <ToastProvider>
       <TaskManagerProvider>
-        <ScriptEditorPage />
+        {v2Enabled && scriptId ? (
+          <EditorShell scriptId={scriptId} />
+        ) : (
+          <ScriptEditorPage />
+        )}
       </TaskManagerProvider>
     </ToastProvider>
   );
