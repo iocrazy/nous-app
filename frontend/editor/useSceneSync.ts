@@ -34,9 +34,22 @@ import {
   OpRejectedError,
   VersionConflictError,
 } from './sceneService';
+import { applyLocal } from './opBuilder';
 import type { ElementOp, ScriptElement, SceneDoc } from './types';
 
 export type SaveState = 'saved' | 'saving' | 'retrying' | 'conflict' | 'offline';
+
+/**
+ * One `script_ops` row as delivered by Supabase Realtime (Phase B P5 / C2).
+ * `op_seq` equals the scene's content_version AFTER the op applied; `actor` is
+ * the writer's user uuid (or 'copilot'); `op_json.ops` is the forward batch.
+ */
+export interface RemoteOpRow {
+  scene_id: string;
+  op_seq: number;
+  actor: string;
+  op_json: { ops?: ElementOp[]; inverse?: ElementOp[] } | null;
+}
 
 export interface SceneSync {
   elements: ScriptElement[];
@@ -45,7 +58,14 @@ export interface SceneSync {
   conflict: { mine: ScriptElement[]; theirs: ScriptElement[] } | null;
   dispatchOps(ops: ElementOp[], optimistic: ScriptElement[]): void;
   resolveConflict(choice: 'mine' | 'theirs'): void;
+  /** Apply (or reconcile from) a remote op row streamed for THIS scene (C2). */
+  applyRemoteOps(row: RemoteOpRow): void;
   flush(): Promise<void>;
+}
+
+export interface SceneSyncOptions {
+  /** Local user's actor id, so applyRemoteOps can drop self-echoed rows. */
+  selfActorId?: string | null;
 }
 
 interface Batch {
@@ -87,7 +107,7 @@ function upsertOpsFor(mine: ScriptElement[]): ElementOp[] {
   }));
 }
 
-export function useSceneSync(scene: SceneDoc): SceneSync {
+export function useSceneSync(scene: SceneDoc, options?: SceneSyncOptions): SceneSync {
   const [elements, setElements] = useState<ScriptElement[]>(scene.elements);
   const [version, setVersion] = useState<number>(scene.content_version);
   const [saveState, setSaveState] = useState<SaveState>('saved');
@@ -105,6 +125,8 @@ export function useSceneSync(scene: SceneDoc): SceneSync {
   const conflictTheirsRef = useRef<ScriptElement[]>([]);
   const flushWaitersRef = useRef<Array<() => void>>([]);
   const sceneIdRef = useRef(scene.id);
+  const selfActorIdRef = useRef(options?.selfActorId ?? null);
+  selfActorIdRef.current = options?.selfActorId ?? null;
   const mountedRef = useRef(true);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pumpRef = useRef<() => Promise<void>>(async () => {});
@@ -282,6 +304,82 @@ export function useSceneSync(scene: SceneDoc): SceneSync {
     [pump, settleFlush],
   );
 
+  // Refetch the scene as the source of truth after a remote gap. When local
+  // edits are pending (`hadPending`) the queue is already frozen by the caller;
+  // we surface the server's version as `theirs` and never clobber our optimistic
+  // work (canvasCoreStore guard ③ semantics). Otherwise we adopt the server view
+  // and re-open the queue so any keystrokes typed during the await still flush.
+  const reconcileFromServer = useCallback(
+    async (hadPending: boolean) => {
+      let fresh: SceneDoc;
+      try {
+        fresh = await getSceneApi(sceneIdRef.current);
+      } catch (err) {
+        console.error('[useSceneSync] remote reconcile refetch failed', {
+          sceneId: sceneIdRef.current,
+          err,
+        });
+        return;
+      }
+      if (!mountedRef.current) return;
+      if (hadPending) {
+        conflictVersionRef.current = fresh.content_version;
+        conflictTheirsRef.current = fresh.elements;
+        setConflict({ mine: elementsRef.current, theirs: fresh.elements });
+        setSaveState('conflict');
+        // Halted on user input — release flush() waiters (docstring contract).
+        releaseFlushWaiters();
+      } else {
+        frozenRef.current = false;
+        versionRef.current = fresh.content_version;
+        elementsRef.current = fresh.elements;
+        setVersion(fresh.content_version);
+        setElements(fresh.elements);
+        setSaveState('saved');
+        if (queueRef.current.length > 0) void pumpRef.current();
+      }
+    },
+    [releaseFlushWaiters],
+  );
+
+  // Apply a remote op row for THIS scene (C2). Three guards, in order:
+  //  1. self-echo (our own actor) or stale (op_seq already applied) → ignore.
+  //  2. exact next seq on a CLEAN local state → splice the forward ops onto the
+  //     optimistic view and advance the version (no network round-trip).
+  //  3. gap / malformed / local dirty → freeze and reconcile from the server;
+  //     a dirty local state diverges into the existing conflict UX.
+  const applyRemoteOps = useCallback(
+    (row: RemoteOpRow) => {
+      const selfId = selfActorIdRef.current;
+      if (selfId && row.actor === selfId) return; // self-echo
+      if (typeof row.op_seq !== 'number' || row.op_seq <= versionRef.current) return; // stale
+
+      const ops = row.op_json?.ops;
+      const contiguous = row.op_seq === versionRef.current + 1;
+      const clean =
+        queueRef.current.length === 0 && !frozenRef.current && !offlineRef.current;
+
+      if (contiguous && clean && Array.isArray(ops)) {
+        const next = applyLocal(elementsRef.current, ops);
+        elementsRef.current = next;
+        versionRef.current = row.op_seq;
+        if (mountedRef.current) {
+          setElements(next);
+          setVersion(row.op_seq);
+        }
+        return;
+      }
+
+      // Guard 3: reconcile from truth. Freeze first so an in-flight pump cannot
+      // advance the version underneath the refetch. `hadPending` decides whether
+      // we diverge (conflict) or cleanly adopt.
+      const hadPending = queueRef.current.length > 0 || frozenRef.current;
+      frozenRef.current = true;
+      void reconcileFromServer(hadPending);
+    },
+    [reconcileFromServer],
+  );
+
   const flush = useCallback((): Promise<void> => {
     if (queueRef.current.length === 0 && !flushingRef.current) return Promise.resolve();
     return new Promise<void>((resolve) => {
@@ -311,5 +409,14 @@ export function useSceneSync(scene: SceneDoc): SceneSync {
     };
   }, []);
 
-  return { elements, version, saveState, conflict, dispatchOps, resolveConflict, flush };
+  return {
+    elements,
+    version,
+    saveState,
+    conflict,
+    dispatchOps,
+    resolveConflict,
+    applyRemoteOps,
+    flush,
+  };
 }

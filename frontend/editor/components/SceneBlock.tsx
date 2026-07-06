@@ -43,7 +43,7 @@ import {
   OpRejectedError,
 } from '../copilotService';
 import type { ElementOp, ElementType, ScriptElement, SceneDoc } from '../types';
-import { useSceneSync } from '../useSceneSync';
+import { useSceneSync, type RemoteOpRow } from '../useSceneSync';
 import { HollywoodLayout } from '../render/HollywoodLayout';
 import { AsianLayout } from '../render/AsianLayout';
 import { MentionNamesContext, type LineMention } from '../render/layoutShared';
@@ -156,6 +156,11 @@ export interface SceneBlockProps {
   onElementsChange?: (sceneId: string, elements: ScriptElement[]) => void;
   /** Other collaborators (self excluded) currently focused on this scene (P5). */
   focusPresence?: PresenceUser[];
+  /** Local user's actor id, so remote self-echoed ops are dropped (C2). */
+  selfActorId?: string | null;
+  /** Registers this scene's applyRemoteOps with the shell's op-stream router
+   *  (called with null on unmount). */
+  onRegisterRemoteApply?: (sceneId: string, apply: ((row: RemoteOpRow) => void) | null) => void;
 }
 
 /** Which half of a block the pointer is over → the drop edge. */
@@ -178,9 +183,11 @@ export function SceneBlock({
   onCopilotActivate,
   onElementsChange,
   focusPresence,
+  selfActorId,
+  onRegisterRemoteApply,
 }: SceneBlockProps) {
   const { t } = useTranslation();
-  const sync = useSceneSync(scene);
+  const sync = useSceneSync(scene, { selfActorId });
   const [focusedElementId, setFocusedElementId] = useState<string | null>(null);
   const [mention, setMention] = useState<MentionState | null>(null);
   // Mention nav state owned HERE (the combobox is presentational): the active
@@ -560,6 +567,14 @@ export function SceneBlock({
       resolveConflict: sync.resolveConflict,
     });
   }, [scene.id, sync.saveState, sync.resolveConflict, onSyncStateChange]);
+
+  // Register this scene's applyRemoteOps with the shell's op-stream router so
+  // realtime rows for this scene reach it; deregister on unmount / scene swap (C2).
+  useEffect(() => {
+    if (!onRegisterRemoteApply) return;
+    onRegisterRemoteApply(scene.id, sync.applyRemoteOps);
+    return () => onRegisterRemoteApply(scene.id, null);
+  }, [scene.id, sync.applyRemoteOps, onRegisterRemoteApply]);
 
   // Lift optimistic elements to the shell for live Statistics + rail entities
   // (Task 6 ⑥), debounced 1s so a burst of keystrokes collapses into one update.

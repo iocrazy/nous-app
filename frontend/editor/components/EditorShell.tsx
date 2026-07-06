@@ -65,8 +65,10 @@ import { ConflictBar } from './ConflictBar';
 import { ColdStart } from './EmptyStates';
 import { ChapterFallback } from './ChapterFallback';
 import { useScriptPresence } from '../collab/useScriptPresence';
+import { useScriptOpsRealtime } from '../collab/useScriptOpsRealtime';
 import { PresenceAvatars } from '../collab/PresenceAvatars';
 import { ScenePresenceContext, type ScenePresenceMap } from '../collab/scenePresenceContext';
+import type { RemoteOpRow } from '../useSceneSync';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -608,6 +610,29 @@ export function EditorShell({
     return map;
   }, [onlineUsers]);
 
+  // ── Live op streaming (Phase B P5 / C2) ────────────────────────────────────
+  // Each mounted SceneBlock registers its applyRemoteOps here; the realtime hook
+  // routes an incoming script_ops row to the matching scene. A row for a scene
+  // that isn't currently mounted (windowed out) is dropped — that scene reloads
+  // its snapshot on remount and the SUBSCRIBED reconcile refreshes all scenes.
+  const remoteApplyRef = useRef<Map<string, (row: RemoteOpRow) => void>>(new Map());
+  const registerRemoteApply = useCallback(
+    (sceneId: string, apply: ((row: RemoteOpRow) => void) | null) => {
+      if (apply) remoteApplyRef.current.set(sceneId, apply);
+      else remoteApplyRef.current.delete(sceneId);
+    },
+    [],
+  );
+  const getSceneIds = useCallback(() => scenesRef.current.map((s) => String(s.id)), []);
+  const dispatchToScene = useCallback((sceneId: string, row: RemoteOpRow) => {
+    remoteApplyRef.current.get(sceneId)?.(row);
+  }, []);
+  useScriptOpsRealtime(COLLAB_ENABLED ? scriptId : null, {
+    getSceneIds,
+    dispatchToScene,
+    onReconcile: reload,
+  });
+
   // Cold start ONLY when the script is truly empty. A legacy script with
   // prose chapters but no scenes must land on the chapter fallback cards
   // (with their Convert to Scenes entry) — the full-screen cold start would
@@ -879,6 +904,10 @@ export function EditorShell({
                             onElementsChange={handleElementsChange}
                             typeCommand={typeCommand ?? undefined}
                             focusPresence={presenceByScene[s.id]}
+                            selfActorId={currentUserId}
+                            onRegisterRemoteApply={
+                              COLLAB_ENABLED ? registerRemoteApply : undefined
+                            }
                           />
                         );
                       })}
