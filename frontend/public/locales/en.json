@@ -2414,6 +2414,8 @@
     "outlineLabel": "Story Outline",
     "outlineUnassigned": "Unassigned",
     "outlineEmptyGroup": "No scenes yet",
-    "outlineOpenScene": "Open scene in Script"
+    "outlineOpenScene": "Open scene in Script",
+    "editSceneHeading": "Edit scene heading",
+    "sceneHeadingEmpty": "Set scene heading"
   }
 }

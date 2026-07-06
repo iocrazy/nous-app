@@ -2414,6 +2414,8 @@
     "outlineLabel": "故事大纲",
     "outlineUnassigned": "未分组",
     "outlineEmptyGroup": "暂无场景",
-    "outlineOpenScene": "在剧本中打开场景"
+    "outlineOpenScene": "在剧本中打开场景",
+    "editSceneHeading": "编辑场景标题",
+    "sceneHeadingEmpty": "设置场景标题"
   }
 }

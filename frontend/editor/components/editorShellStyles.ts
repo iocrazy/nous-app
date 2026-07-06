@@ -92,9 +92,21 @@ export const EDITOR_SHELL_STYLES = `
 }
 .mh-ep-name{ font-weight:700; font-size:14px; color:var(--indigo-deep); }
 .mh-ep-sub{ font-size:11px; color:var(--ink-faint); margin-top:2px; }
+/* Section header row: uppercase label + a right-aligned count badge (laper
+   "Assets ②" pattern). One shared style so every rail region reads the same. */
+.mh-rail-section-head{
+  display:flex; align-items:center; gap:8px; padding:10px 16px 5px;
+}
 .mh-rail-section-label{
   font-size:10.5px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase;
-  color:var(--ink-faint); padding:8px 16px 4px;
+  color:var(--ink-faint);
+}
+.mh-rail-count-badge{
+  margin-left:auto; flex-shrink:0;
+  min-width:17px; height:17px; padding:0 5px; border-radius:9px;
+  display:inline-flex; align-items:center; justify-content:center;
+  font-family:var(--mono); font-size:10px; font-weight:700; line-height:1;
+  background:var(--indigo-soft); color:var(--indigo-deep);
 }
 .mh-scene-list{ flex:1; overflow-y:auto; padding:4px 10px 14px; display:flex; flex-direction:column; gap:5px; }
 .mh-scene-row{
@@ -129,7 +141,12 @@ export const EDITOR_SHELL_STYLES = `
 }
 
 /* ===== RAIL INFO ARCHITECTURE (modules nav + Characters/Locations) ===== */
-.mh-rail-modules{ padding:2px 10px 6px; display:flex; flex-direction:column; gap:2px; }
+/* Regions read as a clear stack (laper): the modules nav is fenced off from the
+   entity/scene sections below it with a hairline divider. */
+.mh-rail-modules{
+  padding:2px 10px 8px; margin-bottom:2px; display:flex; flex-direction:column; gap:2px;
+  border-bottom:1px solid var(--surface-border);
+}
 .mh-rail-module{
   display:flex; align-items:center; gap:9px; width:100%; text-align:left;
   padding:8px 9px; border-radius:var(--radius-sm);
@@ -149,7 +166,13 @@ export const EDITOR_SHELL_STYLES = `
 .mh-rail-scroll{ flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; }
 .mh-rail-scroll .mh-scene-list{ flex:0 0 auto; overflow:visible; }
 .mh-rail-section{ display:flex; flex-direction:column; }
-.mh-rail-entity-list{ padding:0 10px 6px; display:flex; flex-direction:column; gap:1px; }
+/* Stacked sections (Characters → Locations → Scenes) each carry a hairline top
+   divider so the hierarchy reads even when a section runs long. */
+.mh-rail-scroll > .mh-rail-section + .mh-rail-section > .mh-rail-section-head{
+  border-top:1px solid var(--surface-border); margin-top:2px;
+}
+/* Entity rows sit one indent level deeper than their section label. */
+.mh-rail-entity-list{ padding:0 10px 8px 14px; display:flex; flex-direction:column; gap:1px; }
 .mh-rail-entity-row{
   display:flex; align-items:center; gap:8px; width:100%; text-align:left;
   padding:6px 9px; border-radius:var(--radius-sm);
@@ -229,6 +252,21 @@ export const EDITOR_SHELL_STYLES = `
   padding:4px 9px; border-radius:6px; border:1px solid var(--sheet-border);
   background:var(--surface-2); color:var(--sheet-ink); min-width:130px;
 }
+/* Read-mode scene heading (Task 4.5): a typographic slug that reads like a
+   script heading, not a form. Clicking it reveals the selects above. */
+.mh-scene-heading-display{
+  flex:1; min-width:0; text-align:left; background:none; border:1px solid transparent;
+  border-radius:6px; padding:4px 8px; cursor:text;
+  font-family:var(--mono); font-size:13.5px; font-weight:700; letter-spacing:0.04em;
+  text-transform:uppercase; color:var(--sheet-ink);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.mh-scene-heading-display.asian{
+  font-family:var(--sans); font-size:14px; letter-spacing:0.02em; text-transform:none;
+}
+.mh-scene-heading-display:hover{ background:var(--surface-2); }
+.mh-scene-heading-display:focus-visible{ outline:2px solid var(--indigo); outline-offset:-2px; }
+.mh-scene-heading-empty{ color:var(--sheet-ink-soft); font-weight:600; text-transform:none; font-style:italic; }
 
 /* ===== ELEMENT ROWS (Hollywood layout engine) ===== */
 .mh-el-row{ display:flex; align-items:flex-start; gap:9px; margin:0 0 7px; }

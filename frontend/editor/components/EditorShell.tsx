@@ -551,12 +551,19 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
                 locations={railLocations}
                 onSelect={handleSelectScene}
               />
-              <div className="mh-rail-section-label">{t('editor.scenesLabel')}</div>
-              <SceneRail
-                scenes={scenes}
-                activeSceneId={state.activeSceneId}
-                onSelect={handleSelectScene}
-              />
+              <section className="mh-rail-section" aria-label={t('editor.scenesLabel')}>
+                <div className="mh-rail-section-head">
+                  <span className="mh-rail-section-label">{t('editor.scenesLabel')}</span>
+                  {scenes.length > 0 && (
+                    <span className="mh-rail-count-badge">{scenes.length}</span>
+                  )}
+                </div>
+                <SceneRail
+                  scenes={scenes}
+                  activeSceneId={state.activeSceneId}
+                  onSelect={handleSelectScene}
+                />
+              </section>
             </div>
           </>
         )}

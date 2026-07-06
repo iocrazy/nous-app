@@ -92,6 +92,27 @@ export interface TypeCommand {
 const INT_EXT_OPTIONS = ['INT', 'EXT', 'INT/EXT'];
 const TIME_OPTIONS = ['DAY', 'NIGHT', 'DAWN', 'DUSK', 'CONTINUOUS'];
 
+/**
+ * Compose the read-mode scene heading from the meta fields, per layout engine:
+ *  - Hollywood: a slug line `INT. BLANK STUDIO - NIGHT` (uppercase location,
+ *    dot after INT/EXT, dash before the time).
+ *  - Asian: a middot-joined manuscript heading `内景 · 地点 · 夜` (no forced
+ *    uppercasing — CJK has no case), sitting after the numbered badge.
+ * Missing parts drop out cleanly; an all-empty heading returns '' so the caller
+ * can render the "set heading" placeholder instead.
+ */
+function formatSceneHeading(meta: SceneMeta, format: EditorFormat): string {
+  const ie = meta.heading_int_ext.trim();
+  const loc = meta.location_text.trim();
+  const time = meta.time_of_day.trim();
+  if (format === 'asian') {
+    return [ie, loc, time].filter((p) => p.length > 0).join(' · ');
+  }
+  const head = ie ? `${ie}.` : '';
+  const locTime = [loc.toUpperCase(), time].filter((p) => p.length > 0).join(' - ');
+  return [head, locTime].filter((p) => p.length > 0).join(' ');
+}
+
 const INPUT_DEBOUNCE_MS = 500;
 const META_DEBOUNCE_MS = 600;
 
@@ -175,8 +196,15 @@ export function SceneBlock({
     location_text: scene.location_text ?? '',
     time_of_day: scene.time_of_day ?? '',
   });
+  // Head row is dual-state (Task 4.5): a typographic slug by default, the three
+  // selects only while editing. Entering focuses the INT/EXT select; blur out of
+  // the row (or Esc) drops back to the read-mode slug.
+  const [headingEditing, setHeadingEditing] = useState(false);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const headRowRef = useRef<HTMLDivElement | null>(null);
+  const headingDisplayRef = useRef<HTMLButtonElement | null>(null);
+  const intExtSelectRef = useRef<HTMLSelectElement | null>(null);
   const composingRef = useRef(false);
   const elementsRef = useRef<ScriptElement[]>(sync.elements);
   const inputTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -527,6 +555,30 @@ export function SceneBlock({
     [scene.id],
   );
 
+  // On entering edit mode, land the caret on the first control (INT/EXT).
+  useEffect(() => {
+    if (headingEditing) intExtSelectRef.current?.focus();
+  }, [headingEditing]);
+
+  const enterHeadingEdit = useCallback(() => setHeadingEditing(true), []);
+
+  // Leaving the head row entirely (focus moved outside it) returns to read mode.
+  const handleHeadRowBlur = useCallback((e: React.FocusEvent<HTMLDivElement>) => {
+    const next = e.relatedTarget as Node | null;
+    if (next && headRowRef.current?.contains(next)) return;
+    setHeadingEditing(false);
+  }, []);
+
+  // Esc abandons heading editing and returns focus to the read-mode slug.
+  const handleHeadRowKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'Escape') return;
+    e.stopPropagation();
+    setHeadingEditing(false);
+    requestAnimationFrame(() => headingDisplayRef.current?.focus());
+  }, []);
+
+  const displayHeading = formatSceneHeading(meta, format);
+
   const LayoutEngine = format === 'asian' ? AsianLayout : HollywoodLayout;
 
   // The focused line IS the ARIA combobox when a picker is open — feed the layout
@@ -685,44 +737,66 @@ export function SceneBlock({
         ::
       </button>
 
-      <div className={`mh-scene-headrow${format === 'asian' ? ' asian' : ''}`}>
+      <div
+        className={`mh-scene-headrow${format === 'asian' ? ' asian' : ''}`}
+        ref={headRowRef}
+        onBlur={headingEditing ? handleHeadRowBlur : undefined}
+        onKeyDown={headingEditing ? handleHeadRowKeyDown : undefined}
+      >
         <span className="mh-scene-num-badge">
           {index + 1}
           {format === 'asian' ? '.' : ''}
         </span>
-        <select
-          className="mh-scene-select"
-          aria-label={t('editor.intExt')}
-          value={meta.heading_int_ext}
-          onChange={(e) => commitMeta({ heading_int_ext: e.target.value })}
-        >
-          <option value="">—</option>
-          {INT_EXT_OPTIONS.map((o) => (
-            <option key={o} value={o}>
-              {o}
-            </option>
-          ))}
-        </select>
-        <input
-          className="mh-scene-loc-input"
-          aria-label={t('editor.location')}
-          value={meta.location_text}
-          placeholder={t('editor.locationPlaceholder')}
-          onChange={(e) => commitMeta({ location_text: e.target.value })}
-        />
-        <select
-          className="mh-scene-select"
-          aria-label={t('editor.timeOfDay')}
-          value={meta.time_of_day}
-          onChange={(e) => commitMeta({ time_of_day: e.target.value })}
-        >
-          <option value="">—</option>
-          {TIME_OPTIONS.map((o) => (
-            <option key={o} value={o}>
-              {o}
-            </option>
-          ))}
-        </select>
+        {headingEditing ? (
+          <>
+            <select
+              ref={intExtSelectRef}
+              className="mh-scene-select"
+              aria-label={t('editor.intExt')}
+              value={meta.heading_int_ext}
+              onChange={(e) => commitMeta({ heading_int_ext: e.target.value })}
+            >
+              <option value="">—</option>
+              {INT_EXT_OPTIONS.map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+            <input
+              className="mh-scene-loc-input"
+              aria-label={t('editor.location')}
+              value={meta.location_text}
+              placeholder={t('editor.locationPlaceholder')}
+              onChange={(e) => commitMeta({ location_text: e.target.value })}
+            />
+            <select
+              className="mh-scene-select"
+              aria-label={t('editor.timeOfDay')}
+              value={meta.time_of_day}
+              onChange={(e) => commitMeta({ time_of_day: e.target.value })}
+            >
+              <option value="">—</option>
+              {TIME_OPTIONS.map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+          </>
+        ) : (
+          <button
+            type="button"
+            ref={headingDisplayRef}
+            className={`mh-scene-heading-display${format === 'asian' ? ' asian' : ''}`}
+            aria-label={t('editor.editSceneHeading')}
+            onClick={enterHeadingEdit}
+          >
+            {displayHeading || (
+              <span className="mh-scene-heading-empty">{t('editor.sceneHeadingEmpty')}</span>
+            )}
+          </button>
+        )}
       </div>
 
       <MentionNamesContext.Provider value={mentionCandidates}>
