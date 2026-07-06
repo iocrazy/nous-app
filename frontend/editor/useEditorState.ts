@@ -11,7 +11,7 @@
  * localStorage('editor.theme') so a writer's night-draft preference survives a
  * reload, and toggleTheme writes it back. Everything else is session state.
  */
-import { useReducer } from 'react';
+import { useMemo, useReducer } from 'react';
 import type { CursorState } from './editorMachine';
 import type { ElementType } from './types';
 
@@ -70,6 +70,10 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
     case 'setCursor':
       return { ...state, cursor: action.cursor };
     case 'setActiveScene':
+      // Bail on no-op: the IntersectionObserver re-reports the same top scene
+      // on every intersection tick; returning the same state object lets React
+      // skip the re-render entirely.
+      if (state.activeSceneId === action.sceneId) return state;
       return { ...state, activeSceneId: action.sceneId };
     case 'setNextInsertType':
       return { ...state, nextInsertType: action.elementType };
@@ -101,13 +105,21 @@ export interface EditorStateApi {
 
 export function useEditorState(): EditorStateApi {
   const [state, dispatch] = useReducer(reducer, undefined, init);
-  return {
-    state,
-    setMode: (mode) => dispatch({ type: 'setMode', mode }),
-    setFormat: (format) => dispatch({ type: 'setFormat', format }),
-    toggleTheme: () => dispatch({ type: 'toggleTheme' }),
-    setCursor: (cursor) => dispatch({ type: 'setCursor', cursor }),
-    setActiveScene: (sceneId) => dispatch({ type: 'setActiveScene', sceneId }),
-    setNextInsertType: (elementType) => dispatch({ type: 'setNextInsertType', elementType }),
-  };
+  // Stable action identities: effects list these in their deps (e.g. the
+  // IntersectionObserver auto-highlight), and a fresh closure per render would
+  // tear the observer down every frame — a sustained re-render loop in real
+  // browsers that jsdom (no IntersectionObserver) can never catch.
+  const actions = useMemo(
+    () => ({
+      setMode: (mode: EditorMode) => dispatch({ type: 'setMode', mode }),
+      setFormat: (format: EditorFormat) => dispatch({ type: 'setFormat', format }),
+      toggleTheme: () => dispatch({ type: 'toggleTheme' }),
+      setCursor: (cursor: CursorState | null) => dispatch({ type: 'setCursor', cursor }),
+      setActiveScene: (sceneId: string | null) => dispatch({ type: 'setActiveScene', sceneId }),
+      setNextInsertType: (elementType: ElementType) =>
+        dispatch({ type: 'setNextInsertType', elementType }),
+    }),
+    [],
+  );
+  return { state, ...actions };
 }
