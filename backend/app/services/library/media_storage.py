@@ -113,13 +113,22 @@ def to_file_path(bucket: str, key: str) -> str:
 # ── Object store wrapper (Supabase Storage) ─────────────────────────────────
 
 
+# Hard cap on every storage-api call. When storage is sick (2026-07-06: its
+# deleted data dir made every upload hang until kong's 60s upstream timeout),
+# an uncapped call turns "storage degraded" into "uploads hang a minute and
+# the browser reports Failed to fetch". 15s → the filesystem fallback kicks
+# in fast and the user barely notices.
+_STORAGE_CALL_TIMEOUT_S = 15.0
+
+
 class ObjectStore:
     """Thin async wrapper over the Supabase service-role storage client.
 
     All Supabase-storage SDK calls live here so callers deal in bytes/keys and
     mocked tests pin OUR logic, not the SDK. The backend (file vs s3) is a
     storage-api server config detail and is fully transparent to this layer —
-    we only ever PUT/GET objects by (bucket, key).
+    we only ever PUT/GET objects by (bucket, key). Every call is capped at
+    ``_STORAGE_CALL_TIMEOUT_S`` — see the constant's comment.
     """
 
     def __init__(self, bucket: str) -> None:
@@ -133,11 +142,17 @@ class ObjectStore:
         client = await get_async_supabase_admin()
         return client.storage.from_(self._bucket)
 
+    @staticmethod
+    async def _capped(awaitable):
+        import asyncio
+
+        return await asyncio.wait_for(awaitable, timeout=_STORAGE_CALL_TIMEOUT_S)
+
     async def exists(self, key: str) -> bool:
         """True if an object already lives at ``key`` (dedup skip-PUT check)."""
         proxy = await self._proxy()
         try:
-            await proxy.download(key)
+            await self._capped(proxy.download(key))
             return True
         except Exception:
             return False
@@ -146,44 +161,51 @@ class ObjectStore:
         self, key: str, data: bytes, mime: str, *, upsert: bool = True
     ) -> None:
         proxy = await self._proxy()
-        await proxy.upload(
-            key,
-            data,
-            {
-                "content-type": mime or "application/octet-stream",
-                "upsert": "true" if upsert else "false",
-            },
+        await self._capped(
+            proxy.upload(
+                key,
+                data,
+                {
+                    "content-type": mime or "application/octet-stream",
+                    "upsert": "true" if upsert else "false",
+                },
+            )
         )
 
     async def put_file(
         self, key: str, file_path: str, mime: str, *, upsert: bool = True
     ) -> None:
         """Upload from a local file (streamed by the SDK) — for blobs too large
-        to buffer in memory (generated video)."""
+        to buffer in memory (generated video). Larger cap: 4× the standard one
+        (a multi-hundred-MB video legitimately takes longer than 15s)."""
+        import asyncio
         from pathlib import Path
 
         proxy = await self._proxy()
-        await proxy.upload(
-            key,
-            Path(file_path),
-            {
-                "content-type": mime or "application/octet-stream",
-                "upsert": "true" if upsert else "false",
-            },
+        await asyncio.wait_for(
+            proxy.upload(
+                key,
+                Path(file_path),
+                {
+                    "content-type": mime or "application/octet-stream",
+                    "upsert": "true" if upsert else "false",
+                },
+            ),
+            timeout=_STORAGE_CALL_TIMEOUT_S * 4,
         )
 
     async def get_bytes(self, key: str) -> bytes:
         proxy = await self._proxy()
-        return await proxy.download(key)
+        return await self._capped(proxy.download(key))
 
     async def remove(self, key: str) -> None:
         proxy = await self._proxy()
-        await proxy.remove([key])
+        await self._capped(proxy.remove([key]))
 
     async def signed_url(self, key: str, *, ttl_seconds: int = 300) -> str:
         """Short-TTL signed URL for a private object (default 5 min)."""
         proxy = await self._proxy()
-        resp = await proxy.create_signed_url(key, ttl_seconds)
+        resp = await self._capped(proxy.create_signed_url(key, ttl_seconds))
         # storage3 returns both signedURL / signedUrl keys across versions.
         url = resp.get("signedURL") or resp.get("signedUrl")
         if not url:
