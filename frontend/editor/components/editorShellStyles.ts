@@ -389,6 +389,55 @@ export const EDITOR_SHELL_STYLES = `
 .mh-doc-outline{ font-family:var(--sans); color:var(--sheet-ink); }
 .mh-doc-title{ font-size:25px; font-weight:800; letter-spacing:-0.01em; margin-bottom:20px; }
 .mh-doc-p{ font-size:13.5px; line-height:1.75; color:var(--sheet-ink-soft); }
+
+/* ===== OUTLINE VIEW (Outline↔Script linkage tree, Task 4) ===== */
+/* Clear document hierarchy: chapter titles read as H1 (bold, larger, generous
+   spacing); scene rows sit indented beneath as lighter H2/body-weight rows. */
+.mh-outline{ font-family:var(--sans); color:var(--sheet-ink); }
+.mh-outline-group{ margin-bottom:30px; }
+.mh-outline-group:last-child{ margin-bottom:0; }
+.mh-outline-chapter{
+  padding:2px 8px 10px; margin-bottom:8px;
+  border-bottom:1px solid var(--sheet-border);
+  border-radius:var(--radius-sm) var(--radius-sm) 0 0;
+}
+.mh-outline-group.drop-active .mh-outline-chapter{
+  background:var(--indigo-soft); border-bottom-color:var(--indigo);
+}
+.mh-outline-chapter-title{
+  margin:0; font-size:22px; font-weight:800; letter-spacing:-0.01em;
+  line-height:1.25; color:var(--sheet-ink);
+}
+.mh-outline-chapter-excerpt{
+  margin:6px 0 0; font-size:12.5px; line-height:1.55; color:var(--sheet-ink-soft);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.mh-outline-scenes{ list-style:none; margin:0; padding:0; }
+.mh-outline-scene-wrap{ position:relative; padding-left:22px; }
+.mh-outline-scene-row{
+  display:flex; align-items:baseline; gap:10px;
+  padding:8px 12px; border-radius:var(--radius-sm);
+  cursor:pointer; border:1px solid transparent;
+}
+.mh-outline-scene-row:hover{ background:var(--surface-2); }
+.mh-outline-scene-row:focus-visible{ outline:2px solid var(--indigo); outline-offset:-2px; }
+.mh-outline-scene-row.dragging{ opacity:0.55; }
+.mh-outline-scene-num{
+  flex-shrink:0; min-width:20px; font-family:var(--mono);
+  font-size:11px; font-weight:700; color:var(--ink-faint);
+}
+.mh-outline-scene-heading{
+  flex-shrink:0; font-family:var(--mono); font-size:11.5px; font-weight:700;
+  letter-spacing:0.03em; text-transform:uppercase; color:var(--sheet-ink);
+}
+.mh-outline-scene-summary{
+  font-size:13px; color:var(--sheet-ink-soft);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.mh-outline-empty{
+  padding:4px 12px 4px 22px; font-size:12px; color:var(--ink-faint); font-style:italic;
+}
+
 .mh-cover-card{
   width:820px; max-width:100%; min-height:60%;
   background:var(--surface); border:1px dashed var(--surface-border);

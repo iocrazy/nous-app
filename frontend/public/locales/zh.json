@@ -2410,6 +2410,10 @@
     "copilotUndo": "撤销",
     "copilotFailed": "无法应用——文本未改动。",
     "nodesElementCount_other": "{{count}} 个元素",
-    "nodesElementCount_one": "{{count}} 个元素"
+    "nodesElementCount_one": "{{count}} 个元素",
+    "outlineLabel": "故事大纲",
+    "outlineUnassigned": "未分组",
+    "outlineEmptyGroup": "暂无场景",
+    "outlineOpenScene": "在剧本中打开场景"
   }
 }

@@ -99,8 +99,8 @@ describe('EditorShell', () => {
 
     expect(outlineTab).toHaveAttribute('aria-selected', 'true');
     expect(scriptTab).toHaveAttribute('aria-selected', 'false');
-    // Outline mode shows the read-only outline placeholder.
-    expect(screen.getByTestId('outline-placeholder')).toBeInTheDocument();
+    // Outline mode shows the real outline tree (Task 4).
+    expect(screen.getByTestId('outline-view')).toBeInTheDocument();
   });
 
   it('collapses the right panel without losing the navigation landmark', async () => {

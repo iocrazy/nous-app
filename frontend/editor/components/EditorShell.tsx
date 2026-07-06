@@ -49,6 +49,7 @@ import {
 import { SceneRail } from './SceneRail';
 import { RailModules, type RailView } from './RailModules';
 import { NodesView } from '../nodes/NodesView';
+import { OutlineView } from './OutlineView';
 import { RailEntities } from './RailEntities';
 import { deriveRailCharacters, deriveRailLocations } from '../railDerive';
 import { ElementToolbar } from './ElementToolbar';
@@ -190,16 +191,19 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
     [setActiveScene],
   );
 
-  // Jump from a scene node (double-click) back to the script sheet, landing on
-  // that scene: switch views, mark it active, and defer the scroll+focus until
-  // the sheet has re-rendered (the node canvas unmounts on the same tick).
+  // Jump from a scene node (double-click) or an outline row (click) back to the
+  // script sheet, landing on that scene: switch BOTH axes to Script (the
+  // railView node/script axis AND the top Script/Outline/Cover tab), mark it
+  // active, and defer the scroll+focus until the sheet has re-rendered (the node
+  // canvas / outline unmounts on the same tick).
   const handleOpenScene = useCallback(
     (sceneId: string) => {
       setRailView('script');
+      setMode('script');
       setActiveScene(sceneId);
       setPendingOpenSceneId(sceneId);
     },
-    [setActiveScene],
+    [setActiveScene, setMode],
   );
 
   useEffect(() => {
@@ -624,10 +628,12 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
               <div className="mh-sheet">
                 <div className="mh-sheet-inner">
                   {state.mode === 'outline' ? (
-                    <div className="mh-doc-outline" data-testid="outline-placeholder">
-                      <div className="mh-doc-title">{t('editor.episodeOne')}</div>
-                      <p className="mh-doc-p">{t('editor.outlinePlaceholder')}</p>
-                    </div>
+                    <OutlineView
+                      scenes={scenes}
+                      chapters={chapters}
+                      onOpenScene={handleOpenScene}
+                      onReload={reloadAll}
+                    />
                   ) : (
                     <>
                       {scenes.map((s, i) => {

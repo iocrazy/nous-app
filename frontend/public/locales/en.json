@@ -2410,6 +2410,10 @@
     "copilotUndo": "Undo",
     "copilotFailed": "Could not apply — your text is unchanged.",
     "nodesElementCount_one": "{{count}} element",
-    "nodesElementCount_other": "{{count}} elements"
+    "nodesElementCount_other": "{{count}} elements",
+    "outlineLabel": "Story Outline",
+    "outlineUnassigned": "Unassigned",
+    "outlineEmptyGroup": "No scenes yet",
+    "outlineOpenScene": "Open scene in Script"
   }
 }
