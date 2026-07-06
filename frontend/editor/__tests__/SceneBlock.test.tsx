@@ -154,6 +154,32 @@ describe('SceneBlock element editing', () => {
   });
 });
 
+describe('SceneBlock live-stats lift (Task 6 ⑥)', () => {
+  it('reports optimistic elements up (debounced 1s) after an edit', () => {
+    vi.useFakeTimers();
+    const onElementsChange = vi.fn();
+    render(
+      <SceneBlock
+        scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])}
+        index={0}
+        onElementsChange={onElementsChange}
+      />,
+    );
+    const row = document.querySelector('[data-el-id="el_a"]') as HTMLElement;
+    fireEvent.keyDown(row, { key: 'Tab' }); // action → character (optimistic)
+    onElementsChange.mockClear();
+
+    // Nothing lifted until the 1s debounce elapses.
+    expect(onElementsChange).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1000);
+
+    expect(onElementsChange).toHaveBeenCalledWith(
+      '900',
+      expect.arrayContaining([expect.objectContaining({ id: 'el_a', type: 'character' })]),
+    );
+  });
+});
+
 describe('SceneBlock typographic head row (Task 4.5)', () => {
   it('renders a read-mode heading slug by default, not the selects', () => {
     render(<SceneBlock scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])} index={0} />);

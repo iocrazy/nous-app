@@ -141,6 +141,28 @@ describe('windowed rendering', () => {
     // The rest are cheap placeholders, keeping the scrollbar geometry.
     expect(screen.getAllByTestId('scene-placeholder').length).toBeGreaterThan(0);
   });
+
+  it('drops a dragged scene onto a windowed-out placeholder → moveScene before it', async () => {
+    const many: SceneDoc[] = Array.from({ length: 100 }, (_, i) =>
+      scene({ id: `scene${i}`, sort_order: i }),
+    );
+    svc.listScenes.mockResolvedValue(many);
+    scriptSvc.fetchScriptProject.mockResolvedValue({ chapters: [] });
+    render(<EditorShell scriptId="s1" />);
+    await waitFor(() => expect(screen.getAllByTestId('scene-block').length).toBeGreaterThan(0));
+
+    const handle = screen.getAllByLabelText('editor.dragScene')[0]; // scene0's grip
+    const placeholder = screen.getAllByTestId('scene-placeholder')[0]; // a far-off scene
+    const targetId = placeholder.getAttribute('data-scene-id')!;
+
+    fireEvent.dragStart(handle, { dataTransfer: fakeDataTransfer() });
+    fireEvent.dragOver(placeholder);
+    fireEvent.drop(placeholder);
+
+    await waitFor(() =>
+      expect(svc.moveScene).toHaveBeenCalledWith('scene0', { before_scene_id: targetId }),
+    );
+  });
 });
 
 describe('a11y — Esc leaves edit mode', () => {

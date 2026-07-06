@@ -33,30 +33,71 @@ import type { ElementType, ScriptElement } from '../types';
  */
 export const MentionNamesContext = createContext<string[]>([]);
 
-// A mention token is `@` followed by a run of non-space, non-`@` chars. Multi-
-// word names are a Phase-1 limitation (the token stops at the first space).
-const MENTION_RE = /@([^\s@]+)/g;
+// The default (unknown-name) mention token: `@` + a run of non-space, non-`@`
+// chars. A KNOWN multi-word CAST name overrides this and chips as a whole (see
+// matchKnownName); an unknown name still stops at the first word.
+const MENTION_WORD_RE = /^[^\s@]+/;
+
+/**
+ * The longest known CAST name that `after` starts with (case-insensitive) on a
+ * word boundary — this is what lets `@John Smith` chip as one token when
+ * "John Smith" is a known name. Returns the ORIGINAL-cased slice, or null.
+ */
+function matchKnownName(after: string, knownLongestFirst: string[]): string | null {
+  const lower = after.toLowerCase();
+  for (const cand of knownLongestFirst) {
+    if (cand.length === 0) continue;
+    if (lower.startsWith(cand.toLowerCase())) {
+      const next = after.charAt(cand.length);
+      // Boundary: end of line, or a non-alphanumeric follows (so "John Smith"
+      // matches "@John Smith!" but not "@John Smithers").
+      if (next === '' || !/[A-Za-z0-9]/.test(next)) {
+        return after.slice(0, cand.length);
+      }
+    }
+  }
+  return null;
+}
 
 /**
  * Build the inner HTML for an element line: escaped text with any `@name`
  * tokens wrapped as chips. A name present in `mentionNames` (case-insensitive)
- * is a known chip; anything else is a greyed-out fallback chip (never an error).
+ * is a known chip — matched greedily so multi-word CAST names (`@John Smith`)
+ * chip whole; an unknown name is a greyed-out fallback chip that stops at the
+ * first word (never an error).
  */
 export function buildElementHtml(text: string, mentionNames: string[]): string {
   const known = new Set(mentionNames.map((n) => n.toLowerCase()));
+  // Longest-first so a multi-word name wins over a shorter one it contains.
+  const knownLongestFirst = [...mentionNames].sort((a, b) => b.length - a.length);
   let out = '';
-  let last = 0;
-  for (const match of text.matchAll(MENTION_RE)) {
-    const name = match[1];
-    const start = match.index ?? 0;
-    out += escapeHtml(text.slice(last, start));
-    const isKnown = known.has(name.toLowerCase());
+  let i = 0;
+  while (i < text.length) {
+    const at = text.indexOf('@', i);
+    if (at === -1) {
+      out += escapeHtml(text.slice(i));
+      break;
+    }
+    out += escapeHtml(text.slice(i, at));
+    const after = text.slice(at + 1);
+    let name = matchKnownName(after, knownLongestFirst);
+    let isKnown = name != null;
+    if (name == null) {
+      const m = after.match(MENTION_WORD_RE);
+      name = m ? m[0] : '';
+      isKnown = name.length > 0 && known.has(name.toLowerCase());
+    }
+    if (name.length === 0) {
+      // A lone `@` with nothing after it — emit it literally, keep scanning.
+      out += '@';
+      i = at + 1;
+      continue;
+    }
     out +=
       `<span data-mention="${escapeHtml(name)}" ` +
       `class="mh-mention${isKnown ? '' : ' unknown'}">@${escapeHtml(name)}</span>`;
-    last = start + match[0].length;
+    i = at + 1 + name.length;
   }
-  out += escapeHtml(text.slice(last));
   return out;
 }
 
@@ -73,6 +114,13 @@ export interface LineMentionAria {
   listboxId: string;
   /** id of the active option, or undefined when the filtered list is empty. */
   activeOptionId?: string;
+  /**
+   * Whether the listbox currently offers options. When the filter matches
+   * nothing the combobox is collapsed: aria-expanded=false and the dangling
+   * aria-controls / aria-activedescendant are dropped (they'd point at an empty
+   * listbox with no active option otherwise).
+   */
+  expanded: boolean;
 }
 
 /** A mention picker anchored to one element line, threaded through the engines. */
@@ -187,12 +235,15 @@ export function ElementLine({
       contentEditable: true,
       suppressContentEditableWarning: true,
       // When a mention picker is open on this line, the line IS the combobox so
-      // AT announces the active option; otherwise it is a plain textbox.
+      // AT announces the active option; otherwise it is a plain textbox. With no
+      // matches the combobox collapses (aria-expanded=false) and the controls /
+      // activedescendant refs are dropped rather than left dangling.
       role: mentionAria ? 'combobox' : 'textbox',
-      'aria-expanded': mentionAria ? 'true' : undefined,
-      'aria-controls': mentionAria ? mentionAria.listboxId : undefined,
+      'aria-expanded': mentionAria ? (mentionAria.expanded ? 'true' : 'false') : undefined,
+      'aria-controls': mentionAria && mentionAria.expanded ? mentionAria.listboxId : undefined,
       'aria-haspopup': mentionAria ? 'listbox' : undefined,
-      'aria-activedescendant': mentionAria?.activeOptionId,
+      'aria-activedescendant':
+        mentionAria && mentionAria.expanded ? mentionAria.activeOptionId : undefined,
       tabIndex: 0,
       'data-el-id': element.id,
       'data-el-type': element.type,

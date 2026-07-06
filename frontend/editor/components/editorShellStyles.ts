@@ -400,6 +400,15 @@ export const EDITOR_SHELL_STYLES = `
   background:var(--surface); border:1px solid var(--surface-border);
   border-radius:999px; padding:6px 8px; box-shadow:var(--shadow-float); gap:2px;
   flex-wrap:wrap; justify-content:center;
+  transition:border-color 0.15s ease, box-shadow 0.15s ease;
+}
+/* Editing-state hook (Task 6 ②): while a script line is focused the shell root
+   carries data-editing="true"; the element toolbar lights up so the writer sees
+   the type controls are live for the line under the caret. Pure styling — it
+   does not drive focus or a11y, only this visual emphasis. */
+.mh-editor-shell[data-editing='true'] .mh-h-toolbar{
+  border-color:var(--indigo);
+  box-shadow:var(--shadow-float), 0 0 0 1px var(--indigo-soft);
 }
 .mh-h-item{
   display:flex; align-items:center; gap:6px; padding:7px 13px; border-radius:999px;

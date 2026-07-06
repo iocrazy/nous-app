@@ -29,7 +29,7 @@ import {
 import { fetchScriptProject } from '../../services/scriptService';
 import { useToast } from '../../components/Toast';
 import type { CursorState } from '../editorMachine';
-import type { ElementOp, ElementType, SceneDoc } from '../types';
+import type { ElementOp, ElementType, ScriptElement, SceneDoc } from '../types';
 import type { ScriptChapter } from '../../types';
 import { useEditorState, type EditorFormat, type EditorMode } from '../useEditorState';
 import type { SaveState } from '../useSceneSync';
@@ -82,6 +82,9 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
   const [currentEpisodeId, setCurrentEpisodeId] = useState<string | null>(null);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [episodePanelOpen, setEpisodePanelOpen] = useState(false);
+  // Live (optimistic) elements lifted from each SceneBlock so Statistics + rail
+  // entities reflect in-flight edits, not just the last loaded snapshot (Task 6 ⑥).
+  const [liveElements, setLiveElements] = useState<Record<string, ScriptElement[]>>({});
   const [converting, setConverting] = useState<Record<string, boolean>>({});
   const [loadState, setLoadState] = useState<LoadState>('loading');
   // Central-column view: the script sheet or the scene-node projection. The top
@@ -259,6 +262,9 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
     setPendingOpenSceneId(null);
   }, [pendingOpenSceneId, railView, scenes]);
 
+  // Focusing an element line raises the editing-state flag, which the shell
+  // exposes as data-editing="true" — a pure CSS hook that lights up the element
+  // toolbar (see editorShellStyles). It does NOT change focus or a11y behaviour.
   const handleFocusElement = useCallback(
     (cursor: CursorState) => {
       setCursor(cursor);
@@ -267,7 +273,9 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
     [setCursor],
   );
 
-  // Esc left an element line: normal focus order resumes (data-editing=false).
+  // Esc left the element line: clear the editing-state flag so data-editing
+  // flips back to "false" and the toolbar emphasis relaxes. Native focus order
+  // is unaffected — this is only a styling marker.
   const handleExitEditing = useCallback(() => setEditing(false), []);
 
   // ── Scene reorder (Task 10): moveScene({before|after}) then reload ─────────
@@ -438,12 +446,25 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
     return ep?.title ?? t('editor.episodeFallback');
   }, [episodes, currentEpisodeId, t]);
 
+  const handleElementsChange = useCallback((sceneId: string, elements: ScriptElement[]) => {
+    setLiveElements((prev) => ({ ...prev, [sceneId]: elements }));
+  }, []);
+
+  // Scenes with each block's live optimistic elements overlaid (Task 6 ⑥) — the
+  // single source every derivation reads so Statistics, the CAST list and the
+  // rail entity sections update as the writer types (debounced 1s upstream).
+  // Stale ids (a since-removed scene) drop out because we map over `scenes`.
+  const statsScenes = useMemo(
+    () => scenes.map((s) => (liveElements[s.id] ? { ...s, elements: liveElements[s.id] } : s)),
+    [scenes, liveElements],
+  );
+
   // Script-wide CAST names feed the @-mention / character-cue picker.
-  const mentionCandidates = useMemo(() => deriveStatistics(scenes).cast, [scenes]);
+  const mentionCandidates = useMemo(() => deriveStatistics(statsScenes).cast, [statsScenes]);
 
   // Rail entity sections (laper info architecture) — Characters + Locations.
-  const railCharacters = useMemo(() => deriveRailCharacters(scenes), [scenes]);
-  const railLocations = useMemo(() => deriveRailLocations(scenes), [scenes]);
+  const railCharacters = useMemo(() => deriveRailCharacters(statsScenes), [statsScenes]);
+  const railLocations = useMemo(() => deriveRailLocations(statsScenes), [statsScenes]);
 
   // Legacy chapters with no scene pointing at them → read-only prose fallbacks.
   const orphanChapters = useMemo(() => {
@@ -537,6 +558,8 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
     <div
       className="mh-editor-shell"
       data-theme={state.theme}
+      // Styling hook consumed by editorShellStyles: "true" while a script line
+      // is focused lights up the element toolbar. Not a focus/a11y signal.
       data-editing={editing ? 'true' : 'false'}
       data-editor-shell
       ref={shellRef}
@@ -715,6 +738,11 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
                         const mounted =
                           !windowed || (i >= sceneWindow.start && i <= sceneWindow.end);
                         if (!mounted) {
+                          // A windowed-out scene is still a valid drop target so a
+                          // drag can cross the mounted window: dropping on the
+                          // placeholder lands the dragged scene BEFORE it. Keyboard
+                          // reorder (Alt+Arrow) covers the a11y path, so the
+                          // decorative placeholder stays aria-hidden.
                           return (
                             <div
                               key={s.id}
@@ -723,6 +751,22 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
                               data-scene-id={s.id}
                               style={{ height: sceneHeights[i] }}
                               aria-hidden="true"
+                              onDragOver={
+                                reorder.draggingId
+                                  ? (e) => {
+                                      e.preventDefault();
+                                      reorder.onDragOver(s.id, 'before');
+                                    }
+                                  : undefined
+                              }
+                              onDrop={
+                                reorder.draggingId
+                                  ? (e) => {
+                                      e.preventDefault();
+                                      reorder.onDrop(s.id, 'before');
+                                    }
+                                  : undefined
+                              }
                             />
                           );
                         }
@@ -739,6 +783,7 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
                             reorder={reorder}
                             copilotActiveSceneId={copilotSceneId}
                             onCopilotActivate={handleCopilotActivate}
+                            onElementsChange={handleElementsChange}
                             typeCommand={typeCommand ?? undefined}
                           />
                         );
@@ -796,7 +841,7 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
               </button>
             </div>
             <WritingPanel
-              scenes={scenes}
+              scenes={statsScenes}
               format={state.format}
               onFormatChange={handleFormatChange}
             />

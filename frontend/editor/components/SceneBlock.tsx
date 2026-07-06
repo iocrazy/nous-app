@@ -137,12 +137,16 @@ export interface SceneBlockProps {
   onSyncStateChange?: (sceneId: string, status: SceneSyncStatus) => void;
   /** Drag/keyboard reorder wiring (Task 10); absent = reorder disabled. */
   reorder?: SceneReorderApi;
-  /** Called when Esc leaves an element line so the shell can drop `data-editing`. */
+  /** Called when Esc leaves an element line so the shell can clear its
+   * `data-editing` styling hook (toolbar emphasis), not any focus/a11y state. */
   onExitEditing?: () => void;
   /** The scene that currently owns the copilot card (shell keeps it to one). */
   copilotActiveSceneId?: string | null;
   /** Notifies the shell which scene (if any) now holds a copilot selection. */
   onCopilotActivate?: (sceneId: string | null) => void;
+  /** Reports this scene's live (optimistic) elements up (debounced 1s) so the
+   *  shell can derive Statistics / rail entities from in-flight edits. */
+  onElementsChange?: (sceneId: string, elements: ScriptElement[]) => void;
 }
 
 /** Which half of a block the pointer is over → the drop edge. */
@@ -163,6 +167,7 @@ export function SceneBlock({
   onExitEditing,
   copilotActiveSceneId,
   onCopilotActivate,
+  onElementsChange,
 }: SceneBlockProps) {
   const { t } = useTranslation();
   const sync = useSceneSync(scene);
@@ -406,8 +411,9 @@ export function SceneBlock({
         return;
       }
 
-      // Esc leaves the element line: blur so Tab resumes the page's normal focus
-      // order, and tell the shell to drop `data-editing` (spec §3.5 a11y).
+      // Esc leaves the element line: blur so Tab resumes the page's normal
+      // (native) focus order, and tell the shell to clear its data-editing
+      // styling hook that emphasizes the toolbar while a line is focused.
       if (e.key === 'Escape') {
         e.preventDefault();
         e.currentTarget.blur();
@@ -531,6 +537,14 @@ export function SceneBlock({
     });
   }, [scene.id, sync.saveState, sync.resolveConflict, onSyncStateChange]);
 
+  // Lift optimistic elements to the shell for live Statistics + rail entities
+  // (Task 6 ⑥), debounced 1s so a burst of keystrokes collapses into one update.
+  useEffect(() => {
+    if (!onElementsChange) return;
+    const id = setTimeout(() => onElementsChange(scene.id, sync.elements), 1000);
+    return () => clearTimeout(id);
+  }, [sync.elements, scene.id, onElementsChange]);
+
   const onCompositionStart = useCallback(() => {
     composingRef.current = true;
   }, []);
@@ -587,6 +601,9 @@ export function SceneBlock({
     ? {
         elementId: mention.elementId,
         listboxId: mentionListId,
+        // No matches → collapsed combobox: no active option, aria-expanded=false
+        // (Task 6 ③ — drop the dangling activedescendant / controls refs).
+        expanded: mentionFiltered.length > 0,
         activeOptionId:
           mentionFiltered.length > 0 ? `${mentionListId}-opt-${mentionActive}` : undefined,
       }
