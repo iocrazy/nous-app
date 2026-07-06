@@ -73,6 +73,7 @@ export function useChatAttachmentUpload(opts: UseChatAttachmentUploadOpts): {
               filename: uploaded.filename,
               size_bytes: uploaded.size_bytes,
               mime: uploaded.mime,
+              resource_id: uploaded.resource_id,
             };
             // Best-effort image preview (don't block on it)
             if (uploaded.kind === 'image') {

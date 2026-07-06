@@ -432,3 +432,32 @@ async def test_image_too_large_to_inline_is_failure(monkeypatch, tmp_path):
     assert result.attachments == []
     assert len(result.failures) == 1
     assert "too large" in result.failures[0].reason.lower()
+
+
+# ─── dict re-hydration regression (2026-07-06 "图片要显示") ─────────────
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_normalized_dict_rehydrates_to_request_and_resolves():
+    """Regression: the chat service normalizes incoming attachments to plain
+    dicts (via model_dump) for the resource_ref split, then must re-hydrate
+    them to AttachmentRequest before calling resolve_attachments — passing
+    the raw dicts crashed with "'dict' object has no attribute 'kind'" and
+    silently degraded every image turn to text-only."""
+    original = AttachmentRequest(
+        kind="image",
+        url="https://x.com/a.png",
+        mime="image/png",
+        alt_text="screenshot.png",
+        resource_id="310812366953241",
+    )
+    # Same normalization the service applies (model_dump keeps None fields).
+    as_dict = original.model_dump()
+    rehydrated = AttachmentRequest.model_validate(as_dict)
+
+    result = await resolver.resolve_attachments([rehydrated])
+
+    assert result.failures == []
+    assert len(result.attachments) == 1
+    assert result.attachments[0].url == "https://x.com/a.png"

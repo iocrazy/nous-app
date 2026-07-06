@@ -1,9 +1,10 @@
 import React, { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import DOMPurify from 'dompurify';
-import { Copy, Check } from 'lucide-react';
+import { Copy, Check, FileText } from 'lucide-react';
 
-import type { ChatToolCall } from '../../types';
+import type { AIChatMessageAttachment, ChatToolCall } from '../../types';
+import { getResourceCoverUrl } from '../../services/resourceService';
 import { ApprovalCard, type AwaitingApproval } from './ApprovalCard';
 import { SubTaskList } from './SubTaskCard';
 
@@ -16,6 +17,12 @@ export interface MessageBubbleProps {
   onCopy?: () => void;
   timestamp?: string;
   /**
+   * Attachments sent with this turn (images render inline; other kinds
+   * render as a filename chip). Persisted server-side so history reloads
+   * keep them; the optimistic bubble uses the local preview data URL.
+   */
+  attachments?: AIChatMessageAttachment[];
+  /**
    * Sub-task dispatches the LLM made for this assistant turn. Rendered
    * as collapsible cards above the prose body. Ignored on user bubbles.
    */
@@ -27,6 +34,50 @@ export interface MessageBubbleProps {
   awaitingApproval?: AwaitingApproval;
 }
 
+/** Image strip + file chips shown above the message text. resource_ref
+    attachments are skipped — the @-mention is already part of the text. */
+function AttachmentStrip({
+  attachments,
+}: {
+  attachments: AIChatMessageAttachment[];
+}): React.ReactElement | null {
+  const visible = attachments.filter((a) => a.kind !== 'resource_ref');
+  if (visible.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5 mb-1.5">
+      {visible.map((att, i) => {
+        const src =
+          att.preview_data_url ??
+          (att.kind === 'image' && att.resource_id
+            ? getResourceCoverUrl(String(att.resource_id))
+            : undefined);
+        if (src) {
+          return (
+            <img
+              key={`${att.resource_id ?? att.alt_text ?? 'att'}-${i}`}
+              src={src}
+              alt={att.alt_text ?? 'attachment'}
+              loading="lazy"
+              className="max-h-40 max-w-full rounded-lg object-contain bg-ink-900/40"
+            />
+          );
+        }
+        return (
+          <span
+            key={`${att.resource_id ?? att.alt_text ?? 'att'}-${i}`}
+            className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-ink-800/60 text-[11px] text-ink-300"
+          >
+            <FileText size={12} className="shrink-0" />
+            <span className="truncate max-w-[160px]">
+              {att.alt_text ?? att.name ?? att.kind}
+            </span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 export function MessageBubble({
   role,
   content,
@@ -35,6 +86,7 @@ export function MessageBubble({
   onApply,
   onCopy,
   timestamp,
+  attachments,
   toolCalls,
   awaitingApproval,
 }: MessageBubbleProps): React.ReactElement {
@@ -53,6 +105,9 @@ export function MessageBubble({
     return (
       <div className="flex justify-end mb-3">
         <div className="max-w-[75%] px-3 py-2 rounded-xl bg-indigo-600/20 text-ink-200 text-sm leading-relaxed">
+          {attachments && attachments.length > 0 && (
+            <AttachmentStrip attachments={attachments} />
+          )}
           <p className="whitespace-pre-wrap break-words">{content}</p>
           {timestamp && (
             <p className="mt-1 text-[10px] text-ink-500 text-right">{timestamp}</p>
