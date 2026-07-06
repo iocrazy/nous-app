@@ -31,6 +31,10 @@ export interface HollywoodLayoutProps {
   handlers: LayoutHandlers;
   /** The open mention picker (if any) — its ARIA is applied to the matching line. */
   mention?: LineMention | null;
+  /** Copilot-selected element ids (their gutter ticks render pressed). */
+  selectedIds?: Set<string>;
+  /** Gutter-tick click → copilot selection (Task 11). */
+  onTickClick?: (elementId: string, shiftKey: boolean) => void;
 }
 
 export function HollywoodLayout({
@@ -38,6 +42,8 @@ export function HollywoodLayout({
   focusedElementId,
   handlers,
   mention,
+  selectedIds,
+  onTickClick,
 }: HollywoodLayoutProps) {
   return (
     <>
@@ -47,6 +53,8 @@ export function HollywoodLayout({
           element={el}
           lineClass={HOLLYWOOD_LINE_CLASS[el.type]}
           focused={focusedElementId === el.id}
+          selected={selectedIds?.has(el.id)}
+          onTickClick={onTickClick}
           mentionAria={
             mention && mention.elementId === el.id
               ? { listboxId: mention.listboxId, activeOptionId: mention.activeOptionId }

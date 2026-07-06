@@ -21,6 +21,7 @@ import {
   type ClipboardEvent,
   type FormEvent,
   type KeyboardEvent,
+  type MouseEvent,
 } from 'react';
 import type { ElementType, ScriptElement } from '../types';
 
@@ -97,6 +98,10 @@ export interface ElementLineProps {
   placeholder?: string;
   /** When set, this line is the open mention combobox (ARIA lives here, not the popup). */
   mentionAria?: LineMentionAria;
+  /** Copilot selection state for this row's gutter tick (Task 11). */
+  selected?: boolean;
+  /** Clicking the gutter tick selects the element for the copilot (Task 11). */
+  onTickClick?: (elementId: string, shiftKey: boolean) => void;
   onInput: (elementId: string, text: string) => void;
   onKeyDown: (elementId: string, e: KeyboardEvent<HTMLDivElement>) => void;
   onFocus: (elementId: string) => void;
@@ -111,6 +116,8 @@ export function ElementLine({
   focused,
   placeholder,
   mentionAria,
+  selected,
+  onTickClick,
   onInput,
   onKeyDown,
   onFocus,
@@ -135,13 +142,31 @@ export function ElementLine({
 
   const isTransition = element.type === 'transition';
 
+  // The gutter tick is a colour marker by default; when copilot selection is
+  // wired in it becomes a small toggle button that summons the card (Task 11).
+  const tick = onTickClick
+    ? createElement('button', {
+        type: 'button',
+        className: `mh-el-tick tick-btn ${ELEMENT_TICK_CLASS[element.type]}${
+          selected ? ' selected' : ''
+        }`,
+        // Pointer-summon affordance; kept out of the tab order in Phase 1.
+        tabIndex: -1,
+        'aria-pressed': selected ? 'true' : 'false',
+        'aria-label': 'Select element',
+        'data-tick-id': element.id,
+        onMouseDown: (e: MouseEvent) => e.preventDefault(),
+        onClick: (e: MouseEvent) => onTickClick(element.id, e.shiftKey),
+      })
+    : createElement('span', {
+        className: `mh-el-tick ${ELEMENT_TICK_CLASS[element.type]}`,
+        'aria-hidden': 'true',
+      });
+
   return createElement(
     'div',
     { className: `mh-el-row${focused ? ' focused' : ''}${isTransition ? ' transition-row' : ''}` },
-    createElement('span', {
-      className: `mh-el-tick ${ELEMENT_TICK_CLASS[element.type]}`,
-      'aria-hidden': 'true',
-    }),
+    tick,
     createElement('div', {
       ref: editableRef,
       className: `mh-el-editable mh-el-line ${lineClass}`,

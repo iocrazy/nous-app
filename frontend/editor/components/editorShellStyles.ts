@@ -528,4 +528,55 @@ export const EDITOR_SHELL_STYLES = `
   border-radius:5px;
 }
 .mh-editor-shell .mh-drag-handle:focus-visible{ opacity:1; outline-offset:1px; }
+
+/* ===== COPILOT SUMMON — gutter-tick select + card (Task 11) ===== */
+.mh-el-tick.tick-btn{
+  width:5px; padding:0; border:none; cursor:pointer; appearance:none;
+  transition:box-shadow 0.12s ease, transform 0.12s ease;
+}
+.mh-el-tick.tick-btn:hover{ transform:scaleX(1.6); }
+.mh-el-tick.tick-btn.selected{
+  transform:scaleX(1.6);
+  box-shadow:0 0 0 2px color-mix(in srgb, var(--indigo) 45%, transparent);
+}
+
+.mh-copilot-card{
+  margin:10px 0 4px; max-width:520px;
+  background:var(--surface); border:1px solid var(--surface-border);
+  border-radius:var(--radius-md); box-shadow:var(--shadow-float);
+  padding:12px 14px; display:flex; flex-direction:column; gap:10px;
+}
+.mh-copilot-head{ display:flex; align-items:center; gap:9px; }
+.mh-copilot-badge{
+  font-size:10.5px; font-weight:700; letter-spacing:0.04em; text-transform:uppercase;
+  padding:3px 8px; border-radius:999px;
+  background:var(--indigo-soft); color:var(--indigo-deep);
+}
+.mh-copilot-target{ font-size:12.5px; font-weight:600; color:var(--ink-soft); }
+.mh-copilot-actions{ display:flex; gap:8px; flex-wrap:wrap; }
+.mh-copilot-btn{
+  font-family:var(--sans); font-size:12px; font-weight:600; padding:7px 13px;
+  border-radius:var(--radius-sm); cursor:pointer;
+  background:var(--surface-2); color:var(--ink-soft); border:1px solid var(--surface-border);
+}
+.mh-copilot-btn.primary{ background:var(--indigo); color:var(--accent-on); border-color:transparent; }
+.mh-copilot-btn.primary:hover:not(:disabled){ background:var(--indigo-deep); }
+.mh-copilot-btn:disabled{ opacity:0.5; cursor:default; }
+.mh-copilot-input{
+  font-family:var(--sans); font-size:12.5px; padding:8px 11px;
+  border-radius:var(--radius-sm); border:1px solid var(--surface-border);
+  background:var(--surface-2); color:var(--ink-soft);
+}
+.mh-copilot-input:disabled{ opacity:0.6; cursor:default; }
+.mh-copilot-result{
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+  font-size:12.5px; font-weight:600; color:var(--green);
+}
+.mh-copilot-result.failed{ color:var(--red); }
+.mh-copilot-undo{
+  font-family:var(--sans); font-size:12px; font-weight:600; padding:5px 11px;
+  border-radius:var(--radius-sm); cursor:pointer;
+  background:var(--surface); color:var(--ink-soft); border:1px solid var(--surface-border);
+}
+.mh-copilot-undo:hover{ background:var(--surface-2); }
 `;

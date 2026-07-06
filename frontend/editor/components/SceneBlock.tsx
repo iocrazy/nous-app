@@ -34,14 +34,16 @@ import {
   type CursorState,
   type MachineResult,
 } from '../editorMachine';
-import { applyLocal } from '../opBuilder';
+import { applyLocal, buildInverse } from '../opBuilder';
 import { newElementId, updateSceneMeta } from '../sceneService';
+import { buildPolishOps } from '../copilotService';
 import type { ElementOp, ElementType, ScriptElement, SceneDoc } from '../types';
 import { useSceneSync } from '../useSceneSync';
 import { HollywoodLayout } from '../render/HollywoodLayout';
 import { AsianLayout } from '../render/AsianLayout';
 import { MentionNamesContext, type LineMention } from '../render/layoutShared';
 import { MentionCombobox, filterMentionCandidates } from './MentionCombobox';
+import { CopilotCard, type CopilotPhase } from './CopilotCard';
 import { EmptySceneHint } from './EmptyStates';
 import type { EditorFormat } from '../useEditorState';
 import type { SaveState } from '../useSceneSync';
@@ -116,6 +118,10 @@ export interface SceneBlockProps {
   reorder?: SceneReorderApi;
   /** Called when Esc leaves an element line so the shell can drop `data-editing`. */
   onExitEditing?: () => void;
+  /** The scene that currently owns the copilot card (shell keeps it to one). */
+  copilotActiveSceneId?: string | null;
+  /** Notifies the shell which scene (if any) now holds a copilot selection. */
+  onCopilotActivate?: (sceneId: string | null) => void;
 }
 
 /** Which half of a block the pointer is over → the drop edge. */
@@ -134,6 +140,8 @@ export function SceneBlock({
   onSyncStateChange,
   reorder,
   onExitEditing,
+  copilotActiveSceneId,
+  onCopilotActivate,
 }: SceneBlockProps) {
   const { t } = useTranslation();
   const sync = useSceneSync(scene);
@@ -144,6 +152,12 @@ export function SceneBlock({
   // combobox attributes that ride on the focused line.
   const mentionListId = useId();
   const [mentionActive, setMentionActive] = useState(0);
+  // Copilot (Task 11): elements selected via their gutter ticks + this turn's
+  // applied-edit count and the inverse batch that undoes them.
+  const [copilotSelection, setCopilotSelection] = useState<string[]>([]);
+  const [copilotAnchor, setCopilotAnchor] = useState<string | null>(null);
+  const [copilotEdits, setCopilotEdits] = useState<number | null>(null);
+  const [copilotInverse, setCopilotInverse] = useState<ElementOp[] | null>(null);
   const [meta, setMeta] = useState<SceneMeta>({
     heading_int_ext: scene.heading_int_ext ?? '',
     location_text: scene.location_text ?? '',
@@ -502,6 +516,83 @@ export function SceneBlock({
     reorder.onDrop(scene.id, edgeFromPointer(e.currentTarget, e.clientY));
   };
 
+  // ── Copilot summon (Task 11) ──────────────────────────────────────────────
+  const clearCopilot = useCallback(() => {
+    setCopilotSelection([]);
+    setCopilotAnchor(null);
+    setCopilotEdits(null);
+    setCopilotInverse(null);
+  }, []);
+
+  const handleTickClick = useCallback(
+    (elementId: string, shiftKey: boolean) => {
+      // Any selection change starts a fresh turn (drop last turn's undo/edits).
+      setCopilotEdits(null);
+      setCopilotInverse(null);
+      const els = elementsRef.current;
+      if (shiftKey && copilotAnchor) {
+        const a = els.findIndex((e) => e.id === copilotAnchor);
+        const b = els.findIndex((e) => e.id === elementId);
+        if (a !== -1 && b !== -1) {
+          const [lo, hi] = a <= b ? [a, b] : [b, a];
+          setCopilotSelection(els.slice(lo, hi + 1).map((e) => e.id));
+          return;
+        }
+      }
+      // Plain click: single-select, or toggle off if it was the only selection.
+      setCopilotSelection((prev) => (prev.length === 1 && prev[0] === elementId ? [] : [elementId]));
+      setCopilotAnchor(elementId);
+    },
+    [copilotAnchor],
+  );
+
+  const handlePolish = useCallback(() => {
+    const els = elementsRef.current;
+    const ops = buildPolishOps(els, copilotSelection);
+    if (ops.length === 0) {
+      setCopilotEdits(0);
+      setCopilotInverse(null);
+      return;
+    }
+    const inverse = buildInverse(ops, els);
+    sync.dispatchOps(ops, applyLocal(els, ops));
+    setCopilotEdits(ops.length);
+    setCopilotInverse(inverse);
+  }, [copilotSelection, sync]);
+
+  const handleCopilotUndo = useCallback(() => {
+    const inverse = copilotInverse;
+    if (!inverse || inverse.length === 0) return;
+    sync.dispatchOps(inverse, applyLocal(elementsRef.current, inverse));
+    setCopilotEdits(null);
+    setCopilotInverse(null);
+  }, [copilotInverse, sync]);
+
+  // Tell the shell which scene owns the card; if another scene takes over, drop
+  // our selection so only one card is ever summoned (spec: non-persistent).
+  const hasCopilotSelection = copilotSelection.length > 0;
+  useEffect(() => {
+    if (hasCopilotSelection) onCopilotActivate?.(scene.id);
+  }, [hasCopilotSelection, scene.id, onCopilotActivate]);
+  useEffect(() => {
+    if (
+      hasCopilotSelection &&
+      copilotActiveSceneId != null &&
+      copilotActiveSceneId !== scene.id
+    ) {
+      clearCopilot();
+    }
+  }, [copilotActiveSceneId, hasCopilotSelection, scene.id, clearCopilot]);
+
+  const copilotSelectedIds = useMemo(() => new Set(copilotSelection), [copilotSelection]);
+
+  const copilotPhase: CopilotPhase = (() => {
+    if (copilotEdits === null) return 'attached';
+    if (sync.saveState === 'saving') return 'applying';
+    if (sync.saveState === 'retrying' || sync.saveState === 'conflict') return 'failed';
+    return 'done';
+  })();
+
   return (
     <div
       className={`mh-scene-block${isDragging ? ' dragging' : ''}`}
@@ -581,6 +672,8 @@ export function SceneBlock({
           elements={sync.elements}
           focusedElementId={focusedElementId}
           mention={lineMention}
+          selectedIds={copilotSelectedIds}
+          onTickClick={handleTickClick}
           handlers={{
             onInput: handleInput,
             onKeyDown: handleKeyDown,
@@ -603,6 +696,18 @@ export function SceneBlock({
           position={mention.position}
           onSelect={handleMentionSelect}
           onHover={setMentionActive}
+        />
+      )}
+
+      {hasCopilotSelection && (
+        <CopilotCard
+          sceneNumber={index + 1}
+          selectedCount={copilotSelection.length}
+          phase={copilotPhase}
+          editsThisTurn={copilotEdits}
+          canUndo={!!copilotInverse && copilotInverse.length > 0}
+          onPolish={handlePolish}
+          onUndo={handleCopilotUndo}
         />
       )}
 

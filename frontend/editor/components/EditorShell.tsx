@@ -82,6 +82,7 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
   const [syncStates, setSyncStates] = useState<Record<string, SceneSyncStatus>>({});
   const [pendingFocusId, setPendingFocusId] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [copilotSceneId, setCopilotSceneId] = useState<string | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ sceneId: string; edge: 'before' | 'after' } | null>(
     null,
@@ -99,6 +100,11 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
 
   const handleSyncStateChange = useCallback((sceneId: string, status: SceneSyncStatus) => {
     setSyncStates((prev) => ({ ...prev, [sceneId]: status }));
+  }, []);
+
+  // Keep the summoned copilot card to a single scene at a time (Task 11).
+  const handleCopilotActivate = useCallback((sceneId: string | null) => {
+    setCopilotSceneId(sceneId);
   }, []);
 
   const reload = useCallback(async () => {
@@ -624,6 +630,8 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
                             onSyncStateChange={handleSyncStateChange}
                             onExitEditing={handleExitEditing}
                             reorder={reorder}
+                            copilotActiveSceneId={copilotSceneId}
+                            onCopilotActivate={handleCopilotActivate}
                             typeCommand={typeCommand ?? undefined}
                           />
                         );

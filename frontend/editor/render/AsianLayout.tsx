@@ -46,9 +46,20 @@ export interface AsianLayoutProps {
   handlers: LayoutHandlers;
   /** The open mention picker (if any) — its ARIA is applied to the matching line. */
   mention?: LineMention | null;
+  /** Copilot-selected element ids (their gutter ticks render pressed). */
+  selectedIds?: Set<string>;
+  /** Gutter-tick click → copilot selection (Task 11). */
+  onTickClick?: (elementId: string, shiftKey: boolean) => void;
 }
 
-export function AsianLayout({ elements, focusedElementId, handlers, mention }: AsianLayoutProps) {
+export function AsianLayout({
+  elements,
+  focusedElementId,
+  handlers,
+  mention,
+  selectedIds,
+  onTickClick,
+}: AsianLayoutProps) {
   return (
     <>
       {elements.map((el) => {
@@ -65,6 +76,8 @@ export function AsianLayout({ elements, focusedElementId, handlers, mention }: A
               element={el}
               lineClass={ASIAN_LINE_CLASS[el.type]}
               focused={focusedElementId === el.id}
+              selected={selectedIds?.has(el.id)}
+              onTickClick={onTickClick}
               mentionAria={
                 mention && mention.elementId === el.id
                   ? { listboxId: mention.listboxId, activeOptionId: mention.activeOptionId }
