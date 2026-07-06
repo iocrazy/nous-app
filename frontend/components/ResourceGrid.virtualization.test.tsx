@@ -80,6 +80,22 @@ vi.mock('../hooks/useGridVirtualizer', () => ({
 // React context. We replace the entire module so the context lookup never
 // needs the real Provider in the render tree.
 const mockUseResourcesContext = vi.hoisted(() => vi.fn());
+
+// The justified virtualizer is now called unconditionally too — inert mock
+// so its real @tanstack/react-virtual instance never runs in this suite.
+vi.mock('../hooks/useJustifiedVirtualizer', () => ({
+  useJustifiedVirtualizer: vi.fn(() => ({
+    rows: [],
+    rowVirtualizer: {
+      getTotalSize: () => 0,
+      getVirtualItems: () => [],
+      measureElement: vi.fn(),
+    },
+    containerRef: vi.fn(),
+    gap: 8,
+  })),
+}));
+
 vi.mock('../contexts/ResourcesContext', () => ({
   useResourcesContext: mockUseResourcesContext,
 }));

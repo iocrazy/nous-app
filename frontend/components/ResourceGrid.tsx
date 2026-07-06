@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Clock,
@@ -47,6 +47,7 @@ import { TempResourceActions } from './TempResourceActions';
 import { ttlBadgeText } from '../utils/tempTtl';
 import { tempTtlService } from '../services/tempTtlService';
 import { useGridVirtualizer } from '../hooks/useGridVirtualizer';
+import { useJustifiedVirtualizer } from '../hooks/useJustifiedVirtualizer';
 
 // ─── Justified layout helper ────────────────────────────
 // Derive a display aspect ratio (w/h) for a resource, clamped to a sane range.
@@ -403,6 +404,22 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
     itemCount: sortedItems.length,
     fixedColumns: viewMode === 'list' ? 1 : undefined,
     estimateRowHeight: viewMode === 'list' ? 64 : 280,
+  });
+
+  // Justified virtualizer — variable-height rows from a pure layout pre-pass
+  // (the old flex-wrap markup mounted ALL cards; 100k in justified mode died).
+  const justifiedAspectRatios = useMemo(
+    () => sortedItems.map((it) => aspectRatioOf(it.resource)),
+    [sortedItems],
+  );
+  const {
+    rows: justifiedRows,
+    rowVirtualizer: justifiedVirtualizer,
+    containerRef: justifiedContainerRef,
+    gap: justifiedGap,
+  } = useJustifiedVirtualizer({
+    scrollRef: contentScrollRef,
+    aspectRatios: justifiedAspectRatios,
   });
 
   // Sort panel
@@ -1107,18 +1124,40 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                     </div>
                   )}
                   {viewMode === 'justified' ? (
-                    <div className="flex flex-wrap gap-2 justified-grid">
-                      {sortedItems.map((item) => {
-                        const badge = isTempContext ? ttlBadgeText(item.created_at, scopeTtl) : '';
-                        const ar = aspectRatioOf(item.resource);
+                    <div
+                      ref={justifiedContainerRef}
+                      style={{ height: justifiedVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}
+                      data-virtualized="justified"
+                    >
+                      {justifiedVirtualizer.getVirtualItems().map((virtualRow) => {
+                        const row = justifiedRows[virtualRow.index];
+                        if (!row) return null;
+                        const rowItems = sortedItems.slice(row.start, row.end);
                         return (
-                        <div
-                          key={item.id}
-                          style={{ flexGrow: ar, flexBasis: `${ar * 170}px` }}
-                          className="min-w-[140px] max-w-full"
-                          {...getItemTouchHandlers('file', item)}
-                        >
-                        <ResourceCard
+                          <div
+                            key={virtualRow.key}
+                            data-index={virtualRow.index}
+                            style={{
+                              position: 'absolute',
+                              top: 0,
+                              left: 0,
+                              width: '100%',
+                              transform: `translateY(${virtualRow.start}px)`,
+                              display: 'flex',
+                              gap: justifiedGap,
+                              height: row.height,
+                            }}
+                          >
+                            {rowItems.map((item, idx) => {
+                              const badge = isTempContext ? ttlBadgeText(item.created_at, scopeTtl) : '';
+                              const ar = justifiedAspectRatios[row.start + idx] || 1;
+                              return (
+                              <div
+                                key={item.id}
+                                style={{ width: ar * row.height, flexShrink: 0 }}
+                                {...getItemTouchHandlers('file', item)}
+                              >
+                              <ResourceCard
                           item={item}
                           onClick={(e?: any) => {
                             if (isMobileDevice) {
@@ -1167,6 +1206,9 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                           </div>
                         )}
                         </div>
+                              );
+                            })}
+                          </div>
                         );
                       })}
                     </div>

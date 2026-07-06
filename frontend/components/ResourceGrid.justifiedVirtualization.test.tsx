@@ -1,15 +1,11 @@
 /**
- * ResourceGrid.listVirtualization.test.tsx
+ * ResourceGrid.justifiedVirtualization.test.tsx
  *
- * TDD test for Task 2: Virtualizing the list-mode resource library.
- *
- * RED assertion: `data-virtualized="list"` does NOT exist in the old code
- * (which renders all items via sortedItems.map inside <div className="space-y-1.5">).
- * This test FAILS before the implementation is wired in.
- *
- * GREEN assertion: after the list branch is replaced with a virtualizer container,
- * `data-virtualized="list"` exists and only the windowed rows (5 rows × 1 column = 5
- * cards) are in the DOM, not all 500.
+ * The justified (Eagle-style) view previously flex-wrapped ALL items into the
+ * DOM — the last un-virtualized browse mode (grid #927, list #933). This
+ * pins the virtualized replacement: rows come from the pure layout pre-pass
+ * (computeJustifiedRows via useJustifiedVirtualizer, mocked here) and only
+ * the windowed rows' cards mount.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -19,7 +15,9 @@ import { ResourceGrid } from './ResourceGrid';
 import type { ResourceGridProps } from './ResourceGrid';
 import type { ResourceItem } from '../types';
 
-// ── Browser API stubs (jsdom doesn't implement these) ─────────────────────────
+// ── Browser API stubs (jsdom doesn't implement these) ──────────────────────────
+// IntersectionObserver is used by the loadMoreRef sentinel effect
+// ResizeObserver is used by useGridVirtualizer's container width measurement
 beforeEach(() => {
   global.IntersectionObserver = vi.fn().mockImplementation(() => ({
     observe: vi.fn(),
@@ -51,42 +49,38 @@ vi.mock('../services/tempTtlService', () => ({
   },
 }));
 
-// Mock useGridVirtualizer to return exactly 5 virtual rows × 1 column (list mode).
-// BEFORE implementation: the list branch doesn't call useGridVirtualizer at all,
-// so all 500 items are rendered and no data-virtualized="list" exists → RED.
-// AFTER implementation: ResourceGrid uses the virtualizer in the list branch,
-// and only 5 cards are rendered inside data-virtualized="list" → GREEN.
+// Mock useGridVirtualizer to return exactly 3 virtual rows × 2 columns.
+// BEFORE implementation: this mock is never imported by ResourceGrid, so
+// the old code renders all 500 items and no data-virtualized attr exists → RED.
+// AFTER implementation: ResourceGrid calls useGridVirtualizer, the mock
+// The grid/list virtualizer is still called unconditionally by the
+// component — give it an inert mock so it renders nothing surprising.
 vi.mock('../hooks/useGridVirtualizer', () => ({
   useGridVirtualizer: vi.fn(() => ({
-    columns: 1,
-    rowVirtualizer: {
-      getTotalSize: () => 32000,
-      getVirtualItems: () => [
-        { index: 0, key: 'row-0', start: 0 },
-        { index: 1, key: 'row-1', start: 64 },
-        { index: 2, key: 'row-2', start: 128 },
-        { index: 3, key: 'row-3', start: 192 },
-        { index: 4, key: 'row-4', start: 256 },
-      ],
-      // measureElement is passed as a ref callback to each row div
-      measureElement: vi.fn(),
-    },
-    containerRef: vi.fn(),
-    totalSize: 32000,
-  })),
-}));
-
-// Context mock — replaces the entire module so no real Provider is needed.
-const mockUseResourcesContext = vi.hoisted(() => vi.fn());
-
-// The justified virtualizer is now called unconditionally too — inert mock
-// so its real @tanstack/react-virtual instance never runs in this suite.
-vi.mock('../hooks/useJustifiedVirtualizer', () => ({
-  useJustifiedVirtualizer: vi.fn(() => ({
-    rows: [],
+    columns: 2,
     rowVirtualizer: {
       getTotalSize: () => 0,
       getVirtualItems: () => [],
+      measureElement: vi.fn(),
+    },
+    containerRef: vi.fn(),
+    totalSize: 0,
+  })),
+}));
+
+// Justified virtualizer mock: two windowed rows covering items 0-4 of 500.
+vi.mock('../hooks/useJustifiedVirtualizer', () => ({
+  useJustifiedVirtualizer: vi.fn(() => ({
+    rows: [
+      { start: 0, end: 3, height: 160 },
+      { start: 3, end: 5, height: 150 },
+    ],
+    rowVirtualizer: {
+      getTotalSize: () => 42000,
+      getVirtualItems: () => [
+        { index: 0, key: 'jrow-0', start: 0 },
+        { index: 1, key: 'jrow-1', start: 168 },
+      ],
       measureElement: vi.fn(),
     },
     containerRef: vi.fn(),
@@ -94,11 +88,15 @@ vi.mock('../hooks/useJustifiedVirtualizer', () => ({
   })),
 }));
 
+// Context mock — useResourcesContext is a hook that reads from an internal
+// React context. We replace the entire module so the context lookup never
+// needs the real Provider in the render tree.
+const mockUseResourcesContext = vi.hoisted(() => vi.fn());
 vi.mock('../contexts/ResourcesContext', () => ({
   useResourcesContext: mockUseResourcesContext,
 }));
 
-// Lightweight child stubs to avoid deep dependency trees.
+// Mock heavy child components to avoid pulling in their own deep dep trees.
 vi.mock('./ResourceCard', () => ({
   ResourceCard: ({ item }: { item: ResourceItem }) => (
     <div data-testid="resource-card" data-id={item.id} />
@@ -164,7 +162,7 @@ const buildCtx = (overrides: Record<string, unknown> = {}) => ({
   isSharedView: false,
   isTempView: false,
   loading: false,
-  viewMode: 'list' as const,        // ← list mode (key difference from grid test)
+  viewMode: 'justified' as const,
   setViewMode: vi.fn(),
   flattenFolders: false,
   setFlattenFolders: vi.fn(),
@@ -276,62 +274,41 @@ const buildProps = (overrides: Partial<ResourceGridProps> = {}): ResourceGridPro
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
-describe('ResourceGrid — list virtualization', () => {
+describe('ResourceGrid — justified virtualization', () => {
   beforeEach(() => {
     mockUseResourcesContext.mockReturnValue(buildCtx());
   });
 
-  it('renders the virtualized list container (data-virtualized="list") instead of a flat map', () => {
+  it('renders the virtualized justified container instead of a flat flex-wrap', () => {
     const { container } = render(<ResourceGrid {...buildProps()} />);
-
-    // Structural proof: the list branch must be using the virtualizer wrapper
-    const virtualizedList = container.querySelector('[data-virtualized="list"]');
-    expect(virtualizedList).not.toBeNull();
+    expect(container.querySelector('[data-virtualized="justified"]')).not.toBeNull();
+    // The legacy all-items flex-wrap markup must be gone.
+    expect(container.querySelector('.justified-grid')).toBeNull();
   });
 
-  it('bounds the DOM to only the windowed rows — far fewer than 500 items rendered', () => {
+  it('bounds the DOM to the windowed rows — 5 cards, not 500', () => {
     render(<ResourceGrid {...buildProps()} />);
-
-    // The mock virtualizer returns 5 rows × 1 column = 5 cards.
-    // Before virtualization: 500 cards would be in the DOM.
     const cards = screen.getAllByTestId('resource-card');
-    expect(cards.length).toBeLessThan(500);
-    // Specifically, only the 5 windowed items should be rendered
-    expect(cards.length).toBe(5);
+    expect(cards.length).toBe(5); // rows cover items 0-4
+    const ids = cards.map((el) => el.getAttribute('data-id'));
+    expect(ids).toContain('item-0');
+    expect(ids).toContain('item-4');
+    expect(ids).not.toContain('item-5');
   });
 
-  it('sets the total-size height on the container div (proves virtualizer sizing is wired)', () => {
+  it('sets the total-size height on the container (virtualizer sizing wired)', () => {
     const { container } = render(<ResourceGrid {...buildProps()} />);
-
-    const virtualizedList = container.querySelector('[data-virtualized="list"]') as HTMLElement;
-    expect(virtualizedList).not.toBeNull();
-    // The mock getTotalSize() returns 32000 — the height style must reflect this
-    expect(virtualizedList.style.height).toBe('32000px');
+    const el = container.querySelector('[data-virtualized="justified"]') as HTMLElement;
+    expect(el.style.height).toBe('42000px');
   });
 
-  it('does NOT render data-virtualized="grid" when viewMode is list', () => {
+  it('sizes each card wrapper from the row height × aspect ratio', () => {
     const { container } = render(<ResourceGrid {...buildProps()} />);
-
-    const virtualizedGrid = container.querySelector('[data-virtualized="grid"]');
-    expect(virtualizedGrid).toBeNull();
-  });
-
-  it('does NOT render the justified-grid branch when viewMode is list', () => {
-    const { container } = render(<ResourceGrid {...buildProps()} />);
-
-    const justifiedEl = container.querySelector('.justified-grid');
-    expect(justifiedEl).toBeNull();
-  });
-
-  it('preserves each windowed item id as a data attribute on the card', () => {
-    render(<ResourceGrid {...buildProps()} />);
-
-    // 5 virtual rows, 1 column each → items 0..4
-    const cards = screen.getAllByTestId('resource-card');
-    const renderedIds = cards.map((el) => el.getAttribute('data-id'));
-    expect(renderedIds).toContain('item-0');
-    expect(renderedIds).toContain('item-4');
-    // item-5 should NOT be rendered (beyond the 5 mocked rows)
-    expect(renderedIds).not.toContain('item-5');
+    const rowEls = container.querySelectorAll('[data-virtualized="justified"] > div');
+    expect(rowEls.length).toBe(2);
+    // Items without resolution/mime fall back to ar=1 → width == row height.
+    const firstCardWrap = rowEls[0].firstElementChild as HTMLElement;
+    expect(firstCardWrap.style.width).toBe('160px');
+    expect((rowEls[0] as HTMLElement).style.height).toBe('160px');
   });
 });
