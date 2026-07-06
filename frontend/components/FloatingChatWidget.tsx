@@ -2,9 +2,10 @@
  * FloatingChatWidget — the global AI chat shell (replaces AIChatDrawer).
  *
  * Collapsed: a bottom-right FAB on every page. Expanded: a floating window
- * that can be dragged by its title bar and resized from the top/left edges
- * and the top-left corner (it is anchored bottom-right, so growth goes
- * up/left). Rect + open state persist via globalChatStore, which also lets
+ * that can be dragged by its title bar and resized from every edge and
+ * corner (anchored bottom-right: east/south drags adjust width/height AND
+ * right/bottom together so the grabbed edge tracks the pointer). Rect +
+ * open state persist via globalChatStore, which also lets
  * the window survive navigation between AppLayout routes and the fullscreen
  * editor routes (both mount this widget; only one host renders at a time).
  *
@@ -18,6 +19,7 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { GripHorizontal, MessageSquare, Minus } from 'lucide-react';
 
 import { AIChatPanel } from './AIChatPanel';
@@ -28,9 +30,16 @@ import {
   useGlobalChatStore,
 } from '../stores/globalChatStore';
 
-type ResizeMode = 'nw' | 'n' | 'w';
+type ResizeMode = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 
-export function FloatingChatWidget(): React.ReactElement {
+export function FloatingChatWidget(): React.ReactElement | null {
+  // Hide entirely on the Chat page (/team/:id/chat) — its main view IS a
+  // chat (channels + agent DMs), so the floating widget would be a second
+  // chat on top of a chat. State is preserved; the widget reappears (still
+  // open if it was open) as soon as the user navigates away.
+  const { pathname } = useLocation();
+  const onChatPage = /\/chat(\/|$)/.test(pathname);
+
   const open = useGlobalChatStore((s) => s.open);
   const right = useGlobalChatStore((s) => s.right);
   const bottom = useGlobalChatStore((s) => s.bottom);
@@ -136,13 +145,19 @@ export function FloatingChatWidget(): React.ReactElement {
     [setRect],
   );
 
-  // ── Resize (top/left edges + top-left corner; anchored bottom-right) ─
+  // ── Resize (all edges + corners; window anchored bottom-right) ───────
+  // West/north drags only change width/height (the right/bottom offsets
+  // stay put). East/south drags must move width AND right (height AND
+  // bottom) together so the grabbed edge follows the pointer while the
+  // opposite edge stays fixed on screen.
   const resizeState = useRef<{
     mode: ResizeMode;
     startX: number;
     startY: number;
     startW: number;
     startH: number;
+    startRight: number;
+    startBottom: number;
   } | null>(null);
 
   const onResizeStart = useCallback(
@@ -156,19 +171,44 @@ export function FloatingChatWidget(): React.ReactElement {
         startY: e.clientY,
         startW: s.width,
         startH: s.height,
+        startRight: s.right,
+        startBottom: s.bottom,
       };
       const onMove = (ev: PointerEvent) => {
         const r = resizeState.current;
         if (!r) return;
         const dx = ev.clientX - r.startX;
         const dy = ev.clientY - r.startY;
-        const next: { width?: number; height?: number } = {};
-        if (r.mode === 'nw' || r.mode === 'w') {
-          // Left edge moves with the pointer; right edge is anchored.
-          next.width = clamp(r.startW - dx, CHAT_MIN_W, CHAT_MAX_W);
+        const next: Partial<{
+          width: number;
+          height: number;
+          right: number;
+          bottom: number;
+        }> = {};
+        const maxH = window.innerHeight - 48;
+        if (r.mode.includes('w')) {
+          // Left edge follows the pointer; right edge anchored. Cap width
+          // so the left edge can't be pushed past the viewport's left side.
+          const maxW = Math.min(CHAT_MAX_W, window.innerWidth - r.startRight - 8);
+          next.width = clamp(r.startW - dx, CHAT_MIN_W, Math.max(CHAT_MIN_W, maxW));
         }
-        if (r.mode === 'nw' || r.mode === 'n') {
-          next.height = clamp(r.startH - dy, CHAT_MIN_H, window.innerHeight - 48);
+        if (r.mode.includes('e')) {
+          // Right edge follows the pointer; LEFT edge anchored — width and
+          // right offset change in lockstep. Cap so right stays ≥ 8px.
+          const maxW = Math.min(CHAT_MAX_W, r.startW + r.startRight - 8);
+          const w = clamp(r.startW + dx, CHAT_MIN_W, Math.max(CHAT_MIN_W, maxW));
+          next.width = w;
+          next.right = r.startRight - (w - r.startW);
+        }
+        if (r.mode.includes('n')) {
+          next.height = clamp(r.startH - dy, CHAT_MIN_H, maxH);
+        }
+        if (r.mode.includes('s')) {
+          // Bottom edge follows the pointer; TOP edge anchored.
+          const cap = Math.min(maxH, r.startH + r.startBottom - 8);
+          const h = clamp(r.startH + dy, CHAT_MIN_H, Math.max(CHAT_MIN_H, cap));
+          next.height = h;
+          next.bottom = r.startBottom - (h - r.startH);
         }
         setRect(next);
       };
@@ -182,6 +222,8 @@ export function FloatingChatWidget(): React.ReactElement {
     },
     [setRect],
   );
+
+  if (onChatPage) return null;
 
   if (!open) {
     return (
@@ -252,18 +294,38 @@ export function FloatingChatWidget(): React.ReactElement {
         />
       </div>
 
-      {/* Resize handles — top/left edges + top-left corner */}
+      {/* Resize handles — all four edges + four corners */}
       <div
         onPointerDown={onResizeStart('n')}
         className="absolute left-3 right-3 top-0 h-1.5 cursor-ns-resize"
+      />
+      <div
+        onPointerDown={onResizeStart('s')}
+        className="absolute bottom-0 left-3 right-3 h-1.5 cursor-ns-resize"
       />
       <div
         onPointerDown={onResizeStart('w')}
         className="absolute bottom-3 left-0 top-3 w-1.5 cursor-ew-resize"
       />
       <div
+        onPointerDown={onResizeStart('e')}
+        className="absolute bottom-3 right-0 top-3 w-1.5 cursor-ew-resize"
+      />
+      <div
         onPointerDown={onResizeStart('nw')}
         className="absolute left-0 top-0 h-3 w-3 cursor-nwse-resize"
+      />
+      <div
+        onPointerDown={onResizeStart('ne')}
+        className="absolute right-0 top-0 h-3 w-3 cursor-nesw-resize"
+      />
+      <div
+        onPointerDown={onResizeStart('sw')}
+        className="absolute bottom-0 left-0 h-3 w-3 cursor-nesw-resize"
+      />
+      <div
+        onPointerDown={onResizeStart('se')}
+        className="absolute bottom-0 right-0 h-3 w-3 cursor-nwse-resize"
       />
     </div>
   );

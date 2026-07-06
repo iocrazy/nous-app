@@ -715,3 +715,92 @@ async def test_chat_stream_user_cancel_degrades_gracefully() -> None:
     assert out["cancelled"] is True
     # Partial content persisted as the assistant turn (not lost)
     assert out["assistant_message"] is not None
+
+
+# ─── Session listing: cross-agent + server-side search (P1) ─────────────────
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_passes_search_through_to_store() -> None:
+    """Service forwards agent_slug=None (cross-agent) + search to the store."""
+    from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
+
+    captured: Dict[str, Any] = {}
+
+    class _ListingStore(_FakeStore):
+        async def list_sessions(self, **kwargs: Any) -> List[Dict[str, Any]]:
+            captured.update(kwargs)
+            return []
+
+    svc = AILibraryChatService(store=_ListingStore(None))
+    await svc.list_sessions(user_id=uuid4(), search="outline", limit=30)
+
+    assert captured["agent_slug"] is None  # cross-agent: no filter
+    assert captured["search"] == "outline"
+    assert captured["limit"] == 30
+
+
+@pytest.mark.asyncio
+async def test_store_search_builds_escaped_ilike() -> None:
+    """ConversationsAiStore escapes LIKE metacharacters and adds the ILIKE
+    clause only when a search term is given."""
+    from app.services.ai.chat.conversations_ai_store import ConversationsAiStore
+
+    store = ConversationsAiStore()
+    seen: Dict[str, Any] = {}
+
+    async def fake_fetch_all(sql: str, params: Dict[str, Any]) -> List[Dict[str, Any]]:
+        seen["sql"] = sql
+        seen["params"] = params
+        return []
+
+    with patch(
+        "app.services.ai.chat.conversations_ai_store.db_engine.fetch_all",
+        new=fake_fetch_all,
+    ):
+        await store.list_sessions(
+            user_id=str(uuid4()),
+            agent_slug=None,
+            project_id=None,
+            limit=50,
+            search="50%_done",
+        )
+
+    assert "c.title ILIKE :search" in seen["sql"]
+    # % and _ must arrive escaped so user input matches literally.
+    assert seen["params"]["search"] == "%50\\%\\_done%"
+
+    # No search → no ILIKE clause at all.
+    with patch(
+        "app.services.ai.chat.conversations_ai_store.db_engine.fetch_all",
+        new=fake_fetch_all,
+    ):
+        await store.list_sessions(
+            user_id=str(uuid4()), agent_slug=None, project_id=None, limit=50
+        )
+    assert "ILIKE" not in seen["sql"]
+
+
+@pytest.mark.asyncio
+async def test_list_all_chat_sessions_endpoint_validates_and_delegates() -> None:
+    """GET /sessions rejects bad limits and forwards search to the service."""
+    from app.api.ai_library_router import list_all_chat_sessions
+
+    auth = MagicMock()
+    auth.user_id = str(uuid4())
+
+    svc = MagicMock()
+    svc.list_sessions = AsyncMock(return_value=[])
+
+    with patch("app.api.ai_library_router.AILibraryChatService", return_value=svc):
+        with pytest.raises(HTTPException) as exc:
+            await list_all_chat_sessions(auth, limit=0)
+        assert exc.value.status_code == 400
+
+        out = await list_all_chat_sessions(auth, search="plan", limit=20)
+
+    assert out == []
+    call = svc.list_sessions.await_args
+    assert call.kwargs["search"] == "plan"
+    assert call.kwargs["limit"] == 20
+    assert "agent_slug" not in call.kwargs  # cross-agent list
