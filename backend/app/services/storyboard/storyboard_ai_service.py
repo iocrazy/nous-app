@@ -45,6 +45,12 @@ from app.services.storyboard.storyboard_service import StoryboardService
 # Agent slug in the ai_agents table (seeded from backend/seeds/agents/storyboard/).
 AGENT_SLUG = "storyboard"
 
+# The legacy default image model. When the image registry misses and we resolve
+# a provider from the DB catalog, this sentinel yields to the catalog row's
+# actual_model — a caller that passed an explicit non-default model keeps it.
+# Kept equal to script_shot_generate._DEFAULT_MODEL by contract.
+_DEFAULT_IMAGE_MODEL = "dall-e-3"
+
 
 class StoryboardAIService:
     """AI orchestration layer for the Storyboard Workbench module."""
@@ -368,8 +374,9 @@ class StoryboardAIService:
             ImageGenResult serialised as a dict.
 
         Raises:
-            KeyError: If *provider_name* is not registered.
-            RuntimeError: If the provider raises during generation.
+            RuntimeError: If no image model is configured in the catalog
+                (registry miss + empty catalog), or the provider raises during
+                generation.
         """
         try:
             effective_prompt = prompt
@@ -385,11 +392,35 @@ class StoryboardAIService:
             if style_fragment:
                 effective_prompt = f"{effective_prompt}. Style: {style_fragment}"
 
-            image_provider = provider_registry.get_image_provider(provider_name)
+            # Provider precedence: the in-process registry wins when it has the
+            # named provider (reserved for future in-proc providers). Today the
+            # image registry ships EMPTY, so every call KeyErrors here and
+            # resolves against the DB mediahub_models catalog (house rule:
+            # provider config lives in the DB, not env).
+            #
+            # Model precedence on the DB path: an explicit non-default caller
+            # model wins; the 'dall-e-3' default sentinel (or an empty model)
+            # yields to the catalog row's actual_model — so a shot dispatched
+            # with the legacy default lands on whatever image model the admin
+            # enabled (e.g. a doubao-seedream id).
+            try:
+                image_provider = provider_registry.get_image_provider(provider_name)
+                gen_model = model
+            except KeyError:
+                from app.services.media.parsers.video_providers.db_registry import (
+                    resolve_image_provider,
+                )
+
+                image_provider, actual_model = await resolve_image_provider(
+                    provider_name
+                )
+                gen_model = (
+                    model if (model and model != _DEFAULT_IMAGE_MODEL) else actual_model
+                )
 
             result: ImageGenResult = await image_provider.generate(
                 effective_prompt,
-                model,
+                gen_model,
                 aspect_ratio=aspect_ratio,
                 reference_image_url=reference_image_url,
             )
@@ -403,14 +434,6 @@ class StoryboardAIService:
             )
             return asdict(result)
 
-        except KeyError:
-            logger.error(
-                "Image provider not found: %s (project=%s node=%s)",
-                provider_name,
-                project_id,
-                node_id,
-            )
-            raise
         except Exception as exc:
             logger.error(
                 "Image generation failed for project=%s node=%s: %s",
