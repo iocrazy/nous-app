@@ -14,17 +14,25 @@
  * here the rail and paper column render a minimal-but-real view of the loaded
  * scenes so the shell is exercised end to end.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { createScene, listScenes } from '../sceneService';
+import { applyOps, createScene, listScenes, newElementId } from '../sceneService';
 import type { CursorState } from '../editorMachine';
-import type { ElementType, SceneDoc } from '../types';
+import type { ElementOp, ElementType, SceneDoc } from '../types';
 import { useEditorState, type EditorFormat, type EditorMode } from '../useEditorState';
+import type { SaveState } from '../useSceneSync';
+import { persistFormat, readStoredFormat } from '../formatStorage';
 import { EDITOR_SHELL_STYLES } from './editorShellStyles';
-import { SceneBlock, type TypeCommand } from './SceneBlock';
+import { SceneBlock, type TypeCommand, type SceneSyncStatus } from './SceneBlock';
 import { SceneRail } from './SceneRail';
+import { RailModules } from './RailModules';
+import { RailEntities } from './RailEntities';
+import { deriveRailCharacters, deriveRailLocations } from '../railDerive';
 import { ElementToolbar } from './ElementToolbar';
-import { WritingPanel } from './WritingPanel';
+import { WritingPanel, deriveStatistics } from './WritingPanel';
+import { SaveIndicator, aggregateSaveState } from './SaveIndicator';
+import { ConflictBar } from './ConflictBar';
+import { ColdStart } from './EmptyStates';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -32,18 +40,27 @@ const DOC_MODES: EditorMode[] = ['script', 'outline', 'cover'];
 
 export function EditorShell({ scriptId }: { scriptId: string }) {
   const { t } = useTranslation();
+  // Restore the per-script layout engine synchronously so the first paint uses
+  // it (no engine flash on remount).
+  const initialFormat = useMemo(() => readStoredFormat(scriptId) ?? undefined, [scriptId]);
   const { state, setMode, setFormat, toggleTheme, setActiveScene, setCursor, setNextInsertType } =
-    useEditorState();
+    useEditorState({ initialFormat });
   const [scenes, setScenes] = useState<SceneDoc[]>([]);
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const [typeCommand, setTypeCommand] = useState<TypeCommand | null>(null);
+  const [syncStates, setSyncStates] = useState<Record<string, SceneSyncStatus>>({});
+  const [pendingFocusId, setPendingFocusId] = useState<string | null>(null);
 
   const shellRef = useRef<HTMLDivElement | null>(null);
   const cursorRef = useRef<CursorState | null>(null);
   const nonceRef = useRef(0);
   cursorRef.current = state.cursor;
+
+  const handleSyncStateChange = useCallback((sceneId: string, status: SceneSyncStatus) => {
+    setSyncStates((prev) => ({ ...prev, [sceneId]: status }));
+  }, []);
 
   const reload = useCallback(async () => {
     try {
@@ -132,9 +149,34 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
       .catch((err) => console.error('[EditorShell] createScene failed', err));
   }, [scriptId, scenes.length, reload]);
 
+  // Cold start: create the first scene AND seed an empty action row (via the
+  // documented ops endpoint — createScene does not accept initial elements), so
+  // the writer lands on a real, focusable, Tab-ready line.
+  const handleCreateStory = useCallback(async () => {
+    try {
+      const created = await createScene(scriptId, { sort_order: 0 });
+      const elementId = newElementId();
+      const op: ElementOp = {
+        op: 'insert',
+        element_id: elementId,
+        after_id: null,
+        payload: { type: 'action', text: '' },
+      };
+      await applyOps(created.id, [op], created.content_version);
+      await reload();
+      setActiveScene(created.id);
+      setPendingFocusId(elementId);
+    } catch (err) {
+      console.error('[EditorShell] create story failed', err);
+    }
+  }, [scriptId, reload, setActiveScene]);
+
   const handleFormatChange = useCallback(
-    (format: EditorFormat) => setFormat(format),
-    [setFormat],
+    (format: EditorFormat) => {
+      setFormat(format);
+      persistFormat(scriptId, format);
+    },
+    [setFormat, scriptId],
   );
 
   // Active toolbar pill follows the cursor element's type (from the loaded
@@ -149,6 +191,39 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
     }
     return state.nextInsertType;
   })();
+
+  // Script-wide CAST names feed the @-mention / character-cue picker.
+  const mentionCandidates = useMemo(() => deriveStatistics(scenes).cast, [scenes]);
+
+  // Rail entity sections (laper info architecture) — Characters + Locations.
+  const railCharacters = useMemo(() => deriveRailCharacters(scenes), [scenes]);
+  const railLocations = useMemo(() => deriveRailLocations(scenes), [scenes]);
+
+  // Aggregate every scene's save state into one headline (worst-wins). Only the
+  // currently loaded scenes count, so a deleted scene's stale state drops out.
+  const perSceneState = (s: SceneDoc): SaveState => syncStates[s.id]?.saveState ?? 'saved';
+  const aggregateState = aggregateSaveState(scenes.map(perSceneState));
+  const offlineCount = scenes.filter((s) => perSceneState(s) === 'offline').length;
+  const conflictScene = scenes.find((s) => perSceneState(s) === 'conflict') ?? null;
+
+  const resolveConflict = useCallback(
+    (choice: 'mine' | 'theirs') => {
+      if (conflictScene) syncStates[conflictScene.id]?.resolveConflict(choice);
+    },
+    [conflictScene, syncStates],
+  );
+
+  const showColdStart = state.mode === 'script' && loadState === 'ready' && scenes.length === 0;
+
+  // Focus the seeded row once the new scene has rendered (cold start).
+  useEffect(() => {
+    if (!pendingFocusId) return;
+    const node = shellRef.current?.querySelector<HTMLElement>(`[data-el-id="${pendingFocusId}"]`);
+    if (node) {
+      node.focus();
+      setPendingFocusId(null);
+    }
+  }, [pendingFocusId, scenes]);
 
   const tabLabel: Record<EditorMode, string> = {
     script: t('editor.tabScript'),
@@ -211,12 +286,20 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
                 </div>
               </div>
             </div>
-            <div className="mh-rail-section-label">{t('editor.scenesLabel')}</div>
-            <SceneRail
-              scenes={scenes}
-              activeSceneId={state.activeSceneId}
-              onSelect={handleSelectScene}
-            />
+            <RailModules />
+            <div className="mh-rail-scroll">
+              <RailEntities
+                characters={railCharacters}
+                locations={railLocations}
+                onSelect={handleSelectScene}
+              />
+              <div className="mh-rail-section-label">{t('editor.scenesLabel')}</div>
+              <SceneRail
+                scenes={scenes}
+                activeSceneId={state.activeSceneId}
+                onSelect={handleSelectScene}
+              />
+            </div>
           </>
         )}
       </nav>
@@ -239,10 +322,7 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
             ))}
           </div>
           <div className="mh-topbar-right">
-            <div className="mh-save-indicator" data-testid="save-indicator-slot">
-              <span className="mh-save-dot" aria-hidden="true" />
-              {t('editor.saved')}
-            </div>
+            <SaveIndicator state={aggregateState} queued={offlineCount} />
             <button
               type="button"
               className="mh-icon-btn"
@@ -261,8 +341,18 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
                 {t('editor.coverPlaceholder')}
               </div>
             </div>
+          ) : showColdStart ? (
+            <div className="mh-sheet-scroll">
+              <ColdStart onCreateStory={handleCreateStory} />
+            </div>
           ) : (
             <div className="mh-sheet-scroll">
+              {conflictScene && (
+                <ConflictBar
+                  onKeepMine={() => resolveConflict('mine')}
+                  onTakeTheirs={() => resolveConflict('theirs')}
+                />
+              )}
               <ElementToolbar
                 mode={state.mode}
                 activeType={activeType}
@@ -282,7 +372,10 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
                         key={s.id}
                         scene={s}
                         index={i}
+                        format={state.format}
+                        mentionCandidates={mentionCandidates}
                         onFocusElement={handleFocusElement}
+                        onSyncStateChange={handleSyncStateChange}
                         typeCommand={typeCommand ?? undefined}
                       />
                     ))

@@ -17,7 +17,13 @@ import { useTranslation } from 'react-i18next';
 import type { SceneDoc } from '../types';
 import type { EditorFormat } from '../useEditorState';
 
-const CAST_COLORS = ['var(--red)', 'var(--green)', 'var(--violet)', 'var(--indigo)', 'var(--amber)'];
+export const CAST_COLORS = [
+  'var(--red)',
+  'var(--green)',
+  'var(--violet)',
+  'var(--indigo)',
+  'var(--amber)',
+];
 
 export interface EditorStatistics {
   scenes: number;
@@ -83,10 +89,9 @@ export function WritingPanel({ scenes, format, onFormatChange }: WritingPanelPro
           </button>
           <button
             type="button"
-            className="mh-seg"
-            disabled
-            title={t('editor.asianSoon')}
-            aria-pressed={false}
+            className={`mh-seg${format === 'asian' ? ' active' : ''}`}
+            aria-pressed={format === 'asian'}
+            onClick={() => onFormatChange('asian')}
           >
             {t('editor.asian')}
           </button>

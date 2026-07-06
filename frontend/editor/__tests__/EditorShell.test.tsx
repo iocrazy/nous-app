@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, cleanup, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SceneDoc } from '../types';
 
@@ -47,14 +47,17 @@ describe('EditorShell', () => {
     await waitFor(() => expect(screen.getByRole('navigation')).toBeInTheDocument());
     expect(screen.getByRole('main')).toBeInTheDocument();
     expect(screen.getByRole('complementary')).toBeInTheDocument();
-    // Loaded scenes surface in the rail.
-    expect(screen.getByText('Rooftop Access')).toBeInTheDocument();
+    // Loaded scenes surface in the scene list (the location also appears as a
+    // Locations entity row, so scope to the scene rail).
+    const sceneRail = screen.getByTestId('scene-rail');
+    expect(within(sceneRail).getByText('Rooftop Access')).toBeInTheDocument();
   });
 
-  it('exposes the save-indicator slot', async () => {
+  it('exposes the save indicator (saved when all scenes are clean)', async () => {
     svc.listScenes.mockResolvedValue(twoScenes);
     render(<EditorShell scriptId="1" />);
-    await waitFor(() => expect(screen.getByTestId('save-indicator-slot')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('save-indicator')).toBeInTheDocument());
+    expect(screen.getByTestId('save-indicator')).toHaveAttribute('data-state', 'saved');
   });
 
   it('toggles data-theme and persists to localStorage', async () => {
@@ -117,7 +120,46 @@ describe('EditorShell', () => {
     render(<EditorShell scriptId="1" />);
     await waitFor(() => expect(screen.getByTestId('scene-rail')).toBeInTheDocument());
 
-    fireEvent.click(screen.getByText('Rooftop Access'));
+    // "Rooftop Access" now also appears as a Locations entity row, so scope to
+    // the scene list to click the scene row specifically.
+    const sceneRail = screen.getByTestId('scene-rail');
+    fireEvent.click(within(sceneRail).getByText('Rooftop Access'));
     expect(scrollSpy).toHaveBeenCalled();
+  });
+
+  it('orders the rail: modules nav, then Characters, then the Scenes list', async () => {
+    svc.listScenes.mockResolvedValue(twoScenes);
+    render(<EditorShell scriptId="1" />);
+    await waitFor(() => expect(screen.getByRole('navigation')).toBeInTheDocument());
+
+    const modules = screen.getByLabelText('editor.modulesLabel');
+    const characters = screen.getByLabelText('editor.charactersLabel');
+    const scenesLabel = screen.getByText('editor.scenesLabel');
+
+    // DOCUMENT_POSITION_FOLLOWING (4) means the arg comes after in document order.
+    expect(modules.compareDocumentPosition(characters) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(characters.compareDocumentPosition(scenesLabel) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
+  it('persists the chosen format per script and renders the asian engine', async () => {
+    localStorage.removeItem('editor.format.42');
+    svc.listScenes.mockResolvedValue(twoScenes);
+    const { container } = render(<EditorShell scriptId="42" />);
+    await waitFor(() => expect(screen.getByRole('main')).toBeInTheDocument());
+
+    // Starts in Hollywood.
+    expect(container.querySelector('.hw-action')).toBeInTheDocument();
+    expect(container.querySelector('.as-prefix')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'editor.asian' }));
+
+    // Engine switches and the choice is persisted under the per-script key.
+    expect(container.querySelector('.as-prefix')).toBeInTheDocument();
+    expect(container.querySelector('.hw-action')).toBeNull();
+    expect(localStorage.getItem('editor.format.42')).toBe('asian');
   });
 });

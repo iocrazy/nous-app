@@ -76,11 +76,28 @@ describe('WritingPanel', () => {
     expect(screen.getByText('DEV')).toBeInTheDocument();
   });
 
-  it('keeps the Asian format disabled and fires onFormatChange for Hollywood', () => {
+  it('offers both formats and fires onFormatChange for each', () => {
     const onFormatChange = vi.fn();
     render(<WritingPanel scenes={fixture} format="hollywood" onFormatChange={onFormatChange} />);
-    expect(screen.getByRole('button', { name: 'editor.asian' })).toBeDisabled();
+
+    const asian = screen.getByRole('button', { name: 'editor.asian' });
+    expect(asian).toBeEnabled();
+    fireEvent.click(asian);
+    expect(onFormatChange).toHaveBeenCalledWith('asian');
+
     fireEvent.click(screen.getByRole('button', { name: 'editor.hollywood' }));
     expect(onFormatChange).toHaveBeenCalledWith('hollywood');
+  });
+
+  it('marks the active format with aria-pressed', () => {
+    render(<WritingPanel scenes={fixture} format="asian" onFormatChange={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'editor.asian' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'editor.hollywood' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
   });
 });

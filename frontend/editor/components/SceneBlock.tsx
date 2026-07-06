@@ -30,6 +30,27 @@ import { newElementId, updateSceneMeta } from '../sceneService';
 import type { ElementOp, ElementType, ScriptElement, SceneDoc } from '../types';
 import { useSceneSync } from '../useSceneSync';
 import { HollywoodLayout } from '../render/HollywoodLayout';
+import { AsianLayout } from '../render/AsianLayout';
+import { MentionNamesContext } from '../render/layoutShared';
+import { MentionCombobox, type MentionComboboxHandle } from './MentionCombobox';
+import { EmptySceneHint } from './EmptyStates';
+import type { EditorFormat } from '../useEditorState';
+import type { SaveState } from '../useSceneSync';
+
+/** A scene's save status lifted to the shell for the aggregate SaveIndicator. */
+export interface SceneSyncStatus {
+  saveState: SaveState;
+  resolveConflict: (choice: 'mine' | 'theirs') => void;
+}
+
+/** An open @-mention / character-cue picker anchored to one element line. */
+interface MentionState {
+  elementId: string;
+  /** 'inline' = typed `@` inside a line; 'character' = a focused character cue. */
+  kind: 'inline' | 'character';
+  query: string;
+  position?: { top: number; left: number };
+}
 
 /** A toolbar-issued retype of the focused element, routed to the owning scene. */
 export interface TypeCommand {
@@ -59,12 +80,27 @@ export interface SceneBlockProps {
   onFocusElement?: (cursor: CursorState) => void;
   /** Toolbar retype command targeted (by sceneId) at this block's focused element. */
   typeCommand?: TypeCommand;
+  /** Layout engine: 'hollywood' (default) or 'asian'. Both consume the same elements. */
+  format?: EditorFormat;
+  /** Distinct CAST names for the @-mention / character-cue picker (script-wide). */
+  mentionCandidates?: string[];
+  /** Reports this scene's save state up so the shell can aggregate it. */
+  onSyncStateChange?: (sceneId: string, status: SceneSyncStatus) => void;
 }
 
-export function SceneBlock({ scene, index, onFocusElement, typeCommand }: SceneBlockProps) {
+export function SceneBlock({
+  scene,
+  index,
+  onFocusElement,
+  typeCommand,
+  format = 'hollywood',
+  mentionCandidates = [],
+  onSyncStateChange,
+}: SceneBlockProps) {
   const { t } = useTranslation();
   const sync = useSceneSync(scene);
   const [focusedElementId, setFocusedElementId] = useState<string | null>(null);
+  const [mention, setMention] = useState<MentionState | null>(null);
   const [meta, setMeta] = useState<SceneMeta>({
     heading_int_ext: scene.heading_int_ext ?? '',
     location_text: scene.location_text ?? '',
@@ -76,8 +112,11 @@ export function SceneBlock({ scene, index, onFocusElement, typeCommand }: SceneB
   const elementsRef = useRef<ScriptElement[]>(sync.elements);
   const inputTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const metaTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mentionRef = useRef<MentionState | null>(null);
+  const comboboxRef = useRef<MentionComboboxHandle | null>(null);
 
   elementsRef.current = sync.elements;
+  mentionRef.current = mention;
 
   useEffect(() => {
     const inputTimers = inputTimersRef.current;
@@ -106,12 +145,107 @@ export function SceneBlock({ scene, index, onFocusElement, typeCommand }: SceneB
     [sync],
   );
 
+  const closeMention = useCallback(() => setMention(null), []);
+
+  // Caret-safe imperative write: the focused row is never repainted by React
+  // (protects the caret), so a mention insertion writes the DOM node directly
+  // and drops the caret at the end. Chips render when the row later settles.
+  const setNodeText = useCallback((elementId: string, text: string) => {
+    const node = containerRef.current?.querySelector<HTMLElement>(`[data-el-id="${elementId}"]`);
+    if (!node) return;
+    node.textContent = text;
+    const sel = window.getSelection();
+    if (!sel) return;
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    range.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }, []);
+
+  const openMention = useCallback((elementId: string, kind: MentionState['kind']) => {
+    const node = containerRef.current?.querySelector<HTMLElement>(`[data-el-id="${elementId}"]`);
+    const position = node ? { top: node.offsetTop + node.offsetHeight, left: node.offsetLeft } : undefined;
+    setMention({ elementId, kind, query: '', position });
+  }, []);
+
+  const handleMentionSelect = useCallback(
+    (name: string) => {
+      const m = mentionRef.current;
+      if (!m) return;
+      let newText: string;
+      if (m.kind === 'character') {
+        // A character cue IS the name — replace the whole line.
+        newText = name;
+      } else {
+        const el = elementsRef.current.find((e) => e.id === m.elementId);
+        const text = el?.text ?? '';
+        const at = text.lastIndexOf('@');
+        newText =
+          at >= 0
+            ? `${text.slice(0, at)}@${name} ${text.slice(at + 1 + m.query.length)}`
+            : `${text}@${name} `;
+      }
+      const op: ElementOp = { op: 'update', element_id: m.elementId, payload: { text: newText } };
+      sync.dispatchOps([op], applyLocal(elementsRef.current, [op]));
+      setNodeText(m.elementId, newText);
+      setMention(null);
+    },
+    [sync, setNodeText],
+  );
+
   const handleKeyDown = useCallback(
     (elementId: string, e: KeyboardEvent<HTMLDivElement>) => {
       // Never intervene mid-IME-composition — let the browser compose.
       if (composingRef.current || e.nativeEvent.isComposing) return;
       const cursor: CursorState = { sceneId: scene.id, elementId, field: 'element' };
       const els = elementsRef.current;
+
+      // While the mention picker is open on this line, it owns the nav keys.
+      const mentionOpen = mentionRef.current;
+      if (mentionOpen && mentionOpen.elementId === elementId) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          comboboxRef.current?.move(1);
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          comboboxRef.current?.move(-1);
+          return;
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          if (!comboboxRef.current?.confirm()) setMention(null);
+          return;
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setMention(null);
+          return;
+        }
+        if (e.key === 'Tab') {
+          e.preventDefault();
+          // Character-cue selector: Tab abandons the cue and reverts to action
+          // (spec §3.2 laper behaviour); inline mention just closes.
+          if (mentionOpen.kind === 'character') {
+            const op: ElementOp = {
+              op: 'update',
+              element_id: elementId,
+              payload: { type: 'action' },
+            };
+            sync.dispatchOps([op], applyLocal(elementsRef.current, [op]));
+          }
+          setMention(null);
+          return;
+        }
+      }
+
+      // Typing `@` opens the inline picker; let the character itself be typed.
+      if (e.key === '@') {
+        openMention(elementId, 'inline');
+        return;
+      }
 
       if (e.key === 'Tab') {
         e.preventDefault();
@@ -133,11 +267,23 @@ export function SceneBlock({ scene, index, onFocusElement, typeCommand }: SceneB
         applyResult(result);
       }
     },
-    [scene.id, applyResult],
+    [scene.id, applyResult, sync, openMention],
   );
 
   const handleInput = useCallback(
     (elementId: string, text: string) => {
+      // Keep the open picker's filter in sync with the line as the writer types.
+      const m = mentionRef.current;
+      if (m && m.elementId === elementId) {
+        if (m.kind === 'inline') {
+          const at = text.lastIndexOf('@');
+          if (at === -1) setMention(null);
+          else setMention({ ...m, query: text.slice(at + 1) });
+        } else {
+          setMention({ ...m, query: text });
+        }
+      }
+
       const timers = inputTimersRef.current;
       if (timers[elementId]) clearTimeout(timers[elementId]);
       timers[elementId] = setTimeout(() => {
@@ -178,8 +324,16 @@ export function SceneBlock({ scene, index, onFocusElement, typeCommand }: SceneB
     (elementId: string) => {
       setFocusedElementId(elementId);
       onFocusElement?.({ sceneId: scene.id, elementId, field: 'element' });
+      // Focusing a character cue opens the same picker (laper behaviour);
+      // focusing any other row dismisses a picker left open elsewhere.
+      const el = elementsRef.current.find((e) => e.id === elementId);
+      if (el?.type === 'character') {
+        openMention(elementId, 'character');
+      } else {
+        setMention((prev) => (prev && prev.elementId !== elementId ? null : prev));
+      }
     },
-    [onFocusElement, scene.id],
+    [onFocusElement, scene.id, openMention],
   );
 
   // Toolbar retype: when a command targets this scene, update the focused
@@ -198,6 +352,14 @@ export function SceneBlock({ scene, index, onFocusElement, typeCommand }: SceneB
     };
     sync.dispatchOps([op], applyLocal(elementsRef.current, [op]));
   }, [typeCommand, scene.id, sync]);
+
+  // Lift this scene's save state to the shell whenever it changes.
+  useEffect(() => {
+    onSyncStateChange?.(scene.id, {
+      saveState: sync.saveState,
+      resolveConflict: sync.resolveConflict,
+    });
+  }, [scene.id, sync.saveState, sync.resolveConflict, onSyncStateChange]);
 
   const onCompositionStart = useCallback(() => {
     composingRef.current = true;
@@ -221,6 +383,8 @@ export function SceneBlock({ scene, index, onFocusElement, typeCommand }: SceneB
     [scene.id],
   );
 
+  const LayoutEngine = format === 'asian' ? AsianLayout : HollywoodLayout;
+
   return (
     <div
       className="mh-scene-block"
@@ -238,8 +402,11 @@ export function SceneBlock({ scene, index, onFocusElement, typeCommand }: SceneB
         ::
       </button>
 
-      <div className="mh-scene-headrow">
-        <span className="mh-scene-num-badge">{index + 1}</span>
+      <div className={`mh-scene-headrow${format === 'asian' ? ' asian' : ''}`}>
+        <span className="mh-scene-num-badge">
+          {index + 1}
+          {format === 'asian' ? '.' : ''}
+        </span>
         <select
           className="mh-scene-select"
           aria-label={t('editor.intExt')}
@@ -275,21 +442,32 @@ export function SceneBlock({ scene, index, onFocusElement, typeCommand }: SceneB
         </select>
       </div>
 
-      <HollywoodLayout
-        elements={sync.elements}
-        focusedElementId={focusedElementId}
-        handlers={{
-          onInput: handleInput,
-          onKeyDown: handleKeyDown,
-          onFocus: handleFocus,
-          onPaste: handlePaste,
-          onCompositionStart,
-          onCompositionEnd,
-        }}
-      />
+      <MentionNamesContext.Provider value={mentionCandidates}>
+        <LayoutEngine
+          elements={sync.elements}
+          focusedElementId={focusedElementId}
+          handlers={{
+            onInput: handleInput,
+            onKeyDown: handleKeyDown,
+            onFocus: handleFocus,
+            onPaste: handlePaste,
+            onCompositionStart,
+            onCompositionEnd,
+          }}
+        />
+      </MentionNamesContext.Provider>
 
-      {sync.elements.length === 0 && (
-        <div className="mh-el-line mh-placeholder-line">{t('editor.emptyScene')}</div>
+      {sync.elements.length === 0 && <EmptySceneHint />}
+
+      {mention && (
+        <MentionCombobox
+          ref={comboboxRef}
+          candidates={mentionCandidates}
+          query={mention.query}
+          position={mention.position}
+          onSelect={handleMentionSelect}
+          onClose={closeMention}
+        />
       )}
     </div>
   );

@@ -128,6 +128,41 @@ export const EDITOR_SHELL_STYLES = `
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
 
+/* ===== RAIL INFO ARCHITECTURE (modules nav + Characters/Locations) ===== */
+.mh-rail-modules{ padding:2px 10px 6px; display:flex; flex-direction:column; gap:2px; }
+.mh-rail-module{
+  display:flex; align-items:center; gap:9px; width:100%; text-align:left;
+  padding:8px 9px; border-radius:var(--radius-sm);
+  font-family:var(--sans); font-size:12.5px; font-weight:600;
+  color:var(--ink-soft); background:none; border:1px solid transparent; cursor:pointer;
+}
+.mh-rail-module:hover:not(:disabled){ background:var(--surface-2); }
+.mh-rail-module:disabled{ opacity:0.5; cursor:default; }
+.mh-rail-module.active{ background:var(--indigo-soft); color:var(--indigo-deep); border-color:var(--surface-border); }
+.mh-rail-module-glyph{
+  width:16px; text-align:center; flex-shrink:0;
+  font-family:var(--mono); font-size:12px; color:var(--ink-faint);
+}
+.mh-rail-module.active .mh-rail-module-glyph{ color:var(--indigo-deep); }
+/* One scroll region for Characters + Locations + Scenes; the modules nav and
+   Episode selector above it stay fixed (navigation never scrolls away). */
+.mh-rail-scroll{ flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; }
+.mh-rail-scroll .mh-scene-list{ flex:0 0 auto; overflow:visible; }
+.mh-rail-section{ display:flex; flex-direction:column; }
+.mh-rail-entity-list{ padding:0 10px 6px; display:flex; flex-direction:column; gap:1px; }
+.mh-rail-entity-row{
+  display:flex; align-items:center; gap:8px; width:100%; text-align:left;
+  padding:6px 9px; border-radius:var(--radius-sm);
+  font-family:var(--sans); color:var(--ink-soft); background:none; border:none; cursor:pointer;
+}
+.mh-rail-entity-row:hover{ background:var(--surface-2); }
+.mh-rail-entity-name{
+  flex:1; min-width:0; font-size:12.5px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.mh-rail-entity-count{ flex-shrink:0; font-size:10.5px; color:var(--ink-faint); font-family:var(--mono); }
+.mh-rail-empty{ padding:2px 16px 8px; font-size:11.5px; color:var(--ink-faint); }
+
 /* ===== ICON BUTTONS (collapse toggles, theme toggle) ===== */
 .mh-icon-btn{
   display:flex; align-items:center; justify-content:center;
@@ -228,6 +263,46 @@ export const EDITOR_SHELL_STYLES = `
 .mh-el-row.transition-row{ justify-content:flex-end; }
 .mh-el-row.transition-row .mh-el-tick{ display:none; }
 
+/* ===== ELEMENT ROWS (Asian layout engine) — spec D8 column 2 ===== */
+/* A numbered-manuscript typeset: △ action prefix, Name: character label,
+   indented dialogue, inline parens, right transitions, quoted comments,
+   centred subtitles. Colours come from the theme-scoped variables above, so
+   light and dark are both covered without extra selectors. */
+.as-row{ display:flex; align-items:baseline; gap:6px; margin:0 0 7px; }
+.as-row .mh-el-tick{ display:none; }
+.as-row .mh-el-row{ flex:1 1 auto; margin:0; }
+.as-mark{
+  font-family:var(--mono); font-size:13.5px; line-height:1.7;
+  color:var(--sheet-ink-soft); flex-shrink:0; user-select:none;
+}
+.as-prefix{ color:var(--tick-transition); font-weight:700; }
+.as-suffix{ margin-left:-3px; color:var(--tick-character); font-weight:700; }
+/* Character cue = left-aligned label (NOT centred like Hollywood); the row
+   packs cue + colon to the left instead of letting the editable stretch. */
+.as-row-character{ justify-content:flex-start; }
+.as-row-character .mh-el-row{ flex:0 1 auto; }
+.as-row-character .mh-el-editable{ flex:0 1 auto; }
+.as-row-dialogue{ padding-left:2.4em; }
+.as-row-transition{ justify-content:flex-end; }
+.as-row-subtitle{ justify-content:center; }
+.as-action{ text-align:left; }
+.as-character{ font-weight:700; letter-spacing:0.03em; color:var(--tick-character); text-align:left; }
+.as-dialogue{ text-align:left; }
+.as-paren{ font-style:italic; color:var(--sheet-ink-soft); }
+.as-transition{ text-transform:uppercase; font-weight:700; letter-spacing:0.04em; color:var(--sheet-ink-soft); }
+.as-comment{ border-left:3px solid var(--tick-comment); padding-left:8px; color:var(--sheet-ink-soft); font-style:italic; }
+.as-subtitle{ text-align:center; font-style:italic; color:var(--sheet-ink-soft); }
+
+/* Asian scene head = a flat numbered line (N. …) rather than a chip badge. */
+.mh-scene-headrow.asian .mh-scene-num-badge{
+  width:auto; height:auto; min-width:0; padding:0 4px 0 0;
+  background:transparent; color:var(--sheet-ink);
+  font-size:14px; font-weight:700;
+}
+.mh-editor-shell[data-theme='dark'] .mh-scene-headrow.asian .mh-scene-num-badge{
+  background:transparent; color:var(--sheet-ink);
+}
+
 /* ===== HORIZONTAL MODE-SLOT TOOLBAR ===== */
 .mh-h-toolbar{
   display:flex; align-items:center; flex-shrink:0;
@@ -286,6 +361,30 @@ export const EDITOR_SHELL_STYLES = `
 .mh-el-line{ font-size:13.5px; line-height:1.7; color:var(--sheet-ink); margin-bottom:7px; }
 .mh-placeholder-line{ color:var(--sheet-ink-soft); font-style:italic; }
 
+/* ===== @ MENTION CHIPS + PICKER ===== */
+.mh-mention{
+  color:var(--indigo-deep); background:var(--indigo-soft);
+  border-radius:5px; padding:0 4px; font-weight:600;
+  box-decoration-break:clone; -webkit-box-decoration-break:clone;
+}
+.mh-mention.unknown{ color:var(--ink-faint); background:var(--surface-2); font-weight:500; }
+.mh-mention-pop{
+  z-index:20; min-width:180px; max-width:260px; margin-top:2px;
+  background:var(--surface); border:1px solid var(--surface-border);
+  border-radius:var(--radius-md); box-shadow:var(--shadow-float);
+  padding:5px; font-family:var(--sans);
+}
+.mh-mention-list{ list-style:none; margin:0; padding:0; max-height:220px; overflow-y:auto; }
+.mh-mention-opt{
+  padding:7px 10px; border-radius:var(--radius-sm); font-size:12.5px;
+  color:var(--ink-soft); cursor:pointer; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis;
+}
+.mh-mention-opt:hover,
+.mh-mention-opt.active{ background:var(--indigo-soft); color:var(--indigo-deep); }
+.mh-mention-opt[aria-selected='true']{ font-weight:600; }
+.mh-mention-empty{ padding:8px 10px; font-size:12px; color:var(--ink-faint); }
+
 /* Outline / Cover placeholders (read-only in Phase 1) */
 .mh-doc-outline{ font-family:var(--sans); color:var(--sheet-ink); }
 .mh-doc-title{ font-size:25px; font-weight:800; letter-spacing:-0.01em; margin-bottom:20px; }
@@ -307,13 +406,59 @@ export const EDITOR_SHELL_STYLES = `
 }
 .mh-keyboard-hint .sep{ color:var(--surface-border); }
 
-/* ===== SAVE INDICATOR SLOT ===== */
+/* ===== SAVE INDICATOR ===== */
 .mh-save-indicator{
   display:flex; align-items:center; gap:6px; font-size:12px; font-weight:600;
-  color:var(--green); background:var(--green-soft); border-radius:20px; padding:6px 12px 6px 10px;
-  min-height:30px;
+  border-radius:20px; padding:6px 12px 6px 10px; min-height:30px;
+  color:var(--ink-soft); background:var(--surface-2);
 }
-.mh-save-dot{ width:7px; height:7px; border-radius:50%; background:var(--green); }
+.mh-save-dot{ width:7px; height:7px; border-radius:50%; background:currentColor; }
+.mh-save-check{ font-size:12px; line-height:1; }
+.mh-save-count{
+  margin-left:2px; font-family:var(--mono); font-size:11px; font-weight:700;
+  min-width:16px; text-align:center;
+}
+.mh-save-indicator.saved{ color:var(--green); background:var(--green-soft); }
+.mh-save-indicator.saving{ color:var(--indigo-deep); background:var(--indigo-soft); }
+.mh-save-indicator.saving .mh-save-dot{ animation:mh-save-pulse 1.1s ease-in-out infinite; }
+.mh-save-indicator.retrying{ color:var(--amber); background:var(--amber-soft); }
+.mh-save-indicator.offline{ color:var(--ink-faint); background:var(--surface-2); }
+.mh-save-indicator.conflict{ color:var(--red); background:color-mix(in srgb, var(--red) 12%, transparent); }
+@keyframes mh-save-pulse{ 0%,100%{ opacity:1; } 50%{ opacity:0.35; } }
+
+/* ===== CONFLICT BAR (409 resolution) ===== */
+.mh-conflict-bar{
+  flex-shrink:0; width:820px; max-width:100%;
+  display:flex; align-items:center; justify-content:space-between; gap:14px;
+  padding:9px 14px; border-radius:var(--radius-md);
+  background:color-mix(in srgb, var(--red) 10%, var(--surface));
+  border:1px solid color-mix(in srgb, var(--red) 40%, var(--surface-border));
+  color:var(--ink); font-size:12.5px; font-weight:600;
+}
+.mh-conflict-msg{ min-width:0; }
+.mh-conflict-actions{ display:flex; gap:8px; flex-shrink:0; }
+.mh-conflict-btn{
+  font-family:var(--sans); font-size:12px; font-weight:600; padding:6px 12px;
+  border-radius:var(--radius-sm); cursor:pointer;
+  background:var(--red); color:#fff; border:1px solid transparent;
+}
+.mh-conflict-btn.ghost{ background:var(--surface); color:var(--ink-soft); border-color:var(--surface-border); }
+.mh-conflict-btn:hover{ filter:brightness(0.96); }
+
+/* ===== COLD START ===== */
+.mh-coldstart{
+  margin:auto; max-width:460px; text-align:center;
+  display:flex; flex-direction:column; align-items:center; gap:12px; padding:48px 24px;
+}
+.mh-coldstart-title{ font-size:22px; font-weight:800; color:var(--ink); letter-spacing:-0.01em; }
+.mh-coldstart-sub{ font-size:13.5px; line-height:1.7; color:var(--ink-faint); margin:0; }
+.mh-coldstart-btn{
+  margin-top:6px; font-family:var(--sans); font-size:13px; font-weight:700;
+  padding:11px 22px; border-radius:var(--radius-md); cursor:pointer;
+  background:var(--indigo); color:var(--accent-on); border:none;
+  box-shadow:var(--shadow-island);
+}
+.mh-coldstart-btn:hover{ background:var(--indigo-deep); }
 
 /* ===== RIGHT PANEL ===== */
 .mh-right-col{ width:296px; display:flex; flex-direction:column; min-height:0; transition:width 0.2s ease; }

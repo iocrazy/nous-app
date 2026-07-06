@@ -82,10 +82,10 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
   }
 }
 
-function init(): EditorState {
+function init(initialFormat: EditorFormat): EditorState {
   return {
     mode: 'script',
-    format: 'hollywood',
+    format: initialFormat,
     theme: readStoredTheme(),
     cursor: null,
     activeSceneId: null,
@@ -103,8 +103,13 @@ export interface EditorStateApi {
   setNextInsertType: (elementType: ElementType) => void;
 }
 
-export function useEditorState(): EditorStateApi {
-  const [state, dispatch] = useReducer(reducer, undefined, init);
+export interface UseEditorStateOptions {
+  /** Initial layout engine (e.g. restored from per-script persistence). */
+  initialFormat?: EditorFormat;
+}
+
+export function useEditorState(options?: UseEditorStateOptions): EditorStateApi {
+  const [state, dispatch] = useReducer(reducer, options?.initialFormat ?? 'hollywood', init);
   // Stable action identities: effects list these in their deps (e.g. the
   // IntersectionObserver auto-highlight), and a fresh closure per render would
   // tear the observer down every frame — a sustained re-render loop in real
