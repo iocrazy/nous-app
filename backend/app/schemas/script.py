@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, constr
 
 # ---------------------------------------------------------------------------
 # Script Project schemas
@@ -149,6 +149,19 @@ class SceneOpsRequest(BaseModel):
     """Request body for `POST /scenes/{scene_id}/elements/ops`."""
 
     ops: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class CopilotOpsRequest(BaseModel):
+    """Request body for `POST /scenes/{scene_id}/copilot-ops`.
+
+    ``instruction`` is untrusted user free-text (the reconciler wraps it in
+    delimiters before handing it to the LLM). ``read_version`` is the
+    ``content_version`` the editor last read: when it lags the scene's current
+    version the endpoint returns a ``proposal`` (ops regenerated against the
+    CURRENT elements) for the editor to review before applying."""
+
+    instruction: constr(min_length=1, max_length=2000)
+    read_version: int
 
 
 class SceneMoveRequest(BaseModel):

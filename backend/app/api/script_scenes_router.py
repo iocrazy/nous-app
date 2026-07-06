@@ -14,12 +14,14 @@ The ops endpoint is the optimistic-concurrency heart: it requires an
 → 409 and ``OpError`` → 422 with the exact body shapes the editor rebases on.
 """
 
-from typing import Any, Dict, Optional
+import uuid
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import JSONResponse
 from loguru import logger
 
+from app.core.config import settings
 from app.core.deps import AuthDep
 from app.core.scope_guards import verify_scene_access, verify_script_access
 from app.repositories.script_scene_repository import (
@@ -28,12 +30,18 @@ from app.repositories.script_scene_repository import (
     get_script_scene_repository,
 )
 from app.schemas.script import (
+    CopilotOpsRequest,
     SceneCreate,
     SceneMetaUpdate,
     SceneMoveRequest,
     SceneOpsRequest,
 )
-from app.services.script.scene_ops import OpError
+from app.services.script.scene_ops import OpError, apply_ops
+
+# Anchor / element-id keys in a copilot op whose ``el_new_*`` placeholders the
+# server rewrites to real ids before dry-run + return.
+_OP_ID_KEYS = ("element_id", "before_id", "after_id")
+_PLACEHOLDER_PREFIX = "el_new_"
 
 router = APIRouter()
 
@@ -182,6 +190,125 @@ async def apply_element_ops(
     except Exception as exc:
         logger.error(f"[Scenes] apply ops on {scene_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to apply element ops")
+
+
+def _replace_placeholder_ids(ops: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Rewrite every ``el_new_*`` placeholder to a fresh real ``el_<8hex>`` id.
+
+    Returns a NEW list of NEW op dicts (immutability contract) — the payloads
+    are shared by reference (never mutated downstream). A placeholder maps to
+    the SAME real id everywhere it appears (element_id and any anchor), so an
+    inserted element and a later anchor pointing at it stay consistent.
+    """
+    mapping: Dict[str, str] = {}
+
+    def _real(pid: str) -> str:
+        if pid not in mapping:
+            mapping[pid] = f"el_{uuid.uuid4().hex[:8]}"
+        return mapping[pid]
+
+    rewritten: List[Dict[str, Any]] = []
+    for op in ops:
+        new_op = dict(op)
+        for key in _OP_ID_KEYS:
+            val = new_op.get(key)
+            if isinstance(val, str) and val.startswith(_PLACEHOLDER_PREFIX):
+                new_op[key] = _real(val)
+        rewritten.append(new_op)
+    return rewritten
+
+
+@router.post("/scenes/{scene_id}/copilot-ops")
+async def copilot_ops(
+    scene_id: str,
+    auth: AuthDep,
+    body: CopilotOpsRequest,
+    _guard: None = Depends(verify_scene_access),
+):
+    """Reconcile a free-text instruction into element ops (flag-gated).
+
+    An LLM turns ``body.instruction`` into an anchor-based op batch against the
+    scene's CURRENT elements; the server rewrites placeholder ids, dry-runs the
+    batch through ``apply_ops`` (ONE retry with the OpError context on failure),
+    and returns the validated ops — it NEVER writes. The editor dispatches them
+    through the existing ``/elements/ops`` If-Match channel, so this adds zero
+    new concurrency surface.
+
+    - flag ``FEATURE_COPILOT_OPS`` off → 404 (endpoint existence hidden).
+    - ``read_version`` behind the scene's current version → ``proposal: true``
+      with ops regenerated against the current elements (spec v3 §2.2 stale
+      handling); the editor reviews before applying.
+    - dry-run still failing after the retry → 422 with the OpError code.
+    """
+    if not settings.FEATURE_COPILOT_OPS:
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    from app.services.ai.providers.ai_provider_helpers import (
+        resolve_script_provider_config,
+    )
+    from app.services.storyboard.script.script_ai_service import ScriptAIService
+
+    scene = await get_script_scene_repository().get_by_id(scene_id)
+    if scene is None:
+        raise HTTPException(status_code=404, detail="Scene not found")
+    elements = scene.get("content_json") or []
+    current_version = scene.get("content_version") or 0
+    is_proposal = body.read_version < current_version
+
+    provider_key, provider_config, _model, agent_slug = (
+        await resolve_script_provider_config(auth.user_id)
+    )
+    service = ScriptAIService(
+        user_id=auth.user_id,
+        agent_slug=agent_slug,
+        provider_key=provider_key,
+        provider_config=provider_config,
+    )
+
+    error_context: Optional[str] = None
+    last_error: Optional[OpError] = None
+    # One generation + up to one retry seeded with the failing OpError context.
+    for _attempt in range(2):
+        try:
+            generated = await service.instruction_to_element_ops(
+                elements, body.instruction, error_context=error_context
+            )
+        except Exception as exc:
+            logger.error(f"[Copilot] generate ops for scene {scene_id} failed: {exc}")
+            raise HTTPException(
+                status_code=502, detail="Copilot could not generate edits"
+            )
+
+        ops = _replace_placeholder_ids(generated.get("ops") or [])
+        summary = generated.get("summary") or ""
+        try:
+            apply_ops(elements, ops)  # dry-run only — result discarded.
+        except OpError as oe:
+            last_error = oe
+            error_context = f"{oe.code}: {oe.message}"
+            logger.warning(
+                f"[Copilot] scene {scene_id} dry-run rejected "
+                f"({oe.code}); attempt {_attempt + 1}/2"
+            )
+            continue
+
+        data: Dict[str, Any] = {
+            "ops": ops,
+            "base_version": current_version,
+            "summary": summary,
+        }
+        if is_proposal:
+            data["proposal"] = True
+        return {"success": True, "data": data}
+
+    return JSONResponse(
+        status_code=422,
+        content={
+            "success": False,
+            "code": last_error.code if last_error else "invalid_op",
+            "detail": str(last_error) if last_error else "dry-run failed",
+        },
+    )
 
 
 @router.post("/scenes/{scene_id}/move")

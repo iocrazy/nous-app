@@ -105,6 +105,17 @@ class Settings(BaseSettings):
         "summary + agent_memory recall into conversation agent turns, and "
         "compact after turns. Off (default) = Phase 1 behavior (20-msg tail).",
     )
+    FEATURE_COPILOT_OPS: bool = Field(
+        default=False,
+        description="Enable the copilot free-text reconciler endpoint "
+        "(POST /scenes/{id}/copilot-ops): an LLM turns a director's "
+        "instruction into anchor-based element ops, dry-run-validated "
+        "server-side before returning (the endpoint never writes — the "
+        "editor dispatches through the existing If-Match ops channel). Off "
+        "(default) = the endpoint 404s (existence hidden); this is an "
+        "independent switch for the LLM cost surface. Flip true once the "
+        "prompt + dry-run loop is validated on the target stack.",
+    )
     FEATURE_CHAT_MEDIA_OBJECT_STORE: bool = Field(
         default=False,
         description="Route new chat/AI-generated small-image writes to the "
