@@ -65,7 +65,7 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({ slug, onSlugChange, onAgen
   }
 
   return (
-    <div className="h-full overflow-y-auto p-6">
+    <div className="h-full overflow-y-auto pt-6 pb-8">
       <AgentEditor
         // ``key={slug}`` forces a full remount when the slug changes so a
         // pending in-flight fetch from the previous slug can't land late and

@@ -140,9 +140,9 @@ export const UsagePage: React.FC = () => {
   const perAgent = data?.per_agent ?? [];
 
   return (
-    <div className="max-w-6xl mx-auto space-y-5 p-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
+    <div className="max-w-6xl space-y-5 pt-6 pb-8 animate-in fade-in slide-in-from-bottom-4 duration-300">
       <header className="flex flex-wrap items-center justify-between gap-3">
-        <PageHeader title={t('aiUsage.title', 'AI Usage')} className="pt-0 pb-0" />
+        <PageHeader title={t('aiUsage.title', 'AI Usage')} className="pb-0" />
         <div className="flex flex-wrap items-center gap-2">
           {teamId != null && (
             <ScopeSwitcher
