@@ -51,6 +51,10 @@ services:
       # wedged" failure mode that restart:unless-stopped misses.
       - "autoheal=true"
     ports:
+      # APP_PORT is the LAN debug/bypass port (set 8890 in docker/.env).
+      # The PUBLIC 8880 belongs to the nginx gateway below — the DSM
+      # reverse-proxy rule targets 8880 and never changes (user decision
+      # 2026-07-06: swap happened inside compose, not in DSM).
       - "${APP_PORT:-8080}:8080"
     volumes:
       - ${DOWNLOAD_HOST_PATH:-/volume2/sources/MediaHub.library}:/app/downloads
@@ -325,9 +329,10 @@ services:
     container_name: mediahub-app-nginx
     restart: unless-stopped
     ports:
-      # 8881 pairs with the backend's 8880. The reverse proxy must point BOTH
-      # /stream/ and /f/ here (8081 retired 2026-07-06 by user decision).
-      - "8881:80"
+      # THE public port: DSM's :88 rule targets 8880 (unchanged forever).
+      # This container is the gateway — /f/ + /stream/ direct from disk,
+      # everything else proxied to the backend (LAN debug port = APP_PORT).
+      - "8880:80"
     environment:
       # Shared secure_link secret — set in docker/.env, same value the
       # backend reads (NGINX_SECURE_LINK_SECRET). See

@@ -48,7 +48,7 @@
 容器 :8081,后者是当年 HLS 上线时加的规则)。所以 `/f/` 需要同样加一条:
 
 - 群晖 DSM 反向代理(或当年配 /stream/ 的同一处 nginx 规则):
-  `https://mediahubserver.heygo.cn:88/f/*` → `http://192.168.50.9:8881/f/*`(8881=与 backend 8880 成套;8081 已退役 —— `/stream/` 规则也必须指向 8881)
+  **无需任何反代改动(2026-07-06 最终形态)**:宿主 8880 = nginx 网关(DSM 规则永不变);backend 宿主端口由 `.env` 的 `APP_PORT=8890` 提供(内网排障口)。网关内部分流:`/f/`、`/stream/` 直发,其余转 backend
 - 验证:`curl -s -o /dev/null -w '%{http_code}' 'https://mediahubserver.heygo.cn:88/f/x'`
   应为 **403**(签名闸生效)而非 404/502。
 
