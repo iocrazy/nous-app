@@ -37,8 +37,14 @@ def _fake_composed() -> ComposedSystemPrompt:
 async def test_outline_uses_composed_system_message(monkeypatch):
     """generate_outline must compose via PromptComposer with agent_slug=script_ai
     and run the result through AgentRunner."""
+    from app.core.config import settings
     from app.services.ai.prompts import prompt_composer as pc_module
     from app.services.ai.runner import agent_runner as ar_module
+
+    # The adapter factory now FAILS FAST on an empty LLM_API_URL (the old
+    # implicit localhost default is gone) — this test only exercises the
+    # composer/runner wiring, so give it an explicit dummy endpoint.
+    monkeypatch.setattr(settings, "LLM_API_URL", "https://llm.test.invalid/v1")
 
     mock_compose = AsyncMock(return_value=_fake_composed())
     monkeypatch.setattr(pc_module.PromptComposer, "compose", mock_compose)
