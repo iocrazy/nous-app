@@ -31,7 +31,10 @@ import difflib
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.repositories.script_commit_repository import get_script_commit_repository
-from app.repositories.script_scene_repository import get_script_scene_repository
+from app.repositories.script_scene_repository import (
+    VersionConflict,
+    get_script_scene_repository,
+)
 from app.services.script.scene_ops import apply_ops
 
 # Keys that describe an element's *content* (not its identity). Two elements
@@ -296,7 +299,17 @@ class VersionService:
                 )
                 results.append({"scene_id": sid, "status": "rolled_back"})
             except Exception as exc:  # noqa: BLE001 — per-scene partial failure
-                results.append({"scene_id": sid, "status": "failed", "error": str(exc)})
+                # Structured code lets the editor branch (409-style retry UX
+                # for concurrent edits) instead of parsing raw messages.
+                code = "conflict" if isinstance(exc, VersionConflict) else "error"
+                results.append(
+                    {
+                        "scene_id": sid,
+                        "status": "failed",
+                        "error_code": code,
+                        "error": str(exc),
+                    }
+                )
 
         failed = [r for r in results if r["status"] == "failed"]
         return {
