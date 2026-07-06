@@ -21,6 +21,11 @@ vi.mock('../../components/Toast', () => ({
 vi.mock('../../contexts/TaskManagerContext', () => ({
   TaskManagerProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
+// The route reads the current user (for collaboration presence); stub it so the
+// routing assertion doesn't need a real AuthProvider.
+vi.mock('../../contexts/AuthContext', () => ({
+  useAuth: () => ({ currentUserId: null, userProfile: { name: 'Tester' } }),
+}));
 
 import { ScriptEditor } from '../../pages/ScriptEditor/index';
 

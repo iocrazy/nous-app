@@ -2456,6 +2456,13 @@
     "copilotDisabled": "Copilot 自由文本当前不可用",
     "nodesElementCount_other": "{{count}} 个元素",
     "nodesElementCount_one": "{{count}} 个元素",
+    "collab": {
+      "editingBadge": "编辑中",
+      "viewersCount_one": "{{count}} 人查看",
+      "viewersCount_other": "{{count}} 人查看",
+      "presenceLabel": "另有 {{num}} 人在此剧本",
+      "presenceMore": "还有 {{num}} 人"
+    },
     "outlineLabel": "故事大纲",
     "outlineUnassigned": "未分组",
     "outlineEmptyGroup": "暂无场景",

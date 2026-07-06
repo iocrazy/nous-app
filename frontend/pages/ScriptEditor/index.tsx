@@ -1,6 +1,7 @@
 import { useParams } from 'react-router-dom';
 import { ToastProvider } from '../../components/Toast';
 import { TaskManagerProvider } from '../../contexts/TaskManagerContext';
+import { useAuth } from '../../contexts/AuthContext';
 import { ScriptEditorPage } from './ScriptEditorPage';
 import { EditorShell } from '../../editor/components/EditorShell';
 
@@ -21,13 +22,18 @@ import { EditorShell } from '../../editor/components/EditorShell';
  */
 export function ScriptEditor() {
   const { scriptId } = useParams<{ scriptId: string }>();
+  const { currentUserId, userProfile } = useAuth();
   // v2 editor is flag-dark (VITE_FEATURE_SCRIPT_V2); off → legacy editor.
   const v2Enabled = import.meta.env.VITE_FEATURE_SCRIPT_V2 === 'true';
   return (
     <ToastProvider>
       <TaskManagerProvider>
         {v2Enabled && scriptId ? (
-          <EditorShell scriptId={scriptId} />
+          <EditorShell
+            scriptId={scriptId}
+            currentUserId={currentUserId}
+            currentUserName={userProfile.name}
+          />
         ) : (
           <ScriptEditorPage />
         )}

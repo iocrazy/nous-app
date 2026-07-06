@@ -22,7 +22,11 @@ vi.mock('../sceneService', () => ({
 
 // Stateful useSceneSync mock: dispatchOps records the ops AND applies the
 // optimistic list so newly-inserted rows actually render (needed for focus).
-const sync = vi.hoisted(() => ({ dispatch: vi.fn() }));
+const sync = vi.hoisted(() => ({
+  dispatch: vi.fn(),
+  reconcile: vi.fn(),
+  applyRemoteOps: vi.fn(),
+}));
 vi.mock('../useSceneSync', async () => {
   const React = await import('react');
   return {
@@ -38,6 +42,8 @@ vi.mock('../useSceneSync', async () => {
           setElements(optimistic);
         },
         resolveConflict: () => {},
+        applyRemoteOps: sync.applyRemoteOps,
+        reconcile: sync.reconcile,
         flush: async () => {},
       };
     },
@@ -61,6 +67,8 @@ const makeScene = (elements: SceneDoc['elements']): SceneDoc => ({
 afterEach(() => {
   cleanup();
   sync.dispatch.mockClear();
+  sync.reconcile.mockClear();
+  sync.applyRemoteOps.mockClear();
   svc.updateSceneMeta.mockClear();
   vi.useRealTimers();
 });
@@ -216,5 +224,34 @@ describe('SceneBlock typographic head row (Task 4.5)', () => {
     expect(screen.getByRole('button', { name: 'editor.editSceneHeading' })).toHaveTextContent(
       'INT. ROOFTOP ACCESS - NIGHT',
     );
+  });
+
+  // ── Windowed-out remote-op refetch (C2 / M1) ────────────────────────────────
+  describe('remoteStale refetch on remount', () => {
+    it('refetches once and clears the flag when remounted with a dropped op', () => {
+      const onHandled = vi.fn();
+      render(
+        <SceneBlock
+          scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])}
+          index={0}
+          remoteStale
+          onRemoteStaleHandled={onHandled}
+        />,
+      );
+      expect(sync.reconcile).toHaveBeenCalledTimes(1);
+      expect(onHandled).toHaveBeenCalledWith('900');
+    });
+
+    it('does not refetch a scene that had no dropped op', () => {
+      render(
+        <SceneBlock
+          scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])}
+          index={0}
+          remoteStale={false}
+          onRemoteStaleHandled={vi.fn()}
+        />,
+      );
+      expect(sync.reconcile).not.toHaveBeenCalled();
+    });
   });
 });
