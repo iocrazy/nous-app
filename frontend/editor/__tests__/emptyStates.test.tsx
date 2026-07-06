@@ -16,9 +16,10 @@ const svc = vi.hoisted(() => ({
 vi.mock('../sceneService', () => svc);
 
 // EditorShell (Task 10) also reads chapters + shows convert toasts.
-vi.mock('../../services/scriptService', () => ({
+const scriptSvc = vi.hoisted(() => ({
   fetchScriptProject: vi.fn().mockResolvedValue({ chapters: [] }),
 }));
+vi.mock('../../services/scriptService', () => scriptSvc);
 vi.mock('../../components/Toast', () => ({
   useToast: () => ({ addToast: vi.fn() }),
 }));
@@ -88,5 +89,18 @@ describe('EditorShell cold start', () => {
     await waitFor(() =>
       expect(document.activeElement?.getAttribute('data-el-id')).toBe('el_seed'),
     );
+  });
+
+  it('legacy script (chapters, no scenes) shows chapter cards with Convert, NOT cold start', async () => {
+    svc.listScenes.mockResolvedValue([]);
+    scriptSvc.fetchScriptProject.mockResolvedValueOnce({
+      chapters: [{ id: 'ch1', title: 'Chapter One', content: 'Old prose to convert.' }],
+    });
+    render(<EditorShell scriptId="1" />);
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'editor.convertToScenes' })).toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId('cold-start')).toBeNull();
+    expect(screen.getByText('Old prose to convert.')).toBeInTheDocument();
   });
 });
