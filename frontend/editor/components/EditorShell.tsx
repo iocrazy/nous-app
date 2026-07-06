@@ -447,7 +447,16 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
     [conflictScene, syncStates],
   );
 
-  const showColdStart = state.mode === 'script' && loadState === 'ready' && scenes.length === 0;
+  // Cold start ONLY when the script is truly empty. A legacy script with
+  // prose chapters but no scenes must land on the chapter fallback cards
+  // (with their Convert to Scenes entry) — the full-screen cold start would
+  // hide the user's existing work behind a "Create Story" button (go-live
+  // gate follow-up #1, 2026-07-06).
+  const showColdStart =
+    state.mode === 'script' &&
+    loadState === 'ready' &&
+    scenes.length === 0 &&
+    orphanChapters.length === 0;
 
   // Focus the seeded row once the new scene has rendered (cold start).
   useEffect(() => {
