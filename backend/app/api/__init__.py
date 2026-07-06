@@ -51,6 +51,7 @@ from app.api.script_export_router import router as script_export_router
 from app.api.script_import_router import router as script_import_router
 from app.api.script_projects_router import router as script_projects_router
 from app.api.script_scenes_router import router as script_scenes_router
+from app.api.script_shots_router import router as script_shots_router
 from app.api.search_router import router as search_router
 from app.api.shares_router import router as shares_router
 from app.api.skills_router import router as skills_router
@@ -187,6 +188,7 @@ api_router.include_router(router=script_ai_router, tags=["Script AI"])
 api_router.include_router(router=script_import_router, tags=["Script Import"])
 api_router.include_router(router=script_export_router, tags=["Script Export"])
 api_router.include_router(router=script_scenes_router, tags=["Script Scenes"])
+api_router.include_router(router=script_shots_router, tags=["Script Shots"])
 api_router.include_router(router=episodes_router, tags=["Episodes"])
 
 api_router.include_router(router=ai_library_router, tags=["AI Library"])

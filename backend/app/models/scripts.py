@@ -464,6 +464,52 @@ class ScriptScenes(Base):
     )
 
 
+class ScriptShots(Base):
+    __tablename__ = "script_shots"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["scene_id"],
+            ["public.script_scenes.id"],
+            ondelete="CASCADE",
+            name="script_shots_scene_id_fkey",
+        ),
+        PrimaryKeyConstraint("id", name="script_shots_pkey"),
+        Index("idx_script_shots_scene", "scene_id", "sort_order"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")
+    )
+    scene_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    shot_number: Mapped[Optional[int]] = mapped_column(Integer)
+    shot_type: Mapped[Optional[str]] = mapped_column(String(20))
+    camera_angle: Mapped[Optional[str]] = mapped_column(String(20))
+    camera_movement: Mapped[Optional[str]] = mapped_column(String(20))
+    focal_length: Mapped[Optional[str]] = mapped_column(String(20))
+    lighting: Mapped[Optional[str]] = mapped_column(Text)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    image_url: Mapped[Optional[str]] = mapped_column(Text)
+    thumbnail_url: Mapped[Optional[str]] = mapped_column(Text)
+    video_url: Mapped[Optional[str]] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default=text("'empty'::character varying")
+    )
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
 class ScriptOps(Base):
     __tablename__ = "script_ops"
     __table_args__ = (
