@@ -180,6 +180,17 @@ export function SceneBlock({
   const composingRef = useRef(false);
   const elementsRef = useRef<ScriptElement[]>(sync.elements);
   const inputTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  // Text buffered behind each input debounce — flushed (not dropped) on unmount
+  // so a view switch mid-keystroke never loses writing (spec §3.6 flush guard).
+  const pendingInputRef = useRef<Record<string, string>>({});
+  const pendingMetaRef = useRef<Partial<SceneMeta> | null>(null);
+  // Latest sync/scene-id for the []-dep unmount flush (avoids stale closures).
+  const syncRef = useRef(sync);
+  syncRef.current = sync;
+  const sceneIdRef = useRef(scene.id);
+  sceneIdRef.current = scene.id;
+  const onSyncStateChangeRef = useRef(onSyncStateChange);
+  onSyncStateChangeRef.current = onSyncStateChange;
   const metaTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mentionRef = useRef<MentionState | null>(null);
 
@@ -206,8 +217,35 @@ export function SceneBlock({
   useEffect(() => {
     const inputTimers = inputTimersRef.current;
     return () => {
+      // FLUSH, don't drop: a pending debounce at unmount (view switch, nav)
+      // carries real keystrokes. dispatchOps still enqueues + fires the network
+      // write after unmount (useSceneSync guards its setState via mountedRef).
       Object.values(inputTimers).forEach(clearTimeout);
+      const pending = pendingInputRef.current;
+      const ids = Object.keys(pending);
+      if (ids.length > 0) {
+        const ops: ElementOp[] = ids.map((elementId) => ({
+          op: 'update',
+          element_id: elementId,
+          payload: { text: pending[elementId] },
+        }));
+        syncRef.current.dispatchOps(ops, applyLocal(elementsRef.current, ops));
+        pendingInputRef.current = {};
+      }
+      onSyncStateChangeRef.current?.(sceneIdRef.current, {
+        saveState: 'saved',
+        resolveConflict: () => undefined,
+      });
       if (metaTimerRef.current) clearTimeout(metaTimerRef.current);
+      const metaPatch = pendingMetaRef.current;
+      if (metaPatch) {
+        pendingMetaRef.current = null;
+        updateSceneMeta(sceneIdRef.current, {
+          heading_int_ext: metaPatch.heading_int_ext ?? undefined,
+          location_text: metaPatch.location_text ?? undefined,
+          time_of_day: metaPatch.time_of_day ?? undefined,
+        }).catch((err) => console.error('[SceneBlock] flush updateSceneMeta failed', err));
+      }
     };
   }, []);
 
@@ -387,12 +425,14 @@ export function SceneBlock({
       }
 
       const timers = inputTimersRef.current;
+      pendingInputRef.current[elementId] = text;
       if (timers[elementId]) clearTimeout(timers[elementId]);
       timers[elementId] = setTimeout(() => {
         const op: ElementOp = { op: 'update', element_id: elementId, payload: { text } };
         const optimistic = applyLocal(elementsRef.current, [op]);
         sync.dispatchOps([op], optimistic);
         delete timers[elementId];
+        delete pendingInputRef.current[elementId];
       }, INPUT_DEBOUNCE_MS);
     },
     [sync],
@@ -473,8 +513,10 @@ export function SceneBlock({
   const commitMeta = useCallback(
     (patch: Partial<SceneMeta>) => {
       setMeta((prev) => ({ ...prev, ...patch }));
+      pendingMetaRef.current = { ...(pendingMetaRef.current ?? {}), ...patch };
       if (metaTimerRef.current) clearTimeout(metaTimerRef.current);
       metaTimerRef.current = setTimeout(() => {
+        pendingMetaRef.current = null;
         updateSceneMeta(scene.id, {
           heading_int_ext: patch.heading_int_ext ?? undefined,
           location_text: patch.location_text ?? undefined,

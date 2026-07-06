@@ -579,4 +579,62 @@ export const EDITOR_SHELL_STYLES = `
   background:var(--surface); color:var(--ink-soft); border:1px solid var(--surface-border);
 }
 .mh-copilot-undo:hover{ background:var(--surface-2); }
+
+/* ===== NODE VIEW (scene/chapter flow projection) ===== */
+.mh-nodes-view{
+  flex:1; min-height:0; min-width:0; position:relative;
+  background:var(--surface-2); border:1px solid var(--surface-border);
+  border-radius:var(--radius-lg); overflow:hidden;
+}
+/* React Flow chrome tinted to the editor palette (dots + controls). */
+.mh-nodes-view .react-flow__background{ color:var(--surface-border); }
+.mh-nodes-view .react-flow__controls{
+  box-shadow:var(--shadow-island); border-radius:var(--radius-sm); overflow:hidden;
+}
+.mh-nodes-view .react-flow__controls-button{
+  background:var(--surface); border-bottom:1px solid var(--surface-border);
+  color:var(--ink-soft); fill:var(--ink-soft);
+}
+.mh-nodes-view .react-flow__controls-button:hover{ background:var(--surface-2); }
+.mh-flow-node{
+  width:220px; background:var(--surface); color:var(--ink);
+  border:1px solid var(--surface-border); border-radius:var(--radius-md);
+  box-shadow:var(--shadow-island); padding:11px 13px 12px; font-family:var(--sans);
+}
+.mh-flow-handle{ width:7px; height:7px; background:var(--indigo); border:none; }
+.mh-flow-scene-head{ display:flex; align-items:center; gap:8px; }
+.mh-flow-scene-heading{
+  font-size:11px; font-weight:700; letter-spacing:0.02em; text-transform:uppercase;
+  color:var(--ink-soft); font-family:var(--mono); overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.mh-flow-scene-summary{
+  margin-top:8px; font-size:12.5px; line-height:1.5; color:var(--ink);
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+}
+.mh-flow-scene-foot{ margin-top:9px; display:flex; }
+.mh-flow-pill{
+  font-size:10.5px; font-weight:600; font-family:var(--mono);
+  padding:2px 8px; border-radius:999px;
+  background:var(--indigo-soft); color:var(--indigo-deep);
+}
+.mh-flow-chapter{ width:200px; background:var(--indigo-soft); border-color:var(--surface-border); }
+.mh-flow-chapter-head{ display:flex; align-items:center; gap:8px; }
+.mh-flow-chapter-title{ font-size:13px; font-weight:700; color:var(--indigo-deep); }
+.mh-flow-chapter-summary{
+  margin-top:7px; font-size:12px; line-height:1.5; color:var(--ink-soft);
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+}
+.mh-flow-chapter[aria-busy='true']{ opacity:0.75; }
+.mh-flow-actions{ margin-top:10px; display:flex; flex-wrap:wrap; gap:6px; }
+.mh-flow-action{
+  font-family:var(--sans); font-size:11px; font-weight:600;
+  padding:4px 9px; border-radius:var(--radius-sm); cursor:pointer;
+  background:var(--surface); color:var(--ink-soft); border:1px solid var(--surface-border);
+}
+.mh-flow-action:hover:not(:disabled){ background:var(--surface-2); color:var(--ink); }
+.mh-flow-action:disabled{ opacity:0.5; cursor:default; }
+.mh-flow-action.confirming{
+  background:var(--indigo); color:var(--accent-on); border-color:var(--indigo);
+}
 `;
