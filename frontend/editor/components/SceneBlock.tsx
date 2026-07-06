@@ -30,6 +30,8 @@ import { newElementId, updateSceneMeta } from '../sceneService';
 import type { ElementOp, ElementType, ScriptElement, SceneDoc } from '../types';
 import { useSceneSync } from '../useSceneSync';
 import { HollywoodLayout } from '../render/HollywoodLayout';
+import { AsianLayout } from '../render/AsianLayout';
+import type { EditorFormat } from '../useEditorState';
 
 /** A toolbar-issued retype of the focused element, routed to the owning scene. */
 export interface TypeCommand {
@@ -59,9 +61,17 @@ export interface SceneBlockProps {
   onFocusElement?: (cursor: CursorState) => void;
   /** Toolbar retype command targeted (by sceneId) at this block's focused element. */
   typeCommand?: TypeCommand;
+  /** Layout engine: 'hollywood' (default) or 'asian'. Both consume the same elements. */
+  format?: EditorFormat;
 }
 
-export function SceneBlock({ scene, index, onFocusElement, typeCommand }: SceneBlockProps) {
+export function SceneBlock({
+  scene,
+  index,
+  onFocusElement,
+  typeCommand,
+  format = 'hollywood',
+}: SceneBlockProps) {
   const { t } = useTranslation();
   const sync = useSceneSync(scene);
   const [focusedElementId, setFocusedElementId] = useState<string | null>(null);
@@ -221,6 +231,8 @@ export function SceneBlock({ scene, index, onFocusElement, typeCommand }: SceneB
     [scene.id],
   );
 
+  const LayoutEngine = format === 'asian' ? AsianLayout : HollywoodLayout;
+
   return (
     <div
       className="mh-scene-block"
@@ -238,8 +250,11 @@ export function SceneBlock({ scene, index, onFocusElement, typeCommand }: SceneB
         ::
       </button>
 
-      <div className="mh-scene-headrow">
-        <span className="mh-scene-num-badge">{index + 1}</span>
+      <div className={`mh-scene-headrow${format === 'asian' ? ' asian' : ''}`}>
+        <span className="mh-scene-num-badge">
+          {index + 1}
+          {format === 'asian' ? '.' : ''}
+        </span>
         <select
           className="mh-scene-select"
           aria-label={t('editor.intExt')}
@@ -275,7 +290,7 @@ export function SceneBlock({ scene, index, onFocusElement, typeCommand }: SceneB
         </select>
       </div>
 
-      <HollywoodLayout
+      <LayoutEngine
         elements={sync.elements}
         focusedElementId={focusedElementId}
         handlers={{

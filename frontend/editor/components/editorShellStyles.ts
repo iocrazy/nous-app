@@ -228,6 +228,46 @@ export const EDITOR_SHELL_STYLES = `
 .mh-el-row.transition-row{ justify-content:flex-end; }
 .mh-el-row.transition-row .mh-el-tick{ display:none; }
 
+/* ===== ELEMENT ROWS (Asian layout engine) — spec D8 column 2 ===== */
+/* A numbered-manuscript typeset: △ action prefix, Name: character label,
+   indented dialogue, inline parens, right transitions, quoted comments,
+   centred subtitles. Colours come from the theme-scoped variables above, so
+   light and dark are both covered without extra selectors. */
+.as-row{ display:flex; align-items:baseline; gap:6px; margin:0 0 7px; }
+.as-row .mh-el-tick{ display:none; }
+.as-row .mh-el-row{ flex:1 1 auto; margin:0; }
+.as-mark{
+  font-family:var(--mono); font-size:13.5px; line-height:1.7;
+  color:var(--sheet-ink-soft); flex-shrink:0; user-select:none;
+}
+.as-prefix{ color:var(--tick-transition); font-weight:700; }
+.as-suffix{ margin-left:-3px; color:var(--tick-character); font-weight:700; }
+/* Character cue = left-aligned label (NOT centred like Hollywood); the row
+   packs cue + colon to the left instead of letting the editable stretch. */
+.as-row-character{ justify-content:flex-start; }
+.as-row-character .mh-el-row{ flex:0 1 auto; }
+.as-row-character .mh-el-editable{ flex:0 1 auto; }
+.as-row-dialogue{ padding-left:2.4em; }
+.as-row-transition{ justify-content:flex-end; }
+.as-row-subtitle{ justify-content:center; }
+.as-action{ text-align:left; }
+.as-character{ font-weight:700; letter-spacing:0.03em; color:var(--tick-character); text-align:left; }
+.as-dialogue{ text-align:left; }
+.as-paren{ font-style:italic; color:var(--sheet-ink-soft); }
+.as-transition{ text-transform:uppercase; font-weight:700; letter-spacing:0.04em; color:var(--sheet-ink-soft); }
+.as-comment{ border-left:3px solid var(--tick-comment); padding-left:8px; color:var(--sheet-ink-soft); font-style:italic; }
+.as-subtitle{ text-align:center; font-style:italic; color:var(--sheet-ink-soft); }
+
+/* Asian scene head = a flat numbered line (N. …) rather than a chip badge. */
+.mh-scene-headrow.asian .mh-scene-num-badge{
+  width:auto; height:auto; min-width:0; padding:0 4px 0 0;
+  background:transparent; color:var(--sheet-ink);
+  font-size:14px; font-weight:700;
+}
+.mh-editor-shell[data-theme='dark'] .mh-scene-headrow.asian .mh-scene-num-badge{
+  background:transparent; color:var(--sheet-ink);
+}
+
 /* ===== HORIZONTAL MODE-SLOT TOOLBAR ===== */
 .mh-h-toolbar{
   display:flex; align-items:center; flex-shrink:0;

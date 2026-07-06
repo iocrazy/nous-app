@@ -120,4 +120,22 @@ describe('EditorShell', () => {
     fireEvent.click(screen.getByText('Rooftop Access'));
     expect(scrollSpy).toHaveBeenCalled();
   });
+
+  it('persists the chosen format per script and renders the asian engine', async () => {
+    localStorage.removeItem('editor.format.42');
+    svc.listScenes.mockResolvedValue(twoScenes);
+    const { container } = render(<EditorShell scriptId="42" />);
+    await waitFor(() => expect(screen.getByRole('main')).toBeInTheDocument());
+
+    // Starts in Hollywood.
+    expect(container.querySelector('.hw-action')).toBeInTheDocument();
+    expect(container.querySelector('.as-prefix')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'editor.asian' }));
+
+    // Engine switches and the choice is persisted under the per-script key.
+    expect(container.querySelector('.as-prefix')).toBeInTheDocument();
+    expect(container.querySelector('.hw-action')).toBeNull();
+    expect(localStorage.getItem('editor.format.42')).toBe('asian');
+  });
 });

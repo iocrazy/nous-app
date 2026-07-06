@@ -14,12 +14,13 @@
  * here the rail and paper column render a minimal-but-real view of the loaded
  * scenes so the shell is exercised end to end.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { createScene, listScenes } from '../sceneService';
 import type { CursorState } from '../editorMachine';
 import type { ElementType, SceneDoc } from '../types';
 import { useEditorState, type EditorFormat, type EditorMode } from '../useEditorState';
+import { persistFormat, readStoredFormat } from '../formatStorage';
 import { EDITOR_SHELL_STYLES } from './editorShellStyles';
 import { SceneBlock, type TypeCommand } from './SceneBlock';
 import { SceneRail } from './SceneRail';
@@ -32,8 +33,11 @@ const DOC_MODES: EditorMode[] = ['script', 'outline', 'cover'];
 
 export function EditorShell({ scriptId }: { scriptId: string }) {
   const { t } = useTranslation();
+  // Restore the per-script layout engine synchronously so the first paint uses
+  // it (no engine flash on remount).
+  const initialFormat = useMemo(() => readStoredFormat(scriptId) ?? undefined, [scriptId]);
   const { state, setMode, setFormat, toggleTheme, setActiveScene, setCursor, setNextInsertType } =
-    useEditorState();
+    useEditorState({ initialFormat });
   const [scenes, setScenes] = useState<SceneDoc[]>([]);
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [railCollapsed, setRailCollapsed] = useState(false);
@@ -133,8 +137,11 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
   }, [scriptId, scenes.length, reload]);
 
   const handleFormatChange = useCallback(
-    (format: EditorFormat) => setFormat(format),
-    [setFormat],
+    (format: EditorFormat) => {
+      setFormat(format);
+      persistFormat(scriptId, format);
+    },
+    [setFormat, scriptId],
   );
 
   // Active toolbar pill follows the cursor element's type (from the loaded
@@ -282,6 +289,7 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
                         key={s.id}
                         scene={s}
                         index={i}
+                        format={state.format}
                         onFocusElement={handleFocusElement}
                         typeCommand={typeCommand ?? undefined}
                       />

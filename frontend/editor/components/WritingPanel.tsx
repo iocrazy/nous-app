@@ -83,10 +83,9 @@ export function WritingPanel({ scenes, format, onFormatChange }: WritingPanelPro
           </button>
           <button
             type="button"
-            className="mh-seg"
-            disabled
-            title={t('editor.asianSoon')}
-            aria-pressed={false}
+            className={`mh-seg${format === 'asian' ? ' active' : ''}`}
+            aria-pressed={format === 'asian'}
+            onClick={() => onFormatChange('asian')}
           >
             {t('editor.asian')}
           </button>
