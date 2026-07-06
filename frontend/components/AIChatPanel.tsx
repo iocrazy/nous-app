@@ -470,13 +470,14 @@ export function AIChatPanel({
       // Optimistic user bubble — replaced by the authoritative row after
       // the server responds and we reload the message list. Staged image
       // attachments render immediately via their local preview data URL.
+      const sentAttachments = stagedAttachments;
       const tempUser: AIChatMessage = {
         id: `tmp-user-${Date.now()}`,
         session_id: activeSessionId,
         role: 'user',
         content: text,
-        attachments: stagedAttachments.length > 0
-          ? stagedAttachments.map((a) => ({
+        attachments: sentAttachments.length > 0
+          ? sentAttachments.map((a) => ({
               kind: a.kind,
               resource_id: a.resource_id,
               mime: a.mime,
@@ -487,16 +488,20 @@ export function AIChatPanel({
         created_at: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, tempUser]);
+      // Clear the composer chips optimistically — the attachments now live
+      // in the message bubble, and sendChatMessage blocks for the whole AI
+      // turn (tens of seconds), during which stale chips read as "not sent
+      // yet". Restored on failure so the user can retry.
+      setStagedAttachments([]);
 
       try {
         // O3: pass plan_mode only when non-default. Backend swaps in
         // plan-prompt instructions for prompt_user / dry_run.
         // B: send staged attachments + resource_ref attachments alongside.
-        // Clear staged on success — failed sends keep them so user can retry.
         const opts: Parameters<typeof aiLibraryService.sendChatMessage>[2] = {};
         if (planMode !== 'auto') opts.plan_mode = planMode;
         const allAttachments = [
-          ...stagedAttachments.map((a) => ({
+          ...sentAttachments.map((a) => ({
             kind: a.kind,
             url: a.url,
             mime: a.mime ?? undefined,
@@ -515,15 +520,16 @@ export function AIChatPanel({
           opts.attachments = allAttachments;
         }
         await aiLibraryService.sendChatMessage(activeSessionId, text, opts);
-        setStagedAttachments([]);
         // Refetch full history so IDs + timestamps are server-authoritative.
         await loadSessionMessages(activeSessionId);
       } catch (err) {
         console.error('[AIChatPanel] sendChatMessage failed:', err);
         const msg = err instanceof Error ? err.message : String(err);
         addToast(`Send failed: ${msg}`, 'error');
-        // Roll back the optimistic bubble — the server didn't accept it.
+        // Roll back the optimistic bubble and restore the chips — the
+        // server didn't accept the message, so the user can retry as-is.
         setMessages((prev) => prev.filter((m) => m.id !== tempUser.id));
+        setStagedAttachments(sentAttachments);
       } finally {
         setSending(false);
       }
