@@ -2409,6 +2409,7 @@
     "copilotEdits": "本轮 {{count}} 处修改",
     "copilotUndo": "撤销",
     "copilotFailed": "无法应用——文本未改动。",
-    "nodesElementCount_other": "{{count}} 个元素"
+    "nodesElementCount_other": "{{count}} 个元素",
+    "nodesElementCount_one": "{{count}} 个元素"
   }
 }
