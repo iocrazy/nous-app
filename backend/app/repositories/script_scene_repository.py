@@ -43,6 +43,7 @@ UNSET: Any = object()
 
 _SCENES_N2A: Dict[str, str] = _name_to_attr(ScriptScenes)
 _SCENES_ATTRS = {p.key for p in ScriptScenes.__mapper__.column_attrs}
+_OPS_N2A: Dict[str, str] = _name_to_attr(ScriptOps)
 
 # bigint columns coerced on write. Ids/FKs stay native int on read (5.3 trap).
 _SCENE_BIGINT_FIELDS = ("script_id", "chapter_id", "location_id")
@@ -152,6 +153,26 @@ class ScriptSceneRepository:
         except Exception as e:
             logger.error(f"Failed to get scene {scene_id}: {e}")
             return None
+
+    async def list_ops_by_scene(self, scene_id: str) -> List[Dict[str, Any]]:
+        """The immutable op ledger for a scene, ordered by ``op_seq`` ASC (replay
+        order). Each row carries ``op_json`` = ``{"ops": [...], "inverse": [...]}``
+        native (JSONB stays a dict). Read by the version service to replay a scene
+        to a commit watermark and to build inverse batches for rollback."""
+        try:
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(ScriptOps)
+                    .where(ScriptOps.scene_id == _bigint(scene_id))
+                    .order_by(ScriptOps.op_seq.asc())
+                )
+                return [
+                    _parity(_orm_obj_to_dict(r, _OPS_N2A))
+                    for r in result.scalars().all()
+                ]
+        except Exception as e:
+            logger.error(f"Failed to list ops for scene {scene_id}: {e}")
+            return []
 
     # ------------------------------------------------------------------ #
     # Writes — create / update_meta / delete
