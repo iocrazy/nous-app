@@ -346,7 +346,20 @@ def _build_llm_and_embedder(config: "GraphMemoryConfig") -> tuple[Any, Any, Any]
     return llm, embedder, cross_encoder
 
 
-class _LoggingEmbedder:
+try:
+    # Real base class so pydantic accepts the shim: graphiti's
+    # ``GraphitiClients`` validates ``embedder`` with
+    # ``is_instance_of=EmbedderClient`` — a duck-typed wrapper is
+    # REJECTED at Graphiti() construction (ValidationError), which
+    # killed every client build after the graphiti-core bump
+    # (2026-07-06 prod logs). Import guarded so this module still
+    # imports in envs without graphiti installed.
+    from graphiti_core.embedder.client import EmbedderClient as _EmbedderBase
+except Exception:  # noqa: BLE001 — pure-logic test envs
+    _EmbedderBase = object  # type: ignore[assignment,misc]
+
+
+class _LoggingEmbedder(_EmbedderBase):  # type: ignore[valid-type,misc]
     """Observability shim around Graphiti's embedder.
 
     graphiti-core swallows embedding failures internally (empty search
@@ -357,12 +370,25 @@ class _LoggingEmbedder:
     application_logs rows. This shim logs a WARNING on every failed
     embed call, then re-raises so graphiti's own handling is unchanged.
     Delegates everything else to the wrapped embedder.
+
+    MUST subclass graphiti's ``EmbedderClient`` (see the guarded import
+    above) — its ``create``/``create_batch`` are implemented explicitly
+    here (satisfying the ABC) and any other attribute falls through to
+    the wrapped embedder via ``__getattr__``.
     """
 
     def __init__(self, inner: Any, *, model: str, base_url: str) -> None:
         self._inner = inner
         self._model = model
         self._base_url = base_url
+
+    async def create(self, input_data: Any) -> Any:
+        return await self._wrap(self._inner.create, "create")(input_data)
+
+    async def create_batch(self, input_data_list: Any) -> Any:
+        return await self._wrap(self._inner.create_batch, "create_batch")(
+            input_data_list
+        )
 
     def __getattr__(self, name: str) -> Any:
         attr = getattr(self._inner, name)
@@ -440,26 +466,32 @@ class GraphMemoryService:
         """Construct the FalkorDriver on a THROWAWAY THREAD with socket
         timeouts — never inline on the event loop.
 
-        Two landmines in graphiti's FalkorDriver (2026-07-06 P0, the 2h
-        loop freeze — see bug_backend_loop_freeze_healthcheck_blindspot):
+        Two landmines in graphiti's FalkorDriver (2026-07-06 P0 follow-up
+        — see bug_backend_loop_freeze_healthcheck_blindspot):
 
-        1. Its default FalkorDB client is a SYNC redis.Redis with NO
-           socket timeouts, so any query against a hung server blocks
-           its thread forever. We inject our own client with timeouts.
+        1. Its default FalkorDB client carries NO socket timeouts, so a
+           query against a hung server blocks its caller indefinitely.
+           We inject our own client with timeouts.
         2. Its __init__ does ``loop.create_task(build_indices...)`` when
-           it sees a running event loop — scheduling sync-redis work ON
-           the loop. Built on a plain thread there is no running loop,
-           so that branch falls through to its RuntimeError/pass path
-           and nothing ever lands on our loop.
+           it sees a running event loop — scheduling driver work on OUR
+           loop during construction. Built on a plain thread there is no
+           running loop, so that branch falls through to its
+           RuntimeError/pass path and nothing ever lands on our loop.
+
+        The injected client MUST be ``falkordb.asyncio.FalkorDB`` — the
+        driver awaits ``graph.query(...)``, and the sync ``falkordb.FalkorDB``
+        returns a plain QueryResult ("object QueryResult can't be used in
+        'await' expression", caught live 2026-07-06 on the first real
+        search after the pydantic-gate fix).
         """
-        from falkordb import FalkorDB
+        from falkordb.asyncio import FalkorDB as AsyncFalkorDB
         from graphiti_core.driver.falkordb_driver import FalkorDriver
 
         result: dict[str, Any] = {}
 
         def _construct() -> None:
             try:
-                falkor = FalkorDB(
+                falkor = AsyncFalkorDB(
                     host=self.config.falkordb_host,
                     port=self.config.falkordb_port,
                     socket_connect_timeout=self._FALKOR_CONNECT_TIMEOUT_S,

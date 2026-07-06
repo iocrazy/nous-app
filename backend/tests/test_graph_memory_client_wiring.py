@@ -212,3 +212,36 @@ async def test_logging_embedder_passthrough_on_success():
     assert await shim.create_batch(["x", "y"]) == [[0.1], [0.2]]
     # Non-create attributes delegate untouched
     assert shim.embedding_dim == 2048
+
+
+def test_logging_embedder_is_real_embedder_client_instance():
+    """Regression (2026-07-06 prod): graphiti's GraphitiClients pydantic-
+    validates ``embedder`` with is_instance_of=EmbedderClient — a duck-
+    typed shim is rejected at Graphiti() construction (ValidationError:
+    'Input should be an instance of EmbedderClient'), which killed every
+    graph-memory client build after the graphiti-core bump. The shim must
+    be a REAL subclass."""
+    from graphiti_core.embedder.client import EmbedderClient
+
+    from app.services.ai.memory.graph_memory import _LoggingEmbedder
+
+    shim = _LoggingEmbedder(object(), model="m", base_url="b")
+    assert isinstance(shim, EmbedderClient)
+
+
+@pytest.mark.asyncio
+async def test_logging_embedder_create_delegates_to_inner():
+    """The explicit create/create_batch overrides (needed to satisfy the
+    ABC) must still delegate to the wrapped embedder."""
+    from app.services.ai.memory.graph_memory import _LoggingEmbedder
+
+    class _Inner:
+        async def create(self, input_data):
+            return [0.1, 0.2]
+
+        async def create_batch(self, input_data_list):
+            return [[0.1], [0.2]]
+
+    shim = _LoggingEmbedder(_Inner(), model="m", base_url="b")
+    assert await shim.create("hello") == [0.1, 0.2]
+    assert await shim.create_batch(["a", "b"]) == [[0.1], [0.2]]
