@@ -79,18 +79,37 @@ describe('railDerive', () => {
 });
 
 describe('RailModules', () => {
-  it('renders four module slots with only Script active and the rest disabled', () => {
-    render(<RailModules />);
+  it('marks Script + Scenes selectable and keeps Beats / Storyboard disabled', () => {
+    render(<RailModules activeView="script" onSelect={vi.fn()} />);
     const buttons = screen.getAllByRole('button');
     expect(buttons).toHaveLength(4);
-    // Script — active, enabled.
+    // Script — selectable and active (current view).
     expect(buttons[0]).toBeEnabled();
     expect(buttons[0]).toHaveClass('active');
-    // Beats / Storyboard / Scenes — disabled placeholders.
-    for (const b of buttons.slice(1)) {
-      expect(b).toBeDisabled();
-      expect(b).toHaveAttribute('title', 'editor.comingPhase2');
-    }
+    // Beats / Storyboard — disabled placeholders.
+    expect(buttons[1]).toBeDisabled();
+    expect(buttons[1]).toHaveAttribute('title', 'editor.comingPhase2');
+    expect(buttons[2]).toBeDisabled();
+    expect(buttons[2]).toHaveAttribute('title', 'editor.comingPhase2');
+    // Scenes — now selectable (node view), not the active one yet.
+    expect(buttons[3]).toBeEnabled();
+    expect(buttons[3]).not.toHaveClass('active');
+  });
+
+  it('follows aria-current to the active view and fires onSelect on click', () => {
+    const onSelect = vi.fn();
+    const { rerender } = render(<RailModules activeView="script" onSelect={onSelect} />);
+    const scenes = screen.getByRole('button', { name: /moduleScenes/ });
+    expect(scenes).not.toHaveAttribute('aria-current');
+
+    fireEvent.click(scenes);
+    expect(onSelect).toHaveBeenCalledWith('nodes');
+
+    rerender(<RailModules activeView="nodes" onSelect={onSelect} />);
+    expect(screen.getByRole('button', { name: /moduleScenes/ })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
   });
 });
 

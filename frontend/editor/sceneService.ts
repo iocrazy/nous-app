@@ -84,7 +84,12 @@ export async function createScene(
 
 export async function updateSceneMeta(
   sceneId: string,
-  data: Partial<Pick<SceneDoc, 'heading_int_ext' | 'location_text' | 'time_of_day'>>,
+  data: Partial<
+    Pick<
+      SceneDoc,
+      'heading_int_ext' | 'location_text' | 'time_of_day' | 'position_x' | 'position_y'
+    >
+  >,
 ): Promise<SceneDoc> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${apiBase()}/scenes/${sceneId}`, {

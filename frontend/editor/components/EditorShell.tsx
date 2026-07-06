@@ -46,7 +46,8 @@ import {
   type SceneReorderApi,
 } from './SceneBlock';
 import { SceneRail } from './SceneRail';
-import { RailModules } from './RailModules';
+import { RailModules, type RailView } from './RailModules';
+import { NodesView } from '../nodes/NodesView';
 import { RailEntities } from './RailEntities';
 import { deriveRailCharacters, deriveRailLocations } from '../railDerive';
 import { ElementToolbar } from './ElementToolbar';
@@ -76,6 +77,10 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
   const [chapters, setChapters] = useState<ScriptChapter[]>([]);
   const [converting, setConverting] = useState<Record<string, boolean>>({});
   const [loadState, setLoadState] = useState<LoadState>('loading');
+  // Central-column view: the script sheet or the scene-node projection. The top
+  // Script/Outline/Cover tabs are a separate axis and stay put (spec §3.1).
+  const [railView, setRailView] = useState<RailView>('script');
+  const [pendingOpenSceneId, setPendingOpenSceneId] = useState<string | null>(null);
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const [typeCommand, setTypeCommand] = useState<TypeCommand | null>(null);
@@ -189,6 +194,30 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
     },
     [setActiveScene],
   );
+
+  // Jump from a scene node (double-click) back to the script sheet, landing on
+  // that scene: switch views, mark it active, and defer the scroll+focus until
+  // the sheet has re-rendered (the node canvas unmounts on the same tick).
+  const handleOpenScene = useCallback(
+    (sceneId: string) => {
+      setRailView('script');
+      setActiveScene(sceneId);
+      setPendingOpenSceneId(sceneId);
+    },
+    [setActiveScene],
+  );
+
+  useEffect(() => {
+    if (!pendingOpenSceneId || railView !== 'script') return;
+    const block = shellRef.current?.querySelector<HTMLElement>(
+      `[data-scene-id="${pendingOpenSceneId}"]`,
+    );
+    if (block) {
+      block.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      block.querySelector<HTMLElement>('[data-el-id]')?.focus();
+    }
+    setPendingOpenSceneId(null);
+  }, [pendingOpenSceneId, railView, scenes]);
 
   const handleFocusElement = useCallback(
     (cursor: CursorState) => {
@@ -535,7 +564,7 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
                 </div>
               </div>
             </div>
-            <RailModules />
+            <RailModules activeView={railView} onSelect={setRailView} />
             <div className="mh-rail-scroll">
               <RailEntities
                 characters={railCharacters}
@@ -584,7 +613,9 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
         </div>
 
         <div className="mh-page-frame">
-          {state.mode === 'cover' ? (
+          {railView === 'nodes' ? (
+            <NodesView scenes={scenes} chapters={chapters} onOpenScene={handleOpenScene} />
+          ) : state.mode === 'cover' ? (
             <div className="mh-sheet-scroll">
               <div className="mh-cover-card" data-testid="cover-placeholder">
                 {t('editor.coverPlaceholder')}
