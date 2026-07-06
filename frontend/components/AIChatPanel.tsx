@@ -372,13 +372,16 @@ export function AIChatPanel({
   async function loadSessionMessages(
     sessionId: string,
     isCancelled: () => boolean = () => false,
-  ): Promise<void> {
+  ): Promise<AIChatMessage[] | null> {
     try {
       const data = await aiLibraryService.getChatSession(sessionId);
-      if (isCancelled()) return;
-      setMessages(data.messages ?? []);
+      if (isCancelled()) return null;
+      const msgs = data.messages ?? [];
+      setMessages(msgs);
+      return msgs;
     } catch (err) {
       console.error('[AIChatPanel] getChatSession failed:', err);
+      return null;
     }
   }
 
@@ -526,10 +529,23 @@ export function AIChatPanel({
         console.error('[AIChatPanel] sendChatMessage failed:', err);
         const msg = err instanceof Error ? err.message : String(err);
         addToast(`Send failed: ${msg}`, 'error');
-        // Roll back the optimistic bubble and restore the chips — the
-        // server didn't accept the message, so the user can retry as-is.
-        setMessages((prev) => prev.filter((m) => m.id !== tempUser.id));
-        setStagedAttachments(sentAttachments);
+        // "Send failed" here often means the CONNECTION died mid-turn
+        // (proxy timeout on a long AI reply), not that the message was
+        // rejected — the backend persists the user turn BEFORE calling
+        // the model. Reload server history instead of blindly rolling
+        // back: if the turn landed, the bubble (with attachments) stays;
+        // only restore the composer chips when it truly never arrived.
+        const serverMsgs = await loadSessionMessages(activeSessionId);
+        if (serverMsgs === null) {
+          // History fetch also failed (offline?) — fall back to rollback.
+          setMessages((prev) => prev.filter((m) => m.id !== tempUser.id));
+          setStagedAttachments(sentAttachments);
+        } else {
+          const landed = serverMsgs
+            .slice(-3)
+            .some((m) => m.role === 'user' && m.content === text);
+          if (!landed) setStagedAttachments(sentAttachments);
+        }
       } finally {
         setSending(false);
       }
