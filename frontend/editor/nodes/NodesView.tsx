@@ -15,6 +15,7 @@ import {
   Background,
   BackgroundVariant,
   Controls,
+  SelectionMode,
   applyNodeChanges,
   type Edge,
   type Node,
@@ -36,6 +37,18 @@ const DRAG_PERSIST_MS = 500;
 const ID_PREFIX_LEN = 3;
 
 const NODE_TYPES = { sceneNode: SceneFlowNode, chapterNode: ChapterActionsNode };
+
+/**
+ * Modifier that toggles add-to-selection. Cmd on Apple platforms, Ctrl
+ * elsewhere — matches the OS conventions React Flow's own defaults follow.
+ * `navigator.platform` is empty under jsdom, which resolves to Control.
+ */
+function detectMultiSelectKey(): 'Meta' | 'Control' {
+  const platform = (typeof navigator !== 'undefined' && navigator.platform) || '';
+  return /Mac|iPhone|iPad|iPod/i.test(platform) ? 'Meta' : 'Control';
+}
+
+const MULTI_SELECT_KEY = detectMultiSelectKey();
 
 export interface NodesViewProps {
   scenes: SceneDoc[];
@@ -65,7 +78,16 @@ export function NodesView({ scenes, chapters, onOpenScene, scriptId, onReload }:
     [],
   );
 
+  // Latest node set, read synchronously by the single-drag handler to learn the
+  // current selection without re-binding the callback on every position change.
+  const nodesRef = useRef<Node[]>(nodes);
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
+
   // One pending coordinate write per scene id; flushed after the debounce window.
+  // Keyed by scene id, so a group move schedules independent writes that never
+  // clobber each other.
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   useEffect(() => {
     const timers = timersRef.current;
@@ -75,24 +97,45 @@ export function NodesView({ scenes, chapters, onOpenScene, scriptId, onReload }:
     };
   }, []);
 
-  const onNodeDragStop = useCallback((_evt: React.MouseEvent, node: Node) => {
-    if (node.type !== 'sceneNode') return;
-    const sceneId = node.id.slice(ID_PREFIX_LEN);
-    const position_x = Math.round(node.position.x);
-    const position_y = Math.round(node.position.y);
+  // Debounce-persist every scene node in `changed`. Chapter nodes are
+  // projection-only in Task 1 and skipped (Task 3 wires their persistence).
+  const persistPositions = useCallback((changed: Node[]) => {
     const timers = timersRef.current;
-    const existing = timers.get(sceneId);
-    if (existing) clearTimeout(existing);
-    timers.set(
-      sceneId,
-      setTimeout(() => {
-        timers.delete(sceneId);
-        updateSceneMeta(sceneId, { position_x, position_y }).catch((err) =>
-          console.error('[NodesView] failed to persist scene position', err),
-        );
-      }, DRAG_PERSIST_MS),
-    );
+    for (const node of changed) {
+      if (node.type !== 'sceneNode') continue;
+      const sceneId = node.id.slice(ID_PREFIX_LEN);
+      const position_x = Math.round(node.position.x);
+      const position_y = Math.round(node.position.y);
+      const existing = timers.get(sceneId);
+      if (existing) clearTimeout(existing);
+      timers.set(
+        sceneId,
+        setTimeout(() => {
+          timers.delete(sceneId);
+          updateSceneMeta(sceneId, { position_x, position_y }).catch((err) =>
+            console.error('[NodesView] failed to persist scene position', err),
+          );
+        }, DRAG_PERSIST_MS),
+      );
+    }
   }, []);
+
+  const onNodeDragStop = useCallback(
+    (_evt: React.MouseEvent, node: Node) => {
+      // If the dragged node belongs to a multi-selection, React Flow moved the
+      // whole group with it — persist every selected node, not just this one.
+      const selected = nodesRef.current.filter((n) => n.selected);
+      const inSelection =
+        selected.length > 1 && selected.some((n) => String(n.id) === String(node.id));
+      persistPositions(inSelection ? selected : [node]);
+    },
+    [persistPositions],
+  );
+
+  const onSelectionDragStop = useCallback(
+    (_evt: React.MouseEvent, dragged: Node[]) => persistPositions(dragged),
+    [persistPositions],
+  );
 
   const onNodeDoubleClick = useCallback(
     (_evt: React.MouseEvent, node: Node) => {
@@ -116,7 +159,11 @@ export function NodesView({ scenes, chapters, onOpenScene, scriptId, onReload }:
           nodeTypes={NODE_TYPES}
           onNodesChange={onNodesChange}
           onNodeDragStop={onNodeDragStop}
+          onSelectionDragStop={onSelectionDragStop}
           onNodeDoubleClick={onNodeDoubleClick}
+          selectionMode={SelectionMode.Partial}
+          selectionKeyCode="Shift"
+          multiSelectionKeyCode={MULTI_SELECT_KEY}
           fitView
           proOptions={{ hideAttribution: true }}
         >

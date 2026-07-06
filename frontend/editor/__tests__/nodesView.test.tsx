@@ -161,6 +161,80 @@ describe('NodesView', () => {
     });
   });
 
+  describe('selection system', () => {
+    it('wires rubber-band + multi-select props into React Flow', () => {
+      render(
+        <NodesView
+          scenes={[scene({ id: '200' })]}
+          chapters={[]}
+          onOpenScene={vi.fn()}
+          scriptId="1"
+          onReload={vi.fn()}
+        />,
+      );
+      // Shift+drag on blank = rubber band; partial = intersect-to-select.
+      expect(capturedProps.selectionMode).toBe('partial');
+      expect(capturedProps.selectionKeyCode).toBe('Shift');
+      // Ctrl/Cmd toggles add-to-selection — platform-detected modifier.
+      expect(['Meta', 'Control']).toContain(capturedProps.multiSelectionKeyCode);
+      // Group drag settles through its own callback.
+      expect(typeof capturedProps.onSelectionDragStop).toBe('function');
+    });
+
+    describe('group-drag persistence', () => {
+      beforeEach(() => vi.useFakeTimers());
+      afterEach(() => vi.useRealTimers());
+
+      it('persists every selected scene once after a group drag', () => {
+        svc.updateSceneMeta.mockResolvedValue(scene({}));
+        render(
+          <NodesView
+            scenes={[scene({ id: '200' }), scene({ id: '201' })]}
+            chapters={[]}
+            onOpenScene={vi.fn()}
+            scriptId="1"
+            onReload={vi.fn()}
+          />,
+        );
+        const nodes = capturedProps.nodes as Array<Record<string, unknown>>;
+        const dragged = nodes
+          .filter((n) => n.type === 'sceneNode')
+          .map((n, i) => ({ ...n, selected: true, position: { x: 10 + i, y: 20 + i } }));
+
+        (capturedProps.onSelectionDragStop as (e: unknown, n: unknown) => void)({}, dragged);
+        expect(svc.updateSceneMeta).not.toHaveBeenCalled();
+
+        vi.advanceTimersByTime(500);
+        expect(svc.updateSceneMeta).toHaveBeenCalledTimes(2);
+        expect(svc.updateSceneMeta).toHaveBeenCalledWith('200', { position_x: 10, position_y: 20 });
+        expect(svc.updateSceneMeta).toHaveBeenCalledWith('201', { position_x: 11, position_y: 21 });
+      });
+
+      it('skips a chapter node caught in a mixed group selection', () => {
+        svc.updateSceneMeta.mockResolvedValue(scene({}));
+        render(
+          <NodesView
+            scenes={[scene({ id: '200' })]}
+            chapters={[chapter({ id: '100' })]}
+            onOpenScene={vi.fn()}
+            scriptId="1"
+            onReload={vi.fn()}
+          />,
+        );
+        const nodes = capturedProps.nodes as Array<Record<string, unknown>>;
+        const dragged = nodes
+          .filter((n) => n.type === 'sceneNode' || n.type === 'chapterNode')
+          .map((n) => ({ ...n, selected: true, position: { x: 5, y: 6 } }));
+
+        (capturedProps.onSelectionDragStop as (e: unknown, n: unknown) => void)({}, dragged);
+        vi.advanceTimersByTime(500);
+        // Only the scene node persists; the chapter is projection-only in Task 1.
+        expect(svc.updateSceneMeta).toHaveBeenCalledTimes(1);
+        expect(svc.updateSceneMeta).toHaveBeenCalledWith('200', { position_x: 5, position_y: 6 });
+      });
+    });
+  });
+
   it('jumps to the scene on double-click via onOpenScene', () => {
     const onOpenScene = vi.fn();
     render(
