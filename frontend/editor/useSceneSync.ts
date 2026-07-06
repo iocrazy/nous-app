@@ -21,8 +21,11 @@
  *  - 422 (OpRejectedError) → never swallowed: log with context, drop the bad
  *    batch and refetch the scene as truth.
  *
- * `flush()` resolves once the queue drains — the branch-switch guard (spec §3.6)
- * awaits it before navigating away.
+ * `flush()` resolves once the queue drains — OR once syncing halts on a
+ * 'conflict'/'offline' state (otherwise the branch-switch guard would block on
+ * unbounded user interaction). Guards must re-check `saveState` after awaiting:
+ * 'saved' means everything landed; 'conflict'/'offline' means work is pending
+ * and the guard should prompt instead of navigating.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -54,12 +57,27 @@ interface Batch {
 const BACKOFF_BASE_MS = 1000;
 const BACKOFF_CAP_MS = 4000;
 
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+// Field-wise canonical compare: JSON.stringify would break on key-order or
+// backend normalization differences (e.g. read-back injecting character_id:
+// null), turning a byte-identical concurrent write into a spurious conflict.
+const sameElement = (a: ScriptElement, b: ScriptElement): boolean =>
+  a.id === b.id &&
+  a.type === b.type &&
+  a.text === b.text &&
+  (a.character_id ?? null) === (b.character_id ?? null);
 
 const sameElements = (a: ScriptElement[], b: ScriptElement[]): boolean =>
-  JSON.stringify(a) === JSON.stringify(b);
+  a.length === b.length && a.every((el, i) => sameElement(el, b[i]));
 
-/** Rebuild `mine` as full-payload insert-upserts (ids preserved, order anchored). */
+/**
+ * Rebuild `mine` as full-payload insert-upserts (ids preserved, order anchored).
+ *
+ * Known limitation (accepted for Phase 1, spec §3.4's dominant case is text
+ * divergence on the SAME elements): upserts never move or delete, so a
+ * reorder conflict keeps theirs' positions and server-only elements survive
+ * "Keep mine". A true mine-wins (move/delete emission) belongs with the
+ * version/diff UI in Phase 4.
+ */
 function upsertOpsFor(mine: ScriptElement[]): ElementOp[] {
   return mine.map((el, i) => ({
     op: 'insert' as const,
@@ -88,7 +106,22 @@ export function useSceneSync(scene: SceneDoc): SceneSync {
   const flushWaitersRef = useRef<Array<() => void>>([]);
   const sceneIdRef = useRef(scene.id);
   const mountedRef = useRef(true);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pumpRef = useRef<() => Promise<void>>(async () => {});
+
+  // Cancellable backoff: unmount clears the timer so a pending retry never
+  // fires a network call on a dead hook (the unresolved promise is GC'd with
+  // its closure).
+  const sleep = useCallback(
+    (ms: number): Promise<void> =>
+      new Promise((resolve) => {
+        retryTimerRef.current = setTimeout(() => {
+          retryTimerRef.current = null;
+          resolve();
+        }, ms);
+      }),
+    [],
+  );
 
   // Reset all state when the hook is pointed at a different scene.
   useEffect(() => {
@@ -106,13 +139,17 @@ export function useSceneSync(scene: SceneDoc): SceneSync {
     setConflict(null);
   }, [scene.id, scene.content_version, scene.elements]);
 
+  const releaseFlushWaiters = useCallback(() => {
+    const waiters = flushWaitersRef.current;
+    flushWaitersRef.current = [];
+    waiters.forEach((resolve) => resolve());
+  }, []);
+
   const settleFlush = useCallback(() => {
     if (queueRef.current.length === 0 && !flushingRef.current) {
-      const waiters = flushWaitersRef.current;
-      flushWaitersRef.current = [];
-      waiters.forEach((resolve) => resolve());
+      releaseFlushWaiters();
     }
-  }, []);
+  }, [releaseFlushWaiters]);
 
   const pump = useCallback(async () => {
     if (flushingRef.current || frozenRef.current || offlineRef.current) return;
@@ -143,6 +180,9 @@ export function useSceneSync(scene: SceneDoc): SceneSync {
               setConflict({ mine: elementsRef.current, theirs: err.elements });
               setSaveState('conflict');
             }
+            // Syncing halted on user input — release flush() waiters so the
+            // branch-switch guard can prompt (docstring contract).
+            releaseFlushWaiters();
             break;
           }
           if (err instanceof OpRejectedError) {
@@ -172,6 +212,7 @@ export function useSceneSync(scene: SceneDoc): SceneSync {
           if (typeof navigator !== 'undefined' && navigator.onLine === false) {
             offlineRef.current = true;
             if (mountedRef.current) setSaveState('offline');
+            releaseFlushWaiters(); // halted on connectivity — same guard contract
             break;
           }
           const delay = Math.min(BACKOFF_BASE_MS * 2 ** batch.attempt, BACKOFF_CAP_MS);
@@ -198,7 +239,7 @@ export function useSceneSync(scene: SceneDoc): SceneSync {
         settleFlush();
       }
     }
-  }, [settleFlush]);
+  }, [settleFlush, releaseFlushWaiters, sleep]);
 
   pumpRef.current = pump;
 
@@ -206,7 +247,9 @@ export function useSceneSync(scene: SceneDoc): SceneSync {
     (ops: ElementOp[], optimistic: ScriptElement[]) => {
       elementsRef.current = optimistic;
       setElements(optimistic);
-      setSaveState('saving');
+      // While frozen/offline nothing flushes — keep the truthful indicator
+      // ('conflict'/'offline') instead of flashing a false 'saving'.
+      if (!frozenRef.current && !offlineRef.current) setSaveState('saving');
       queueRef.current.push({ ops, optimistic, attempt: 0 });
       void pump();
     },
@@ -261,6 +304,10 @@ export function useSceneSync(scene: SceneDoc): SceneSync {
     return () => {
       mountedRef.current = false;
       window.removeEventListener('online', onOnline);
+      if (retryTimerRef.current !== null) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
     };
   }, []);
 

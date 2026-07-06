@@ -357,6 +357,28 @@ describe('flush()', () => {
     expect(resolved).toBe(true);
   });
 
+  it('releases waiters when syncing halts on a conflict (guard re-checks saveState)', async () => {
+    const theirs = [el('el_00000001', 'their text')];
+    mockApplyOps.mockRejectedValueOnce(new VersionConflictError(9, theirs));
+
+    const { result } = renderHook(() => useSceneSync(makeScene()));
+    let resolved = false;
+    await act(async () => {
+      result.current.dispatchOps(
+        [{ op: 'update', element_id: 'el_00000001', payload: { text: 'mine' } }],
+        [el('el_00000001', 'mine')],
+      );
+      void result.current.flush().then(() => {
+        resolved = true;
+      });
+    });
+    await drain();
+    // flush() must NOT hang on unbounded user interaction — it resolves and
+    // the caller sees saveState==='conflict' to decide to prompt.
+    expect(resolved).toBe(true);
+    expect(result.current.saveState).toBe('conflict');
+  });
+
   it('resolves immediately when nothing is queued', async () => {
     const { result } = renderHook(() => useSceneSync(makeScene()));
     await expect(result.current.flush()).resolves.toBeUndefined();
