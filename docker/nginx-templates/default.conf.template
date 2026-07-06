@@ -1,9 +1,21 @@
-# MediaHub Nginx config TEMPLATE (envsubst by the official nginx image:
+# MediaHub Nginx GATEWAY template (envsubst by the official nginx image:
 # /etc/nginx/templates/*.template → /etc/nginx/conf.d/*.conf at start).
-# Serves HLS (/stream/) + signed direct files (/f/) from /app/downloads/.
-# ${NGINX_SECURE_LINK_SECRET} comes from the container env — see
-# docs/runbook/nginx-direct-serve.md before touching compose (Watchtower
-# does NOT apply compose changes).
+#
+# This container IS the app gateway (2026-07-06): the Synology reverse proxy
+# forwards mediahubserver.heygo.cn:88 → :8881 (this container), which
+# path-routes:
+#   /f/       signed direct file serve (secure_link) — bytes off disk
+#   /stream/  HLS segments — bytes off disk
+#   /health   gateway health
+#   /         everything else proxied to the backend (API/WS/SSE)
+# ${NGINX_SECURE_LINK_SECRET} comes from the container env. Watchtower does
+# NOT apply compose changes — see docs/runbook/nginx-direct-serve.md.
+
+# WebSocket upgrade mapping (conf.d files live inside the http block).
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
 
 server {
     listen 80;
@@ -63,6 +75,29 @@ server {
     location /health {
         return 200 'OK';
         add_header Content-Type text/plain;
+    }
+
+    # ── Everything else → backend (API / WebSocket / SSE) ─────────────
+    # The backend caps uploads at 500 MB; match it here or nginx 413s
+    # bulk imports before FastAPI ever sees them.
+    client_max_body_size 512m;
+
+    location / {
+        proxy_pass http://mediahub:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # WebSocket (/api/v1/ws/*) + SSE (chat streaming): upgrade passthrough,
+        # no buffering (SSE events must flush per-event), long timeouts for
+        # ws/sse/large transfers.
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
     }
 
     # Gzip for playlists (m3u8 are text-based)
