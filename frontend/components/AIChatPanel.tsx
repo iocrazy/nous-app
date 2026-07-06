@@ -42,6 +42,7 @@ import { useChatAttachmentUpload } from '../hooks/useChatAttachmentUpload';
 import { useComposerDropzone } from '../hooks/useComposerDropzone';
 import { useComposerPaste } from '../hooks/useComposerPaste';
 import { useResourceSearch } from '../hooks/useResourceSearch';
+import { useGlobalChatStore } from '../stores/globalChatStore';
 
 export interface AIChatPanelProps {
   /** String form of the project's BIGINT id, for display + session tagging.
@@ -183,6 +184,28 @@ export function AIChatPanel({
   // the user-selected agent drives everything — identical to the existing behavior.
   const lockedAgent = agentSlug ?? null;
   const effectiveAgentSlug = lockedAgent ?? selectedAgentSlug;
+
+  // AI Library sidebar / Sessions page "open chat with this agent": consume
+  // the one-shot request from globalChatStore (nonce keyed so re-clicking the
+  // same agent re-fires). With a sessionId, seed the per-agent last-session
+  // memory FIRST so the agent-switch effect resumes straight into that
+  // session; when the agent is already selected that effect won't re-run, so
+  // switch the session directly. Ignored in locked mode — an embedded,
+  // agent-locked panel must not be hijacked by the global sidebar.
+  const chatRequest = useGlobalChatStore((s) => s.chatRequest);
+  useEffect(() => {
+    if (!chatRequest || lockedAgent) return;
+    const { agentSlug: reqSlug, sessionId: reqSession } = chatRequest;
+    if (reqSession) rememberLastSession(reqSlug, reqSession);
+    if (reqSession && selectedAgentSlug === reqSlug) {
+      setActiveSessionId(reqSession);
+      setMessages([]);
+      void loadSessionMessages(reqSession);
+    }
+    setSelectedAgentSlug(reqSlug);
+    useGlobalChatStore.getState().consumeChatRequest();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatRequest, lockedAgent]);
 
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);

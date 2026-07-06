@@ -66,6 +66,7 @@ const SkillsPage = lazyWithRetry(() => import('./pages/SkillsPage').then(m => ({
 const UsagePage = lazyWithRetry(() => import('./pages/UsagePage').then(m => ({ default: m.UsagePage })));
 const WorkforcePage = lazyWithRetry(() => import('./pages/WorkforcePage').then(m => ({ default: m.WorkforcePage })));
 const SessionsPage = lazyWithRetry(() => import('./pages/SessionsPage').then(m => ({ default: m.SessionsPage })));
+const MemoryPage = lazyWithRetry(() => import('./pages/MemoryPage').then(m => ({ default: m.MemoryPage })));
 const IssuesPage = lazyWithRetry(() => import('./pages/IssuesPage').then(m => ({ default: m.IssuesPage })));
 const CanvasPage = lazyWithRetry(() => import('./features/canvas-core/ui/CanvasPage'));
 const AILibraryLayout = lazyWithRetry(() =>
@@ -202,6 +203,7 @@ export const router = createBrowserRouter([
               { path: 'sessions/:sessionId', element: <SuspenseWrap><SessionsPage /></SuspenseWrap> },
               { path: 'usage', element: <SuspenseWrap><UsagePage /></SuspenseWrap> },
               { path: 'workforce', element: <SuspenseWrap><WorkforcePage /></SuspenseWrap> },
+              { path: 'memory', element: <SuspenseWrap><MemoryPage /></SuspenseWrap> },
             ],
           },
           { path: 'player/:displayId', element: <SuspenseWrap><DownloadDetailPage /></SuspenseWrap> },

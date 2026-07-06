@@ -67,7 +67,9 @@
     "agentPausedManual": "Paused by admin",
     "memory": "My Memory",
     "workforce": "Workforce",
-    "sessions": "Sessions"
+    "sessions": "Sessions",
+    "dashboard": "Dashboard",
+    "liveRuns": "{{count}} running"
   },
   "user": {
     "profile": "Profile",
@@ -2092,7 +2094,21 @@
       "msgCount": "{{count}} msgs",
       "pickOne": "Select a session to view its transcript.",
       "noMessages": "No messages in this session.",
-      "deleteConfirm": "Delete this session and its messages?"
+      "deleteConfirm": "Delete this session and its messages?",
+      "openInChat": "Open in Chat"
+    },
+    "insightsSection": "Insights",
+    "openChatWith": "Chat with {{name}}",
+    "noMyAgents": "No custom agents yet",
+    "systemAgents": "System",
+    "systemAgentsAlert": "A system agent is paused",
+    "dashboard": {
+      "loadError": "Failed to load usage",
+      "todayRuns": "Runs today",
+      "todayTokens": "Tokens today",
+      "weekRuns": "Runs · 7d",
+      "weekTokens": "Tokens · 7d",
+      "topModels": "Top models · 7d"
     }
   },
   "aiUsage": {
