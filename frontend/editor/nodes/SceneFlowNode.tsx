@@ -7,14 +7,18 @@
  * editorShellStyles.ts) so it themes with the rest of the v2 editor — it does not
  * pull in features/script's canvas CSS, which belongs to the legacy node editor.
  */
-import { memo } from 'react';
+import { memo, useContext } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { useTranslation } from 'react-i18next';
 import type { SceneNodeData } from './sceneNodeMapper';
+import { ScenePresenceContext } from '../collab/scenePresenceContext';
+import { ScenePresenceBadge } from '../collab/ScenePresenceBadge';
 
 function SceneFlowNodeImpl({ data }: NodeProps) {
   const { t } = useTranslation();
   const { scene, summary, coverUrl } = data as unknown as SceneNodeData;
+  const presenceByScene = useContext(ScenePresenceContext);
+  const focusPresence = presenceByScene[String(scene.id)] ?? [];
 
   const num = (scene.sort_order ?? 0) + 1;
   const heading = [scene.heading_int_ext, scene.location_text, scene.time_of_day]
@@ -39,6 +43,7 @@ function SceneFlowNodeImpl({ data }: NodeProps) {
         <span className="mh-flow-scene-heading">
           {heading || t('editor.nodesUntitledScene')}
         </span>
+        <ScenePresenceBadge users={focusPresence} />
       </div>
       <div className="mh-flow-scene-summary">
         {summary || t('editor.nodesEmptyScene')}

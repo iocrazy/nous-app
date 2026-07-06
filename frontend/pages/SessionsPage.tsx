@@ -16,6 +16,7 @@ import type { AIChatMessage, ChatSession } from '../types';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { MessageBubble } from '../components/chat/AIChatBubble';
 import { useToast } from '../components/Toast';
+import { PageHeader } from '../components/AILibrary/PageHeader';
 import { useGlobalChatStore } from '../stores/globalChatStore';
 
 function formatWhen(iso?: string | null): string {
@@ -163,12 +164,11 @@ export const SessionsPage: React.FC = () => {
     <div className="flex h-full min-h-0 gap-4 pt-6">
       {/* ── Session list ── */}
       <div className="flex w-80 flex-shrink-0 flex-col min-h-0">
-        <div className="mb-3 flex items-center gap-2">
-          <h1 className="text-base font-semibold text-ink-200">
-            {t('aiLibrary.sessions.title', 'Sessions')}
-          </h1>
-          <span className="text-xs text-ink-600">{sessions.length}</span>
-        </div>
+        <PageHeader
+          title={t('aiLibrary.sessions.title', 'Sessions')}
+          count={sessions.length}
+          className="pb-3"
+        />
         <div className="relative mb-2">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-600" />
           <input

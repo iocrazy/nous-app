@@ -2456,6 +2456,13 @@
     "copilotDisabled": "Copilot free-text is unavailable",
     "nodesElementCount_one": "{{count}} element",
     "nodesElementCount_other": "{{count}} elements",
+    "collab": {
+      "editingBadge": "Editing",
+      "viewersCount_one": "{{count}} viewing",
+      "viewersCount_other": "{{count}} viewing",
+      "presenceLabel": "{{num}} others in this script",
+      "presenceMore": "{{num}} more"
+    },
     "outlineLabel": "Story Outline",
     "outlineUnassigned": "Unassigned",
     "outlineEmptyGroup": "No scenes yet",

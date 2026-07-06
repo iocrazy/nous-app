@@ -285,9 +285,13 @@ class Settings(BaseSettings):
     # ============================================
     # LLM Configuration (Script / Storyboard AI)
     # ============================================
-    LLM_API_URL: str = Field(
-        default="http://localhost:8000/v1", description="LLM API base URL"
-    )
+    # Deliberately EMPTY by default (was "http://localhost:8000/v1"): the
+    # implicit localhost fallback meant any un-configured deployment / new
+    # user with no provider silently dialed a dead socket and surfaced as a
+    # timeout instead of a clear "not configured" error — prod's .env never
+    # set this, so the qwen fallback path was a live landmine. Local dev
+    # with vLLM/ollama sets it explicitly in .env.
+    LLM_API_URL: str = Field(default="", description="LLM API base URL")
     LLM_API_KEY: str = Field(default="", description="LLM API key")
     LLM_MODEL: str = Field(default="gpt-4o", description="LLM model name")
     LLM_TIMEOUT_SECONDS: float = Field(

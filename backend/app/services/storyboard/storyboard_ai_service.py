@@ -178,6 +178,12 @@ class StoryboardAIService:
         Raises:
             RuntimeError: If the HTTP request fails or returns an error status.
         """
+        if not settings.LLM_API_URL:
+            raise RuntimeError(
+                "LLM provider not configured: LLM_API_URL is unset — "
+                "configure a provider in Admin → AI Models or set "
+                "LLM_API_URL for a local OpenAI-compatible endpoint."
+            )
         headers = {"Content-Type": "application/json"}
         if settings.LLM_API_KEY:
             headers["Authorization"] = f"Bearer {settings.LLM_API_KEY}"
