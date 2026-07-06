@@ -13,7 +13,7 @@ import { PageHeader } from '../components/AILibrary/PageHeader';
 export const MemoryPage: React.FC = () => {
   const { t } = useTranslation();
   return (
-    <div className="mx-auto max-w-3xl space-y-6 pb-12">
+    <div className="max-w-3xl space-y-6 pt-6 pb-12">
       <PageHeader title={t('sidebar.memory', 'My Memory')} className="pb-0" />
       {/* Phase 4: user-facing AI memory management (Claude-style) */}
       <MemoryPanel />

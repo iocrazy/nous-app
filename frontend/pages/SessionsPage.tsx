@@ -167,7 +167,7 @@ export const SessionsPage: React.FC = () => {
         <PageHeader
           title={t('aiLibrary.sessions.title', 'Sessions')}
           count={sessions.length}
-          className="pt-0 pb-3"
+          className="pb-3"
         />
         <div className="relative mb-2">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-600" />

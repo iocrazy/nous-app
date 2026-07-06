@@ -183,14 +183,14 @@ export const WorkforcePage: React.FC = () => {
   }, [board]);
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
+    <div className="max-w-6xl space-y-6 pt-6 pb-8">
       <PageHeader
         title={t('workforce.title', 'Workforce')}
         subtitle={t(
           'workforce.subtitle',
           'Persistent agents — current state, queue depth, and recent activity.',
         )}
-        className="pt-0 pb-0"
+        className="pb-0"
         actions={
           <div className="text-right">
             <div className="text-[11px] text-ink-500">

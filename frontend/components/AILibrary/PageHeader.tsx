@@ -7,7 +7,8 @@
 //   title      text-lg  font-semibold text-ink-100
 //   subtitle   text-sm  text-ink-500
 //   count      text-xs  text-ink-600 (inline after the title)
-//   container  pt-6 pb-4, actions right-aligned and centered
+//   container  pt-0 pb-4 (the PAGE container owns the top gap: pt-6),
+//              actions right-aligned and centered
 // Sibling rails/columns use their own smaller in-rail headers — this is
 // for the PAGE title only.
 
@@ -30,7 +31,7 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
   actions,
   className = '',
 }) => (
-  <div className={`flex items-start justify-between gap-4 pt-6 pb-4 ${className}`}>
+  <div className={`flex items-start justify-between gap-4 pb-4 ${className}`}>
     <div className="min-w-0">
       <h1 className="flex items-baseline gap-2 text-lg font-semibold text-ink-100">
         <span className="truncate">{title}</span>
