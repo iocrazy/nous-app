@@ -118,7 +118,7 @@ def get_adapter(model: str, settings: Any) -> AIAdapter:
 
     if m == "" or m.startswith("qwen-") or m.startswith("tongyi-"):
         return QwenAdapter(
-            api_url=settings.LLM_API_URL,
+            api_url=_require_llm_url(settings.LLM_API_URL),
             api_key=settings.LLM_API_KEY,
             default_model=model or settings.LLM_MODEL,
         )
@@ -126,6 +126,20 @@ def get_adapter(model: str, settings: Any) -> AIAdapter:
     raise ValueError(
         f"unsupported model: {model!r} — known prefixes: {_KNOWN_PREFIXES}"
     )
+
+
+def _require_llm_url(url: str) -> str:
+    """Fail fast with an actionable error instead of dialing an empty/dead
+    endpoint (the old default was localhost:8000 — a silent landmine on any
+    deployment that never set LLM_API_URL)."""
+    if not url:
+        raise ValueError(
+            "LLM provider not configured: no provider resolved from the "
+            "admin/user config and LLM_API_URL is unset. Configure a "
+            "provider in Admin → AI Models, or set LLM_API_URL to a local "
+            "OpenAI-compatible endpoint."
+        )
+    return url
 
 
 def get_adapter_for_user(
@@ -223,7 +237,7 @@ def get_adapter_for_user(
 
     # provider_key == "qwen" (default / only remaining case)
     return QwenAdapter(
-        api_url=user_base or fallback_settings.LLM_API_URL,
+        api_url=_require_llm_url(user_base or fallback_settings.LLM_API_URL),
         api_key=user_key or fallback_settings.LLM_API_KEY,
         default_model=model or fallback_settings.LLM_MODEL,
     )
