@@ -205,3 +205,26 @@ def test_content_key_from_sha_matches_content_key():
 
     key2 = content_key_from_sha(scope_id=3, sha=sha2, mime="video/mp4")
     assert key == key2 and sha == sha2
+
+
+@pytest.mark.asyncio
+async def test_calls_are_time_capped():
+    """A hung storage-api must not hang callers — 2026-07-06 incident: a
+    deleted data dir made uploads hang until kong's 60s timeout. Every
+    ObjectStore call is capped so the filesystem fallback kicks in fast."""
+    import asyncio
+
+    async def never_returns(*a, **k):
+        await asyncio.sleep(3600)
+
+    store = ObjectStore(CHAT_MEDIA_BUCKET)
+    proxy = AsyncMock()
+    proxy.upload.side_effect = never_returns
+    import app.services.library.media_storage as ms
+
+    with (
+        patch.object(store, "_proxy", new=AsyncMock(return_value=proxy)),
+        patch.object(ms, "_STORAGE_CALL_TIMEOUT_S", 0.05),
+    ):
+        with pytest.raises(asyncio.TimeoutError):
+            await store.put_bytes("k", b"x", "image/png")
