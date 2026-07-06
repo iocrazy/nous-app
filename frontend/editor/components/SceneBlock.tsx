@@ -33,7 +33,15 @@ import { HollywoodLayout } from '../render/HollywoodLayout';
 import { AsianLayout } from '../render/AsianLayout';
 import { MentionNamesContext } from '../render/layoutShared';
 import { MentionCombobox, type MentionComboboxHandle } from './MentionCombobox';
+import { EmptySceneHint } from './EmptyStates';
 import type { EditorFormat } from '../useEditorState';
+import type { SaveState } from '../useSceneSync';
+
+/** A scene's save status lifted to the shell for the aggregate SaveIndicator. */
+export interface SceneSyncStatus {
+  saveState: SaveState;
+  resolveConflict: (choice: 'mine' | 'theirs') => void;
+}
 
 /** An open @-mention / character-cue picker anchored to one element line. */
 interface MentionState {
@@ -76,6 +84,8 @@ export interface SceneBlockProps {
   format?: EditorFormat;
   /** Distinct CAST names for the @-mention / character-cue picker (script-wide). */
   mentionCandidates?: string[];
+  /** Reports this scene's save state up so the shell can aggregate it. */
+  onSyncStateChange?: (sceneId: string, status: SceneSyncStatus) => void;
 }
 
 export function SceneBlock({
@@ -85,6 +95,7 @@ export function SceneBlock({
   typeCommand,
   format = 'hollywood',
   mentionCandidates = [],
+  onSyncStateChange,
 }: SceneBlockProps) {
   const { t } = useTranslation();
   const sync = useSceneSync(scene);
@@ -342,6 +353,14 @@ export function SceneBlock({
     sync.dispatchOps([op], applyLocal(elementsRef.current, [op]));
   }, [typeCommand, scene.id, sync]);
 
+  // Lift this scene's save state to the shell whenever it changes.
+  useEffect(() => {
+    onSyncStateChange?.(scene.id, {
+      saveState: sync.saveState,
+      resolveConflict: sync.resolveConflict,
+    });
+  }, [scene.id, sync.saveState, sync.resolveConflict, onSyncStateChange]);
+
   const onCompositionStart = useCallback(() => {
     composingRef.current = true;
   }, []);
@@ -438,9 +457,7 @@ export function SceneBlock({
         />
       </MentionNamesContext.Provider>
 
-      {sync.elements.length === 0 && (
-        <div className="mh-el-line mh-placeholder-line">{t('editor.emptyScene')}</div>
-      )}
+      {sync.elements.length === 0 && <EmptySceneHint />}
 
       {mention && (
         <MentionCombobox

@@ -53,10 +53,11 @@ describe('EditorShell', () => {
     expect(within(sceneRail).getByText('Rooftop Access')).toBeInTheDocument();
   });
 
-  it('exposes the save-indicator slot', async () => {
+  it('exposes the save indicator (saved when all scenes are clean)', async () => {
     svc.listScenes.mockResolvedValue(twoScenes);
     render(<EditorShell scriptId="1" />);
-    await waitFor(() => expect(screen.getByTestId('save-indicator-slot')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('save-indicator')).toBeInTheDocument());
+    expect(screen.getByTestId('save-indicator')).toHaveAttribute('data-state', 'saved');
   });
 
   it('toggles data-theme and persists to localStorage', async () => {
