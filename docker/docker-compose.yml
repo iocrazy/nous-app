@@ -86,6 +86,9 @@ services:
       # value falls back to "DBOS disabled" startup warning + HTTP 500 on
       # /media/fetch. See docker/.env.example for the URL format.
       - DBOS_DATABASE_URL=${DBOS_DATABASE_URL:-}
+      # nginx direct-serve signer (P3) — same secure_link secret the nginx
+      # container gets; deployment-infra env like DBOS_DATABASE_URL.
+      - NGINX_SECURE_LINK_SECRET=${NGINX_SECURE_LINK_SECRET:-}
     depends_on:
       redis:
         condition: service_healthy
@@ -192,6 +195,9 @@ services:
       # zero workflow execution cluster-wide. Caught in prod 2026-05-10
       # — parse + download stuck because no worker was actually running.
       - DBOS_DATABASE_URL=${DBOS_DATABASE_URL:-}
+      # nginx direct-serve signer (P3) — same secure_link secret the nginx
+      # container gets; deployment-infra env like DBOS_DATABASE_URL.
+      - NGINX_SECURE_LINK_SECRET=${NGINX_SECURE_LINK_SECRET:-}
     depends_on:
       redis:
         condition: service_healthy
