@@ -199,6 +199,25 @@ async def verify_shot_access(
     await verify_scene_access(str(shot.get("scene_id")), auth)
 
 
+async def verify_commit_access(
+    commit_id: str,
+    auth: AuthContext = Depends(get_auth),
+) -> None:
+    """Guard for `/commits/{commit_id}` targets — resolves commit → script_id,
+    then applies the same team check (404 if the commit is missing).
+
+    A one-hop wrapper over the script team check for the commit-scoped route
+    (``DELETE /commits/{commit_id}``) that has no ``script_id`` in its path. The
+    ``str()`` coercion in ``_assert_script_team_access`` handles the #1006 trap
+    (the row's ``script_id`` is a native int, the guard compares as str)."""
+    from app.repositories.script_commit_repository import get_script_commit_repository
+
+    commit = await get_script_commit_repository().get(commit_id)
+    if not commit:
+        raise HTTPException(status_code=404, detail="Commit not found")
+    await _assert_script_team_access(str(commit.get("script_id")), auth.user_id)
+
+
 async def verify_episode_write_access(
     episode_id: str,
     auth: AuthContext = Depends(get_auth),
