@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Cpu,
   Library,
+  MessageSquare,
   Plus,
 } from 'lucide-react';
 import type { AILibraryAgent } from '../../types';
@@ -84,6 +85,7 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
     return match ? match[1] : null;
   })();
   const skillsActive = /\/ai-library\/skills(\/|$)/.test(location.pathname);
+  const sessionsActive = /\/ai-library\/sessions(\/|$)/.test(location.pathname);
   const usageActive = /\/ai-library\/usage(\/|$)/.test(location.pathname);
   const workforceActive = /\/ai-library\/workforce(\/|$)/.test(location.pathname);
   const memoryActive = /\/ai-library\/memory(\/|$)/.test(location.pathname);
@@ -281,6 +283,22 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
                 );
               })()
             )}
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div className="mx-3 my-2 border-t border-ink-800/80" />
+
+        {/* Chat */}
+        <div className="px-2">
+          <SectionLabel>{t('aiLibrary.chatSection', 'Chat')}</SectionLabel>
+          <div className="mt-1 flex flex-col gap-0.5">
+            <NavItem
+              icon={MessageSquare}
+              label={t('sidebar.sessions', 'Sessions')}
+              active={sessionsActive}
+              onClick={() => navigate(`${urlPrefix}/ai-library/sessions`)}
+            />
           </div>
         </div>
 
