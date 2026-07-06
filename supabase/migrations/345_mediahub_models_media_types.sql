@@ -1,4 +1,4 @@
--- Migration 344: widen mediahub_models.type CHECK to allow 'image' + 'video'
+-- Migration 345: allow image/video model types in the catalog (Ark Seedream t2i etc.)
 --
 -- The image provider_registry ships EMPTY, so image generation (shot Generate,
 -- legacy canvas) resolves its provider from the mediahub_models catalog
