@@ -768,6 +768,8 @@ export const aiLibraryService = {
             data_url?: string;
             mime?: string;
             alt_text?: string;
+            /** Temp resource id — persisted with the message for history display. */
+            resource_id?: string;
           }
         | {
             kind: 'resource_ref';

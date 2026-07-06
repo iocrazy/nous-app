@@ -90,6 +90,10 @@ class MessageOut(BaseModel):
     prompt_tokens: Optional[int] = None
     completion_tokens: Optional[int] = None
     metadata_json: Optional[dict[str, Any]] = None
+    # Attachment display metadata persisted with user turns (kind /
+    # resource_id / mime / alt_text) — lets the UI re-render image chips
+    # in the bubble after a history reload. None for assistant rows.
+    attachments: Optional[list[dict[str, Any]]] = None
     created_at: Optional[datetime] = None
 
     @field_validator("id", mode="before")

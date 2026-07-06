@@ -112,11 +112,15 @@ export default function ResourcePicker({ open, teamId, onClose, onSelect }: Prop
       scopeId: teamId,
       flatten: true,
       search: debouncedSearch.trim() || undefined,
+      // Server-side cap: search runs ILIKE in the database, so the picker gets
+      // the top PAGE_SIZE MATCHES. The old shape fetched the whole library
+      // (silently truncated at PostgREST's 1000-row ceiling) and sliced on the
+      // client — at scale, matches beyond the first 1000 rows never appeared.
+      limit: PAGE_SIZE,
     })
       .then((results) => {
         if (cancelled) return;
-        // Cap to PAGE_SIZE so the picker stays snappy even on large libraries.
-        setItems(results.slice(0, PAGE_SIZE));
+        setItems(results);
       })
       .catch((err: unknown) => {
         if (cancelled) return;

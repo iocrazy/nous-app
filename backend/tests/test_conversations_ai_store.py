@@ -533,6 +533,62 @@ async def test_append_user_message_maps_role_and_content() -> None:
 
 
 @pytest.mark.asyncio
+async def test_append_user_message_persists_attachment_metadata() -> None:
+    """Attachment display metadata rides in body['attachments'] (2026-07-06
+    "图片要显示" fix) and round-trips through _to_legacy_message_shape so
+    history reloads keep the image chips. Assistant/pre-feature rows read
+    back as None."""
+    captured: dict = {}
+
+    async def fake_send_message(**kwargs: Any) -> dict:
+        captured.update(kwargs)
+        return {
+            "id": _MSG_ID,
+            "conversation_id": _CONV_ID,
+            "seq": 1,
+            "created_at": "2026-07-06T00:00:00",
+        }
+
+    atts = [
+        {
+            "kind": "image",
+            "resource_id": "310812366953241",
+            "mime": "image/png",
+            "alt_text": "screenshot.png",
+        }
+    ]
+    store = _store()
+    fake_repo = type("R", (), {"send_message": staticmethod(fake_send_message)})()
+    with patch(
+        "app.repositories.conversation_repository.get_conversation_repository",
+        return_value=fake_repo,
+    ):
+        result = await store.append_user_message(
+            session_id=_CONV_ID,
+            user_id=_USER_ID,
+            content="what is this?",
+            attachments=atts,
+        )
+
+    assert captured["body"] == {"text": "what is this?", "attachments": atts}
+    assert result["attachments"] == atts
+
+    # Read side: body['attachments'] surfaces on the legacy shape...
+    row = {
+        "id": _MSG_ID,
+        "conversation_id": _CONV_ID,
+        "sender_type": "user",
+        "body": {"text": "what is this?", "attachments": atts},
+        "created_at": "2026-07-06T00:00:00",
+    }
+    shaped = store._to_legacy_message_shape(row)
+    assert shaped["attachments"] == atts
+    # ...and rows without them (assistant / pre-feature) read back as None.
+    bare = store._to_legacy_message_shape({**row, "body": {"text": "hi"}})
+    assert bare["attachments"] is None
+
+
+@pytest.mark.asyncio
 async def test_append_assistant_message_metadata_round_trip_via_return_value() -> None:
     """append_assistant_message's own return must carry metadata_json EXACTLY
     as passed by the caller (run_id / tool_calls / awaiting_approval intact),

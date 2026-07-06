@@ -1427,6 +1427,16 @@ export interface UsageDailySummary {
 
 export type ChatMessageRole = 'user' | 'assistant' | 'system';
 
+export interface AIChatMessageAttachment {
+  kind: string; // image | video | pdf | resource_ref
+  resource_id?: string | null;
+  mime?: string | null;
+  alt_text?: string | null;
+  name?: string | null;
+  /** Client-side only: local preview for the optimistic bubble (not persisted). */
+  preview_data_url?: string;
+}
+
 export interface AIChatMessage {
   id: string; // UUID
   session_id: string;
@@ -1436,6 +1446,7 @@ export interface AIChatMessage {
   prompt_tokens?: number | null;
   completion_tokens?: number | null;
   metadata_json?: Record<string, unknown> | null;
+  attachments?: AIChatMessageAttachment[] | null;
   created_at?: string | null;
 }
 

@@ -1,4 +1,5 @@
 import { supabase } from '../supabaseClient';
+import { fetchAllRows } from '../utils/pgAllRows';
 import { Folder, Resource, ResourceItem, ResourceVersion, SmartCollection } from '../types';
 import {
   applyKeysetCursor,
@@ -257,16 +258,22 @@ export async function fetchFolderContents(
   folderId: string,
   includeTrashed = false,
 ): Promise<ResourceItem[]> {
-  let query = supabase
-    .from('resource_items')
-    .select('*, resource:resources!inner(*)')
-    .eq('folder_id', folderId);
-  if (!includeTrashed) {
-    query = query.eq('resource.is_trashed', false);
-  }
-  const { data, error } = await query.order('created_at', { ascending: false });
-  if (error) throw error;
-  return data || [];
+  // Range-drained: a folder can exceed PostgREST's 1000-row cap, which a bare
+  // select() silently truncates. Stable (created_at, id) order keeps pages
+  // from shifting mid-drain; 10k safety ceiling per fetchAllRows.
+  return fetchAllRows<ResourceItem>((from, to) => {
+    let query = supabase
+      .from('resource_items')
+      .select('*, resource:resources!inner(*)')
+      .eq('folder_id', folderId);
+    if (!includeTrashed) {
+      query = query.eq('resource.is_trashed', false);
+    }
+    return query
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to);
+  });
 }
 
 export async function fetchTrashedFolders(
@@ -437,6 +444,10 @@ export interface FetchResourcesParams {
   social_combine?: 'and' | 'or';
   /** AND-on-top floor: parsed_media.comment_count > 0. */
   has_comments?: boolean;
+  /** Explicit row cap. Without it PostgREST still hard-caps at 1000 —
+   *  callers that only need a page should say so instead of relying on the
+   *  silent ceiling. Full-set callers belong on fetchResourcesPaginated. */
+  limit?: number;
 }
 
 /**
@@ -585,7 +596,9 @@ export async function fetchResources(
   }
 
   const query = buildResourceItemsQuery(params, tagResourceIds);
-  const { data, error } = await query.order('created_at', { ascending: false });
+  let ordered = query.order('created_at', { ascending: false });
+  if (params.limit != null) ordered = ordered.limit(params.limit);
+  const { data, error } = await ordered;
   if (error) throw error;
   // The query builder's return type narrows as we chain filters; cast back.
   return (data as unknown as ResourceItem[]) ?? [];
@@ -1173,52 +1186,14 @@ export async function permanentDeleteFolder(folderId: string): Promise<void> {
 
 // ─── Trashed resources ───────────────────────────────────
 
-export async function fetchTrashedResources(
-  isPersonal: boolean,
-  scopeId: string
-): Promise<ResourceItem[]> {
-  // Query resources where is_trashed=true.
-  //
-  // On trash the resource_items row is deleted and the origin is snapshotted
-  // onto the resource as last_scope_type / last_scope_id (the restore-location
-  // snapshot — it survives PR-E, it is NOT one of the dropped scope_type
-  // columns). So the recycle bin must filter by that snapshot.
-  //
-  // Post PR-C/PR-E, `scopeId` is the team snowflake — for personal mode it is
-  // the *personal-team* id, NOT the user UUID. trash_resource() writes
-  // last_scope_id = personal-team snowflake + last_scope_type = 'personal',
-  // so personal must filter by last_scope (mirroring team). The old
-  // `creator_id == scopeId` check compared a UUID column to a bigint id and
-  // always returned zero rows → empty recycle bin.
-  const query = supabase
-    .from('resources')
-    .select('*')
-    .eq('is_trashed', true)
-    .eq('last_scope_type', isPersonal ? 'personal' : 'team')
-    .eq('last_scope_id', scopeId);
-
-  const { data, error } = await query.order('trashed_at', { ascending: false });
-
-  if (error) throw error;
-
-  // Wrap each resource in a ResourceItem-like shape for compatibility
-  return (data || []).map((resource): ResourceItem => ({
-    id: resource.id,
-    resource_id: resource.id,
-    scope_id: scopeId,
-    folder_id: resource.last_folder_id ?? null,
-    library_id: resource.last_library_id ?? null,
-    added_by: resource.created_by ?? null,
-    created_at: resource.created_at,
-    resource,
-  }));
-}
 
 /**
- * Keyset-paginated recycle bin (same filter as `fetchTrashedResources`, but
- * ordered `(trashed_at DESC, id DESC)` so it scrolls past PostgREST's 1000-row
- * cap). No search param — the recycle view has no filter bar. First-page count
- * on `cursor === null`.
+ * Keyset-paginated recycle bin: resources with `is_trashed=true` filtered by
+ * the `last_scope_type/last_scope_id` restore-location snapshot, ordered
+ * `(trashed_at DESC, id DESC)` so it scrolls past PostgREST's 1000-row cap.
+ * No search param — the recycle view has no filter bar. First-page count on
+ * `cursor === null`. (The old unpaginated `fetchTrashedResources` is gone —
+ * it silently capped at 1000.)
  */
 export async function fetchTrashedResourcesPaginated(
   isPersonal: boolean,
@@ -1463,14 +1438,18 @@ export async function removeResourceTag(resourceId: string, tagId: string) {
 export async function fetchDownloadedResources(
   scopeId: string,
 ): Promise<ResourceItem[]> {
-  const { data, error } = await supabase
-    .from('resource_items')
-    .select('*, resource:resources!inner(*)')
-    .eq('scope_id', scopeId)
-    .eq('resource.source_type', 'web')
-    .order('created_at', { ascending: false });
-  if (error) throw error;
-  return data || [];
+  // Range-drained past the 1000-row cap (downloads sidebar view can exceed
+  // it long before the primary keyset-paginated views do).
+  return fetchAllRows<ResourceItem>((from, to) =>
+    supabase
+      .from('resource_items')
+      .select('*, resource:resources!inner(*)')
+      .eq('scope_id', scopeId)
+      .eq('resource.source_type', 'web')
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to),
+  );
 }
 
 export async function fetchDownloadedResourceCount(
@@ -1649,44 +1628,6 @@ export async function fetchSmartFolderResultsPaginated(
   return { ...page, totalCount: result.total_count ?? -1 };
 }
 
-/**
- * Query resources matching a smart folder's rules (client-side fallback).
- */
-export async function fetchSmartFolderResources(
-  scopeId: string,
-  rules: { match: string; conditions: Array<{ field: string; operator: string; value: string }> }
-): Promise<ResourceItem[]> {
-  let query = supabase
-    .from('resource_items')
-    .select('*, resource:resources!inner(*)')
-    .eq('scope_id', scopeId)
-    .eq('resources.is_trashed', false);
-
-  for (const cond of (rules.conditions || [])) {
-    const col = `resource.${cond.field}`;
-    switch (cond.operator) {
-      case 'equals':
-        query = query.eq(col, cond.value);
-        break;
-      case 'contains':
-        query = query.ilike(col, `%${cond.value}%`);
-        break;
-      case 'starts_with':
-        query = query.ilike(col, `${cond.value}%`);
-        break;
-      case 'greater_than':
-        query = query.gt(col, cond.value);
-        break;
-      case 'less_than':
-        query = query.lt(col, cond.value);
-        break;
-    }
-  }
-
-  const { data, error } = await query.order('created_at', { ascending: false });
-  if (error) throw error;
-  return data || [];
-}
 
 // ─── Move / Copy / Batch ─────────────────────────────
 

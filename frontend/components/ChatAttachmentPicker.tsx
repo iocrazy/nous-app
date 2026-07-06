@@ -24,6 +24,9 @@ export interface StagedAttachment {
   filename: string;
   size_bytes: number;
   mime: string | null;
+  /** Temp resource id from the upload — sent with the message so history
+      reloads can render the image via the resource cover endpoint. */
+  resource_id?: string;
   /** Local data URL for image previews (we keep it client-side; not sent). */
   preview_data_url?: string;
 }

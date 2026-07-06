@@ -894,6 +894,9 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
           isPersonal,
           scopeId,
           folderId: String(tempFolder.id),
+          // temp folder = chat-upload staging; explicit cap instead of the
+          // silent PostgREST 1000 ceiling.
+          limit: 1000,
         });
         if (!cancelled) setTempResources(items);
       } catch (err) {
