@@ -1312,6 +1312,17 @@ class ResourcesRepository(AsyncpgRepository):
     # ── Folders ─────────────────────────────────────────────────────
 
     async def create_folder(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        # Same choke-point coercion as create_resource_item (#1054): callers
+        # hand snowflake ids around as strings, but asyncpg's strict int8
+        # codec rejects str for BIGINT columns.
+        data = {
+            **data,
+            **{
+                k: self._bigint(data[k])
+                for k in ("scope_id", "parent_id")
+                if data.get(k) is not None
+            },
+        }
         try:
             async with write_scope() as session:
                 result = await session.execute(

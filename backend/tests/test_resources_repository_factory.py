@@ -18,6 +18,8 @@ unconditionally. These tests pin:
 
 from __future__ import annotations
 
+import pytest
+
 
 def test_factory_returns_orm_repository():
     """Flag retired → factory unconditionally returns the ORM-backed
@@ -87,3 +89,50 @@ def test_bigint_helper_coerces_str_input():
     assert AsyncpgRepository._bigint_list(["1", 2, "3"]) == [1, 2, 3]
     assert AsyncpgRepository._bigint_list(None) == []
     assert AsyncpgRepository._bigint_list([]) == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_create_folder_coerces_str_snowflake_ids():
+    """Regression (2026-07-06): chat_upload's _ensure_temp_folder passes
+    scope_id as a str snowflake; asyncpg's strict int8 codec rejected it
+    (DataError: 'str' object cannot be interpreted as an integer) and every
+    first chat-attachment upload into a fresh scope 500'd. create_folder
+    must coerce scope_id / parent_id at the choke point, like
+    create_resource_item does (#1054)."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.repositories.resources_repository import ResourcesRepository
+
+    captured: dict = {}
+
+    class _FakeSession:
+        async def execute(self, stmt):
+            captured.update(stmt.compile().params)
+            result = MagicMock()
+            result.mappings.return_value.first.return_value = None
+            return result
+
+    class _FakeScope:
+        async def __aenter__(self):
+            return _FakeSession()
+
+        async def __aexit__(self, *a):
+            return False
+
+    with patch(
+        "app.repositories.resources_repository.write_scope",
+        return_value=_FakeScope(),
+    ):
+        await ResourcesRepository().create_folder(
+            {
+                "name": "temp",
+                "scope_id": "324633973020186",
+                "parent_id": "12345",
+                "created_by": "u-1",
+            }
+        )
+
+    assert captured["scope_id"] == 324633973020186
+    assert captured["parent_id"] == 12345
+    assert captured["name"] == "temp"
