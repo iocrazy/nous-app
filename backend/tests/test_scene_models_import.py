@@ -33,3 +33,18 @@ def test_shot_model_importable_and_shaped():
         "status",
         "sort_order",
     } <= cols
+
+
+def test_commit_model_importable_and_shaped():
+    from app.models import ScriptCommits
+
+    assert ScriptCommits.__tablename__ == "script_commits"
+    cols = {c.key for c in ScriptCommits.__mapper__.column_attrs}
+    assert {
+        "script_id",
+        "message",
+        "watermarks",
+        "scene_ids",
+        "created_by",
+        "created_at",
+    } <= cols
