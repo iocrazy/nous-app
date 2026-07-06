@@ -303,7 +303,12 @@ async def run_conversation_agent_turn(
 
     # Gate 1 — agent must exist.
     agent_repo = get_agent_repository()
-    agent = await agent_repo.get_by_slug(agent_slug)
+    # Agent-overrides (mig 341): group chat resolves the TEAM layer only —
+    # a member's personal customization must not leak into a shared room.
+    agent = await agent_repo.get_by_slug(
+        agent_slug,
+        override_team_id=int(scope_id) if scope_id is not None else None,
+    )
     if agent is None:
         logger.info(
             f"[CHAT-SEC-AGENT-08] gate1_deny: "
@@ -365,6 +370,8 @@ async def run_conversation_agent_turn(
                 request_instructions=request_instructions,
                 graph_facts=stack.graph_facts,
                 user_context=stack.user_context,
+                # Team layer only — see the gate-1 note above.
+                override_team_id=int(scope_id) if scope_id is not None else None,
             )
         )
     except Exception as exc:

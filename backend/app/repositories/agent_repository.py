@@ -46,16 +46,16 @@ so they are idempotent.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from loguru import logger
-from sqlalchemy import delete, insert, or_, select, update
+from sqlalchemy import delete, false, insert, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.session import read_scope, write_scope
-from app.models import AgentSkills, AiAgents
+from app.models import AgentOverrides, AgentSkills, AiAgents
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
 
 # ai_agents DB-column-name → mapped-attribute-name. Built once from the mapper.
@@ -84,6 +84,21 @@ _AGENT_TS_ISO_COLS = ("created_at", "updated_at")
 # model). Pinned so the ORM select returns EXACTLY the columns the REST impl
 # did. Only ``id`` is type-sensitive (uuid → str); the rest are text.
 _PERSISTENT_COLS = ("id", "slug", "name", "description", "model")
+
+# Fields a user/team override may replace on a SYSTEM PRESET agent
+# (migration 341). Whole-field semantics: a non-NULL override column replaces
+# the system value entirely; NULL inherits. Catalog identity (name /
+# description / icon / slug) and governance (budgets, chat_permissions) are
+# deliberately NOT overridable.
+AGENT_OVERRIDE_FIELDS = (
+    "identity_md",
+    "soul_md",
+    "agent_md",
+    "model",
+    "temperature",
+    "max_tokens",
+    "fallback_models",
+)
 
 
 def _agent_to_dict(obj: Any) -> Dict[str, Any]:
@@ -129,31 +144,232 @@ class AgentRepository:
     # Reads
     # ------------------------------------------------------------------
 
-    async def get_by_slug(self, slug: str) -> Optional[Dict[str, Any]]:
-        """Fetch a single agent by slug; returns None if not found."""
+    async def get_by_slug(
+        self,
+        slug: str,
+        *,
+        override_user_id: Optional[UUID] = None,
+        override_team_id: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch a single agent by slug; returns None if not found.
+
+        When ``override_user_id`` / ``override_team_id`` are provided and the
+        agent is a SYSTEM PRESET, the caller's customization layer is merged
+        in (user override ?? team override ?? system row — whole-field, see
+        migration 341). Callers that omit them (background pipelines, admin
+        paths, seed loader) always get the pristine system row."""
         try:
             async with read_scope() as session:
                 result = await session.execute(
                     select(AiAgents).where(AiAgents.slug == slug).limit(1)
                 )
                 row = result.scalars().first()
-                return _agent_to_dict(row) if row else None
+                agent = _agent_to_dict(row) if row else None
+            if agent is not None:
+                agent = await self._apply_overrides(
+                    agent, user_id=override_user_id, team_id=override_team_id
+                )
+            return agent
         except Exception as e:
             logger.error(f"Failed to get agent by slug '{slug}': {e}")
             return None
 
-    async def get_by_id(self, agent_id: UUID) -> Optional[Dict[str, Any]]:
-        """Fetch an agent by UUID; returns None if not found."""
+    async def get_by_id(
+        self,
+        agent_id: UUID,
+        *,
+        override_user_id: Optional[UUID] = None,
+        override_team_id: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch an agent by UUID; returns None if not found. Override merge
+        semantics identical to :meth:`get_by_slug`."""
         try:
             async with read_scope() as session:
                 result = await session.execute(
                     select(AiAgents).where(AiAgents.id == agent_id).limit(1)
                 )
                 row = result.scalars().first()
-                return _agent_to_dict(row) if row else None
+                agent = _agent_to_dict(row) if row else None
+            if agent is not None:
+                agent = await self._apply_overrides(
+                    agent, user_id=override_user_id, team_id=override_team_id
+                )
+            return agent
         except Exception as e:
             logger.error(f"Failed to get agent by id {agent_id}: {e}")
             return None
+
+    # ------------------------------------------------------------------
+    # Overrides — per-user / per-team customization of system presets
+    # (migration 341). Effective agent = user ?? team ?? system.
+    # ------------------------------------------------------------------
+
+    async def _apply_overrides(
+        self,
+        agent: Dict[str, Any],
+        *,
+        user_id: Optional[UUID],
+        team_id: Optional[int],
+    ) -> Dict[str, Any]:
+        """Merge the caller's override rows into a system-preset agent dict.
+
+        Annotates ``override_scope`` ('user' | 'team' | None) and
+        ``override_fields`` (overridden column names) so the editor can show
+        a "customized" badge + reset affordance. Never raises — override
+        lookup failures degrade to the base row."""
+        if not agent.get("is_system_preset") or (user_id is None and team_id is None):
+            return agent
+        try:
+            agent_uuid = UUID(str(agent["id"]))
+            merged = dict(agent)
+            merged["override_scope"] = None
+            merged["override_fields"] = []
+            # Team layer first, then user layer on top (user wins per-field).
+            layers: List[tuple[str, Optional[Dict[str, Any]]]] = []
+            if team_id is not None:
+                layers.append(
+                    ("team", await self.get_override(agent_uuid, team_id=team_id))
+                )
+            if user_id is not None:
+                layers.append(
+                    ("user", await self.get_override(agent_uuid, user_id=user_id))
+                )
+            for scope, ov in layers:
+                if not ov:
+                    continue
+                for field_name in AGENT_OVERRIDE_FIELDS:
+                    if ov.get(field_name) is not None:
+                        merged[field_name] = ov[field_name]
+                        if field_name not in merged["override_fields"]:
+                            merged["override_fields"].append(field_name)
+                merged["override_scope"] = scope
+            return merged
+        except Exception as e:  # noqa: BLE001 — never break agent resolution
+            logger.warning(
+                f"[agent-overrides] merge failed for {agent.get('slug')}: {e}"
+            )
+            return agent
+
+    async def get_override(
+        self,
+        agent_id: UUID,
+        *,
+        user_id: Optional[UUID] = None,
+        team_id: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch one override row for exactly one scope; None if absent."""
+        try:
+            stmt = select(AgentOverrides).where(AgentOverrides.agent_id == agent_id)
+            if user_id is not None:
+                stmt = stmt.where(AgentOverrides.user_id == user_id)
+            elif team_id is not None:
+                stmt = stmt.where(AgentOverrides.team_id == team_id)
+            else:
+                return None
+            async with read_scope() as session:
+                result = await session.execute(stmt.limit(1))
+                row = result.scalars().first()
+                if not row:
+                    return None
+                out: Dict[str, Any] = {
+                    "id": row.id,
+                    "agent_id": str(row.agent_id),
+                    "user_id": str(row.user_id) if row.user_id else None,
+                    "team_id": row.team_id,
+                }
+                for f in AGENT_OVERRIDE_FIELDS:
+                    out[f] = getattr(row, f)
+                return out
+        except Exception as e:
+            logger.error(f"Failed to get override for agent {agent_id}: {e}")
+            return None
+
+    async def upsert_override(
+        self,
+        agent_id: UUID,
+        fields: Dict[str, Any],
+        *,
+        user_id: Optional[UUID] = None,
+        team_id: Optional[int] = None,
+    ) -> bool:
+        """Create or update the override row for one scope. Only keys in
+        ``AGENT_OVERRIDE_FIELDS`` are written; other keys are ignored."""
+        payload = {k: v for k, v in fields.items() if k in AGENT_OVERRIDE_FIELDS}
+        if not payload or (user_id is None and team_id is None):
+            return False
+        try:
+            existing = await self.get_override(
+                agent_id, user_id=user_id, team_id=team_id
+            )
+            async with write_scope() as session:
+                if existing:
+                    await session.execute(
+                        update(AgentOverrides)
+                        .where(AgentOverrides.id == existing["id"])
+                        .values(**payload, updated_at=datetime.now(timezone.utc))
+                    )
+                else:
+                    session.add(
+                        AgentOverrides(
+                            agent_id=agent_id,
+                            user_id=user_id,
+                            team_id=team_id,
+                            **payload,
+                        )
+                    )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to upsert override for agent {agent_id}: {e}")
+            return False
+
+    async def delete_override(
+        self,
+        agent_id: UUID,
+        *,
+        user_id: Optional[UUID] = None,
+        team_id: Optional[int] = None,
+    ) -> bool:
+        """Reset-to-defaults: drop the override row for one scope. Returns
+        True iff a row was deleted."""
+        if user_id is None and team_id is None:
+            return False
+        try:
+            stmt = delete(AgentOverrides).where(AgentOverrides.agent_id == agent_id)
+            if user_id is not None:
+                stmt = stmt.where(AgentOverrides.user_id == user_id)
+            else:
+                stmt = stmt.where(AgentOverrides.team_id == team_id)
+            async with write_scope() as session:
+                result = await session.execute(stmt)
+                return (result.rowcount or 0) > 0
+        except Exception as e:
+            logger.error(f"Failed to delete override for agent {agent_id}: {e}")
+            return False
+
+    async def list_override_scopes(
+        self, *, user_id: UUID, team_ids: List[int]
+    ) -> Dict[str, List[str]]:
+        """agent_id(str) → scopes (['user'|'team', ...]) — sidebar badges."""
+        try:
+            stmt = select(
+                AgentOverrides.agent_id,
+                AgentOverrides.user_id,
+                AgentOverrides.team_id,
+            ).where(
+                or_(
+                    AgentOverrides.user_id == user_id,
+                    AgentOverrides.team_id.in_(team_ids) if team_ids else false(),
+                )
+            )
+            out: Dict[str, List[str]] = {}
+            async with read_scope() as session:
+                result = await session.execute(stmt)
+                for aid, uid, _tid in result.all():
+                    out.setdefault(str(aid), []).append("user" if uid else "team")
+            return out
+        except Exception as e:
+            logger.error(f"Failed to list override scopes: {e}")
+            return {}
 
     async def list_persistent(self) -> List[Dict[str, Any]]:
         """List agents marked as persistent workers (M3 Delegate targets).

@@ -35,7 +35,11 @@ from app.core.admin_deps import AdminAuthDep
 from app.core.deps import AuthDep
 from app.core.scope_dep import ScopedRequestDep
 from app.db.supabase_client import get_async_supabase_admin
-from app.repositories.agent_repository import AgentRepository, get_agent_repository
+from app.repositories.agent_repository import (
+    AGENT_OVERRIDE_FIELDS,
+    AgentRepository,
+    get_agent_repository,
+)
 from app.repositories.agent_runs_repository import (
     get_agent_runs_repository,
 )
@@ -316,6 +320,12 @@ async def list_agents(request: Request, auth: AuthDep) -> List[Dict[str, Any]]:
         project_ids=project_ids,
     )
 
+    # Agent-overrides (mig 341): mark presets the caller (or their teams)
+    # customized so the sidebar can badge them.
+    override_scopes = await agent_repo.list_override_scopes(
+        user_id=user_uuid, team_ids=team_ids
+    )
+
     enriched_with_skills: List[Dict[str, Any]] = []
     for row in rows:
         try:
@@ -325,7 +335,13 @@ async def list_agents(request: Request, auth: AuthDep) -> List[Dict[str, Any]]:
             continue
         skill_ids = await agent_repo.get_skill_ids(agent_uuid)
         enriched_with_skills.append(
-            _with_chat_permissions({**row, "skill_ids": skill_ids})
+            _with_chat_permissions(
+                {
+                    **row,
+                    "skill_ids": skill_ids,
+                    "override_scopes": override_scopes.get(str(row["id"]), []),
+                }
+            )
         )
     return await _enrich_agents_with_scope_names(enriched_with_skills)
 
@@ -341,7 +357,12 @@ async def get_agent(slug: str, auth: AuthDep) -> Dict[str, Any]:
     Response includes ``team_name`` / ``project_name`` for scope display.
     """
     agent_repo, _ = _repos()
-    agent = await agent_repo.get_by_slug(slug)
+    # Merged view: the editor shows the caller's EFFECTIVE agent (their
+    # personal override applied), with override_scope/override_fields set so
+    # the UI can show the customized badge + reset affordance.
+    agent = await agent_repo.get_by_slug(
+        slug, override_user_id=_coerce_user_uuid(auth.user_id)
+    )
     if not agent:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="agent not found"
@@ -492,19 +513,30 @@ async def update_agent(
     user_uuid = _coerce_user_uuid(auth.user_id)
     # Content fields (everything except skill bindings and chat permissions).
     updates = payload.model_dump(
-        exclude_none=True, exclude={"skill_ids", "chat_permissions"}
+        exclude_none=True,
+        exclude={"skill_ids", "chat_permissions", "override_scope", "override_team_id"},
     )
 
-    # System-preset carve-out (CHAT-PERM-15): presets stay read-only for content
-    # and skill edits, but chat permissions ARE editable (governance, not
-    # content). So reject only when a content/skill change is attempted.
+    # System presets (mig 341): content edits land in the caller's OVERRIDE
+    # layer instead of the (formerly 403'd) base row. Only the whitelisted
+    # AGENT_OVERRIDE_FIELDS are customizable; catalog identity (name /
+    # description / icon), budgets and skill bindings stay admin-owned.
     is_preset = bool(agent.get("is_system_preset"))
-    content_change = bool(updates) or payload.skill_ids is not None
-    if is_preset and content_change:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="system preset agents are read-only except chat permissions",
-        )
+    override_updates: Dict[str, Any] = {}
+    if is_preset:
+        if payload.skill_ids is not None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="skill bindings of system presets are shared — not customizable",
+            )
+        non_overridable = sorted(k for k in updates if k not in AGENT_OVERRIDE_FIELDS)
+        if non_overridable:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"system preset fields not customizable: {non_overridable}",
+            )
+        override_updates = updates
+        updates = {}
 
     # Role gate for chat-permission edits (CHAT-PERM-19 / review H1). The legacy
     # endpoint had NO role check — any logged-in user could PATCH any agent. We
@@ -538,6 +570,44 @@ async def update_agent(
         updates["capability_profile"] = {**existing_profile, "chat": existing_chat}
         chat_audit = {"before": before_chat, "after": existing_chat}
 
+    override_team_ctx: Optional[int] = None
+    if override_updates:
+        scope = payload.override_scope or "user"
+        if scope == "team":
+            if payload.override_team_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="override_scope='team' requires override_team_id",
+                )
+            allowed = await _is_team_owner(user_uuid, payload.override_team_id)
+            if not allowed:
+                try:
+                    allowed = await _user_is_admin(user_uuid)
+                except Exception:  # noqa: BLE001 — fail closed
+                    allowed = False
+            if not allowed:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="team overrides require team owner or platform admin",
+                )
+            override_team_ctx = payload.override_team_id
+            ok = await agent_repo.upsert_override(
+                agent_uuid, override_updates, team_id=payload.override_team_id
+            )
+        else:
+            ok = await agent_repo.upsert_override(
+                agent_uuid, override_updates, user_id=user_uuid
+            )
+        if not ok:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="failed to save agent override",
+            )
+        logger.info(
+            f"agent override upserted by {auth.user_id} on {agent['slug']} "
+            f"scope={scope} fields={sorted(override_updates)}"
+        )
+
     if updates:
         await agent_repo.update_fields_versioned(
             agent_uuid, updates, created_by=user_uuid
@@ -551,12 +621,70 @@ async def update_agent(
             f"chat_permissions changed by {auth.user_id} on agent {agent['slug']}: {chat_audit}"
         )
 
-    refreshed = await agent_repo.get_by_slug(slug)
+    refreshed = await agent_repo.get_by_slug(
+        slug,
+        override_user_id=user_uuid,
+        override_team_id=override_team_ctx,
+    )
     if refreshed is None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="agent disappeared after update",
         )
+    row = _with_chat_permissions(
+        {**refreshed, "skill_ids": await agent_repo.get_skill_ids(agent_uuid)}
+    )
+    enriched = await _enrich_agents_with_scope_names([row])
+    return enriched[0]
+
+
+@router.delete(
+    "/agents/{slug}/override",
+    response_model=AgentOut,
+    summary="Reset a system preset to its defaults (drop the caller's override)",
+)
+async def delete_agent_override(
+    slug: str,
+    auth: AuthDep,
+    scope: str = "user",
+    team_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """复位: drop the caller's customization layer so the agent falls back to
+    the admin/system defaults. scope='user' (default) drops the personal
+    layer; scope='team' (+team_id, team owner or platform admin) drops the
+    shared team layer. Returns the refreshed (merged) agent."""
+    if scope not in ("user", "team"):
+        raise HTTPException(status_code=400, detail="scope must be user|team")
+    agent_repo, _ = _repos()
+    agent = await agent_repo.get_by_slug(slug)
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="agent not found"
+        )
+    agent_uuid = UUID(str(agent["id"]))
+    user_uuid = _coerce_user_uuid(auth.user_id)
+
+    if scope == "team":
+        if team_id is None:
+            raise HTTPException(status_code=400, detail="scope='team' requires team_id")
+        allowed = await _is_team_owner(user_uuid, team_id)
+        if not allowed:
+            try:
+                allowed = await _user_is_admin(user_uuid)
+            except Exception:  # noqa: BLE001 — fail closed
+                allowed = False
+        if not allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="team overrides require team owner or platform admin",
+            )
+        await agent_repo.delete_override(agent_uuid, team_id=team_id)
+    else:
+        await agent_repo.delete_override(agent_uuid, user_id=user_uuid)
+
+    refreshed = await agent_repo.get_by_slug(
+        slug, override_user_id=user_uuid, override_team_id=team_id
+    )
     row = _with_chat_permissions(
         {**refreshed, "skill_ids": await agent_repo.get_skill_ids(agent_uuid)}
     )

@@ -94,6 +94,13 @@ class AgentOut(AgentBase):
     # the router from agent_chat_caps(row); defaults to all-false so clients
     # never have to guess. NOT the raw capability_profile (no internal-gating leak).
     chat_permissions: ChatPermissionsOut = Field(default_factory=ChatPermissionsOut)
+    # Agent-overrides (mig 341). On single-get/patch: which layer produced the
+    # merged view ('user' beats 'team') + which fields it replaced. On list:
+    # override_scopes marks agents the caller (or their teams) customized —
+    # drives the sidebar "customized" badge + reset affordance.
+    override_scope: Optional[Literal["user", "team"]] = None
+    override_fields: list[str] = Field(default_factory=list)
+    override_scopes: list[str] = Field(default_factory=list)
 
 
 class AgentUpdate(BaseModel):
@@ -113,6 +120,11 @@ class AgentUpdate(BaseModel):
     # restores it to null when spend drops below on month rollover.
     monthly_token_budget: Optional[int] = Field(default=None, ge=0)
     monthly_cost_cents_budget: Optional[int] = Field(default=None, ge=0)
+    # Agent-overrides (mig 341): where a SYSTEM PRESET content edit lands.
+    # Default 'user' = personal layer; 'team' (+ override_team_id, caller must
+    # be that team's owner or a platform admin) = shared team layer.
+    override_scope: Optional[Literal["user", "team"]] = None
+    override_team_id: Optional[int] = None
     # Admin can pause/resume. 'budget' is server-owned (sweeper-only) and is
     # rejected here via the Literal so a client can't forge a fake budget
     # pause. Pass null to resume from either a manual or a budget pause.
