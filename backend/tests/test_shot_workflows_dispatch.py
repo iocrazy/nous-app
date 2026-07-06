@@ -472,13 +472,136 @@ async def test_mark_shot_done_and_failed_write_status_lane():
         "app.repositories.script_shot_repository.get_script_shot_repository",
         MagicMock(return_value=shot_repo),
     ):
-        await m.mark_shot_done(_SHOT, "http://cdn/x.png")
+        await m.mark_shot_done(_SHOT, "/api/v1/generated-media/42/cover", "/thumb")
         await m.mark_shot_failed(_SHOT)
 
     shot_repo.update_status.assert_any_await(
-        _SHOT, "done", image_url="http://cdn/x.png"
+        _SHOT,
+        "done",
+        image_url="/api/v1/generated-media/42/cover",
+        thumbnail_url="/thumb",
     )
     shot_repo.update_status.assert_any_await(_SHOT, "failed")
+
+
+# ---------------------------------------------------------------------------
+# persist_generation step: durable single-point persistence (L5 go-live gate)
+# ---------------------------------------------------------------------------
+
+
+async def test_persist_generation_writes_durable_urls(monkeypatch):
+    """The provider's EPHEMERAL cdn url is persisted through the generated-media
+    store; the shot gets same-origin /cover urls (never the rotting cdn url).
+    Both fields point at /cover — the ShotCard renders them in a bare <img>."""
+    from app.workflows import script_shot_generate as m
+
+    shot_repo = MagicMock()
+    shot_repo.get_by_id = AsyncMock(
+        return_value={"id": int(_SHOT), "scene_id": int(_SCENE), "description": "d"}
+    )
+    scene_repo = MagicMock()
+    scene_repo.get_by_id = AsyncMock(return_value={"script_id": 700, "heading": "INT"})
+    script_repo = MagicMock()
+    script_repo.get_by_id = AsyncMock(return_value={"id": 700, "team_id": 900})
+    register = AsyncMock(return_value={"id": 4242})
+
+    with (
+        patch(
+            "app.repositories.script_shot_repository.get_script_shot_repository",
+            MagicMock(return_value=shot_repo),
+        ),
+        patch(
+            "app.repositories.script_scene_repository.get_script_scene_repository",
+            MagicMock(return_value=scene_repo),
+        ),
+        patch(
+            "app.repositories.script_repository.get_script_project_repository",
+            MagicMock(return_value=script_repo),
+        ),
+        patch(
+            "app.services.library.generated_media_service.register_generated_media",
+            register,
+        ),
+    ):
+        urls = await m.persist_generation(
+            _SHOT, "http://cdn/ephemeral.png", "dall-e-3", "openai", _USER
+        )
+
+    assert urls == {
+        "image_url": "/api/v1/generated-media/4242/cover",
+        "thumbnail_url": "/api/v1/generated-media/4242/cover",
+    }
+    # Registered under the shot's OWNING TEAM (shot→scene→script.team_id), not
+    # the caller's personal team, and tagged with kind='shot_generate'.
+    kwargs = register.call_args.kwargs
+    assert kwargs["scope_id"] == 900
+    assert kwargs["source_url"] == "http://cdn/ephemeral.png"
+    assert kwargs["origin"].kind == "shot_generate"
+
+
+async def test_persist_generation_falls_back_to_provider_url_on_failure(monkeypatch):
+    """Persistence is best-effort: if register_generated_media raises, the step
+    keeps the provider url (better than failing the paid-for generation) —
+    durability is a WARNING-worthy regression but never fatal."""
+    from app.workflows import script_shot_generate as m
+
+    shot_repo = MagicMock()
+    shot_repo.get_by_id = AsyncMock(
+        return_value={"id": int(_SHOT), "scene_id": int(_SCENE), "description": "d"}
+    )
+    scene_repo = MagicMock()
+    scene_repo.get_by_id = AsyncMock(return_value={"script_id": 700})
+    script_repo = MagicMock()
+    script_repo.get_by_id = AsyncMock(return_value={"id": 700, "team_id": 900})
+    register = AsyncMock(side_effect=RuntimeError("storage down"))
+
+    with (
+        patch(
+            "app.repositories.script_shot_repository.get_script_shot_repository",
+            MagicMock(return_value=shot_repo),
+        ),
+        patch(
+            "app.repositories.script_scene_repository.get_script_scene_repository",
+            MagicMock(return_value=scene_repo),
+        ),
+        patch(
+            "app.repositories.script_repository.get_script_project_repository",
+            MagicMock(return_value=script_repo),
+        ),
+        patch(
+            "app.services.library.generated_media_service.register_generated_media",
+            register,
+        ),
+    ):
+        urls = await m.persist_generation(
+            _SHOT, "http://cdn/ephemeral.png", "dall-e-3", "openai", _USER
+        )
+
+    assert urls == {
+        "image_url": "http://cdn/ephemeral.png",
+        "thumbnail_url": "http://cdn/ephemeral.png",
+    }
+
+
+async def test_persist_generation_keeps_url_when_no_user_id():
+    """No user_id (frozen DBOS input compat) → can't resolve a scope, so the
+    step keeps the provider url without ever calling the store."""
+    from app.workflows import script_shot_generate as m
+
+    register = AsyncMock()
+    with patch(
+        "app.services.library.generated_media_service.register_generated_media",
+        register,
+    ):
+        urls = await m.persist_generation(
+            _SHOT, "http://cdn/ephemeral.png", "dall-e-3", "openai", None
+        )
+
+    assert urls == {
+        "image_url": "http://cdn/ephemeral.png",
+        "thumbnail_url": "http://cdn/ephemeral.png",
+    }
+    register.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
