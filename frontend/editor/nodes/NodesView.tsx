@@ -15,17 +15,27 @@ import {
   Background,
   BackgroundVariant,
   Controls,
+  MiniMap,
   SelectionMode,
   applyNodeChanges,
   type Edge,
   type Node,
   type NodeChange,
+  type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useTranslation } from 'react-i18next';
-import { mapToFlow } from './sceneNodeMapper';
+import {
+  mapToFlow,
+  SCENE_NODE_WIDTH,
+  CHAPTER_NODE_WIDTH,
+  NODE_HEIGHT_FALLBACK,
+} from './sceneNodeMapper';
 import { SceneFlowNode } from './SceneFlowNode';
 import { ChapterActionsNode, ChapterActionContext } from './ChapterActionsNode';
+import { GuideOverlay } from './GuideOverlay';
+import { computeAlignmentGuides, type AlignmentGuides, type Rect } from './alignmentGuides';
+import { useCanvasShortcuts } from './useCanvasShortcuts';
 import { useConvertPoll } from '../useConvertPoll';
 import { updateSceneMeta } from '../sceneService';
 import type { SceneDoc } from '../types';
@@ -35,8 +45,24 @@ import type { ScriptChapter } from '../../types';
 const DRAG_PERSIST_MS = 500;
 /** Length of the `sc-` / `ch-` id prefixes the mapper emits. */
 const ID_PREFIX_LEN = 3;
+/** Snap-to-grid step, px. Gentle 8px lattice — no user toggle (YAGNI). */
+const SNAP_GRID: [number, number] = [8, 8];
+/** Stable empty-guides object so clearing never allocates a new render key. */
+const NO_GUIDES: AlignmentGuides = {};
 
 const NODE_TYPES = { sceneNode: SceneFlowNode, chapterNode: ChapterActionsNode };
+
+/** Bounding rect of a node in flow space, using measured size when available. */
+function nodeRect(node: Node): Rect {
+  const fallbackWidth =
+    node.type === 'chapterNode' ? CHAPTER_NODE_WIDTH : SCENE_NODE_WIDTH;
+  return {
+    x: node.position.x,
+    y: node.position.y,
+    width: node.measured?.width ?? fallbackWidth,
+    height: node.measured?.height ?? NODE_HEIGHT_FALLBACK,
+  };
+}
 
 /**
  * Modifier that toggles add-to-selection. Cmd on Apple platforms, Ctrl
@@ -64,7 +90,12 @@ export function NodesView({ scenes, chapters, onOpenScene, scriptId, onReload }:
   const { t } = useTranslation();
   const graph = useMemo(() => mapToFlow(scenes, chapters), [scenes, chapters]);
   const [nodes, setNodes] = useState<Node[]>(() => graph.nodes as Node[]);
+  const [guides, setGuides] = useState<AlignmentGuides>(NO_GUIDES);
   const { startPoll } = useConvertPoll(scriptId);
+
+  // Canvas container (keyboard target) + live flow instance (zoom / fit).
+  const containerRef = useRef<HTMLDivElement>(null);
+  const instanceRef = useRef<ReactFlowInstance | null>(null);
 
   // Re-seed when the projection changes (scene added / removed / reparented).
   // Drag-in-progress positions are transient client state; a structural change
@@ -120,22 +151,101 @@ export function NodesView({ scenes, chapters, onOpenScene, scriptId, onReload }:
     }
   }, []);
 
+  // While a single node drags, match its edges against every other node and draw
+  // the guide lines. The actual position snap is applied once on drop (below),
+  // so the node never fights the cursor mid-drag.
+  const onNodeDrag = useCallback((_evt: React.MouseEvent, node: Node) => {
+    const others = nodesRef.current.filter((n) => String(n.id) !== String(node.id));
+    setGuides(computeAlignmentGuides(nodeRect(node), others.map(nodeRect)));
+  }, []);
+
   const onNodeDragStop = useCallback(
     (_evt: React.MouseEvent, node: Node) => {
+      setGuides(NO_GUIDES);
       // If the dragged node belongs to a multi-selection, React Flow moved the
       // whole group with it — persist every selected node, not just this one.
       const selected = nodesRef.current.filter((n) => n.selected);
       const inSelection =
         selected.length > 1 && selected.some((n) => String(n.id) === String(node.id));
-      persistPositions(inSelection ? selected : [node]);
+      if (inSelection) {
+        persistPositions(selected);
+        return;
+      }
+      // Solo drop: apply a one-time alignment snap (wins over the 8px grid).
+      const others = nodesRef.current.filter((n) => String(n.id) !== String(node.id));
+      const g = computeAlignmentGuides(nodeRect(node), others.map(nodeRect));
+      const snapped =
+        g.snappedX != null || g.snappedY != null
+          ? {
+              ...node,
+              position: {
+                x: g.snappedX ?? node.position.x,
+                y: g.snappedY ?? node.position.y,
+              },
+            }
+          : node;
+      if (snapped !== node) {
+        setNodes((nds) =>
+          nds.map((n) =>
+            String(n.id) === String(node.id) ? { ...n, position: snapped.position } : n,
+          ),
+        );
+      }
+      persistPositions([snapped]);
     },
     [persistPositions],
   );
 
   const onSelectionDragStop = useCallback(
-    (_evt: React.MouseEvent, dragged: Node[]) => persistPositions(dragged),
+    (_evt: React.MouseEvent, dragged: Node[]) => {
+      setGuides(NO_GUIDES);
+      persistPositions(dragged);
+    },
     [persistPositions],
   );
+
+  // Keyboard actions. Nudge moves + persists the selected scenes; select-all /
+  // clear flip the `selected` flag across the controlled node set.
+  const nudgeSelected = useCallback(
+    (dx: number, dy: number) => {
+      const selected = nodesRef.current.filter(
+        (n) => n.selected && n.type === 'sceneNode',
+      );
+      if (selected.length === 0) return;
+      const moved = selected.map((n) => ({
+        ...n,
+        position: { x: n.position.x + dx, y: n.position.y + dy },
+      }));
+      const movedById = new Map(moved.map((n) => [String(n.id), n.position]));
+      setNodes((nds) =>
+        nds.map((n) =>
+          movedById.has(String(n.id))
+            ? { ...n, position: movedById.get(String(n.id))! }
+            : n,
+        ),
+      );
+      persistPositions(moved);
+    },
+    [persistPositions],
+  );
+
+  const selectAll = useCallback(
+    () => setNodes((nds) => nds.map((n) => (n.selected ? n : { ...n, selected: true }))),
+    [],
+  );
+  const clearSelection = useCallback(
+    () => setNodes((nds) => nds.map((n) => (n.selected ? { ...n, selected: false } : n))),
+    [],
+  );
+
+  useCanvasShortcuts(containerRef, {
+    onNudge: nudgeSelected,
+    onZoomIn: () => instanceRef.current?.zoomIn(),
+    onZoomOut: () => instanceRef.current?.zoomOut(),
+    onFitView: () => instanceRef.current?.fitView(),
+    onSelectAll: selectAll,
+    onClearSelection: clearSelection,
+  });
 
   const onNodeDoubleClick = useCallback(
     (_evt: React.MouseEvent, node: Node) => {
@@ -151,24 +261,47 @@ export function NodesView({ scenes, chapters, onOpenScene, scriptId, onReload }:
   );
 
   return (
-    <div className="mh-nodes-view" data-testid="nodes-view" aria-label={t('editor.nodesViewLabel')}>
+    <div
+      ref={containerRef}
+      tabIndex={0}
+      className="mh-nodes-view"
+      data-testid="nodes-view"
+      aria-label={t('editor.nodesViewLabel')}
+    >
       <ChapterActionContext.Provider value={actionContext}>
         <ReactFlow
           nodes={nodes}
           edges={graph.edges as Edge[]}
           nodeTypes={NODE_TYPES}
+          onInit={(instance) => {
+            instanceRef.current = instance;
+          }}
           onNodesChange={onNodesChange}
+          onNodeDrag={onNodeDrag}
           onNodeDragStop={onNodeDragStop}
           onSelectionDragStop={onSelectionDragStop}
           onNodeDoubleClick={onNodeDoubleClick}
           selectionMode={SelectionMode.Partial}
           selectionKeyCode="Shift"
           multiSelectionKeyCode={MULTI_SELECT_KEY}
+          snapGrid={SNAP_GRID}
+          snapToGrid
+          onlyRenderVisibleElements
           fitView
           proOptions={{ hideAttribution: true }}
         >
           <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
           <Controls showInteractive={false} />
+          <MiniMap
+            pannable
+            zoomable
+            aria-label={t('editor.nodesMinimapLabel')}
+            maskColor="var(--minimap-mask)"
+            nodeColor={(node) =>
+              node.type === 'chapterNode' ? 'var(--indigo)' : 'var(--ink-faint)'
+            }
+          />
+          <GuideOverlay guides={guides} />
         </ReactFlow>
       </ChapterActionContext.Provider>
     </div>

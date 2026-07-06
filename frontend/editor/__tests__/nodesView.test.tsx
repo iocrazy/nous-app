@@ -50,8 +50,22 @@ vi.mock('../../components/Toast', () => ({
   useToast: () => ({ addToast: vi.fn() }),
 }));
 
+import { MiniMap } from '@xyflow/react';
 import { NodesView } from '../nodes/NodesView';
 import { EditorShell } from '../components/EditorShell';
+
+/** Depth-first search for a rendered child element whose component type matches. */
+function hasChildOfType(children: unknown, type: unknown): boolean {
+  const stack = Array.isArray(children) ? [...children] : [children];
+  while (stack.length) {
+    const node = stack.pop() as { type?: unknown; props?: { children?: unknown } } | null;
+    if (!node || typeof node !== 'object') continue;
+    if (node.type === type) return true;
+    const kids = node.props?.children;
+    if (kids != null) stack.push(...(Array.isArray(kids) ? kids : [kids]));
+  }
+  return false;
+}
 
 const scene = (over: Partial<SceneDoc>): SceneDoc => ({
   id: '200',
@@ -264,6 +278,39 @@ describe('NodesView', () => {
         expect(svc.updateSceneMeta).toHaveBeenCalledTimes(2);
         expect(svc.updateSceneMeta.mock.calls.map((c) => c[0]).sort()).toEqual(['200', '201']);
       });
+    });
+  });
+
+  describe('navigation & feel', () => {
+    it('enables snap grid, snap-to-grid, and visible-only rendering', () => {
+      render(
+        <NodesView
+          scenes={[scene({ id: '200' })]}
+          chapters={[]}
+          onOpenScene={vi.fn()}
+          scriptId="1"
+          onReload={vi.fn()}
+        />,
+      );
+      expect(capturedProps.snapGrid).toEqual([8, 8]);
+      expect(capturedProps.snapToGrid).toBe(true);
+      expect(capturedProps.onlyRenderVisibleElements).toBe(true);
+      // Alignment guides + nudge need the live instance and per-drag hook.
+      expect(typeof capturedProps.onInit).toBe('function');
+      expect(typeof capturedProps.onNodeDrag).toBe('function');
+    });
+
+    it('mounts a MiniMap inside the canvas', () => {
+      render(
+        <NodesView
+          scenes={[scene({ id: '200' })]}
+          chapters={[]}
+          onOpenScene={vi.fn()}
+          scriptId="1"
+          onReload={vi.fn()}
+        />,
+      );
+      expect(hasChildOfType(capturedProps.children, MiniMap)).toBe(true);
     });
   });
 

@@ -18,6 +18,16 @@ import type { ScriptChapter } from '../../types';
 
 /** Longest summary line rendered on a scene node before truncation. */
 const SUMMARY_MAX = 60;
+
+/**
+ * Rendered node widths (px), mirrored from `.mh-flow-node` / `.mh-flow-chapter`
+ * in editorShellStyles.ts. Used as the fallback rect width for alignment guides
+ * before xyflow has measured a node. Keep in sync if the CSS widths change.
+ */
+export const SCENE_NODE_WIDTH = 220;
+export const CHAPTER_NODE_WIDTH = 200;
+/** Fallback rect height before xyflow measures a node. */
+export const NODE_HEIGHT_FALLBACK = 96;
 /** Vertical step between auto-laid scenes within a column. */
 const SCENE_Y_STEP = 140;
 /** Horizontal offset of a chapter's scene column from the chapter node. */
