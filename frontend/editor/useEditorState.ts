@@ -13,6 +13,7 @@
  */
 import { useReducer } from 'react';
 import type { CursorState } from './editorMachine';
+import type { ElementType } from './types';
 
 export type EditorMode = 'script' | 'outline' | 'cover';
 export type EditorFormat = 'hollywood' | 'asian';
@@ -24,6 +25,8 @@ export interface EditorState {
   theme: EditorTheme;
   cursor: CursorState | null;
   activeSceneId: string | null;
+  /** Element type the toolbar will apply to the NEXT insert when no line has focus. */
+  nextInsertType: ElementType;
 }
 
 export type EditorAction =
@@ -31,7 +34,8 @@ export type EditorAction =
   | { type: 'setFormat'; format: EditorFormat }
   | { type: 'toggleTheme' }
   | { type: 'setCursor'; cursor: CursorState | null }
-  | { type: 'setActiveScene'; sceneId: string | null };
+  | { type: 'setActiveScene'; sceneId: string | null }
+  | { type: 'setNextInsertType'; elementType: ElementType };
 
 const THEME_STORAGE_KEY = 'editor.theme';
 
@@ -67,6 +71,8 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
       return { ...state, cursor: action.cursor };
     case 'setActiveScene':
       return { ...state, activeSceneId: action.sceneId };
+    case 'setNextInsertType':
+      return { ...state, nextInsertType: action.elementType };
     default:
       return state;
   }
@@ -79,6 +85,7 @@ function init(): EditorState {
     theme: readStoredTheme(),
     cursor: null,
     activeSceneId: null,
+    nextInsertType: 'action',
   };
 }
 
@@ -89,6 +96,7 @@ export interface EditorStateApi {
   toggleTheme: () => void;
   setCursor: (cursor: CursorState | null) => void;
   setActiveScene: (sceneId: string | null) => void;
+  setNextInsertType: (elementType: ElementType) => void;
 }
 
 export function useEditorState(): EditorStateApi {
@@ -100,5 +108,6 @@ export function useEditorState(): EditorStateApi {
     toggleTheme: () => dispatch({ type: 'toggleTheme' }),
     setCursor: (cursor) => dispatch({ type: 'setCursor', cursor }),
     setActiveScene: (sceneId) => dispatch({ type: 'setActiveScene', sceneId }),
+    setNextInsertType: (elementType) => dispatch({ type: 'setNextInsertType', elementType }),
   };
 }

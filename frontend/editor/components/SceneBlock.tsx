@@ -27,9 +27,18 @@ import {
 } from '../editorMachine';
 import { applyLocal } from '../opBuilder';
 import { newElementId, updateSceneMeta } from '../sceneService';
-import type { ElementOp, ScriptElement, SceneDoc } from '../types';
+import type { ElementOp, ElementType, ScriptElement, SceneDoc } from '../types';
 import { useSceneSync } from '../useSceneSync';
 import { HollywoodLayout } from '../render/HollywoodLayout';
+
+/** A toolbar-issued retype of the focused element, routed to the owning scene. */
+export interface TypeCommand {
+  sceneId: string;
+  elementId: string;
+  type: ElementType;
+  /** Bump to re-fire even when the payload is unchanged. */
+  nonce: number;
+}
 
 const INT_EXT_OPTIONS = ['INT', 'EXT', 'INT/EXT'];
 const TIME_OPTIONS = ['DAY', 'NIGHT', 'DAWN', 'DUSK', 'CONTINUOUS'];
@@ -43,7 +52,16 @@ interface SceneMeta {
   time_of_day: string;
 }
 
-export function SceneBlock({ scene, index }: { scene: SceneDoc; index: number }) {
+export interface SceneBlockProps {
+  scene: SceneDoc;
+  index: number;
+  /** Reports the focused element up so the toolbar/statistics can track the cursor. */
+  onFocusElement?: (cursor: CursorState) => void;
+  /** Toolbar retype command targeted (by sceneId) at this block's focused element. */
+  typeCommand?: TypeCommand;
+}
+
+export function SceneBlock({ scene, index, onFocusElement, typeCommand }: SceneBlockProps) {
   const { t } = useTranslation();
   const sync = useSceneSync(scene);
   const [focusedElementId, setFocusedElementId] = useState<string | null>(null);
@@ -156,7 +174,31 @@ export function SceneBlock({ scene, index }: { scene: SceneDoc; index: number })
     [sync],
   );
 
-  const handleFocus = useCallback((elementId: string) => setFocusedElementId(elementId), []);
+  const handleFocus = useCallback(
+    (elementId: string) => {
+      setFocusedElementId(elementId);
+      onFocusElement?.({ sceneId: scene.id, elementId, field: 'element' });
+    },
+    [onFocusElement, scene.id],
+  );
+
+  // Toolbar retype: when a command targets this scene, update the focused
+  // element's type in place (only if it still exists in the optimistic view).
+  const lastCommandNonceRef = useRef(0);
+  useEffect(() => {
+    if (!typeCommand || typeCommand.sceneId !== scene.id) return;
+    if (typeCommand.nonce === lastCommandNonceRef.current) return;
+    lastCommandNonceRef.current = typeCommand.nonce;
+    const target = elementsRef.current.find((el) => el.id === typeCommand.elementId);
+    if (!target) return;
+    const op: ElementOp = {
+      op: 'update',
+      element_id: typeCommand.elementId,
+      payload: { type: typeCommand.type },
+    };
+    sync.dispatchOps([op], applyLocal(elementsRef.current, [op]));
+  }, [typeCommand, scene.id, sync]);
+
   const onCompositionStart = useCallback(() => {
     composingRef.current = true;
   }, []);
@@ -180,7 +222,12 @@ export function SceneBlock({ scene, index }: { scene: SceneDoc; index: number })
   );
 
   return (
-    <div className="mh-scene-block" ref={containerRef} data-testid="scene-block">
+    <div
+      className="mh-scene-block"
+      ref={containerRef}
+      data-testid="scene-block"
+      data-scene-id={scene.id}
+    >
       <button
         type="button"
         className="mh-drag-handle"

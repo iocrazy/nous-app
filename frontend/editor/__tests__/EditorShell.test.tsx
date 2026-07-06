@@ -108,4 +108,16 @@ describe('EditorShell', () => {
     await waitFor(() => expect(screen.getByText('editor.loadError')).toBeInTheDocument());
     expect(spy).toHaveBeenCalled();
   });
+
+  it('scrolls the matching scene block into view when a rail row is clicked', async () => {
+    svc.listScenes.mockResolvedValue(twoScenes);
+    // jsdom does not implement scrollIntoView — install a mock to observe the call.
+    const scrollSpy = vi.fn();
+    HTMLElement.prototype.scrollIntoView = scrollSpy;
+    render(<EditorShell scriptId="1" />);
+    await waitFor(() => expect(screen.getByTestId('scene-rail')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText('Rooftop Access'));
+    expect(scrollSpy).toHaveBeenCalled();
+  });
 });

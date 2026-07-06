@@ -14,13 +14,17 @@
  * here the rail and paper column render a minimal-but-real view of the loaded
  * scenes so the shell is exercised end to end.
  */
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { listScenes } from '../sceneService';
-import type { SceneDoc } from '../types';
-import { useEditorState, type EditorMode } from '../useEditorState';
+import { createScene, listScenes } from '../sceneService';
+import type { CursorState } from '../editorMachine';
+import type { ElementType, SceneDoc } from '../types';
+import { useEditorState, type EditorFormat, type EditorMode } from '../useEditorState';
 import { EDITOR_SHELL_STYLES } from './editorShellStyles';
-import { SceneBlock } from './SceneBlock';
+import { SceneBlock, type TypeCommand } from './SceneBlock';
+import { SceneRail } from './SceneRail';
+import { ElementToolbar } from './ElementToolbar';
+import { WritingPanel } from './WritingPanel';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -28,11 +32,29 @@ const DOC_MODES: EditorMode[] = ['script', 'outline', 'cover'];
 
 export function EditorShell({ scriptId }: { scriptId: string }) {
   const { t } = useTranslation();
-  const { state, setMode, toggleTheme, setActiveScene } = useEditorState();
+  const { state, setMode, setFormat, toggleTheme, setActiveScene, setCursor, setNextInsertType } =
+    useEditorState();
   const [scenes, setScenes] = useState<SceneDoc[]>([]);
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [panelCollapsed, setPanelCollapsed] = useState(false);
+  const [typeCommand, setTypeCommand] = useState<TypeCommand | null>(null);
+
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const cursorRef = useRef<CursorState | null>(null);
+  const nonceRef = useRef(0);
+  cursorRef.current = state.cursor;
+
+  const reload = useCallback(async () => {
+    try {
+      const rows = await listScenes(scriptId);
+      setScenes([...rows].sort((a, b) => a.sort_order - b.sort_order));
+      setLoadState('ready');
+    } catch (err) {
+      console.error('[EditorShell] failed to load scenes', err);
+      setLoadState('error');
+    }
+  }, [scriptId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -40,8 +62,7 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
     listScenes(scriptId)
       .then((rows) => {
         if (cancelled) return;
-        const sorted = [...rows].sort((a, b) => a.sort_order - b.sort_order);
-        setScenes(sorted);
+        setScenes([...rows].sort((a, b) => a.sort_order - b.sort_order));
         setLoadState('ready');
       })
       .catch((err) => {
@@ -54,6 +75,81 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
     };
   }, [scriptId]);
 
+  // Viewport auto-highlight: mark the most-visible SceneBlock active. jsdom has
+  // no IntersectionObserver, so feature-detect and no-op there.
+  useEffect(() => {
+    if (state.mode !== 'script' || typeof IntersectionObserver === 'undefined') return;
+    const root = shellRef.current;
+    if (!root) return;
+    const blocks = root.querySelectorAll('[data-scene-id]');
+    if (blocks.length === 0) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        const top = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+        const id = top && (top.target as HTMLElement).dataset.sceneId;
+        if (id) setActiveScene(id);
+      },
+      { threshold: [0.4] },
+    );
+    blocks.forEach((b) => io.observe(b));
+    return () => io.disconnect();
+  }, [state.mode, scenes, setActiveScene]);
+
+  const handleSelectScene = useCallback(
+    (sceneId: string) => {
+      setActiveScene(sceneId);
+      shellRef.current
+        ?.querySelector<HTMLElement>(`[data-scene-id="${sceneId}"]`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    },
+    [setActiveScene],
+  );
+
+  const handleFocusElement = useCallback((cursor: CursorState) => setCursor(cursor), [setCursor]);
+
+  const handleSelectType = useCallback(
+    (type: ElementType) => {
+      setNextInsertType(type);
+      const cursor = cursorRef.current;
+      if (cursor?.elementId) {
+        nonceRef.current += 1;
+        setTypeCommand({
+          sceneId: cursor.sceneId,
+          elementId: cursor.elementId,
+          type,
+          nonce: nonceRef.current,
+        });
+      }
+    },
+    [setNextInsertType],
+  );
+
+  const handleInsertScene = useCallback(() => {
+    createScene(scriptId, { sort_order: scenes.length })
+      .then(() => reload())
+      .catch((err) => console.error('[EditorShell] createScene failed', err));
+  }, [scriptId, scenes.length, reload]);
+
+  const handleFormatChange = useCallback(
+    (format: EditorFormat) => setFormat(format),
+    [setFormat],
+  );
+
+  // Active toolbar pill follows the cursor element's type (from the loaded
+  // snapshot); falls back to the pending next-insert type when unknown.
+  const activeType: ElementType | null = (() => {
+    const cursor = state.cursor;
+    if (cursor?.elementId) {
+      for (const s of scenes) {
+        const el = s.elements.find((e) => e.id === cursor.elementId);
+        if (el) return el.type;
+      }
+    }
+    return state.nextInsertType;
+  })();
+
   const tabLabel: Record<EditorMode, string> = {
     script: t('editor.tabScript'),
     outline: t('editor.tabOutline'),
@@ -61,7 +157,7 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
   };
 
   return (
-    <div className="mh-editor-shell" data-theme={state.theme} data-editor-shell>
+    <div className="mh-editor-shell" data-theme={state.theme} data-editor-shell ref={shellRef}>
       <style>{EDITOR_SHELL_STYLES}</style>
 
       {loadState === 'loading' && (
@@ -116,34 +212,11 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
               </div>
             </div>
             <div className="mh-rail-section-label">{t('editor.scenesLabel')}</div>
-            <div className="mh-scene-list">
-              {scenes.map((s, i) => {
-                const ext = (s.heading_int_ext ?? '').toUpperCase() === 'EXT';
-                return (
-                  <button
-                    type="button"
-                    key={s.id}
-                    className={`mh-scene-row${state.activeSceneId === s.id ? ' active' : ''}`}
-                    onClick={() => setActiveScene(s.id)}
-                  >
-                    <span className="mh-scene-num-chip">{i + 1}</span>
-                    <span className="mh-scene-meta-text">
-                      <span className="mh-scene-row-head">
-                        <span className={`mh-ie-badge ${ext ? 'ext' : 'int'}`}>
-                          {ext ? 'EXT' : 'INT'}
-                        </span>
-                        <span className="mh-scene-title">
-                          {s.location_text || t('editor.untitledScene')}
-                        </span>
-                      </span>
-                      <span className="mh-scene-slug">
-                        {s.elements[0]?.text || t('editor.emptyScene')}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+            <SceneRail
+              scenes={scenes}
+              activeSceneId={state.activeSceneId}
+              onSelect={handleSelectScene}
+            />
           </>
         )}
       </nav>
@@ -190,6 +263,12 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
             </div>
           ) : (
             <div className="mh-sheet-scroll">
+              <ElementToolbar
+                mode={state.mode}
+                activeType={activeType}
+                onSelectType={handleSelectType}
+                onInsertScene={handleInsertScene}
+              />
               <div className="mh-sheet">
                 <div className="mh-sheet-inner">
                   {state.mode === 'outline' ? (
@@ -198,7 +277,15 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
                       <p className="mh-doc-p">{t('editor.outlinePlaceholder')}</p>
                     </div>
                   ) : (
-                    scenes.map((s, i) => <SceneBlock key={s.id} scene={s} index={i} />)
+                    scenes.map((s, i) => (
+                      <SceneBlock
+                        key={s.id}
+                        scene={s}
+                        index={i}
+                        onFocusElement={handleFocusElement}
+                        typeCommand={typeCommand ?? undefined}
+                      />
+                    ))
                   )}
                 </div>
               </div>
@@ -242,9 +329,11 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
                 ›
               </button>
             </div>
-            <div className="mh-panel-body">
-              <div className="mh-panel-hint">{t('editor.statisticsSoon')}</div>
-            </div>
+            <WritingPanel
+              scenes={scenes}
+              format={state.format}
+              onFormatChange={handleFormatChange}
+            />
           </>
         )}
       </aside>
