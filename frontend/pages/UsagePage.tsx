@@ -48,6 +48,7 @@ import type {
 } from '../types';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { useToast } from '../components/Toast';
+import { PageHeader } from '../components/AILibrary/PageHeader';
 
 const AGENT_BAR_COLORS = [
   '#6366f1',
@@ -141,11 +142,7 @@ export const UsagePage: React.FC = () => {
   return (
     <div className="max-w-6xl mx-auto space-y-5 p-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
       <header className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-lg font-semibold text-ink-100">
-            {t('aiUsage.title', 'AI Usage')}
-          </h1>
-        </div>
+        <PageHeader title={t('aiUsage.title', 'AI Usage')} className="pt-0 pb-0" />
         <div className="flex flex-wrap items-center gap-2">
           {teamId != null && (
             <ScopeSwitcher

@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import type { AILibraryUsageSummary } from '../types';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { LiveRunsStrip } from '../components/AILibrary/LiveRunsStrip';
+import { PageHeader } from '../components/AILibrary/PageHeader';
 
 function StatCard({
   label,
@@ -66,10 +67,8 @@ export const AILibraryIndex: React.FC = () => {
   const topModels = (week?.by_model ?? []).slice(0, 5);
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6 pt-6 pb-12">
-      <h1 className="text-base font-semibold text-ink-200">
-        {t('sidebar.dashboard', 'Dashboard')}
-      </h1>
+    <div className="mx-auto max-w-4xl space-y-6 pb-12">
+      <PageHeader title={t('sidebar.dashboard', 'Dashboard')} className="pb-0" />
 
       {/* Running now */}
       <LiveRunsStrip />
