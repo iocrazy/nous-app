@@ -347,11 +347,11 @@ def test_build_driver_runs_off_loop_with_socket_timeouts(monkeypatch):
             captured["database"] = database
             captured["thread"] = _threading.current_thread()
 
-    import falkordb as falkor_mod
+    import falkordb.asyncio as falkor_async_mod
     import graphiti_core.driver.falkordb_driver as fd_mod
 
     monkeypatch.setattr(fd_mod, "FalkorDriver", _FakeDriver)
-    monkeypatch.setattr(falkor_mod, "FalkorDB", _FakeFalkorDB)
+    monkeypatch.setattr(falkor_async_mod, "FalkorDB", _FakeFalkorDB)
 
     service = GraphMemoryService(config=_enabled_config())
     driver = service._build_driver(database="test_memory")
@@ -377,12 +377,45 @@ def test_build_driver_hung_construction_times_out(monkeypatch):
         def __init__(self, **kwargs):
             _time.sleep(60)
 
-    import falkordb as falkor_mod
+    import falkordb.asyncio as falkor_async_mod
 
-    monkeypatch.setattr(falkor_mod, "FalkorDB", _HangingFalkorDB)
+    monkeypatch.setattr(falkor_async_mod, "FalkorDB", _HangingFalkorDB)
 
     service = GraphMemoryService(config=_enabled_config())
     monkeypatch.setattr(service, "_FALKOR_BUILD_TIMEOUT_S", 0.5, raising=False)
     t0 = _time.monotonic()
     assert service._build_driver(database="test_memory") is None
     assert _time.monotonic() - t0 < 5.0
+
+
+def test_build_driver_injects_the_async_falkordb_client(monkeypatch):
+    """Regression (2026-07-06, second half): graphiti's FalkorDriver AWAITS
+    graph.query(), so the injected client must be falkordb.asyncio.FalkorDB —
+    injecting the sync falkordb.FalkorDB produced 'object QueryResult can't
+    be used in await expression' on every real search."""
+    import falkordb
+    import falkordb.asyncio as falkor_async_mod
+
+    used: dict = {}
+
+    class _MarkerAsync(object):
+        def __init__(self, **kwargs):
+            used["cls"] = "async"
+
+    class _MarkerSync(object):
+        def __init__(self, **kwargs):
+            used["cls"] = "sync"
+
+    class _FakeDriver2:
+        def __init__(self, *, falkor_db, database):
+            pass
+
+    import graphiti_core.driver.falkordb_driver as fd_mod
+
+    monkeypatch.setattr(fd_mod, "FalkorDriver", _FakeDriver2)
+    monkeypatch.setattr(falkor_async_mod, "FalkorDB", _MarkerAsync)
+    monkeypatch.setattr(falkordb, "FalkorDB", _MarkerSync)
+
+    service = GraphMemoryService(config=_enabled_config())
+    service._build_driver(database="test_memory")
+    assert used.get("cls") == "async"

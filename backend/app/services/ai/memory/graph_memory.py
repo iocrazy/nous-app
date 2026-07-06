@@ -440,26 +440,32 @@ class GraphMemoryService:
         """Construct the FalkorDriver on a THROWAWAY THREAD with socket
         timeouts — never inline on the event loop.
 
-        Two landmines in graphiti's FalkorDriver (2026-07-06 P0, the 2h
-        loop freeze — see bug_backend_loop_freeze_healthcheck_blindspot):
+        Two landmines in graphiti's FalkorDriver (2026-07-06 P0 follow-up
+        — see bug_backend_loop_freeze_healthcheck_blindspot):
 
-        1. Its default FalkorDB client is a SYNC redis.Redis with NO
-           socket timeouts, so any query against a hung server blocks
-           its thread forever. We inject our own client with timeouts.
+        1. Its default FalkorDB client carries NO socket timeouts, so a
+           query against a hung server blocks its caller indefinitely.
+           We inject our own client with timeouts.
         2. Its __init__ does ``loop.create_task(build_indices...)`` when
-           it sees a running event loop — scheduling sync-redis work ON
-           the loop. Built on a plain thread there is no running loop,
-           so that branch falls through to its RuntimeError/pass path
-           and nothing ever lands on our loop.
+           it sees a running event loop — scheduling driver work on OUR
+           loop during construction. Built on a plain thread there is no
+           running loop, so that branch falls through to its
+           RuntimeError/pass path and nothing ever lands on our loop.
+
+        The injected client MUST be ``falkordb.asyncio.FalkorDB`` — the
+        driver awaits ``graph.query(...)``, and the sync ``falkordb.FalkorDB``
+        returns a plain QueryResult ("object QueryResult can't be used in
+        'await' expression", caught live 2026-07-06 on the first real
+        search after the pydantic-gate fix).
         """
-        from falkordb import FalkorDB
+        from falkordb.asyncio import FalkorDB as AsyncFalkorDB
         from graphiti_core.driver.falkordb_driver import FalkorDriver
 
         result: dict[str, Any] = {}
 
         def _construct() -> None:
             try:
-                falkor = FalkorDB(
+                falkor = AsyncFalkorDB(
                     host=self.config.falkordb_host,
                     port=self.config.falkordb_port,
                     socket_connect_timeout=self._FALKOR_CONNECT_TIMEOUT_S,
