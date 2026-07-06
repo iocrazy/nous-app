@@ -221,6 +221,21 @@ class ShotMoveRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Version / commit schemas (Phase B P4 — manual tags over the op ledger)
+# ---------------------------------------------------------------------------
+
+
+class CommitCreate(BaseModel):
+    """Request body for `POST /scripts/{script_id}/commits`.
+
+    ``message`` is the tag label. It is capped at 200 chars to match the
+    ``script_commits.message`` column (VARCHAR(200)) — an over-long message is
+    rejected 422 at the boundary rather than truncated/erroring at the DB."""
+
+    message: constr(min_length=1, max_length=200)
+
+
+# ---------------------------------------------------------------------------
 # Canvas sync schema
 # ---------------------------------------------------------------------------
 

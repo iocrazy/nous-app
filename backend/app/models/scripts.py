@@ -544,6 +544,43 @@ class ScriptOps(Base):
     )
 
 
+class ScriptCommits(Base):
+    __tablename__ = "script_commits"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["script_id"],
+            ["public.script_projects.id"],
+            ondelete="CASCADE",
+            name="script_commits_script_id_fkey",
+        ),
+        PrimaryKeyConstraint("id", name="script_commits_pkey"),
+        Index("idx_script_commits_script", "script_id", "created_at"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")
+    )
+    script_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    message: Mapped[str] = mapped_column(String(200), nullable=False)
+    watermarks: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, comment="{scene_id: op_seq} per-scene ledger high-water"
+    )
+    scene_ids: Mapped[list] = mapped_column(
+        JSONB,
+        nullable=False,
+        comment="ordered [{id, sort_order, heading...}] scene-set snapshot",
+    )
+    created_by: Mapped[str] = mapped_column(
+        String(64), nullable=False, comment="user uuid"
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
 class ScriptStoryboardLinks(Base):
     __tablename__ = "script_storyboard_links"
     __table_args__ = (
