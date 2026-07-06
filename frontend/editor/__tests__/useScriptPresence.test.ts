@@ -21,10 +21,21 @@ const ME: ScriptPresenceSelf = {
   isDirty: false,
 };
 
+// The channel is opened only AFTER `supabase.auth.getSession()` resolves (auth
+// applied to the realtime socket first), so flush the microtask queue before
+// asserting on / firing the channel. Microtasks aren't faked by fake timers.
+async function flush() {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Helpers — a fresh fake Supabase channel + client per test.
 // ---------------------------------------------------------------------------
-function buildFakes() {
+function buildFakes(config: { session?: { access_token: string } | null; defer?: boolean } = {}) {
+  const session = 'session' in config ? config.session : { access_token: 'tok' };
   const capturedHandlers: Record<string, (...args: unknown[]) => void> = {};
   let subscribeCb: ((status: string) => void) | null = null;
   let presenceSnapshot: Record<string, unknown> = {};
@@ -46,7 +57,19 @@ function buildFakes() {
     presenceState: vi.fn(() => presenceSnapshot),
   };
 
+  let resolveSession: (() => void) | null = null;
+  const sessionResult = { data: { session } };
+  const getSession = vi.fn(() =>
+    config.defer
+      ? new Promise((res) => {
+          resolveSession = () => res(sessionResult);
+        })
+      : Promise.resolve(sessionResult),
+  );
+
   const fakeSupabase = {
+    auth: { getSession },
+    realtime: { setAuth: vi.fn() },
     channel: vi.fn(() => fakeChannel),
     removeChannel: vi.fn(),
   };
@@ -58,7 +81,14 @@ function buildFakes() {
     subscribeCb?.('SUBSCRIBED');
   };
 
-  return { capturedHandlers, fakeChannel, fakeSupabase, setPresenceSnapshot, subscribeNow };
+  return {
+    capturedHandlers,
+    fakeChannel,
+    fakeSupabase,
+    setPresenceSnapshot,
+    subscribeNow,
+    resolveSession: () => resolveSession?.(),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -70,15 +100,20 @@ describe('useScriptPresence', () => {
   let fakeSupabase: ReturnType<typeof buildFakes>['fakeSupabase'];
   let setPresenceSnapshot: ReturnType<typeof buildFakes>['setPresenceSnapshot'];
   let subscribeNow: ReturnType<typeof buildFakes>['subscribeNow'];
+  let resolveSession: ReturnType<typeof buildFakes>['resolveSession'];
+
+  const wire = (fakes: ReturnType<typeof buildFakes>) => {
+    ({ capturedHandlers, fakeChannel, fakeSupabase, setPresenceSnapshot, subscribeNow, resolveSession } =
+      fakes);
+    vi.mocked(getSupabaseClient).mockReturnValue(
+      fakeSupabase as unknown as ReturnType<typeof getSupabaseClient>,
+    );
+  };
 
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
-    ({ capturedHandlers, fakeChannel, fakeSupabase, setPresenceSnapshot, subscribeNow } =
-      buildFakes());
-    vi.mocked(getSupabaseClient).mockReturnValue(
-      fakeSupabase as unknown as ReturnType<typeof getSupabaseClient>,
-    );
+    wire(buildFakes());
   });
 
   afterEach(() => {
@@ -89,31 +124,62 @@ describe('useScriptPresence', () => {
   // 1. Null-guard — flag-off callers pass null, nothing subscribes.
   // -------------------------------------------------------------------------
   describe('null-guard', () => {
-    it('scriptId=null → no channel created, empty state', () => {
+    it('scriptId=null → no channel created, empty state', async () => {
       const { result } = renderHook(() => useScriptPresence(null, ME));
+      await flush();
       expect(fakeSupabase.channel).not.toHaveBeenCalled();
       expect(result.current.onlineUsers).toEqual([]);
     });
 
-    it('me=null → no channel created, empty state', () => {
+    it('me=null → no channel created, empty state', async () => {
       const { result } = renderHook(() => useScriptPresence('s1', null));
+      await flush();
       expect(fakeSupabase.channel).not.toHaveBeenCalled();
       expect(result.current.onlineUsers).toEqual([]);
     });
   });
 
   // -------------------------------------------------------------------------
-  // 2. Channel identity + track on SUBSCRIBED
+  // 2. Auth-before-join + channel identity + track on SUBSCRIBED
   // -------------------------------------------------------------------------
-  it('opens channel `script-presence-<id>` keyed by userId', () => {
+  it('applies realtime auth BEFORE opening the presence channel', async () => {
     renderHook(() => useScriptPresence('s1', ME));
+    await flush();
+    expect(fakeSupabase.realtime.setAuth).toHaveBeenCalledWith('tok');
+    const setAuthOrder = fakeSupabase.realtime.setAuth.mock.invocationCallOrder[0];
+    const channelOrder = fakeSupabase.channel.mock.invocationCallOrder[0];
+    expect(setAuthOrder).toBeLessThan(channelOrder);
+  });
+
+  it('opens no channel when there is no session', async () => {
+    wire(buildFakes({ session: null }));
+    renderHook(() => useScriptPresence('s1', ME));
+    await flush();
+    expect(fakeSupabase.realtime.setAuth).not.toHaveBeenCalled();
+    expect(fakeSupabase.channel).not.toHaveBeenCalled();
+  });
+
+  it('does not subscribe when unmounted before getSession resolves (cancel guard)', async () => {
+    wire(buildFakes({ defer: true }));
+    const { unmount } = renderHook(() => useScriptPresence('s1', ME));
+    act(() => unmount());
+    resolveSession();
+    await flush();
+    expect(fakeSupabase.channel).not.toHaveBeenCalled();
+    expect(fakeSupabase.removeChannel).not.toHaveBeenCalled();
+  });
+
+  it('opens channel `script-presence-<id>` keyed by userId', async () => {
+    renderHook(() => useScriptPresence('s1', ME));
+    await flush();
     expect(fakeSupabase.channel).toHaveBeenCalledWith('script-presence-s1', {
       config: { presence: { key: 'me-123' } },
     });
   });
 
-  it('attaches all presence handlers before subscribe', () => {
+  it('attaches all presence handlers before subscribe', async () => {
     renderHook(() => useScriptPresence('s1', ME));
+    await flush();
     // on() is chainable and must be fully wired before subscribe() runs.
     const onOrder = (fakeChannel.on as ReturnType<typeof vi.fn>).mock.invocationCallOrder;
     const subscribeOrder = (fakeChannel.subscribe as ReturnType<typeof vi.fn>).mock
@@ -122,8 +188,9 @@ describe('useScriptPresence', () => {
     expect(Math.max(...onOrder)).toBeLessThan(subscribeOrder);
   });
 
-  it('tracks self payload on SUBSCRIBED (viewing when clean)', () => {
+  it('tracks self payload on SUBSCRIBED (viewing when clean)', async () => {
     renderHook(() => useScriptPresence('s1', ME));
+    await flush();
     act(() => subscribeNow());
     expect(fakeChannel.track).toHaveBeenCalledWith({
       user_id: 'me-123',
@@ -133,8 +200,9 @@ describe('useScriptPresence', () => {
     });
   });
 
-  it('reports mode=editing when isDirty is true', () => {
+  it('reports mode=editing when isDirty is true', async () => {
     renderHook(() => useScriptPresence('s1', { ...ME, isDirty: true, focusedSceneId: 's7' }));
+    await flush();
     act(() => subscribeNow());
     expect(fakeChannel.track).toHaveBeenCalledWith({
       user_id: 'me-123',
@@ -147,7 +215,7 @@ describe('useScriptPresence', () => {
   // -------------------------------------------------------------------------
   // 3. Snapshot recompute + self filter
   // -------------------------------------------------------------------------
-  it('recomputes onlineUsers from presenceState and excludes self', () => {
+  it('recomputes onlineUsers from presenceState and excludes self', async () => {
     setPresenceSnapshot({
       'me-123': [{ user_id: 'me-123', name: 'Me', focused_scene_id: 's1', mode: 'viewing' }],
       'other-456': [
@@ -155,6 +223,7 @@ describe('useScriptPresence', () => {
       ],
     });
     const { result } = renderHook(() => useScriptPresence('s1', ME));
+    await flush();
     act(() => subscribeNow());
     act(() => capturedHandlers['presence:sync']());
 
@@ -163,9 +232,10 @@ describe('useScriptPresence', () => {
     ]);
   });
 
-  it('join and leave both recompute the full snapshot', () => {
+  it('join and leave both recompute the full snapshot', async () => {
     setPresenceSnapshot({ 'u-a': [{ user_id: 'u-a', name: 'A' }] });
     const { result } = renderHook(() => useScriptPresence('s1', ME));
+    await flush();
     act(() => subscribeNow());
 
     act(() => capturedHandlers['presence:join']());
@@ -176,9 +246,10 @@ describe('useScriptPresence', () => {
     expect(result.current.onlineUsers).toEqual([]);
   });
 
-  it('defaults name to user_id and focused_scene_id to null when absent', () => {
+  it('defaults name to user_id and focused_scene_id to null when absent', async () => {
     setPresenceSnapshot({ 'u-x': [{ user_id: 'u-x' }] });
     const { result } = renderHook(() => useScriptPresence('s1', ME));
+    await flush();
     act(() => subscribeNow());
     act(() => capturedHandlers['presence:sync']());
     expect(result.current.onlineUsers).toEqual([
@@ -189,11 +260,12 @@ describe('useScriptPresence', () => {
   // -------------------------------------------------------------------------
   // 4. Re-track on focus change + throttle
   // -------------------------------------------------------------------------
-  it('re-tracks when focusedSceneId changes after the throttle window', () => {
+  it('re-tracks when focusedSceneId changes after the throttle window', async () => {
     const { rerender } = renderHook(
       ({ me }) => useScriptPresence('s1', me),
       { initialProps: { me: ME } },
     );
+    await flush();
     act(() => subscribeNow());
     expect(fakeChannel.track).toHaveBeenCalledTimes(1);
 
@@ -206,11 +278,12 @@ describe('useScriptPresence', () => {
     );
   });
 
-  it('throttles rapid focus changes to a single trailing track with the latest value', () => {
+  it('throttles rapid focus changes to a single trailing track with the latest value', async () => {
     const { rerender } = renderHook(
       ({ me }) => useScriptPresence('s1', me),
       { initialProps: { me: ME } },
     );
+    await flush();
     act(() => subscribeNow());
     expect(fakeChannel.track).toHaveBeenCalledTimes(1); // leading, on subscribe
 
@@ -229,19 +302,21 @@ describe('useScriptPresence', () => {
   // -------------------------------------------------------------------------
   // 5. Cleanup on unmount
   // -------------------------------------------------------------------------
-  it('removes the channel on unmount', () => {
+  it('removes the channel on unmount', async () => {
     const { unmount } = renderHook(() => useScriptPresence('s1', ME));
+    await flush();
     act(() => subscribeNow());
     act(() => unmount());
     expect(fakeSupabase.removeChannel).toHaveBeenCalledTimes(1);
     expect(fakeSupabase.removeChannel).toHaveBeenCalledWith(fakeChannel);
   });
 
-  it('clears a pending trailing track timer on unmount (no track after unmount)', () => {
+  it('clears a pending trailing track timer on unmount (no track after unmount)', async () => {
     const { rerender, unmount } = renderHook(
       ({ me }) => useScriptPresence('s1', me),
       { initialProps: { me: ME } },
     );
+    await flush();
     act(() => subscribeNow());
     expect(fakeChannel.track).toHaveBeenCalledTimes(1);
 
@@ -268,9 +343,10 @@ describe('useScriptPresence', () => {
       ],
     });
 
-    it('shows editing while fresh, downgrades to viewing after 4000 ms', () => {
+    it('shows editing while fresh, downgrades to viewing after 4000 ms', async () => {
       setPresenceSnapshot(editing());
       const { result } = renderHook(() => useScriptPresence('s1', ME));
+      await flush();
       act(() => subscribeNow());
       act(() => capturedHandlers['presence:sync']());
       expect(result.current.onlineUsers[0].mode).toBe('editing');
@@ -279,9 +355,10 @@ describe('useScriptPresence', () => {
       expect(result.current.onlineUsers[0].mode).toBe('viewing');
     });
 
-    it('a fresh editing track within the window keeps it editing (sticky refresh)', () => {
+    it('a fresh editing track within the window keeps it editing (sticky refresh)', async () => {
       setPresenceSnapshot(editing());
       const { result } = renderHook(() => useScriptPresence('s1', ME));
+      await flush();
       act(() => subscribeNow());
       act(() => capturedHandlers['presence:sync']());
 
@@ -294,9 +371,10 @@ describe('useScriptPresence', () => {
       expect(result.current.onlineUsers[0].mode).toBe('viewing');
     });
 
-    it('a transient viewing track does not clear a still-fresh editing badge', () => {
+    it('a transient viewing track does not clear a still-fresh editing badge', async () => {
       setPresenceSnapshot(editing());
       const { result } = renderHook(() => useScriptPresence('s1', ME));
+      await flush();
       act(() => subscribeNow());
       act(() => capturedHandlers['presence:sync']());
 
@@ -308,9 +386,10 @@ describe('useScriptPresence', () => {
       expect(result.current.onlineUsers[0].mode).toBe('editing');
     });
 
-    it('drops the editing timer when the user leaves', () => {
+    it('drops the editing timer when the user leaves', async () => {
       setPresenceSnapshot(editing());
       const { result } = renderHook(() => useScriptPresence('s1', ME));
+      await flush();
       act(() => subscribeNow());
       act(() => capturedHandlers['presence:sync']());
       expect(result.current.onlineUsers).toHaveLength(1);

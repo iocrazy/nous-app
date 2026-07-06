@@ -111,17 +111,68 @@ export function useScriptPresence(
     if (!supabase) return;
 
     const selfId = me.userId;
-    const ch = supabase.channel('script-presence-' + scriptId, {
-      config: { presence: { key: selfId } },
-    });
+    let ch: RealtimeChannel | null = null;
+    let cancelled = false;
 
-    // (Re)start a user's 4 s editing-expiry timer and mark them an active editor.
-    const refreshEditor = (uid: string) => {
-      const existing = editingTimersRef.current.get(uid);
-      if (existing !== undefined) clearTimeout(existing);
-      editingTimersRef.current.set(
-        uid,
-        setTimeout(() => {
+    void (async () => {
+      // Apply the session token to the realtime socket BEFORE joining. Presence
+      // itself has no RLS, but we take the same path as the op-stream channel
+      // (see useScriptOpsRealtime for the anon-claims race) for consistency and
+      // so broadcast auth keeps working if presence ever gains it.
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      if (!token || cancelled) return; // no session, or unmounted mid-await
+      supabase.realtime.setAuth(token);
+
+      const channel = supabase.channel('script-presence-' + scriptId, {
+        config: { presence: { key: selfId } },
+      });
+
+      // (Re)start a user's 4 s editing-expiry timer and mark them an active editor.
+      const refreshEditor = (uid: string) => {
+        const existing = editingTimersRef.current.get(uid);
+        if (existing !== undefined) clearTimeout(existing);
+        editingTimersRef.current.set(
+          uid,
+          setTimeout(() => {
+            editingTimersRef.current.delete(uid);
+            setActiveEditors((prev) => {
+              if (!prev.has(uid)) return prev;
+              const next = new Set(prev);
+              next.delete(uid);
+              return next;
+            });
+          }, EDITING_EXPIRY_MS),
+        );
+        setActiveEditors((prev) => (prev.has(uid) ? prev : new Set(prev).add(uid)));
+      };
+
+      // Recompute the online set from the full presence snapshot (authoritative
+      // after any event); the local user is always filtered out.
+      const recompute = () => {
+        const state = channel.presenceState() as Record<string, PresenceEntry[]>;
+        const users: PresenceUser[] = [];
+        const present = new Set<string>();
+        for (const key of Object.keys(state)) {
+          const entries = state[key];
+          if (!entries || entries.length === 0) continue;
+          const p = entries[0];
+          const uid = typeof p.user_id === 'string' ? p.user_id : key;
+          if (uid === selfId) continue;
+          present.add(uid);
+          const pmode: PresenceMode = p.mode === 'editing' ? 'editing' : 'viewing';
+          users.push({
+            user_id: uid,
+            name: typeof p.name === 'string' ? p.name : uid,
+            focused_scene_id: typeof p.focused_scene_id === 'string' ? p.focused_scene_id : null,
+            mode: pmode,
+          });
+          if (pmode === 'editing') refreshEditor(uid);
+        }
+        // Drop editing timers/flags for users who have left the channel.
+        editingTimersRef.current.forEach((timer, uid) => {
+          if (present.has(uid)) return;
+          clearTimeout(timer);
           editingTimersRef.current.delete(uid);
           setActiveEditors((prev) => {
             if (!prev.has(uid)) return prev;
@@ -129,67 +180,32 @@ export function useScriptPresence(
             next.delete(uid);
             return next;
           });
-        }, EDITING_EXPIRY_MS),
-      );
-      setActiveEditors((prev) => (prev.has(uid) ? prev : new Set(prev).add(uid)));
-    };
-
-    // Recompute the online set from the full presence snapshot (authoritative
-    // after any event); the local user is always filtered out.
-    const recompute = () => {
-      const state = ch.presenceState() as Record<string, PresenceEntry[]>;
-      const users: PresenceUser[] = [];
-      const present = new Set<string>();
-      for (const key of Object.keys(state)) {
-        const entries = state[key];
-        if (!entries || entries.length === 0) continue;
-        const p = entries[0];
-        const uid = typeof p.user_id === 'string' ? p.user_id : key;
-        if (uid === selfId) continue;
-        present.add(uid);
-        const mode: PresenceMode = p.mode === 'editing' ? 'editing' : 'viewing';
-        users.push({
-          user_id: uid,
-          name: typeof p.name === 'string' ? p.name : uid,
-          focused_scene_id: typeof p.focused_scene_id === 'string' ? p.focused_scene_id : null,
-          mode,
         });
-        if (mode === 'editing') refreshEditor(uid);
-      }
-      // Drop editing timers/flags for users who have left the channel.
-      editingTimersRef.current.forEach((timer, uid) => {
-        if (present.has(uid)) return;
-        clearTimeout(timer);
-        editingTimersRef.current.delete(uid);
-        setActiveEditors((prev) => {
-          if (!prev.has(uid)) return prev;
-          const next = new Set(prev);
-          next.delete(uid);
-          return next;
+        setRawUsers(users);
+      };
+
+      // All .on() handlers are attached BEFORE .subscribe() (Realtime contract).
+      channel
+        .on('presence', { event: 'sync' }, () => { recompute(); })
+        .on('presence', { event: 'join' }, () => { recompute(); })
+        .on('presence', { event: 'leave' }, () => { recompute(); })
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') setSubscribed(true);
         });
-      });
-      setRawUsers(users);
-    };
 
-    // All .on() handlers are attached BEFORE .subscribe() (Realtime contract).
-    ch
-      .on('presence', { event: 'sync' }, () => { recompute(); })
-      .on('presence', { event: 'join' }, () => { recompute(); })
-      .on('presence', { event: 'leave' }, () => { recompute(); })
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') setSubscribed(true);
-      });
-
-    channelRef.current = ch;
+      ch = channel;
+      channelRef.current = channel;
+    })();
 
     return () => {
+      cancelled = true;
       if (trailingTimerRef.current !== null) {
         clearTimeout(trailingTimerRef.current);
         trailingTimerRef.current = null;
       }
       editingTimersRef.current.forEach((timer) => clearTimeout(timer));
       editingTimersRef.current.clear();
-      supabase.removeChannel(ch);
+      if (ch) supabase.removeChannel(ch);
       channelRef.current = null;
       lastTrackRef.current = 0;
       setSubscribed(false);
