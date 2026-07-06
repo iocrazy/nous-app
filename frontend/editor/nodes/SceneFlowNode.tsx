@@ -14,7 +14,7 @@ import type { SceneNodeData } from './sceneNodeMapper';
 
 function SceneFlowNodeImpl({ data }: NodeProps) {
   const { t } = useTranslation();
-  const { scene, summary } = data as unknown as SceneNodeData;
+  const { scene, summary, coverUrl } = data as unknown as SceneNodeData;
 
   const num = (scene.sort_order ?? 0) + 1;
   const heading = [scene.heading_int_ext, scene.location_text, scene.time_of_day]
@@ -26,6 +26,14 @@ function SceneFlowNodeImpl({ data }: NodeProps) {
   return (
     <div className="mh-flow-node mh-flow-scene" data-scene-id={scene.id}>
       <Handle type="target" position={Position.Top} className="mh-flow-handle" />
+      {coverUrl && (
+        <img
+          className="mh-flow-scene-cover"
+          src={coverUrl}
+          alt={t('editor.nodesShotCoverAlt')}
+          loading="lazy"
+        />
+      )}
       <div className="mh-flow-scene-head">
         <span className="mh-scene-num-badge">{num}</span>
         <span className="mh-flow-scene-heading">

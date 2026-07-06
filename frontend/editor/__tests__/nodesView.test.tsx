@@ -52,8 +52,10 @@ vi.mock('../../components/Toast', () => ({
   useToast: () => ({ addToast: vi.fn() }),
 }));
 
-import { MiniMap } from '@xyflow/react';
+import { MiniMap, ReactFlowProvider } from '@xyflow/react';
+import type { ComponentProps } from 'react';
 import { NodesView } from '../nodes/NodesView';
+import { SceneFlowNode } from '../nodes/SceneFlowNode';
 import { EditorShell } from '../components/EditorShell';
 
 /** Depth-first search for a rendered child element whose component type matches. */
@@ -332,6 +334,68 @@ describe('NodesView', () => {
         />,
       );
       expect(hasChildOfType(capturedProps.children, MiniMap)).toBe(true);
+    });
+  });
+
+  describe('shot cover thumbnails', () => {
+    type SceneNodeProps = ComponentProps<typeof SceneFlowNode>;
+    const renderSceneNode = (data: Record<string, unknown>) =>
+      render(
+        <ReactFlowProvider>
+          <SceneFlowNode {...({ id: 'sc-200', data } as unknown as SceneNodeProps)} />
+        </ReactFlowProvider>,
+      );
+
+    it('renders a cover image on the scene card when coverUrl is set', () => {
+      renderSceneNode({ scene: scene({ id: '200' }), summary: '', coverUrl: 'http://img/9' });
+      const img = screen.getByRole('img');
+      expect(img).toHaveAttribute('src', 'http://img/9');
+    });
+
+    it('renders no image when coverUrl is absent (zero layout regression)', () => {
+      renderSceneNode({ scene: scene({ id: '200' }), summary: '' });
+      expect(screen.queryByRole('img')).toBeNull();
+    });
+
+    it('threads loaded shot covers onto scene nodes', async () => {
+      svc.listShots.mockResolvedValue([
+        { id: 'sh1', scene_id: '200', image_url: 'http://img/9', status: 'done' },
+      ]);
+      render(
+        <NodesView
+          scenes={[scene({ id: '200' })]}
+          chapters={[]}
+          onOpenScene={vi.fn()}
+          scriptId="1"
+          onReload={vi.fn()}
+        />,
+      );
+      await waitFor(() => {
+        const node = (capturedProps.nodes as Array<Record<string, unknown>>).find(
+          (n) => n.type === 'sceneNode',
+        );
+        expect((node!.data as { coverUrl?: string }).coverUrl).toBe('http://img/9');
+      });
+    });
+
+    it('still renders the canvas when listShots rejects (silent degrade)', async () => {
+      svc.listShots.mockRejectedValue(new Error('boom'));
+      render(
+        <NodesView
+          scenes={[scene({ id: '200' })]}
+          chapters={[]}
+          onOpenScene={vi.fn()}
+          scriptId="1"
+          onReload={vi.fn()}
+        />,
+      );
+      const node = (capturedProps.nodes as Array<Record<string, unknown>>).find(
+        (n) => n.type === 'sceneNode',
+      );
+      expect(node).toBeDefined();
+      expect((node!.data as { coverUrl?: string }).coverUrl).toBeUndefined();
+      // Let the rejected fetch settle so it doesn't leak as an unhandled rejection.
+      await waitFor(() => expect(svc.listShots).toHaveBeenCalled());
     });
   });
 

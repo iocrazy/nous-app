@@ -152,6 +152,17 @@ describe('sceneNodeMapper.mapToFlow', () => {
     expect(edges).toHaveLength(0);
   });
 
+  it('threads a shot cover url onto the matching scene node only (Task 4)', () => {
+    const scenes = [makeScene({ id: '200' }), makeScene({ id: '201' })];
+    const covers = new Map([['200', '/api/v1/generated-media/9/cover']]);
+    const { nodes } = mapToFlow(scenes, [], covers);
+    const s200 = nodes.find((n) => n.id === 'sc-200')!.data as { coverUrl?: string };
+    const s201 = nodes.find((n) => n.id === 'sc-201')!.data as { coverUrl?: string };
+    expect(s200.coverUrl).toBe('/api/v1/generated-media/9/cover');
+    // Scenes without a cover entry carry no coverUrl at all (zero-regression).
+    expect('coverUrl' in s201).toBe(false);
+  });
+
   it('never mutates its inputs and returns only string ids', () => {
     const chapters = [makeChapter({ id: '100' })];
     const scenes = [makeScene({ id: '200', chapter_id: '100' })];

@@ -762,6 +762,11 @@ export const EDITOR_SHELL_STYLES = `
   box-shadow:var(--shadow-island); padding:11px 13px 12px; font-family:var(--sans);
 }
 .mh-flow-handle{ width:7px; height:7px; background:var(--indigo); border:none; }
+.mh-flow-scene-cover{
+  display:block; width:100%; height:72px; object-fit:cover;
+  border-radius:var(--radius-sm); border:1px solid var(--surface-border);
+  margin-bottom:9px;
+}
 .mh-flow-scene-head{ display:flex; align-items:center; gap:8px; }
 .mh-flow-scene-heading{
   font-size:11px; font-weight:700; letter-spacing:0.02em; text-transform:uppercase;

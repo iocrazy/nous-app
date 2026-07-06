@@ -56,6 +56,8 @@ export interface ChapterNodeData {
 export interface SceneNodeData {
   scene: SceneDoc;
   summary: string;
+  /** Same-origin durable cover of the scene's first shot with an image (Task 4). */
+  coverUrl?: string;
 }
 
 export interface FlowNode {
@@ -110,7 +112,11 @@ function chapterNodeData(ch: ScriptChapter): ChapterNodeData {
  * - edges: `ch-X → sc-Y` for each scene's chapter_id, plus chapter→chapter
  *   edges from `parent_chapter_id`.
  */
-export function mapToFlow(scenes: SceneDoc[], chapters: ScriptChapter[]): FlowGraph {
+export function mapToFlow(
+  scenes: SceneDoc[],
+  chapters: ScriptChapter[],
+  shotCoverByScene?: Map<string, string>,
+): FlowGraph {
   const chapterById = new Map<string, ScriptChapter>(
     chapters.map((ch) => [String(ch.id), ch]),
   );
@@ -154,11 +160,16 @@ export function mapToFlow(scenes: SceneDoc[], chapters: ScriptChapter[]): FlowGr
       position = { x: baseX + SCENE_X_OFFSET, y: indexInGroup * SCENE_Y_STEP };
     }
 
+    const coverUrl = shotCoverByScene?.get(String(scene.id));
     return {
       id: `sc-${scene.id}`,
       type: 'sceneNode' as const,
       position,
-      data: { scene, summary: sceneSummary(scene) } satisfies SceneNodeData,
+      data: {
+        scene,
+        summary: sceneSummary(scene),
+        ...(coverUrl ? { coverUrl } : {}),
+      } satisfies SceneNodeData,
     };
   });
 

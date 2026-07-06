@@ -37,7 +37,7 @@ import { GuideOverlay } from './GuideOverlay';
 import { computeAlignmentGuides, type AlignmentGuides, type Rect } from './alignmentGuides';
 import { useCanvasShortcuts } from './useCanvasShortcuts';
 import { useConvertPoll } from '../useConvertPoll';
-import { updateSceneMeta, updateChapterPosition } from '../sceneService';
+import { updateSceneMeta, updateChapterPosition, listShots } from '../sceneService';
 import type { SceneDoc } from '../types';
 import type { ScriptChapter } from '../../types';
 
@@ -88,7 +88,11 @@ export interface NodesViewProps {
 
 export function NodesView({ scenes, chapters, onOpenScene, scriptId, onReload }: NodesViewProps) {
   const { t } = useTranslation();
-  const graph = useMemo(() => mapToFlow(scenes, chapters), [scenes, chapters]);
+  const [shotCovers, setShotCovers] = useState<Map<string, string>>(() => new Map());
+  const graph = useMemo(
+    () => mapToFlow(scenes, chapters, shotCovers),
+    [scenes, chapters, shotCovers],
+  );
   const [nodes, setNodes] = useState<Node[]>(() => graph.nodes as Node[]);
   const [guides, setGuides] = useState<AlignmentGuides>(NO_GUIDES);
   const { startPoll } = useConvertPoll(scriptId);
@@ -103,6 +107,39 @@ export function NodesView({ scenes, chapters, onOpenScene, scriptId, onReload }:
   useEffect(() => {
     setNodes(graph.nodes as Node[]);
   }, [graph]);
+
+  // Load each scene's first shot cover, once per scene set, and build a
+  // sceneId → cover-url map the mapper threads onto the cards. Best-effort: a
+  // scene whose shots fail to load just shows no cover (console.error, no toast),
+  // and the map is only committed when at least one cover exists so the no-image
+  // path never re-seeds the canvas (zero regression).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.all(
+        scenes.map(async (s): Promise<[string, string | null]> => {
+          const sceneId = String(s.id);
+          try {
+            const shots = await listShots(sceneId);
+            const withImage = shots.find((shot) => !!shot.image_url);
+            return [sceneId, withImage?.image_url ?? null];
+          } catch (err) {
+            console.error('[NodesView] failed to load shot covers for scene', sceneId, err);
+            return [sceneId, null];
+          }
+        }),
+      );
+      if (cancelled) return;
+      const map = new Map<string, string>();
+      for (const [sceneId, url] of entries) {
+        if (url) map.set(sceneId, url);
+      }
+      if (map.size > 0) setShotCovers(map);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [scenes]);
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => setNodes((nds) => applyNodeChanges(changes, nds)),
