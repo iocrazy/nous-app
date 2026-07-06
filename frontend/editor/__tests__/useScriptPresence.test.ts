@@ -77,7 +77,7 @@ describe('useScriptPresence', () => {
     ({ capturedHandlers, fakeChannel, fakeSupabase, setPresenceSnapshot, subscribeNow } =
       buildFakes());
     vi.mocked(getSupabaseClient).mockReturnValue(
-      fakeSupabase as ReturnType<typeof getSupabaseClient>,
+      fakeSupabase as unknown as ReturnType<typeof getSupabaseClient>,
     );
   });
 
@@ -251,5 +251,76 @@ describe('useScriptPresence', () => {
 
     act(() => vi.advanceTimersByTime(5000));
     expect(fakeChannel.track).toHaveBeenCalledTimes(1); // trailing timer was cleared
+  });
+
+  // -------------------------------------------------------------------------
+  // 8. Editing-mode 4 s expiry (C3)
+  // -------------------------------------------------------------------------
+  describe('editing-mode expiry', () => {
+    const editing = (over: Record<string, unknown> = {}) => ({
+      'other-456': [
+        { user_id: 'other-456', name: 'Other', focused_scene_id: 's2', mode: 'editing', ...over },
+      ],
+    });
+    const viewing = () => ({
+      'other-456': [
+        { user_id: 'other-456', name: 'Other', focused_scene_id: 's2', mode: 'viewing' },
+      ],
+    });
+
+    it('shows editing while fresh, downgrades to viewing after 4000 ms', () => {
+      setPresenceSnapshot(editing());
+      const { result } = renderHook(() => useScriptPresence('s1', ME));
+      act(() => subscribeNow());
+      act(() => capturedHandlers['presence:sync']());
+      expect(result.current.onlineUsers[0].mode).toBe('editing');
+
+      act(() => vi.advanceTimersByTime(4000));
+      expect(result.current.onlineUsers[0].mode).toBe('viewing');
+    });
+
+    it('a fresh editing track within the window keeps it editing (sticky refresh)', () => {
+      setPresenceSnapshot(editing());
+      const { result } = renderHook(() => useScriptPresence('s1', ME));
+      act(() => subscribeNow());
+      act(() => capturedHandlers['presence:sync']());
+
+      act(() => vi.advanceTimersByTime(3000));
+      act(() => capturedHandlers['presence:sync']()); // refresh — timer resets
+      act(() => vi.advanceTimersByTime(3000)); // 6000 total, but only 3000 since refresh
+      expect(result.current.onlineUsers[0].mode).toBe('editing');
+
+      act(() => vi.advanceTimersByTime(1000)); // now 4000 past the refresh
+      expect(result.current.onlineUsers[0].mode).toBe('viewing');
+    });
+
+    it('a transient viewing track does not clear a still-fresh editing badge', () => {
+      setPresenceSnapshot(editing());
+      const { result } = renderHook(() => useScriptPresence('s1', ME));
+      act(() => subscribeNow());
+      act(() => capturedHandlers['presence:sync']());
+
+      // Their save flaps to saved → a viewing track arrives 1 s later.
+      act(() => vi.advanceTimersByTime(1000));
+      setPresenceSnapshot(viewing());
+      act(() => capturedHandlers['presence:sync']());
+      // Still within the 4 s editing window → stays editing (no flicker).
+      expect(result.current.onlineUsers[0].mode).toBe('editing');
+    });
+
+    it('drops the editing timer when the user leaves', () => {
+      setPresenceSnapshot(editing());
+      const { result } = renderHook(() => useScriptPresence('s1', ME));
+      act(() => subscribeNow());
+      act(() => capturedHandlers['presence:sync']());
+      expect(result.current.onlineUsers).toHaveLength(1);
+
+      setPresenceSnapshot({});
+      act(() => capturedHandlers['presence:leave']());
+      expect(result.current.onlineUsers).toEqual([]);
+      // No lingering timer fires after they left.
+      act(() => vi.advanceTimersByTime(5000));
+      expect(result.current.onlineUsers).toEqual([]);
+    });
   });
 });

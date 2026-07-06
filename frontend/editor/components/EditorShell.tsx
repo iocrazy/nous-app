@@ -69,6 +69,7 @@ import { useScriptOpsRealtime } from '../collab/useScriptOpsRealtime';
 import { PresenceAvatars } from '../collab/PresenceAvatars';
 import { ScenePresenceContext, type ScenePresenceMap } from '../collab/scenePresenceContext';
 import type { RemoteOpRow } from '../useSceneSync';
+import { reportError } from '../../services/errorReporter';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -582,15 +583,15 @@ export function EditorShell({
 
   // ── Collaboration presence (Phase B P5 / C1) ───────────────────────────────
   // Track who else is in this script and which scene they are focused on. The
-  // hook receives null when the flag is off, so nothing subscribes. `isDirty` is
-  // a static viewing signal for Task 1; Task 3 wires it to the real sync queue.
+  // hook receives null when the flag is off, so nothing subscribes. `isDirty`
+  // drives our broadcast mode: any scene not fully saved → 'editing' (C3).
   const presenceSelf =
     COLLAB_ENABLED && currentUserId
       ? {
           userId: currentUserId,
           name: currentUserName ?? currentUserId,
           focusedSceneId: state.activeSceneId,
-          isDirty: false,
+          isDirty: aggregateState !== 'saved',
         }
       : null;
   const { onlineUsers } = useScriptPresence(
@@ -632,6 +633,30 @@ export function EditorShell({
     dispatchToScene,
     onReconcile: reload,
   });
+
+  // ── Divergence beacon (Phase B P5 / C3) ────────────────────────────────────
+  // One low-frequency signal each time a scene ENTERS the conflict state so the
+  // collaboration divergence rate stays observable: console + the frontend log
+  // pipeline (frontend_error_logs; the only persistent client channel — the
+  // `collab_divergence` metadata tag makes these greppable/filterable in
+  // monitoring since divergence is expected, not a fault).
+  const divergedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!COLLAB_ENABLED) return;
+    const now = new Set(
+      scenes.filter((s) => syncStates[s.id]?.saveState === 'conflict').map((s) => s.id),
+    );
+    for (const sceneId of now) {
+      if (divergedRef.current.has(sceneId)) continue;
+      console.info('[collab] divergence', { sceneId });
+      void reportError(`[collab] divergence scene=${sceneId}`, {
+        type: 'runtime',
+        component: 'EditorShell',
+        metadata: { kind: 'collab_divergence', sceneId, scriptId },
+      });
+    }
+    divergedRef.current = now;
+  }, [scenes, syncStates, scriptId]);
 
   // Cold start ONLY when the script is truly empty. A legacy script with
   // prose chapters but no scenes must land on the chapter fallback cards
