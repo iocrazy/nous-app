@@ -431,6 +431,51 @@ async def test_generate_step_composes_prompt_and_returns_url():
     assert "INT - Hall" in prompt
 
 
+def test_generate_workflow_default_provider_is_none_for_db_resolution():
+    """The workflow's default provider is None (not 'openai'): the image
+    provider_registry ships EMPTY, so a named provider would only KeyError.
+    None threads down to generate_image, which resolves the admin-enabled image
+    model from the DB catalog (house rule: provider config lives in the DB)."""
+    from app.workflows import script_shot_generate as m
+
+    assert m._DEFAULT_PROVIDER is None
+    assert m._DEFAULT_MODEL == "dall-e-3"  # legacy sentinel → yields to catalog
+
+
+async def test_generate_step_threads_none_provider_to_service():
+    """provider=None (the workflow default) reaches generate_image as
+    provider_name=None, driving the DB-catalog resolution path."""
+    from app.workflows import script_shot_generate as m
+
+    shot_repo = MagicMock()
+    shot_repo.get_by_id = AsyncMock(
+        return_value={"id": int(_SHOT), "scene_id": int(_SCENE), "description": "d"}
+    )
+    scene_repo = MagicMock()
+    scene_repo.get_by_id = AsyncMock(return_value={})
+    svc = MagicMock()
+    svc.generate_image = AsyncMock(return_value={"image_url": "http://cdn/x.png"})
+
+    with (
+        patch(
+            "app.repositories.script_shot_repository.get_script_shot_repository",
+            MagicMock(return_value=shot_repo),
+        ),
+        patch(
+            "app.repositories.script_scene_repository.get_script_scene_repository",
+            MagicMock(return_value=scene_repo),
+        ),
+        patch(
+            "app.services.storyboard.storyboard_ai_service.StoryboardAIService",
+            MagicMock(return_value=svc),
+        ),
+    ):
+        url = await m.generate_shot_image_step(_SHOT, m._DEFAULT_MODEL, None)
+
+    assert url == "http://cdn/x.png"
+    assert svc.generate_image.call_args.kwargs["provider_name"] is None
+
+
 async def test_generate_step_raises_when_no_url():
     from app.workflows import script_shot_generate as m
 

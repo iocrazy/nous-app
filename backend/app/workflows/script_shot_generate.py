@@ -40,11 +40,15 @@ from typing import Any, Optional
 from dbos import DBOS
 from loguru import logger
 
-# Default image provider/model — same defaults as ``storyboard_image_workflow``.
-# Threaded as workflow kwargs so a caller can override once shot-level provider
-# selection lands; the generate endpoint is flag-gated (FEATURE_SHOT_GENERATE).
+# Default image provider/model. ``provider=None`` means "resolve from the DB
+# mediahub_models catalog" — the image ``provider_registry`` ships EMPTY, so a
+# named provider like "openai" would only KeyError; passing None lets
+# ``StoryboardAIService.generate_image`` resolve the admin-enabled image model
+# (house rule: provider config lives in the DB, not env). A caller may still
+# thread an explicit provider/model to override. ``_DEFAULT_MODEL`` stays the
+# legacy sentinel: generate_image treats it as "use the catalog row's model".
 _DEFAULT_MODEL = "dall-e-3"
-_DEFAULT_PROVIDER = "openai"
+_DEFAULT_PROVIDER: Optional[str] = None
 
 
 def _compose_prompt(shot: dict[str, Any], scene: Optional[dict[str, Any]]) -> str:
@@ -91,7 +95,7 @@ def _compose_prompt(shot: dict[str, Any], scene: Optional[dict[str, Any]]) -> st
 async def generate_shot_image_step(
     shot_id: str,
     model: str,
-    provider: str,
+    provider: Optional[str],
 ) -> str:
     """Read the shot + its scene, compose the prompt, and run the image provider.
 
@@ -149,7 +153,7 @@ async def persist_generation(
     shot_id: str,
     provider_url: str,
     model: str,
-    provider: str,
+    provider: Optional[str],
     user_id: Optional[str],
 ) -> dict[str, str]:
     """Persist the provider's ephemeral image through the generated-media store.
@@ -247,7 +251,7 @@ async def script_shot_generate_workflow(
     shot_id: str,
     *,
     model: str = _DEFAULT_MODEL,
-    provider: str = _DEFAULT_PROVIDER,
+    provider: Optional[str] = _DEFAULT_PROVIDER,
     user_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """DBOS orchestrator: shot → generated image url on the shot row.
