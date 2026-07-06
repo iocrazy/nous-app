@@ -178,3 +178,44 @@ async def test_delete_override_resets_to_defaults():
 
     repo.delete_override.assert_awaited_once()
     assert repo.delete_override.await_args.kwargs["user_id"] == USER_ID
+
+
+@pytest.mark.asyncio
+async def test_admin_catalog_update_writes_base_row_versioned():
+    """Admin catalog PUT edits the BASE preset row via the versioned path —
+    user overrides are a separate table and stay untouched."""
+    from app.api.admin.agents_router import AdminAgentUpdate, update_catalog_agent
+
+    auth = MagicMock()
+    auth.user_id = str(USER_ID)
+
+    repo = MagicMock()
+    repo.get_by_slug = AsyncMock(return_value=dict(BASE_AGENT))
+    repo.update_fields_versioned = AsyncMock()
+    repo.count_overrides_by_agent = AsyncMock(return_value={})
+
+    with patch("app.api.admin.agents_router.get_agent_repository", return_value=repo):
+        await update_catalog_agent(
+            "analyze", AdminAgentUpdate(soul_md="new base soul"), auth
+        )
+
+    repo.update_fields_versioned.assert_awaited_once()
+    args = repo.update_fields_versioned.await_args
+    assert args.args[1] == {"soul_md": "new base soul"}
+
+
+@pytest.mark.asyncio
+async def test_admin_catalog_update_404_for_non_preset():
+    from fastapi import HTTPException
+
+    from app.api.admin.agents_router import AdminAgentUpdate, update_catalog_agent
+
+    auth = MagicMock()
+    auth.user_id = str(USER_ID)
+    repo = MagicMock()
+    repo.get_by_slug = AsyncMock(return_value={**BASE_AGENT, "is_system_preset": False})
+
+    with patch("app.api.admin.agents_router.get_agent_repository", return_value=repo):
+        with pytest.raises(HTTPException) as exc:
+            await update_catalog_agent("analyze", AdminAgentUpdate(name="x"), auth)
+    assert exc.value.status_code == 404

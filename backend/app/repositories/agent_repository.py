@@ -346,6 +346,40 @@ class AgentRepository:
             logger.error(f"Failed to delete override for agent {agent_id}: {e}")
             return False
 
+    async def list_presets(self) -> List[Dict[str, Any]]:
+        """All system-preset agents (the admin catalog), ordered by name."""
+        try:
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(AiAgents)
+                    .where(AiAgents.is_system_preset.is_(True))
+                    .order_by(AiAgents.name)
+                )
+                return [_agent_to_dict(r) for r in result.scalars().all()]
+        except Exception as e:
+            logger.error(f"Failed to list preset agents: {e}")
+            return []
+
+    async def count_overrides_by_agent(self) -> Dict[str, Dict[str, int]]:
+        """agent_id(str) → {'user': n, 'team': m} — how many users/teams
+        customized each preset (admin catalog view)."""
+        try:
+            stmt = select(
+                AgentOverrides.agent_id,
+                AgentOverrides.user_id,
+                AgentOverrides.team_id,
+            )
+            out: Dict[str, Dict[str, int]] = {}
+            async with read_scope() as session:
+                result = await session.execute(stmt)
+                for aid, uid, _tid in result.all():
+                    bucket = out.setdefault(str(aid), {"user": 0, "team": 0})
+                    bucket["user" if uid else "team"] += 1
+            return out
+        except Exception as e:
+            logger.error(f"Failed to count overrides: {e}")
+            return {}
+
     async def list_override_scopes(
         self, *, user_id: UUID, team_ids: List[int]
     ) -> Dict[str, List[str]]:
