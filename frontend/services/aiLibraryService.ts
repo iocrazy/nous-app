@@ -452,19 +452,40 @@ export const aiLibraryService = {
 
   /**
    * List chat sessions for one agent, filtered to the caller's own.
-   * Optional ``projectId`` narrows to sessions opened from that project.
+   * Optional ``projectId`` narrows to sessions opened from that project;
+   * ``search`` filters by title server-side (whole history, not one page).
    */
   async listChatSessions(
     slug: string,
     projectId?: number,
     limit = 50,
+    search?: string,
   ): Promise<ChatSession[]> {
     const qs = new URLSearchParams({ limit: String(limit) });
     if (projectId != null) qs.set('project_id', String(projectId));
+    if (search) qs.set('search', search);
     const resp = await fetch(
       `${base()}/agents/${encodeURIComponent(slug)}/sessions?${qs.toString()}`,
       { headers: await getAuthHeaders() },
     );
+    return handle<ChatSession[]>(resp);
+  },
+
+  /**
+   * Cross-agent session list for the "All sessions" view: every chat
+   * session the caller owns, newest first, each carrying ``agent_slug``
+   * so the UI can badge and jump to the source agent. ``search`` is a
+   * server-side title filter.
+   */
+  async listAllChatSessions(
+    search?: string,
+    limit = 50,
+  ): Promise<ChatSession[]> {
+    const qs = new URLSearchParams({ limit: String(limit) });
+    if (search) qs.set('search', search);
+    const resp = await fetch(`${base()}/sessions?${qs.toString()}`, {
+      headers: await getAuthHeaders(),
+    });
     return handle<ChatSession[]>(resp);
   },
 

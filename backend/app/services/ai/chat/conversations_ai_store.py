@@ -277,9 +277,14 @@ class ConversationsAiStore:
         agent_slug: Optional[str],
         project_id: Optional[int],
         limit: int,
+        search: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Return the caller's non-archived direct_agent sessions, newest
-        conversation_ai_meta.updated_at first."""
+        conversation_ai_meta.updated_at first.
+
+        ``search`` is a case-insensitive title substring filter applied in
+        SQL (ILIKE) — the whole history is searchable, not just one page.
+        """
         sql = (
             self._JOIN_SELECT
             + " AND cm.user_id = :uid"
@@ -292,6 +297,14 @@ class ConversationsAiStore:
         if project_id is not None:
             sql += " AND c.project_id = :project_id"
             params["project_id"] = _bigint(project_id)
+        if search:
+            # Escape LIKE metacharacters so user input matches literally
+            # (backslash is Postgres' default ILIKE escape char).
+            escaped = (
+                search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            )
+            sql += " AND c.title ILIKE :search"
+            params["search"] = f"%{escaped}%"
         sql += " ORDER BY m.updated_at DESC LIMIT :limit"
 
         rows = await db_engine.fetch_all(sql, params)

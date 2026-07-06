@@ -2093,14 +2093,42 @@ async def list_chat_sessions(
     auth: AuthDep,
     project_id: Optional[int] = None,
     limit: int = 50,
+    search: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     if limit < 1 or limit > 200:
         raise HTTPException(status_code=400, detail="limit must be 1..200")
     svc = AILibraryChatService()
     user_uuid = _coerce_user_uuid(auth.user_id)
     return await svc.list_sessions(
-        user_id=user_uuid, agent_slug=slug, project_id=project_id, limit=limit
+        user_id=user_uuid,
+        agent_slug=slug,
+        project_id=project_id,
+        limit=limit,
+        search=search,
     )
+
+
+@router.get(
+    "/sessions",
+    response_model=List[SessionOut],
+    summary="List chat sessions this caller owns across ALL agents",
+)
+async def list_all_chat_sessions(
+    auth: AuthDep,
+    search: Optional[str] = None,
+    limit: int = 50,
+) -> List[Dict[str, Any]]:
+    """Cross-agent session list for the floating chat's "All sessions" view.
+
+    Same rows as the per-agent endpoint minus the agent filter; each item
+    carries ``agent_slug`` so the UI can badge the source agent and jump to
+    it on select. ``search`` is a server-side ILIKE title filter — the whole
+    history is searchable, not just the returned page."""
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=400, detail="limit must be 1..200")
+    svc = AILibraryChatService()
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    return await svc.list_sessions(user_id=user_uuid, limit=limit, search=search)
 
 
 @router.get(

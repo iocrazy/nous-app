@@ -125,18 +125,21 @@ class AILibraryChatService:
         agent_slug: Optional[str] = None,
         project_id: Optional[int] = None,
         limit: int = 50,
+        search: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Return the caller's sessions, newest-updated first.
 
         Filters out soft-deleted (``status='deleted'``) rows. Optional
         agent_slug + project_id narrow the result set to what the UI is
-        currently viewing.
+        currently viewing; ``search`` is a server-side (ILIKE) title filter
+        so the whole history is searchable, not just the returned page.
         """
         return await self._store.list_sessions(
             user_id=str(user_id),
             agent_slug=agent_slug,
             project_id=project_id,
             limit=limit,
+            search=search,
         )
 
     async def get_session(self, session_id: str, *, user_id: UUID) -> Dict[str, Any]:
