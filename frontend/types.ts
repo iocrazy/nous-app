@@ -867,6 +867,7 @@ export interface ScriptProject {
   name: string;
   description?: string;
   display_code?: string;
+  episode_id?: string | null;
   settings_json?: Record<string, unknown>;
   viewport_json?: { x: number; y: number; zoom: number };
   status: 'active' | 'archived' | 'deleted';

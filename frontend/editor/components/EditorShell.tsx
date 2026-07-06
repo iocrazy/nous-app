@@ -20,9 +20,11 @@ import {
   applyOps,
   convertToScenes,
   createScene,
+  listEpisodes,
   listScenes,
   moveScene,
   newElementId,
+  type Episode,
 } from '../sceneService';
 import { fetchScriptProject } from '../../services/scriptService';
 import { useToast } from '../../components/Toast';
@@ -50,6 +52,7 @@ import { SceneRail } from './SceneRail';
 import { RailModules, type RailView } from './RailModules';
 import { NodesView } from '../nodes/NodesView';
 import { OutlineView } from './OutlineView';
+import { EpisodePanel } from './EpisodePanel';
 import { RailEntities } from './RailEntities';
 import { deriveRailCharacters, deriveRailLocations } from '../railDerive';
 import { ElementToolbar } from './ElementToolbar';
@@ -73,6 +76,12 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
   const { addToast } = useToast();
   const [scenes, setScenes] = useState<SceneDoc[]>([]);
   const [chapters, setChapters] = useState<ScriptChapter[]>([]);
+  // Episode dimension (Task 5): the owning project, this script's episode, and
+  // the project's episode list power the rail Ep selector + management panel.
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [currentEpisodeId, setCurrentEpisodeId] = useState<string | null>(null);
+  const [episodes, setEpisodes] = useState<Episode[]>([]);
+  const [episodePanelOpen, setEpisodePanelOpen] = useState(false);
   const [converting, setConverting] = useState<Record<string, boolean>>({});
   const [loadState, setLoadState] = useState<LoadState>('loading');
   // Central-column view: the script sheet or the scene-node projection. The top
@@ -120,16 +129,43 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
     }
   }, [scriptId]);
 
-  // Chapters power the legacy prose fallback (Task 10). Failure is non-fatal:
-  // the scene editor still works, we just cannot offer the Convert cards.
+  // Chapters power the legacy prose fallback (Task 10); the same fetch carries
+  // the owning project id + this script's episode (Task 5). Failure is
+  // non-fatal: the scene editor still works, we just lose the Convert cards and
+  // the episode selector falls back to its "Ep 1" label.
   const loadChapters = useCallback(async () => {
     try {
       const project = await fetchScriptProject(scriptId);
       setChapters(project.chapters ?? []);
+      setProjectId(project.project_id ?? null);
+      setCurrentEpisodeId(project.episode_id ?? null);
     } catch (err) {
       console.error('[EditorShell] failed to load chapters', err);
     }
   }, [scriptId]);
+
+  // The project's episode list feeds the rail Ep selector + management panel.
+  const loadEpisodes = useCallback(async (pid: string) => {
+    try {
+      setEpisodes(await listEpisodes(pid));
+    } catch (err) {
+      console.error('[EditorShell] failed to load episodes', err);
+    }
+  }, []);
+
+  // After an episode mutation (rename / create / delete / reassign) re-fetch the
+  // project (its episode_id may have changed) and the episode list.
+  const reloadEpisodes = useCallback(async () => {
+    const project = await fetchScriptProject(scriptId).catch((err) => {
+      console.error('[EditorShell] failed to reload project', err);
+      return null;
+    });
+    if (project) {
+      setProjectId(project.project_id ?? null);
+      setCurrentEpisodeId(project.episode_id ?? null);
+      if (project.project_id) await loadEpisodes(project.project_id);
+    }
+  }, [scriptId, loadEpisodes]);
 
   const reloadAll = useCallback(async () => {
     await Promise.all([reload(), loadChapters()]);
@@ -158,6 +194,11 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
       cancelled = true;
     };
   }, [scriptId, loadChapters]);
+
+  // Once the owning project is known, load its episode list for the selector.
+  useEffect(() => {
+    if (projectId) void loadEpisodes(projectId);
+  }, [projectId, loadEpisodes]);
 
   // Viewport auto-highlight: mark the most-visible SceneBlock active. jsdom has
   // no IntersectionObserver, so feature-detect and no-op there.
@@ -388,6 +429,15 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
     return state.nextInsertType;
   })();
 
+  // Current episode's display title for the rail selector (#1006: compare ids
+  // as strings). Falls back to "Ep 1" when the script has no episode yet.
+  const currentEpisodeTitle = useMemo(() => {
+    const ep = episodes.find(
+      (e) => currentEpisodeId != null && String(e.id) === String(currentEpisodeId),
+    );
+    return ep?.title ?? t('editor.episodeFallback');
+  }, [episodes, currentEpisodeId, t]);
+
   // Script-wide CAST names feed the @-mention / character-cue picker.
   const mentionCandidates = useMemo(() => deriveStatistics(scenes).cast, [scenes]);
 
@@ -537,11 +587,29 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
                   ‹
                 </button>
               </div>
-              <div className="mh-ep-selector">
-                <div className="mh-ep-name">{t('editor.episodeOne')}</div>
-                <div className="mh-ep-sub">
-                  {t('editor.sceneCount', { count: scenes.length })}
-                </div>
+              <div className="mh-ep-selector-wrap">
+                <button
+                  type="button"
+                  className="mh-ep-selector"
+                  aria-expanded={episodePanelOpen}
+                  aria-label={t('editor.manageEpisodes')}
+                  onClick={() => setEpisodePanelOpen((v) => !v)}
+                >
+                  <div className="mh-ep-name">{currentEpisodeTitle}</div>
+                  <div className="mh-ep-sub">
+                    {t('editor.sceneCount', { count: scenes.length })}
+                  </div>
+                </button>
+                {episodePanelOpen && projectId && (
+                  <EpisodePanel
+                    scriptId={scriptId}
+                    projectId={projectId}
+                    episodes={episodes}
+                    currentEpisodeId={currentEpisodeId}
+                    onChanged={reloadEpisodes}
+                    onClose={() => setEpisodePanelOpen(false)}
+                  />
+                )}
               </div>
             </div>
             <RailModules activeView={railView} onSelect={setRailView} />

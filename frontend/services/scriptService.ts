@@ -48,7 +48,9 @@ export async function createScriptProject(data: {
 
 export async function updateScriptProject(
   scriptId: string,
-  data: Partial<Pick<ScriptProject, 'name' | 'description' | 'status' | 'settings_json'>>,
+  data: Partial<
+    Pick<ScriptProject, 'name' | 'description' | 'status' | 'settings_json' | 'episode_id'>
+  >,
 ): Promise<ScriptProject> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${getApiUrl()}/api/v1/scripts/projects/${scriptId}`, {

@@ -2416,6 +2416,16 @@
     "outlineEmptyGroup": "暂无场景",
     "outlineOpenScene": "在剧本中打开场景",
     "editSceneHeading": "编辑场景标题",
-    "sceneHeadingEmpty": "设置场景标题"
+    "sceneHeadingEmpty": "设置场景标题",
+    "episodesTitle": "剧集",
+    "newEpisode": "新建剧集",
+    "manageEpisodes": "管理剧集",
+    "episodeFallback": "Ep 1",
+    "epCurrent": "当前",
+    "epDelete": "删除剧集",
+    "epDeleteBlocked": "剧集下有剧本，无法删除",
+    "epRename": "重命名剧集",
+    "epScriptsTitle": "该剧集的剧本数",
+    "epClose": "关闭剧集面板"
   }
 }

@@ -17,11 +17,12 @@ import uuid as _uuid
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
+from sqlalchemy import and_
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import insert, select, update
+from sqlalchemy import func, insert, select, update
 
 from app.db.session import read_scope, write_scope
-from app.models import Episodes
+from app.models import Episodes, ScriptProjects
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
 
 _EPISODES_N2A: Dict[str, str] = _name_to_attr(Episodes)
@@ -69,15 +70,29 @@ class EpisodeRepository:
         pass
 
     async def list_by_project(self, project_id: str) -> List[Dict[str, Any]]:
-        """All episodes for a project, ordered by sort_order."""
+        """All episodes for a project, ordered by sort_order, each annotated
+        with ``script_count`` — the number of non-deleted scripts pointing at
+        it. The UI gates deletion on this: the ``episode_id`` FK is ON DELETE
+        RESTRICT, so a non-empty episode cannot be removed."""
         try:
             async with read_scope() as session:
                 result = await session.execute(
-                    select(Episodes)
+                    select(Episodes, func.count(ScriptProjects.id))
+                    .outerjoin(
+                        ScriptProjects,
+                        and_(
+                            ScriptProjects.episode_id == Episodes.id,
+                            ScriptProjects.status != "deleted",
+                        ),
+                    )
                     .where(Episodes.project_id == _bigint(project_id))
+                    .group_by(Episodes.id)
                     .order_by(Episodes.sort_order.asc())
                 )
-                return [_row(r) for r in result.scalars().all()]
+                return [
+                    {**_row(ep), "script_count": int(count or 0)}
+                    for ep, count in result.all()
+                ]
         except Exception as e:
             logger.error(f"Failed to list episodes for project {project_id}: {e}")
             return []

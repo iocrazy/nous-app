@@ -25,6 +25,9 @@ class ScriptProjectUpdate(BaseModel):
     description: Optional[str] = Field(None, max_length=2000)
     status: Optional[str] = Field(None, pattern="^(active|archived)$")
     settings_json: Optional[Dict[str, Any]] = None
+    # Reassign the script to another episode (Phase B P2). Snowflake id as str;
+    # the repo bigint-coerces it. FK is ON DELETE RESTRICT.
+    episode_id: Optional[str] = None
 
 
 class ScriptProjectResponse(BaseModel):
@@ -37,6 +40,7 @@ class ScriptProjectResponse(BaseModel):
     name: str
     description: Optional[str] = None
     display_code: Optional[str] = None
+    episode_id: Optional[str] = None
     status: str
     settings_json: Optional[Dict[str, Any]] = None
     viewport_json: Optional[Dict[str, Any]] = None

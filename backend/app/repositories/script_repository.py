@@ -149,7 +149,7 @@ class ScriptProjectRepository(BaseRepository):
 
     async def update(self, record_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
         try:
-            values = _coerce_bigint_cols(data, ("project_id", "team_id"))
+            values = _coerce_bigint_cols(data, ("project_id", "team_id", "episode_id"))
             async with write_scope() as session:
                 result = await session.execute(
                     update(ScriptProjects)

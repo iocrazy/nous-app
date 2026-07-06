@@ -2416,6 +2416,16 @@
     "outlineEmptyGroup": "No scenes yet",
     "outlineOpenScene": "Open scene in Script",
     "editSceneHeading": "Edit scene heading",
-    "sceneHeadingEmpty": "Set scene heading"
+    "sceneHeadingEmpty": "Set scene heading",
+    "episodesTitle": "Episodes",
+    "newEpisode": "New Episode",
+    "manageEpisodes": "Manage episodes",
+    "episodeFallback": "Ep 1",
+    "epCurrent": "Current",
+    "epDelete": "Delete episode",
+    "epDeleteBlocked": "Episode has scripts — cannot delete",
+    "epRename": "Rename episode",
+    "epScriptsTitle": "Scripts in this episode",
+    "epClose": "Close episodes"
   }
 }

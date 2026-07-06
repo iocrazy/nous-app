@@ -148,12 +148,53 @@ export async function moveScene(
   return unwrapResponse<SceneDoc>(res);
 }
 
-export async function listEpisodes(
-  projectId: string,
-): Promise<{ id: string; title: string; sort_order: number }[]> {
+/**
+ * An episode row. `script_count` (non-deleted scripts pointing at it) is
+ * present on list responses so the UI can disable deleting a non-empty episode
+ * — the episode_id FK is ON DELETE RESTRICT.
+ */
+export interface Episode {
+  id: string;
+  title: string;
+  sort_order: number;
+  script_count?: number;
+}
+
+export async function listEpisodes(projectId: string): Promise<Episode[]> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${apiBase()}/projects/${projectId}/episodes`, { headers });
-  return unwrapResponse<{ id: string; title: string; sort_order: number }[]>(res);
+  return unwrapResponse<Episode[]>(res);
+}
+
+export async function createEpisode(
+  projectId: string,
+  data: { title?: string; sort_order?: number } = {},
+): Promise<Episode> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${apiBase()}/projects/${projectId}/episodes`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return unwrapResponse<Episode>(res);
+}
+
+export async function updateEpisode(
+  episodeId: string,
+  data: { title?: string; sort_order?: number },
+): Promise<Episode> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${apiBase()}/episodes/${episodeId}`, {
+    method: 'PATCH',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return unwrapResponse<Episode>(res);
+}
+
+export async function deleteEpisode(episodeId: string): Promise<void> {
+  const headers = await getAuthHeaders();
+  await fetch(`${apiBase()}/episodes/${episodeId}`, { method: 'DELETE', headers });
 }
 
 export async function convertToScenes(

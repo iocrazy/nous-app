@@ -86,12 +86,65 @@ export const EDITOR_SHELL_STYLES = `
   background:linear-gradient(135deg,var(--indigo),var(--violet));
   transform:rotate(45deg); flex-shrink:0;
 }
+.mh-ep-selector-wrap{ position:relative; }
 .mh-ep-selector{
+  display:block; width:100%; text-align:left; cursor:pointer; font-family:var(--sans);
   background:var(--indigo-soft); border:1px solid var(--surface-border);
   border-radius:var(--radius-md); padding:10px 12px;
 }
+.mh-ep-selector:hover{ border-color:var(--indigo); }
+.mh-ep-selector:focus-visible{ outline:2px solid var(--indigo); outline-offset:2px; }
 .mh-ep-name{ font-weight:700; font-size:14px; color:var(--indigo-deep); }
 .mh-ep-sub{ font-size:11px; color:var(--ink-faint); margin-top:2px; }
+
+/* ===== EPISODE PANEL (multi-episode management, Task 5) ===== */
+.mh-ep-panel{
+  margin-top:8px; padding:8px; display:flex; flex-direction:column; gap:4px;
+  background:var(--surface); border:1px solid var(--surface-border);
+  border-radius:var(--radius-md); box-shadow:var(--shadow-island);
+}
+.mh-ep-panel-head{ display:flex; align-items:center; gap:8px; padding:2px 4px 6px; }
+.mh-ep-panel-head .mh-rail-section-label{ margin-right:auto; }
+.mh-ep-new-btn{
+  font-family:var(--sans); font-size:11.5px; font-weight:600;
+  padding:4px 10px; border-radius:var(--radius-sm); cursor:pointer;
+  background:var(--indigo); color:var(--accent-on); border:1px solid transparent;
+}
+.mh-ep-new-btn:hover:not(:disabled){ background:var(--indigo-deep); }
+.mh-ep-new-btn:disabled{ opacity:0.5; cursor:default; }
+.mh-ep-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:2px; }
+.mh-ep-item{ display:flex; align-items:center; gap:4px; }
+.mh-ep-item-main{
+  flex:1; min-width:0; display:flex; align-items:center; gap:8px;
+  padding:7px 9px; border-radius:var(--radius-sm); cursor:pointer;
+  background:none; border:1px solid transparent; text-align:left; font-family:var(--sans);
+  color:var(--ink-soft);
+}
+.mh-ep-item-main:hover:not(:disabled){ background:var(--surface-2); }
+.mh-ep-item-main.current{ background:var(--indigo-soft); color:var(--indigo-deep); cursor:default; }
+.mh-ep-item-title{
+  flex:1; min-width:0; font-size:12.5px; font-weight:600;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.mh-ep-item-count{
+  flex-shrink:0; font-family:var(--mono); font-size:10.5px; color:var(--ink-faint);
+}
+.mh-ep-current-badge{
+  flex-shrink:0; font-size:9.5px; font-weight:700; letter-spacing:0.04em; text-transform:uppercase;
+  padding:1px 6px; border-radius:8px; background:var(--indigo); color:var(--accent-on);
+}
+.mh-ep-delete-btn{
+  flex-shrink:0; width:24px; height:24px; border-radius:var(--radius-sm);
+  display:flex; align-items:center; justify-content:center; cursor:pointer;
+  background:none; border:1px solid transparent; color:var(--ink-faint); font-size:15px;
+}
+.mh-ep-delete-btn:hover:not(:disabled){ background:var(--surface-2); color:var(--red); }
+.mh-ep-delete-btn:disabled{ opacity:0.35; cursor:not-allowed; }
+.mh-ep-rename-input{
+  flex:1; min-width:0; font-family:var(--sans); font-size:12.5px; font-weight:600;
+  padding:6px 9px; border-radius:var(--radius-sm);
+  border:1px solid var(--indigo); background:var(--surface); color:var(--ink);
+}
 /* Section header row: uppercase label + a right-aligned count badge (laper
    "Assets ②" pattern). One shared style so every rail region reads the same. */
 .mh-rail-section-head{
