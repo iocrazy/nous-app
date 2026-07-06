@@ -128,17 +128,31 @@ export function ElementLine({
   const editableRef = useRef<HTMLDivElement | null>(null);
   const mentionNames = useContext(MentionNamesContext);
 
-  // Sync DOM content from props only when the text diverges and the row isn't
-  // the one being typed into — protects the caret during live editing. Repaints
-  // as HTML so `@name` mention chips render (they only appear on a settled,
-  // unfocused row; while typing the raw text stands in, caret-safe).
+  // THE EFFECT BELOW IS THE ONLY WRITER OF THE EDITABLE'S CONTENT.
+  //
+  // Rendering the content via dangerouslySetInnerHTML looked equivalent but
+  // hid a caret/typing killer: React re-writes the innerHTML of that node on
+  // EVERY parent re-render (verified empirically — even with an unchanged
+  // __html string), and parent re-renders happen constantly mid-typing (the
+  // toolbar highlight follows the cursor, the mention picker opens, sync
+  // states change). Each rewrite reset the line to the last COMMITTED model
+  // text, eating everything typed inside the 500ms input debounce window and
+  // throwing the caret to line start.
+  //
+  // So the render pass emits an EMPTY editable and this effect (no dep array
+  // — runs after every render) syncs model → DOM only when the text actually
+  // diverges AND the row isn't focused. While the writer is typing
+  // (activeElement === node) the DOM is never touched; remote/optimistic
+  // changes land as soon as the row blurs. Repaints go through
+  // buildElementHtml so `@name` chips render (chips never change textContent,
+  // keeping the divergence check byte-exact).
   useEffect(() => {
     const node = editableRef.current;
     if (!node) return;
     if (node.textContent !== element.text && document.activeElement !== node) {
       node.innerHTML = buildElementHtml(element.text, mentionNames);
     }
-  }, [element.text, mentionNames]);
+  });
 
   const isTransition = element.type === 'transition';
 
@@ -183,10 +197,9 @@ export function ElementLine({
       'data-el-id': element.id,
       'data-el-type': element.type,
       'data-placeholder': placeholder ?? '',
-      // Uncontrolled: initial content painted once on mount (with mention chips),
-      // then kept in sync by the effect above. React never owns the children of
-      // a contentEditable.
-      dangerouslySetInnerHTML: { __html: buildElementHtml(element.text, mentionNames) },
+      // Uncontrolled: no children and no dangerouslySetInnerHTML — the sync
+      // effect above owns the DOM content exclusively (see its comment for
+      // why render-pass HTML writes eat in-flight typing).
       onInput: (e: FormEvent<HTMLDivElement>) =>
         onInput(element.id, e.currentTarget.textContent ?? ''),
       onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => onKeyDown(element.id, e),
