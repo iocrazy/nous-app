@@ -42,6 +42,7 @@ import { useChatAttachmentUpload } from '../hooks/useChatAttachmentUpload';
 import { useComposerDropzone } from '../hooks/useComposerDropzone';
 import { useComposerPaste } from '../hooks/useComposerPaste';
 import { useResourceSearch } from '../hooks/useResourceSearch';
+import { useGlobalChatStore } from '../stores/globalChatStore';
 
 export interface AIChatPanelProps {
   /** String form of the project's BIGINT id, for display + session tagging.
@@ -183,6 +184,17 @@ export function AIChatPanel({
   // the user-selected agent drives everything — identical to the existing behavior.
   const lockedAgent = agentSlug ?? null;
   const effectiveAgentSlug = lockedAgent ?? selectedAgentSlug;
+
+  // AI Library sidebar "open chat with this agent": consume the one-shot
+  // request from globalChatStore (nonce keyed so re-clicking the same agent
+  // re-fires). Ignored in locked mode — an embedded, agent-locked panel must
+  // not be hijacked by the global sidebar.
+  const chatRequest = useGlobalChatStore((s) => s.chatRequest);
+  useEffect(() => {
+    if (!chatRequest || lockedAgent) return;
+    setSelectedAgentSlug(chatRequest.agentSlug);
+    useGlobalChatStore.getState().consumeChatRequest();
+  }, [chatRequest, lockedAgent]);
 
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
