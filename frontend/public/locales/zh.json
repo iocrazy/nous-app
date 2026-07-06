@@ -1074,6 +1074,12 @@
       "shares": "分享",
       "trash": "回收站"
     },
+    "storyboardMoved": {
+      "title": "分镜功能已迁移",
+      "body": "分镜现在位于每个剧本的编辑器中，作为其镜头板。打开一个剧本即可开始为场景分镜。",
+      "goToScripts": "前往剧本",
+      "toast": "分镜已迁移到剧本编辑器中"
+    },
     "totalProjects": "共 {{count}} 个项目",
     "searchProjects": "搜索项目",
     "noSearchResults": "没有匹配的项目",

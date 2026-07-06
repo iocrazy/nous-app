@@ -72,6 +72,8 @@ def inverse_between(ops_rows: list[dict], from_seq: int, to_seq: int) -> list[di
 - 测试：旧端点 410/重定向;新面不受影响（shots 套件全绿）。
 - Commit `feat(script): legacy storyboard cutover — rename-deprecate tables, retire routes`
 
+> **偏差记录（2026-07-06, PR-V2 实做 → Option B）**：侦察发现旧 storyboard 面**并非**孤立的近死 workbench——`ProjectStoryboardTab`（ProjectsPage 的 live tab）+ `/scripts/convert-to-storyboard` 端点 + `project_style_profile` 的 `JOIN storyboard_projects`（仅经已退役的 sb_ai_router 可达）都是 workbench 路由之外的消费方。若"rename 表 + 410 路由"一把梭会打断 live 项目 tab 与端点。经 team-lead 拍板改走 **Option B（可逆优先）**：本 PR **只退役路由+UI**（410 五个 sb_* 路由 + `/convert-to-storyboard`，`ProjectStoryboardTab` 换迁移提示卡跳 Scripts tab，workbench 路由重定向+toast），**迁移 346 表 rename 推迟**为独立家务迁移（前置条件：这些 410 在 prod 跑稳后再做，届时一并删 `script_to_storyboard_workflow` 死码）。`script_storyboard_links` / `script_canvas_router` / `canvases_router` 一律不动。表仍在位 → `test_storyboard_repository_orm.py` 等 ORM 测试不受影响。Commit `feat(script): legacy storyboard cutover — retire routes and surfaces (tables deferred)`。
+
 **→ PR-V2 ship**。
 
 ### Task 6: 收口
