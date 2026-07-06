@@ -214,3 +214,107 @@ export async function convertToScenes(
 export function newElementId(): string {
   return 'el_' + crypto.randomUUID().replace(/-/g, '').slice(0, 8);
 }
+
+// ---------------------------------------------------------------------------
+// Shots (Phase B P3 — the storyboard tier that hangs off a scene)
+// ---------------------------------------------------------------------------
+
+/** A shot's status machine (server-owned; never client-set through updateShot). */
+export type ShotStatus = 'empty' | 'generating' | 'done' | 'failed';
+
+/**
+ * A storyboard shot row. Every id is a string end-to-end (Snowflake bigint —
+ * never Number()-coerced). The parameter tags + `description` are the only
+ * client-editable fields via `updateShot`; `status` and the produced media URLs
+ * flow exclusively through the generate workflow's write lane.
+ */
+export interface Shot {
+  id: string;
+  scene_id: string;
+  shot_number: number | null;
+  shot_type: string | null;
+  camera_angle: string | null;
+  camera_movement: string | null;
+  focal_length: string | null;
+  lighting: string | null;
+  description: string | null;
+  image_url: string | null;
+  thumbnail_url: string | null;
+  video_url: string | null;
+  status: ShotStatus;
+  sort_order: number;
+}
+
+/** Fields a caller may set when creating or editing a shot's tags/description. */
+export type ShotInput = Partial<
+  Pick<
+    Shot,
+    | 'shot_number'
+    | 'shot_type'
+    | 'camera_angle'
+    | 'camera_movement'
+    | 'focal_length'
+    | 'lighting'
+    | 'description'
+    | 'sort_order'
+  >
+>;
+
+export async function listShots(sceneId: string): Promise<Shot[]> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${apiBase()}/scenes/${sceneId}/shots`, { headers });
+  return unwrapResponse<Shot[]>(res);
+}
+
+export async function createShot(sceneId: string, data: ShotInput = {}): Promise<Shot> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${apiBase()}/scenes/${sceneId}/shots`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return unwrapResponse<Shot>(res);
+}
+
+export async function updateShot(shotId: string, data: ShotInput): Promise<Shot> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${apiBase()}/shots/${shotId}`, {
+    method: 'PATCH',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return unwrapResponse<Shot>(res);
+}
+
+export async function deleteShot(shotId: string): Promise<void> {
+  const headers = await getAuthHeaders();
+  await fetch(`${apiBase()}/shots/${shotId}`, { method: 'DELETE', headers });
+}
+
+export async function moveShot(
+  shotId: string,
+  args: { before_shot_id?: string | null; after_shot_id?: string | null },
+): Promise<Shot> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${apiBase()}/shots/${shotId}/move`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(args),
+  });
+  return unwrapResponse<Shot>(res);
+}
+
+/**
+ * Dispatch the async AI storyboard breakdown of a scene. Returns the FLAT
+ * { success, task_id } envelope (handleResponse) — the shots land some seconds
+ * later, observed by polling `listShots` (#1019 flat dispatch contract).
+ */
+export async function autoStoryboard(sceneId: string): Promise<string> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${apiBase()}/scenes/${sceneId}/auto-storyboard`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+  });
+  const body = await handleResponse<{ success: boolean; task_id: string }>(res);
+  return body.task_id;
+}

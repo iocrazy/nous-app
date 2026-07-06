@@ -51,6 +51,7 @@ import {
 import { SceneRail } from './SceneRail';
 import { RailModules, type RailView } from './RailModules';
 import { NodesView } from '../nodes/NodesView';
+import { StoryboardView } from '../storyboard/StoryboardView';
 import { OutlineView } from './OutlineView';
 import { EpisodePanel } from './EpisodePanel';
 import { RailEntities } from './RailEntities';
@@ -699,6 +700,8 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
               scriptId={scriptId}
               onReload={reloadAll}
             />
+          ) : railView === 'storyboard' ? (
+            <StoryboardView scenes={scenes} scriptId={scriptId} />
           ) : state.mode === 'cover' ? (
             <div className="mh-sheet-scroll">
               <div className="mh-cover-card" data-testid="cover-placeholder">

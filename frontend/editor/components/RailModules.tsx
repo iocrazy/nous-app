@@ -1,18 +1,18 @@
 /**
  * RailModules — the left-rail module navigation (Task 8.5, laper information
- * architecture). View slots: Script (the script sheet) and Scenes (the node
- * projection, Phase B) are selectable; Beats / Storyboard remain
- * visible-but-disabled placeholders — the same "mode slot" concept as the
- * disabled Outline toolbar items: the slot is shown so the shape of the product
- * is legible, but it can't be selected yet.
+ * architecture). View slots: Script (the script sheet), Scenes (the node
+ * projection) and Storyboard (the shot board, Phase B P3) are selectable; Beats
+ * remains a visible-but-disabled placeholder — the same "mode slot" concept as
+ * the disabled Outline toolbar items: the slot is shown so the shape of the
+ * product is legible, but it can't be selected yet.
  *
  * Icons follow the editor island's monochrome text-glyph convention (as with
  * the ElementToolbar glyphs) rather than importing an icon set here — zero emoji.
  */
 import { useTranslation } from 'react-i18next';
 
-/** The two central-column views the rail can switch between. */
-export type RailView = 'script' | 'nodes';
+/** The central-column views the rail can switch between. */
+export type RailView = 'script' | 'nodes' | 'storyboard';
 
 interface RailModule {
   key: string;
@@ -25,7 +25,7 @@ interface RailModule {
 const MODULES: RailModule[] = [
   { key: 'script', labelKey: 'editor.moduleScript', glyph: '▤', view: 'script' },
   { key: 'beats', labelKey: 'editor.moduleBeats', glyph: '≡' },
-  { key: 'storyboard', labelKey: 'editor.moduleStoryboard', glyph: '▦' },
+  { key: 'storyboard', labelKey: 'editor.moduleStoryboard', glyph: '▦', view: 'storyboard' },
   { key: 'scenes', labelKey: 'editor.moduleScenes', glyph: '▧', view: 'nodes' },
 ];
 
