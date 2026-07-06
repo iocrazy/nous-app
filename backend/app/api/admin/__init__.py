@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 
+from .agents_router import router as agents_catalog_router
 from .ai_usage_router import router as ai_usage_router
 from .alert_rules_router import router as alert_rules_router
 from .audit_logs_router import router as audit_logs_router
@@ -121,6 +122,9 @@ admin_router.include_router(
 )
 admin_router.include_router(
     ai_usage_router, prefix="/ai-usage", tags=["Admin - AI Usage"]
+)
+admin_router.include_router(
+    agents_catalog_router, prefix="/agents", tags=["Admin - Agents Catalog"]
 )
 admin_router.include_router(
     boundary_audit_router,
