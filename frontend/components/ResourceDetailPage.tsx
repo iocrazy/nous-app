@@ -496,12 +496,15 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
       try {
         const ctx = await fetchResourceContext(resourceId);
         if (!ctx || cancelled) return;
-        const items = await fetchResources(
-          !teamId, // personal when the URL has no team segment
-          ctx.scope_id,
-          ctx.folder_id,
-          ctx.library_id,
-        );
+        const items = await fetchResources({
+          isPersonal: !teamId, // personal when the URL has no team segment
+          scopeId: ctx.scope_id,
+          folderId: ctx.folder_id,
+          libraryId: ctx.library_id,
+          // The sibling rail is a peek, not a browser — cap it explicitly
+          // instead of riding PostgREST's silent 1000-row ceiling.
+          limit: 500,
+        });
         if (!cancelled) setSiblingFiles(items);
       } catch (err) {
         console.error('Failed to load sibling files:', err);
