@@ -314,3 +314,75 @@ async def test_live_driver_connects_and_builds_indices(
     # No LLM involved — pure driver/index connectivity.
     await client.build_indices_and_constraints()
     await client.close()
+
+
+# ============================================================
+# _build_driver — loop-freeze防御 (2026-07-06 P0 follow-up)
+# ============================================================
+
+
+def test_build_driver_runs_off_loop_with_socket_timeouts(monkeypatch):
+    """Pin the two loop-freeze defenses (2026-07-06 P0):
+
+    1. The injected FalkorDB client carries socket timeouts — graphiti's
+       default is a sync redis.Redis with NO timeout, so a hung server
+       blocks its calling thread forever.
+    2. Construction happens on a throwaway thread, NOT the caller's
+       thread — on a thread there is no running event loop, so
+       FalkorDriver.__init__'s ``loop.create_task(build_indices...)``
+       branch (which schedules sync-redis work onto the loop) falls
+       through to its RuntimeError/pass path.
+    """
+    import threading as _threading
+
+    captured: dict = {}
+
+    class _FakeFalkorDB:
+        def __init__(self, **kwargs):
+            captured["falkor_kwargs"] = kwargs
+
+    class _FakeDriver:
+        def __init__(self, *, falkor_db, database):
+            captured["falkor_db"] = falkor_db
+            captured["database"] = database
+            captured["thread"] = _threading.current_thread()
+
+    import falkordb as falkor_mod
+    import graphiti_core.driver.falkordb_driver as fd_mod
+
+    monkeypatch.setattr(fd_mod, "FalkorDriver", _FakeDriver)
+    monkeypatch.setattr(falkor_mod, "FalkorDB", _FakeFalkorDB)
+
+    service = GraphMemoryService(config=_enabled_config())
+    driver = service._build_driver(database="test_memory")
+
+    assert isinstance(driver, _FakeDriver)
+    assert captured["database"] == "test_memory"
+    kw = captured["falkor_kwargs"]
+    assert kw["host"] == "db.test"
+    assert kw["port"] == 16379
+    assert kw["socket_connect_timeout"] == service._FALKOR_CONNECT_TIMEOUT_S
+    assert kw["socket_timeout"] == service._FALKOR_SOCKET_TIMEOUT_S
+    # Built on the throwaway thread, not the caller's.
+    assert captured["thread"] is not _threading.main_thread()
+    assert captured["thread"].name == "falkor-driver-build"
+
+
+def test_build_driver_hung_construction_times_out(monkeypatch):
+    """A construction that hangs (server half-up) must return None within
+    the build cap instead of hanging the caller."""
+    import time as _time
+
+    class _HangingFalkorDB:
+        def __init__(self, **kwargs):
+            _time.sleep(60)
+
+    import falkordb as falkor_mod
+
+    monkeypatch.setattr(falkor_mod, "FalkorDB", _HangingFalkorDB)
+
+    service = GraphMemoryService(config=_enabled_config())
+    monkeypatch.setattr(service, "_FALKOR_BUILD_TIMEOUT_S", 0.5, raising=False)
+    t0 = _time.monotonic()
+    assert service._build_driver(database="test_memory") is None
+    assert _time.monotonic() - t0 < 5.0

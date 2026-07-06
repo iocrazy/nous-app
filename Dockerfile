@@ -64,6 +64,12 @@ RUN pip install /tmp/mediahub_core*.whl && rm -f /tmp/mediahub_core*.whl
 # Install yt-dlp and faster-whisper
 RUN pip install yt-dlp==2024.12.23 faster-whisper==1.1.0
 
+# py-spy: sample a live process's Python stacks from outside the
+# interpreter. Kept in the image so an event-loop freeze (2026-07-06 P0)
+# can be diagnosed BEFORE the restart destroys the evidence:
+#   docker exec mediahub-app-backend py-spy dump --pid 1
+RUN pip install py-spy==0.4.0
+
 # Set working directory
 WORKDIR /app
 
