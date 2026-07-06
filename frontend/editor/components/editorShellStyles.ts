@@ -28,6 +28,7 @@ export const EDITOR_SHELL_STYLES = `
   --tick-glow:none; --grain-opacity:0.05; --grain-blend:multiply;
   --radius-lg:20px; --radius-md:13px; --radius-sm:9px;
   --accent-on:#ffffff;
+  --minimap-mask:rgba(241,240,248,0.60);
 }
 .mh-editor-shell[data-theme='dark']{
   --bg:#171320; --bg-2:#1c1727;
@@ -47,6 +48,7 @@ export const EDITOR_SHELL_STYLES = `
   --tick-glow:0 0 7px currentColor; --grain-opacity:0.065; --grain-blend:overlay;
   --radius-lg:20px; --radius-md:13px; --radius-sm:9px;
   --accent-on:#1a1424;
+  --minimap-mask:rgba(19,15,27,0.62);
 }
 
 .mh-editor-shell{
@@ -745,12 +747,26 @@ export const EDITOR_SHELL_STYLES = `
   color:var(--ink-soft); fill:var(--ink-soft);
 }
 .mh-nodes-view .react-flow__controls-button:hover{ background:var(--surface-2); }
+.mh-nodes-view .react-flow__minimap{
+  background:var(--surface); border:1px solid var(--surface-border);
+  border-radius:var(--radius-sm); box-shadow:var(--shadow-island);
+}
+/* Alignment guides — a passive overlay spanning the whole canvas. */
+.mh-flow-guides{ position:absolute; inset:0; pointer-events:none; z-index:5; }
+.mh-flow-guide{ position:absolute; background:var(--indigo); }
+.mh-flow-guide-v{ top:0; bottom:0; width:1px; }
+.mh-flow-guide-h{ left:0; right:0; height:1px; }
 .mh-flow-node{
   width:220px; background:var(--surface); color:var(--ink);
   border:1px solid var(--surface-border); border-radius:var(--radius-md);
   box-shadow:var(--shadow-island); padding:11px 13px 12px; font-family:var(--sans);
 }
 .mh-flow-handle{ width:7px; height:7px; background:var(--indigo); border:none; }
+.mh-flow-scene-cover{
+  display:block; width:100%; height:72px; object-fit:cover;
+  border-radius:var(--radius-sm); border:1px solid var(--surface-border);
+  margin-bottom:9px;
+}
 .mh-flow-scene-head{ display:flex; align-items:center; gap:8px; }
 .mh-flow-scene-heading{
   font-size:11px; font-weight:700; letter-spacing:0.02em; text-transform:uppercase;

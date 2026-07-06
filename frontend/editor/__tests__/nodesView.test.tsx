@@ -34,7 +34,9 @@ vi.mock('@xyflow/react', async (importOriginal) => {
 
 const svc = vi.hoisted(() => ({
   updateSceneMeta: vi.fn(),
+  updateChapterPosition: vi.fn(),
   listScenes: vi.fn(),
+  listShots: vi.fn(),
   convertToScenes: vi.fn(),
   moveScene: vi.fn(),
   createScene: vi.fn(),
@@ -50,8 +52,24 @@ vi.mock('../../components/Toast', () => ({
   useToast: () => ({ addToast: vi.fn() }),
 }));
 
+import { MiniMap, ReactFlowProvider } from '@xyflow/react';
+import type { ComponentProps } from 'react';
 import { NodesView } from '../nodes/NodesView';
+import { SceneFlowNode } from '../nodes/SceneFlowNode';
 import { EditorShell } from '../components/EditorShell';
+
+/** Depth-first search for a rendered child element whose component type matches. */
+function hasChildOfType(children: unknown, type: unknown): boolean {
+  const stack = Array.isArray(children) ? [...children] : [children];
+  while (stack.length) {
+    const node = stack.pop() as { type?: unknown; props?: { children?: unknown } } | null;
+    if (!node || typeof node !== 'object') continue;
+    if (node.type === type) return true;
+    const kids = node.props?.children;
+    if (kids != null) stack.push(...(Array.isArray(kids) ? kids : [kids]));
+  }
+  return false;
+}
 
 const scene = (over: Partial<SceneDoc>): SceneDoc => ({
   id: '200',
@@ -87,6 +105,11 @@ function findNode(type: string): Record<string, unknown> {
   if (!node) throw new Error(`no ${type} in captured nodes`);
   return node;
 }
+
+beforeEach(() => {
+  // Shot-cover fetch degrades to "no covers" unless a test opts in.
+  svc.listShots.mockResolvedValue([]);
+});
 
 afterEach(() => {
   cleanup();
@@ -143,7 +166,8 @@ describe('NodesView', () => {
       });
     });
 
-    it('does not persist when a read-only chapter node is dragged', () => {
+    it('persists a dragged chapter position via updateChapterPosition', () => {
+      svc.updateChapterPosition.mockResolvedValue(undefined);
       render(
         <NodesView
           scenes={[]}
@@ -153,11 +177,225 @@ describe('NodesView', () => {
           onReload={vi.fn()}
         />,
       );
-      const chapterNode = { ...findNode('chapterNode'), position: { x: 10, y: 20 } };
+      const chapterNode = { ...findNode('chapterNode'), position: { x: 10.2, y: 20.9 } };
 
       (capturedProps.onNodeDragStop as (e: unknown, n: unknown) => void)({}, chapterNode);
+      expect(svc.updateChapterPosition).not.toHaveBeenCalled();
+
       vi.advanceTimersByTime(500);
+      // Chapter id is the `ch-` prefix stripped, String()-coerced.
+      expect(svc.updateChapterPosition).toHaveBeenCalledWith('100', {
+        position_x: 10,
+        position_y: 21,
+      });
+      // Scene lane is never touched by a chapter drag.
       expect(svc.updateSceneMeta).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('selection system', () => {
+    it('wires rubber-band + multi-select props into React Flow', () => {
+      render(
+        <NodesView
+          scenes={[scene({ id: '200' })]}
+          chapters={[]}
+          onOpenScene={vi.fn()}
+          scriptId="1"
+          onReload={vi.fn()}
+        />,
+      );
+      // Shift+drag on blank = rubber band; partial = intersect-to-select.
+      expect(capturedProps.selectionMode).toBe('partial');
+      expect(capturedProps.selectionKeyCode).toBe('Shift');
+      // Ctrl/Cmd toggles add-to-selection — platform-detected modifier.
+      expect(['Meta', 'Control']).toContain(capturedProps.multiSelectionKeyCode);
+      // Group drag settles through its own callback.
+      expect(typeof capturedProps.onSelectionDragStop).toBe('function');
+    });
+
+    describe('group-drag persistence', () => {
+      beforeEach(() => vi.useFakeTimers());
+      afterEach(() => vi.useRealTimers());
+
+      it('persists every selected scene once after a group drag', () => {
+        svc.updateSceneMeta.mockResolvedValue(scene({}));
+        render(
+          <NodesView
+            scenes={[scene({ id: '200' }), scene({ id: '201' })]}
+            chapters={[]}
+            onOpenScene={vi.fn()}
+            scriptId="1"
+            onReload={vi.fn()}
+          />,
+        );
+        const nodes = capturedProps.nodes as Array<Record<string, unknown>>;
+        const dragged = nodes
+          .filter((n) => n.type === 'sceneNode')
+          .map((n, i) => ({ ...n, selected: true, position: { x: 10 + i, y: 20 + i } }));
+
+        (capturedProps.onSelectionDragStop as (e: unknown, n: unknown) => void)({}, dragged);
+        expect(svc.updateSceneMeta).not.toHaveBeenCalled();
+
+        vi.advanceTimersByTime(500);
+        expect(svc.updateSceneMeta).toHaveBeenCalledTimes(2);
+        expect(svc.updateSceneMeta).toHaveBeenCalledWith('200', { position_x: 10, position_y: 20 });
+        expect(svc.updateSceneMeta).toHaveBeenCalledWith('201', { position_x: 11, position_y: 21 });
+      });
+
+      it('skips a chapter node caught in a mixed group selection', () => {
+        svc.updateSceneMeta.mockResolvedValue(scene({}));
+        render(
+          <NodesView
+            scenes={[scene({ id: '200' })]}
+            chapters={[chapter({ id: '100' })]}
+            onOpenScene={vi.fn()}
+            scriptId="1"
+            onReload={vi.fn()}
+          />,
+        );
+        const nodes = capturedProps.nodes as Array<Record<string, unknown>>;
+        const dragged = nodes
+          .filter((n) => n.type === 'sceneNode' || n.type === 'chapterNode')
+          .map((n) => ({ ...n, selected: true, position: { x: 5, y: 6 } }));
+
+        (capturedProps.onSelectionDragStop as (e: unknown, n: unknown) => void)({}, dragged);
+        vi.advanceTimersByTime(500);
+        // Each node persists through its own lane: scene → updateSceneMeta,
+        // chapter → updateChapterPosition (Task 3).
+        expect(svc.updateSceneMeta).toHaveBeenCalledTimes(1);
+        expect(svc.updateSceneMeta).toHaveBeenCalledWith('200', { position_x: 5, position_y: 6 });
+        expect(svc.updateChapterPosition).toHaveBeenCalledWith('100', {
+          position_x: 5,
+          position_y: 6,
+        });
+      });
+
+      it('persists the whole selection when one selected node is dragged solo', () => {
+        // React Flow routes a solo drag of a node that sits inside an active
+        // multi-selection through onNodeDragStop (not onSelectionDragStop); the
+        // view must still flush every selected scene, not just the grabbed one.
+        svc.updateSceneMeta.mockResolvedValue(scene({}));
+        render(
+          <NodesView
+            scenes={[scene({ id: '200' }), scene({ id: '201' })]}
+            chapters={[]}
+            onOpenScene={vi.fn()}
+            scriptId="1"
+            onReload={vi.fn()}
+          />,
+        );
+        const sceneIds = (capturedProps.nodes as Array<Record<string, unknown>>)
+          .filter((n) => n.type === 'sceneNode')
+          .map((n) => n.id as string);
+        // Select both scene nodes through the real change pipeline.
+        act(() => {
+          (capturedProps.onNodesChange as (c: unknown[]) => void)(
+            sceneIds.map((id) => ({ id, type: 'select', selected: true })),
+          );
+        });
+
+        // Grab one selected node and drop it individually.
+        (capturedProps.onNodeDragStop as (e: unknown, n: unknown) => void)({}, findNode('sceneNode'));
+        vi.advanceTimersByTime(500);
+
+        expect(svc.updateSceneMeta).toHaveBeenCalledTimes(2);
+        expect(svc.updateSceneMeta.mock.calls.map((c) => c[0]).sort()).toEqual(['200', '201']);
+      });
+    });
+  });
+
+  describe('navigation & feel', () => {
+    it('enables snap grid, snap-to-grid, and visible-only rendering', () => {
+      render(
+        <NodesView
+          scenes={[scene({ id: '200' })]}
+          chapters={[]}
+          onOpenScene={vi.fn()}
+          scriptId="1"
+          onReload={vi.fn()}
+        />,
+      );
+      expect(capturedProps.snapGrid).toEqual([8, 8]);
+      expect(capturedProps.snapToGrid).toBe(true);
+      expect(capturedProps.onlyRenderVisibleElements).toBe(true);
+      // Alignment guides + nudge need the live instance and per-drag hook.
+      expect(typeof capturedProps.onInit).toBe('function');
+      expect(typeof capturedProps.onNodeDrag).toBe('function');
+    });
+
+    it('mounts a MiniMap inside the canvas', () => {
+      render(
+        <NodesView
+          scenes={[scene({ id: '200' })]}
+          chapters={[]}
+          onOpenScene={vi.fn()}
+          scriptId="1"
+          onReload={vi.fn()}
+        />,
+      );
+      expect(hasChildOfType(capturedProps.children, MiniMap)).toBe(true);
+    });
+  });
+
+  describe('shot cover thumbnails', () => {
+    type SceneNodeProps = ComponentProps<typeof SceneFlowNode>;
+    const renderSceneNode = (data: Record<string, unknown>) =>
+      render(
+        <ReactFlowProvider>
+          <SceneFlowNode {...({ id: 'sc-200', data } as unknown as SceneNodeProps)} />
+        </ReactFlowProvider>,
+      );
+
+    it('renders a cover image on the scene card when coverUrl is set', () => {
+      renderSceneNode({ scene: scene({ id: '200' }), summary: '', coverUrl: 'http://img/9' });
+      const img = screen.getByRole('img');
+      expect(img).toHaveAttribute('src', 'http://img/9');
+    });
+
+    it('renders no image when coverUrl is absent (zero layout regression)', () => {
+      renderSceneNode({ scene: scene({ id: '200' }), summary: '' });
+      expect(screen.queryByRole('img')).toBeNull();
+    });
+
+    it('threads loaded shot covers onto scene nodes', async () => {
+      svc.listShots.mockResolvedValue([
+        { id: 'sh1', scene_id: '200', image_url: 'http://img/9', status: 'done' },
+      ]);
+      render(
+        <NodesView
+          scenes={[scene({ id: '200' })]}
+          chapters={[]}
+          onOpenScene={vi.fn()}
+          scriptId="1"
+          onReload={vi.fn()}
+        />,
+      );
+      await waitFor(() => {
+        const node = (capturedProps.nodes as Array<Record<string, unknown>>).find(
+          (n) => n.type === 'sceneNode',
+        );
+        expect((node!.data as { coverUrl?: string }).coverUrl).toBe('http://img/9');
+      });
+    });
+
+    it('still renders the canvas when listShots rejects (silent degrade)', async () => {
+      svc.listShots.mockRejectedValue(new Error('boom'));
+      render(
+        <NodesView
+          scenes={[scene({ id: '200' })]}
+          chapters={[]}
+          onOpenScene={vi.fn()}
+          scriptId="1"
+          onReload={vi.fn()}
+        />,
+      );
+      const node = (capturedProps.nodes as Array<Record<string, unknown>>).find(
+        (n) => n.type === 'sceneNode',
+      );
+      expect(node).toBeDefined();
+      expect((node!.data as { coverUrl?: string }).coverUrl).toBeUndefined();
+      // Let the rejected fetch settle so it doesn't leak as an unhandled rejection.
+      await waitFor(() => expect(svc.listShots).toHaveBeenCalled());
     });
   });
 

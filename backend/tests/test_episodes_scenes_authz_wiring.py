@@ -139,6 +139,64 @@ async def test_canvas_delete_chapter_403_foreign_team(client, _foreign_team):
 
 
 # --------------------------------------------------------------------------- #
+# Behavior: chapter position round-trip (Phase B Task 3)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_canvas_update_chapter_persists_position(client, monkeypatch):
+    """PUT chapter position passes both floats through to the service update
+    dict transparently — schema Optional[float] fields, model_dump passthrough,
+    no repo/service change. Guard chain is wired so the caller's team matches."""
+    import app.core.scope_guards as guards
+    from app.repositories.script_repository import (
+        ScriptChapterRepository,
+        ScriptProjectRepository,
+    )
+    from app.services.storyboard.script.script_service import ScriptService
+
+    captured: dict = {}
+
+    async def fake_chapter_get(self, chapter_id):
+        return {"id": chapter_id, "script_id": "9001"}
+
+    async def fake_project_get(self, script_id):
+        return {"id": script_id, "team_id": "SAME_TEAM"}
+
+    async def fake_team(user_id):
+        return "SAME_TEAM"
+
+    async def fake_update(self, chapter_id, data):
+        captured["chapter_id"] = chapter_id
+        captured["data"] = data
+        return {"id": chapter_id, **data}
+
+    monkeypatch.setattr(ScriptChapterRepository, "get_by_id", fake_chapter_get)
+    monkeypatch.setattr(ScriptProjectRepository, "get_by_id", fake_project_get)
+    monkeypatch.setattr(guards, "get_team_id_for_user", fake_team)
+    monkeypatch.setattr(ScriptService, "update_chapter", fake_update)
+
+    resp = await client.put(
+        "/api/v1/scripts/projects/chapters/123",
+        json={"position_x": 120.5, "position_y": -40},
+    )
+    assert resp.status_code == 200
+    assert captured["chapter_id"] == "123"
+    assert captured["data"]["position_x"] == 120.5
+    assert captured["data"]["position_y"] == -40
+
+
+@pytest.mark.asyncio
+async def test_canvas_update_chapter_rejects_non_numeric_position(client):
+    """A non-numeric position is a 422 at request validation."""
+    resp = await client.put(
+        "/api/v1/scripts/projects/chapters/123",
+        json={"position_x": "not-a-number"},
+    )
+    assert resp.status_code == 422
+
+
+# --------------------------------------------------------------------------- #
 # Behavior: elements/ops optimistic-concurrency envelope
 # --------------------------------------------------------------------------- #
 
