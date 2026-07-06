@@ -158,7 +158,7 @@ async def auto_storyboard(
         wf_id = str(_uuid.uuid4())
         task_id = await mgr.create(
             user_id=auth.user_id,
-            task_type="script_shot_breakdown",
+            task_type="shot_breakdown",  # ≤20 chars: task_tracking.task_type is VARCHAR(20)
             title="Auto storyboard scene",
             dbos_workflow_id=wf_id,
         )
@@ -211,7 +211,7 @@ async def generate_shot(
         wf_id = str(_uuid.uuid4())
         task_id = await mgr.create(
             user_id=auth.user_id,
-            task_type="script_shot_generate",
+            task_type="shot_generate",  # ≤20 chars: task_tracking.task_type is VARCHAR(20)
             title="Generate shot image",
             dbos_workflow_id=wf_id,
         )
