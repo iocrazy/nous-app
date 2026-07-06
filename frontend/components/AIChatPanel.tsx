@@ -372,13 +372,16 @@ export function AIChatPanel({
   async function loadSessionMessages(
     sessionId: string,
     isCancelled: () => boolean = () => false,
-  ): Promise<void> {
+  ): Promise<AIChatMessage[] | null> {
     try {
       const data = await aiLibraryService.getChatSession(sessionId);
-      if (isCancelled()) return;
-      setMessages(data.messages ?? []);
+      if (isCancelled()) return null;
+      const msgs = data.messages ?? [];
+      setMessages(msgs);
+      return msgs;
     } catch (err) {
       console.error('[AIChatPanel] getChatSession failed:', err);
+      return null;
     }
   }
 
@@ -470,13 +473,14 @@ export function AIChatPanel({
       // Optimistic user bubble — replaced by the authoritative row after
       // the server responds and we reload the message list. Staged image
       // attachments render immediately via their local preview data URL.
+      const sentAttachments = stagedAttachments;
       const tempUser: AIChatMessage = {
         id: `tmp-user-${Date.now()}`,
         session_id: activeSessionId,
         role: 'user',
         content: text,
-        attachments: stagedAttachments.length > 0
-          ? stagedAttachments.map((a) => ({
+        attachments: sentAttachments.length > 0
+          ? sentAttachments.map((a) => ({
               kind: a.kind,
               resource_id: a.resource_id,
               mime: a.mime,
@@ -487,16 +491,20 @@ export function AIChatPanel({
         created_at: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, tempUser]);
+      // Clear the composer chips optimistically — the attachments now live
+      // in the message bubble, and sendChatMessage blocks for the whole AI
+      // turn (tens of seconds), during which stale chips read as "not sent
+      // yet". Restored on failure so the user can retry.
+      setStagedAttachments([]);
 
       try {
         // O3: pass plan_mode only when non-default. Backend swaps in
         // plan-prompt instructions for prompt_user / dry_run.
         // B: send staged attachments + resource_ref attachments alongside.
-        // Clear staged on success — failed sends keep them so user can retry.
         const opts: Parameters<typeof aiLibraryService.sendChatMessage>[2] = {};
         if (planMode !== 'auto') opts.plan_mode = planMode;
         const allAttachments = [
-          ...stagedAttachments.map((a) => ({
+          ...sentAttachments.map((a) => ({
             kind: a.kind,
             url: a.url,
             mime: a.mime ?? undefined,
@@ -515,15 +523,29 @@ export function AIChatPanel({
           opts.attachments = allAttachments;
         }
         await aiLibraryService.sendChatMessage(activeSessionId, text, opts);
-        setStagedAttachments([]);
         // Refetch full history so IDs + timestamps are server-authoritative.
         await loadSessionMessages(activeSessionId);
       } catch (err) {
         console.error('[AIChatPanel] sendChatMessage failed:', err);
         const msg = err instanceof Error ? err.message : String(err);
         addToast(`Send failed: ${msg}`, 'error');
-        // Roll back the optimistic bubble — the server didn't accept it.
-        setMessages((prev) => prev.filter((m) => m.id !== tempUser.id));
+        // "Send failed" here often means the CONNECTION died mid-turn
+        // (proxy timeout on a long AI reply), not that the message was
+        // rejected — the backend persists the user turn BEFORE calling
+        // the model. Reload server history instead of blindly rolling
+        // back: if the turn landed, the bubble (with attachments) stays;
+        // only restore the composer chips when it truly never arrived.
+        const serverMsgs = await loadSessionMessages(activeSessionId);
+        if (serverMsgs === null) {
+          // History fetch also failed (offline?) — fall back to rollback.
+          setMessages((prev) => prev.filter((m) => m.id !== tempUser.id));
+          setStagedAttachments(sentAttachments);
+        } else {
+          const landed = serverMsgs
+            .slice(-3)
+            .some((m) => m.role === 'user' && m.content === text);
+          if (!landed) setStagedAttachments(sentAttachments);
+        }
       } finally {
         setSending(false);
       }
