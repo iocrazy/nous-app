@@ -52,6 +52,8 @@ import { CopilotCard, type CopilotPhase } from './CopilotCard';
 import { EmptySceneHint } from './EmptyStates';
 import type { EditorFormat } from '../useEditorState';
 import type { SaveState } from '../useSceneSync';
+import { ScenePresenceBadge } from '../collab/ScenePresenceBadge';
+import type { PresenceUser } from '../collab/useScriptPresence';
 
 /** A scene's save status lifted to the shell for the aggregate SaveIndicator. */
 export interface SceneSyncStatus {
@@ -152,6 +154,8 @@ export interface SceneBlockProps {
   /** Reports this scene's live (optimistic) elements up (debounced 1s) so the
    *  shell can derive Statistics / rail entities from in-flight edits. */
   onElementsChange?: (sceneId: string, elements: ScriptElement[]) => void;
+  /** Other collaborators (self excluded) currently focused on this scene (P5). */
+  focusPresence?: PresenceUser[];
 }
 
 /** Which half of a block the pointer is over → the drop edge. */
@@ -173,6 +177,7 @@ export function SceneBlock({
   copilotActiveSceneId,
   onCopilotActivate,
   onElementsChange,
+  focusPresence,
 }: SceneBlockProps) {
   const { t } = useTranslation();
   const sync = useSceneSync(scene);
@@ -925,6 +930,7 @@ export function SceneBlock({
             )}
           </button>
         )}
+        <ScenePresenceBadge users={focusPresence ?? []} />
       </div>
 
       <MentionNamesContext.Provider value={mentionCandidates}>

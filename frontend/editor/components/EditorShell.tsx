@@ -64,12 +64,28 @@ import { SaveIndicator, aggregateSaveState } from './SaveIndicator';
 import { ConflictBar } from './ConflictBar';
 import { ColdStart } from './EmptyStates';
 import { ChapterFallback } from './ChapterFallback';
+import { useScriptPresence } from '../collab/useScriptPresence';
+import { PresenceAvatars } from '../collab/PresenceAvatars';
+import { ScenePresenceContext, type ScenePresenceMap } from '../collab/scenePresenceContext';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
+// Realtime collaboration is flag-dark: off → the presence hook receives null and
+// nothing subscribes (zero mount / zero channel), matching the P5 constraint.
+const COLLAB_ENABLED = import.meta.env.VITE_FEATURE_COLLAB === 'true';
+
 const DOC_MODES: EditorMode[] = ['script', 'outline', 'cover'];
 
-export function EditorShell({ scriptId }: { scriptId: string }) {
+export function EditorShell({
+  scriptId,
+  currentUserId = null,
+  currentUserName,
+}: {
+  scriptId: string;
+  /** Local user identity for collaboration presence (supplied by the route). */
+  currentUserId?: string | null;
+  currentUserName?: string;
+}) {
   const { t } = useTranslation();
   // Restore the per-script layout engine synchronously so the first paint uses
   // it (no engine flash on remount).
@@ -562,6 +578,36 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
     [conflictScene, syncStates],
   );
 
+  // ── Collaboration presence (Phase B P5 / C1) ───────────────────────────────
+  // Track who else is in this script and which scene they are focused on. The
+  // hook receives null when the flag is off, so nothing subscribes. `isDirty` is
+  // a static viewing signal for Task 1; Task 3 wires it to the real sync queue.
+  const presenceSelf =
+    COLLAB_ENABLED && currentUserId
+      ? {
+          userId: currentUserId,
+          name: currentUserName ?? currentUserId,
+          focusedSceneId: state.activeSceneId,
+          isDirty: false,
+        }
+      : null;
+  const { onlineUsers } = useScriptPresence(
+    COLLAB_ENABLED ? scriptId : null,
+    presenceSelf,
+  );
+
+  // Group other participants by the scene they are focused on, for the soft
+  // per-scene badges on the sheet and in the node view.
+  const presenceByScene = useMemo<ScenePresenceMap>(() => {
+    const map: ScenePresenceMap = {};
+    for (const u of onlineUsers) {
+      const sceneId = u.focused_scene_id;
+      if (!sceneId) continue;
+      (map[sceneId] ??= []).push(u);
+    }
+    return map;
+  }, [onlineUsers]);
+
   // Cold start ONLY when the script is truly empty. A legacy script with
   // prose chapters but no scenes must land on the chapter fallback cards
   // (with their Convert to Scenes entry) — the full-screen cold start would
@@ -713,6 +759,7 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
             ))}
           </div>
           <div className="mh-topbar-right">
+            {COLLAB_ENABLED && <PresenceAvatars users={onlineUsers} />}
             <SaveIndicator state={aggregateState} queued={offlineCount} />
             <button
               type="button"
@@ -734,13 +781,15 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
               onBack={() => setDiffCommit(null)}
             />
           ) : railView === 'nodes' ? (
-            <NodesView
-              scenes={scenes}
-              chapters={chapters}
-              onOpenScene={handleOpenScene}
-              scriptId={scriptId}
-              onReload={reloadAll}
-            />
+            <ScenePresenceContext.Provider value={presenceByScene}>
+              <NodesView
+                scenes={scenes}
+                chapters={chapters}
+                onOpenScene={handleOpenScene}
+                scriptId={scriptId}
+                onReload={reloadAll}
+              />
+            </ScenePresenceContext.Provider>
           ) : railView === 'storyboard' ? (
             <StoryboardView scenes={scenes} scriptId={scriptId} />
           ) : state.mode === 'cover' ? (
@@ -829,6 +878,7 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
                             onCopilotActivate={handleCopilotActivate}
                             onElementsChange={handleElementsChange}
                             typeCommand={typeCommand ?? undefined}
+                            focusPresence={presenceByScene[s.id]}
                           />
                         );
                       })}
