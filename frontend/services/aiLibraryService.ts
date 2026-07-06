@@ -66,6 +66,25 @@ function encodeSkillFilePath(path: string): string {
     .join('/');
 }
 
+/** One attachment sent with a chat turn (shared by /chat and /chat-stream). */
+export type ChatAttachmentInput =
+  | {
+      kind: 'image' | 'video' | 'pdf';
+      url?: string;
+      data_url?: string;
+      mime?: string;
+      alt_text?: string;
+      /** Temp resource id — persisted with the message for history display. */
+      resource_id?: string;
+    }
+  | {
+      kind: 'resource_ref';
+      resource_id: string;
+      url?: string;
+      mime?: string;
+      alt_text?: string;
+    };
+
 export const aiLibraryService = {
   // ─── Agents ────────────────────────────────────────────────────────────────
 
@@ -761,24 +780,7 @@ export const aiLibraryService = {
     content: string,
     options: {
       plan_mode?: 'auto' | 'prompt_user' | 'dry_run';
-      attachments?: Array<
-        | {
-            kind: 'image' | 'video' | 'pdf';
-            url?: string;
-            data_url?: string;
-            mime?: string;
-            alt_text?: string;
-            /** Temp resource id — persisted with the message for history display. */
-            resource_id?: string;
-          }
-        | {
-            kind: 'resource_ref';
-            resource_id: string;
-            url?: string;
-            mime?: string;
-            alt_text?: string;
-          }
-      >;
+      attachments?: ChatAttachmentInput[];
     } = {},
   ): Promise<ChatResponse> {
     const body: Record<string, unknown> = { content };
@@ -821,10 +823,15 @@ export const aiLibraryService = {
   async *streamChatMessage(
     sessionId: string,
     content: string,
-    options: { plan_mode?: 'auto' | 'prompt_user' | 'dry_run'; signal?: AbortSignal } = {},
+    options: {
+      plan_mode?: 'auto' | 'prompt_user' | 'dry_run';
+      attachments?: ChatAttachmentInput[];
+      signal?: AbortSignal;
+    } = {},
   ): AsyncGenerator<{ type: string; data: any }> {
     const body: Record<string, unknown> = { content };
     if (options.plan_mode) body.plan_mode = options.plan_mode;
+    if (options.attachments?.length) body.attachments = options.attachments;
     const resp = await fetch(
       `${base()}/sessions/${encodeURIComponent(sessionId)}/chat-stream`,
       {

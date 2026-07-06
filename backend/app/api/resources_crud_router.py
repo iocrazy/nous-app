@@ -513,6 +513,70 @@ async def serve_resource_file(
         raise HTTPException(status_code=500, detail="Failed to serve file")
 
 
+# ─── Lazy thumbnail helpers (million-files P1) ──────────────────────────────
+
+# Warm dark-neutral placeholder tiles per media class — shown while the
+# on-demand thumbnail generates. 16:10 so justified/grid tiles look intentional.
+_PLACEHOLDER_FILL = {
+    "video": "#2c2547",
+    "image": "#1c3129",
+    "audio": "#372a49",
+}
+_PLACEHOLDER_DEFAULT_FILL = "#221c2e"
+
+
+def _cover_placeholder(mime_type: str):
+    from fastapi.responses import Response
+
+    kind = (mime_type or "").split("/", 1)[0]
+    fill = _PLACEHOLDER_FILL.get(kind, _PLACEHOLDER_DEFAULT_FILL)
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200" '
+        'viewBox="0 0 320 200">'
+        f'<rect width="320" height="200" fill="{fill}"/>'
+        '<circle cx="160" cy="100" r="22" fill="none" stroke="#8a7fa1" '
+        'stroke-width="3" stroke-dasharray="8 6"/>'
+        "</svg>"
+    )
+    # no-store: the client must re-ask so the real thumbnail replaces this
+    # as soon as the workflow lands it.
+    return Response(
+        content=svg,
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+async def _enqueue_lazy_thumbnail(
+    resource_id: str, file_path: str, mime_type: str
+) -> None:
+    """Fire-and-forget thumbnail generation for a viewed-but-thumbnail-less
+    resource. The workflow id is date-bucketed: concurrent cover misses for
+    the same resource collapse onto ONE workflow (DBOS idempotency), while a
+    failed generation naturally becomes retryable the next day. Enqueue
+    failures must never break cover serving — log and move on (the client
+    just sees the placeholder again)."""
+    from datetime import datetime, timezone
+
+    try:
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
+        from app.workflows.thumbnail import thumbnail_workflow
+
+        date_bucket = datetime.now(timezone.utc).strftime("%Y%m%d")
+        await start_workflow_routed(
+            "thumbnail",
+            dbos_workflow_callable=thumbnail_workflow,
+            dbos_workflow_kwargs={
+                "resource_id": resource_id,
+                "file_path": file_path,
+                "mime_type": mime_type,
+            },
+            workflow_id=f"thumb-lazy-{resource_id}-{date_bucket}",
+        )
+    except Exception as e:
+        logger.warning(f"[cover] lazy thumbnail enqueue failed for {resource_id}: {e}")
+
+
 @router.get("/{resource_id}/cover")
 async def serve_resource_cover(resource_id: str):
     """Serve cover/thumbnail image for a resource (no auth required).
@@ -588,9 +652,33 @@ async def serve_resource_cover(resource_id: str):
                     f"parsed_media cover lookup failed for media_id={media_id}: {e}"
                 )
 
-        # Fallback for image files: serve the original file as cover.
-        if resource.get("mime_type", "").startswith("image/"):
-            file_path = resource.get("file_path")
+        # ── Lazy thumbnail generation (million-files P1) ─────────────────
+        # Independent resources (no parsed_media backing) without a
+        # pre-generated thumbnail get one ON FIRST VIEW: enqueue the
+        # thumbnail workflow (date-bucketed idempotency key — concurrent
+        # misses collapse into one workflow, failures retry next day) and
+        # answer immediately. Small images serve the original bytes as the
+        # cover (no workflow needed); everything else gets an inline SVG
+        # placeholder with no-store so the client re-asks until the real
+        # thumbnail lands.
+        mime_type = resource.get("mime_type") or ""
+        file_path = resource.get("file_path")
+        if not media_id and file_path and not file_path.startswith("http"):
+            full_path = Path(settings.DOWNLOAD_PATH) / file_path
+            if full_path.exists():
+                size = resource.get("file_size_bytes") or 0
+                if mime_type.startswith("image/") and 0 < size <= 512_000:
+                    mime, _ = mimetypes.guess_type(str(full_path))
+                    return FileResponse(
+                        path=str(full_path),
+                        media_type=mime or "image/jpeg",
+                        headers={"Cache-Control": "public, max-age=604800"},
+                    )
+                await _enqueue_lazy_thumbnail(str(resource_id), file_path, mime_type)
+                return _cover_placeholder(mime_type)
+
+        # Legacy fallback for image files without a local file-size record.
+        if mime_type.startswith("image/"):
             if file_path and not file_path.startswith("http"):
                 full_path = Path(settings.DOWNLOAD_PATH) / file_path
                 if full_path.exists():
