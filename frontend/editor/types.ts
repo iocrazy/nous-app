@@ -34,6 +34,9 @@ export interface SceneDoc {
   content_version: number;
   elements: ScriptElement[];
   sort_order: number;
+  // Node-view canvas coordinates (script_scenes mig 339; null/absent until placed).
+  position_x?: number | null;
+  position_y?: number | null;
 }
 
 /**
