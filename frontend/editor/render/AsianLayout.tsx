@@ -16,7 +16,7 @@
  * machine, debounced input, paste, IME) stays in SceneBlock and flows down
  * through `handlers`, so this component is purely presentational.
  */
-import { ElementLine } from './layoutShared';
+import { ElementLine, type LineMention } from './layoutShared';
 import type { LayoutHandlers } from './HollywoodLayout';
 import type { ElementType, ScriptElement } from '../types';
 
@@ -44,9 +44,11 @@ export interface AsianLayoutProps {
   elements: ScriptElement[];
   focusedElementId: string | null;
   handlers: LayoutHandlers;
+  /** The open mention picker (if any) — its ARIA is applied to the matching line. */
+  mention?: LineMention | null;
 }
 
-export function AsianLayout({ elements, focusedElementId, handlers }: AsianLayoutProps) {
+export function AsianLayout({ elements, focusedElementId, handlers, mention }: AsianLayoutProps) {
   return (
     <>
       {elements.map((el) => {
@@ -63,6 +65,11 @@ export function AsianLayout({ elements, focusedElementId, handlers }: AsianLayou
               element={el}
               lineClass={ASIAN_LINE_CLASS[el.type]}
               focused={focusedElementId === el.id}
+              mentionAria={
+                mention && mention.elementId === el.id
+                  ? { listboxId: mention.listboxId, activeOptionId: mention.activeOptionId }
+                  : undefined
+              }
               {...handlers}
             />
             {suffix && (

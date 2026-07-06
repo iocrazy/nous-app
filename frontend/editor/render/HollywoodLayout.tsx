@@ -7,7 +7,7 @@
  * map. All interaction (keydown machine, debounced input, paste) is owned by
  * SceneBlock and passed down as `handlers`, so this component stays presentational.
  */
-import { ElementLine, type ElementLineProps } from './layoutShared';
+import { ElementLine, type ElementLineProps, type LineMention } from './layoutShared';
 import type { ElementType, ScriptElement } from '../types';
 
 export const HOLLYWOOD_LINE_CLASS: Record<ElementType, string> = {
@@ -29,9 +29,16 @@ export interface HollywoodLayoutProps {
   elements: ScriptElement[];
   focusedElementId: string | null;
   handlers: LayoutHandlers;
+  /** The open mention picker (if any) — its ARIA is applied to the matching line. */
+  mention?: LineMention | null;
 }
 
-export function HollywoodLayout({ elements, focusedElementId, handlers }: HollywoodLayoutProps) {
+export function HollywoodLayout({
+  elements,
+  focusedElementId,
+  handlers,
+  mention,
+}: HollywoodLayoutProps) {
   return (
     <>
       {elements.map((el) => (
@@ -40,6 +47,11 @@ export function HollywoodLayout({ elements, focusedElementId, handlers }: Hollyw
           element={el}
           lineClass={HOLLYWOOD_LINE_CLASS[el.type]}
           focused={focusedElementId === el.id}
+          mentionAria={
+            mention && mention.elementId === el.id
+              ? { listboxId: mention.listboxId, activeOptionId: mention.activeOptionId }
+              : undefined
+          }
           {...handlers}
         />
       ))}

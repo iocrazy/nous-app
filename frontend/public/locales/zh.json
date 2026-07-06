@@ -2381,6 +2381,13 @@
     "statCharacters": "角色",
     "statLocations": "地点",
     "cast": "角色表",
-    "castEmpty": "暂无角色"
+    "castEmpty": "暂无角色",
+    "convertToScenes": "转换为场景",
+    "converting": "转换中…",
+    "convertStarted": "正在把章节转换为场景…",
+    "convertDone": "章节已转换为场景",
+    "convertFailed": "无法转换该章节",
+    "untitledChapter": "未命名章节",
+    "chapterEmpty": "该章节暂无文本。"
   }
 }

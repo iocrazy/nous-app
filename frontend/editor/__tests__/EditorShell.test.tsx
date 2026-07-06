@@ -10,8 +10,19 @@ vi.mock('react-i18next', () => ({
 const svc = vi.hoisted(() => ({
   listScenes: vi.fn(),
   listEpisodes: vi.fn(),
+  convertToScenes: vi.fn(),
+  moveScene: vi.fn(),
 }));
 vi.mock('../sceneService', () => svc);
+
+// EditorShell now loads legacy chapters + surfaces convert toasts; stub both so
+// the shell can render without a ToastProvider or a real network call.
+vi.mock('../../services/scriptService', () => ({
+  fetchScriptProject: vi.fn().mockResolvedValue({ chapters: [] }),
+}));
+vi.mock('../../components/Toast', () => ({
+  useToast: () => ({ addToast: vi.fn() }),
+}));
 
 import { EditorShell } from '../components/EditorShell';
 

@@ -476,4 +476,56 @@ export const EDITOR_SHELL_STYLES = `
   font-family:var(--sans); font-size:14px; padding:24px; text-align:center;
 }
 .mh-shell-state.error{ color:var(--red); }
+
+/* ===== SCENE REORDER (drag + keyboard, Task 10) ===== */
+.mh-drag-handle{ cursor:grab; border-radius:5px; }
+.mh-drag-handle:active{ cursor:grabbing; }
+.mh-scene-block.dragging{ opacity:0.55; }
+.mh-drop-indicator{
+  height:2px; border-radius:2px; margin:5px 0;
+  background:var(--indigo); box-shadow:0 0 0 1px color-mix(in srgb, var(--indigo) 30%, transparent);
+}
+.mh-drop-indicator.before{ margin-top:0; }
+.mh-drop-indicator.after{ margin-bottom:0; }
+
+/* Windowed-render placeholder (unmounted far-off scenes keep scroll geometry). */
+.mh-scene-placeholder{ margin-bottom:26px; }
+
+/* ===== LEGACY CHAPTER FALLBACK (read-only prose + Convert) ===== */
+.mh-chapter-fallback{
+  margin:0 0 26px; padding:16px 18px;
+  background:var(--surface-2); border:1px solid var(--sheet-border);
+  border-radius:var(--radius-md); border-left:3px solid var(--tick-transition);
+}
+.mh-chapter-fallback-head{
+  display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px;
+}
+.mh-chapter-fallback-title{
+  margin:0; font-size:14px; font-weight:700; color:var(--sheet-ink); font-family:var(--sans);
+}
+.mh-chapter-convert-btn{
+  flex-shrink:0; font-family:var(--sans); font-size:12px; font-weight:600;
+  padding:6px 12px; border-radius:var(--radius-sm); cursor:pointer;
+  background:var(--indigo); color:var(--accent-on); border:1px solid transparent;
+}
+.mh-chapter-convert-btn:hover:not(:disabled){ background:var(--indigo-deep); }
+.mh-chapter-convert-btn:disabled{ opacity:0.55; cursor:default; }
+.mh-chapter-fallback-body{
+  margin:0; font-size:13px; line-height:1.7; color:var(--sheet-ink-soft);
+  white-space:pre-wrap; font-family:var(--mono);
+}
+.mh-chapter-fallback-body.empty{ font-style:italic; }
+
+/* ===== VISIBLE FOCUS RING AUDIT (a11y sweep, Task 10) ===== */
+.mh-editor-shell button:focus-visible,
+.mh-editor-shell select:focus-visible,
+.mh-editor-shell input:focus-visible,
+.mh-editor-shell [role='tab']:focus-visible,
+.mh-editor-shell [role='option']:focus-visible,
+.mh-editor-shell .mh-el-editable:focus-visible{
+  outline:2px solid var(--indigo);
+  outline-offset:2px;
+  border-radius:5px;
+}
+.mh-editor-shell .mh-drag-handle:focus-visible{ opacity:1; outline-offset:1px; }
 `;

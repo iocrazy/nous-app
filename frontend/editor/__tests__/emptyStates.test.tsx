@@ -15,6 +15,14 @@ const svc = vi.hoisted(() => ({
 }));
 vi.mock('../sceneService', () => svc);
 
+// EditorShell (Task 10) also reads chapters + shows convert toasts.
+vi.mock('../../services/scriptService', () => ({
+  fetchScriptProject: vi.fn().mockResolvedValue({ chapters: [] }),
+}));
+vi.mock('../../components/Toast', () => ({
+  useToast: () => ({ addToast: vi.fn() }),
+}));
+
 import { ColdStart, EmptySceneHint } from '../components/EmptyStates';
 import { EditorShell } from '../components/EditorShell';
 import type { SceneDoc } from '../types';

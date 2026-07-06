@@ -2381,6 +2381,13 @@
     "statCharacters": "Characters",
     "statLocations": "Locations",
     "cast": "Cast",
-    "castEmpty": "No characters yet"
+    "castEmpty": "No characters yet",
+    "convertToScenes": "Convert to Scenes",
+    "converting": "Converting…",
+    "convertStarted": "Converting chapter to scenes…",
+    "convertDone": "Chapter converted to scenes",
+    "convertFailed": "Could not convert this chapter",
+    "untitledChapter": "Untitled Chapter",
+    "chapterEmpty": "This chapter has no text yet."
   }
 }
