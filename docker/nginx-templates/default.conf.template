@@ -1,0 +1,72 @@
+# MediaHub Nginx config TEMPLATE (envsubst by the official nginx image:
+# /etc/nginx/templates/*.template → /etc/nginx/conf.d/*.conf at start).
+# Serves HLS (/stream/) + signed direct files (/f/) from /app/downloads/.
+# ${NGINX_SECURE_LINK_SECRET} comes from the container env — see
+# docs/runbook/nginx-direct-serve.md before touching compose (Watchtower
+# does NOT apply compose changes).
+
+server {
+    listen 80;
+    server_name _;
+
+    # HLS streaming - serve video segments and playlists
+    location /stream/ {
+        alias /app/downloads/;
+
+        types {
+            application/vnd.apple.mpegurl m3u8;
+            video/mp2t ts;
+            video/mp4 m4s mp4;
+        }
+
+        # Cache: segments are immutable, playlists need short cache
+        set $cache_control "public, max-age=31536000";
+        if ($request_filename ~* \.m3u8$) {
+            set $cache_control "public, max-age=2";
+        }
+        add_header Cache-Control $cache_control;
+
+        # Allow cross-origin requests from frontend
+        add_header Access-Control-Allow-Origin *;
+        add_header Access-Control-Allow-Methods "GET, OPTIONS";
+        add_header Access-Control-Allow-Headers "Range, Origin, Accept, Authorization";
+
+        # Handle preflight requests
+        if ($request_method = 'OPTIONS') {
+            add_header Access-Control-Allow-Origin *;
+            add_header Access-Control-Allow-Methods "GET, OPTIONS";
+            add_header Access-Control-Allow-Headers "Range, Origin, Accept, Authorization";
+            add_header Content-Length 0;
+            add_header Content-Type text/plain;
+            return 204;
+        }
+    }
+
+    # Signed direct file serve (million-files P3) — FastAPI answers cover/
+    # file requests with a 302 here; bytes go straight from disk via
+    # sendfile. Signature formula must match backend
+    # app/services/media/nginx_direct.py sign_direct_url EXACTLY.
+    location /f/ {
+        alias /app/downloads/;
+
+        secure_link $arg_st,$arg_e;
+        secure_link_md5 "$secure_link_expires$uri ${NGINX_SECURE_LINK_SECRET}";
+
+        if ($secure_link = "") { return 403; }
+        if ($secure_link = "0") { return 410; }
+
+        add_header Cache-Control "private, max-age=86400";
+        add_header Access-Control-Allow-Origin *;
+    }
+
+    # Health check
+    location /health {
+        return 200 'OK';
+        add_header Content-Type text/plain;
+    }
+
+    # Gzip for playlists (m3u8 are text-based)
+    gzip on;
+    gzip_types application/vnd.apple.mpegurl;
+    gzip_min_length 256;
+}

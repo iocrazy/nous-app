@@ -1,0 +1,81 @@
+# nginx 静态直出(signed direct serve)— NAS 启用 Runbook
+
+> 背景:百万文件 P3(设计:`docs/superpowers/specs/2026-07-06-million-files-single-user-design.md`)。
+> 启用后 cover(后续 file)字节由既有 HLS nginx 容器(:8081)sendfile 直发,
+> FastAPI 只回 302 签名重定向。**代码合并后默认不生效** —— 需要下面的一次性
+> NAS 操作 + DB 开关。任何一步不做,系统保持现状(FileResponse),零风险。
+
+## 一次性 NAS 操作(⚠️ Watchtower 不应用 compose 变更)
+
+1. 生成共享 secret 并写入 host env 文件(backend 与 nginx 共用):
+
+   ```bash
+   ssh <nas>   # port 1122, key nas_deploy_key
+   openssl rand -hex 32
+   # 把输出追加到 /volume1/docker/mediahub/docker/.env:
+   # NGINX_SECURE_LINK_SECRET=<上面的值>
+   ```
+
+2. 拉新代码后,重建 **仅 nginx** 容器(铁律 `--no-deps`,防漂移栈级联):
+
+   ```bash
+   cd /volume1/docker/mediahub
+   git pull
+   sudo /usr/local/bin/docker compose -f docker/docker-compose.yml up -d --no-deps nginx
+   ```
+
+3. backend 容器读取新 env(bind-mount 的 .env,stop/start 即重读):
+
+   ```bash
+   sudo /usr/local/bin/docker stop -t 0 mediahub-app-backend && \
+   sudo /usr/local/bin/docker start mediahub-app-backend
+   # worker 同理:mediahub-worker
+   ```
+
+4. 验证 nginx 侧签名闸:
+
+   ```bash
+   # 无签名 → 403
+   curl -s -o /dev/null -w '%{http_code}\n' 'http://127.0.0.1:8081/f/anything'
+   # HLS 原路不受影响 → 200/404 照旧
+   curl -s -o /dev/null -w '%{http_code}\n' 'http://127.0.0.1:8081/health'
+   ```
+
+## 打开 DB 开关(Supabase SQL,随时可关)
+
+```sql
+INSERT INTO public.system_settings (key, value)
+VALUES ('nginx_direct_serve',
+        '{"enabled": true,
+          "base_url": "https://mediahubserver.heygo.cn:8081",
+          "ttl_seconds": 86400}'::jsonb)
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+```
+
+> base_url 必须是浏览器可达的 :8081 通路(与现有 HLS 播放同一入口)。
+> 后端配置缓存 60s —— 开关变更 1 分钟内生效。
+
+## 验证(开启后)
+
+```bash
+# cover 端点应回 302,Location 指向 /f/...?st=..&e=..
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' \
+  'https://mediahubserver.heygo.cn:88/api/v1/resources/<id>/cover'
+# 跟随后 200 且 Server: nginx
+curl -sIL 'https://mediahubserver.heygo.cn:88/api/v1/resources/<id>/cover' | grep -iE '^(HTTP|server)'
+```
+
+前端无需任何改动:`<img>` 自动跟随 302;302 本身带 `private, max-age=600`,
+重复渲染 10 分钟内不再触达 gateway。
+
+## 回滚
+
+- 软回滚(秒级):`UPDATE public.system_settings SET value = jsonb_set(value,'{enabled}','false') WHERE key='nginx_direct_serve';` —— cover 立即回到 FileResponse。
+- nginx 配置回滚:恢复 compose 里旧的 `nginx-hls.conf` 挂载并 `up -d --no-deps nginx`(模板与旧 conf 的 /stream/、/health 行为一致,一般无需)。
+
+## 已知边界
+
+- 302 方案 gateway 仍承接每次首个 cover 请求(纯重定向,零磁盘 IO);
+  彻底绕开 gateway 的"列表响应直带签名 URL"是后续增量,当前收益已 >95%。
+- 签名对 `$uri`(percent-decoded)计算 —— 中文/空格文件名已覆盖
+  (backend 用原始路径算 md5、URL 里 quote)。
