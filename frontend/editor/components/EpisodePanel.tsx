@@ -22,6 +22,7 @@ import {
   type Episode,
 } from '../sceneService';
 import { updateScriptProject } from '../../services/scriptService';
+import { useToast } from '../../components/Toast';
 
 export interface EpisodePanelProps {
   scriptId: string;
@@ -47,6 +48,7 @@ export function EpisodePanel({
   onClose,
 }: EpisodePanelProps) {
   const { t } = useTranslation();
+  const { addToast } = useToast();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
@@ -58,12 +60,15 @@ export function EpisodePanel({
         await op();
         await onChanged();
       } catch (err) {
+        // Surface the failure — this is exactly where a DELETE RESTRICT race
+        // (episode filled between list + delete) would otherwise vanish.
         console.error('[EpisodePanel] episode mutation failed', err);
+        addToast(t('editor.episodeActionFailed'), 'error');
       } finally {
         setBusy(false);
       }
     },
-    [onChanged],
+    [onChanged, addToast, t],
   );
 
   const handleReassign = useCallback(

@@ -2299,7 +2299,6 @@
   },
   "editor": {
     "brand": "MediaHub Projects",
-    "episodeOne": "Ep 1 — Pilot",
     "scenesLabel": "场景",
     "scenesNav": "场景导航",
     "sceneCount": "{{count}} 个场景 · 剧本",
@@ -2321,7 +2320,6 @@
     "loading": "正在加载场景…",
     "loadError": "无法加载此剧本，请重试。",
     "coverPlaceholder": "封面编辑器 — 第二阶段推出",
-    "outlinePlaceholder": "大纲编辑将在第二阶段推出，当前视图为只读。",
     "statisticsSoon": "统计信息将随场景编辑器一同推出。",
     "hintTab": "切换元素",
     "hintEnter": "新建元素",
@@ -2426,6 +2424,7 @@
     "epDeleteBlocked": "剧集下有剧本，无法删除",
     "epRename": "重命名剧集",
     "epScriptsTitle": "该剧集的剧本数",
-    "epClose": "关闭剧集面板"
+    "epClose": "关闭剧集面板",
+    "episodeActionFailed": "剧集操作失败，请重试。"
   }
 }

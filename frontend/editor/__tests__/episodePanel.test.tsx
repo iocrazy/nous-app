@@ -29,6 +29,9 @@ const scriptSvc = vi.hoisted(() => ({
 }));
 vi.mock('../../services/scriptService', () => scriptSvc);
 
+const toast = vi.hoisted(() => ({ addToast: vi.fn() }));
+vi.mock('../../components/Toast', () => ({ useToast: () => ({ addToast: toast.addToast }) }));
+
 import { EpisodePanel } from '../components/EpisodePanel';
 
 // Native-int ids (as they arrive at runtime) despite the string type.
@@ -100,6 +103,16 @@ describe('EpisodePanel', () => {
     renderPanel();
     fireEvent.click(screen.getByText('editor.newEpisode'));
     await waitFor(() => expect(svc.createEpisode).toHaveBeenCalledWith('700'));
+  });
+
+  it('shows an error toast when a mutation fails (e.g. DELETE RESTRICT race)', async () => {
+    svc.deleteEpisode.mockRejectedValueOnce(new Error('restrict'));
+    renderPanel();
+    const [, itemB] = screen.getAllByTestId('episode-item');
+    fireEvent.click(within(itemB).getByLabelText('editor.epDelete')); // empty ep, deletable
+    await waitFor(() =>
+      expect(toast.addToast).toHaveBeenCalledWith('editor.episodeActionFailed', 'error'),
+    );
   });
 
   it('disables delete for a non-empty episode and deletes an empty one', async () => {

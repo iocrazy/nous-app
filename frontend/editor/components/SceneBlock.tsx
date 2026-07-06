@@ -578,6 +578,9 @@ export function SceneBlock({
 
   // Leaving the head row entirely (focus moved outside it) returns to read mode.
   const handleHeadRowBlur = useCallback((e: React.FocusEvent<HTMLDivElement>) => {
+    // A window/tab switch blurs the control without leaving the row — keep the
+    // edit state so the writer returns to the same selects, not a collapsed slug.
+    if (!document.hasFocus()) return;
     const next = e.relatedTarget as Node | null;
     if (next && headRowRef.current?.contains(next)) return;
     setHeadingEditing(false);

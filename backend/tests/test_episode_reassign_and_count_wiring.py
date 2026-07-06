@@ -20,7 +20,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from app.core.deps import AuthContext, get_auth
-from app.core.scope_guards import verify_project_read_access
+from app.core.scope_guards import verify_project_read_access, verify_script_access
 from app.main import app
 from app.schemas.script import ScriptProjectUpdate
 
@@ -56,6 +56,7 @@ def test_script_project_update_schema_carries_episode_id():
 
 @pytest.mark.asyncio
 async def test_put_script_project_forwards_episode_id(client, monkeypatch):
+    from app.repositories.episode_repository import EpisodeRepository
     from app.repositories.script_repository import ScriptProjectRepository
 
     captured: dict = {}
@@ -65,9 +66,27 @@ async def test_put_script_project_forwards_episode_id(client, monkeypatch):
         captured["data"] = data
         return {"id": record_id, "episode_id": data.get("episode_id")}
 
-    monkeypatch.setattr(ScriptProjectRepository, "update", fake_update)
+    # Script + episode both in project 700 so the same-project reassign check
+    # passes; then assert the schema forwards episode_id through to the repo.
+    async def fake_script_get(self, script_id):
+        return {"id": script_id, "project_id": 700}
 
-    resp = await client.put("/api/v1/scripts/projects/9001", json={"episode_id": "555"})
+    async def fake_episode_get(self, episode_id):
+        return {"id": episode_id, "project_id": 700}
+
+    monkeypatch.setattr(ScriptProjectRepository, "update", fake_update)
+    monkeypatch.setattr(ScriptProjectRepository, "get_by_id", fake_script_get)
+    monkeypatch.setattr(EpisodeRepository, "get_by_id", fake_episode_get)
+    # The PUT route now carries verify_script_access — bypass the team check
+    # (tested elsewhere) so this test targets the schema passthrough.
+    app.dependency_overrides[verify_script_access] = lambda: None
+    try:
+        resp = await client.put(
+            "/api/v1/scripts/projects/9001", json={"episode_id": "555"}
+        )
+    finally:
+        app.dependency_overrides.pop(verify_script_access, None)
+
     assert resp.status_code == 200
     assert captured["record_id"] == "9001"
     assert captured["data"] == {"episode_id": "555"}
