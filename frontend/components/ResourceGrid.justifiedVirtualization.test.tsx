@@ -309,6 +309,9 @@ describe('ResourceGrid — justified virtualization', () => {
     // Items without resolution/mime fall back to ar=1 → width == row height.
     const firstCardWrap = rowEls[0].firstElementChild as HTMLElement;
     expect(firstCardWrap.style.width).toBe('160px');
-    expect((rowEls[0] as HTMLElement).style.height).toBe('160px');
+    // Rows must NOT hard-code their height: the card renders chrome below
+    // the thumbnail (filename bar / TTL strip), so the row self-measures via
+    // measureElement and only the thumbnail width comes from the layout pass.
+    expect((rowEls[0] as HTMLElement).style.height).toBe('');
   });
 });

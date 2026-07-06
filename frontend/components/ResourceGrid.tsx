@@ -1137,6 +1137,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                           <div
                             key={virtualRow.key}
                             data-index={virtualRow.index}
+                            ref={justifiedVirtualizer.measureElement}
                             style={{
                               position: 'absolute',
                               top: 0,
@@ -1144,8 +1145,9 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                               width: '100%',
                               transform: `translateY(${virtualRow.start}px)`,
                               display: 'flex',
+                              alignItems: 'flex-start',
                               gap: justifiedGap,
-                              height: row.height,
+                              paddingBottom: justifiedGap,
                             }}
                           >
                             {rowItems.map((item, idx) => {

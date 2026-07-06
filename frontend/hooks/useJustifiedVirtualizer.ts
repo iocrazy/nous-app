@@ -2,6 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { computeJustifiedRows, type JustifiedRow } from '../utils/justifiedLayout'
 
+/** Height of a grid card's non-thumbnail chrome (filename bar): px-3/py-2.5
+ *  padding + one 13px text line + border. Estimate only — rows re-measure. */
+const CARD_CHROME_ESTIMATE = 44
+
 interface UseJustifiedVirtualizerOpts {
   scrollRef: React.RefObject<HTMLElement>
   /** Display aspect ratios (w/h), one per item, in render order. */
@@ -61,8 +65,13 @@ export function useJustifiedVirtualizer({
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
-    // Exact size per row (+ the inter-row gap) — no measureElement needed.
-    estimateSize: (index) => (rows[index]?.height ?? targetRowHeight) + gap,
+    // The layout pass gives the exact IMAGE height per row, but each card
+    // renders extra chrome below the thumbnail (the filename info bar,
+    // ~40px; more with the temp-TTL strip or a transcoding badge). The
+    // estimate covers the common case and rows self-correct via
+    // measureElement, so stacked chrome never overlaps the next row.
+    estimateSize: (index) =>
+      (rows[index]?.height ?? targetRowHeight) + CARD_CHROME_ESTIMATE + gap,
     overscan: 4,
   })
 
