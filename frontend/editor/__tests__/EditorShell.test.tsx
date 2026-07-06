@@ -160,10 +160,14 @@ describe('EditorShell', () => {
     localStorage.removeItem('editor.format.42');
     svc.listScenes.mockResolvedValue(twoScenes);
     const { container } = render(<EditorShell scriptId="42" />);
-    await waitFor(() => expect(screen.getByRole('main')).toBeInTheDocument());
+    // Wait for the SCENES (Hollywood lines), not the main landmark — the
+    // landmark exists during the loading state too, so slow runners raced
+    // the listScenes resolution and flaked on the .hw-action assertion.
+    await waitFor(() =>
+      expect(container.querySelector('.hw-action')).toBeInTheDocument(),
+    );
 
     // Starts in Hollywood.
-    expect(container.querySelector('.hw-action')).toBeInTheDocument();
     expect(container.querySelector('.as-prefix')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'editor.asian' }));
