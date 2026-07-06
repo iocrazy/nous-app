@@ -73,11 +73,22 @@ services:
       - MEDIAHUB_TOKEN_ENCRYPTION_KEY=${MEDIAHUB_TOKEN_ENCRYPTION_KEY:-}
       - MEDIAHUB_TOKEN_ENCRYPTION_KEY_OLD=${MEDIAHUB_TOKEN_ENCRYPTION_KEY_OLD:-}
       - WHISPER_PROVIDER=${WHISPER_PROVIDER:-openai_api}
+      # Memory stack + telemetry (backfilled from NAS drift 2026-07-06 —
+      # these were hand-added on the host and lost to every repo copy).
+      - FEATURE_HONCHO_MEMORY=${FEATURE_HONCHO_MEMORY:-}
+      - HONCHO_BASE_URL=${HONCHO_BASE_URL:-}
+      - FEATURE_LANGFUSE=${FEATURE_LANGFUSE:-}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
       # DBOS orchestrator — direct Postgres URL (NOT supavisor / pgbouncer:
       # DBOS uses LISTEN/NOTIFY which doesn't survive any pooler). Empty
       # value falls back to "DBOS disabled" startup warning + HTTP 500 on
       # /media/fetch. See docker/.env.example for the URL format.
       - DBOS_DATABASE_URL=${DBOS_DATABASE_URL:-}
+      # nginx direct-serve signer (P3) — same secure_link secret the nginx
+      # container gets; deployment-infra env like DBOS_DATABASE_URL.
+      - NGINX_SECURE_LINK_SECRET=${NGINX_SECURE_LINK_SECRET:-}
     depends_on:
       redis:
         condition: service_healthy
@@ -169,6 +180,14 @@ services:
       - MEDIAHUB_TOKEN_ENCRYPTION_KEY=${MEDIAHUB_TOKEN_ENCRYPTION_KEY:-}
       - MEDIAHUB_TOKEN_ENCRYPTION_KEY_OLD=${MEDIAHUB_TOKEN_ENCRYPTION_KEY_OLD:-}
       - WHISPER_PROVIDER=${WHISPER_PROVIDER:-openai_api}
+      # Memory stack + telemetry (backfilled from NAS drift 2026-07-06 —
+      # these were hand-added on the host and lost to every repo copy).
+      - FEATURE_HONCHO_MEMORY=${FEATURE_HONCHO_MEMORY:-}
+      - HONCHO_BASE_URL=${HONCHO_BASE_URL:-}
+      - FEATURE_LANGFUSE=${FEATURE_LANGFUSE:-}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
       # CRITICAL: worker NEEDS DBOS_DATABASE_URL — the WHOLE point of
       # this container is to consume the DBOS workflow queue. Without
       # this env, init_dbos() logs "DBOS disabled" and the process
@@ -176,6 +195,9 @@ services:
       # zero workflow execution cluster-wide. Caught in prod 2026-05-10
       # — parse + download stuck because no worker was actually running.
       - DBOS_DATABASE_URL=${DBOS_DATABASE_URL:-}
+      # nginx direct-serve signer (P3) — same secure_link secret the nginx
+      # container gets; deployment-infra env like DBOS_DATABASE_URL.
+      - NGINX_SECURE_LINK_SECRET=${NGINX_SECURE_LINK_SECRET:-}
     depends_on:
       redis:
         condition: service_healthy
@@ -303,6 +325,10 @@ services:
     container_name: mediahub-app-nginx
     restart: unless-stopped
     ports:
+      # 8881 = the memorable one (backend is 8880); 8081 kept so the existing
+      # /stream/ reverse-proxy rule keeps working — retire it after the proxy
+      # rule is repointed.
+      - "8881:80"
       - "8081:80"
     environment:
       # Shared secure_link secret — set in docker/.env, same value the

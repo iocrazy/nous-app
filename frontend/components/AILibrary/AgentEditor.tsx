@@ -129,6 +129,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
   const [error, setError] = useState<string | null>(null);
   const [forkModalOpen, setForkModalOpen] = useState(false);
   const [allAgents, setAllAgents] = useState<AILibraryAgent[]>([]);
+  const [resetting, setResetting] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -296,9 +297,12 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
    * sweeper will re-pause within ~60 s — callers should bump the budget
    * first to avoid the flap.
    */
-  const [resetting, setResetting] = useState(false);
   // 复位: drop the caller's override layer so the preset falls back to the
-  // admin/system defaults (DELETE /agents/{slug}/override).
+  // admin/system defaults (DELETE /agents/{slug}/override). NOTE: its
+  // `resetting` state is declared with the other hooks at the top — a
+  // useState down here sat AFTER the loading/error early-returns and blew
+  // up every agent open with React #310 (hooks count changed between the
+  // loading render and the loaded render).
   const resetOverride = async (): Promise<void> => {
     setResetting(true);
     try {
