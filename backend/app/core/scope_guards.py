@@ -181,6 +181,24 @@ async def verify_scene_access(
     await _assert_script_team_access(str(scene.get("script_id")), auth.user_id)
 
 
+async def verify_shot_access(
+    shot_id: str,
+    auth: AuthContext = Depends(get_auth),
+) -> None:
+    """Guard for `/shots/{shot_id}/...` targets — resolves shot → scene_id →
+    script_id, then applies the same team check (404 if the shot is missing).
+
+    A thin one-hop wrapper over ``verify_scene_access``'s kernel: shots hang off
+    a scene which hangs off a script, so authorization collapses to the scene's
+    team check once the shot is resolved to its ``scene_id``."""
+    from app.repositories.script_shot_repository import get_script_shot_repository
+
+    shot = await get_script_shot_repository().get_by_id(shot_id)
+    if not shot:
+        raise HTTPException(status_code=404, detail="Shot not found")
+    await verify_scene_access(str(shot.get("scene_id")), auth)
+
+
 async def verify_episode_write_access(
     episode_id: str,
     auth: AuthContext = Depends(get_auth),

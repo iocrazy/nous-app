@@ -177,6 +177,50 @@ class SceneMoveRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Shot schemas (Phase B P3 — storyboard shots hang off a scene)
+# ---------------------------------------------------------------------------
+
+
+class ShotCreate(BaseModel):
+    """Request body for creating a shot under a scene. ``scene_id`` comes from
+    the path; ``status`` / image URLs are never client-set on create (a fresh
+    shot lands ``status='empty'`` — those move through generate/update_status)."""
+
+    shot_number: Optional[int] = None
+    shot_type: Optional[str] = Field(None, max_length=20)
+    camera_angle: Optional[str] = Field(None, max_length=20)
+    camera_movement: Optional[str] = Field(None, max_length=20)
+    focal_length: Optional[str] = Field(None, max_length=20)
+    lighting: Optional[str] = None
+    description: Optional[str] = None
+    sort_order: Optional[int] = None
+
+
+class ShotUpdate(BaseModel):
+    """Request body for updating a shot's parameter tags / description. NEVER
+    touches ``status`` or the image/thumbnail/video URLs — those flow through
+    the generate workflow's ``update_status`` write lane."""
+
+    shot_number: Optional[int] = None
+    shot_type: Optional[str] = Field(None, max_length=20)
+    camera_angle: Optional[str] = Field(None, max_length=20)
+    camera_movement: Optional[str] = Field(None, max_length=20)
+    focal_length: Optional[str] = Field(None, max_length=20)
+    lighting: Optional[str] = None
+    description: Optional[str] = None
+
+
+class ShotMoveRequest(BaseModel):
+    """Request body for `POST /shots/{shot_id}/move`.
+
+    Shots are reordered WITHIN their scene only (no cross-scene move in P3), so
+    there is no reparent field — just the sparse-insertion anchors."""
+
+    before_shot_id: Optional[str] = None
+    after_shot_id: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
 # Canvas sync schema
 # ---------------------------------------------------------------------------
 
