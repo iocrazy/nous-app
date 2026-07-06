@@ -107,7 +107,11 @@ def _foreign_team(monkeypatch):
     monkeypatch.setattr(ScriptShotRepository, "get_by_id", fake_shot_get)
     monkeypatch.setattr(ScriptSceneRepository, "get_by_id", fake_scene_get)
     monkeypatch.setattr(ScriptProjectRepository, "get_by_id", fake_project_get)
-    monkeypatch.setattr(guards, "get_team_id_for_user", fake_team)
+
+    async def fake_member(team_id, user_id):
+        return False
+
+    monkeypatch.setattr(guards, "_is_team_member", fake_member)
 
 
 @pytest.mark.asyncio
