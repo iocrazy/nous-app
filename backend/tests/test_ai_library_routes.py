@@ -268,7 +268,7 @@ async def test_patch_system_preset_rejected(client: AsyncClient) -> None:
         _cleanup(skill_patches)
 
     assert resp.status_code == 403
-    assert "read-only" in resp.json()["error"].lower()
+    assert "not customizable" in resp.json()["error"].lower()
 
 
 @pytest.mark.asyncio
