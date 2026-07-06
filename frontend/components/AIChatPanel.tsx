@@ -117,6 +117,32 @@ function parseProjectId(projectId: string | undefined): number | undefined {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
+// Per-agent "last active session" memory: switching agents (or reopening the
+// widget) resumes where you left off with that agent instead of always
+// landing on the newest session. Plain localStorage map slug → session id.
+const LAST_SESSION_KEY = 'ai_chat_last_session';
+
+function readLastSessionMap(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(LAST_SESSION_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function rememberLastSession(agentSlug: string, sessionId: string): void {
+  try {
+    localStorage.setItem(
+      LAST_SESSION_KEY,
+      JSON.stringify({ ...readLastSessionMap(), [agentSlug]: sessionId }),
+    );
+  } catch {
+    /* storage full/blocked — memory is a nicety, never fatal */
+  }
+}
+
 export function AIChatPanel({
   projectId,
   contextType,
@@ -133,12 +159,21 @@ export function AIChatPanel({
   const [agents, setAgents] = useState<AILibraryAgent[]>([]);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  // Session-history search (slide-over only). Client-side title filter —
-  // the list is capped at 50 sessions server-side. Reset when the overlay
-  // closes so it reopens fresh.
+  // Session-history search + scope (slide-over only). Search runs
+  // server-side (SQL ILIKE over the whole history); scope 'all' switches to
+  // the cross-agent list where every row carries an agent badge. Both reset
+  // when the overlay closes so it reopens fresh.
   const [sessionSearch, setSessionSearch] = useState('');
+  const [sessionScope, setSessionScope] = useState<'current' | 'all'>('current');
+  // Server-fetched rows for the overlay (search active or scope=all).
+  // null = show the panel's own per-agent session list untouched.
+  const [overlaySessions, setOverlaySessions] = useState<ChatSession[] | null>(null);
   useEffect(() => {
-    if (!sessionsOverlayOpen) setSessionSearch('');
+    if (!sessionsOverlayOpen) {
+      setSessionSearch('');
+      setSessionScope('current');
+      setOverlaySessions(null);
+    }
   }, [sessionsOverlayOpen]);
   const [messages, setMessages] = useState<AIChatMessage[]>([]);
   const [selectedAgentSlug, setSelectedAgentSlug] = useState<string | null>(null);
@@ -299,8 +334,13 @@ export function AIChatPanel({
         if (cancelled) return;
         setSessions(list);
         if (list.length > 0) {
-          setActiveSessionId(list[0].id);
-          await loadSessionMessages(list[0].id, () => cancelled);
+          // Resume this agent's last active session when it still exists;
+          // otherwise fall back to the newest one.
+          const rememberedId = readLastSessionMap()[effectiveAgentSlug];
+          const resume =
+            list.find((s) => s.id === rememberedId) ?? list[0];
+          setActiveSessionId(resume.id);
+          await loadSessionMessages(resume.id, () => cancelled);
         } else {
           const sessionPayload = lockedAgent
             ? { title: t('chat.newConversation', 'New conversation') }
@@ -342,11 +382,15 @@ export function AIChatPanel({
     }
   }
 
-  const handleSelectSession = useCallback(async (sessionId: string) => {
-    setActiveSessionId(sessionId);
-    setMessages([]);
-    await loadSessionMessages(sessionId);
-  }, []);
+  const handleSelectSession = useCallback(
+    async (sessionId: string) => {
+      setActiveSessionId(sessionId);
+      if (effectiveAgentSlug) rememberLastSession(effectiveAgentSlug, sessionId);
+      setMessages([]);
+      await loadSessionMessages(sessionId);
+    },
+    [effectiveAgentSlug],
+  );
 
   const handleNewSession = useCallback(async () => {
     if (!effectiveAgentSlug) return;
@@ -365,6 +409,7 @@ export function AIChatPanel({
       );
       setSessions((prev) => [created, ...prev]);
       setActiveSessionId(created.id);
+      rememberLastSession(effectiveAgentSlug, created.id);
       setMessages([]);
     } catch (err) {
       console.error('[AIChatPanel] createChatSession failed:', err);
@@ -373,12 +418,34 @@ export function AIChatPanel({
     }
   }, [effectiveAgentSlug, lockedAgent, numericProjectId, contextType, contextId, t, addToast]);
 
+  const handleRenameSession = useCallback(
+    async (sessionId: string, title: string) => {
+      try {
+        const updated = await aiLibraryService.updateChatSession(sessionId, { title });
+        const applyTitle = (list: ChatSession[]) =>
+          list.map((s) =>
+            s.id === sessionId ? { ...s, title: updated.title ?? title } : s,
+          );
+        setSessions(applyTitle);
+        setOverlaySessions((prev) => (prev ? applyTitle(prev) : prev));
+      } catch (err) {
+        console.error('[AIChatPanel] updateChatSession failed:', err);
+        const msg = err instanceof Error ? err.message : String(err);
+        addToast(`Rename failed: ${msg}`, 'error');
+      }
+    },
+    [addToast],
+  );
+
   const handleDeleteSession = useCallback(
     async (sessionId: string) => {
       try {
         await aiLibraryService.deleteChatSession(sessionId);
         const next = sessions.filter((s) => s.id !== sessionId);
         setSessions(next);
+        setOverlaySessions((prev) =>
+          prev ? prev.filter((s) => s.id !== sessionId) : prev,
+        );
         if (activeSessionId === sessionId) {
           if (next.length > 0) {
             setActiveSessionId(next[0].id);
@@ -472,6 +539,74 @@ export function AIChatPanel({
     [handleSend],
   );
 
+  // Overlay data: when scope=all or a search term is active, fetch from the
+  // server (debounced) into overlaySessions — the panel's own per-agent
+  // `sessions` state is never clobbered by browsing the history.
+  useEffect(() => {
+    if (!sessionsOverlayOpen) return;
+    const q = sessionSearch.trim();
+    if (sessionScope === 'current' && !q) {
+      setOverlaySessions(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const list =
+            sessionScope === 'all'
+              ? await aiLibraryService.listAllChatSessions(q || undefined)
+              : effectiveAgentSlug
+                ? await aiLibraryService.listChatSessions(
+                    effectiveAgentSlug,
+                    lockedAgent ? undefined : numericProjectId,
+                    50,
+                    q,
+                  )
+                : [];
+          if (!cancelled) setOverlaySessions(list);
+        } catch (err) {
+          console.error('[AIChatPanel] overlay session fetch failed:', err);
+        }
+      })();
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [
+    sessionsOverlayOpen,
+    sessionScope,
+    sessionSearch,
+    effectiveAgentSlug,
+    lockedAgent,
+    numericProjectId,
+  ]);
+
+  // Selecting a session that belongs to ANOTHER agent (scope=all) jumps the
+  // panel to that agent; the remembered-session map makes the agent-switch
+  // effect resume exactly the row that was clicked.
+  const handleOverlaySelect = useCallback(
+    (sessionId: string) => {
+      const picked = overlaySessions?.find((s) => s.id === sessionId);
+      const slug = picked?.agent_slug;
+      if (slug && slug !== effectiveAgentSlug && !lockedAgent) {
+        rememberLastSession(slug, sessionId);
+        setSelectedAgentSlug(slug);
+      } else {
+        void handleSelectSession(sessionId);
+      }
+      onSessionsOverlayClose?.();
+    },
+    [
+      overlaySessions,
+      effectiveAgentSlug,
+      lockedAgent,
+      handleSelectSession,
+      onSessionsOverlayClose,
+    ],
+  );
+
   const sessionItems: SessionItem[] = useMemo(
     () =>
       (sessions || []).filter(Boolean).map((s) => ({
@@ -482,6 +617,19 @@ export function AIChatPanel({
       })),
     [sessions, t],
   );
+
+  // Rows shown inside the slide-over. Agent badge only in the 'all' scope,
+  // where sessions from other agents appear.
+  const overlayItems: SessionItem[] = useMemo(() => {
+    if (overlaySessions == null) return sessionItems;
+    return overlaySessions.filter(Boolean).map((s) => ({
+      id: s.id,
+      title: s.title ?? t('chat.untitled', 'Untitled'),
+      message_count: s.message_count ?? 0,
+      updated_at: s.updated_at ?? '',
+      agent_slug: sessionScope === 'all' ? (s.agent_slug ?? undefined) : undefined,
+    }));
+  }, [overlaySessions, sessionItems, sessionScope, t]);
 
   // AgentOption wants {id, name, description?}. We thread agent.slug as
   // id because selection downstream uses slug — it's the session FK.
@@ -551,6 +699,7 @@ export function AIChatPanel({
           onSelect={handleSelectSession}
           onNew={handleNewSession}
           onDelete={handleDeleteSession}
+          onRename={handleRenameSession}
         />
       ) : (
         <>
@@ -574,6 +723,26 @@ export function AIChatPanel({
               <span className="text-sm font-medium text-ink-200">
                 Chat History
               </span>
+              {/* Scope toggle: this agent's sessions vs everything the
+                  caller owns across agents (rows then carry agent badges). */}
+              {!lockedAgent && (
+                <div className="flex items-center gap-0.5 rounded-md bg-ink-800 p-0.5">
+                  {(['current', 'all'] as const).map((scope) => (
+                    <button
+                      key={scope}
+                      type="button"
+                      onClick={() => setSessionScope(scope)}
+                      className={`rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+                        sessionScope === scope
+                          ? 'bg-indigo-500/10 text-indigo-400'
+                          : 'text-ink-500 hover:text-ink-300'
+                      }`}
+                    >
+                      {scope === 'current' ? 'Current' : 'All'}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="border-b border-ink-800 px-2 py-1.5">
               <div className="flex items-center gap-1.5 rounded-md bg-ink-800 px-2 py-1">
@@ -599,25 +768,15 @@ export function AIChatPanel({
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto">
               <SessionList
-                sessions={
-                  sessionSearch.trim()
-                    ? sessionItems.filter((it) =>
-                        (it.title || 'New chat')
-                          .toLowerCase()
-                          .includes(sessionSearch.trim().toLowerCase()),
-                      )
-                    : sessionItems
-                }
+                sessions={overlayItems}
                 activeSessionId={activeSessionId}
-                onSelect={(id) => {
-                  handleSelectSession(id);
-                  onSessionsOverlayClose?.();
-                }}
+                onSelect={handleOverlaySelect}
                 onNew={() => {
                   handleNewSession();
                   onSessionsOverlayClose?.();
                 }}
                 onDelete={handleDeleteSession}
+                onRename={handleRenameSession}
               />
             </div>
           </div>

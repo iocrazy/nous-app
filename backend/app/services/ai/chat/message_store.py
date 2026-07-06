@@ -71,8 +71,13 @@ class MessageStore(Protocol):
         agent_slug: Optional[str],
         project_id: Optional[int],
         limit: int,
+        search: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """Return the caller's non-deleted sessions, newest-updated first."""
+        """Return the caller's non-deleted sessions, newest-updated first.
+
+        ``search`` filters by title (case-insensitive substring) in SQL so
+        the caller's whole history is searchable, not just the returned page.
+        """
         ...
 
     async def get_session(self, *, session_id: int) -> Optional[Dict[str, Any]]:
