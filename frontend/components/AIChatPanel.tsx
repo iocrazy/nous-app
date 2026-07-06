@@ -468,12 +468,22 @@ export function AIChatPanel({
       setSending(true);
 
       // Optimistic user bubble — replaced by the authoritative row after
-      // the server responds and we reload the message list.
+      // the server responds and we reload the message list. Staged image
+      // attachments render immediately via their local preview data URL.
       const tempUser: AIChatMessage = {
         id: `tmp-user-${Date.now()}`,
         session_id: activeSessionId,
         role: 'user',
         content: text,
+        attachments: stagedAttachments.length > 0
+          ? stagedAttachments.map((a) => ({
+              kind: a.kind,
+              resource_id: a.resource_id,
+              mime: a.mime,
+              alt_text: a.filename,
+              preview_data_url: a.preview_data_url,
+            }))
+          : undefined,
         created_at: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, tempUser]);
@@ -491,6 +501,7 @@ export function AIChatPanel({
             url: a.url,
             mime: a.mime ?? undefined,
             alt_text: a.filename,
+            resource_id: a.resource_id,
           })),
           ...refAttachments.map((r) => ({
             kind: r.kind,
@@ -798,6 +809,7 @@ export function AIChatPanel({
                 key={msg.id}
                 role={msg.role === 'system' ? 'assistant' : msg.role}
                 content={msg.content}
+                attachments={msg.attachments ?? undefined}
                 tokens={
                   msg.prompt_tokens != null && msg.completion_tokens != null
                     ? (msg.prompt_tokens ?? 0) + (msg.completion_tokens ?? 0)

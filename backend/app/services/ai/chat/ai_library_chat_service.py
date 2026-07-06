@@ -405,11 +405,36 @@ class AILibraryChatService:
 
         history = await self.get_messages(session_id, user_id=user_id)
 
+        # Normalize attachments to dicts up front so both the persisted
+        # user message (display metadata) and the S4/G2 resolution below
+        # work regardless of whether they arrived as Pydantic
+        # AttachmentRequest objects (HTTP path) or plain dicts (test path).
+        _att_dicts: list[dict] = []
+        for _att in attachments or []:
+            if hasattr(_att, "model_dump"):
+                _att_dicts.append(_att.model_dump())
+            elif isinstance(_att, dict):
+                _att_dicts.append(_att)
+            # silently drop anything else — same behavior as before
+
         # Persist the user turn BEFORE calling the model so partial
         # failures (LLM timeout, budget pause) still leave a record of
-        # what the user tried to ask.
+        # what the user tried to ask. Attachment display metadata rides
+        # along (kind/resource_id/mime/alt_text — never data_url bytes)
+        # so history reloads can re-render the image in the bubble.
         user_msg = await self._store.append_user_message(
-            session_id=session_id, user_id=str(user_id), content=content
+            session_id=session_id,
+            user_id=str(user_id),
+            content=content,
+            attachments=[
+                {
+                    k: a.get(k)
+                    for k in ("kind", "resource_id", "mime", "alt_text", "name")
+                    if a.get(k) is not None
+                }
+                for a in _att_dicts
+            ]
+            or None,
         )
 
         # M1.5 wiring: load agent record so we can read budget/fallback,
@@ -567,17 +592,7 @@ class AILibraryChatService:
         # content loaded lazily via ResourceFetch tool during the turn).
         # All other kinds → existing G2 binary attachment path (image/pdf/audio).
 
-        # Normalize to dicts so downstream split / resolver code works regardless
-        # of whether attachments arrived as Pydantic AttachmentRequest objects
-        # (HTTP path) or plain dicts (test path).
-        _att_dicts: list[dict] = []
-        for _att in attachments or []:
-            if hasattr(_att, "model_dump"):
-                _att_dicts.append(_att.model_dump())
-            elif isinstance(_att, dict):
-                _att_dicts.append(_att)
-            # silently drop anything else — same behavior as before
-
+        # (`_att_dicts` normalized above, before the user-message persist.)
         ref_atts: list = []
         binary_atts: list = []
         for _att in _att_dicts:
@@ -728,12 +743,19 @@ class AILibraryChatService:
         if binary_atts:
             try:
                 from app.agent_framework.multimodal import build_user_message
+                from app.schemas.ai_library_chat import AttachmentRequest
                 from app.services.ai.chat.chat_attachment_resolver import (
                     resolve_attachments,
                 )
                 from app.services.ai.model_capabilities import model_supports_vision
 
-                resolved = await resolve_attachments(binary_atts)
+                # resolve_attachments reads `.kind`/`.url`/... as attributes —
+                # passing the normalized dicts crashes it ('dict' object has
+                # no attribute 'kind') and the whole turn silently degrades
+                # to text-only. Re-hydrate to AttachmentRequest objects.
+                resolved = await resolve_attachments(
+                    [AttachmentRequest.model_validate(a) for a in binary_atts]
+                )
                 attachment_failures = list(resolved.failures)
                 supports_vision = await model_supports_vision(composed.model)
                 new_user_msg = build_user_message(

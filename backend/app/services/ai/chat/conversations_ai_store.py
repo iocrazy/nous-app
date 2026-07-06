@@ -453,6 +453,9 @@ class ConversationsAiStore:
             "prompt_tokens": meta.get("prompt_tokens"),
             "completion_tokens": meta.get("completion_tokens"),
             "metadata_json": metadata_json or None,
+            # Display metadata written by append_user_message; absent (None)
+            # for assistant rows and pre-feature user rows.
+            "attachments": body.get("attachments") or None,
             "created_at": row.get("created_at"),
         }
 
@@ -474,20 +477,35 @@ class ConversationsAiStore:
         return [self._to_legacy_message_shape(r) for r in rows]
 
     async def append_user_message(
-        self, *, session_id: int, user_id: str, content: str
+        self,
+        *,
+        session_id: int,
+        user_id: str,
+        content: str,
+        attachments: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """Insert a user-role message via the shared ConversationRepository
-        (atomic seq allocation + read-cursor advance)."""
+        (atomic seq allocation + read-cursor advance).
+
+        ``attachments`` is display metadata only (kind / resource_id / mime /
+        alt_text) — small dicts, never file bytes or data URLs. Stored under
+        ``body['attachments']`` so history reloads can re-render the image
+        chips in the user bubble; the vision pipeline resolves the actual
+        bytes separately from the request's attachments.
+        """
         from app.repositories.conversation_repository import (
             get_conversation_repository,
         )
 
+        body: Dict[str, Any] = {"text": content}
+        if attachments:
+            body["attachments"] = attachments
         row = await get_conversation_repository().send_message(
             conversation_id=_bigint(session_id),
             sender_id=user_id,
             sender_type="user",
             type="text",
-            body={"text": content},
+            body=body,
             parent_id=None,
         )
         return {
@@ -499,6 +517,7 @@ class ConversationsAiStore:
             "prompt_tokens": None,
             "completion_tokens": None,
             "metadata_json": None,
+            "attachments": attachments or None,
             "created_at": row.get("created_at"),
         }
 
