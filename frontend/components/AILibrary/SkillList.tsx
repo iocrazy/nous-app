@@ -297,11 +297,11 @@ export const SkillList: React.FC<SkillListProps> = ({
   };
 
   return (
-    <div className="flex h-full w-[19rem] flex-col border-r border-ink-800/60 bg-ink-950/40">
+    <div className="flex h-full w-[19rem] flex-col border-r border-ink-800/60">
       {/* Header — Paperclip: "Skills" title + count; + button to the right */}
       <div className="flex items-start justify-between border-b border-ink-800/60 px-4 py-3">
         <div className="flex flex-col">
-          <span className="text-[15px] font-semibold text-ink-100">
+          <span className="text-sm font-semibold text-ink-200">
             {t('aiLibrary.skills.listTitle', 'Skills')}
           </span>
           <span className="text-[11px] text-ink-500">
