@@ -65,6 +65,7 @@ const AgentsPage = lazyWithRetry(() => import('./pages/AgentsPage').then(m => ({
 const SkillsPage = lazyWithRetry(() => import('./pages/SkillsPage').then(m => ({ default: m.SkillsPage })));
 const UsagePage = lazyWithRetry(() => import('./pages/UsagePage').then(m => ({ default: m.UsagePage })));
 const WorkforcePage = lazyWithRetry(() => import('./pages/WorkforcePage').then(m => ({ default: m.WorkforcePage })));
+const SessionsPage = lazyWithRetry(() => import('./pages/SessionsPage').then(m => ({ default: m.SessionsPage })));
 const IssuesPage = lazyWithRetry(() => import('./pages/IssuesPage').then(m => ({ default: m.IssuesPage })));
 const CanvasPage = lazyWithRetry(() => import('./features/canvas-core/ui/CanvasPage'));
 const AILibraryLayout = lazyWithRetry(() =>
@@ -197,6 +198,8 @@ export const router = createBrowserRouter([
                 path: 'skills/:slug/files/*',
                 element: <SuspenseWrap><SkillsPage /></SuspenseWrap>,
               },
+              { path: 'sessions', element: <SuspenseWrap><SessionsPage /></SuspenseWrap> },
+              { path: 'sessions/:sessionId', element: <SuspenseWrap><SessionsPage /></SuspenseWrap> },
               { path: 'usage', element: <SuspenseWrap><UsagePage /></SuspenseWrap> },
               { path: 'workforce', element: <SuspenseWrap><WorkforcePage /></SuspenseWrap> },
             ],

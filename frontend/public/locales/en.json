@@ -66,7 +66,8 @@
     "agentPausedBudget": "Paused: monthly budget exceeded",
     "agentPausedManual": "Paused by admin",
     "memory": "My Memory",
-    "workforce": "Workforce"
+    "workforce": "Workforce",
+    "sessions": "Sessions"
   },
   "user": {
     "profile": "Profile",
@@ -2080,7 +2081,18 @@
       "autoBroadcastDesc": "Allow the agent to post automatic updates (e.g. task completion) to its groups."
     },
     "myAgentsSection": "My Agents",
-    "customized": "Customized"
+    "customized": "Customized",
+    "chatSection": "Chat",
+    "sessions": {
+      "title": "Sessions",
+      "searchPlaceholder": "Search sessions...",
+      "empty": "No sessions yet — start one from the chat panel.",
+      "untitled": "Untitled",
+      "msgCount": "{{count}} msgs",
+      "pickOne": "Select a session to view its transcript.",
+      "noMessages": "No messages in this session.",
+      "deleteConfirm": "Delete this session and its messages?"
+    }
   },
   "aiUsage": {
     "title": "AI Usage",

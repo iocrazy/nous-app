@@ -66,7 +66,8 @@
     "agentPausedBudget": "已暂停：超出月度预算",
     "agentPausedManual": "已被管理员暂停",
     "memory": "我的记忆",
-    "workforce": "工作团队"
+    "workforce": "工作团队",
+    "sessions": "会话"
   },
   "user": {
     "profile": "个人资料",
@@ -2080,7 +2081,18 @@
       "autoBroadcastDesc": "允许 Agent 向所在群组发送自动更新（如任务完成）。"
     },
     "myAgentsSection": "我的智能体",
-    "customized": "已自定义"
+    "customized": "已自定义",
+    "chatSection": "聊天",
+    "sessions": {
+      "title": "会话",
+      "searchPlaceholder": "搜索会话...",
+      "empty": "还没有会话 — 在聊天面板里发起一个。",
+      "untitled": "未命名",
+      "msgCount": "{{count}} 条消息",
+      "pickOne": "选择一个会话查看聊天记录。",
+      "noMessages": "该会话暂无消息。",
+      "deleteConfirm": "删除该会话及其全部消息?"
+    }
   },
   "aiUsage": {
     "title": "AI 使用统计",
