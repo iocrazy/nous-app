@@ -1,7 +1,9 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Users, Film, FileText, Download } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { EditorTopBar } from '../../components/EditorTopBar';
+import { StoryboardReadOnlyBanner } from '../../components/storyboard/StoryboardReadOnlyBanner';
 import { EditorLoadingScreen } from '../../components/EditorLoadingScreen';
 import { ReactFlowProvider } from '@xyflow/react';
 import { Canvas } from '../../features/storyboard/Canvas';
@@ -88,6 +90,7 @@ function mapBackendEdgesToCanvas(
 }
 
 export function CanvasEditorPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { teamId, projectId: parentProjectId, storyboardId: projectId } = useParams<{ teamId?: string; projectId?: string; storyboardId?: string }>();
 
@@ -193,8 +196,11 @@ export function CanvasEditorPage() {
             projectName="Storyboard"
             onBack={handleBack}
             onExport={() => setShowExport(true)}
-            onImport={() => setShowScriptImport(true)}
           />
+
+          {/* Legacy cutover (Phase B P3): this standalone board is read-only —
+              shots now live in the script editor. Banner + disabled write entry. */}
+          <StoryboardReadOnlyBanner />
 
           {/* Canvas + side panels */}
           <div className="flex-1 flex min-h-0">
@@ -207,8 +213,9 @@ export function CanvasEditorPage() {
               <div className="absolute top-4 left-4 flex flex-col gap-0.5 bg-ink-900/90 backdrop-blur-sm rounded-xl p-1 border border-ink-800/40 shadow-lg z-10">
                 <FloatingIconButton
                   icon={<FileText size={16} />}
-                  tooltip="Script Import"
+                  tooltip={t('storyboard.readOnlyBanner')}
                   testId="sb-toggle-script"
+                  disabled
                   onClick={() => setShowScriptImport(true)}
                 />
                 <FloatingIconButton
@@ -289,23 +296,28 @@ function FloatingIconButton({
   active,
   onClick,
   testId,
+  disabled,
 }: {
   icon: React.ReactNode;
   tooltip: string;
   active?: boolean;
   onClick: () => void;
   testId?: string;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
       title={tooltip}
       data-testid={testId}
       className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${
-        active
-          ? 'bg-ink-700 text-ink-100'
-          : 'text-ink-500 hover:text-ink-200 hover:bg-ink-800/80'
+        disabled
+          ? 'text-ink-700 cursor-not-allowed opacity-50'
+          : active
+            ? 'bg-ink-700 text-ink-100'
+            : 'text-ink-500 hover:text-ink-200 hover:bg-ink-800/80'
       }`}
     >
       {icon}

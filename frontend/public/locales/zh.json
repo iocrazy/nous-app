@@ -1350,7 +1350,8 @@
       "mediumWide": "中远景",
       "wide": "远景",
       "extremeWide": "极远景"
-    }
+    },
+    "readOnlyBanner": "此旧版分镜已只读 — 镜头现已迁入剧本编辑器"
   },
   "canvas": {
     "addImage": "+ 添加图片",
@@ -2432,6 +2433,26 @@
     "epRename": "重命名剧集",
     "epScriptsTitle": "该剧集的剧本数",
     "epClose": "关闭剧集面板",
-    "episodeActionFailed": "剧集操作失败，请重试。"
+    "episodeActionFailed": "剧集操作失败，请重试。",
+    "storyboardLabel": "分镜",
+    "storyboardAuto": "自动分镜",
+    "storyboardAutoBusy": "生成中…",
+    "storyboardAddShot": "+ 添加镜头",
+    "storyboardEmptyColumn": "暂无镜头",
+    "storyboardNoScenes": "在剧本视图中添加场景后即可分镜。",
+    "shotNumber": "镜头编号",
+    "shotStatusEmpty": "暂无图像",
+    "shotStatusGenerating": "生成中…",
+    "shotStatusFailed": "生成失败",
+    "shotRetry": "重试",
+    "shotThumbAlt": "镜头 {{number}} 预览",
+    "shotDelete": "删除镜头",
+    "shotPillUnset": "设置",
+    "shotFocalLength": "焦距",
+    "shotFocalPlaceholder": "35mm",
+    "shotDescription": "镜头描述",
+    "shotDescPlaceholder": "描述这个镜头…",
+    "shotGenerate": "生成",
+    "shotGenerateComingSoon": "图像生成即将上线"
   }
 }

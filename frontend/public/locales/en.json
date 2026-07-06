@@ -1350,7 +1350,8 @@
       "mediumWide": "Medium Wide",
       "wide": "Wide",
       "extremeWide": "Extreme Wide"
-    }
+    },
+    "readOnlyBanner": "This legacy storyboard is read-only — shots now live in the script editor"
   },
   "canvas": {
     "addImage": "+ Add Image",
@@ -2432,6 +2433,26 @@
     "epRename": "Rename episode",
     "epScriptsTitle": "Scripts in this episode",
     "epClose": "Close episodes",
-    "episodeActionFailed": "Could not update episodes. Please try again."
+    "episodeActionFailed": "Could not update episodes. Please try again.",
+    "storyboardLabel": "Storyboard",
+    "storyboardAuto": "Auto Storyboard",
+    "storyboardAutoBusy": "Boarding…",
+    "storyboardAddShot": "+ Add Shot",
+    "storyboardEmptyColumn": "No shots yet",
+    "storyboardNoScenes": "Add scenes in the Script view to storyboard them.",
+    "shotNumber": "Shot number",
+    "shotStatusEmpty": "No image yet",
+    "shotStatusGenerating": "Generating…",
+    "shotStatusFailed": "Generation failed",
+    "shotRetry": "Retry",
+    "shotThumbAlt": "Shot {{number}} preview",
+    "shotDelete": "Delete shot",
+    "shotPillUnset": "Set",
+    "shotFocalLength": "Focal length",
+    "shotFocalPlaceholder": "35mm",
+    "shotDescription": "Shot description",
+    "shotDescPlaceholder": "Describe this shot…",
+    "shotGenerate": "Generate",
+    "shotGenerateComingSoon": "Image generation is coming soon"
   }
 }
