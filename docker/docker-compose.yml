@@ -325,11 +325,9 @@ services:
     container_name: mediahub-app-nginx
     restart: unless-stopped
     ports:
-      # 8881 = the memorable one (backend is 8880); 8081 kept so the existing
-      # /stream/ reverse-proxy rule keeps working — retire it after the proxy
-      # rule is repointed.
+      # 8881 pairs with the backend's 8880. The reverse proxy must point BOTH
+      # /stream/ and /f/ here (8081 retired 2026-07-06 by user decision).
       - "8881:80"
-      - "8081:80"
     environment:
       # Shared secure_link secret — set in docker/.env, same value the
       # backend reads (NGINX_SECURE_LINK_SECRET). See
