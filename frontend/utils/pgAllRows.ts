@@ -36,7 +36,14 @@ export async function fetchAllRows<T>(
     if (error) throw error;
     const rows = data ?? [];
     out.push(...rows);
-    if (rows.length < PG_PAGE) break; // short page = end of the result set
+    if (rows.length < PG_PAGE) return out; // short page = end of the result set
   }
+  // Every page came back full — the result set exceeds the ceiling. Never
+  // truncate silently (the audit's core rule); the view that hits this
+  // needs keyset pagination, not a bigger cap.
+  console.warn(
+    `[fetchAllRows] result truncated at ${out.length} rows (maxPages ceiling) — ` +
+      'this view needs keyset pagination',
+  );
   return out;
 }

@@ -40,7 +40,8 @@ describe('fetchAllRows', () => {
     expect(factory).toHaveBeenCalledTimes(1);
   });
 
-  it('stops at the maxPages safety ceiling even when pages stay full', async () => {
+  it('stops at the maxPages safety ceiling — loudly, never silently', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const factory = vi.fn(async (from: number) => ({
       data: rows(PG_PAGE, from),
       error: null,
@@ -48,6 +49,8 @@ describe('fetchAllRows', () => {
     const all = await fetchAllRows<number>(factory, 3);
     expect(all).toHaveLength(PG_PAGE * 3);
     expect(factory).toHaveBeenCalledTimes(3);
+    // The audit's core rule: no silent caps.
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('truncated'));
   });
 
   it('throws the page error instead of swallowing it', async () => {
