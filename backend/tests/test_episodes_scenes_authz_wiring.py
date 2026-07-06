@@ -228,3 +228,28 @@ async def test_ops_success_returns_200_envelope(client, monkeypatch):
     assert body["success"] is True
     assert body["data"]["content_version"] == 4
     assert body["data"]["elements"] == [{"id": "el_1"}]
+
+
+@pytest.mark.asyncio
+async def test_delete_nonempty_episode_returns_409_not_500(client, monkeypatch):
+    """FK RESTRICT (mig 338) must surface as a clean 409 — live round-trip
+    2026-07-06 caught the raw 500."""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.repositories.episode_repository import EpisodeRepository
+
+    async def fake_delete(self, episode_id):
+        raise IntegrityError("stmt", {}, Exception("fk restrict"))
+
+    monkeypatch.setattr(EpisodeRepository, "delete", fake_delete)
+
+    from app.main import app
+
+    app.dependency_overrides[verify_episode_write_access] = lambda: None
+    try:
+        resp = await client.delete("/api/v1/episodes/777")
+    finally:
+        app.dependency_overrides.pop(verify_episode_write_access, None)
+    assert resp.status_code == 409
+    body = resp.json()
+    assert body["success"] is False

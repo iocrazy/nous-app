@@ -15,6 +15,7 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
+from sqlalchemy.exc import IntegrityError
 
 from app.core.deps import AuthDep
 from app.core.scope_guards import (
@@ -90,10 +91,23 @@ async def delete_episode(
     auth: AuthDep,
     _guard: None = Depends(verify_episode_write_access),
 ) -> Dict[str, Any]:
-    """Delete an episode."""
+    """Delete an episode.
+
+    script_projects.episode_id is ON DELETE RESTRICT (mig 338): deleting an
+    episode that still owns scripts violates the FK. Surface that as a clean
+    409 instead of a raw 500 — caught by the live API round-trip 2026-07-06.
+    """
     try:
         await get_episode_repository().delete(episode_id)
         return {"success": True}
+    except IntegrityError:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "episode_not_empty",
+                "message": "Episode still has scripts",
+            },
+        )
     except Exception as exc:
         logger.error(f"[Episodes] delete {episode_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to delete episode")
