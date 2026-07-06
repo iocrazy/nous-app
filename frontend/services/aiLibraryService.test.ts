@@ -155,4 +155,18 @@ describe('aiLibraryService.streamChatMessage', () => {
     const init = spy.mock.calls[0][1] as RequestInit;
     expect(init.body).toContain('"plan_mode":"prompt_user"');
   });
+
+  it('passes attachments in request body when supplied (G2 image turn)', async () => {
+    stubStreamFetch(['event: done\ndata: {}']);
+    const spy = vi.mocked(globalThis.fetch);
+    const gen = aiLibraryService.streamChatMessage('s1', 'what is this?', {
+      attachments: [
+        { kind: 'image', url: 'teams/1/uploads/2/v1/a.png', mime: 'image/png', resource_id: '2' },
+      ],
+    });
+    await gen.next();
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(init.body).toContain('"attachments"');
+    expect(init.body).toContain('"resource_id":"2"');
+  });
 });

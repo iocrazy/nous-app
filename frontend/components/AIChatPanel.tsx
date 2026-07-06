@@ -492,16 +492,18 @@ export function AIChatPanel({
       };
       setMessages((prev) => [...prev, tempUser]);
       // Clear the composer chips optimistically — the attachments now live
-      // in the message bubble, and sendChatMessage blocks for the whole AI
-      // turn (tens of seconds), during which stale chips read as "not sent
-      // yet". Restored on failure so the user can retry.
+      // in the message bubble. Restored on failure so the user can retry.
       setStagedAttachments([]);
+
+      // Streaming assistant bubble — created on the first delta, grown in
+      // place, then replaced by the authoritative row on history reload.
+      const tempAssistantId = `tmp-assistant-${Date.now()}`;
 
       try {
         // O3: pass plan_mode only when non-default. Backend swaps in
         // plan-prompt instructions for prompt_user / dry_run.
         // B: send staged attachments + resource_ref attachments alongside.
-        const opts: Parameters<typeof aiLibraryService.sendChatMessage>[2] = {};
+        const opts: Parameters<typeof aiLibraryService.streamChatMessage>[2] = {};
         if (planMode !== 'auto') opts.plan_mode = planMode;
         const allAttachments = [
           ...sentAttachments.map((a) => ({
@@ -522,11 +524,45 @@ export function AIChatPanel({
         if (allAttachments.length > 0) {
           opts.attachments = allAttachments;
         }
-        await aiLibraryService.sendChatMessage(activeSessionId, text, opts);
-        // Refetch full history so IDs + timestamps are server-authoritative.
+        // SSE streaming instead of the buffered /chat call: a long AI reply
+        // no longer sits behind one giant request that proxies love to kill
+        // — deltas render as they arrive and keep the connection alive.
+        let streamed = '';
+        for await (const evt of aiLibraryService.streamChatMessage(
+          activeSessionId, text, opts,
+        )) {
+          if (evt.type === 'delta') {
+            const chunk = typeof evt.data?.text === 'string' ? evt.data.text : '';
+            if (!chunk) continue;
+            const isFirst = streamed === '';
+            streamed += chunk;
+            const content = streamed;
+            if (isFirst) {
+              setMessages((prev) => [...prev, {
+                id: tempAssistantId,
+                session_id: activeSessionId,
+                role: 'assistant' as const,
+                content,
+                created_at: new Date().toISOString(),
+              }]);
+            } else {
+              setMessages((prev) => prev.map((m) =>
+                m.id === tempAssistantId ? { ...m, content } : m,
+              ));
+            }
+          } else if (evt.type === 'error') {
+            throw new Error(
+              typeof evt.data?.error === 'string' ? evt.data.error : 'stream error',
+            );
+          }
+          // 'done' ends the generator; unknown event types are no-ops
+          // (forward-compat per the backend contract).
+        }
+        // Refetch full history so IDs + timestamps + tokens are
+        // server-authoritative (also swaps out both temp bubbles).
         await loadSessionMessages(activeSessionId);
       } catch (err) {
-        console.error('[AIChatPanel] sendChatMessage failed:', err);
+        console.error('[AIChatPanel] chat stream failed:', err);
         const msg = err instanceof Error ? err.message : String(err);
         addToast(`Send failed: ${msg}`, 'error');
         // "Send failed" here often means the CONNECTION died mid-turn
@@ -538,7 +574,9 @@ export function AIChatPanel({
         const serverMsgs = await loadSessionMessages(activeSessionId);
         if (serverMsgs === null) {
           // History fetch also failed (offline?) — fall back to rollback.
-          setMessages((prev) => prev.filter((m) => m.id !== tempUser.id));
+          setMessages((prev) => prev.filter(
+            (m) => m.id !== tempUser.id && m.id !== tempAssistantId,
+          ));
           setStagedAttachments(sentAttachments);
         } else {
           const landed = serverMsgs
@@ -854,7 +892,9 @@ export function AIChatPanel({
               />
             ))}
 
-            {sending && (
+            {/* Typing dots only until the first streamed delta arrives —
+                after that the growing assistant bubble is the indicator. */}
+            {sending && !messages.some((m) => m.id.startsWith('tmp-assistant')) && (
               <div className="flex justify-start mb-3">
                 <div className="max-w-[85%] rounded-xl bg-ink-800 text-ink-200 text-sm leading-relaxed overflow-hidden">
                   <TypingIndicator show />
