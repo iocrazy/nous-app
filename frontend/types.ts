@@ -1081,6 +1081,12 @@ export interface AILibraryAgent {
   // (review C1 — capability_profile itself is NOT exposed on the wire).
   // Always present from the API (defaults all-false); optional here for forward-compat.
   chat_permissions?: AgentChatPermissions;
+  // Agent-overrides (mig 341). Single-get: which layer produced this merged
+  // view + the fields it replaced. List: override_scopes marks presets the
+  // caller (or their teams) customized — drives the sidebar badge.
+  override_scope?: 'user' | 'team' | null;
+  override_fields?: string[];
+  override_scopes?: string[];
 }
 
 /**

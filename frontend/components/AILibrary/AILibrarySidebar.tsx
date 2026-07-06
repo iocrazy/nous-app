@@ -174,7 +174,8 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
                 {t('aiLibrary.noAgents', 'No agents yet')}
               </div>
             ) : (
-              agents.map((agent) => {
+              (() => {
+                const renderAgent = (agent: (typeof agents)[number]) => {
                 const Icon = getAgentIcon(agent.icon);
                 const active = activeAgentSlug === agent.slug;
                 const isRunning = runningAgentIds.has(agent.id);
@@ -214,14 +215,31 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
                   />
                 ) : null;
 
-                const trailing: React.ReactNode = isChatEnabled ? (
-                  <div className="flex items-center gap-1">
-                    <span className="rounded px-1.5 py-0.5 text-[10px] font-medium text-indigo-300 bg-indigo-500/15">
-                      {t('aiLibrary.permissions.tab')}
-                    </span>
-                    {statusTrailing}
-                  </div>
-                ) : statusTrailing;
+                // Agent-overrides (mig 341): presets the caller (or their
+                // teams) customized get a dot — reset lives in the editor.
+                const customized = (agent.override_scopes?.length ?? 0) > 0;
+                const customizedDot = customized ? (
+                  <span
+                    className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-indigo-400"
+                    title={t('aiLibrary.customized', 'Customized')}
+                    aria-label={t('aiLibrary.customized', 'Customized')}
+                  />
+                ) : null;
+
+                const trailing: React.ReactNode =
+                  isChatEnabled || customized ? (
+                    <div className="flex items-center gap-1">
+                      {customizedDot}
+                      {isChatEnabled && (
+                        <span className="rounded px-1.5 py-0.5 text-[10px] font-medium text-indigo-300 bg-indigo-500/15">
+                          {t('aiLibrary.permissions.tab')}
+                        </span>
+                      )}
+                      {statusTrailing}
+                    </div>
+                  ) : (
+                    statusTrailing
+                  );
 
                 return (
                   <NavItem
@@ -242,7 +260,26 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
                     }
                   />
                 );
-              })
+                };
+
+                const presets = agents.filter((a) => a.is_system_preset);
+                const mine = agents.filter((a) => !a.is_system_preset);
+                return (
+                  <>
+                    {presets.map(renderAgent)}
+                    {mine.length > 0 && (
+                      <>
+                        <div className="mt-2 px-2">
+                          <SectionLabel>
+                            {t('aiLibrary.myAgentsSection', 'My Agents')}
+                          </SectionLabel>
+                        </div>
+                        {mine.map(renderAgent)}
+                      </>
+                    )}
+                  </>
+                );
+              })()
             )}
           </div>
         </div>

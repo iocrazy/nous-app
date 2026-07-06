@@ -134,6 +134,22 @@ export const aiLibraryService = {
     return handle<AILibraryAgent>(resp);
   },
 
+  /** Reset a system preset to its defaults — drop the caller's override
+   *  layer (mig 341). Returns the refreshed (merged) agent. */
+  async deleteAgentOverride(
+    slug: string,
+    scope: 'user' | 'team' = 'user',
+    teamId?: number,
+  ): Promise<AILibraryAgent> {
+    const qs = new URLSearchParams({ scope });
+    if (teamId != null) qs.set('team_id', String(teamId));
+    const resp = await fetch(
+      `${base()}/agents/${encodeURIComponent(slug)}/override?${qs.toString()}`,
+      { method: 'DELETE', headers: await getAuthHeaders() },
+    );
+    return handle<AILibraryAgent>(resp);
+  },
+
   /** Manually pause an agent (paused_reason='manual'). 400 if already paused. */
   async pauseAgent(slug: string): Promise<AILibraryAgent> {
     const resp = await fetch(

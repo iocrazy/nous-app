@@ -25,7 +25,6 @@ import {
   ArrowDown,
   ArrowUp,
   ChevronDown,
-  GitFork,
   Play,
   Plus,
   X,
@@ -204,9 +203,12 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
   }
 
   const isPreset = agent.is_system_preset;
-  // Preset agents are read-only for everyone in Phase 1 — backend
-  // returns 403 on PATCH including for admin. See header comment.
-  const readOnly = isPreset;
+  // Agent-overrides (mig 341): preset CONTENT (prompts / model / temperature /
+  // max_tokens) is editable by everyone — the backend routes those edits into
+  // the caller's personal override layer (reset anytime). Catalog identity
+  // (name/description/icon), enabled flag, skills and budgets stay admin-owned.
+  const catalogLocked = isPreset;
+  const readOnly = false;
 
   // Provider preflight: the agent's model belongs to a provider the
   // current user hasn't configured (no API key / disabled). Invocations
@@ -257,9 +259,17 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
       // Build the PATCH payload immutably from the overview/files draft, and
       // attach ``skill_ids`` only when the Skills tab has pending changes so
       // we don't wipe+rewrite bindings on unrelated saves.
-      const patch: Partial<AILibraryAgent> = skillsDirty
-        ? { ...draft, skill_ids: localSkillIds }
-        : { ...draft };
+      let patch: Partial<AILibraryAgent> =
+        skillsDirty && !catalogLocked
+          ? { ...draft, skill_ids: localSkillIds }
+          : { ...draft };
+      if (catalogLocked) {
+        // System preset: send ONLY the override-able content fields —
+        // catalog fields are admin-owned and would 403.
+        const { identity_md, soul_md, agent_md, model, temperature, max_tokens } =
+          patch;
+        patch = { identity_md, soul_md, agent_md, model, temperature, max_tokens };
+      }
       const updated = await aiLibraryService.updateAgent(slug, patch);
       setAgent(updated);
       setDraft(buildDraft(updated));
@@ -286,8 +296,32 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
    * sweeper will re-pause within ~60 s — callers should bump the budget
    * first to avoid the flap.
    */
+  const [resetting, setResetting] = useState(false);
+  // 复位: drop the caller's override layer so the preset falls back to the
+  // admin/system defaults (DELETE /agents/{slug}/override).
+  const resetOverride = async (): Promise<void> => {
+    setResetting(true);
+    try {
+      const updated = await aiLibraryService.deleteAgentOverride(slug);
+      setAgent(updated);
+      setDraft(buildDraft(updated));
+      addToast(
+        t('aiLibrary.agents.overrideResetToast', 'Restored system defaults'),
+        'success',
+      );
+    } catch (err) {
+      console.error('[AgentEditor] deleteAgentOverride failed:', err);
+      addToast(
+        t('aiLibrary.agents.saveError', { error: friendlyError(err) }),
+        'error',
+      );
+    } finally {
+      setResetting(false);
+    }
+  };
+
   const handleResume = async (): Promise<void> => {
-    if (readOnly) return;
+    if (catalogLocked) return;
     setResuming(true);
     setError(null);
     try {
@@ -312,19 +346,19 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
   // ─── Skill binding helpers (local-state only; PATCH on Save) ───────────────
 
   const addSkill = (skillId: number): void => {
-    if (readOnly) return;
+    if (catalogLocked) return;
     setLocalSkillIds((ids) =>
       ids.includes(skillId) ? ids : [...ids, skillId],
     );
   };
 
   const removeSkill = (skillId: number): void => {
-    if (readOnly) return;
+    if (catalogLocked) return;
     setLocalSkillIds((ids) => ids.filter((id) => id !== skillId));
   };
 
   const moveSkill = (skillId: number, direction: -1 | 1): void => {
-    if (readOnly) return;
+    if (catalogLocked) return;
     setLocalSkillIds((ids) => {
       const idx = ids.indexOf(skillId);
       if (idx === -1) return ids;
@@ -393,23 +427,13 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
         <div className="flex items-center gap-2">
           <AgentActionBar
             agent={agent}
-            readOnly={readOnly}
+            readOnly={catalogLocked}
             onAgentUpdated={(updated) => {
               setAgent(updated);
               setDraft(buildDraft(updated));
             }}
             onDuplicate={openForkModal}
           />
-          {isPreset && (
-            <button
-              onClick={openForkModal}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm font-medium text-ink-200 hover:bg-ink-700 transition-colors whitespace-nowrap"
-              title={t('aiLibrary.agents.forkAgent', 'Fork to My Agents')}
-            >
-              <GitFork size={14} />
-              {t('aiLibrary.agents.forkAgent', 'Fork to My Agents')}
-            </button>
-          )}
           {!readOnly && (
             <button
               onClick={save}
@@ -478,22 +502,45 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
           {agent.paused_reason && (
             <PausedBanner
               reason={agent.paused_reason}
-              disabled={readOnly || resuming}
+              disabled={catalogLocked || resuming}
               onResume={handleResume}
               resuming={resuming}
             />
           )}
-          {readOnly && (
-            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-              {t('aiLibrary.agents.presetReadOnly')}
-            </div>
-          )}
+          {isPreset &&
+            (agent.override_scope ? (
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-2 text-xs text-indigo-300">
+                <span>
+                  {t(
+                    'aiLibrary.agents.overrideActive',
+                    'Customized ({{scope}} layer) — your edits apply only to you; the system default is untouched.',
+                    { scope: agent.override_scope },
+                  )}
+                </span>
+                <button
+                  onClick={resetOverride}
+                  disabled={resetting}
+                  className="shrink-0 rounded-md border border-indigo-500/40 px-2.5 py-1 font-medium text-indigo-300 hover:bg-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {resetting
+                    ? t('common.loading')
+                    : t('aiLibrary.agents.resetToDefaults', 'Reset to defaults')}
+                </button>
+              </div>
+            ) : (
+              <div className="rounded-lg border border-ink-700 bg-ink-800/60 px-3 py-2 text-xs text-ink-400">
+                {t(
+                  'aiLibrary.agents.presetOverrideHint',
+                  'System agent — edits are saved as your personal customization (visible only to you) and can be reset anytime.',
+                )}
+              </div>
+            ))}
 
           <div className="flex items-center gap-3">
             <AgentIconPicker
               value={draft.icon ?? null}
               onChange={(slug) => updateDraft('icon', slug)}
-              disabled={readOnly}
+              disabled={catalogLocked}
               size={24}
             />
             <p className="text-xs text-ink-500">
@@ -513,7 +560,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
                 type="text"
                 value={draft.name ?? ''}
                 onChange={(e) => updateDraft('name', e.target.value)}
-                disabled={readOnly}
+                disabled={catalogLocked}
                 className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
               />
             </div>
@@ -537,7 +584,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
             <textarea
               value={draft.description ?? ''}
               onChange={(e) => updateDraft('description', e.target.value)}
-              disabled={readOnly}
+              disabled={catalogLocked}
               rows={2}
               className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
             />
@@ -607,7 +654,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
                   type="checkbox"
                   checked={draft.enabled ?? false}
                   onChange={(e) => updateDraft('enabled', e.target.checked)}
-                  disabled={readOnly}
+                  disabled={catalogLocked}
                   className="h-4 w-4"
                 />
                 <span>{(draft.enabled ?? false) ? t('common.yes', 'Yes') : t('common.no', 'No')}</span>
@@ -618,7 +665,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
           <BudgetFields
             tokenBudget={draft.monthly_token_budget ?? null}
             costCentsBudget={draft.monthly_cost_cents_budget ?? null}
-            disabled={readOnly}
+            disabled={catalogLocked}
             onTokenChange={(v) => updateDraft('monthly_token_budget', v)}
             onCostChange={(v) => updateDraft('monthly_cost_cents_budget', v)}
           />
@@ -626,7 +673,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
           <RunLimitFields
             timeoutSec={draft.timeout_sec ?? null}
             maxConcurrentRuns={draft.max_concurrent_runs ?? null}
-            disabled={readOnly}
+            disabled={catalogLocked}
             onTimeoutChange={(v) => updateDraft('timeout_sec', v)}
             onConcurrencyChange={(v) => updateDraft('max_concurrent_runs', v)}
           />
@@ -683,7 +730,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
           localSkillIds={localSkillIds}
           allSkills={allSkills}
           skillsLoading={skillsLoading}
-          readOnly={readOnly}
+          readOnly={catalogLocked}
           onAdd={addSkill}
           onRemove={removeSkill}
           onMove={moveSkill}

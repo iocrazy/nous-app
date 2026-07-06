@@ -1983,7 +1983,11 @@
         "lastFire": "Last",
         "lastIssue": "Last issue",
         "cronUtcHint": "Cron hours are UTC — your timezone is UTC{{offset}}."
-      }
+      },
+      "overrideActive": "Customized ({{scope}} layer) — your edits apply only to you; the system default is untouched.",
+      "presetOverrideHint": "System agent — edits are saved as your personal customization (visible only to you) and can be reset anytime.",
+      "resetToDefaults": "Reset to defaults",
+      "overrideResetToast": "Restored system defaults"
     },
     "skills": {
       "addFile": "+ Add file",
@@ -2074,7 +2078,9 @@
       "readTeamFilesDesc": "Allow the agent to read resources of the group's team when summoned.",
       "autoBroadcast": "Auto-broadcast",
       "autoBroadcastDesc": "Allow the agent to post automatic updates (e.g. task completion) to its groups."
-    }
+    },
+    "myAgentsSection": "My Agents",
+    "customized": "Customized"
   },
   "aiUsage": {
     "title": "AI Usage",
