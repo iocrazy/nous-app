@@ -93,7 +93,11 @@ def _same_team(monkeypatch):
         return "TEAM"
 
     monkeypatch.setattr(ScriptProjectRepository, "get_by_id", fake_project_get)
-    monkeypatch.setattr(guards, "get_team_id_for_user", fake_team)
+
+    async def fake_member(team_id, user_id):
+        return True
+
+    monkeypatch.setattr(guards, "_is_team_member", fake_member)
 
 
 @pytest.fixture
@@ -130,7 +134,11 @@ async def test_commit_delete_403_foreign_team(client, monkeypatch):
 
     monkeypatch.setattr(ScriptCommitRepository, "get", fake_commit_get)
     monkeypatch.setattr(ScriptProjectRepository, "get_by_id", fake_project_get)
-    monkeypatch.setattr(guards, "get_team_id_for_user", fake_team)
+
+    async def fake_member(team_id, user_id):
+        return False
+
+    monkeypatch.setattr(guards, "_is_team_member", fake_member)
 
     resp = await client.delete("/api/v1/commits/123")
     assert resp.status_code == 403

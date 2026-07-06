@@ -265,6 +265,33 @@ export const EDITOR_SHELL_STYLES = `
 .mh-doc-tab[aria-selected='true']{ background:var(--indigo); color:var(--accent-on); }
 .mh-topbar-right{ display:flex; align-items:center; gap:10px; }
 
+/* ── Collaboration presence (Phase B P5 / C1) ─────────────────────────────── */
+.mh-presence-avatars{ display:flex; align-items:center; }
+.mh-presence-avatar{
+  display:inline-flex; align-items:center; justify-content:center;
+  width:26px; height:26px; margin-left:-7px; border-radius:50%;
+  background:var(--indigo-soft); color:var(--indigo-deep);
+  border:2px solid var(--surface); box-shadow:var(--shadow-island);
+  font-size:11px; font-weight:600; font-family:var(--sans);
+  user-select:none;
+}
+.mh-presence-avatar:first-child{ margin-left:0; }
+.mh-presence-avatar.editing{ background:var(--indigo); color:var(--accent-on); }
+.mh-presence-avatar.overflow{ background:var(--surface-2); color:var(--ink-soft); }
+
+.mh-scene-presence-badge{
+  display:inline-flex; align-items:center; gap:4px;
+  padding:1px 8px; border-radius:999px;
+  background:var(--surface-2); color:var(--ink-soft);
+  border:1px solid var(--surface-border);
+  font-size:11px; font-weight:500; font-family:var(--sans);
+  white-space:nowrap;
+}
+.mh-scene-presence-badge.editing{
+  background:var(--indigo-soft); color:var(--indigo-deep); border-color:transparent;
+}
+.mh-flow-scene-head .mh-scene-presence-badge{ margin-left:auto; }
+
 .mh-page-frame{ flex:1; min-height:0; display:flex; }
 .mh-sheet-scroll{
   flex:1; min-height:0; min-width:0; overflow-y:auto;

@@ -43,7 +43,7 @@ import {
   OpRejectedError,
 } from '../copilotService';
 import type { ElementOp, ElementType, ScriptElement, SceneDoc } from '../types';
-import { useSceneSync } from '../useSceneSync';
+import { useSceneSync, type RemoteOpRow } from '../useSceneSync';
 import { HollywoodLayout } from '../render/HollywoodLayout';
 import { AsianLayout } from '../render/AsianLayout';
 import { MentionNamesContext, type LineMention } from '../render/layoutShared';
@@ -52,6 +52,8 @@ import { CopilotCard, type CopilotPhase } from './CopilotCard';
 import { EmptySceneHint } from './EmptyStates';
 import type { EditorFormat } from '../useEditorState';
 import type { SaveState } from '../useSceneSync';
+import { ScenePresenceBadge } from '../collab/ScenePresenceBadge';
+import type { PresenceUser } from '../collab/useScriptPresence';
 
 /** A scene's save status lifted to the shell for the aggregate SaveIndicator. */
 export interface SceneSyncStatus {
@@ -152,6 +154,18 @@ export interface SceneBlockProps {
   /** Reports this scene's live (optimistic) elements up (debounced 1s) so the
    *  shell can derive Statistics / rail entities from in-flight edits. */
   onElementsChange?: (sceneId: string, elements: ScriptElement[]) => void;
+  /** Other collaborators (self excluded) currently focused on this scene (P5). */
+  focusPresence?: PresenceUser[];
+  /** Local user's actor id, so remote self-echoed ops are dropped (C2). */
+  selfActorId?: string | null;
+  /** Registers this scene's applyRemoteOps with the shell's op-stream router
+   *  (called with null on unmount). */
+  onRegisterRemoteApply?: (sceneId: string, apply: ((row: RemoteOpRow) => void) | null) => void;
+  /** True when a remote op for this scene arrived while it was unmounted
+   *  (windowed out); the block refetches its scene on (re)mount to shed the
+   *  stale snapshot, then calls onRemoteStaleHandled to clear the flag (C2). */
+  remoteStale?: boolean;
+  onRemoteStaleHandled?: (sceneId: string) => void;
 }
 
 /** Which half of a block the pointer is over → the drop edge. */
@@ -173,9 +187,14 @@ export function SceneBlock({
   copilotActiveSceneId,
   onCopilotActivate,
   onElementsChange,
+  focusPresence,
+  selfActorId,
+  onRegisterRemoteApply,
+  remoteStale,
+  onRemoteStaleHandled,
 }: SceneBlockProps) {
   const { t } = useTranslation();
-  const sync = useSceneSync(scene);
+  const sync = useSceneSync(scene, { selfActorId });
   const [focusedElementId, setFocusedElementId] = useState<string | null>(null);
   const [mention, setMention] = useState<MentionState | null>(null);
   // Mention nav state owned HERE (the combobox is presentational): the active
@@ -556,6 +575,22 @@ export function SceneBlock({
     });
   }, [scene.id, sync.saveState, sync.resolveConflict, onSyncStateChange]);
 
+  // Register this scene's applyRemoteOps with the shell's op-stream router so
+  // realtime rows for this scene reach it; deregister on unmount / scene swap (C2).
+  useEffect(() => {
+    if (!onRegisterRemoteApply) return;
+    onRegisterRemoteApply(scene.id, sync.applyRemoteOps);
+    return () => onRegisterRemoteApply(scene.id, null);
+  }, [scene.id, sync.applyRemoteOps, onRegisterRemoteApply]);
+
+  // A remote op landed for this scene while it was windowed out — the snapshot
+  // we mounted from may be stale, so refetch once and clear the flag (C2 / M1).
+  useEffect(() => {
+    if (!remoteStale) return;
+    sync.reconcile();
+    onRemoteStaleHandled?.(scene.id);
+  }, [remoteStale, scene.id, sync.reconcile, onRemoteStaleHandled]);
+
   // Lift optimistic elements to the shell for live Statistics + rail entities
   // (Task 6 ⑥), debounced 1s so a burst of keystrokes collapses into one update.
   useEffect(() => {
@@ -925,6 +960,7 @@ export function SceneBlock({
             )}
           </button>
         )}
+        <ScenePresenceBadge users={focusPresence ?? []} />
       </div>
 
       <MentionNamesContext.Provider value={mentionCandidates}>

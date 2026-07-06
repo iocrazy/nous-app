@@ -40,6 +40,7 @@ import { getAgentIcon } from '../components/AILibrary/agentIcons';
 import { LiveRunsStrip } from '../components/AILibrary/LiveRunsStrip';
 import { getSupabaseClient } from '../supabaseClient';
 import { AgentDetailDrawer } from '../components/Workforce/AgentDetailDrawer';
+import { PageHeader } from '../components/AILibrary/PageHeader';
 
 // Realtime is the primary refresh trigger; the safety poll covers the
 // case where a Realtime subscription drops silently (Supabase gateway
@@ -182,32 +183,29 @@ export const WorkforcePage: React.FC = () => {
   }, [board]);
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      <header className="flex items-end justify-between">
-        <div>
-          <h1 className="text-lg font-semibold text-ink-100">
-            {t('workforce.title', 'Workforce')}
-          </h1>
-          <p className="text-sm text-ink-500 mt-1">
-            {t(
-              'workforce.subtitle',
-              'Persistent agents — current state, queue depth, and recent activity.',
-            )}
-          </p>
-        </div>
-        <div className="text-right">
-          <div className="text-[11px] text-ink-500">
-            {lastFetchedAt
-              ? new Date(lastFetchedAt).toLocaleTimeString()
-              : t('workforce.loading', 'Loading…')}
-          </div>
-          {totalQueued > 0 && (
-            <div className="text-[11px] text-amber-400 mt-0.5">
-              {t('workforce.queuedItems', '{{count}} queued', { count: totalQueued })}
+    <div className="max-w-6xl space-y-6 pt-6 pb-8">
+      <PageHeader
+        title={t('workforce.title', 'Workforce')}
+        subtitle={t(
+          'workforce.subtitle',
+          'Persistent agents — current state, queue depth, and recent activity.',
+        )}
+        className="pb-0"
+        actions={
+          <div className="text-right">
+            <div className="text-[11px] text-ink-500">
+              {lastFetchedAt
+                ? new Date(lastFetchedAt).toLocaleTimeString()
+                : t('workforce.loading', 'Loading…')}
             </div>
-          )}
-        </div>
-      </header>
+            {totalQueued > 0 && (
+              <div className="text-[11px] text-amber-400 mt-0.5">
+                {t('workforce.queuedItems', '{{count}} queued', { count: totalQueued })}
+              </div>
+            )}
+          </div>
+        }
+      />
 
       {error && (
         <div className="rounded-md border border-red-900/40 bg-red-950/30 px-4 py-3 text-sm text-red-300">

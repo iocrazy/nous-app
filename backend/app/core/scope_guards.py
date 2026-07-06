@@ -16,7 +16,7 @@ Routes consume them as: `_guard: None = Depends(verify_scope_access)`.
 
 from fastapi import Depends, HTTPException, Query
 
-from app.core.deps import AuthContext, get_auth, get_team_id_for_user
+from app.core.deps import AuthContext, get_auth
 from app.db.supabase_client import get_async_supabase_admin
 
 
@@ -140,16 +140,42 @@ async def verify_project_read_access(
 
 
 async def _assert_script_team_access(script_id: str, user_id: str) -> None:
-    """Shared body: load ``script_projects`` by id (404 if missing), then compare
-    its ``team_id`` with the caller's team. Raises HTTPException on failure."""
+    """Shared body: load ``script_projects`` by id (404 if missing), then require
+    the caller to be a MEMBER of the script's team. Raises HTTPException on failure.
+
+    Membership (``team_members``) rather than personal-team equality — the
+    pre-P5 predicate compared ``get_team_id_for_user`` (the caller's personal
+    workspace) against ``script_projects.team_id``, which 403'd every teammate
+    on a shared-team script and made collaboration impossible at the HTTP
+    layer while the realtime RLS (mig 346) was already membership-based. This
+    matches ``verify_scope_access`` (Spec 1 PR-C: authorization collapses to
+    "caller is a member of the team") and the ``can_read_script_op`` RLS
+    function. Personal-team scripts are unaffected: the owner is the personal
+    team's single member."""
     from app.repositories.script_repository import get_script_project_repository
 
     project = await get_script_project_repository().get_by_id(script_id)
     if not project:
         raise HTTPException(status_code=404, detail="Script project not found")
-    user_team = await get_team_id_for_user(user_id)
-    if str(user_team) != str(project.get("team_id")):
+    if not await _is_team_member(str(project.get("team_id")), user_id):
         raise HTTPException(status_code=403, detail="Access denied")
+
+
+async def _is_team_member(team_id: str, user_id: str) -> bool:
+    """True when ``user_id`` has a ``team_members`` row for ``team_id``.
+
+    Separate seam so authz wiring tests can stub membership without faking a
+    Supabase client."""
+    client = await get_async_supabase_admin()
+    membership = (
+        await client.table("team_members")
+        .select("team_id")
+        .eq("team_id", team_id)
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    return bool(membership.data)
 
 
 async def verify_script_access(

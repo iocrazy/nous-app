@@ -64,12 +64,31 @@ import { SaveIndicator, aggregateSaveState } from './SaveIndicator';
 import { ConflictBar } from './ConflictBar';
 import { ColdStart } from './EmptyStates';
 import { ChapterFallback } from './ChapterFallback';
+import { useScriptPresence } from '../collab/useScriptPresence';
+import { useScriptOpsRealtime } from '../collab/useScriptOpsRealtime';
+import { PresenceAvatars } from '../collab/PresenceAvatars';
+import { ScenePresenceContext, type ScenePresenceMap } from '../collab/scenePresenceContext';
+import type { RemoteOpRow } from '../useSceneSync';
+import { reportError } from '../../services/errorReporter';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
+// Realtime collaboration is flag-dark: off → the presence hook receives null and
+// nothing subscribes (zero mount / zero channel), matching the P5 constraint.
+const COLLAB_ENABLED = import.meta.env.VITE_FEATURE_COLLAB === 'true';
+
 const DOC_MODES: EditorMode[] = ['script', 'outline', 'cover'];
 
-export function EditorShell({ scriptId }: { scriptId: string }) {
+export function EditorShell({
+  scriptId,
+  currentUserId = null,
+  currentUserName,
+}: {
+  scriptId: string;
+  /** Local user identity for collaboration presence (supplied by the route). */
+  currentUserId?: string | null;
+  currentUserName?: string;
+}) {
   const { t } = useTranslation();
   // Restore the per-script layout engine synchronously so the first paint uses
   // it (no engine flash on remount).
@@ -562,6 +581,101 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
     [conflictScene, syncStates],
   );
 
+  // ── Collaboration presence (Phase B P5 / C1) ───────────────────────────────
+  // Track who else is in this script and which scene they are focused on. The
+  // hook receives null when the flag is off, so nothing subscribes. `isDirty`
+  // drives our broadcast mode: any scene not fully saved → 'editing' (C3).
+  const presenceSelf =
+    COLLAB_ENABLED && currentUserId
+      ? {
+          userId: currentUserId,
+          name: currentUserName ?? currentUserId,
+          focusedSceneId: state.activeSceneId,
+          isDirty: aggregateState !== 'saved',
+        }
+      : null;
+  const { onlineUsers } = useScriptPresence(
+    COLLAB_ENABLED ? scriptId : null,
+    presenceSelf,
+  );
+
+  // Group other participants by the scene they are focused on, for the soft
+  // per-scene badges on the sheet and in the node view.
+  const presenceByScene = useMemo<ScenePresenceMap>(() => {
+    const map: ScenePresenceMap = {};
+    for (const u of onlineUsers) {
+      const sceneId = u.focused_scene_id;
+      if (!sceneId) continue;
+      (map[sceneId] ??= []).push(u);
+    }
+    return map;
+  }, [onlineUsers]);
+
+  // ── Live op streaming (Phase B P5 / C2) ────────────────────────────────────
+  // Each mounted SceneBlock registers its applyRemoteOps here; the realtime hook
+  // routes an incoming script_ops row to the matching scene. When a row arrives
+  // for a scene that is NOT currently mounted (windowed out above the virtualize
+  // threshold), there is no handler to apply it — we record that scene id in
+  // `droppedScenes` so the block refetches its (now stale) snapshot the moment it
+  // remounts, rather than showing pre-op text until the next reload.
+  const remoteApplyRef = useRef<Map<string, (row: RemoteOpRow) => void>>(new Map());
+  const [droppedScenes, setDroppedScenes] = useState<ReadonlySet<string>>(new Set());
+  const registerRemoteApply = useCallback(
+    (sceneId: string, apply: ((row: RemoteOpRow) => void) | null) => {
+      if (apply) remoteApplyRef.current.set(sceneId, apply);
+      else remoteApplyRef.current.delete(sceneId);
+    },
+    [],
+  );
+  const getSceneIds = useCallback(() => scenesRef.current.map((s) => String(s.id)), []);
+  const dispatchToScene = useCallback((sceneId: string, row: RemoteOpRow) => {
+    const handler = remoteApplyRef.current.get(sceneId);
+    if (handler) {
+      handler(row);
+      return;
+    }
+    // No mounted block for this scene — remember it so the block refetches on
+    // remount (M1). Snapshot ids compare as strings (scenesRef holds strings).
+    setDroppedScenes((prev) => (prev.has(sceneId) ? prev : new Set(prev).add(sceneId)));
+  }, []);
+  const handleRemoteStaleHandled = useCallback((sceneId: string) => {
+    setDroppedScenes((prev) => {
+      if (!prev.has(sceneId)) return prev;
+      const next = new Set(prev);
+      next.delete(sceneId);
+      return next;
+    });
+  }, []);
+  useScriptOpsRealtime(COLLAB_ENABLED ? scriptId : null, {
+    getSceneIds,
+    dispatchToScene,
+    onReconcile: reload,
+  });
+
+  // ── Divergence beacon (Phase B P5 / C3) ────────────────────────────────────
+  // One low-frequency signal each time a scene ENTERS the conflict state so the
+  // collaboration divergence rate stays observable: console + the frontend log
+  // pipeline (frontend_error_logs; the only persistent client channel — the
+  // `collab_divergence` metadata tag makes these greppable/filterable in
+  // monitoring since divergence is expected, not a fault).
+  const divergedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!COLLAB_ENABLED) return;
+    const now = new Set(
+      scenes.filter((s) => syncStates[s.id]?.saveState === 'conflict').map((s) => s.id),
+    );
+    for (const sceneId of now) {
+      if (divergedRef.current.has(sceneId)) continue;
+      console.info('[collab] divergence', { sceneId });
+      void reportError(`[collab] divergence scene=${sceneId}`, {
+        type: 'runtime',
+        component: 'EditorShell',
+        metadata: { kind: 'collab_divergence', sceneId, scriptId },
+      });
+    }
+    divergedRef.current = now;
+  }, [scenes, syncStates, scriptId]);
+
   // Cold start ONLY when the script is truly empty. A legacy script with
   // prose chapters but no scenes must land on the chapter fallback cards
   // (with their Convert to Scenes entry) — the full-screen cold start would
@@ -713,6 +827,7 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
             ))}
           </div>
           <div className="mh-topbar-right">
+            {COLLAB_ENABLED && <PresenceAvatars users={onlineUsers} />}
             <SaveIndicator state={aggregateState} queued={offlineCount} />
             <button
               type="button"
@@ -734,13 +849,15 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
               onBack={() => setDiffCommit(null)}
             />
           ) : railView === 'nodes' ? (
-            <NodesView
-              scenes={scenes}
-              chapters={chapters}
-              onOpenScene={handleOpenScene}
-              scriptId={scriptId}
-              onReload={reloadAll}
-            />
+            <ScenePresenceContext.Provider value={presenceByScene}>
+              <NodesView
+                scenes={scenes}
+                chapters={chapters}
+                onOpenScene={handleOpenScene}
+                scriptId={scriptId}
+                onReload={reloadAll}
+              />
+            </ScenePresenceContext.Provider>
           ) : railView === 'storyboard' ? (
             <StoryboardView scenes={scenes} scriptId={scriptId} />
           ) : state.mode === 'cover' ? (
@@ -829,6 +946,15 @@ export function EditorShell({ scriptId }: { scriptId: string }) {
                             onCopilotActivate={handleCopilotActivate}
                             onElementsChange={handleElementsChange}
                             typeCommand={typeCommand ?? undefined}
+                            focusPresence={presenceByScene[s.id]}
+                            selfActorId={currentUserId}
+                            onRegisterRemoteApply={
+                              COLLAB_ENABLED ? registerRemoteApply : undefined
+                            }
+                            remoteStale={COLLAB_ENABLED && droppedScenes.has(s.id)}
+                            onRemoteStaleHandled={
+                              COLLAB_ENABLED ? handleRemoteStaleHandled : undefined
+                            }
                           />
                         );
                       })}
