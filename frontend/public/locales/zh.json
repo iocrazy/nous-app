@@ -67,7 +67,9 @@
     "agentPausedManual": "已被管理员暂停",
     "memory": "我的记忆",
     "workforce": "工作团队",
-    "sessions": "会话"
+    "sessions": "会话",
+    "dashboard": "总览",
+    "liveRuns": "{{count}} 个运行中"
   },
   "user": {
     "profile": "个人资料",
@@ -2093,6 +2095,19 @@
       "pickOne": "选择一个会话查看聊天记录。",
       "noMessages": "该会话暂无消息。",
       "deleteConfirm": "删除该会话及其全部消息?"
+    },
+    "insightsSection": "洞察",
+    "openChatWith": "与 {{name}} 聊天",
+    "noMyAgents": "还没有自建 agent",
+    "systemAgents": "系统",
+    "systemAgentsAlert": "有系统 agent 已暂停",
+    "dashboard": {
+      "loadError": "用量加载失败",
+      "todayRuns": "今日运行",
+      "todayTokens": "今日 tokens",
+      "weekRuns": "7 日运行",
+      "weekTokens": "7 日 tokens",
+      "topModels": "7 日模型排行"
     }
   },
   "aiUsage": {
