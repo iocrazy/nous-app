@@ -4,11 +4,14 @@
 
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown, ChevronRight, Layers, MessageSquare, Sparkles } from 'lucide-react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { ChevronDown, ChevronRight, Layers, MessageSquare, Plus, Sparkles } from 'lucide-react';
 import {
   fetchProjectAssetsTree,
   type ProjectAssetTreeNode,
 } from '../../services/projectAssetsService';
+import { createCanvas } from '../../features/canvas-core/services/canvasService';
+import { useToast } from '../Toast';
 
 export type ProjectAssetsSelection =
   | { kind: 'chat-uploads' }
@@ -23,9 +26,13 @@ interface Props {
 
 export const ProjectAssetsTree: React.FC<Props> = ({ selection, onSelect, chatUploadsCount }) => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const { teamId } = useParams<{ teamId: string }>();
+  const { addToast } = useToast();
   const [tree, setTree] = useState<ProjectAssetTreeNode[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  const [creatingProjectId, setCreatingProjectId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -47,6 +54,26 @@ export const ProjectAssetsTree: React.FC<Props> = ({ selection, onSelect, chatUp
       else next.add(projectId);
       return next;
     });
+
+  // Create a fresh (empty) canvas and drop the user straight into the editor.
+  // The new canvas has no nodes yet, so batch A's orphan filter keeps it out
+  // of THIS tree until a node is added — that's why we navigate rather than
+  // refresh the tree in place.
+  const handleCreateCanvas = async (projectId: string) => {
+    if (creatingProjectId) return;
+    setCreatingProjectId(projectId);
+    try {
+      const canvas = await createCanvas(projectId, {
+        name: t('projectAssets.untitledCanvas', 'Untitled Canvas'),
+      });
+      navigate(`/team/${teamId}/canvas/${canvas.id}`);
+    } catch (err) {
+      console.error('[ProjectAssetsTree] create canvas failed:', err);
+      addToast(t('projectAssets.createFailed', 'Failed to create canvas'), 'error');
+    } finally {
+      setCreatingProjectId(null);
+    }
+  };
 
   return (
     <div className="w-60 shrink-0 border-r border-line overflow-y-auto py-2 text-sm">
@@ -81,15 +108,26 @@ export const ProjectAssetsTree: React.FC<Props> = ({ selection, onSelect, chatUp
 
       {!loading && tree.map((project) => (
         <div key={project.project_id}>
-          <button
-            onClick={() => toggle(project.project_id)}
-            className="flex items-center gap-1.5 w-full px-2 py-1.5 text-content-2 hover:text-content-2"
-          >
-            {expanded.has(project.project_id)
-              ? <ChevronDown size={14} className="shrink-0" />
-              : <ChevronRight size={14} className="shrink-0" />}
-            <span className="flex-1 truncate text-left font-medium">{project.name}</span>
-          </button>
+          <div className="group flex items-center w-full px-2 py-1.5 text-content-2">
+            <button
+              onClick={() => toggle(project.project_id)}
+              className="flex items-center gap-1.5 flex-1 min-w-0 hover:text-content-2"
+            >
+              {expanded.has(project.project_id)
+                ? <ChevronDown size={14} className="shrink-0" />
+                : <ChevronRight size={14} className="shrink-0" />}
+              <span className="flex-1 truncate text-left font-medium">{project.name}</span>
+            </button>
+            <button
+              onClick={() => handleCreateCanvas(project.project_id)}
+              disabled={creatingProjectId === project.project_id}
+              title={t('projectAssets.newCanvas', 'New Canvas')}
+              aria-label={t('projectAssets.newCanvas', 'New Canvas')}
+              className="shrink-0 p-1 rounded text-content-3 hover:text-content-2 hover:bg-island-2 opacity-0 group-hover:opacity-100 focus:opacity-100 disabled:opacity-40"
+            >
+              <Plus size={14} />
+            </button>
+          </div>
 
           {expanded.has(project.project_id) && project.canvases.map((canvas) => (
             <button
@@ -110,7 +148,15 @@ export const ProjectAssetsTree: React.FC<Props> = ({ selection, onSelect, chatUp
           ))}
 
           {expanded.has(project.project_id) && project.canvases.length === 0 && (
-            <div className="pl-7 pr-3 py-1 text-xs text-content-4">{t('projectAssets.noCanvases')}</div>
+            <button
+              onClick={() => handleCreateCanvas(project.project_id)}
+              disabled={creatingProjectId === project.project_id}
+              aria-label={t('projectAssets.newCanvas', 'New Canvas')}
+              className="flex items-center gap-1.5 w-full pl-7 pr-3 py-1 rounded-md text-xs text-content-3 hover:text-content-2 hover:bg-island-2 disabled:opacity-40"
+            >
+              <Plus size={13} className="shrink-0" />
+              <span className="truncate text-left">{t('projectAssets.newCanvas', 'New Canvas')}</span>
+            </button>
           )}
         </div>
       ))}
