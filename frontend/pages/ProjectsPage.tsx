@@ -19,6 +19,12 @@ import { ProjectScriptsTab } from '../components/project/ProjectScriptsTab';
 import { ProjectOutputTab } from '../components/project/ProjectOutputTab';
 import { StageSelector } from '../components/project/StageSelector';
 import { StageToolGrid } from '../components/project/StageToolGrid';
+import { StageWorkbench } from '../components/project/StageWorkbench';
+
+// Phase B B2 — stage-driven workbench header. Off = legacy stepper + tool
+// strip; on = the workbench card. Dark by default until prod-verified.
+const WORKBENCH_ENABLED =
+  import.meta.env.VITE_FEATURE_PROJECT_WORKBENCH === 'true';
 
 // Map URL tab param → ProjectNavSidebar section key
 const TAB_TO_SECTION: Record<string, string> = {
@@ -248,20 +254,30 @@ export function ProjectsPage() {
           onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
         />
         <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
-          {/* SOP stage stepper + recommended-tool grid (Phase 5b) */}
-          <div className="flex flex-col gap-1 px-8 pt-3 pb-1 border-b border-ink-200">
-            <StageSelector
+          {/* SOP stage header: workbench card (B2) or legacy stepper + tool strip. */}
+          {WORKBENCH_ENABLED ? (
+            <StageWorkbench
               projectId={selectedProject.id}
               canWrite={true}
               currentStage={currentStage}
               onStageChange={handleStageChange}
-            />
-            <StageToolGrid
-              projectId={selectedProject.id}
               setActiveTab={setActiveTab}
-              currentStage={currentStage}
             />
-          </div>
+          ) : (
+            <div className="flex flex-col gap-1 px-8 pt-3 pb-1 border-b border-ink-200">
+              <StageSelector
+                projectId={selectedProject.id}
+                canWrite={true}
+                currentStage={currentStage}
+                onStageChange={handleStageChange}
+              />
+              <StageToolGrid
+                projectId={selectedProject.id}
+                setActiveTab={setActiveTab}
+                currentStage={currentStage}
+              />
+            </div>
+          )}
           <div className={'flex-1 overflow-y-auto px-8 pb-8'}>
             {activeTab === 'files' && (
               <ProjectFilesView
