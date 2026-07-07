@@ -76,13 +76,14 @@ class TestAdapter:
         )
         assert "my-proxy" in adapter.api_url
 
-    def test_no_user_config_builds_keyless_adapter(self) -> None:
-        # No global MODELSCOPE_* settings exist; missing user config must
-        # not crash — it builds an adapter with an empty key (the request
-        # will fail with a clear auth error from ModelScope).
-        adapter = get_adapter_for_user("Qwen/Qwen3-235B-A22B", {}, _Settings())
-        assert isinstance(adapter, ModelScopeAdapter)
-        assert adapter.api_key == ""
+    def test_no_user_config_raises_provider_not_configured(self) -> None:
+        # DB-only credentials (2026-07-07): a missing ModelScope key raises
+        # a clear ProviderNotConfiguredError instead of building a keyless
+        # adapter that dies upstream with ModelScope's opaque auth error.
+        from app.services.ai.adapters.factory import ProviderNotConfiguredError
+
+        with pytest.raises(ProviderNotConfiguredError):
+            get_adapter_for_user("Qwen/Qwen3-235B-A22B", {}, _Settings())
 
     def test_default_url_is_chat_completions(self) -> None:
         assert MODELSCOPE_DEFAULT_URL == (

@@ -93,7 +93,9 @@ async def test_env_fallback_when_db_absent():
     assert cfg.enabled is True
     assert cfg.falkordb_host == "env-host"
     assert cfg.falkordb_port == 6399
-    assert cfg.extractor_api_key == "ms-env"
+    # Credentials are DB-only (铁律 2026-07-07): api_key ignores env even
+    # when OPENAI_API_KEY is set; non-credential fields keep env fallback.
+    assert cfg.extractor_api_key == ""
     assert cfg.extractor_base_url == "https://env.example/v1"
 
 
