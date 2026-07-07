@@ -4,9 +4,13 @@ vi.mock('./parserService', () => ({
   getAuthHeaders: vi.fn().mockResolvedValue({ Authorization: 'Bearer test-token' }),
 }));
 vi.mock('../utils/apiConfig', () => ({ getApiUrl: () => 'http://api.test' }));
+const getSupabaseAccessToken = vi.fn();
+vi.mock('../supabaseClient', () => ({
+  getSupabaseAccessToken: (...a: unknown[]) => getSupabaseAccessToken(...a),
+}));
 
 import {
-  attachmentUrl,
+  attachmentUrlWithToken,
   createNote,
   deleteNote,
   getActivity,
@@ -21,6 +25,7 @@ const okJson = (data: unknown) =>
 describe('inspirationService', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okJson([])));
+    getSupabaseAccessToken.mockReset();
   });
   afterEach(() => vi.unstubAllGlobals());
 
@@ -88,7 +93,17 @@ describe('inspirationService', () => {
     expect(init.headers['Content-Type']).toBeUndefined();
   });
 
-  it('attachmentUrl builds the signed-get endpoint', () => {
-    expect(attachmentUrl('a1')).toBe('http://api.test/api/v1/inspiration/attachments/a1');
+  it('attachmentUrlWithToken appends the Supabase access token as ?token=', async () => {
+    getSupabaseAccessToken.mockResolvedValue('signed-jwt');
+    await expect(attachmentUrlWithToken('a1')).resolves.toBe(
+      'http://api.test/api/v1/inspiration/attachments/a1?token=signed-jwt',
+    );
+  });
+
+  it('attachmentUrlWithToken omits ?token= when no session token is available', async () => {
+    getSupabaseAccessToken.mockResolvedValue(null);
+    await expect(attachmentUrlWithToken('a1')).resolves.toBe(
+      'http://api.test/api/v1/inspiration/attachments/a1',
+    );
   });
 });

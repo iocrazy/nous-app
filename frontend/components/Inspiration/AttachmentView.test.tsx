@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 
 vi.mock('../../services/inspirationService', () => ({
-  attachmentUrl: (id: string) => `http://api.test/att/${id}`,
+  attachmentUrlWithToken: (id: string) => Promise.resolve(`http://api.test/att/${id}?token=tok`),
 }));
 
 import { AttachmentView } from './AttachmentView';
@@ -20,10 +20,14 @@ describe('AttachmentView', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('renders images as thumbnails linking to source', () => {
+  it('renders images as token-authed thumbnails linking to source', async () => {
     render(<AttachmentView attachments={[att('1', 'image/png', 'pic.png')]} />);
     const img = screen.getByRole('img');
-    expect(img.getAttribute('src')).toBe('http://api.test/att/1');
+    await waitFor(() =>
+      expect(img.getAttribute('src')).toBe('http://api.test/att/1?token=tok'),
+    );
+    const link = img.closest('a');
+    expect(link?.getAttribute('href')).toBe('http://api.test/att/1?token=tok');
   });
 
   it('renders audio with native controls', () => {

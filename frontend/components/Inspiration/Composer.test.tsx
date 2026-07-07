@@ -75,4 +75,59 @@ describe('Composer', () => {
     await waitFor(() => expect(addToast).toHaveBeenCalledWith('boom', 'error'));
     expect(ta.value).toBe('keep me');
   });
+
+  it('a failed upload keeps the file staged with a Retry action instead of silently dropping it', async () => {
+    createNote.mockResolvedValue({ id: '9', attachments: [], tags: [] });
+    uploadAttachment.mockRejectedValue(new Error('network down'));
+    const onCreated = vi.fn();
+    render(<Composer onCreated={onCreated} tagSuggestions={[]} />);
+    const input = screen.getByLabelText('Attach files') as HTMLInputElement;
+    const file = new File(['x'], 'p.png', { type: 'image/png' });
+    fireEvent.change(input, { target: { files: [file] } });
+    const ta = screen.getByRole('textbox');
+    fireEvent.change(ta, { target: { value: 'with file' } });
+    fireEvent.click(screen.getByText('Save'));
+
+    await waitFor(() => expect(uploadAttachment).toHaveBeenCalledWith('9', file));
+    // note itself was still created and reported up — only the attachment failed
+    await waitFor(() =>
+      expect(onCreated).toHaveBeenCalledWith(
+        expect.objectContaining({ id: '9', attachments: [] }),
+      ),
+    );
+    // the failed file stays visible with a Retry action, it is not dropped
+    expect(screen.getByText('p.png')).toBeTruthy();
+    expect(screen.getByLabelText('Retry p.png')).toBeTruthy();
+  });
+
+  it('clicking Retry re-uploads against the original note and clears the chip on success', async () => {
+    createNote.mockResolvedValue({ id: '9', attachments: [], tags: [] });
+    uploadAttachment.mockRejectedValueOnce(new Error('network down'));
+    const onCreated = vi.fn();
+    const onAttachmentUploaded = vi.fn();
+    render(
+      <Composer onCreated={onCreated} onAttachmentUploaded={onAttachmentUploaded} tagSuggestions={[]} />,
+    );
+    const input = screen.getByLabelText('Attach files') as HTMLInputElement;
+    const file = new File(['x'], 'p.png', { type: 'image/png' });
+    fireEvent.change(input, { target: { files: [file] } });
+    const ta = screen.getByRole('textbox');
+    fireEvent.change(ta, { target: { value: 'with file' } });
+    fireEvent.click(screen.getByText('Save'));
+    await waitFor(() => expect(screen.getByLabelText('Retry p.png')).toBeTruthy());
+
+    uploadAttachment.mockResolvedValueOnce({
+      id: 'a1', mime: 'image/png', size_bytes: 4, original_name: 'p.png',
+    });
+    fireEvent.click(screen.getByLabelText('Retry p.png'));
+
+    await waitFor(() => expect(uploadAttachment).toHaveBeenCalledWith('9', file));
+    await waitFor(() =>
+      expect(onAttachmentUploaded).toHaveBeenCalledWith(
+        '9',
+        expect.objectContaining({ id: 'a1' }),
+      ),
+    );
+    expect(screen.queryByText('p.png')).toBeNull();
+  });
 });

@@ -15,6 +15,7 @@ import {
   listNotes,
   updateNote,
   type InspirationNote,
+  type NoteAttachment,
 } from '../services/inspirationService';
 
 const PAGE_SIZE = 50;
@@ -103,6 +104,16 @@ export const InspirationPage: React.FC = () => {
     setRefreshKey((k) => k + 1);
   };
 
+  // A Composer retry succeeded after the note was already created/rendered —
+  // merge the attachment into that note's card in place.
+  const onAttachmentUploaded = (noteId: string, attachment: NoteAttachment) => {
+    setNotes((prev) =>
+      prev.map((n) =>
+        n.id === noteId ? { ...n, attachments: [...n.attachments, attachment] } : n,
+      ),
+    );
+  };
+
   const onTogglePin = async (note: InspirationNote) => {
     try {
       const updated = await updateNote(note.id, { pinned: !note.pinned });
@@ -175,7 +186,11 @@ export const InspirationPage: React.FC = () => {
 
       <div className="flex gap-3">
         <div className="min-w-0 flex-1 space-y-2.5">
-          <Composer onCreated={onCreated} tagSuggestions={tags.map((x) => x.tag)} />
+          <Composer
+            onCreated={onCreated}
+            onAttachmentUploaded={onAttachmentUploaded}
+            tagSuggestions={tags.map((x) => x.tag)}
+          />
           <NoteTimeline
             notes={notes}
             onEdit={startEdit}

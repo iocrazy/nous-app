@@ -14,7 +14,7 @@ vi.mock('../services/inspirationService', () => ({
   updateNote: (...a: unknown[]) => updateNote(...a),
   createNote: vi.fn(),
   uploadAttachment: vi.fn(),
-  attachmentUrl: (id: string) => `http://api.test/att/${id}`,
+  attachmentUrlWithToken: (id: string) => Promise.resolve(`http://api.test/att/${id}`),
 }));
 // NoteCard imports MarkdownBody as a default export whose real prop is
 // `source` (not `content` — see components/AILibrary/MarkdownBody.tsx).

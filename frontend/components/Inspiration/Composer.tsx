@@ -15,19 +15,36 @@ import { findActiveTag } from './noteTags';
 
 interface Props {
   onCreated: (note: InspirationNote) => void;
+  /** Called when a retried upload finally succeeds, so the page can merge the
+   * new attachment into the (already-created) note's card. */
+  onAttachmentUploaded?: (noteId: string, attachment: NoteAttachment) => void;
   tagSuggestions: string[];
   prefill?: { content: string; refHotspot?: RefHotspot } | null;
 }
 
-export const Composer: React.FC<Props> = ({ onCreated, tagSuggestions, prefill }) => {
+/** A staged file, tagged with the note it failed to attach to (if any) so a
+ * Retry can target the right note without re-creating it. */
+interface StagedFile {
+  key: string;
+  file: File;
+  noteId?: string;
+}
+
+export const Composer: React.FC<Props> = ({
+  onCreated,
+  onAttachmentUploaded,
+  tagSuggestions,
+  prefill,
+}) => {
   const { t } = useTranslation();
   const { addToast } = useToast();
   const [text, setText] = useState(prefill?.content ?? '');
-  const [staged, setStaged] = useState<File[]>([]);
+  const [staged, setStaged] = useState<StagedFile[]>([]);
   const [saving, setSaving] = useState(false);
   const [caret, setCaret] = useState(0);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const nextKey = useRef(0);
 
   const active = useMemo(() => findActiveTag(text, caret), [text, caret]);
   const suggestions = useMemo(() => {
@@ -44,7 +61,10 @@ export const Composer: React.FC<Props> = ({ onCreated, tagSuggestions, prefill }
   };
 
   const stageFiles = useCallback((files: FileList | File[]) => {
-    setStaged((prev) => [...prev, ...Array.from(files)]);
+    setStaged((prev) => [
+      ...prev,
+      ...Array.from(files).map((file) => ({ key: `f${nextKey.current++}`, file })),
+    ]);
   }, []);
 
   const submit = async () => {
@@ -54,24 +74,44 @@ export const Composer: React.FC<Props> = ({ onCreated, tagSuggestions, prefill }
     try {
       const note = await createNote(content, prefill?.refHotspot);
       const uploaded: NoteAttachment[] = [];
-      for (const file of staged) {
+      const failed: StagedFile[] = [];
+      for (const item of staged) {
         try {
-          uploaded.push(await uploadAttachment(note.id, file));
+          uploaded.push(await uploadAttachment(note.id, item.file));
         } catch (err) {
           addToast(
-            t('inspiration.uploadFailed', 'Upload failed: {{name}}', { name: file.name }) +
+            t('inspiration.uploadFailed', 'Upload failed: {{name}}', { name: item.file.name }) +
               `: ${(err as Error).message}`,
             'error',
           );
+          // Keep the file staged (tagged with the note it belongs to) rather
+          // than dropping it — the note was already created, so the user
+          // only needs to retry the attachment, not the whole note.
+          failed.push({ ...item, noteId: note.id });
         }
       }
       onCreated({ ...note, attachments: [...note.attachments, ...uploaded] });
       setText('');
-      setStaged([]);
+      setStaged(failed);
     } catch (err) {
       addToast((err as Error).message, 'error');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const retryUpload = async (item: StagedFile) => {
+    if (!item.noteId) return;
+    try {
+      const attachment = await uploadAttachment(item.noteId, item.file);
+      setStaged((prev) => prev.filter((s) => s.key !== item.key));
+      onAttachmentUploaded?.(item.noteId, attachment);
+    } catch (err) {
+      addToast(
+        t('inspiration.uploadFailed', 'Upload failed: {{name}}', { name: item.file.name }) +
+          `: ${(err as Error).message}`,
+        'error',
+      );
     }
   };
 
@@ -123,12 +163,26 @@ export const Composer: React.FC<Props> = ({ onCreated, tagSuggestions, prefill }
 
       {staged.length > 0 && (
         <div className="flex flex-wrap gap-1.5 pt-2">
-          {staged.map((f, i) => (
-            <span key={`${f.name}-${i}`} className="inline-flex items-center gap-1.5 rounded-lg bg-island-2 px-2.5 py-1 text-xs text-content-2">
-              {f.name}
+          {staged.map((item) => (
+            <span
+              key={item.key}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs text-content-2 ${
+                item.noteId ? 'bg-red-500/10' : 'bg-island-2'
+              }`}
+            >
+              {item.file.name}
+              {item.noteId && (
+                <button
+                  aria-label={`Retry ${item.file.name}`}
+                  onClick={() => void retryUpload(item)}
+                  className="font-semibold text-indigo-300 hover:text-indigo-200"
+                >
+                  {t('inspiration.retry', 'Retry')}
+                </button>
+              )}
               <button
-                aria-label={`Remove ${f.name}`}
-                onClick={() => setStaged((prev) => prev.filter((_, j) => j !== i))}
+                aria-label={`Remove ${item.file.name}`}
+                onClick={() => setStaged((prev) => prev.filter((s) => s.key !== item.key))}
                 className="text-content-3 hover:text-content"
               >
                 <X size={11} />

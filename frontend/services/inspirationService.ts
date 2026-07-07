@@ -2,6 +2,7 @@
 // All ids are strings — the backend serializes bigints via coerce_numbers_to_str.
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
+import { getSupabaseAccessToken } from '../supabaseClient';
 
 export interface NoteAttachment {
   id: string;
@@ -143,6 +144,15 @@ export async function deleteAttachment(attachmentId: string): Promise<void> {
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 }
 
-export function attachmentUrl(attachmentId: string): string {
-  return `${base()}/attachments/${attachmentId}`;
+/**
+ * Build the signed-get URL for an attachment, including a `?token=` query
+ * param so browser-native loads (`<img>`/`<video>`/`<audio>` src, `<a href>`
+ * downloads) can authenticate — those elements never send an Authorization
+ * header. Backend accepts this token via the same media/JWT dual-channel as
+ * resources_crud_router's `/file` route (see inspiration_router.get_attachment).
+ */
+export async function attachmentUrlWithToken(attachmentId: string): Promise<string> {
+  const url = `${base()}/attachments/${attachmentId}`;
+  const token = await getSupabaseAccessToken();
+  return token ? `${url}?token=${encodeURIComponent(token)}` : url;
 }

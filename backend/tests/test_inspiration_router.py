@@ -11,6 +11,7 @@ from app.api.inspiration_router import (
     create_note,
     delete_attachment,
     delete_note,
+    get_attachment,
     list_notes,
     update_note,
     upload_attachment,
@@ -133,6 +134,41 @@ async def test_upload_maps_storage_failed_to_502():
         with pytest.raises(HTTPException) as exc:
             await upload_attachment("42", file=upload, current_user=USER)
     assert exc.value.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_get_attachment_with_valid_token_query_redirects():
+    """Browser <img>/<video>/<audio>/<a> src cannot send Authorization headers.
+    A validated ?token= (media/temp token) must be enough to authorize a GET,
+    matching resources_crud_router.serve_resource_file's dual-channel pattern.
+    """
+    repo = AsyncMock()
+    repo.get_by_id.return_value = {"id": 7, "user_id": "u1"}
+    att_svc = AsyncMock()
+    att_svc.sign_get.return_value = "https://storage.example/signed-url"
+    with (
+        patch(
+            "app.api.inspiration_router.get_inspiration_attachments_repository",
+            return_value=repo,
+        ),
+        patch("app.api.inspiration_router._attachments", return_value=att_svc),
+        patch(
+            "app.api.media_auth.validate_media_cookie",
+            AsyncMock(return_value="u1"),
+        ),
+    ):
+        resp = await get_attachment("7", authorization=None, token="signed-media-tok")
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "https://storage.example/signed-url"
+
+
+@pytest.mark.asyncio
+async def test_get_attachment_without_credentials_rejected():
+    """No Authorization header and no ?token= must be rejected outright —
+    never fall through to an unauthenticated repo lookup."""
+    with pytest.raises(HTTPException) as exc:
+        await get_attachment("7", authorization=None, token=None)
+    assert exc.value.status_code == 401
 
 
 @pytest.mark.asyncio

@@ -1,9 +1,9 @@
 // Renders a note's attachments by mime family (spec §2.2 #5):
 // image grid / inline audio / video card / typed download chip.
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { FileText } from 'lucide-react';
 import {
-  attachmentUrl,
+  attachmentUrlWithToken,
   type NoteAttachment,
 } from '../../services/inspirationService';
 
@@ -18,9 +18,38 @@ function extOf(name: string): string {
   return dot > 0 ? name.slice(dot + 1).toUpperCase().slice(0, 5) : 'FILE';
 }
 
+/**
+ * Resolve every attachment's token-authed URL up front. The GET endpoint
+ * requires a `?token=` for native `<img>`/`<video>`/`<audio>`/`<a>` loads
+ * (browsers never send Authorization headers for those), and fetching the
+ * signed session token is async — so we resolve into state rather than
+ * calling a sync URL builder inline in JSX.
+ */
+function useAttachmentUrls(attachments: NoteAttachment[]): Record<string, string> {
+  const [urls, setUrls] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const entries = await Promise.all(
+        attachments.map(async (a) => [a.id, await attachmentUrlWithToken(a.id)] as const),
+      );
+      if (alive) setUrls(Object.fromEntries(entries));
+    })();
+    return () => {
+      alive = false;
+    };
+    // Re-resolve whenever the attachment set (by id) changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attachments.map((a) => a.id).join(',')]);
+
+  return urls;
+}
+
 export const AttachmentView: React.FC<{ attachments: NoteAttachment[] }> = ({
   attachments,
 }) => {
+  const urls = useAttachmentUrls(attachments);
   if (!attachments.length) return null;
   const images = attachments.filter((a) => a.mime.startsWith('image/'));
   const audios = attachments.filter((a) => a.mime.startsWith('audio/'));
@@ -39,13 +68,13 @@ export const AttachmentView: React.FC<{ attachments: NoteAttachment[] }> = ({
           {images.map((a) => (
             <a
               key={a.id}
-              href={attachmentUrl(a.id)}
+              href={urls[a.id] ?? ''}
               target="_blank"
               rel="noreferrer"
               className="block"
             >
               <img
-                src={attachmentUrl(a.id)}
+                src={urls[a.id] ?? ''}
                 alt={a.original_name}
                 loading="lazy"
                 className="h-24 w-32 rounded-lg object-cover bg-island-2"
@@ -57,21 +86,21 @@ export const AttachmentView: React.FC<{ attachments: NoteAttachment[] }> = ({
       {videos.map((a) => (
         <video
           key={a.id}
-          src={attachmentUrl(a.id)}
+          src={urls[a.id] ?? ''}
           controls
           preload="metadata"
           className="max-h-64 rounded-lg bg-island-2"
         />
       ))}
       {audios.map((a) => (
-        <audio key={a.id} src={attachmentUrl(a.id)} controls className="h-9 w-full max-w-xs" />
+        <audio key={a.id} src={urls[a.id] ?? ''} controls className="h-9 w-full max-w-xs" />
       ))}
       {files.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {files.map((a) => (
             <a
               key={a.id}
-              href={attachmentUrl(a.id)}
+              href={urls[a.id] ?? ''}
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center gap-2 rounded-lg bg-island-2 px-3 py-1.5 text-xs text-content-2 hover:bg-line"
