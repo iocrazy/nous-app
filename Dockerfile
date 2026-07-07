@@ -54,6 +54,22 @@ RUN apt-get update && apt-get install -y \
 ENV CHROME_PATH=/usr/bin/chromium
 ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
 
+# ── dreamina (即梦) AIGC CLI ──────────────────────────────────────────────
+# JimengCliProvider drives this binary as a subprocess for image + video
+# generation. The official installer (verified 2026-07-07) auto-detects the
+# platform and drops a single static binary; DREAMINA_INSTALL_DIR pins it to
+# /usr/local/bin so it lands on PATH and is readable by the non-root `app`
+# user. The build FAILS if the binary isn't on PATH + runnable afterward —
+# never a silent skip (a missing CLI must break the image, not surface at
+# runtime). Auth/login state is written at runtime to $HOME/.dreamina_cli
+# (i.e. /app/.dreamina_cli for the `app` user) and persisted via the
+# dreamina-auth compose volume — see docs/runbook/jimeng-cli.md.
+# NOTE: the installer fetches the binary from a ByteDance CN CDN; a CI runner
+# without CN egress will fail this layer (that is the intended hard failure).
+RUN DREAMINA_INSTALL_DIR=/usr/local/bin bash -c 'curl -fsSL https://jimeng.jianying.com/cli | bash' \
+    && command -v dreamina \
+    && dreamina --help >/dev/null
+
 # Install uv package manager
 RUN pip install uv
 
@@ -84,6 +100,12 @@ RUN uv sync
 
 # Create downloads directory
 RUN mkdir -p /app/downloads
+
+# dreamina CLI writes OAuth/login state under $HOME/.dreamina_cli (HOME=/app for
+# the app user). Pre-create it so the dreamina-auth named volume inherits the
+# app user's ownership (1031:100) on first mount, and `dreamina login` run via
+# `docker exec` can write without a permission error.
+RUN mkdir -p /app/.dreamina_cli
 
 # Non-root service user.
 # UID 1031 / GID 100 matches the 'mediahub' service account created on

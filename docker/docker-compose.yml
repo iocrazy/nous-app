@@ -60,6 +60,9 @@ services:
       - ${DOWNLOAD_HOST_PATH:-/volume2/sources/MediaHub.library}:/app/downloads
       - ./.env:/app/.env
       - ./config/config.yml:/app/config.yml
+      # dreamina (即梦) CLI OAuth/login state (shared with worker). Login once on
+      # the NAS; both services read it. See docs/runbook/jimeng-cli.md.
+      - dreamina-auth:/app/.dreamina_cli
     environment:
       - TZ=Asia/Shanghai
       - REDIS_URL=redis://redis:6379/0
@@ -162,6 +165,9 @@ services:
       - ${DOWNLOAD_HOST_PATH:-/volume2/sources/MediaHub.library}:/app/downloads
       - ./.env:/app/.env
       - ./config/config.yml:/app/config.yml
+      # dreamina (即梦) CLI OAuth/login state — the worker runs the generation
+      # workflows, so `dreamina login` is done here. Shared with the backend.
+      - dreamina-auth:/app/.dreamina_cli
     environment:
       - TZ=Asia/Shanghai
       - REDIS_URL=redis://redis:6379/0
@@ -383,3 +389,7 @@ services:
 
 volumes:
   redis_data:
+  # dreamina (即梦) CLI OAuth/login state — persisted so a one-time
+  # `dreamina login` on the NAS survives image pulls + container restarts.
+  # Shared by the backend + worker services. See docs/runbook/jimeng-cli.md.
+  dreamina-auth:
