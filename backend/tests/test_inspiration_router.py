@@ -9,12 +9,14 @@ from starlette.datastructures import Headers, UploadFile
 
 from app.api.inspiration_router import (
     create_note,
+    delete_attachment,
     delete_note,
     list_notes,
     update_note,
     upload_attachment,
 )
 from app.schemas.inspiration import NoteCreateIn, NoteUpdateIn
+from app.services.inspiration.attachment_service import AttachmentStorageFailed
 from app.services.inspiration.notes_service import NoteNotFound, NotePersistFailed
 
 USER = {"id": "u1"}
@@ -111,3 +113,41 @@ async def test_upload_returns_string_id():
     # Verify id is a string (coerced by AttachmentOut schema)
     assert out.id == "9007199254740993"
     assert isinstance(out.id, str)
+
+
+@pytest.mark.asyncio
+async def test_upload_maps_storage_failed_to_502():
+    svc = AsyncMock()
+    svc.assert_owned = AsyncMock()
+    att_svc = AsyncMock()
+    att_svc.store.side_effect = AttachmentStorageFailed()
+    upload = UploadFile(
+        file=BytesIO(b"\x89PNG"),
+        filename="pic.png",
+        headers=Headers({"content-type": "image/png"}),
+    )
+    with (
+        patch("app.api.inspiration_router.get_notes_service", return_value=svc),
+        patch("app.api.inspiration_router._attachments", return_value=att_svc),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            await upload_attachment("42", file=upload, current_user=USER)
+    assert exc.value.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_delete_attachment_maps_repo_failure_to_502():
+    repo = AsyncMock()
+    repo.get_by_id.return_value = {"id": 7, "user_id": "u1"}
+    att_svc = AsyncMock()
+    att_svc.delete.return_value = False
+    with (
+        patch(
+            "app.api.inspiration_router.get_inspiration_attachments_repository",
+            return_value=repo,
+        ),
+        patch("app.api.inspiration_router._attachments", return_value=att_svc),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            await delete_attachment("7", current_user=USER)
+    assert exc.value.status_code == 502

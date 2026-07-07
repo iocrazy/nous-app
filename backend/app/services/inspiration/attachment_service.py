@@ -33,6 +33,10 @@ class AttachmentTooLarge(Exception):
         super().__init__(f"attachment exceeds {limit_mb} MB limit")
 
 
+class AttachmentStorageFailed(Exception):
+    pass
+
+
 def _sanitize(filename: str) -> str:
     base = filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     cleaned = _UNSAFE.sub("_", base).strip("._") or "file"
@@ -45,7 +49,7 @@ class AttachmentService:
         self._repo = get_inspiration_attachments_repository()
 
     async def _get_limit_mb(self) -> int:
-        # system_settings 键 inspiration.max_attachment_mb(mig 348 seeded jsonb 500).
+        # system_settings 键 inspiration.max_attachment_mb(mig 349 seeded jsonb 500).
         #
         # 核实结论:app/repositories/admin/system_settings_repository.py 确实存在,
         # 但它是面向 admin 页面的 SQLAlchemy ORM CRUD 层
@@ -84,7 +88,13 @@ class AttachmentService:
             raise AttachmentTooLarge(limit_mb)
         now = datetime.now(_SHANGHAI)
         key = f"{now:%Y}/{now:%m}/{now:%d}/{uuid.uuid4().hex}/{_sanitize(filename)}"
-        await self._store.put_bytes(key, data, mime)
+        try:
+            await self._store.put_bytes(key, data, mime)
+        except Exception as e:
+            logger.error(
+                f"attachment storage write failed (note={note_id}, key={key}): {e}"
+            )
+            raise AttachmentStorageFailed() from e
         return await self._repo.create(
             note_id=note_id,
             user_id=user_id,
@@ -96,7 +106,13 @@ class AttachmentService:
         )
 
     async def sign_get(self, att_row: Dict[str, Any]) -> str:
-        return await self._store.signed_url(att_row["path"])
+        try:
+            return await self._store.signed_url(att_row["path"])
+        except Exception as e:
+            logger.error(
+                f"attachment signed url generation failed ({att_row['path']}): {e}"
+            )
+            raise AttachmentStorageFailed() from e
 
     async def delete(self, att_row: Dict[str, Any]) -> bool:
         try:

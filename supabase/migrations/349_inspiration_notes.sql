@@ -1,4 +1,4 @@
--- 348_inspiration_notes.sql
+-- 349_inspiration_notes.sql
 -- Inspiration Notes P1 (spec: docs/superpowers/specs/2026-07-07-inspiration-notes-design.md)
 -- memos-style quick-capture notes + multi-format attachments + PAT tokens (endpoints in P4).
 
@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS inspiration_attachments (
 
 CREATE INDEX IF NOT EXISTS idx_inspiration_attachments_note
   ON inspiration_attachments (note_id);
+CREATE INDEX IF NOT EXISTS idx_inspiration_attachments_user
+  ON inspiration_attachments (user_id);
 
 CREATE TABLE IF NOT EXISTS inspiration_api_tokens (
   id           BIGINT PRIMARY KEY DEFAULT generate_snowflake_id(),
@@ -90,3 +92,8 @@ $$;
 INSERT INTO system_settings (key, value)
 VALUES ('inspiration.max_attachment_mb', '500'::jsonb)
 ON CONFLICT (key) DO NOTHING;
+
+-- Private bucket for note attachments (same posture as chat-media).
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('inspiration', 'inspiration', false)
+ON CONFLICT (id) DO NOTHING;

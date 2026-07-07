@@ -101,9 +101,13 @@ class NotesService:
     ) -> Optional[Dict[str, Any]]:
         await self._owned(user_id, note_id)
         tags = parse_tags(content_md) if content_md is not None else None
-        return await self._notes.update(
+        row = await self._notes.update(
             note_id, content_md=content_md, tags=tags, pinned=pinned
         )
+        if row is not None:
+            atts = await self._attachments.list_for_notes([row["id"]])
+            row["attachments"] = atts
+        return row
 
     async def delete_note(self, user_id: str, note_id: Any) -> None:
         await self._owned(user_id, note_id)

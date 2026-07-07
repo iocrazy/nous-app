@@ -6,6 +6,7 @@ import pytest
 
 from app.services.inspiration.attachment_service import (
     AttachmentService,
+    AttachmentStorageFailed,
     AttachmentTooLarge,
 )
 
@@ -69,3 +70,22 @@ async def test_filename_is_sanitized_in_object_key():
     await svc.store("u1", "42", "../../evil name?.png", "image/png", b"x")
     key = store.put_bytes.call_args[0][0]
     assert ".." not in key and "?" not in key and " " not in key.split("/")[4]
+
+
+@pytest.mark.asyncio
+async def test_store_raises_storage_failed_when_put_bytes_errors():
+    store, repo = AsyncMock(), AsyncMock()
+    store.put_bytes.side_effect = RuntimeError("s3 down")
+    svc = _service(store, repo)
+    with pytest.raises(AttachmentStorageFailed):
+        await svc.store("u1", "42", "pic.png", "image/png", b"\x89PNG")
+    repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sign_get_raises_storage_failed_when_signed_url_errors():
+    store = AsyncMock()
+    store.signed_url.side_effect = RuntimeError("s3 down")
+    svc = _service(store=store)
+    with pytest.raises(AttachmentStorageFailed):
+        await svc.sign_get({"id": 7, "path": "2026/07/07/u/x.png"})

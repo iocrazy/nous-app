@@ -14,6 +14,7 @@ from app.repositories.inspiration_attachments_repository import (
 from app.schemas.inspiration import AttachmentOut, NoteCreateIn, NoteOut, NoteUpdateIn
 from app.services.inspiration.attachment_service import (
     AttachmentService,
+    AttachmentStorageFailed,
     AttachmentTooLarge,
 )
 from app.services.inspiration.notes_service import (
@@ -78,7 +79,6 @@ async def update_note(
         raise HTTPException(status_code=404, detail="note not found")
     if row is None:
         raise HTTPException(status_code=502, detail="note update failed")
-    row.setdefault("attachments", [])
     return NoteOut(**row)
 
 
@@ -134,6 +134,8 @@ async def upload_attachment(
             status_code=413,
             detail=f"file exceeds the {e.limit_mb} MB attachment limit",
         )
+    except AttachmentStorageFailed:
+        raise HTTPException(status_code=502, detail="attachment storage unavailable")
     if row is None:
         raise HTTPException(status_code=502, detail="attachment persistence failed")
     return AttachmentOut(**row)
@@ -146,7 +148,10 @@ async def get_attachment(
     att = await get_inspiration_attachments_repository().get_by_id(attachment_id)
     if not att or str(att.get("user_id")) != _uid(current_user):
         raise HTTPException(status_code=404, detail="attachment not found")
-    url = await _attachments().sign_get(att)
+    try:
+        url = await _attachments().sign_get(att)
+    except AttachmentStorageFailed:
+        raise HTTPException(status_code=502, detail="attachment storage unavailable")
     return RedirectResponse(url, status_code=302)
 
 
@@ -157,4 +162,5 @@ async def delete_attachment(
     att = await get_inspiration_attachments_repository().get_by_id(attachment_id)
     if not att or str(att.get("user_id")) != _uid(current_user):
         raise HTTPException(status_code=404, detail="attachment not found")
-    await _attachments().delete(att)
+    if not await _attachments().delete(att):
+        raise HTTPException(status_code=502, detail="attachment deletion failed")
