@@ -13,6 +13,7 @@ import logging
 from typing import Any, Optional
 
 from app.core import secret_box
+from app.db import engine as db_engine
 from app.db.repository_base import AsyncpgRepository
 
 logger = logging.getLogger(__name__)
@@ -71,12 +72,19 @@ class SocialAccountsRepository(AsyncpgRepository):
 
     async def upsert_account(self, **f: Any) -> dict:
         f = _encrypt_token_cols(f)
-        row = await self.fetch_one(
+        # COMMITTING path required: this INSERT ... RETURNING writes a row.
+        # self.fetch_one runs on eng.connect() (no transaction) and would
+        # SILENTLY ROLL BACK the write on connection close (the #498
+        # silent-rollback class — see repository_base.py:102-108). Use
+        # db_engine.execute_returning_one (eng.begin(), auto-commit) instead,
+        # matching the generated_media_repository.mark_promoted convention.
+        row = await db_engine.execute_returning_one(
             """
             INSERT INTO social_accounts
                 (scope_type, scope_id, platform, platform_user_id, username,
                  avatar_url, access_token, refresh_token, token_expires_at, created_by)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+            VALUES (:scope_type, :scope_id, :platform, :platform_user_id, :username,
+                    :avatar_url, :access_token, :refresh_token, :token_expires_at, :created_by)
             ON CONFLICT (scope_type, scope_id, platform, platform_user_id)
             DO UPDATE SET username = EXCLUDED.username,
                           avatar_url = EXCLUDED.avatar_url,
@@ -86,16 +94,18 @@ class SocialAccountsRepository(AsyncpgRepository):
                           status = 'active', updated_at = NOW()
             RETURNING *
             """,
-            f["scope_type"],
-            f["scope_id"],
-            f["platform"],
-            f["platform_user_id"],
-            f["username"],
-            f.get("avatar_url"),
-            f.get("access_token"),
-            f.get("refresh_token"),
-            f.get("token_expires_at"),
-            f["created_by"],
+            {
+                "scope_type": f["scope_type"],
+                "scope_id": f["scope_id"],
+                "platform": f["platform"],
+                "platform_user_id": f["platform_user_id"],
+                "username": f["username"],
+                "avatar_url": f.get("avatar_url"),
+                "access_token": f.get("access_token"),
+                "refresh_token": f.get("refresh_token"),
+                "token_expires_at": f.get("token_expires_at"),
+                "created_by": f["created_by"],
+            },
         )
         return _public_row(row)
 
