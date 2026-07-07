@@ -33,18 +33,21 @@
 │  Notes tab:                  │  Activity 面板(角上 热力图 ⇄ 迷你月历 切换,localStorage 记忆)
 │    composer(置顶快记框)     │  Tags 面板(Notes→笔记 #tags;Hotspots→热点标签)
 │    按日分组笔记 timeline      │  Hotspots Top3 面板(仅 Notes tab;行内 + 存灵感;All hotspots → 切 tab)
-│  Hotspots tab:               │
+│  Hotspots tab:               │  Notes 面板(仅 Hotspots tab;mini 快记输入框 + 最近 2-3 条笔记 + Open in Notes →)
 │    头行:All/For You/Saved + 来源健康 chip
 │    左列当日排名列表 + 右侧详情面板(热度走势/摘要/标签/原链)
 │    底部动作条:Save as note / Parse / Not interested / Open source
 ```
+
+**侧栏对称原则**:Notes tab 右下是 Hotspots 面板,Hotspots tab 右下是 Notes 面板(mini composer 直接可存,不必切 tab)——在哪个 tab 都能完成"看"与"记"两件事。
 
 ### 2.2 核心交互契约
 
 1. **日期是全页共享状态**:点热力图格/月历某天 → 顶栏出现 `Jul 7 ×` chip;笔记流、Hotspots 侧栏面板(标题变 `Hotspots · Jul 7`)、Hotspots tab 列表三处同步。清除 chip 全部回"今天"。热点系统已按日键控(`getHotspotDates`),此联动零新后端。
 2. **一个日历组件**:侧栏 Activity 面板 = 热力图模式(16 周密度格,点格过滤)⇄ 月历模式(密度圆点、今天描边、选中实心、月份翻页)。两模式驱动同一个日期状态。
 3. **composer**:placeholder 引导;inline `#tag` 输入时自动补全(取用户已有标签前缀匹配);粘贴图片直接上传;拖放任意文件;⌘Enter 保存。
-4. **笔记卡**:时间戳 + `···` 菜单(edit/pin/delete);Markdown 渲染(react-markdown + remark-gfm,DOMPurify 消毒);`#tag` 渲染为 accent chip 可点击过滤。
+4. **笔记卡**:时间戳 + `···` 菜单(edit/pin/delete);`#tag` 渲染为 accent chip 可点击过滤。
+4b. **富 Markdown(对齐 memos 渲染栈)**:react-markdown + remark-gfm(表格/删除线/autolink/任务清单)+ remark-breaks(已有)基础上,新增 **highlight.js 代码块高亮**、**remark-math + rehype-katex 数学公式**、**任务清单 checkbox 可交互**(点击切换 → PATCH 回写 content_md 对应行,memos 招牌体验)。渲染统一走 DOMPurify/rehype-sanitize 消毒。
 5. **附件渲染分型**:image/* → 缩略图网格(点开 lightbox);audio/* → 内嵌播放器 pill;video/* → poster 缩略图(点开播放);其余(pdf/office/任意)→ 类型徽标 chip(文件名+扩展名+大小,点击下载/预览)。
 6. **热点引用卡**(refcard):左 accent 竖线卡,含来源徽标、标题、热度、`Open detail →`(切到 Hotspots tab 并选中该条)。由"存灵感"动作生成,用户想法写卡上方正文。
 7. **Save as note 闭环**:Hotspots tab 底部主按钮/侧栏行内 `+` → 切回 Notes tab,composer 预填引用卡 + 热点标签(inline #tags),光标落正文首行。
@@ -86,7 +89,18 @@
 | original_name | TEXT NOT NULL | 展示名 |
 | created_at | TIMESTAMPTZ | |
 
-### 3.3 配置(走 DB,遵守 env→DB 铁律)
+### 3.3 `inspiration_api_tokens`(外部录入 PAT)
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| id | BIGINT PK | Snowflake |
+| user_id | UUID NOT NULL | 归属 |
+| name | VARCHAR NOT NULL | 用途备注("iOS Shortcut" 等) |
+| token_hash | VARCHAR NOT NULL | SHA-256,明文只在创建时返回一次(遵守 secret-at-rest 口径) |
+| last_used_at | TIMESTAMPTZ NULL | 审计 |
+| created_at / revoked_at | TIMESTAMPTZ | 撤销即失效 |
+
+### 3.4 配置(走 DB,遵守 env→DB 铁律)
 
 `system_settings` 增键 `inspiration.max_attachment_mb`(默认 500,admin 可调)。
 
@@ -105,6 +119,10 @@
 | `/attachments/upload` | POST | multipart;校验 mime 白名单宽松 + size ≤ 配置上限;写 storage(adapter)+ 插行;返回元数据 |
 | `/attachments/{id}` | GET | 302/流式返回(经 adapter 签名 URL);owner 校验 |
 | `/attachments/{id}` | DELETE | 删行 + best-effort 删对象(失败仅告警,不阻断) |
+| `/tokens` | GET/POST | PAT 管理:列表(不含明文)/ 创建(明文仅此一次返回) |
+| `/tokens/{id}` | DELETE | 撤销(置 revoked_at) |
+
+**外部录入(用户明确要求)**:`POST /notes` 与 `POST /attachments/upload` 同时接受两种认证——现有 Supabase JWT(页面用)与 `Authorization: Bearer <PAT>`(外部脚本/快捷指令/bot 用)。PAT 校验:SHA-256 比对 + revoked/last_used 更新;scope 固定为 inspiration 读写,不放大到其他模块。PAT 在 Settings → API Tokens 面板管理(生成时弹一次明文+复制按钮)。外部调用示例写进端点 docstring:`curl -X POST .../api/v1/inspiration/notes -H "Authorization: Bearer mhk_..." -d '{"content_md":"idea #tag"}'`。
 
 **StorageAdapter 边界**(§1 用户明确要求可扩展):`app/services/inspiration_storage.py` 定义 `put(path, stream, mime) / sign_get(path) / delete(path)` 协议,首个实现 `SupabaseStorageAdapter`(复用 chat-media 通道的客户端);`storage_backend` 列选 adapter。前端**永不**直连 Supabase Storage。
 
@@ -123,6 +141,7 @@ frontend/components/Inspiration/
   ActivityPanel.tsx       # 热力图 ⇄ 迷你月历(单组件双模式,localStorage 记忆)
   TagsPanel.tsx           # 双 tab 语义的标签聚合面板
   HotspotsSidePanel.tsx   # Notes tab 的 Top3 + 存灵感
+  NotesSidePanel.tsx      # Hotspots tab 的 mini composer + 最近笔记(对称面板)
   HotspotsWorkspace.tsx   # Hotspots tab:列表+详情双栏(内容迁自 HotspotCard/HotspotInfoPanel)
   AttachmentView.tsx      # image/audio/video/file 四型渲染
   attachmentUpload.ts     # 上传封装(进度/失败重试一次/上限前端预校验)
@@ -152,7 +171,7 @@ frontend/services/inspirationService.ts   # API 层
 
 1. **P1 数据+后端**:迁移、repo、service(含 StorageAdapter)、router、测试 —— flag 无关,纯新增
 2. **P2 前端 Notes 主体**:InspirationPage 骨架 + composer + timeline + 附件 + 日历面板(flag-dark)
-3. **P3 热点融合**:Hotspots tab、侧栏 Top3、存灵感闭环、热点 tags、全局 Parse
-4. **P4 打磨+GO-LIVE**:移动端、i18n 校对、真机视觉过、开 flag
+3. **P3 热点融合**:Hotspots tab、双侧栏对称面板(Hotspots Top3 / Notes mini)、存灵感闭环、热点 tags、全局 Parse
+4. **P4 富格式+外部 API+GO-LIVE**:代码高亮/KaTeX/交互 checkbox、PAT 管理面板与双认证端点、移动端、i18n 校对、真机视觉过、开 flag
 
 每个 P 一个 PR,合入即 ship(flag-dark),遵守 epic 流程(SDD + 机审前置 + 发布硬闸)。
