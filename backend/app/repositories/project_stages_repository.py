@@ -73,6 +73,27 @@ _GET_STAGE_BY_ID_SQL = (
     f"SELECT {_CATALOG_COLUMNS} FROM public.project_stages WHERE id = :sid"
 )
 
+# Batch lookups for the project LIST page (Phase B B1) — one query for N
+# projects, mirroring get_project_file_counts' no-N+1 contract.
+_STAGES_FOR_PROJECTS_SQL = """
+    SELECT p.id AS project_id, ps.slug, ps.name, ps.sort_order
+    FROM public.projects p
+    JOIN public.project_stages ps ON ps.id = p.current_stage_id
+    WHERE p.id = ANY(:pids)
+"""
+
+_LATEST_ACTIVITY_FOR_PROJECTS_SQL = """
+    SELECT DISTINCT ON (psh.project_id)
+           psh.project_id, psh.entered_at,
+           ps.name AS stage_name,
+           up.username AS actor
+    FROM public.project_stage_history psh
+    JOIN public.project_stages ps ON ps.id = psh.stage_id
+    LEFT JOIN public.user_profiles up ON up.id = psh.transitioned_by
+    WHERE psh.project_id = ANY(:pids)
+    ORDER BY psh.project_id, psh.entered_at DESC
+"""
+
 
 # ── Serialiser ───────────────────────────────────────────────────────────────
 
@@ -132,6 +153,70 @@ class ProjectStagesRepository:
 
         rows = await db_engine.fetch_all(_GET_HISTORY_SQL, {"pid": int(project_id)})
         return [_serialize(r) for r in rows]
+
+    async def stages_for_projects(
+        self, project_ids: list[Any]
+    ) -> dict[str, dict[str, Any]]:
+        """Current stage per project in ONE query (list-page batch, B1).
+
+        Returns ``{str(project_id): {slug, name, sort_order}}``; projects with
+        no ``current_stage_id`` are simply absent. Never raises — the list
+        page degrades to stage-less cards on failure.
+        """
+        if not project_ids:
+            return {}
+        from app.db import engine as db_engine
+
+        try:
+            rows = await db_engine.fetch_all(
+                _STAGES_FOR_PROJECTS_SQL,
+                {"pids": [int(p) for p in project_ids]},
+            )
+            return {
+                str(r["project_id"]): {
+                    "slug": r["slug"],
+                    "name": r["name"],
+                    "sort_order": r["sort_order"],
+                }
+                for r in rows
+            }
+        except Exception as e:  # noqa: BLE001 — enrichment must not sink the list
+            logger.error(f"[project_stages] batch stage lookup failed: {e}")
+            return {}
+
+    async def latest_activity_for_projects(
+        self, project_ids: list[Any]
+    ) -> dict[str, dict[str, Any]]:
+        """Most recent stage transition per project in ONE query (B1).
+
+        Returns ``{str(project_id): {stage_name, actor, entered_at}}``;
+        projects with no history are absent. Never raises.
+        """
+        if not project_ids:
+            return {}
+        from app.db import engine as db_engine
+
+        try:
+            rows = await db_engine.fetch_all(
+                _LATEST_ACTIVITY_FOR_PROJECTS_SQL,
+                {"pids": [int(p) for p in project_ids]},
+            )
+            out: dict[str, dict[str, Any]] = {}
+            for r in rows:
+                entered = r["entered_at"]
+                out[str(r["project_id"])] = {
+                    "stage_name": r["stage_name"],
+                    "actor": r["actor"] or "",
+                    "entered_at": (
+                        entered.isoformat()
+                        if hasattr(entered, "isoformat")
+                        else entered
+                    ),
+                }
+            return out
+        except Exception as e:  # noqa: BLE001 — enrichment must not sink the list
+            logger.error(f"[project_stages] batch activity lookup failed: {e}")
+            return {}
 
     async def set_current_stage(
         self, project_id: int, stage_id: int, user_id: str

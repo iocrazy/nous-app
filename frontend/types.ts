@@ -693,6 +693,30 @@ export interface Project {
   modules_enabled?: string[];
   created_at: string;
   updated_at: string;
+  // Card enrichment (Phase B B1) — batch-derived on the list endpoint;
+  // null/absent when the project has no stage/members/history rows.
+  current_stage?: ProjectCardStage | null;
+  members_preview?: ProjectMembersPreview | null;
+  latest_activity?: ProjectCardActivity | null;
+}
+
+export interface ProjectCardStage {
+  slug: string;
+  name: string;
+  /** 1-based position in the stage catalog (sort_order ranking). */
+  index: number;
+  total: number;
+}
+
+export interface ProjectMembersPreview {
+  count: number;
+  members: { user_id: string; username: string }[];
+}
+
+export interface ProjectCardActivity {
+  stage_name: string;
+  actor: string;
+  entered_at: string;
 }
 
 export interface ProjectMember {

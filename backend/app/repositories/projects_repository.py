@@ -525,6 +525,60 @@ class ProjectsRepository:
             logger.error(f"Failed to get file counts: {e}")
             return {}
 
+    async def get_project_members_preview(
+        self, project_ids: List[str], limit: int = 3
+    ) -> Dict[str, Dict[str, Any]]:
+        """Member preview for many projects in ONE pass (list page, B1).
+
+        Returns ``{str(project_id): {"count": int, "members": [{"user_id",
+        "username"}, ...]}}`` with at most ``limit`` members each (joined_at
+        order). Usernames come from ``user_profiles`` (same enrich pattern as
+        team_repository); a user with no profile row keeps ``username=""``.
+        Projects with no member rows are absent. Never raises — the list page
+        degrades to member-less cards.
+        """
+        if not project_ids:
+            return {}
+        try:
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(
+                        ProjectMembers.project_id,
+                        ProjectMembers.user_id,
+                    )
+                    .where(ProjectMembers.project_id.in_([int(p) for p in project_ids]))
+                    .order_by(ProjectMembers.project_id, ProjectMembers.joined_at)
+                )
+                rows = result.all()
+                if not rows:
+                    return {}
+
+                grouped: Dict[str, Dict[str, Any]] = {}
+                user_ids: set = set()
+                for pid, uid in rows:
+                    entry = grouped.setdefault(str(pid), {"count": 0, "members": []})
+                    entry["count"] += 1
+                    if len(entry["members"]) < limit:
+                        entry["members"].append({"user_id": str(uid), "username": ""})
+                        user_ids.add(uid)
+
+                if user_ids:
+                    from app.models.users import UserProfiles
+
+                    names = await session.execute(
+                        select(UserProfiles.id, UserProfiles.username).where(
+                            UserProfiles.id.in_(list(user_ids))
+                        )
+                    )
+                    by_id = {str(i): (u or "") for i, u in names.all()}
+                    for entry in grouped.values():
+                        for m in entry["members"]:
+                            m["username"] = by_id.get(m["user_id"], "")
+                return grouped
+        except Exception as e:  # noqa: BLE001 — enrichment must not sink the list
+            logger.error(f"Failed to get member previews: {e}")
+            return {}
+
     # ------------------------------------------------------------------ #
     # Files CRUD
     # ------------------------------------------------------------------ #
