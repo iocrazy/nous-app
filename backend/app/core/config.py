@@ -135,6 +135,17 @@ class Settings(BaseSettings):
         "is an independent switch for the image-generation cost surface. Flip "
         "true once the generate chain is validated on the target stack.",
     )
+    FEATURE_SHOT_VIDEO: bool = Field(
+        default=False,
+        description="Enable single-shot video generation (POST "
+        "/shots/{id}/generate-video): dispatches a DBOS workflow that runs the "
+        "DB-catalog video provider (jimeng-cli / seedance) and writes the "
+        "produced clip's durable URL onto the shot's video_url column. Off "
+        "(default) = the endpoint 404s (existence hidden) — an independent "
+        "switch for the video-generation cost surface, separate from "
+        "FEATURE_SHOT_GENERATE. Flip true once the video chain is validated on "
+        "the target stack (needs the dreamina CLI logged in on the NAS).",
+    )
     STORAGE_SIGNED_URL_PUBLIC_BASE: str = Field(
         default="",
         description="OPTIONAL public base URL (scheme+host[+port]) for storage "

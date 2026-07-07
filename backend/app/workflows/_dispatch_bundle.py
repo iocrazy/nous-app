@@ -50,6 +50,9 @@ from app.workflows.script_shot_breakdown import (  # noqa: F401
 from app.workflows.script_shot_generate import (  # noqa: F401
     script_shot_generate_workflow,
 )
+from app.workflows.script_shot_video import (  # noqa: F401
+    script_shot_video_workflow,
+)
 from app.workflows.sideload import sideload_workflow  # noqa: F401
 from app.workflows.soda_download import (  # noqa: F401
     soda_download_queue,

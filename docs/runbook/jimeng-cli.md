@@ -109,8 +109,8 @@ cost.
 dreamina login | relogin | logout | user_credit | version
 dreamina text2image  --prompt=... --ratio=W:H --resolution_type=... --poll=N [--model_version=...]
 dreamina image2image --images=<path> --prompt=... --poll=N
-dreamina text2video  --prompt=... --model_version=seedance2.0fast --poll=N
-dreamina image2video --image=<path> --prompt=... --model_version=... --poll=N
+dreamina text2video  --prompt=... --ratio=W:H --model_version=seedance2.0fast --poll=N [--duration=N --video_resolution=720p]
+dreamina image2video --image=<path> --prompt=... --poll=N [--model_version=... --duration=N --video_resolution=720p]
 dreamina query_result --submit_id=<id> --download_dir=<dir>
 dreamina list_task
 ```
@@ -118,11 +118,15 @@ dreamina list_task
 stdout mixes human log lines with JSON — the provider scans for the JSON object
 carrying `submit_id` / `gen_status` / `result_json` / `images` / `videos`.
 
-> ⚠️ `image2video --image=` (singular) is **not yet live-verified** — the
-> provider code and its tests currently lock the singular form. Before the
-> PR-J2 video E2E, run `dreamina image2video -h` on the real CLI and reconcile
-> the flag name (`--image` vs `--images`) across the provider + tests + this
-> runbook.
+Video flags (verified against `dreamina image2video -h` / `text2video -h`,
+2026-07-06):
+- `image2video` takes a **single `--image`** (first-frame image); ratio is
+  inferred from the image and is NOT set on this command. Example:
+  `dreamina image2video --image=./first.png --prompt="camera push in"`.
+- `text2video` takes `--ratio` (one of `1:1 3:4 16:9 4:3 9:16 21:9`).
+- `model_version` for both: `seedance2.0 / seedance2.0fast / seedance2.0_vip /
+  seedance2.0fast_vip / seedance2.0mini` (text2video default `seedance2.0fast` —
+  the catalog seed row `jimeng-cli-seedance` uses it).
 
 ## Troubleshooting
 

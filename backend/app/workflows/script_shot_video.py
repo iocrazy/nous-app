@@ -1,0 +1,245 @@
+"""script_shot_video DBOS workflow — single-shot video generation (Phase B P3,
+PR-J2 Task 5, flag ``FEATURE_SHOT_VIDEO``).
+
+The video sibling of ``script_shot_generate``: resolve the DB-catalog video
+provider (jimeng-cli / seedance today), run ``generate_video``, persist the
+produced local clip through the Tier-1 ``generated_media`` store, and write a
+durable same-origin URL onto the shot's ``video_url`` column.
+
+Two decisions worth reading (both recorded here so a future editor doesn't
+"fix" them):
+
+1. **image2video vs text2video.** ``shot.image_url`` is a same-origin
+   ``/api/v1/generated-media/{id}/cover`` URL, NOT a local file path — but the
+   CLI's ``image2video`` needs a real local file. So ``_resolve_local_image_for_i2v``
+   bridges the cover URL back to the referenced ``generated_media`` row and, only
+   when that row is filesystem-backed and present, hands its real path to
+   ``image2video``. Object-store images (``sb://``), a raw provider/ephemeral
+   image url, or any miss → ``None`` → the step falls back to ``text2video``.
+
+2. **The shot's ``status`` column is the IMAGE lane's state machine
+   (empty→generating→done/failed) and this workflow MUST NOT clobber it.** A
+   shot can carry a done image AND generate a video; a video failure must never
+   make the image look failed. So the video lifecycle (queued/in_progress/
+   failed) lives entirely in ``task_tracking`` (task_type='shot_video', which the
+   Task Center already surfaces — route C), and the only durable shot-row write
+   is ``video_url`` on success, written via ``update_status`` with the shot's
+   CURRENT status passed through unchanged (``update_status`` requires a status
+   arg; re-writing the existing value is a no-op for that column). No new column,
+   no migration. On failure the workflow simply ``raise``s — DBOS records FAILED,
+   task_tracking mirrors it; the shot row is left untouched (no phantom 'failed'
+   image state).
+
+Persistence (route C): unlike the image path, a jimeng video product is ALWAYS
+a local file (no ephemeral CDN url to fall back to), so a persist failure has no
+durable artifact to keep — ``persist_video_generation`` raises rather than
+degrading. The jimeng ``jimeng_`` scratch dir is reaped after ingest either way
+(H1 discipline, shared with ``script_shot_generate``).
+"""
+
+from __future__ import annotations
+
+import os
+import re
+from typing import Any, Optional
+
+from dbos import DBOS
+from loguru import logger
+
+from app.core.config import settings
+from app.workflows.script_shot_generate import (
+    _compose_prompt,
+    _reap_scratch_dir,
+    _resolve_scope_id,
+)
+
+# Default video aspect — shots carry no aspect field; 16:9 is the cinematic
+# default (the provider maps it to the CLI --ratio).
+_DEFAULT_ASPECT = "16:9"
+_VIDEO_MIME = "video/mp4"
+
+# Bridges a durable same-origin generated-media URL back to its numeric id so an
+# already-generated image can seed image2video. Matches /cover (image serving),
+# /stream (video serving), and /file (auth-gated) suffixes.
+_GENERATED_MEDIA_URL_RE = re.compile(r"/generated-media/(\d+)/(?:cover|stream|file)$")
+
+
+async def _resolve_local_image_for_i2v(shot: dict[str, Any]) -> Optional[str]:
+    """Resolve the shot's image to a local file path for image2video, or None.
+
+    ``shot.image_url`` is a same-origin ``/cover`` URL (see decision 1). Parse it
+    back to the ``generated_media`` row and return the real filesystem path only
+    when the row is an image AND filesystem-backed AND present. Object-store
+    images (no local path), a raw provider url, or any miss → None (the caller
+    falls back to text2video)."""
+    image_url = str((shot or {}).get("image_url") or "")
+    match = _GENERATED_MEDIA_URL_RE.search(image_url)
+    if not match:
+        return None
+    gen_id = int(match.group(1))
+
+    from app.repositories.generated_media_repository import GeneratedMediaRepository
+
+    row = await GeneratedMediaRepository().get_by_id(gen_id)
+    if not row or row.get("media_kind") != "image":
+        return None
+
+    from app.services.library.media_storage import resolve_media_source
+
+    loc = resolve_media_source(row["file_path"])
+    if loc.is_object_store:
+        return None
+    # Containment guard (same posture as generated_media_router._serve_media_row):
+    # a corrupt/hostile file_path must never resolve to a path outside
+    # DOWNLOAD_PATH, even though the CLI would just be handed it as --image.
+    base = os.path.realpath(settings.DOWNLOAD_PATH)
+    real = os.path.realpath(os.path.join(settings.DOWNLOAD_PATH, loc.rel_path or ""))
+    if not (real == base or real.startswith(base + os.sep)):
+        return None
+    return real if os.path.isfile(real) else None
+
+
+@DBOS.step(retries_allowed=True, max_attempts=3)
+async def generate_shot_video_step(
+    shot_id: str,
+    model: Optional[str],
+    provider: Optional[str],
+) -> str:
+    """Read the shot + scene, compose the prompt, and run the video provider.
+
+    Returns the produced clip's LOCAL file path (jimeng writes to disk, no URL).
+    Uses image2video when the shot already has a filesystem-backed image, else
+    text2video. Raises if the shot is missing or the provider yields no file."""
+    from app.repositories.script_scene_repository import get_script_scene_repository
+    from app.repositories.script_shot_repository import get_script_shot_repository
+    from app.services.media.parsers.video_providers.db_registry import (
+        resolve_video_provider,
+    )
+
+    shot = await get_script_shot_repository().get_by_id(shot_id)
+    if not shot:
+        raise ValueError(f"Shot not found: {shot_id}")
+    scene = await get_script_scene_repository().get_by_id(str(shot.get("scene_id")))
+    prompt = _compose_prompt(shot, scene)
+
+    provider_obj, actual_model = await resolve_video_provider(provider or model or None)
+    image_path = await _resolve_local_image_for_i2v(shot)
+
+    result = await provider_obj.generate_video(
+        prompt=prompt,
+        aspect=_DEFAULT_ASPECT,
+        model_version=actual_model or model or None,
+        image_path=image_path,
+    )
+    local_path = getattr(result, "local_path", None)
+    if not local_path:
+        raise RuntimeError(f"Video provider returned no file for shot {shot_id}")
+    logger.info(
+        "[script_shot_video][step] shot {} → {} ({})",
+        shot_id,
+        local_path,
+        "image2video" if image_path else "text2video",
+    )
+    return local_path
+
+
+@DBOS.step()
+async def persist_video_generation(
+    shot_id: str,
+    local_path: str,
+    model: Optional[str],
+    provider: Optional[str],
+    user_id: Optional[str],
+) -> str:
+    """Persist the local clip through the generated-media store → durable URL.
+
+    Returns the same-origin ``/api/v1/generated-media/{id}/stream`` URL (a
+    token-free serving endpoint, so a bare ``<video src>`` can load it). Unlike
+    the image path there is NO ephemeral-url fallback (a jimeng video is always a
+    local file), so any failure — missing user_id, unresolvable scope, ingest
+    error — ``raise``s (route C: the workflow fails, task_tracking mirrors it).
+    The ``jimeng_`` scratch dir is reaped after ingest regardless (H1)."""
+    from app.repositories.script_scene_repository import get_script_scene_repository
+    from app.repositories.script_shot_repository import get_script_shot_repository
+    from app.services.library.generated_media_service import (
+        GenerationOrigin,
+        register_generated_media,
+    )
+
+    try:
+        if not user_id:
+            raise ValueError(f"shot {shot_id} video persist has no user_id")
+
+        shot = await get_script_shot_repository().get_by_id(shot_id)
+        if not shot:
+            raise ValueError(f"Shot not found: {shot_id}")
+        scene = await get_script_scene_repository().get_by_id(str(shot.get("scene_id")))
+        prompt = _compose_prompt(shot, scene)
+        scope_id = await _resolve_scope_id(scene, str(user_id))
+
+        row = await register_generated_media(
+            user_id=str(user_id),
+            scope_id=scope_id,
+            source_path=local_path,
+            mime=_VIDEO_MIME,
+            origin=GenerationOrigin(
+                kind="shot_video",
+                node_id=str(shot_id),
+                prompt=prompt,
+                model=model,
+                provider=provider,
+                derivation_kind="shot_video",
+            ),
+        )
+        gen_id = row.get("id")
+        if gen_id is None:
+            raise RuntimeError("register_generated_media returned no id")
+        durable = f"/api/v1/generated-media/{gen_id}/stream"
+        logger.info(
+            "[script_shot_video][persist] shot {} → generated_media {} ({})",
+            shot_id,
+            gen_id,
+            durable,
+        )
+        return durable
+    finally:
+        _reap_scratch_dir(local_path)
+
+
+@DBOS.step()
+async def mark_shot_video_done(shot_id: str, video_url: str) -> None:
+    """Write ``video_url`` onto the shot WITHOUT touching the image-lane status.
+
+    Uses the repo's single-column ``update_video_url`` (a bare UPDATE of
+    ``video_url``) rather than a read-modify-write of ``status`` — the latter
+    would race a concurrent image generation flipping ``status`` to 'done' and
+    clobber it (see decision 2)."""
+    from app.repositories.script_shot_repository import get_script_shot_repository
+
+    await get_script_shot_repository().update_video_url(shot_id, video_url)
+
+
+@DBOS.workflow()
+async def script_shot_video_workflow(
+    shot_id: str,
+    *,
+    model: Optional[str] = None,
+    provider: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """DBOS orchestrator: shot → generated video url on the shot row.
+
+    - input: shot_id (bigint str) + optional model/provider catalog hints + user_id
+    - output: {status, shot_id, video_url}
+    - side-effects: sets shot.video_url (NOT shot.status — see module docstring)
+
+    On any failure the error propagates (route C: DBOS records FAILED and
+    task_tracking mirrors it); the shot row is left untouched so a video failure
+    never corrupts the image lane. ``user_id`` is optional (frozen DBOS input
+    compat) but a real value is required to persist."""
+    local_path = await generate_shot_video_step(shot_id, model, provider)
+    video_url = await persist_video_generation(
+        shot_id, local_path, model, provider, user_id
+    )
+    await mark_shot_video_done(shot_id, video_url)
+    return {"status": "success", "shot_id": shot_id, "video_url": video_url}

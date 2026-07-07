@@ -52,7 +52,7 @@ vi.mock('../../components/Toast', () => ({
   useToast: () => ({ addToast: vi.fn() }),
 }));
 
-import { StoryboardView } from '../storyboard/StoryboardView';
+import { StoryboardView, videoRegenSettled } from '../storyboard/StoryboardView';
 import { EditorShell } from '../components/EditorShell';
 
 const scene = (over: Partial<SceneDoc>): SceneDoc => ({
@@ -217,6 +217,27 @@ describe('StoryboardView', () => {
       'title',
       'editor.shotGenerateComingSoon',
     );
+  });
+});
+
+describe('videoRegenSettled — M1 re-generation poll guard', () => {
+  it('does NOT settle while the shot still shows its prior video url', () => {
+    // Re-generating a shot that already has a video: the poll must not be
+    // satisfied by the stale url still present on the first tick.
+    expect(videoRegenSettled('https://x/old.mp4', 'https://x/old.mp4')).toBe(false);
+  });
+
+  it('settles once a NEW url arrives', () => {
+    expect(videoRegenSettled('https://x/new.mp4', 'https://x/old.mp4')).toBe(true);
+  });
+
+  it('settles on a first-ever video (no prior url)', () => {
+    expect(videoRegenSettled('https://x/first.mp4', null)).toBe(true);
+  });
+
+  it('does not settle while there is still no video', () => {
+    expect(videoRegenSettled(null, null)).toBe(false);
+    expect(videoRegenSettled(null, 'https://x/old.mp4')).toBe(false);
   });
 });
 

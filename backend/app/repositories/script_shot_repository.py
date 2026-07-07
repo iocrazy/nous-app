@@ -276,6 +276,31 @@ class ScriptShotRepository:
             logger.error(f"Failed to update shot status {shot_id}: {e}")
             raise
 
+    async def update_video_url(
+        self, shot_id: str, video_url: str
+    ) -> Optional[Dict[str, Any]]:
+        """Write ONLY ``video_url`` — never ``status``.
+
+        The video lane is decoupled from the image ``status`` machine: a video
+        run must not read-modify-write ``status`` (that races a concurrent image
+        generation flipping it to 'done' and would clobber it). This single-
+        column UPDATE touches ``video_url`` and nothing else."""
+        try:
+            async with write_scope() as session:
+                result = await session.execute(
+                    update(ScriptShots)
+                    .where(ScriptShots.id == _bigint(shot_id))
+                    .values(video_url=video_url)
+                    .returning(ScriptShots)
+                )
+                row = result.scalars().first()
+                out = _row(row) if row else None
+            logger.info(f"Updated shot {shot_id} video_url")
+            return out
+        except Exception as e:
+            logger.error(f"Failed to update shot video_url {shot_id}: {e}")
+            raise
+
     async def delete(self, shot_id: str) -> bool:
         """Delete a shot."""
         try:

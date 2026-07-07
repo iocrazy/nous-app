@@ -12,6 +12,12 @@
  * drop-indicator pattern as OutlineView); the owning column supplies the drag
  * wiring through `reorder`. `status` and the produced media URLs are read-only
  * here — they flow through the generate workflow, never updateShot.
+ *
+ * Video (flag-dark, VITE_FEATURE_SHOT_VIDEO — the parent passes `videoEnabled`):
+ * when on, a two-click-confirm Generate Video button (video generation spends
+ * credit) plus a `<video>` preview once `video_url` is set. The whole surface is
+ * behind the flag; video "generating" is a parent-held `videoBusy` flag, not
+ * shot.status (the image lane owns that column).
  */
 import { memo, useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -43,6 +49,15 @@ export interface ShotCardProps {
   onGenerate?: (shotId: string) => void;
   /** Session-level degrade: the generate feature flag is off (a 404 was seen). */
   generateDisabled?: boolean;
+  /** VITE_FEATURE_SHOT_VIDEO — the parent gates the whole video surface. */
+  videoEnabled?: boolean;
+  /** Generate-video dispatch (only wired when videoEnabled). */
+  onGenerateVideo?: (shotId: string) => void;
+  /** Parent-driven optimistic "video generating" (video state is NOT in
+   * shot.status — the image lane owns that column). */
+  videoBusy?: boolean;
+  /** Session-level degrade: the video feature flag is off (a 404 was seen). */
+  videoDisabled?: boolean;
   reorder: ShotReorderApi;
 }
 
@@ -61,6 +76,10 @@ function ShotCardImpl({
   onDelete,
   onGenerate,
   generateDisabled = false,
+  videoEnabled = false,
+  onGenerateVideo,
+  videoBusy = false,
+  videoDisabled = false,
   reorder,
 }: ShotCardProps) {
   const { t } = useTranslation();
@@ -143,8 +162,35 @@ function ShotCardImpl({
     }, CONFIRM_WINDOW_MS);
   }, [confirmingDelete, onDelete, shot.id]);
 
+  // Inline-confirm Generate Video: first click arms, second (within the window)
+  // dispatches — same two-click safety as delete / Auto Storyboard, because a
+  // video generation spends subscription credit.
+  const [confirmingVideo, setConfirmingVideo] = useState(false);
+  const videoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (videoTimerRef.current) clearTimeout(videoTimerRef.current);
+    },
+    [],
+  );
+  const handleVideoClick = useCallback(() => {
+    if (confirmingVideo) {
+      if (videoTimerRef.current) clearTimeout(videoTimerRef.current);
+      videoTimerRef.current = null;
+      setConfirmingVideo(false);
+      onGenerateVideo?.(shot.id);
+      return;
+    }
+    setConfirmingVideo(true);
+    videoTimerRef.current = setTimeout(() => {
+      videoTimerRef.current = null;
+      setConfirmingVideo(false);
+    }, CONFIRM_WINDOW_MS);
+  }, [confirmingVideo, onGenerateVideo, shot.id]);
+
   const number = shot.shot_number ?? index;
   const generateReady = typeof onGenerate === 'function';
+  const videoReady = typeof onGenerateVideo === 'function';
 
   return (
     <div className="mh-shot-card-wrap">
@@ -257,6 +303,17 @@ function ShotCardImpl({
           onChange={handleDescChange}
         />
 
+        {videoEnabled && shot.video_url && (
+          <video
+            className="mh-shot-video"
+            data-testid="shot-video"
+            src={shot.video_url}
+            controls
+            preload="metadata"
+            aria-label={t('editor.shotVideoLabel', { number })}
+          />
+        )}
+
         <footer className="mh-shot-foot">
           <button
             type="button"
@@ -267,6 +324,22 @@ function ShotCardImpl({
           >
             {shot.status === 'failed' ? t('editor.shotRetry') : t('editor.shotGenerate')}
           </button>
+          {videoEnabled && (
+            <button
+              type="button"
+              className={`mh-shot-generate-video${confirmingVideo ? ' confirming' : ''}`}
+              data-testid="shot-generate-video"
+              disabled={!videoReady || videoDisabled || videoBusy}
+              title={videoDisabled ? t('editor.shotVideoComingSoon') : undefined}
+              onClick={videoReady && !videoDisabled && !videoBusy ? handleVideoClick : undefined}
+            >
+              {videoBusy
+                ? t('editor.shotVideoGenerating')
+                : confirmingVideo
+                  ? t('editor.nodesConfirm')
+                  : t('editor.shotGenerateVideo')}
+            </button>
+          )}
         </footer>
       </article>
       {reorder.dropEdge === 'after' && (

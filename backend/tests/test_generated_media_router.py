@@ -332,6 +332,85 @@ async def test_cover_404_for_non_image_media_kind(monkeypatch, tmp_path, client)
 
 
 # ---------------------------------------------------------------------------
+# /stream endpoint tests (no-auth public VIDEO serving — <video src>)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_stream_404_when_row_missing(monkeypatch, client):
+    """GET /{id}/stream returns 404 when repo.get_by_id returns None."""
+
+    async def _fake_get_by_id(self, gen_id: int):
+        return None
+
+    monkeypatch.setattr(r.GeneratedMediaRepository, "get_by_id", _fake_get_by_id)
+
+    resp = await client.get("/api/v1/generated-media/99/stream")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_stream_404_for_non_video_media_kind(monkeypatch, tmp_path, client):
+    """GET /{id}/stream returns 404 when media_kind != 'video' (e.g. 'image').
+
+    Images are served by /cover; /stream is video-only.
+    """
+    file_name = "pic.jpg"
+    (tmp_path / file_name).write_bytes(b"fake jpeg bytes")
+
+    async def _fake_get_by_id(self, gen_id: int):
+        return {
+            "id": gen_id,
+            "file_path": file_name,
+            "mime": "image/jpeg",
+            "media_kind": "image",
+        }
+
+    fake_settings = types.SimpleNamespace(DOWNLOAD_PATH=str(tmp_path))
+    monkeypatch.setattr(r.GeneratedMediaRepository, "get_by_id", _fake_get_by_id)
+    monkeypatch.setattr(r, "settings", fake_settings)
+
+    resp = await client.get("/api/v1/generated-media/77/stream")
+    assert resp.status_code == 404
+    assert resp.json()["error"] == "no video"
+
+
+@pytest.mark.asyncio
+async def test_stream_happy_path_no_auth(monkeypatch, tmp_path):
+    """GET /{id}/stream returns 200 + video bytes with NO auth header required.
+
+    Mirrors /cover's public posture — a bare <video src> can't carry a Bearer
+    header. This test installs no auth override and sends no Authorization.
+    """
+    file_name = "clip.mp4"
+    file_content = b"\x00\x00\x00 ftypisom fake mp4 bytes"
+    (tmp_path / file_name).write_bytes(file_content)
+
+    async def _fake_get_by_id(self, gen_id: int):
+        return {
+            "id": gen_id,
+            "file_path": file_name,
+            "mime": "video/mp4",
+            "media_kind": "video",
+        }
+
+    fake_settings = types.SimpleNamespace(DOWNLOAD_PATH=str(tmp_path))
+
+    app.dependency_overrides.pop(get_auth, None)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        monkeypatch.setattr(r.GeneratedMediaRepository, "get_by_id", _fake_get_by_id)
+        monkeypatch.setattr(r, "settings", fake_settings)
+
+        resp = await ac.get("/api/v1/generated-media/30/stream")
+
+    assert resp.status_code == 200, resp.text
+    assert resp.content == file_content
+    assert "video/mp4" in resp.headers.get("content-type", "")
+    assert "public" in resp.headers.get("cache-control", "")
+
+
+# ---------------------------------------------------------------------------
 # M7 — realpath traversal guard
 # ---------------------------------------------------------------------------
 
