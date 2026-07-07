@@ -142,7 +142,7 @@ export interface SummaryData {
 // Keep backward compatibility alias
 export type DouyinBase = ParsedMedia;
 
-export type ViewState = 'parser' | 'dashboard' | 'settings' | 'cleanup' | 'points' | 'mediatrack' | 'resources' | 'members' | 'billing' | 'todolist' | 'shared' | 'agents' | 'skills' | 'ailibrary' | 'chat';
+export type ViewState = 'parser' | 'dashboard' | 'settings' | 'cleanup' | 'points' | 'mediatrack' | 'resources' | 'members' | 'billing' | 'todolist' | 'shared' | 'agents' | 'skills' | 'ailibrary' | 'chat' | 'distribution';
 
 export interface ApiKey {
   id: number;
@@ -1697,5 +1697,18 @@ export interface ChatMessage {
   parent_id?: string | null;
   edited_at: string | null;
   deleted_at: string | null;
+  created_at: string;
+}
+
+export interface SocialAccount {
+  id: string; // Snowflake BIGINT, serialized as string by backend (JS 2^53 precision)
+  scope_type: 'user' | 'team';
+  scope_id: string;
+  platform: 'douyin' | 'kuaishou' | 'xiaohongshu';
+  platform_user_id: string;
+  username: string;
+  avatar_url: string | null;
+  token_expires_at: string | null;
+  status: 'active' | 'expired';
   created_at: string;
 }

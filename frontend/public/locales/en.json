@@ -69,7 +69,8 @@
     "workforce": "Workforce",
     "sessions": "Sessions",
     "dashboard": "Dashboard",
-    "liveRuns": "{{count}} running"
+    "liveRuns": "{{count}} running",
+    "distribution": "Distribution"
   },
   "user": {
     "profile": "Profile",
@@ -151,6 +152,7 @@
     "create": "Create",
     "delete": "Delete",
     "deleting": "Deleting...",
+    "remove": "Remove",
     "previous": "Previous",
     "next": "Next",
     "save": "Save",
@@ -170,6 +172,31 @@
       "minutesAgo": "{{count}}m ago",
       "hoursAgo": "{{count}}h ago",
       "daysAgo": "{{count}}d ago"
+    }
+  },
+  "distribution": {
+    "accountsTitle": "Platform Accounts",
+    "accountsSubtitle": "Connect social accounts to publish from MediaHub",
+    "connectAccount": "Connect Account",
+    "connectAnother": "Connect another account",
+    "loadFailed": "Failed to load accounts",
+    "connectFailed": "Could not start Douyin authorization",
+    "refreshed": "Authorization refreshed",
+    "refreshFailed": "Refresh failed — reauthorize",
+    "deleteFailed": "Failed to remove account",
+    "active": "Active",
+    "expired": "Authorization expired",
+    "reauthorize": "Reauthorize",
+    "teamScope": "Team",
+    "personalScope": "Personal",
+    "nav": {
+      "publish": "Publish",
+      "accounts": "Accounts",
+      "allAccounts": "All accounts",
+      "insights": "Insights",
+      "analytics": "Analytics",
+      "settings": "Settings",
+      "soon": "Soon"
     }
   },
   "parser": {
