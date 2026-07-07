@@ -135,7 +135,9 @@ describe('EditorShell', () => {
     // the scene list to click the scene row specifically.
     const sceneRail = screen.getByTestId('scene-rail');
     fireEvent.click(within(sceneRail).getByText('Rooftop Access'));
-    expect(scrollSpy).toHaveBeenCalled();
+    // Retry window: under full parallel CI load the scroll can land a tick after
+    // the click's state flush, so poll rather than assert synchronously (F5).
+    await waitFor(() => expect(scrollSpy).toHaveBeenCalled());
   });
 
   it('orders the rail: modules nav, then Characters, then the Scenes list', async () => {
