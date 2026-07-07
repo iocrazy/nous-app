@@ -30,17 +30,12 @@ vi.mock('../services/aiService', () => ({
 vi.mock('../services/aiLibraryService', () => ({
   aiLibraryService: { listAgents: vi.fn().mockResolvedValue([]) },
 }));
-vi.mock('./StoryboardApiSettings', () => ({ StoryboardApiSettings: () => null }));
 vi.mock('./MCPServersPanel', () => ({ MCPServersPanel: () => null }));
 vi.mock('./ApprovalsPanel', () => ({ ApprovalsPanel: () => null }));
 vi.mock('./MemoryPanel', () => ({ MemoryPanel: () => null }));
 vi.mock('./AIHealthBoard', () => ({ AIHealthBoard: () => null }));
 vi.mock('../features/canvas-core/smart/NousCenterVerifyPanel', () => ({
   NousCenterVerifyPanel: () => null,
-}));
-vi.mock('../stores/settingsStore', () => ({
-  useSettingsStore: (selector: (s: { enabledSbProviders: string[] }) => unknown) =>
-    selector({ enabledSbProviders: [] }),
 }));
 
 const QWEN_KEY_PLACEHOLDER = 'Enter your Qwen (Bailian) API key';
