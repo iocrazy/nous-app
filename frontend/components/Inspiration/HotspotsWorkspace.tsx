@@ -21,9 +21,9 @@ export const HotspotsWorkspace: React.FC<Props> = ({ day, onSaveAsNote, onParse 
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const ranked = useMemo(() => topHotspots(hotspots.filter((h) => !h.is_hidden), 50), [hotspots]);
-  // Do not auto-select the top row: the detail pane would then repeat its title,
-  // making it ambiguous with the list row's own title text.
-  const selected = ranked.find((h) => h.id === selectedId) ?? null;
+  // Opening the Hotspots tab should auto-select the top-ranked hotspot so the
+  // detail pane shows content immediately (mockup v7 UX).
+  const selected = ranked.find((h) => h.id === selectedId) ?? ranked[0] ?? null;
 
   const notInterested = async (h: Hotspot) => {
     try {

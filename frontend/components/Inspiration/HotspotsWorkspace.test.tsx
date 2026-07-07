@@ -25,14 +25,14 @@ describe('HotspotsWorkspace', () => {
 
   it('renders the ranked list for the day', async () => {
     render(<HotspotsWorkspace day="2026-07-07" onSaveAsNote={vi.fn()} onParse={vi.fn()} />);
-    await waitFor(() => expect(screen.getByText('Topic 1')).toBeTruthy());
-    expect(screen.getByText('Topic 3')).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole('button', { name: /Topic 1/ })).toBeTruthy());
+    expect(screen.getByRole('button', { name: /Topic 3/ })).toBeTruthy();
   });
 
   it('clicking a row selects it into the detail pane', async () => {
     render(<HotspotsWorkspace day={null} onSaveAsNote={vi.fn()} onParse={vi.fn()} />);
-    await waitFor(() => expect(screen.getByText('Topic 2')).toBeTruthy());
-    fireEvent.click(screen.getByText('Topic 2'));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Topic 2/ })).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /Topic 2/ }));
     await waitFor(() => expect(getHotspot).toHaveBeenCalledWith('2'));
   });
 
