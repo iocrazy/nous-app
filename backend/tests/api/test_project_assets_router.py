@@ -138,13 +138,16 @@ async def test_project_assets_tree_groups_by_project(app, monkeypatch):
                 "canvas_name": "A",
                 "kind": "smart",
                 "asset_count": 3,
+                "node_count": 4,
             },
             {
+                # No assets but has nodes — a real canvas, kept.
                 "project_id": "9000",
                 "canvas_id": "5002",
                 "canvas_name": "B",
                 "kind": "classic",
                 "asset_count": 0,
+                "node_count": 2,
             },
         ]
 
@@ -162,3 +165,50 @@ async def test_project_assets_tree_groups_by_project(app, monkeypatch):
     assert {c["canvas_id"] for c in proj_one["canvases"]} == {"5001", "5002"}
     proj_two = next(p for p in data if p["project_id"] == "9001")
     assert proj_two["canvases"] == []
+
+
+@pytest.mark.asyncio
+async def test_project_assets_tree_hides_empty_orphan_canvases(app, monkeypatch):
+    async def fake_projects(self, user_id, team_id=None):
+        return [{"id": "9000", "name": "Proj One", "team_id": None}]
+
+    async def fake_tree(self, project_ids):
+        return [
+            # Has assets — kept.
+            {
+                "project_id": "9000",
+                "canvas_id": "5001",
+                "canvas_name": "A",
+                "kind": "smart",
+                "asset_count": 2,
+                "node_count": 0,
+            },
+            # Has nodes but no assets — kept.
+            {
+                "project_id": "9000",
+                "canvas_id": "5002",
+                "canvas_name": "B",
+                "kind": "classic",
+                "asset_count": 0,
+                "node_count": 3,
+            },
+            # Zero assets AND zero nodes — an orphaned blank canvas, dropped.
+            {
+                "project_id": "9000",
+                "canvas_id": "5003",
+                "canvas_name": "C",
+                "kind": "classic",
+                "asset_count": 0,
+                "node_count": 0,
+            },
+        ]
+
+    monkeypatch.setattr(par.ProjectsRepository, "get_user_projects", fake_projects)
+    monkeypatch.setattr(par.CanvasRefsRepository, "tree_for_projects", fake_tree)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        resp = await c.get("/api/v1/resources/project-assets/tree")
+    assert resp.status_code == 200
+    proj_one = resp.json()["data"][0]
+    assert {c["canvas_id"] for c in proj_one["canvases"]} == {"5001", "5002"}
