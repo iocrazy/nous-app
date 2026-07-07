@@ -577,10 +577,15 @@ export function SceneBlock({
 
   // Register this scene's applyRemoteOps with the shell's op-stream router so
   // realtime rows for this scene reach it; deregister on unmount / scene swap (C2).
+  // scene.id is typed string but the scenes API returns it as a JSON number
+  // (#1006), and the router's lookup key is String(record.scene_id) from the
+  // realtime row — so we String() the registration key to match (mixed-type Map
+  // keys silently miss).
   useEffect(() => {
     if (!onRegisterRemoteApply) return;
-    onRegisterRemoteApply(scene.id, sync.applyRemoteOps);
-    return () => onRegisterRemoteApply(scene.id, null);
+    const key = String(scene.id);
+    onRegisterRemoteApply(key, sync.applyRemoteOps);
+    return () => onRegisterRemoteApply(key, null);
   }, [scene.id, sync.applyRemoteOps, onRegisterRemoteApply]);
 
   // A remote op landed for this scene while it was windowed out — the snapshot
@@ -588,7 +593,7 @@ export function SceneBlock({
   useEffect(() => {
     if (!remoteStale) return;
     sync.reconcile();
-    onRemoteStaleHandled?.(scene.id);
+    onRemoteStaleHandled?.(String(scene.id)); // string key — matches droppedScenes
   }, [remoteStale, scene.id, sync.reconcile, onRemoteStaleHandled]);
 
   // Lift optimistic elements to the shell for live Statistics + rail entities

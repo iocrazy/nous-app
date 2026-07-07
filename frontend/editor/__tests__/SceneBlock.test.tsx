@@ -254,4 +254,36 @@ describe('SceneBlock typographic head row (Task 4.5)', () => {
       expect(sync.reconcile).not.toHaveBeenCalled();
     });
   });
+
+  // ── #1006: scene ids are JSON numbers at runtime, keys must be String()'d ────
+  describe('scene-id coercion at collab boundaries (number id)', () => {
+    // The scenes API returns id as a JSON number despite the string type; build
+    // a scene whose id is a real number to exercise the Map-key coercion.
+    const numScene = (): SceneDoc => ({
+      ...makeScene([{ id: 'el_a', type: 'action', text: 'A' }]),
+      id: 900 as unknown as string,
+    });
+
+    it('registers applyRemoteOps under a STRING key even when scene.id is a number', () => {
+      const onRegister = vi.fn();
+      render(<SceneBlock scene={numScene()} index={0} onRegisterRemoteApply={onRegister} />);
+      expect(onRegister).toHaveBeenCalledWith('900', sync.applyRemoteOps);
+      // Key must be the string '900', never the number 900.
+      expect(onRegister.mock.calls[0][0]).toBe('900');
+    });
+
+    it('clears the dropped flag with a STRING key when scene.id is a number', () => {
+      const onHandled = vi.fn();
+      render(
+        <SceneBlock
+          scene={numScene()}
+          index={0}
+          remoteStale
+          onRemoteStaleHandled={onHandled}
+        />,
+      );
+      expect(onHandled).toHaveBeenCalledWith('900');
+      expect(onHandled.mock.calls[0][0]).toBe('900');
+    });
+  });
 });
