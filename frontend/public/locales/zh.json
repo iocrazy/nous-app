@@ -188,7 +188,16 @@
     "expired": "授权已过期",
     "reauthorize": "重新授权",
     "teamScope": "团队",
-    "personalScope": "个人"
+    "personalScope": "个人",
+    "nav": {
+      "publish": "发布",
+      "accounts": "账号",
+      "allAccounts": "全部账号",
+      "insights": "洞察",
+      "analytics": "分析",
+      "settings": "设置",
+      "soon": "即将上线"
+    }
   },
   "parser": {
     "title": "媒体解析",

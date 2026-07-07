@@ -188,7 +188,16 @@
     "expired": "Authorization expired",
     "reauthorize": "Reauthorize",
     "teamScope": "Team",
-    "personalScope": "Personal"
+    "personalScope": "Personal",
+    "nav": {
+      "publish": "Publish",
+      "accounts": "Accounts",
+      "allAccounts": "All accounts",
+      "insights": "Insights",
+      "analytics": "Analytics",
+      "settings": "Settings",
+      "soon": "Soon"
+    }
   },
   "parser": {
     "title": "Media Parser",
