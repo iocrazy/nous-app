@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 
 vi.mock('../../services/inspirationService', () => ({
-  attachmentUrlWithToken: (id: string) => Promise.resolve(`http://api.test/att/${id}?token=tok`),
+  attachmentUrlWithToken: (id: string, token?: string) =>
+    `http://api.test/att/${id}${token ? `?token=${token}` : ''}`,
+}));
+vi.mock('../../contexts/AuthContext', () => ({
+  useAuth: () => ({ mediaToken: 'tok' }),
 }));
 
 import { AttachmentView } from './AttachmentView';
@@ -20,12 +24,10 @@ describe('AttachmentView', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('renders images as token-authed thumbnails linking to source', async () => {
+  it('renders images as token-authed thumbnails linking to source', () => {
     render(<AttachmentView attachments={[att('1', 'image/png', 'pic.png')]} />);
     const img = screen.getByRole('img');
-    await waitFor(() =>
-      expect(img.getAttribute('src')).toBe('http://api.test/att/1?token=tok'),
-    );
+    expect(img.getAttribute('src')).toBe('http://api.test/att/1?token=tok');
     const link = img.closest('a');
     expect(link?.getAttribute('href')).toBe('http://api.test/att/1?token=tok');
   });

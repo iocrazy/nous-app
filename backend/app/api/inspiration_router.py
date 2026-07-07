@@ -162,8 +162,13 @@ async def get_attachment(
     `<a href>` downloads) cannot attach an Authorization header, so this
     dual-channel pattern mirrors resources_crud_router.serve_resource_file:
     - Authorization header (Bearer JWT) — used by fetch()-based callers.
-    - ?token= query param — the frontend's signed media/temp token, with a
-      raw-JWT fallback for callers that pass one through this param instead.
+    - ?token= query param — the frontend always sends the short-lived,
+      independently-revocable media token here (validate_media_cookie).
+      The raw-JWT fallback below only exists for parity with the resources
+      route's defense-in-depth; it must never be what the frontend puts in
+      a URL, since a long-lived session JWT in a URL leaks into nginx/app
+      logs, browser history, and Referer headers, and can't be revoked
+      without killing the whole session.
     """
     user_id: Optional[str] = None
 

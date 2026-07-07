@@ -1,11 +1,12 @@
 // Renders a note's attachments by mime family (spec §2.2 #5):
 // image grid / inline audio / video card / typed download chip.
-import React, { useEffect, useState } from 'react';
+import React, { useMemo } from 'react';
 import { FileText } from 'lucide-react';
 import {
   attachmentUrlWithToken,
   type NoteAttachment,
 } from '../../services/inspirationService';
+import { useAuth } from '../../contexts/AuthContext';
 
 function formatSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -19,37 +20,28 @@ function extOf(name: string): string {
 }
 
 /**
- * Resolve every attachment's token-authed URL up front. The GET endpoint
- * requires a `?token=` for native `<img>`/`<video>`/`<audio>`/`<a>` loads
- * (browsers never send Authorization headers for those), and fetching the
- * signed session token is async — so we resolve into state rather than
- * calling a sync URL builder inline in JSX.
+ * Resolve every attachment's token-authed URL. `attachmentUrlWithToken` is a
+ * pure sync builder (same shape as resourceService's getResourceMediaUrl) —
+ * no fetching happens here, so a plain memo is enough (no effect/state).
  */
-function useAttachmentUrls(attachments: NoteAttachment[]): Record<string, string> {
-  const [urls, setUrls] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      const entries = await Promise.all(
-        attachments.map(async (a) => [a.id, await attachmentUrlWithToken(a.id)] as const),
-      );
-      if (alive) setUrls(Object.fromEntries(entries));
-    })();
-    return () => {
-      alive = false;
-    };
-    // Re-resolve whenever the attachment set (by id) changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [attachments.map((a) => a.id).join(',')]);
-
-  return urls;
+function useAttachmentUrls(
+  attachments: NoteAttachment[],
+  mediaToken: string | undefined,
+): Record<string, string> {
+  return useMemo(
+    () =>
+      Object.fromEntries(
+        attachments.map((a) => [a.id, attachmentUrlWithToken(a.id, mediaToken)]),
+      ),
+    [attachments, mediaToken],
+  );
 }
 
 export const AttachmentView: React.FC<{ attachments: NoteAttachment[] }> = ({
   attachments,
 }) => {
-  const urls = useAttachmentUrls(attachments);
+  const { mediaToken } = useAuth();
+  const urls = useAttachmentUrls(attachments, mediaToken ?? undefined);
   if (!attachments.length) return null;
   const images = attachments.filter((a) => a.mime.startsWith('image/'));
   const audios = attachments.filter((a) => a.mime.startsWith('audio/'));

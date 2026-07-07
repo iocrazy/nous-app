@@ -2,7 +2,6 @@
 // All ids are strings — the backend serializes bigints via coerce_numbers_to_str.
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
-import { getSupabaseAccessToken } from '../supabaseClient';
 
 export interface NoteAttachment {
   id: string;
@@ -150,9 +149,16 @@ export async function deleteAttachment(attachmentId: string): Promise<void> {
  * downloads) can authenticate — those elements never send an Authorization
  * header. Backend accepts this token via the same media/JWT dual-channel as
  * resources_crud_router's `/file` route (see inspiration_router.get_attachment).
+ *
+ * `token` must be the short-lived, independently-revocable media token
+ * (AuthContext's `mediaToken`, minted by POST /auth/media-token) — mirrors
+ * resourceService's getResourceMediaUrl/getResourceFileUrl/getResourceCoverUrl,
+ * which all take the media token as a caller-supplied parameter rather than
+ * fetching it themselves. Do NOT pass the long-lived Supabase session JWT
+ * here: it would land in nginx/app logs, browser history, and Referer
+ * headers, and can't be revoked independently of the whole session.
  */
-export async function attachmentUrlWithToken(attachmentId: string): Promise<string> {
+export function attachmentUrlWithToken(attachmentId: string, token?: string): string {
   const url = `${base()}/attachments/${attachmentId}`;
-  const token = await getSupabaseAccessToken();
   return token ? `${url}?token=${encodeURIComponent(token)}` : url;
 }

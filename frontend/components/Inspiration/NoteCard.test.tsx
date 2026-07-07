@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 
 vi.mock('../../services/inspirationService', () => ({
-  attachmentUrlWithToken: (id: string) => Promise.resolve(`http://api.test/att/${id}`),
+  attachmentUrlWithToken: (id: string) => `http://api.test/att/${id}`,
+}));
+vi.mock('../../contexts/AuthContext', () => ({
+  useAuth: () => ({ mediaToken: 'tok' }),
 }));
 // MarkdownBody's real props are `{ source: string }` (verified by reading
 // components/AILibrary/MarkdownBody.tsx) — the mock mirrors that, not the
