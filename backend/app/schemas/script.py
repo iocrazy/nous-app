@@ -1,7 +1,7 @@
 """Script Editor request/response Pydantic schemas."""
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, constr
 
@@ -16,6 +16,20 @@ class ScriptProjectCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     description: Optional[str] = Field(None, max_length=2000)
     project_id: int
+
+
+class ScriptImportRequest(BaseModel):
+    """Request body for creating a script from imported screenplay/prose text.
+
+    ``mode`` selects the parse path: ``fountain`` runs the deterministic
+    parser (zero LLM), ``prose`` routes the raw text through the existing
+    convert-to-scenes LLM pipeline. ``content`` size is additionally guarded
+    at the endpoint (422) so the message is explicit."""
+
+    name: str = Field(..., min_length=1, max_length=200)
+    project_id: int
+    mode: Literal["fountain", "prose"]
+    content: str = Field(..., min_length=1)
 
 
 class ScriptProjectUpdate(BaseModel):
