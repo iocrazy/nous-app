@@ -13,6 +13,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 
 import { ClassicPalette } from '../classic/ui/ClassicPalette';
 import { ClassicRunBar } from '../classic/ui/ClassicRunBar';
@@ -32,9 +33,11 @@ export default function CanvasPage() {
   const saveStatus = useCanvasCoreStore((s) => s.saveStatus);
   const saveError = useCanvasCoreStore((s) => s.saveError);
   const kind = useCanvasCoreStore((s) => s.kind);
+  const nodeCount = useCanvasCoreStore((s) => s.nodes.length);
   const loadCanvas = useCanvasCoreStore((s) => s.loadCanvas);
   const flushSave = useCanvasCoreStore((s) => s.flushSave);
   const reset = useCanvasCoreStore((s) => s.reset);
+  const { t } = useTranslation();
 
   // Cmd+K palette — canvas-only scope, active only when canvas is ready.
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -74,6 +77,19 @@ export default function CanvasPage() {
         tone="error"
         detail={loadError ?? undefined}
       />
+    );
+  }
+
+  // A ready-but-empty canvas (no nodes) renders an explicit empty state
+  // rather than a silently-blank React Flow grid, which read as broken.
+  if (nodeCount === 0) {
+    return (
+      <div className="flex h-full w-full items-center justify-center">
+        <div className="max-w-sm text-center text-slate-700 dark:text-slate-300">
+          <p className="text-base font-medium">{t('canvas.empty.title')}</p>
+          <p className="mt-1 text-xs opacity-70">{t('canvas.empty.hint')}</p>
+        </div>
+      </div>
     );
   }
 

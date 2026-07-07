@@ -1366,6 +1366,10 @@
     "addImage": "+ 添加图片",
     "generate": "生成",
     "generateAll": "全部生成",
+    "empty": {
+      "title": "画布为空",
+      "hint": "这里还没有任何内容。"
+    },
     "toolbar": {
       "zoomIn": "放大",
       "zoomOut": "缩小",
