@@ -178,6 +178,34 @@ async def resolve_platform_model(
     return row["actual_provider"], provider_config, row["actual_model"]
 
 
+# Built-in maintenance calls (context compaction, session-memory notes,
+# agent-memory promotion/consolidation) need a cheap default model when the
+# primary path gives them nothing. Credentials are DB-only, so this default
+# MUST name a platform catalog entry — the old hardcoded "qwen-turbo" /
+# "claude-haiku-4-5" fallbacks resolve to nothing and silently degrade the
+# whole maintenance tier. Admin-overridable via
+# ``system_settings.maintenance_llm_model``.
+DEFAULT_MAINTENANCE_MODEL = "mediahub-doubao-seed-2-0-lite"
+
+
+async def get_maintenance_model() -> str:
+    """The catalog model maintenance/utility LLM calls fall back to.
+
+    ``system_settings.maintenance_llm_model`` (admin-set, DB) →
+    :data:`DEFAULT_MAINTENANCE_MODEL`. Never raises — a broken settings
+    read degrades to the default.
+    """
+    from app.services.ai.governance.ai_governance import _read_raw
+
+    try:
+        value = await _read_raw("maintenance_llm_model")
+    except Exception:  # noqa: BLE001 — maintenance tier must not break callers
+        value = None
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return DEFAULT_MAINTENANCE_MODEL
+
+
 async def resolve_db_adapter(
     model: str,
     module: str,

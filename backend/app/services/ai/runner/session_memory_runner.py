@@ -25,7 +25,6 @@ from app.repositories.session_memory_repository import (
 
 # Fallback model when the agent's own model is unknown/empty — a cheap Qwen
 # tier (DashScope) for session-note maintenance.
-_FALLBACK_SUMMARY_MODEL = "qwen-turbo"
 
 
 # Cheap-summarizer prompt routed through the agent's OWN provider, the same way
@@ -45,10 +44,11 @@ async def _default_summarizer(prompt: str, model: str = "") -> str:
 
         from app.schemas.ai_library import ComposedSystemPrompt
         from app.services.ai.providers.ai_provider_helpers import (
+            get_maintenance_model,
             resolve_db_adapter,
         )
 
-        summary_model = (model or "").strip() or _FALLBACK_SUMMARY_MODEL
+        summary_model = (model or "").strip() or await get_maintenance_model()
         try:
             # DB-only credentials (铁律 2026-07-07): platform catalog → raise.
             adapter = await resolve_db_adapter(summary_model, "agent_memory")
@@ -56,7 +56,7 @@ async def _default_summarizer(prompt: str, model: str = "") -> str:
             # Unknown/unconfigured model → fall back to the cheap default
             # (itself DB-resolved; a miss lands in the outer best-effort
             # except).
-            summary_model = _FALLBACK_SUMMARY_MODEL
+            summary_model = await get_maintenance_model()
             adapter = await resolve_db_adapter(summary_model, "agent_memory")
 
         composed = ComposedSystemPrompt(
