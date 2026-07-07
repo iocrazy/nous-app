@@ -24,6 +24,12 @@ class NoteNotFound(Exception):
     pass
 
 
+class NotePersistFailed(Exception):
+    """Raised when a repo write reports failure — mapped to HTTP 502 by the router."""
+
+    pass
+
+
 def _today_shanghai() -> str:
     return datetime.now(_SHANGHAI).strftime("%Y-%m-%d")
 
@@ -101,7 +107,8 @@ class NotesService:
 
     async def delete_note(self, user_id: str, note_id: Any) -> None:
         await self._owned(user_id, note_id)
-        await self._notes.soft_delete(note_id)
+        if not await self._notes.soft_delete(note_id):
+            raise NotePersistFailed()
 
     async def activity(
         self, user_id: str, date_from: str, date_to: str

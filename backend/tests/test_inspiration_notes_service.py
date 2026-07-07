@@ -4,7 +4,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.services.inspiration.notes_service import NoteNotFound, NotesService
+from app.services.inspiration.notes_service import (
+    NoteNotFound,
+    NotePersistFailed,
+    NotesService,
+)
 
 
 def _service():
@@ -72,6 +76,15 @@ async def test_delete_missing_raises_not_found():
     svc._notes.get_by_id.return_value = None
     with pytest.raises(NoteNotFound):
         await svc.delete_note("u1", "404")
+
+
+@pytest.mark.asyncio
+async def test_delete_raises_persist_failed_when_repo_reports_false():
+    svc = _service()
+    svc._notes.get_by_id.return_value = {"id": 1, "user_id": "u1"}
+    svc._notes.soft_delete.return_value = False
+    with pytest.raises(NotePersistFailed):
+        await svc.delete_note("u1", "1")
 
 
 @pytest.mark.asyncio
