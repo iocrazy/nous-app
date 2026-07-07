@@ -39,6 +39,7 @@ export const Composer: React.FC<Props> = ({
   const { t } = useTranslation();
   const { addToast } = useToast();
   const [text, setText] = useState(prefill?.content ?? '');
+  const [ref, setRef] = useState(prefill?.refHotspot ?? null);
   const [staged, setStaged] = useState<StagedFile[]>([]);
   const [saving, setSaving] = useState(false);
   const [caret, setCaret] = useState(0);
@@ -72,7 +73,7 @@ export const Composer: React.FC<Props> = ({
     if (!content || saving) return;
     setSaving(true);
     try {
-      const note = await createNote(content, prefill?.refHotspot);
+      const note = await createNote(content, ref ?? undefined);
       const uploaded: NoteAttachment[] = [];
       const failed: StagedFile[] = [];
       for (const item of staged) {
@@ -117,6 +118,21 @@ export const Composer: React.FC<Props> = ({
 
   return (
     <div className="rounded-xl bg-island px-4 pb-3 pt-4">
+      {ref && (
+        <div className="mb-2 flex items-center gap-2 rounded-lg border border-line border-l-2 border-l-indigo-500 bg-island-2 px-3 py-2">
+          <div className="min-w-0 flex-1">
+            {ref.source && <span className="text-[10px] font-bold text-content-2">{ref.source}</span>}
+            <div className="truncate text-[12px] text-content">{ref.title}</div>
+          </div>
+          <button
+            aria-label="Remove hotspot reference"
+            onClick={() => setRef(null)}
+            className="shrink-0 text-content-3 hover:text-content"
+          >
+            <X size={13} />
+          </button>
+        </div>
+      )}
       <textarea
         ref={taRef}
         value={text}
