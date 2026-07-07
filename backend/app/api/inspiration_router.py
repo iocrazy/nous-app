@@ -4,7 +4,16 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Header,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
 from fastapi.responses import RedirectResponse
 
 from app.core.deps import get_current_user
@@ -143,10 +152,42 @@ async def upload_attachment(
 
 @router.get("/attachments/{attachment_id}")
 async def get_attachment(
-    attachment_id: str, current_user: dict = Depends(get_current_user)
+    attachment_id: str,
+    authorization: Optional[str] = Header(None),
+    token: Optional[str] = Query(None),
 ):
+    """Serve (redirect to) an attachment's signed storage URL.
+
+    Browser-native loads (`<img src>`, `<video src>`, `<audio src>`,
+    `<a href>` downloads) cannot attach an Authorization header, so this
+    dual-channel pattern mirrors resources_crud_router.serve_resource_file:
+    - Authorization header (Bearer JWT) — used by fetch()-based callers.
+    - ?token= query param — the frontend always sends the short-lived,
+      independently-revocable media token here (validate_media_cookie).
+      The raw-JWT fallback below only exists for parity with the resources
+      route's defense-in-depth; it must never be what the frontend puts in
+      a URL, since a long-lived session JWT in a URL leaks into nginx/app
+      logs, browser history, and Referer headers, and can't be revoked
+      without killing the whole session.
+    """
+    user_id: Optional[str] = None
+
+    if token and not authorization:
+        from app.api.media_auth import validate_media_cookie
+
+        user_id = await validate_media_cookie(token)
+
+    if user_id is None:
+        effective_auth = authorization
+        if not effective_auth and token:
+            effective_auth = f"Bearer {token}"
+        if not effective_auth:
+            raise HTTPException(status_code=401, detail="missing credentials")
+        current_user = await get_current_user(effective_auth)
+        user_id = _uid(current_user)
+
     att = await get_inspiration_attachments_repository().get_by_id(attachment_id)
-    if not att or str(att.get("user_id")) != _uid(current_user):
+    if not att or str(att.get("user_id")) != user_id:
         raise HTTPException(status_code=404, detail="attachment not found")
     try:
         url = await _attachments().sign_get(att)

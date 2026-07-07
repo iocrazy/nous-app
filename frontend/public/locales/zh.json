@@ -2393,6 +2393,28 @@
     "setInterestPrompt": "在上方输入关键词（如 综艺 明星 影视），获取只看你关心话题的 feed。",
     "noForYouYet": "没有命中你关键词的热点 —— 试试更宽泛的关键词，或稍后再来。"
   },
+  "inspiration": {
+    "title": "灵感库",
+    "placeholder": "记录灵感… 正文打 #标签，粘贴图片或拖入任意文件",
+    "save": "保存",
+    "saving": "保存中…",
+    "activity": "活跃度",
+    "tags": "标签",
+    "edit": "编辑",
+    "pin": "置顶",
+    "unpin": "取消置顶",
+    "delete": "删除",
+    "deleteConfirm": "删除这条笔记？",
+    "editNote": "编辑笔记",
+    "cancel": "取消",
+    "empty": "还没有笔记——在上方记录你的第一个灵感。",
+    "loadMore": "加载更多",
+    "loading": "加载中…",
+    "noteCount": "{{count}} 条",
+    "searchPlaceholder": "搜索笔记…",
+    "openSource": "查看来源",
+    "uploadFailed": "上传失败: {{name}}"
+  },
   "editor": {
     "brand": "MediaHub Projects",
     "scenesLabel": "场景",

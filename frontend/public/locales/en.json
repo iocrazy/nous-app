@@ -2393,6 +2393,28 @@
     "setInterestPrompt": "Enter keywords above (e.g. variety, celebrities, films) to get a feed filtered to topics you care about.",
     "noForYouYet": "No hotspots match your keywords yet — try broader keywords or check back later."
   },
+  "inspiration": {
+    "title": "Inspiration",
+    "placeholder": "Capture an idea… #tag inline, paste an image, or drop any file",
+    "save": "Save",
+    "saving": "Saving…",
+    "activity": "Activity",
+    "tags": "Tags",
+    "edit": "Edit",
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "delete": "Delete",
+    "deleteConfirm": "Delete this note?",
+    "editNote": "Edit note",
+    "cancel": "Cancel",
+    "empty": "No notes yet — capture your first idea above.",
+    "loadMore": "Load more",
+    "loading": "Loading…",
+    "noteCount": "{{count}} notes",
+    "searchPlaceholder": "Search notes…",
+    "openSource": "Open source",
+    "uploadFailed": "Upload failed: {{name}}"
+  },
   "editor": {
     "brand": "MediaHub Projects",
     "scenesLabel": "Scenes",
