@@ -79,22 +79,29 @@ describe('railDerive', () => {
 });
 
 describe('RailModules', () => {
-  it('marks Script / Storyboard / Scenes selectable and keeps only Beats disabled', () => {
+  it('marks all four module slots selectable', () => {
     render(<RailModules activeView="script" onSelect={vi.fn()} />);
     const buttons = screen.getAllByRole('button');
     expect(buttons).toHaveLength(4);
     // Script — selectable and active (current view).
     expect(buttons[0]).toBeEnabled();
     expect(buttons[0]).toHaveClass('active');
-    // Beats — the last disabled placeholder.
-    expect(buttons[1]).toBeDisabled();
-    expect(buttons[1]).toHaveAttribute('title', 'editor.comingPhase2');
-    // Storyboard — now selectable (shot board, Phase B P3), not active yet.
+    // Beats — now selectable (beat sheet, PR-BT2), not active yet.
+    expect(buttons[1]).toBeEnabled();
+    expect(buttons[1]).not.toHaveClass('active');
+    // Storyboard — selectable (shot board, Phase B P3), not active yet.
     expect(buttons[2]).toBeEnabled();
     expect(buttons[2]).not.toHaveClass('active');
     // Scenes — selectable (node view), not the active one yet.
     expect(buttons[3]).toBeEnabled();
     expect(buttons[3]).not.toHaveClass('active');
+  });
+
+  it('fires onSelect with the beats view when the Beats slot is clicked', () => {
+    const onSelect = vi.fn();
+    render(<RailModules activeView="script" onSelect={onSelect} />);
+    fireEvent.click(screen.getByRole('button', { name: /moduleBeats/ }));
+    expect(onSelect).toHaveBeenCalledWith('beats');
   });
 
   it('follows aria-current to the active view and fires onSelect on click', () => {
