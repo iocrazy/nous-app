@@ -1,15 +1,18 @@
 """Router-layer tests: guard clauses + service exception mapping."""
 
+from io import BytesIO
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import HTTPException
+from starlette.datastructures import Headers, UploadFile
 
 from app.api.inspiration_router import (
     create_note,
     delete_note,
     list_notes,
     update_note,
+    upload_attachment,
 )
 from app.schemas.inspiration import NoteCreateIn, NoteUpdateIn
 from app.services.inspiration.notes_service import NoteNotFound, NotePersistFailed
@@ -79,3 +82,32 @@ async def test_delete_maps_persist_failed_to_502():
         with pytest.raises(HTTPException) as exc:
             await delete_note("9", current_user=USER)
     assert exc.value.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_upload_returns_string_id():
+    """Verify bigint id is coerced to string to preserve precision > 2^53."""
+    svc = AsyncMock()
+    svc.assert_owned = AsyncMock()  # Mock the assert_owned check
+    att_svc = AsyncMock()
+    # id > 2^53 — would lose precision if returned as JSON number
+    att_svc.store.return_value = {
+        "id": 9007199254740993,
+        "note_id": 42,
+        "mime": "image/png",
+        "size_bytes": 4,
+        "original_name": "pic.png",
+    }
+    upload = UploadFile(
+        file=BytesIO(b"\x89PNG"),
+        filename="pic.png",
+        headers=Headers({"content-type": "image/png"}),
+    )
+    with (
+        patch("app.api.inspiration_router.get_notes_service", return_value=svc),
+        patch("app.api.inspiration_router._attachments", return_value=att_svc),
+    ):
+        out = await upload_attachment("42", file=upload, current_user=USER)
+    # Verify id is a string (coerced by AttachmentOut schema)
+    assert out.id == "9007199254740993"
+    assert isinstance(out.id, str)

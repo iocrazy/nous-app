@@ -11,7 +11,7 @@ from app.core.deps import get_current_user
 from app.repositories.inspiration_attachments_repository import (
     get_inspiration_attachments_repository,
 )
-from app.schemas.inspiration import NoteCreateIn, NoteOut, NoteUpdateIn
+from app.schemas.inspiration import AttachmentOut, NoteCreateIn, NoteOut, NoteUpdateIn
 from app.services.inspiration.attachment_service import (
     AttachmentService,
     AttachmentTooLarge,
@@ -106,7 +106,11 @@ async def notes_tags(current_user: dict = Depends(get_current_user)):
     return await get_notes_service().tag_counts(_uid(current_user))
 
 
-@router.post("/attachments/upload", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/attachments/upload",
+    response_model=AttachmentOut,
+    status_code=status.HTTP_201_CREATED,
+)
 async def upload_attachment(
     note_id: str,
     file: UploadFile = File(...),
@@ -132,7 +136,7 @@ async def upload_attachment(
         )
     if row is None:
         raise HTTPException(status_code=502, detail="attachment persistence failed")
-    return row
+    return AttachmentOut(**row)
 
 
 @router.get("/attachments/{attachment_id}")
