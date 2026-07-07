@@ -3,12 +3,13 @@
 // code (rehype-highlight) and interactive task-list checkboxes on top of the
 // GFM tables/strikethrough react-markdown already gives us. Kept separate from
 // the shared AILibrary/MarkdownBody so AI-chat rendering is untouched.
-import React, { useRef } from 'react';
+import React, { useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import rehypeHighlight from 'rehype-highlight';
 import 'highlight.js/styles/github-dark.css';
+import { computeTaskOffsets } from './taskMarkers';
 
 interface Props {
   source: string;
@@ -17,13 +18,31 @@ interface Props {
   onToggleTask?: (index: number) => void;
 }
 
+/** Find which task-offset (from computeTaskOffsets, ascending) falls inside
+ *  a `li` node's [start, end) source range. Used to derive a checkbox's
+ *  document-order index from where it sits in *source*, not from render
+ *  order/count — see the StrictMode comment below for why that matters. */
+function findTaskIndexInRange(offsets: number[], start: number, end: number): number | null {
+  for (let i = 0; i < offsets.length; i += 1) {
+    if (offsets[i] >= start && offsets[i] < end) return i;
+  }
+  return null;
+}
+
 export const NoteMarkdown: React.FC<Props> = ({ source, onToggleTask }) => {
-  // Assign each task checkbox its document-order index. react-markdown renders
-  // synchronously in document order within one pass, so a per-render counter
-  // (reset here, incremented as each checkbox renders) yields stable indices
-  // matching toggleTaskItem's contract.
-  const counter = useRef(0);
-  counter.current = 0;
+  // Each task checkbox's document-order index is derived purely from the
+  // *source* — never from a mutable render-time counter. A per-render
+  // `useRef` counter (incremented once per `input` renderer invocation) used
+  // to work, but broke under React.StrictMode: StrictMode double-invokes
+  // each child component's function to surface impure renders, and the
+  // `input` renderer is its own fiber, so its second invocation kept
+  // incrementing the same shared counter instead of re-deriving the same
+  // value — indices came out as [1, 3, 5] instead of [0, 1, 2]. Deriving the
+  // index from `node.position` (attached by remark/unified to the `li`, not
+  // to the synthetic `input` element GFM injects — verified by inspection)
+  // is a pure function of (source, node), so it's stable no matter how many
+  // times, or in what order, a given fiber is invoked.
+  const taskOffsets = useMemo(() => computeTaskOffsets(source), [source]);
 
   return (
     <div className="text-[13.5px] leading-relaxed text-content markdown-note">
@@ -31,16 +50,16 @@ export const NoteMarkdown: React.FC<Props> = ({ source, onToggleTask }) => {
         remarkPlugins={[remarkGfm, remarkBreaks]}
         rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
         components={{
-          input: ({ type, checked, ...rest }) => {
+          input: ({ type, checked, taskIndex, ...rest }: any) => {
             if (type !== 'checkbox') return <input type={type} {...rest} />;
-            const idx = counter.current;
-            counter.current += 1;
             return (
               <input
                 type="checkbox"
                 checked={!!checked}
-                disabled={!onToggleTask}
-                onChange={() => onToggleTask?.(idx)}
+                disabled={!onToggleTask || taskIndex == null}
+                onChange={() => {
+                  if (taskIndex != null) onToggleTask?.(taskIndex);
+                }}
                 className="mr-1.5 align-middle accent-indigo-500"
               />
             );
@@ -65,9 +84,24 @@ export const NoteMarkdown: React.FC<Props> = ({ source, onToggleTask }) => {
           ),
           th: ({ children }) => <th className="border border-line px-2 py-1 text-left font-semibold">{children}</th>,
           td: ({ children }) => <td className="border border-line px-2 py-1">{children}</td>,
-          li: ({ className, children }) => (
-            <li className={className?.includes('task-list-item') ? 'list-none' : undefined}>{children}</li>
-          ),
+          li: ({ className, children, node }: any) => {
+            if (!className?.includes('task-list-item')) {
+              return <li className={className}>{children}</li>;
+            }
+            // Derive this item's checkbox index from where it sits in
+            // source, then hand it to the `input` child as a plain prop —
+            // pure and StrictMode-safe (see NoteMarkdown's top comment).
+            const start = node?.position?.start?.offset;
+            const end = node?.position?.end?.offset;
+            const taskIndex =
+              start != null && end != null ? findTaskIndexInRange(taskOffsets, start, end) : null;
+            const patchedChildren = React.Children.map(children, (child) =>
+              React.isValidElement(child) && (child.props as any)?.type === 'checkbox'
+                ? React.cloneElement(child as React.ReactElement<any>, { taskIndex })
+                : child,
+            );
+            return <li className="list-none">{patchedChildren}</li>;
+          },
           ul: ({ children }) => <ul className="my-1 list-disc pl-5">{children}</ul>,
           ol: ({ children }) => <ol className="my-1 list-decimal pl-5">{children}</ol>,
           p: ({ children }) => <p className="my-1">{children}</p>,
