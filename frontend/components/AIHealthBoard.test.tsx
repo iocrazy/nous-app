@@ -100,6 +100,27 @@ describe('AIHealthBoard', () => {
     expect(screen.getByText('aiHealth.warningsBadge:1')).toBeTruthy();
   });
 
+  it('renders probe_failing red (error hint styling), not amber', async () => {
+    mockService.getAIHealth.mockResolvedValue([
+      {
+        capability: 'topic_scorer',
+        label: 'Topic Scorer',
+        agent_slug: 'topic-scorer',
+        assigned: false,
+        model: 'deepseek-v4-flash',
+        provider: 'deepseek',
+        needs_vision: false,
+        origin: 'governance',
+        status: 'probe_failing',
+        hint: "Latest platform probe of 'deepseek-v4-flash' FAILED: HTTP 402",
+      },
+    ]);
+    render(<AIHealthBoard />);
+    const hint = await screen.findByText(/HTTP 402/);
+    // Unreachable = broken NOW = red error styling, not an amber config warning.
+    expect(hint.className).toContain('text-red-400');
+  });
+
   it('surfaces a load error', async () => {
     mockService.getAIHealth.mockRejectedValue(new Error('boom'));
     render(<AIHealthBoard />);
