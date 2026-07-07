@@ -13,6 +13,7 @@ import { HotspotsWorkspace } from '../components/Inspiration/HotspotsWorkspace';
 import { HotspotsSidePanel } from '../components/Inspiration/HotspotsSidePanel';
 import { useHotspots } from '../components/Inspiration/useHotspots';
 import { hotspotToRef } from '../components/Inspiration/hotspotToRef';
+import { toggleTaskItem } from '../components/Inspiration/toggleTaskItem';
 import { FloatingParse } from '../components/TopicInspiration/FloatingParse';
 import type { Hotspot } from '../services/topicService';
 import {
@@ -57,6 +58,12 @@ export const InspirationPage: React.FC = () => {
   // loadMore against applying a stale response after filters (date/tag/q)
   // change mid-flight (see task-7 review finding).
   const requestSeq = useRef(0);
+  // Per-note in-flight write sequence for checkbox toggles (task-3 review
+  // finding): rapid clicks on the same note's checkboxes fire concurrent
+  // `updateNote` PATCHes whose responses can land out of order. Keyed by
+  // note.id so unrelated notes never block each other; the latest seq for a
+  // given note is the only response allowed to apply/revert its content_md.
+  const toggleSeq = useRef<Record<string, number>>({});
 
   useEffect(() => {
     const id = setTimeout(() => setQ(queryInput.trim()), 300);
@@ -171,6 +178,27 @@ export const InspirationPage: React.FC = () => {
     }
   };
 
+  const onToggleTask = async (note: InspirationNote, index: number) => {
+    const nextMd = toggleTaskItem(note.content_md, index);
+    if (nextMd === note.content_md) return;
+    // Claim this note's latest write slot *before* the optimistic update so
+    // a response that lands after a newer toggle (of the same note) never
+    // clobbers state it's no longer authoritative for.
+    const seq = (toggleSeq.current[note.id] ?? 0) + 1;
+    toggleSeq.current[note.id] = seq;
+    setNotes((prev) => prev.map((n) => (n.id === note.id ? { ...n, content_md: nextMd } : n)));
+    try {
+      const updated = await updateNote(note.id, { content_md: nextMd });
+      if (seq !== toggleSeq.current[note.id]) return; // superseded by a newer toggle; discard
+      setNotes((prev) => prev.map((n) => (n.id === note.id ? updated : n)));
+    } catch (err) {
+      if (seq === toggleSeq.current[note.id]) {
+        setNotes((prev) => prev.map((n) => (n.id === note.id ? note : n)));
+      }
+      addToast((err as Error).message, 'error');
+    }
+  };
+
   const startEdit = (note: InspirationNote) => {
     setEditing(note);
     setEditText(note.content_md);
@@ -266,6 +294,7 @@ export const InspirationPage: React.FC = () => {
                 onTogglePin={onTogglePin}
                 onDelete={onDelete}
                 onTagClick={(tg) => setTag(tg)}
+                onToggleTask={(note, index) => void onToggleTask(note, index)}
                 hasMore={hasMore}
                 loading={loading}
                 loadMore={() => void loadMore()}

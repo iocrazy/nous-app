@@ -7,11 +7,11 @@ vi.mock('../../services/inspirationService', () => ({
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({ mediaToken: 'tok' }),
 }));
-// MarkdownBody's real props are `{ source: string }` (verified by reading
-// components/AILibrary/MarkdownBody.tsx) — the mock mirrors that, not the
-// `{ content }` shape sketched in the task brief.
-vi.mock('../AILibrary/MarkdownBody', () => ({
-  default: ({ source }: { source: string }) => <div data-testid="md">{source}</div>,
+// NoteMarkdown's real props are `{ source: string, onToggleTask?: (index) => void }`
+// (verified by reading components/Inspiration/NoteMarkdown.tsx) — the mock mirrors
+// that shape and preserves the previous MarkdownBody mock's testid/text contract.
+vi.mock('./NoteMarkdown', () => ({
+  NoteMarkdown: ({ source }: { source: string }) => <div data-testid="md">{source}</div>,
 }));
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (_k: string, fallback: string) => fallback }),
