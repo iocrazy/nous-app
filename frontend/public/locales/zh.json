@@ -1370,6 +1370,9 @@
       "title": "画布为空",
       "hint": "这里还没有任何内容。"
     },
+    "dragCreate": {
+      "title": "添加节点"
+    },
     "toolbar": {
       "zoomIn": "放大",
       "zoomOut": "缩小",
