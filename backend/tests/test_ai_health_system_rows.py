@@ -237,8 +237,9 @@ async def test_system_row_failure_is_isolated(monkeypatch):
 
 
 async def test_probe_overlay_flags_failed_platform_model(monkeypatch):
-    import app.repositories.mediahub_model_repository as repo_mod
     from unittest.mock import MagicMock
+
+    import app.repositories.mediahub_model_repository as repo_mod
 
     repo = MagicMock()
     repo.get_by_name = AsyncMock(
@@ -274,8 +275,9 @@ async def test_probe_overlay_flags_failed_platform_model(monkeypatch):
 
 
 async def test_probe_overlay_flags_failed_byok_key(monkeypatch):
-    import app.repositories.mediahub_model_repository as repo_mod
     from unittest.mock import MagicMock
+
+    import app.repositories.mediahub_model_repository as repo_mod
 
     repo = MagicMock()
     repo.get_by_name = AsyncMock(return_value=None)
@@ -323,8 +325,9 @@ async def test_probe_overlay_never_masks_config_problems(monkeypatch):
 
 
 async def test_probe_overlay_ok_probe_stays_green(monkeypatch):
-    import app.repositories.mediahub_model_repository as repo_mod
     from unittest.mock import MagicMock
+
+    import app.repositories.mediahub_model_repository as repo_mod
 
     repo = MagicMock()
     repo.get_by_name = AsyncMock(
