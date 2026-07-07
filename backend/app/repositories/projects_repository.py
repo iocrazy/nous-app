@@ -396,6 +396,11 @@ class ProjectsRepository:
         """
         try:
             values = _known_only(data, _PROJECTS_ATTRS, _PROJECTS_TEMPORAL)
+            # team_id arrives as a str from the request schema but the column is
+            # BIGINT and asyncpg's int8 codec is strict — coerce like the read
+            # path (list_projects) already does, or the INSERT 500s (DataError).
+            if values.get("team_id") is not None:
+                values["team_id"] = int(values["team_id"])
             async with write_scope() as session:
                 result = await session.execute(
                     insert(Projects).values(**values).returning(Projects)
