@@ -49,6 +49,10 @@ export const TopicInspirationPage: React.FC = () => {
 
   // Load the saved interest once (drives the For You editor + empty state).
   useEffect(() => {
+    // Flag-on renders InspirationPage instead (see the early-return below,
+    // placed after all hooks per rules-of-hooks) — skip the fetch so the
+    // legacy page doesn't fire a request nobody reads.
+    if (notesEnabled) return;
     let alive = true;
     (async () => {
       try {
@@ -93,6 +97,11 @@ export const TopicInspirationPage: React.FC = () => {
   // addToast is wrapped in useCallback in Toast context and is referentially stable,
   // but omitted here per brief guidance to prevent any potential infinite-refetch risk.
   useEffect(() => {
+    // Same rationale as the getInterest effect above — flag-on skips
+    // straight to InspirationPage, so getHotspots/getHotspotDates here would
+    // be wasted requests (and could surface a stray "Failed to load topics"
+    // toast for a page that's never shown).
+    if (notesEnabled) return;
     let alive = true;
     (async () => {
       setLoading(true);

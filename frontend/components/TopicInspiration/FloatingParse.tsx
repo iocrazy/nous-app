@@ -179,6 +179,13 @@ export const FloatingParse: React.FC<{
   };
 
   if (phase === 'collapsed') {
+    // Controlled mode (parent passes `open`): the entry point lives in the
+    // parent's own UI (e.g. InspirationPage's top-bar "Parse URL" button),
+    // so don't also render the floating trigger pill — that would give the
+    // page two redundant Parse entry points. Uncontrolled callers (`open`
+    // undefined, e.g. legacy TopicInspirationPage's bare `<FloatingParse />`)
+    // keep the floating button as their only entry point.
+    if (open !== undefined) return null;
     return (
       <button
         onClick={() => {

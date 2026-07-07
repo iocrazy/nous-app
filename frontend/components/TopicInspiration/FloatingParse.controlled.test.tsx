@@ -29,4 +29,13 @@ describe('FloatingParse controlled open', () => {
     render(<FloatingParse open={false} onOpenChange={vi.fn()} />);
     expect(screen.queryByPlaceholderText(/paste/i)).toBeNull();
   });
+
+  it('does not render the floating trigger button when controlled (open=false) — the parent supplies the entry point', () => {
+    render(<FloatingParse open={false} onOpenChange={vi.fn()} />);
+    // Collapsed-phase floating button renders "Parse Link" text with no other
+    // markup; in controlled mode it must be entirely absent from the DOM so
+    // the page doesn't show two redundant Parse entry points (top bar +
+    // floating pill).
+    expect(screen.queryByRole('button', { name: /parse link/i })).toBeNull();
+  });
 });
