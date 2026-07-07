@@ -42,4 +42,20 @@ CREATE TABLE IF NOT EXISTS public.distribution_oauth_states (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Backend-only tables: reached solely by service_role repository code, never
+-- via PostgREST from the frontend. Lock down with the same service-role-only
+-- pattern as 344_script_commits.sql (see also 265's retroactive lockdown of
+-- world-readable log tables — don't repeat that class of bug here).
+ALTER TABLE public.social_accounts ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Service role full access on social_accounts" ON public.social_accounts;
+CREATE POLICY "Service role full access on social_accounts" ON public.social_accounts FOR ALL
+  USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
+
+ALTER TABLE public.distribution_oauth_states ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Service role full access on distribution_oauth_states" ON public.distribution_oauth_states;
+CREATE POLICY "Service role full access on distribution_oauth_states" ON public.distribution_oauth_states FOR ALL
+  USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
+
+NOTIFY pgrst, 'reload schema';
+
 COMMIT;
