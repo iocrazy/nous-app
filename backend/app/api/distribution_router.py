@@ -112,9 +112,17 @@ async def list_accounts(user: CurrentUserDep):
 )
 async def connect_account(body: ConnectAccountRequest, user: CurrentUserDep):
     uid = str(user["id"])
-    scope_id = uid if body.scope_id == "self" else body.scope_id
-    if body.scope_type == "team" and scope_id not in await _user_team_ids(uid):
-        raise HTTPException(status_code=403, detail="Not a member of this team")
+    if body.scope_type == "user":
+        # IDOR guard: never trust a client-supplied scope_id for user scope —
+        # force it to the caller's own id unconditionally. Otherwise a client
+        # could pass another user's uuid (team co-members can read peers'
+        # user_id via GET /teams/{id}/members) and have the later oauth
+        # callback bind the attacker's token under the victim's personal scope.
+        scope_id = uid
+    else:  # team
+        scope_id = body.scope_id
+        if scope_id not in await _user_team_ids(uid):
+            raise HTTPException(status_code=403, detail="Not a member of this team")
     try:
         creds = await get_douyin_credentials()
     except CredentialsNotConfigured:
