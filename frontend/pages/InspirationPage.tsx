@@ -1,7 +1,7 @@
 // New notes-first Inspiration workspace (spec §2, mockup v7). Rendered by
 // TopicInspirationPage when VITE_FEATURE_INSPIRATION_NOTES is on; hotspot
 // integration (tab, side panel, save-as-note) arrives in P3.
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Search, X } from 'lucide-react';
 import { useToast } from '../components/Toast';
@@ -33,6 +33,10 @@ export const InspirationPage: React.FC = () => {
   const [refreshKey, setRefreshKey] = useState(0);
   const [editing, setEditing] = useState<InspirationNote | null>(null);
   const [editText, setEditText] = useState('');
+  // Monotonic request version: guards both the main filter-driven fetch and
+  // loadMore against applying a stale response after filters (date/tag/q)
+  // change mid-flight (see task-7 review finding).
+  const requestSeq = useRef(0);
 
   useEffect(() => {
     const id = setTimeout(() => setQ(queryInput.trim()), 300);
@@ -46,11 +50,12 @@ export const InspirationPage: React.FC = () => {
 
   useEffect(() => {
     let alive = true;
+    const seq = ++requestSeq.current;
     (async () => {
       setLoading(true);
       try {
         const rows = await listNotes(filters, PAGE_SIZE, undefined);
-        if (!alive) return;
+        if (!alive || seq !== requestSeq.current) return;
         setNotes(rows);
         setHasMore(rows.length === PAGE_SIZE);
       } catch (err) {
@@ -78,9 +83,11 @@ export const InspirationPage: React.FC = () => {
 
   const loadMore = useCallback(async () => {
     if (!notes.length || loading) return;
+    const seq = requestSeq.current;
     setLoading(true);
     try {
       const rows = await listNotes(filters, PAGE_SIZE, notes[notes.length - 1].id);
+      if (seq !== requestSeq.current) return; // filters changed while in-flight; discard
       setNotes((prev) => [...prev, ...rows]);
       setHasMore(rows.length === PAGE_SIZE);
     } catch (err) {
