@@ -146,6 +146,10 @@ class Settings(BaseSettings):
         "FEATURE_SHOT_GENERATE. Flip true once the video chain is validated on "
         "the target stack (needs the dreamina CLI logged in on the NAS).",
     )
+    FEATURE_DISTRIBUTION: bool = Field(
+        default=False,
+        description="Distribution module (platform accounts + publishing). Flag-dark until go-live.",
+    )
     STORAGE_SIGNED_URL_PUBLIC_BASE: str = Field(
         default="",
         description="OPTIONAL public base URL (scheme+host[+port]) for storage "
