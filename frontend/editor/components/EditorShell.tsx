@@ -35,6 +35,7 @@ import type { ScriptChapter } from '../../types';
 import { useEditorState, type EditorFormat, type EditorMode } from '../useEditorState';
 import type { SaveState } from '../useSceneSync';
 import { persistFormat, readStoredFormat } from '../formatStorage';
+import { persistRailView, readStoredRailView } from '../railViewStorage';
 import { useConvertPoll } from '../useConvertPoll';
 import {
   WINDOW_THRESHOLD,
@@ -111,7 +112,11 @@ export function EditorShell({
   const [loadState, setLoadState] = useState<LoadState>('loading');
   // Central-column view: the script sheet or the scene-node projection. The top
   // Script/Outline/Cover tabs are a separate axis and stay put (spec §3.1).
-  const [railView, setRailView] = useState<RailView>('script');
+  // Restored per-script from localStorage so a reload/remount lands the writer
+  // back on the view they left (F2); an unknown/invalid stored value → 'script'.
+  const [railView, setRailView] = useState<RailView>(
+    () => readStoredRailView(scriptId) ?? 'script',
+  );
   // Version diff (Phase B P4): when set, the centre pane swaps to the diff view
   // (comparing this commit against the live 'current' state), taking precedence
   // over the rail views. A shell-level state — the simplest surface consistent
@@ -219,6 +224,13 @@ export function EditorShell({
     setDiffCommit(null);
     setRailView(view);
   }, []);
+
+  // Persist the rail view per script whenever it changes (F2). An effect covers
+  // every path uniformly — the rail toggle AND the scene-node jump-back that
+  // sets it to 'script' — so a reload always restores what the writer last saw.
+  useEffect(() => {
+    persistRailView(scriptId, railView);
+  }, [scriptId, railView]);
 
   const selectMode = useCallback(
     (m: EditorMode) => {

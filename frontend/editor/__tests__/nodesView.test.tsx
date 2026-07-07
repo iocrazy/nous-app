@@ -166,6 +166,51 @@ describe('NodesView', () => {
       });
     });
 
+    it('persists a keyboard a11y move once, without a custom nudge (F1)', () => {
+      // xyflow's built-in arrow-key move emits a `position` change with
+      // dragging===false (no drag-stop event). The view persists that keyboard
+      // nudge through onNodesChange — exactly one write, for the selected scene.
+      svc.updateSceneMeta.mockResolvedValue(scene({}));
+      render(
+        <NodesView
+          scenes={[scene({ id: '200' })]}
+          chapters={[]}
+          onOpenScene={vi.fn()}
+          scriptId="1"
+          onReload={vi.fn()}
+        />,
+      );
+      const id = findNode('sceneNode').id as string;
+      const onNodesChange = capturedProps.onNodesChange as (c: unknown[]) => void;
+      // Select the node through the real change pipeline, then keyboard-move it.
+      act(() => onNodesChange([{ id, type: 'select', selected: true }]));
+      act(() => onNodesChange([{ id, type: 'position', position: { x: 8, y: 0 }, dragging: false }]));
+
+      expect(svc.updateSceneMeta).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(500);
+      expect(svc.updateSceneMeta).toHaveBeenCalledTimes(1);
+      expect(svc.updateSceneMeta).toHaveBeenCalledWith('200', { position_x: 8, position_y: 0 });
+    });
+
+    it('does not persist a mid-drag position frame (dragging===true) (F1)', () => {
+      svc.updateSceneMeta.mockResolvedValue(scene({}));
+      render(
+        <NodesView
+          scenes={[scene({ id: '200' })]}
+          chapters={[]}
+          onOpenScene={vi.fn()}
+          scriptId="1"
+          onReload={vi.fn()}
+        />,
+      );
+      const id = findNode('sceneNode').id as string;
+      const onNodesChange = capturedProps.onNodesChange as (c: unknown[]) => void;
+      act(() => onNodesChange([{ id, type: 'select', selected: true }]));
+      act(() => onNodesChange([{ id, type: 'position', position: { x: 8, y: 0 }, dragging: true }]));
+      vi.advanceTimersByTime(500);
+      expect(svc.updateSceneMeta).not.toHaveBeenCalled();
+    });
+
     it('persists a dragged chapter position via updateChapterPosition', () => {
       svc.updateChapterPosition.mockResolvedValue(undefined);
       render(
@@ -397,6 +442,57 @@ describe('NodesView', () => {
       // Let the rejected fetch settle so it doesn't leak as an unhandled rejection.
       await waitFor(() => expect(svc.listShots).toHaveBeenCalled());
     });
+
+    const findSceneNode = (id: string) =>
+      (capturedProps.nodes as Array<Record<string, unknown>>).find(
+        (n) => n.type === 'sceneNode' && n.id === id,
+      );
+
+    it('clears a stale cover when the scene later has no shot images (F3)', async () => {
+      const rest = { chapters: [], onOpenScene: vi.fn(), scriptId: '1', onReload: vi.fn() };
+      svc.listShots.mockResolvedValue([
+        { id: 'sh1', scene_id: '200', image_url: 'http://img/9', status: 'done' },
+      ]);
+      const { rerender } = render(<NodesView scenes={[scene({ id: '200' })]} {...rest} />);
+      await waitFor(() =>
+        expect((findSceneNode('sc-200')!.data as { coverUrl?: string }).coverUrl).toBe(
+          'http://img/9',
+        ),
+      );
+      // The scene's shot image is deleted; a scene-set change re-runs the cover
+      // fetch, now returning no images — the once-shown cover must disappear.
+      svc.listShots.mockResolvedValue([]);
+      rerender(<NodesView scenes={[scene({ id: '200' }), scene({ id: '201' })]} {...rest} />);
+      await waitFor(() =>
+        expect(
+          (findSceneNode('sc-200')!.data as { coverUrl?: string }).coverUrl,
+        ).toBeUndefined(),
+      );
+    });
+
+    it('does not refetch shots when the scene id set is unchanged (F4)', async () => {
+      const rest = { chapters: [], onOpenScene: vi.fn(), scriptId: '1', onReload: vi.fn() };
+      svc.listShots.mockResolvedValue([]);
+      const { rerender } = render(<NodesView scenes={[scene({ id: '200' })]} {...rest} />);
+      await waitFor(() => expect(svc.listShots).toHaveBeenCalledWith('200'));
+      svc.listShots.mockClear();
+      // New array instance, same id set (a persist-then-reload) → no refetch.
+      rerender(<NodesView scenes={[scene({ id: '200', location_text: 'Changed' })]} {...rest} />);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(svc.listShots).not.toHaveBeenCalled();
+    });
+
+    it('refetches shots when the scene id set changes (F4)', async () => {
+      const rest = { chapters: [], onOpenScene: vi.fn(), scriptId: '1', onReload: vi.fn() };
+      svc.listShots.mockResolvedValue([]);
+      const { rerender } = render(<NodesView scenes={[scene({ id: '200' })]} {...rest} />);
+      await waitFor(() => expect(svc.listShots).toHaveBeenCalledWith('200'));
+      svc.listShots.mockClear();
+      rerender(<NodesView scenes={[scene({ id: '200' }), scene({ id: '201' })]} {...rest} />);
+      await waitFor(() => expect(svc.listShots).toHaveBeenCalledWith('201'));
+    });
   });
 
   it('jumps to the scene on double-click via onOpenScene', () => {
@@ -451,5 +547,32 @@ describe('EditorShell — Scenes slot routing', () => {
       'aria-current',
       'page',
     );
+  }, 20000);
+
+  it('restores the rail view across a remount (F2)', async () => {
+    svc.listScenes.mockResolvedValue([scene({ id: '200' })]);
+    const { unmount } = render(<EditorShell scriptId="77" />);
+    await waitFor(() => expect(screen.getByRole('main')).toBeInTheDocument(), { timeout: 15000 });
+
+    fireEvent.click(screen.getByRole('button', { name: /moduleScenes/ }));
+    expect(screen.getByTestId('nodes-view')).toBeInTheDocument();
+    // The choice is persisted per script id.
+    expect(localStorage.getItem('editor.railView.77')).toBe('nodes');
+
+    // A fresh mount for the same script comes back on the node canvas, with no
+    // re-selection.
+    unmount();
+    render(<EditorShell scriptId="77" />);
+    await waitFor(() => expect(screen.getByRole('main')).toBeInTheDocument(), { timeout: 15000 });
+    expect(screen.getByTestId('nodes-view')).toBeInTheDocument();
+  }, 25000);
+
+  it('falls back to the script sheet for an invalid stored rail view (F2)', async () => {
+    localStorage.setItem('editor.railView.88', 'garbage');
+    svc.listScenes.mockResolvedValue([scene({ id: '200' })]);
+    render(<EditorShell scriptId="88" />);
+    await waitFor(() => expect(screen.getByRole('main')).toBeInTheDocument(), { timeout: 15000 });
+    // Garbage in storage → default script sheet, no node canvas.
+    expect(screen.queryByTestId('nodes-view')).toBeNull();
   }, 20000);
 });
