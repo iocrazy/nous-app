@@ -1316,6 +1316,19 @@
       "advanceTo": "推进到 {{stage}}",
       "finalStage": "最后阶段",
       "recommendedTools": "推荐工具"
+    },
+    "suggest": {
+      "eyebrow": "下一步建议",
+      "planning": "定好项目方向，然后创建第一个脚本。",
+      "script": "有 {{count}} 个脚本在写。锁定一个即可转成分镜。",
+      "scriptEmpty": "开始写第一个脚本，驱动项目推进。",
+      "storyboard": "分镜在脚本编辑器里完成——生成前先锁定镜头。",
+      "generation": "镜头就绪？生成画面、视频、音频。",
+      "review": "收集反馈，迭代到成片通过。",
+      "delivery": "打包并交接最终交付物。",
+      "ctaScripts": "去脚本",
+      "ctaOutput": "去成片",
+      "ctaFiles": "去文件"
     }
   },
   "storyboard": {

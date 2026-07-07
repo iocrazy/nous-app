@@ -1316,6 +1316,19 @@
       "advanceTo": "Advance to {{stage}}",
       "finalStage": "Final stage",
       "recommendedTools": "Recommended tools"
+    },
+    "suggest": {
+      "eyebrow": "Suggested next",
+      "planning": "Set the project's direction, then create your first script.",
+      "script": "You have {{count}} scripts in progress. Lock one to turn it into a storyboard.",
+      "scriptEmpty": "Start writing your first script to drive the project.",
+      "storyboard": "Storyboards live inside the script editor — lock your shots before generating.",
+      "generation": "Shots ready? Generate frames, video, and audio.",
+      "review": "Collect feedback and iterate until the cut is approved.",
+      "delivery": "Package and hand off the final deliverables.",
+      "ctaScripts": "Go to Scripts",
+      "ctaOutput": "Go to Output",
+      "ctaFiles": "Go to Files"
     }
   },
   "storyboard": {
