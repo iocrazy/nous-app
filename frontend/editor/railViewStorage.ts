@@ -10,7 +10,7 @@
  */
 import type { RailView } from './components/RailModules';
 
-const VALID: readonly RailView[] = ['script', 'nodes', 'storyboard'];
+const VALID: readonly RailView[] = ['script', 'nodes', 'storyboard', 'beats'];
 const storageKey = (scriptId: string): string => `editor.railView.${scriptId}`;
 
 export function readStoredRailView(scriptId: string): RailView | null {

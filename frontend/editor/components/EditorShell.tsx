@@ -52,6 +52,7 @@ import {
 } from './SceneBlock';
 import { SceneRail } from './SceneRail';
 import { RailModules, type RailView } from './RailModules';
+import { BeatsView } from '../beats/BeatsView';
 import { NodesView } from '../nodes/NodesView';
 import { StoryboardView } from '../storyboard/StoryboardView';
 import { VersionDiff } from '../versions/VersionDiff';
@@ -886,6 +887,8 @@ export function EditorShell({
             </ScenePresenceContext.Provider>
           ) : railView === 'storyboard' ? (
             <StoryboardView scenes={scenes} scriptId={scriptId} />
+          ) : railView === 'beats' ? (
+            <BeatsView scenes={scenes} scriptId={scriptId} onOpenScene={handleOpenScene} />
           ) : state.mode === 'cover' ? (
             <div className="mh-sheet-scroll">
               <div className="mh-cover-card" data-testid="cover-placeholder">
