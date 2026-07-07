@@ -1,4 +1,4 @@
--- Migration 350: Distribution — social platform accounts + OAuth state
+-- Migration 351: Distribution — social platform accounts + OAuth state
 --
 -- social_accounts: bound platform accounts (Douyin first). Tokens are
 -- Fernet-encrypted at the application layer (app.core.secret_box) before
