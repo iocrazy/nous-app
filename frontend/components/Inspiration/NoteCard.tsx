@@ -4,7 +4,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ExternalLink, Flame, MoreHorizontal, Pin } from 'lucide-react';
-import MarkdownBody from '../AILibrary/MarkdownBody';
+import { NoteMarkdown } from './NoteMarkdown';
 import { AttachmentView } from './AttachmentView';
 import type { InspirationNote } from '../../services/inspirationService';
 
@@ -14,6 +14,7 @@ interface Props {
   onTogglePin: (note: InspirationNote) => void;
   onDelete: (note: InspirationNote) => void;
   onTagClick: (tag: string) => void;
+  onToggleTask?: (note: InspirationNote, index: number) => void;
 }
 
 function timeOf(iso: string): string {
@@ -21,7 +22,7 @@ function timeOf(iso: string): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-export const NoteCard: React.FC<Props> = ({ note, onEdit, onTogglePin, onDelete, onTagClick }) => {
+export const NoteCard: React.FC<Props> = ({ note, onEdit, onTogglePin, onDelete, onTagClick, onToggleTask }) => {
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -65,7 +66,10 @@ export const NoteCard: React.FC<Props> = ({ note, onEdit, onTogglePin, onDelete,
       </div>
 
       <div className="mt-1.5 text-[13.5px] leading-relaxed text-content">
-        <MarkdownBody source={note.content_md} />
+        <NoteMarkdown
+          source={note.content_md}
+          onToggleTask={onToggleTask ? (index) => onToggleTask(note, index) : undefined}
+        />
       </div>
 
       {note.ref_hotspot && (

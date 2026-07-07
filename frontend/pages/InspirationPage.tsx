@@ -13,6 +13,7 @@ import { HotspotsWorkspace } from '../components/Inspiration/HotspotsWorkspace';
 import { HotspotsSidePanel } from '../components/Inspiration/HotspotsSidePanel';
 import { useHotspots } from '../components/Inspiration/useHotspots';
 import { hotspotToRef } from '../components/Inspiration/hotspotToRef';
+import { toggleTaskItem } from '../components/Inspiration/toggleTaskItem';
 import { FloatingParse } from '../components/TopicInspiration/FloatingParse';
 import type { Hotspot } from '../services/topicService';
 import {
@@ -171,6 +172,19 @@ export const InspirationPage: React.FC = () => {
     }
   };
 
+  const onToggleTask = async (note: InspirationNote, index: number) => {
+    const nextMd = toggleTaskItem(note.content_md, index);
+    if (nextMd === note.content_md) return;
+    setNotes((prev) => prev.map((n) => (n.id === note.id ? { ...n, content_md: nextMd } : n)));
+    try {
+      const updated = await updateNote(note.id, { content_md: nextMd });
+      setNotes((prev) => prev.map((n) => (n.id === note.id ? updated : n)));
+    } catch (err) {
+      setNotes((prev) => prev.map((n) => (n.id === note.id ? note : n)));
+      addToast((err as Error).message, 'error');
+    }
+  };
+
   const startEdit = (note: InspirationNote) => {
     setEditing(note);
     setEditText(note.content_md);
@@ -266,6 +280,7 @@ export const InspirationPage: React.FC = () => {
                 onTogglePin={onTogglePin}
                 onDelete={onDelete}
                 onTagClick={(tg) => setTag(tg)}
+                onToggleTask={(note, index) => void onToggleTask(note, index)}
                 hasMore={hasMore}
                 loading={loading}
                 loadMore={() => void loadMore()}

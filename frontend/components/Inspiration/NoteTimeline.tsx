@@ -13,13 +13,14 @@ interface Props {
   onTogglePin: (n: InspirationNote) => void;
   onDelete: (n: InspirationNote) => void;
   onTagClick: (tag: string) => void;
+  onToggleTask?: (note: InspirationNote, index: number) => void;
   hasMore: boolean;
   loading: boolean;
   loadMore: () => void;
 }
 
 export const NoteTimeline: React.FC<Props> = ({
-  notes, onEdit, onTogglePin, onDelete, onTagClick, hasMore, loading, loadMore,
+  notes, onEdit, onTogglePin, onDelete, onTagClick, onToggleTask, hasMore, loading, loadMore,
 }) => {
   const { t } = useTranslation();
   const groups = useMemo(() => {
@@ -52,7 +53,15 @@ export const NoteTimeline: React.FC<Props> = ({
             <span className="h-px flex-1 bg-line" />
           </div>
           {dayNotes.map((n) => (
-            <NoteCard key={n.id} note={n} onEdit={onEdit} onTogglePin={onTogglePin} onDelete={onDelete} onTagClick={onTagClick} />
+            <NoteCard
+              key={n.id}
+              note={n}
+              onEdit={onEdit}
+              onTogglePin={onTogglePin}
+              onDelete={onDelete}
+              onTagClick={onTagClick}
+              onToggleTask={onToggleTask}
+            />
           ))}
         </React.Fragment>
       ))}
