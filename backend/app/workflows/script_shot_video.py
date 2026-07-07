@@ -89,7 +89,13 @@ async def _resolve_local_image_for_i2v(shot: dict[str, Any]) -> Optional[str]:
     loc = resolve_media_source(row["file_path"])
     if loc.is_object_store:
         return None
+    # Containment guard (same posture as generated_media_router._serve_media_row):
+    # a corrupt/hostile file_path must never resolve to a path outside
+    # DOWNLOAD_PATH, even though the CLI would just be handed it as --image.
+    base = os.path.realpath(settings.DOWNLOAD_PATH)
     real = os.path.realpath(os.path.join(settings.DOWNLOAD_PATH, loc.rel_path or ""))
+    if not (real == base or real.startswith(base + os.sep)):
+        return None
     return real if os.path.isfile(real) else None
 
 
@@ -204,15 +210,13 @@ async def persist_video_generation(
 async def mark_shot_video_done(shot_id: str, video_url: str) -> None:
     """Write ``video_url`` onto the shot WITHOUT touching the image-lane status.
 
-    ``update_status`` requires a status arg, so the shot's current status is read
-    and passed through unchanged — only ``video_url`` actually changes (see
-    decision 2)."""
+    Uses the repo's single-column ``update_video_url`` (a bare UPDATE of
+    ``video_url``) rather than a read-modify-write of ``status`` — the latter
+    would race a concurrent image generation flipping ``status`` to 'done' and
+    clobber it (see decision 2)."""
     from app.repositories.script_shot_repository import get_script_shot_repository
 
-    repo = get_script_shot_repository()
-    shot = await repo.get_by_id(shot_id)
-    current_status = (shot or {}).get("status") or "empty"
-    await repo.update_status(shot_id, current_status, video_url=video_url)
+    await get_script_shot_repository().update_video_url(shot_id, video_url)
 
 
 @DBOS.workflow()

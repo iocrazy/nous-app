@@ -1015,14 +1015,14 @@ async def test_persist_video_raises_on_no_user_id_and_still_reaps(monkeypatch):
     assert not os.path.exists(tmp_dir)  # reaped despite the raise
 
 
-async def test_mark_shot_video_done_preserves_status(monkeypatch):
-    """mark_shot_video_done writes video_url WITHOUT changing the image-lane
-    status — it re-passes the shot's current status unchanged."""
+async def test_mark_shot_video_done_writes_only_video_url(monkeypatch):
+    """mark_shot_video_done writes video_url via the single-column repo method
+    (update_video_url) — never a read-modify-write of status, which would race a
+    concurrent image generation flipping status to 'done' (M2)."""
     from app.workflows import script_shot_video as m
 
     repo = MagicMock()
-    repo.get_by_id = AsyncMock(return_value={"id": int(_SHOT), "status": "done"})
-    repo.update_status = AsyncMock(return_value={"id": int(_SHOT)})
+    repo.update_video_url = AsyncMock(return_value={"id": int(_SHOT)})
 
     with patch(
         "app.repositories.script_shot_repository.get_script_shot_repository",
@@ -1030,10 +1030,30 @@ async def test_mark_shot_video_done_preserves_status(monkeypatch):
     ):
         await m.mark_shot_video_done(_SHOT, "/api/v1/generated-media/8888/stream")
 
-    # status passed through unchanged ('done'), only video_url added.
-    args, kwargs = repo.update_status.call_args
-    assert args == (_SHOT, "done")
-    assert kwargs["video_url"] == "/api/v1/generated-media/8888/stream"
+    repo.update_video_url.assert_awaited_once_with(
+        _SHOT, "/api/v1/generated-media/8888/stream"
+    )
+    # No status read-modify-write: the shot is never fetched, update_status untouched.
+    repo.get_by_id.assert_not_called()
+    repo.update_status.assert_not_called()
+
+
+async def test_resolve_local_image_none_when_path_escapes_download_dir(monkeypatch):
+    """NIT: a corrupt/hostile file_path that resolves outside DOWNLOAD_PATH must
+    yield None (same containment posture as _serve_media_row) — never handed to
+    the CLI as --image."""
+    from app.workflows import script_shot_video as m
+
+    row = {"id": 555, "media_kind": "image", "file_path": "../../etc/passwd"}
+    with patch(
+        "app.repositories.generated_media_repository.GeneratedMediaRepository."
+        "get_by_id",
+        AsyncMock(return_value=row),
+    ):
+        got = await m._resolve_local_image_for_i2v(
+            {"image_url": "/api/v1/generated-media/555/cover"}
+        )
+    assert got is None
 
 
 async def test_resolve_local_image_returns_none_for_non_cover_url(monkeypatch):

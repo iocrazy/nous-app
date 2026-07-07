@@ -64,6 +64,18 @@ export interface StoryboardViewProps {
 type ShotsByScene = Record<string, Shot[]>;
 type DropTarget = { shotId: string; edge: 'before' | 'after' };
 
+/**
+ * The video-regen poll settles ONLY on a NEW url — never the shot's prior one.
+ * Without the `!== priorUrl` guard a re-generation of a shot that already has a
+ * video would be satisfied immediately by the stale url (M1).
+ */
+export function videoRegenSettled(
+  freshUrl: string | null,
+  priorUrl: string | null,
+): boolean {
+  return !!freshUrl && freshUrl !== priorUrl;
+}
+
 /** `INT · Location · TIME`, empty parts dropped (mirrors OutlineView's head). */
 function headingLine(scene: SceneDoc): string {
   return [scene.heading_int_ext, scene.location_text, scene.time_of_day]
@@ -274,6 +286,9 @@ export function StoryboardView({ scenes, scriptId }: StoryboardViewProps) {
   const handleGenerateVideo = useCallback(
     async (sceneId: string, shot: Shot) => {
       const key = String(shot.id);
+      // Capture the CURRENT url so a re-generation isn't instantly satisfied by
+      // the shot's existing video: the poll only settles on a NEW url.
+      const priorUrl = shot.video_url;
       setVideoBusy((prev) => ({ ...prev, [key]: true }));
       try {
         await generateShotVideo(shot.id);
@@ -290,7 +305,7 @@ export function StoryboardView({ scenes, scriptId }: StoryboardViewProps) {
       startPoll(
         async () => {
           const fresh = await getShot(shot.id);
-          if (fresh.video_url) {
+          if (videoRegenSettled(fresh.video_url, priorUrl)) {
             patchShotLocal(sceneId, shot.id, { video_url: fresh.video_url });
             return true;
           }
