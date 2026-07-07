@@ -23,18 +23,26 @@ import {
   type Node,
   type NodeChange,
   type OnSelectionChangeParams,
+  type ReactFlowInstance,
   type Viewport,
   applyEdgeChanges,
   applyNodeChanges,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { CanvasConnection, CanvasNode } from '../types';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { SMART_NODE_TYPES } from '../smart/nodes/registry';
 import { CLASSIC_NODE_TYPES } from '../classic/ClassicNodeViews';
 import { toReactFlowEdges, validateCanvasConnection } from './connectionMapping';
+import {
+  computeAlignmentGuides,
+  type AlignmentGuides,
+  type Rect,
+} from '../../../canvas-kit/alignmentGuides';
+import { GuideOverlay } from '../../../canvas-kit/GuideOverlay';
+import { useCanvasShortcuts } from '../../../canvas-kit/useCanvasShortcuts';
 
 type AnyNode = Node;
 
@@ -45,6 +53,36 @@ type AnyNode = Node;
 //   INK_MUTED  → dark-mode --ink-600  (#52525b, zinc-600) — unselected nodes
 const INK_ACCENT = '#6366f1';
 const INK_MUTED = '#52525b';
+
+/** Snap-to-grid step, px — the gentle 8px lattice shared with the script editor. */
+const SNAP_GRID: [number, number] = [8, 8];
+/** Stable empty-guides object so clearing never allocates a new render key. */
+const NO_GUIDES: AlignmentGuides = {};
+/** Node box used for guide math before React Flow has measured a node (flow px). */
+const FALLBACK_NODE_WIDTH = 200;
+const FALLBACK_NODE_HEIGHT = 120;
+
+/**
+ * Additive-selection modifier: Cmd on Apple platforms, Ctrl elsewhere — matches
+ * the OS conventions React Flow's defaults follow. Shift is reserved for
+ * box-select. `navigator.platform` is empty under jsdom, which resolves to Control.
+ */
+function detectMultiSelectKey(): 'Meta' | 'Control' {
+  const platform = (typeof navigator !== 'undefined' && navigator.platform) || '';
+  return /Mac|iPhone|iPad|iPod/i.test(platform) ? 'Meta' : 'Control';
+}
+const MULTI_SELECT_KEY = detectMultiSelectKey();
+
+/** Bounding rect of a React Flow node in flow space, using measured size when known. */
+function nodeRect(node: AnyNode): Rect {
+  const measured = (node as { measured?: { width?: number; height?: number } }).measured;
+  return {
+    x: node.position.x,
+    y: node.position.y,
+    width: measured?.width ?? FALLBACK_NODE_WIDTH,
+    height: measured?.height ?? FALLBACK_NODE_HEIGHT,
+  };
+}
 
 function toReactFlowNodes(nodes: CanvasNode[]): AnyNode[] {
   return nodes.map((node, idx) => {
@@ -81,6 +119,13 @@ export function CanvasSurface() {
   // RAF handle for coalescing per-tick onMove dirty signals (Fix 2).
   const viewportRafRef = useRef<number | null>(null);
 
+  // Focusable host for the canvas-kit keyboard layer + the live React Flow
+  // instance it drives (fit-view / zoom).
+  const containerRef = useRef<HTMLDivElement>(null);
+  const instanceRef = useRef<ReactFlowInstance | null>(null);
+  // Alignment-guide lines drawn while a single node drags.
+  const [guides, setGuides] = useState<AlignmentGuides>(NO_GUIDES);
+
   const selectionSet = useMemo(() => new Set(selection), [selection]);
 
   // nodeColor for MiniMap — selected nodes get the app accent, others get muted.
@@ -98,6 +143,13 @@ export function CanvasSurface() {
     [nodes, selectionSet],
   );
   const rfEdges = useMemo(() => toReactFlowEdges(connections), [connections]);
+
+  // Latest rendered nodes, read synchronously by the drag handlers to compute
+  // alignment guides against the other nodes without re-binding on every tick.
+  const rfNodesRef = useRef(rfNodes);
+  useEffect(() => {
+    rfNodesRef.current = rfNodes;
+  }, [rfNodes]);
 
   // Fix 3 (6e-2c) — O(1) node-type lookup for connection validation.
   // `nodeTypeById` is called twice per connection event (source + target).
@@ -135,6 +187,55 @@ export function CanvasSurface() {
   const onNodeDragStart = useCallback(() => {
     noteDragStart();
   }, [noteDragStart]);
+
+  // While a single node drags, match its edges against the others and draw the
+  // alignment guides. The snap itself is applied once on drop so the node never
+  // fights the cursor mid-drag.
+  const onNodeDrag = useCallback((_evt: unknown, node: AnyNode) => {
+    const others = rfNodesRef.current.filter((n) => n.id !== node.id);
+    setGuides(computeAlignmentGuides(nodeRect(node), others.map(nodeRect)));
+  }, []);
+
+  const onNodeDragStop = useCallback(
+    (_evt: unknown, node: AnyNode) => {
+      setGuides(NO_GUIDES);
+      // Group drop: React Flow moved the whole selection and every position
+      // already flowed through onNodesChange → setNodes (the store's persist
+      // channel), so skip the single-node snap rather than fight it.
+      const selection = useCanvasCoreStore.getState().selection;
+      if (selection.length > 1 && selection.includes(node.id)) return;
+      // Solo drop: apply a one-time alignment snap (wins over the 8px grid),
+      // committed through the store action so revision/persist stay consistent.
+      const others = rfNodesRef.current.filter((n) => n.id !== node.id);
+      const g = computeAlignmentGuides(nodeRect(node), others.map(nodeRect));
+      if (g.snappedX == null && g.snappedY == null) return;
+      const snapped = rfNodesRef.current.map((n) =>
+        n.id === node.id
+          ? {
+              ...n,
+              position: {
+                x: g.snappedX ?? n.position.x,
+                y: g.snappedY ?? n.position.y,
+              },
+            }
+          : n,
+      );
+      setNodes(snapped as unknown as CanvasNode[]);
+    },
+    [setNodes],
+  );
+
+  // Adopt the shared canvas-kit keyboard layer for the two shortcuts canvas-core
+  // does NOT already own: fit-view (f) and zoom (+/-). Escape and Cmd/Ctrl+A are
+  // deliberately no-ops here — the window-scoped useCanvasShortcuts (CanvasPage)
+  // already owns them, so re-binding would double-handle.
+  useCanvasShortcuts(containerRef, {
+    onZoomIn: () => instanceRef.current?.zoomIn(),
+    onZoomOut: () => instanceRef.current?.zoomOut(),
+    onFitView: () => instanceRef.current?.fitView(),
+    onSelectAll: () => {},
+    onClearSelection: () => {},
+  });
 
   const onEdgesChange = useCallback(
     (changes: EdgeChange[]) => {
@@ -213,41 +314,53 @@ export function CanvasSurface() {
         : undefined;
 
   return (
-    <ReactFlow
-      nodes={rfNodes}
-      edges={rfEdges}
-      nodeTypes={nodeTypes}
-      onNodesChange={onNodesChange}
-      onNodeDragStart={onNodeDragStart}
-      onEdgesChange={onEdgesChange}
-      onConnect={onConnect}
-      onMove={onMove}
-      onSelectionChange={onSelectionChange}
-      isValidConnection={isConnectionValid}
-      viewport={viewport}
-      fitView={false}
-      proOptions={{ hideAttribution: true }}
-      // 6b.1 — skip rendering nodes/edges whose bounding box lies outside
-      // the current viewport.  React Flow re-checks on every pan/zoom so
-      // the visible set stays correct without any extra work from us.
-      onlyRenderVisibleElements
-      // Shift-drag for box select; click-drag is for panning the
-      // viewport, matching Figma / Miro / Excalidraw.
-      selectionMode={SelectionMode.Partial}
-      selectionOnDrag={false}
-      multiSelectionKeyCode="Shift"
-      deleteKeyCode={null}
-    >
-      <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
-      <Controls position="bottom-right" />
-      {/* 6b.2 — minimap: pannable + zoomable, selected nodes highlighted */}
-      <MiniMap
-        position="bottom-left"
-        pannable
-        zoomable
-        nodeColor={nodeColor}
-        nodeStrokeWidth={3}
-      />
-    </ReactFlow>
+    <div ref={containerRef} tabIndex={0} className="relative h-full w-full outline-none">
+      <ReactFlow
+        nodes={rfNodes}
+        edges={rfEdges}
+        nodeTypes={nodeTypes}
+        onInit={(instance) => {
+          instanceRef.current = instance;
+        }}
+        onNodesChange={onNodesChange}
+        onNodeDragStart={onNodeDragStart}
+        onNodeDrag={onNodeDrag}
+        onNodeDragStop={onNodeDragStop}
+        onEdgesChange={onEdgesChange}
+        onConnect={onConnect}
+        onMove={onMove}
+        onSelectionChange={onSelectionChange}
+        isValidConnection={isConnectionValid}
+        viewport={viewport}
+        fitView={false}
+        proOptions={{ hideAttribution: true }}
+        // 6b.1 — skip rendering nodes/edges whose bounding box lies outside
+        // the current viewport.  React Flow re-checks on every pan/zoom so
+        // the visible set stays correct without any extra work from us.
+        onlyRenderVisibleElements
+        // Gentle 8px snap lattice + one-time alignment snap on solo drop.
+        snapGrid={SNAP_GRID}
+        snapToGrid
+        // Shift-drag for box select; Cmd/Ctrl adds to the selection; click-drag
+        // pans the viewport, matching Figma / Miro / Excalidraw.
+        selectionMode={SelectionMode.Partial}
+        selectionOnDrag={false}
+        selectionKeyCode="Shift"
+        multiSelectionKeyCode={MULTI_SELECT_KEY}
+        deleteKeyCode={null}
+      >
+        <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
+        <Controls position="bottom-right" />
+        {/* 6b.2 — minimap: pannable + zoomable, selected nodes highlighted */}
+        <MiniMap
+          position="bottom-left"
+          pannable
+          zoomable
+          nodeColor={nodeColor}
+          nodeStrokeWidth={3}
+        />
+        <GuideOverlay guides={guides} />
+      </ReactFlow>
+    </div>
   );
 }

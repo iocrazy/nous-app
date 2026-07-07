@@ -9,6 +9,7 @@
  */
 import { useReactFlow } from '@xyflow/react';
 import type { AlignmentGuides } from './alignmentGuides';
+import './guideOverlay.css';
 
 export interface GuideOverlayProps {
   guides: AlignmentGuides;
