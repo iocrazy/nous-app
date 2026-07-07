@@ -79,8 +79,8 @@ async def test_tasklet_raw_text_mode():
         system_prompt="You echo.",
     )
     with patch(
-        "app.services.ai.adapters.factory.get_adapter",
-        return_value=_mock_adapter_returning("  hello  "),
+        "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+        new=AsyncMock(return_value=_mock_adapter_returning("  hello  ")),
     ):
         result = await t.run("hi", settings=MagicMock())
 
@@ -102,8 +102,8 @@ async def test_tasklet_json_mode_happy():
         },
     )
     with patch(
-        "app.services.ai.adapters.factory.get_adapter",
-        return_value=_mock_adapter_returning('{"name": "alice"}'),
+        "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+        new=AsyncMock(return_value=_mock_adapter_returning('{"name": "alice"}')),
     ):
         result = await t.run("who?", settings=MagicMock())
 
@@ -120,8 +120,8 @@ async def test_tasklet_json_mode_malformed():
         output_schema={"type": "object", "required": ["x"]},
     )
     with patch(
-        "app.services.ai.adapters.factory.get_adapter",
-        return_value=_mock_adapter_returning("not json"),
+        "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+        new=AsyncMock(return_value=_mock_adapter_returning("not json")),
     ):
         result = await t.run("?", settings=MagicMock())
 
@@ -143,8 +143,8 @@ async def test_tasklet_json_mode_schema_mismatch():
         },
     )
     with patch(
-        "app.services.ai.adapters.factory.get_adapter",
-        return_value=_mock_adapter_returning('{"age": 30}'),
+        "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+        new=AsyncMock(return_value=_mock_adapter_returning('{"age": 30}')),
     ):
         result = await t.run("?", settings=MagicMock())
 
@@ -166,8 +166,8 @@ async def test_tasklet_json_mode_enum_violation():
         },
     )
     with patch(
-        "app.services.ai.adapters.factory.get_adapter",
-        return_value=_mock_adapter_returning('{"color": "purple"}'),
+        "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+        new=AsyncMock(return_value=_mock_adapter_returning('{"color": "purple"}')),
     ):
         result = await t.run("?", settings=MagicMock())
 
@@ -182,8 +182,8 @@ async def test_tasklet_llm_exception_is_swallowed():
     boom_adapter = MagicMock()
     boom_adapter.call = AsyncMock(side_effect=RuntimeError("connection refused"))
     with patch(
-        "app.services.ai.adapters.factory.get_adapter",
-        return_value=boom_adapter,
+        "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+        new=AsyncMock(return_value=boom_adapter),
     ):
         result = await t.run("?", settings=MagicMock())
 
@@ -199,8 +199,8 @@ async def test_tasklet_bad_response_shape():
     weird_adapter = MagicMock()
     weird_adapter.call = AsyncMock(return_value={"unexpected": "shape"})
     with patch(
-        "app.services.ai.adapters.factory.get_adapter",
-        return_value=weird_adapter,
+        "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+        new=AsyncMock(return_value=weird_adapter),
     ):
         result = await t.run("?", settings=MagicMock())
 
@@ -212,8 +212,8 @@ async def test_tasklet_bad_response_shape():
 async def test_run_or_raise_happy():
     t = Tasklet(slug="ok", system_prompt="x")
     with patch(
-        "app.services.ai.adapters.factory.get_adapter",
-        return_value=_mock_adapter_returning("yes"),
+        "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+        new=AsyncMock(return_value=_mock_adapter_returning("yes")),
     ):
         value = await t.run_or_raise("?", settings=MagicMock())
     assert value == "yes"
@@ -225,8 +225,8 @@ async def test_run_or_raise_propagates():
     boom_adapter = MagicMock()
     boom_adapter.call = AsyncMock(side_effect=RuntimeError("nope"))
     with patch(
-        "app.services.ai.adapters.factory.get_adapter",
-        return_value=boom_adapter,
+        "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+        new=AsyncMock(return_value=boom_adapter),
     ):
         with pytest.raises(TaskletError) as excinfo:
             await t.run_or_raise("?", settings=MagicMock())
@@ -283,8 +283,8 @@ class TestBuiltins:
         """Each builtin runs end-to-end via mock without crashing the framework."""
         adapter = _mock_adapter_returning('{"intent": "chat", "confidence": 0.9}')
         with patch(
-            "app.services.ai.adapters.factory.get_adapter",
-            return_value=adapter,
+            "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+            new=AsyncMock(return_value=adapter),
         ):
             result = await intent_classifier.run("hi there", settings=MagicMock())
         assert result.ok is True

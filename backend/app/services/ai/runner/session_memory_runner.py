@@ -29,7 +29,7 @@ _FALLBACK_SUMMARY_MODEL = "qwen-turbo"
 
 
 # Cheap-summarizer prompt routed through the agent's OWN provider, the same way
-# the chat compactor's summarizer does (get_adapter over global settings keys).
+# the chat compactor's summarizer does (DB-resolved platform credentials).
 # Kept here (not in agent_framework) to avoid pulling settings into a primitive.
 async def _default_summarizer(prompt: str, model: str = "") -> str:
     """Cheap LLM call for session-memory maintenance.
@@ -43,17 +43,21 @@ async def _default_summarizer(prompt: str, model: str = "") -> str:
     try:
         from uuid import UUID
 
-        from app.core.config import settings
         from app.schemas.ai_library import ComposedSystemPrompt
-        from app.services.ai.adapters.factory import get_adapter
+        from app.services.ai.providers.ai_provider_helpers import (
+            resolve_db_adapter,
+        )
 
         summary_model = (model or "").strip() or _FALLBACK_SUMMARY_MODEL
         try:
-            adapter = get_adapter(summary_model, settings)
+            # DB-only credentials (铁律 2026-07-07): platform catalog → raise.
+            adapter = await resolve_db_adapter(summary_model, "agent_memory")
         except ValueError:
-            # Unknown model prefix → fall back to the cheap default provider.
+            # Unknown/unconfigured model → fall back to the cheap default
+            # (itself DB-resolved; a miss lands in the outer best-effort
+            # except).
             summary_model = _FALLBACK_SUMMARY_MODEL
-            adapter = get_adapter(summary_model, settings)
+            adapter = await resolve_db_adapter(summary_model, "agent_memory")
 
         composed = ComposedSystemPrompt(
             # Audit #17: ComposedSystemPrompt.agent_id is a required UUID — the

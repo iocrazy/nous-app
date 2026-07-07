@@ -1,65 +1,81 @@
-"""Un-configured LLM provider must FAIL FAST with an actionable error —
-never dial the old implicit localhost:8000 default (prod's .env never set
-LLM_API_URL, so the qwen fallback path was a live landmine surfacing as
-opaque connect timeouts)."""
+"""Un-configured LLM provider must FAIL FAST with an actionable error.
+
+History: the old implicit localhost:8000 default was removed first (#1112),
+then env credentials were retired entirely (铁律 2026-07-07) — resolution is
+DB-only (mediahub_models catalog → user BYOK → ProviderNotConfiguredError).
+"""
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.services.ai.adapters.factory import get_adapter, get_adapter_for_user
+from app.services.ai.adapters.factory import (
+    ProviderNotConfiguredError,
+    get_adapter,
+    get_adapter_for_user,
+)
 
 
-def test_default_llm_api_url_is_empty():
-    """The silent localhost default is gone — Settings ships empty."""
+def test_env_credential_fields_are_retired():
+    """LLM/DeepSeek/Doubao/Claude credential fields no longer exist on
+    Settings — DB-only credentials cannot regress into env silently."""
     from app.core.config import Settings
 
-    assert Settings.model_fields["LLM_API_URL"].default == ""
+    for retired in (
+        "LLM_API_URL",
+        "LLM_API_KEY",
+        "LLM_MODEL",
+        "DEEPSEEK_API_URL",
+        "DEEPSEEK_API_KEY",
+        "DOUBAO_API_URL",
+        "DOUBAO_API_KEY",
+        "CLAUDE_API_KEY",
+    ):
+        assert retired not in Settings.model_fields, retired
 
 
-def test_get_adapter_fails_fast_without_llm_url():
+def test_get_adapter_fails_fast_without_credentials():
     class S:
-        LLM_API_URL = ""
-        LLM_API_KEY = ""
+        LLM_API_URL = "https://env-leak.example/v1"  # must be ignored
+        LLM_API_KEY = "sk-env"
         LLM_MODEL = "qwen-max"
 
-    with pytest.raises(ValueError, match="not configured"):
+    with pytest.raises(ProviderNotConfiguredError, match="not configured"):
         get_adapter("qwen-max", S())
 
 
 def test_get_adapter_for_user_fails_fast_when_nothing_resolves():
-    class FallbackSettings:
-        LLM_API_URL = ""
-        LLM_API_KEY = ""
-        LLM_MODEL = "qwen-max"
-
-    with pytest.raises(ValueError, match="not configured"):
-        get_adapter_for_user("qwen-max", {}, FallbackSettings())
+    with pytest.raises(ProviderNotConfiguredError, match="not configured"):
+        get_adapter_for_user("qwen-max", {}, None)
 
 
 def test_get_adapter_for_user_byo_base_still_works():
-    class FallbackSettings:
-        LLM_API_URL = ""
-        LLM_API_KEY = ""
-        LLM_MODEL = "qwen-max"
-
     adapter = get_adapter_for_user(
         "qwen-max",
         {"qwen": {"base_url": "https://byo.example/v1", "api_key": "k"}},
-        FallbackSettings(),
+        None,
     )
     assert adapter is not None
 
 
 @pytest.mark.asyncio
-async def test_storyboard_service_fails_fast_without_url():
+async def test_storyboard_service_fails_fast_when_model_not_in_catalog():
     from app.services.storyboard.storyboard_ai_service import StoryboardAIService
 
     svc = StoryboardAIService()
-    with patch("app.services.storyboard.storyboard_ai_service.settings") as s:
-        s.LLM_API_URL = ""
-        s.LLM_API_KEY = ""
+    repo = MagicMock()
+    repo.get_by_slug = AsyncMock(return_value={"model": "doubao-unlisted"})
+    with (
+        patch(
+            "app.repositories.agent_repository.get_agent_repository",
+            return_value=repo,
+        ),
+        patch(
+            "app.services.ai.providers.ai_provider_helpers.resolve_mediahub_model",
+            AsyncMock(return_value=None),
+        ),
+    ):
         with pytest.raises(RuntimeError, match="not configured"):
             await svc._call_llm([{"role": "user", "content": "hi"}])

@@ -222,8 +222,8 @@ async def test_chat_persists_both_messages_and_bumps_counters() -> None:
             return_value=runner,
         ),
         patch(
-            "app.services.ai.chat.ai_library_chat_service.get_adapter",
-            return_value=MagicMock(),
+            "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+            new=AsyncMock(return_value=MagicMock()),
         ),
         patch(
             "app.services.ai.chat.ai_library_chat_service.SkillToolService",
@@ -345,8 +345,8 @@ async def test_chat_persists_tool_calls_into_metadata_json() -> None:
             return_value=runner,
         ),
         patch(
-            "app.services.ai.chat.ai_library_chat_service.get_adapter",
-            return_value=MagicMock(),
+            "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+            new=AsyncMock(return_value=MagicMock()),
         ),
         patch(
             "app.services.ai.chat.ai_library_chat_service.SkillToolService",
@@ -461,8 +461,8 @@ async def test_chat_streams_chunks_via_callback() -> None:
             return_value=runner,
         ),
         patch(
-            "app.services.ai.chat.ai_library_chat_service.get_adapter",
-            return_value=MagicMock(),
+            "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+            new=AsyncMock(return_value=MagicMock()),
         ),
         patch(
             "app.services.ai.chat.ai_library_chat_service.SkillToolService",
@@ -584,8 +584,8 @@ async def test_chat_chunk_callback_failure_does_not_abort_turn() -> None:
             return_value=runner,
         ),
         patch(
-            "app.services.ai.chat.ai_library_chat_service.get_adapter",
-            return_value=MagicMock(),
+            "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+            new=AsyncMock(return_value=MagicMock()),
         ),
         patch(
             "app.services.ai.chat.ai_library_chat_service.SkillToolService",
@@ -698,8 +698,8 @@ async def test_chat_stream_user_cancel_degrades_gracefully() -> None:
             return_value=runner,
         ),
         patch(
-            "app.services.ai.chat.ai_library_chat_service.get_adapter",
-            return_value=MagicMock(),
+            "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+            new=AsyncMock(return_value=MagicMock()),
         ),
         patch(
             "app.services.ai.chat.ai_library_chat_service.SkillToolService",

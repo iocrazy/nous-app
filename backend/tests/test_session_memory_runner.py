@@ -25,7 +25,8 @@ async def test_summarizer_routes_through_agent_model():
     """A Doubao agent's session-memory must use Doubao, not Qwen."""
     adapter = _fake_adapter("doubao notes")
     with patch(
-        "app.services.ai.adapters.factory.get_adapter", return_value=adapter
+        "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+        new=AsyncMock(return_value=adapter),
     ) as get_adapter:
         out = await _default_summarizer("p", model="doubao-seed-2")
 
@@ -41,7 +42,8 @@ async def test_summarizer_routes_through_agent_model():
 async def test_summarizer_falls_back_to_qwen_when_model_empty():
     adapter = _fake_adapter()
     with patch(
-        "app.services.ai.adapters.factory.get_adapter", return_value=adapter
+        "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+        new=AsyncMock(return_value=adapter),
     ) as get_adapter:
         await _default_summarizer("p", model="")
 
@@ -55,12 +57,15 @@ async def test_summarizer_falls_back_on_unknown_prefix():
     the cheap fallback model rather than no-op."""
     adapter = _fake_adapter()
 
-    def _factory(model, settings):
+    async def _factory(model, module):
         if model == "weird-model":
             raise ValueError("unsupported model")
         return adapter
 
-    with patch("app.services.ai.adapters.factory.get_adapter", side_effect=_factory):
+    with patch(
+        "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+        new=_factory,
+    ):
         out = await _default_summarizer("p", model="weird-model")
 
     assert out == "NOTES"
@@ -72,8 +77,8 @@ async def test_summarizer_falls_back_on_unknown_prefix():
 async def test_summarizer_swallows_errors_returns_empty():
     """Best-effort: any failure returns '' rather than raising into chat."""
     with patch(
-        "app.services.ai.adapters.factory.get_adapter",
-        side_effect=RuntimeError("boom"),
+        "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+        new=AsyncMock(side_effect=RuntimeError("boom")),
     ):
         out = await _default_summarizer("p", model="qwen-max")
 

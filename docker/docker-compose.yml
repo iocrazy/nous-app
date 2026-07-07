@@ -70,8 +70,6 @@ services:
       # pods; HTTP API stays available throughout.
       - MEDIAHUB_ROLE=gateway
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
-      - DOUBAO_API_KEY=${DOUBAO_API_KEY:-}
       # Secret-at-rest root key (Fernet). _OLD carries the previous key
       # during rotation windows (MultiFernet decrypt).
       - MEDIAHUB_TOKEN_ENCRYPTION_KEY=${MEDIAHUB_TOKEN_ENCRYPTION_KEY:-}
@@ -177,8 +175,6 @@ services:
       - FEATURE_MULTI_WORKER_ID=${FEATURE_MULTI_WORKER_ID:-}
       - WORKER_REPLICA_INDEX=0
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
-      - DOUBAO_API_KEY=${DOUBAO_API_KEY:-}
       # Secret-at-rest root key (Fernet). _OLD carries the previous key
       # during rotation windows (MultiFernet decrypt).
       - MEDIAHUB_TOKEN_ENCRYPTION_KEY=${MEDIAHUB_TOKEN_ENCRYPTION_KEY:-}

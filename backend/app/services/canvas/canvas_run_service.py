@@ -207,10 +207,11 @@ class CanvasRunService:
         return self._settings
 
     async def _get_adapter(self, model: str):
-        from app.services.ai.adapters import get_adapter
+        # DB-only credential resolution (铁律 2026-07-07): platform
+        # ``mediahub_models`` catalog → ProviderNotConfiguredError. No env.
+        from app.services.ai.providers.ai_provider_helpers import resolve_db_adapter
 
-        settings = await self._get_settings()
-        return get_adapter(model=model, settings=settings)
+        return await resolve_db_adapter(model, "canvas")
 
     async def run_prompt(
         self,

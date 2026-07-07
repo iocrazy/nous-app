@@ -197,8 +197,8 @@ async def test_chat_full_pipeline_fires_all_side_effects() -> None:
             return_value=runner,
         ),
         patch(
-            "app.services.ai.chat.ai_library_chat_service.get_adapter",
-            return_value=MagicMock(),
+            "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+            new=AsyncMock(return_value=MagicMock()),
         ),
         patch(
             "app.services.ai.chat.ai_library_chat_service.SkillToolService",
