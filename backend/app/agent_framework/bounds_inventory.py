@@ -81,28 +81,29 @@ async def inventory_agent_slugs(agent_repo: Any) -> frozenset[str]:
         return frozenset()
 
 
-def inventory_providers(settings_obj: Any) -> frozenset[str]:
+async def inventory_providers(settings_obj: Any = None) -> frozenset[str]:
     """Provider names that have credentials configured.
 
-    Probes well-known settings attributes; adapter naming convention is
-    ``<PROVIDER>_API_KEY``. A truthy value (non-empty string / non-None)
-    counts as 'available' — does NOT verify the key works.
+    Credentials are DB-only (铁律 2026-07-07): availability comes from the
+    enabled rows of the platform ``mediahub_models`` catalog (their
+    ``actual_provider`` values), not from env probing — ``settings_obj`` is
+    accepted for signature compatibility and ignored. Does NOT verify the
+    keys work. Best-effort: a broken catalog read degrades to an empty set
+    (the advertisement just claims no provider capability).
     """
-    providers: set[str] = set()
-    probes = {
-        "qwen": ("QWEN_API_KEY", "DASHSCOPE_API_KEY"),
-        "openai": ("OPENAI_API_KEY",),
-        "deepseek": ("DEEPSEEK_API_KEY",),
-        "doubao": ("DOUBAO_API_KEY",),
-        "anthropic": ("ANTHROPIC_API_KEY",),
-    }
-    for provider, attrs in probes.items():
-        for attr in attrs:
-            value = getattr(settings_obj, attr, None)
-            if value:
-                providers.add(provider)
-                break
-    return frozenset(providers)
+    try:
+        from app.repositories.mediahub_model_repository import (
+            get_mediahub_model_repository,
+        )
+
+        rows = await get_mediahub_model_repository().list_all()
+    except Exception:  # noqa: BLE001 — inventory must not break startup
+        return frozenset()
+    return frozenset(
+        str(row.get("actual_provider") or "").strip()
+        for row in rows
+        if row.get("is_enabled") and (row.get("actual_provider") or "").strip()
+    )
 
 
 def merge_lane_capacity(

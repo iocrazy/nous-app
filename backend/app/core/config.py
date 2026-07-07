@@ -274,13 +274,9 @@ class Settings(BaseSettings):
         "(2026-05-12). Set False on hosts with working IPv6 egress.",
     )
 
-    # ============================================
-    # OpenAI Configuration (for visual analysis)
-    # ============================================
-    OPENAI_API_KEY: str = Field(default="", description="OpenAI API Key")
-    OPENAI_MODEL: str = Field(
-        default="gpt-4o", description="OpenAI model for visual analysis"
-    )
+    # OpenAI credentials are DB-ONLY too (2026-07-07, follow-up to the LLM
+    # retirement): OPENAI_API_KEY / OPENAI_MODEL were removed. Visual analysis
+    # and embedding resolve through the mediahub_models catalog / user BYOK.
 
     # ============================================
     # LLM Configuration (Script / Storyboard AI)

@@ -167,7 +167,10 @@ def _chat_env(
         patch(f"{_SVC}.build_agent_runner_stack", AsyncMock(return_value=fake_stack)),
         patch(f"{_SVC}.PromptComposer", return_value=composer),
         patch(f"{_SVC}.AgentRunner", return_value=runner),
-        patch(f"{_SVC}.get_adapter", return_value=MagicMock()),
+        patch(
+            "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+            new=AsyncMock(return_value=MagicMock()),
+        ),
         patch(f"{_SVC}.SkillToolService", return_value=MagicMock()),
         patch(f"{_SVC}.RunRecorder", side_effect=lambda **kw: _RunRecorderCM(recorder)),
     ]

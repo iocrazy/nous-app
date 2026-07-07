@@ -94,14 +94,16 @@ _SETTINGS_MAP: dict[str, tuple[str, str]] = {
     "port": ("graph_falkordb_port", "FALKORDB_PORT"),
     "database": ("graph_falkordb_database", "FALKORDB_DATABASE"),
     "extractor_base_url": ("graph_extractor_base_url", "OPENAI_BASE_URL"),
-    "extractor_api_key": ("graph_extractor_api_key", "OPENAI_API_KEY"),
+    # api_key entries have NO env fallback (credentials are DB-only,
+    # 铁律 2026-07-07) — the empty env name resolves to the default "".
+    "extractor_api_key": ("graph_extractor_api_key", ""),
     "extractor_model": ("graph_extractor_model", "GRAPH_EXTRACTOR_MODEL"),
     "extractor_structured_output_mode": (
         "graph_extractor_structured_output_mode",
         "GRAPH_EXTRACTOR_STRUCTURED_OUTPUT_MODE",
     ),
     "embedder_base_url": ("graph_embedder_base_url", "OPENAI_BASE_URL"),
-    "embedder_api_key": ("graph_embedder_api_key", "OPENAI_API_KEY"),
+    "embedder_api_key": ("graph_embedder_api_key", ""),  # DB-only, no env
     "embedder_model": ("graph_embedder_model", "GRAPH_EMBEDDER_MODEL"),
     "embedder_dimensions": ("graph_embedder_dimensions", "GRAPH_EMBEDDER_DIMENSIONS"),
 }
