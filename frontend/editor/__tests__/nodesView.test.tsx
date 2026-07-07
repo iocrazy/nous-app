@@ -138,6 +138,54 @@ describe('NodesView', () => {
     );
   });
 
+  describe('empty state', () => {
+    it('renders an explicit empty state (no ReactFlow) when there are no scenes and no chapters', () => {
+      render(
+        <NodesView
+          scenes={[]}
+          chapters={[]}
+          onOpenScene={vi.fn()}
+          scriptId="1"
+          onReload={vi.fn()}
+        />,
+      );
+      expect(screen.getByTestId('nodes-empty')).toBeTruthy();
+      expect(screen.getByText('editor.nodesEmptyTitle')).toBeTruthy();
+      // ReactFlow must not mount — the capturing shim never ran, so no nodes.
+      expect(capturedProps.nodes).toBeUndefined();
+    });
+
+    it('invokes onBackToScript when the empty-state button is clicked', () => {
+      const onBackToScript = vi.fn();
+      render(
+        <NodesView
+          scenes={[]}
+          chapters={[]}
+          onOpenScene={vi.fn()}
+          scriptId="1"
+          onReload={vi.fn()}
+          onBackToScript={onBackToScript}
+        />,
+      );
+      fireEvent.click(screen.getByTestId('nodes-empty-back'));
+      expect(onBackToScript).toHaveBeenCalledTimes(1);
+    });
+
+    it('renders the canvas (not the empty state) once a scene exists', () => {
+      render(
+        <NodesView
+          scenes={[scene({ id: '200' })]}
+          chapters={[]}
+          onOpenScene={vi.fn()}
+          scriptId="1"
+          onReload={vi.fn()}
+        />,
+      );
+      expect(screen.queryByTestId('nodes-empty')).toBeNull();
+      expect((capturedProps.nodes as unknown[]).length).toBe(1);
+    });
+  });
+
   describe('coordinate persistence', () => {
     beforeEach(() => vi.useFakeTimers());
     afterEach(() => vi.useRealTimers());
