@@ -322,6 +322,31 @@ async def test_no_media_file_produced(monkeypatch):
     assert exc.value.code == "generation_failed"
 
 
+async def test_success_json_containing_401_not_misclassified(monkeypatch):
+    # M1: a paid, successful submit whose JSON carries a number like 401 (credit
+    # balance, or a submit_id substring) must NEVER be read as not_logged_in. The
+    # bare "401" needle is gone and _classify_failure only runs on failure
+    # (rc != 0 or no submit_id), so a clean rc=0 + submit_id short-circuits it.
+    install_fake_exec(
+        monkeypatch,
+        {
+            "text2image": lambda argv: FakeProc(
+                rc=0,
+                stdout=_json_bytes(
+                    {"submit_id": "ok401", "credit": 401, "gen_status": "submitted"}
+                ),
+            ),
+            "query_result": lambda argv: FakeProc(
+                rc=0, stdout=b"done", on_run=_writes_file("out.png"), argv=argv
+            ),
+        },
+    )
+    provider = JimengCliProvider()
+    result = await provider.generate_image(prompt="x", aspect="1:1")
+    assert result.mime == "image/png"
+    assert result.raw["submit_id"] == "ok401"
+
+
 # ---------------------------------------------------------------------------
 # Hard timeout + kill path (real wait_for, hanging proc)
 # ---------------------------------------------------------------------------

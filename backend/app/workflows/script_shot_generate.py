@@ -35,10 +35,17 @@ is a BUSINESS column this workflow may write):
 
 from __future__ import annotations
 
+import os
+import shutil
 from typing import Any, Optional
 
 from dbos import DBOS
 from loguru import logger
+
+# Prefix of the scratch dir the jimeng-cli provider writes its product into
+# (``tempfile.mkdtemp(prefix="jimeng_")``). Only a dir with this prefix is ever
+# reaped after ingest, so cleanup can never nuke an arbitrary path.
+_JIMENG_SCRATCH_PREFIX = "jimeng_"
 
 # Default image provider/model. ``provider=None`` means "resolve from the DB
 # mediahub_models catalog" — the image ``provider_registry`` ships EMPTY, so a
@@ -132,6 +139,17 @@ async def generate_shot_image_step(
     return produced
 
 
+def _reap_scratch_dir(local_path: str) -> None:
+    """Remove the jimeng-cli scratch dir holding ``local_path`` (H1).
+
+    Best-effort and defensive: only a dir whose basename starts with the
+    ``jimeng_`` prefix is ever removed, so a stray non-scratch path can never
+    trigger deletion of an arbitrary directory."""
+    parent = os.path.dirname(local_path)
+    if os.path.basename(parent).startswith(_JIMENG_SCRATCH_PREFIX):
+        shutil.rmtree(parent, ignore_errors=True)
+
+
 async def _resolve_scope_id(scene: Optional[dict[str, Any]], user_id: str) -> int:
     """Owning team for the shot: scene(script_id)→script_projects(team_id).
 
@@ -174,64 +192,73 @@ async def persist_generation(
         register_generated_media,
     )
 
-    if not user_id:
-        logger.warning(
-            "[script_shot_generate][persist] shot {} has no user_id — keeping "
-            "EPHEMERAL provider url (will rot): {}",
-            shot_id,
-            provider_url,
-        )
-        return {"image_url": provider_url, "thumbnail_url": provider_url}
-
+    # provider_url is a URL (Ark) or a local file path (jimeng-cli). The local
+    # file lives in a `jimeng_` scratch dir the provider created; once the store
+    # has copied it in (or we've given up), that dir is reaped in the `finally`
+    # so the worker /tmp never grows unboundedly (H1).
+    is_url = provider_url.startswith(("http://", "https://"))
     try:
-        shot = await get_script_shot_repository().get_by_id(shot_id)
-        if not shot:
-            raise ValueError(f"Shot not found: {shot_id}")
-        from app.repositories.script_scene_repository import (
-            get_script_scene_repository,
-        )
+        if not user_id:
+            logger.warning(
+                "[script_shot_generate][persist] shot {} has no user_id — keeping "
+                "EPHEMERAL provider url (will rot): {}",
+                shot_id,
+                provider_url,
+            )
+            return {"image_url": provider_url, "thumbnail_url": provider_url}
 
-        scene = await get_script_scene_repository().get_by_id(str(shot.get("scene_id")))
-        prompt = _compose_prompt(shot, scene)
-        scope_id = await _resolve_scope_id(scene, str(user_id))
+        try:
+            shot = await get_script_shot_repository().get_by_id(shot_id)
+            if not shot:
+                raise ValueError(f"Shot not found: {shot_id}")
+            from app.repositories.script_scene_repository import (
+                get_script_scene_repository,
+            )
 
-        # provider_url is a URL (Ark) or a local file path (jimeng-cli). Route to
-        # the matching ingest input — register_generated_media takes exactly one.
-        is_url = provider_url.startswith(("http://", "https://"))
-        row = await register_generated_media(
-            user_id=str(user_id),
-            scope_id=scope_id,
-            source_url=provider_url if is_url else None,
-            source_path=None if is_url else provider_url,
-            mime="image/png",
-            origin=GenerationOrigin(
-                kind="shot_generate",
-                node_id=str(shot_id),
-                prompt=prompt,
-                model=model,
-                provider=provider,
-                derivation_kind="shot_generate",
-            ),
-        )
-        gen_id = row.get("id")
-        if gen_id is None:
-            raise RuntimeError("register_generated_media returned no id")
-        durable = f"/api/v1/generated-media/{gen_id}/cover"
-        logger.info(
-            "[script_shot_generate][persist] shot {} → generated_media {} ({})",
-            shot_id,
-            gen_id,
-            durable,
-        )
-        return {"image_url": durable, "thumbnail_url": durable}
-    except Exception:
-        logger.opt(exception=True).warning(
-            "[script_shot_generate][persist] durable persist FAILED for shot {} "
-            "— keeping EPHEMERAL provider url (will rot): {}",
-            shot_id,
-            provider_url,
-        )
-        return {"image_url": provider_url, "thumbnail_url": provider_url}
+            scene = await get_script_scene_repository().get_by_id(
+                str(shot.get("scene_id"))
+            )
+            prompt = _compose_prompt(shot, scene)
+            scope_id = await _resolve_scope_id(scene, str(user_id))
+
+            # Route to the matching ingest input — register takes exactly one.
+            row = await register_generated_media(
+                user_id=str(user_id),
+                scope_id=scope_id,
+                source_url=provider_url if is_url else None,
+                source_path=None if is_url else provider_url,
+                mime="image/png",
+                origin=GenerationOrigin(
+                    kind="shot_generate",
+                    node_id=str(shot_id),
+                    prompt=prompt,
+                    model=model,
+                    provider=provider,
+                    derivation_kind="shot_generate",
+                ),
+            )
+            gen_id = row.get("id")
+            if gen_id is None:
+                raise RuntimeError("register_generated_media returned no id")
+            durable = f"/api/v1/generated-media/{gen_id}/cover"
+            logger.info(
+                "[script_shot_generate][persist] shot {} → generated_media {} ({})",
+                shot_id,
+                gen_id,
+                durable,
+            )
+            return {"image_url": durable, "thumbnail_url": durable}
+        except Exception:
+            logger.opt(exception=True).warning(
+                "[script_shot_generate][persist] durable persist FAILED for shot {} "
+                "— keeping EPHEMERAL provider url (will rot): {}",
+                shot_id,
+                provider_url,
+            )
+            return {"image_url": provider_url, "thumbnail_url": provider_url}
+    finally:
+        if not is_url:
+            _reap_scratch_dir(provider_url)
 
 
 @DBOS.step()

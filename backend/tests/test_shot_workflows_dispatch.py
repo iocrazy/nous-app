@@ -21,6 +21,8 @@ production bug if broken:
 from __future__ import annotations
 
 import importlib
+import os
+import tempfile
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -645,6 +647,128 @@ async def test_persist_generation_keeps_url_when_no_user_id():
         "thumbnail_url": "http://cdn/ephemeral.png",
     }
     register.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# persist_generation local-file ingest: reap the jimeng-cli temp dir (H1)
+# ---------------------------------------------------------------------------
+
+
+def _mk_jimeng_tmp() -> tuple[str, str]:
+    """A real jimeng_ scratch dir with a product file — models what the CLI
+    provider hands back as a local source_path."""
+    tmp_dir = tempfile.mkdtemp(prefix="jimeng_")
+    local_path = os.path.join(tmp_dir, "out.png")
+    with open(local_path, "wb") as f:
+        f.write(b"\x89PNG\r\n")
+    return tmp_dir, local_path
+
+
+def _persist_patches(shot_repo, scene_repo, script_repo, register):
+    return (
+        patch(
+            "app.repositories.script_shot_repository.get_script_shot_repository",
+            MagicMock(return_value=shot_repo),
+        ),
+        patch(
+            "app.repositories.script_scene_repository.get_script_scene_repository",
+            MagicMock(return_value=scene_repo),
+        ),
+        patch(
+            "app.repositories.script_repository.get_script_project_repository",
+            MagicMock(return_value=script_repo),
+        ),
+        patch(
+            "app.services.library.generated_media_service.register_generated_media",
+            register,
+        ),
+    )
+
+
+async def test_persist_generation_local_path_reaps_temp_dir_on_success(monkeypatch):
+    """A jimeng-cli local source_path is routed to source_path (not source_url)
+    and, after the store copies it in, its jimeng_ scratch dir is reaped so the
+    worker /tmp never grows unboundedly (H1)."""
+    from app.workflows import script_shot_generate as m
+
+    tmp_dir, local_path = _mk_jimeng_tmp()
+    shot_repo = MagicMock()
+    shot_repo.get_by_id = AsyncMock(
+        return_value={"id": int(_SHOT), "scene_id": int(_SCENE), "description": "d"}
+    )
+    scene_repo = MagicMock()
+    scene_repo.get_by_id = AsyncMock(return_value={"script_id": 700})
+    script_repo = MagicMock()
+    script_repo.get_by_id = AsyncMock(return_value={"id": 700, "team_id": 900})
+    register = AsyncMock(return_value={"id": 4242})
+
+    p1, p2, p3, p4 = _persist_patches(shot_repo, scene_repo, script_repo, register)
+    with p1, p2, p3, p4:
+        urls = await m.persist_generation(_SHOT, local_path, "5.0", "jimeng-cli", _USER)
+
+    assert urls == {
+        "image_url": "/api/v1/generated-media/4242/cover",
+        "thumbnail_url": "/api/v1/generated-media/4242/cover",
+    }
+    kwargs = register.call_args.kwargs
+    assert kwargs["source_path"] == local_path
+    assert kwargs["source_url"] is None
+    assert not os.path.exists(tmp_dir)  # H1: scratch dir reaped
+
+
+async def test_persist_generation_local_path_reaps_temp_dir_on_failure(monkeypatch):
+    """Even when the store raises, the jimeng_ scratch dir is still reaped — the
+    finally cleanup runs on every path so a persist failure can't leak files."""
+    from app.workflows import script_shot_generate as m
+
+    tmp_dir, local_path = _mk_jimeng_tmp()
+    shot_repo = MagicMock()
+    shot_repo.get_by_id = AsyncMock(
+        return_value={"id": int(_SHOT), "scene_id": int(_SCENE), "description": "d"}
+    )
+    scene_repo = MagicMock()
+    scene_repo.get_by_id = AsyncMock(return_value={"script_id": 700})
+    script_repo = MagicMock()
+    script_repo.get_by_id = AsyncMock(return_value={"id": 700, "team_id": 900})
+    register = AsyncMock(side_effect=RuntimeError("storage down"))
+
+    p1, p2, p3, p4 = _persist_patches(shot_repo, scene_repo, script_repo, register)
+    with p1, p2, p3, p4:
+        await m.persist_generation(_SHOT, local_path, "5.0", "jimeng-cli", _USER)
+
+    assert not os.path.exists(tmp_dir)  # H1: reaped despite the failure
+
+
+async def test_persist_generation_never_reaps_non_jimeng_dir(monkeypatch):
+    """Safety guard: only a jimeng_-prefixed scratch dir is ever removed. A local
+    path living somewhere else (defensive — should not happen) is left untouched
+    so cleanup can never nuke an arbitrary directory."""
+    from app.workflows import script_shot_generate as m
+
+    other_dir = tempfile.mkdtemp(prefix="keepme_")
+    local_path = os.path.join(other_dir, "out.png")
+    with open(local_path, "wb") as f:
+        f.write(b"\x89PNG\r\n")
+    try:
+        shot_repo = MagicMock()
+        shot_repo.get_by_id = AsyncMock(
+            return_value={"id": int(_SHOT), "scene_id": int(_SCENE), "description": "d"}
+        )
+        scene_repo = MagicMock()
+        scene_repo.get_by_id = AsyncMock(return_value={"script_id": 700})
+        script_repo = MagicMock()
+        script_repo.get_by_id = AsyncMock(return_value={"id": 700, "team_id": 900})
+        register = AsyncMock(return_value={"id": 4242})
+
+        p1, p2, p3, p4 = _persist_patches(shot_repo, scene_repo, script_repo, register)
+        with p1, p2, p3, p4:
+            await m.persist_generation(_SHOT, local_path, "5.0", "jimeng-cli", _USER)
+
+        assert os.path.exists(other_dir)  # NOT reaped — wrong prefix
+    finally:
+        import shutil
+
+        shutil.rmtree(other_dir, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------

@@ -110,13 +110,19 @@ dreamina login | relogin | logout | user_credit | version
 dreamina text2image  --prompt=... --ratio=W:H --resolution_type=... --poll=N [--model_version=...]
 dreamina image2image --images=<path> --prompt=... --poll=N
 dreamina text2video  --prompt=... --model_version=seedance2.0fast --poll=N
-dreamina image2video --images=<path> --prompt=... --model_version=... --poll=N
+dreamina image2video --image=<path> --prompt=... --model_version=... --poll=N
 dreamina query_result --submit_id=<id> --download_dir=<dir>
 dreamina list_task
 ```
 
 stdout mixes human log lines with JSON — the provider scans for the JSON object
 carrying `submit_id` / `gen_status` / `result_json` / `images` / `videos`.
+
+> ⚠️ `image2video --image=` (singular) is **not yet live-verified** — the
+> provider code and its tests currently lock the singular form. Before the
+> PR-J2 video E2E, run `dreamina image2video -h` on the real CLI and reconcile
+> the flag name (`--image` vs `--images`) across the provider + tests + this
+> runbook.
 
 ## Troubleshooting
 

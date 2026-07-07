@@ -93,12 +93,15 @@ _VIDEO_EXTS = (".mp4", ".mov", ".webm", ".m4v")
 # Real not-logged-in output (verified 2026-07-07):
 #   未检测到有效登录态，请先执行 dreamina login
 _NOT_LOGGED_IN_ZH = ("未检测到有效登录态", "请先执行 dreamina login")
+# NB: no bare "401" needle — it substring-matches any numeric token (a credit
+# balance, a submit_id fragment) in an otherwise-successful payload and would
+# misread a paid generation as not-logged-in (M1). "unauthorized" carries the
+# auth signal without the false positives.
 _NOT_LOGGED_IN_EN = (
     "not logged in",
     "please login",
     "please log in",
     "unauthorized",
-    "401",
 )
 _NO_CREDIT_ZH = ("额度不足", "余额不足", "积分不足", "配额不足")
 _NO_CREDIT_EN = (
@@ -305,11 +308,18 @@ class JimengCliProvider:
         download_dir = tempfile.mkdtemp(prefix="jimeng_")
 
         rc, out, err = await self._run_cli(submit_args, submit_timeout)
-        failure = self._classify_failure(rc, out, err)
-        if failure is not None:
-            raise failure
-
         parsed = _extract_json(out) or {}
+        submit_id = parsed.get("submit_id")
+
+        # Only interrogate the output for failure signatures when the submit did
+        # NOT cleanly yield a submit_id (rc != 0 or no id). A paid, successful
+        # submit whose JSON happens to contain tokens like "401" must never be
+        # misclassified as not-logged-in / no-credit (M1).
+        if rc != 0 or not submit_id:
+            failure = self._classify_failure(rc, out, err)
+            if failure is not None:
+                raise failure
+
         gen_status = str(parsed.get("gen_status", "")).lower()
         if gen_status in {"failed", "fail", "error"}:
             raise JimengCliError(
@@ -318,7 +328,6 @@ class JimengCliProvider:
                 stderr=err[:500],
             )
 
-        submit_id = parsed.get("submit_id")
         if not submit_id and rc != 0:
             raise JimengCliError(
                 "generation_failed",
@@ -342,12 +351,15 @@ class JimengCliProvider:
             ],
             self._query_timeout,
         )
-        q_failure = self._classify_failure(q_rc, q_out, q_err)
-        if q_failure is not None:
-            raise q_failure
 
         local_path = _first_media_file(download_dir, exts)
         if not local_path:
+            # No product → only now interrogate the query output for a structured
+            # cause (same M1 discipline: classify on the failure branch, not the
+            # success one).
+            q_failure = self._classify_failure(q_rc, q_out, q_err)
+            if q_failure is not None:
+                raise q_failure
             raise JimengCliError(
                 "generation_failed",
                 f"dreamina produced no media file for submit_id={submit_id}",
