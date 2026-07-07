@@ -328,6 +328,8 @@ export interface CapabilityHealth {
     | 'no_model'
     | 'not_vision'
     | 'not_configured'
+    | 'probe_failing'
+    | 'key_test_failed'
     | 'unknown_provider'
     | 'runtime_failing'
     | 'error';
