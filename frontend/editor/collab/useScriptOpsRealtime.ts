@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import { getSupabaseClient } from '../../supabaseClient';
 import type { RemoteOpRow } from '../useSceneSync';
 
@@ -63,27 +64,45 @@ export function useScriptOpsRealtime(
     const supabase = getSupabaseClient();
     if (!supabase) return;
 
-    const channel = supabase
-      .channel('script-ops-' + scriptId)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'script_ops' },
-        (payload) => {
-          const record = payload.new as Record<string, unknown>;
-          if (record == null || record.scene_id == null) return;
-          const sceneId = String(record.scene_id);
-          // Second gate: only rows for scenes in THIS open script.
-          if (!getSceneIdsRef.current().includes(sceneId)) return;
-          dispatchToSceneRef.current(sceneId, normalizeRow(record));
-        },
-      )
-      .subscribe((status) => {
-        // Full reconcile once connected — catches ops missed pre-subscription.
-        if (status === 'SUBSCRIBED') onReconcileRef.current?.();
-      });
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+
+    void (async () => {
+      // Apply the session token to the realtime socket BEFORE joining. Supabase
+      // freezes a postgres_changes subscription's JWT claims at join time, so
+      // subscribing before supabase-js has called realtime.setAuth() evaluates
+      // this channel as anon → mig346's can_read_script_op() is false → the
+      // server silently never delivers a single row (channel still reads
+      // 'joined'). Real-machine canary: a probe channel joined after auth on the
+      // same socket got every op; this one got none until we set auth first.
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      if (!token || cancelled) return; // no session, or unmounted mid-await
+      supabase.realtime.setAuth(token);
+
+      channel = supabase
+        .channel('script-ops-' + scriptId)
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'script_ops' },
+          (payload) => {
+            const record = payload.new as Record<string, unknown>;
+            if (record == null || record.scene_id == null) return;
+            const sceneId = String(record.scene_id);
+            // Second gate: only rows for scenes in THIS open script.
+            if (!getSceneIdsRef.current().includes(sceneId)) return;
+            dispatchToSceneRef.current(sceneId, normalizeRow(record));
+          },
+        )
+        .subscribe((status) => {
+          // Full reconcile once connected — catches ops missed pre-subscription.
+          if (status === 'SUBSCRIBED') onReconcileRef.current?.();
+        });
+    })();
 
     return () => {
-      supabase.removeChannel(channel);
+      cancelled = true;
+      if (channel) supabase.removeChannel(channel);
     };
   }, [scriptId]);
 }
