@@ -31,6 +31,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Hooks gate: rules-of-hooks violations shipped to prod before (#1094,
+      # early-return-then-useState = React #310). Blocking on error; the
+      # exhaustive-deps rule reports as warning only.
+      - name: ESLint (react-hooks gate)
+        run: npm run lint
+
       # Non-blocking: surfaces pre-existing type errors in PR output without
       # breaking CI. Flip to a required step once the backlog is cleared.
       - name: TypeScript check
