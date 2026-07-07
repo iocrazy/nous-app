@@ -58,14 +58,20 @@ afterEach(() => {
 });
 
 describe('CanvasPage empty state', () => {
-  it('renders an explicit empty state (not the blank surface) when ready with zero nodes', () => {
+  it('renders the hint OVER a live surface when ready with zero nodes', () => {
+    // The surface must stay mounted — the palette/composer on it are the only
+    // way to add a first node (a full-screen empty state dead-ends a canvas
+    // freshly created via New Canvas).
     seedReady([]);
     render(<CanvasPage />);
     expect(screen.getByText('canvas.empty.title')).toBeTruthy();
-    expect(screen.queryByTestId('canvas-surface')).toBeNull();
+    expect(screen.getByTestId('canvas-surface')).toBeTruthy();
+    // The hint never intercepts surface interactions.
+    const hint = screen.getByText('canvas.empty.title').closest('div')?.parentElement;
+    expect(hint?.className).toContain('pointer-events-none');
   });
 
-  it('renders the canvas surface when ready with nodes', () => {
+  it('renders the canvas surface without the hint when ready with nodes', () => {
     seedReady([{ id: 'n1' }]);
     render(<CanvasPage />);
     expect(screen.getByTestId('canvas-surface')).toBeTruthy();

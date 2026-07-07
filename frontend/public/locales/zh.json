@@ -1187,7 +1187,15 @@
       "storyboard": "分镜",
       "generation": "生成",
       "review": "审核",
-      "delivery": "交付"
+      "delivery": "交付",
+      "desc": {
+        "planning": "确定简报、收集参考、定下项目方向。",
+        "script": "撰写并锁定驱动后续环节的脚本。",
+        "storyboard": "把锁定的脚本转成分镜与运镜说明。",
+        "generation": "生产镜头——生成画面、视频、音频。",
+        "review": "收集反馈，迭代到成片通过。",
+        "delivery": "打包最终交付物并交接。"
+      }
     },
     "tools": {
       "files": "文件",
@@ -1275,6 +1283,12 @@
     "card": {
       "enteredStage": "进入 {{stage}}",
       "archived": "已归档"
+    },
+    "workbench": {
+      "currentStageOf": "当前阶段 · 第 {{index}}/{{total}} 步",
+      "advanceTo": "推进到 {{stage}}",
+      "finalStage": "最后阶段",
+      "recommendedTools": "推荐工具"
     }
   },
   "storyboard": {
