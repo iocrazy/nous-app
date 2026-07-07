@@ -1215,15 +1215,17 @@ class AILibraryChatService:
 
         async def _summarizer(head: List[Dict[str, Any]]) -> str:
             try:
-                cheap_model = "qwen-turbo"
-                # DB-only credentials (铁律 2026-07-07): resolve through the
-                # platform catalog; a miss raises and the compactor falls
-                # back to its emergency cap (pre-existing behavior — prod
-                # never had env creds for this path either).
+                # DB-only credentials (铁律 2026-07-07): the cheap summary
+                # model is the maintenance-tier catalog default (admin-
+                # overridable via system_settings.maintenance_llm_model). A
+                # catalog miss raises and the compactor falls back to its
+                # emergency cap.
                 from app.services.ai.providers.ai_provider_helpers import (
+                    get_maintenance_model,
                     resolve_db_adapter,
                 )
 
+                cheap_model = await get_maintenance_model()
                 adapter = await resolve_db_adapter(cheap_model, "chat")
                 from uuid import UUID as _UUID
 

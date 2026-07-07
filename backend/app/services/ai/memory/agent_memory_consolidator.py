@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from loguru import logger
 
-_FALLBACK_CONSOLIDATION_MODEL = "qwen-turbo"
 _SYSTEM_MESSAGE = (
     "You distil durable agent memory. " "Output only a JSON array of memory entries."
 )
@@ -31,10 +30,11 @@ async def default_consolidator(prompt: str, model: str = "") -> str:
 
         from app.schemas.ai_library import ComposedSystemPrompt
         from app.services.ai.providers.ai_provider_helpers import (
+            get_maintenance_model,
             resolve_db_adapter,
         )
 
-        consolidation_model = (model or "").strip() or _FALLBACK_CONSOLIDATION_MODEL
+        consolidation_model = (model or "").strip() or await get_maintenance_model()
         try:
             # DB-only credentials (铁律 2026-07-07): platform catalog → raise.
             adapter = await resolve_db_adapter(consolidation_model, "agent_memory")
@@ -42,7 +42,7 @@ async def default_consolidator(prompt: str, model: str = "") -> str:
             # Unknown/unconfigured model → fall back to the cheap default
             # (itself DB-resolved; a miss lands in the outer best-effort
             # except and returns "").
-            consolidation_model = _FALLBACK_CONSOLIDATION_MODEL
+            consolidation_model = await get_maintenance_model()
             adapter = await resolve_db_adapter(consolidation_model, "agent_memory")
 
         composed = ComposedSystemPrompt(

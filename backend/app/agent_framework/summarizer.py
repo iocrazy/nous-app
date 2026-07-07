@@ -33,8 +33,6 @@ from typing import Optional
 
 from loguru import logger
 
-DEFAULT_COMPACTION_PROVIDER = "claude-haiku-4-5"
-
 # How many tokens the summary itself can use. Capped to a few hundred
 # so even a maximally verbose Haiku output doesn't blow the budget the
 # compaction was supposed to free up.
@@ -69,7 +67,10 @@ async def _read_provider_setting() -> str:
     Resolution order (first wins):
       1. ``COMPACTION_PROVIDER`` env var — for ad-hoc CI overrides
       2. ``system_settings.compaction_provider`` — admin-configurable
-      3. ``DEFAULT_COMPACTION_PROVIDER`` — sane default
+      3. ``get_maintenance_model()`` — the maintenance-tier platform
+         catalog default (``system_settings.maintenance_llm_model`` →
+         ``DEFAULT_MAINTENANCE_MODEL``); the old hardcoded Haiku default
+         named no catalog entry under DB-only credentials
 
     Errors here are non-fatal: if Postgres is unreachable we fall back
     to the default rather than break the agent loop. Logs the failure
@@ -106,7 +107,9 @@ async def _read_provider_setting() -> str:
             exc,
         )
 
-    return DEFAULT_COMPACTION_PROVIDER
+    from app.services.ai.providers.ai_provider_helpers import get_maintenance_model
+
+    return await get_maintenance_model()
 
 
 def _flatten_messages_for_summary(messages: list[dict]) -> str:
@@ -230,7 +233,6 @@ async def summarize(
 
 
 __all__ = [
-    "DEFAULT_COMPACTION_PROVIDER",
     "DEFAULT_SUMMARY_MAX_TOKENS",
     "SUMMARIZE_SYSTEM_PROMPT",
     "SUMMARIZE_TIMEOUT_S",
