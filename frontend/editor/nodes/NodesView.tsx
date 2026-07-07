@@ -1,30 +1,28 @@
 /**
  * NodesView — the scene/chapter flow projection surface (Phase B Task 2-3).
  *
- * Renders the mapper's node/edge graph in a controlled @xyflow/react canvas.
- * Scene nodes are draggable; a drag-stop persists the new coordinates via
- * `updateSceneMeta` (debounced 500ms per scene so a flurry of small moves
- * collapses into one write). Double-clicking a scene node jumps back to the
+ * A scene-mode adapter over the shared `CanvasEngine` (canvas-kit): it projects
+ * the mapper's node/edge graph, and wires the scene-specific persistence.
+ * Positions are debounced per lane (`sc-` → updateSceneMeta, `ch-` →
+ * updateChapterPosition) through `useGroupDragPersist`; the engine owns the
+ * feel (snap grid, box-select, alignment guides, minimap, fit-view / zoom).
+ *
+ * The edges are a read-only projection, so the engine runs with
+ * `allowConnect={false}` (no connection handlers attached at all). Scene nodes
+ * are draggable; a drag-stop persists via the engine's `onNodeDragStop` /
+ * `onSelectionDragStop` hooks. Double-clicking a scene node jumps back to the
  * script view through `onOpenScene`. Chapter nodes carry an inline action bar
  * (Expand / Branch / Convert) — dispatched + polled through a context so the
  * node components don't thread callbacks through React Flow's node `data`.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ReactFlow,
-  Background,
-  BackgroundVariant,
-  Controls,
-  MiniMap,
-  SelectionMode,
   applyNodeChanges,
   type Edge,
   type Node,
   type NodeChange,
   type NodePositionChange,
-  type ReactFlowInstance,
 } from '@xyflow/react';
-import '@xyflow/react/dist/style.css';
 import { useTranslation } from 'react-i18next';
 import {
   mapToFlow,
@@ -34,13 +32,7 @@ import {
 } from './sceneNodeMapper';
 import { SceneFlowNode } from './SceneFlowNode';
 import { ChapterActionsNode, ChapterActionContext } from './ChapterActionsNode';
-import { GuideOverlay } from '../../canvas-kit/GuideOverlay';
-import {
-  computeAlignmentGuides,
-  type AlignmentGuides,
-  type Rect,
-} from '../../canvas-kit/alignmentGuides';
-import { useCanvasShortcuts } from '../../canvas-kit/useCanvasShortcuts';
+import { CanvasEngine } from '../../canvas-kit/CanvasEngine';
 import { useGroupDragPersist } from '../../canvas-kit/useGroupDragPersist';
 import { useConvertPoll } from '../useConvertPoll';
 import { updateSceneMeta, updateChapterPosition, listShots } from '../sceneService';
@@ -51,10 +43,6 @@ import type { ScriptChapter } from '../../types';
 const DRAG_PERSIST_MS = 500;
 /** Length of the `sc-` / `ch-` id prefixes the mapper emits. */
 const ID_PREFIX_LEN = 3;
-/** Snap-to-grid step, px. Gentle 8px lattice — no user toggle (YAGNI). */
-const SNAP_GRID: [number, number] = [8, 8];
-/** Stable empty-guides object so clearing never allocates a new render key. */
-const NO_GUIDES: AlignmentGuides = {};
 
 const NODE_TYPES = { sceneNode: SceneFlowNode, chapterNode: ChapterActionsNode };
 
@@ -65,29 +53,15 @@ function sameCovers(a: Map<string, string>, b: Map<string, string>): boolean {
   return true;
 }
 
-/** Bounding rect of a node in flow space, using measured size when available. */
-function nodeRect(node: Node): Rect {
+/** Node box for guide + snap math: measured size when known, else per-type fallback. */
+function sceneNodeMeasure(node: Node): { width: number; height: number } {
   const fallbackWidth =
     node.type === 'chapterNode' ? CHAPTER_NODE_WIDTH : SCENE_NODE_WIDTH;
   return {
-    x: node.position.x,
-    y: node.position.y,
     width: node.measured?.width ?? fallbackWidth,
     height: node.measured?.height ?? NODE_HEIGHT_FALLBACK,
   };
 }
-
-/**
- * Modifier that toggles add-to-selection. Cmd on Apple platforms, Ctrl
- * elsewhere — matches the OS conventions React Flow's own defaults follow.
- * `navigator.platform` is empty under jsdom, which resolves to Control.
- */
-function detectMultiSelectKey(): 'Meta' | 'Control' {
-  const platform = (typeof navigator !== 'undefined' && navigator.platform) || '';
-  return /Mac|iPhone|iPad|iPod/i.test(platform) ? 'Meta' : 'Control';
-}
-
-const MULTI_SELECT_KEY = detectMultiSelectKey();
 
 export interface NodesViewProps {
   scenes: SceneDoc[];
@@ -116,12 +90,7 @@ export function NodesView({
     [scenes, chapters, shotCovers],
   );
   const [nodes, setNodes] = useState<Node[]>(() => graph.nodes as Node[]);
-  const [guides, setGuides] = useState<AlignmentGuides>(NO_GUIDES);
   const { startPoll } = useConvertPoll(scriptId);
-
-  // Canvas container (keyboard target) + live flow instance (zoom / fit).
-  const containerRef = useRef<HTMLDivElement>(null);
-  const instanceRef = useRef<ReactFlowInstance | null>(null);
 
   // Re-seed when the projection changes (scene added / removed / reparented).
   // Drag-in-progress positions are transient client state; a structural change
@@ -171,8 +140,8 @@ export function NodesView({
     };
   }, [sceneIdSig]);
 
-  // Latest node set, read synchronously by the single-drag handler to learn the
-  // current selection without re-binding the callback on every position change.
+  // Latest node set, read synchronously by the group-drag branch to flush every
+  // selected node without re-binding the callback on every position change.
   const nodesRef = useRef<Node[]>(nodes);
   useEffect(() => {
     nodesRef.current = nodes;
@@ -227,64 +196,43 @@ export function NodesView({
     pointerDraggingRef.current = true;
   }, []);
 
-  // While a single node drags, match its edges against every other node and draw
-  // the guide lines. The actual position snap is applied once on drop (below),
-  // so the node never fights the cursor mid-drag.
-  const onNodeDrag = useCallback((_evt: React.MouseEvent, node: Node) => {
-    const others = nodesRef.current.filter((n) => String(n.id) !== String(node.id));
-    setGuides(computeAlignmentGuides(nodeRect(node), others.map(nodeRect)));
-  }, []);
-
+  // A settled node drag. The engine hands us whether the drop was a group move
+  // and any one-time alignment snap it computed; we own persistence.
   const onNodeDragStop = useCallback(
-    (_evt: React.MouseEvent, node: Node) => {
+    (node: Node, ctx: { isGroupDrop: boolean; snappedPosition: { x: number; y: number } | null }) => {
       pointerDraggingRef.current = false;
-      setGuides(NO_GUIDES);
-      // If the dragged node belongs to a multi-selection, React Flow moved the
-      // whole group with it — persist every selected node, not just this one.
-      const selected = nodesRef.current.filter((n) => n.selected);
-      const inSelection =
-        selected.length > 1 && selected.some((n) => String(n.id) === String(node.id));
-      if (inSelection) {
-        persistPositions(selected);
+      // Group drop: React Flow moved the whole selection — persist every selected
+      // node through its own lane, not just this one.
+      if (ctx.isGroupDrop) {
+        persistPositions(nodesRef.current.filter((n) => n.selected));
         return;
       }
-      // Solo drop: apply a one-time alignment snap (wins over the 8px grid).
-      const others = nodesRef.current.filter((n) => String(n.id) !== String(node.id));
-      const g = computeAlignmentGuides(nodeRect(node), others.map(nodeRect));
-      const snapped =
-        g.snappedX != null || g.snappedY != null
-          ? {
-              ...node,
-              position: {
-                x: g.snappedX ?? node.position.x,
-                y: g.snappedY ?? node.position.y,
-              },
-            }
-          : node;
-      if (snapped !== node) {
+      // Solo drop: apply the engine's one-time alignment snap (wins over the 8px
+      // grid) to local state, then persist the final coordinate.
+      const finalPosition = ctx.snappedPosition ?? node.position;
+      if (ctx.snappedPosition) {
         setNodes((nds) =>
           nds.map((n) =>
-            String(n.id) === String(node.id) ? { ...n, position: snapped.position } : n,
+            String(n.id) === String(node.id) ? { ...n, position: finalPosition } : n,
           ),
         );
       }
-      persistPositions([snapped]);
+      persistPositions([{ ...node, position: finalPosition }]);
     },
     [persistPositions],
   );
 
   const onSelectionDragStop = useCallback(
-    (_evt: React.MouseEvent, dragged: Node[]) => {
+    (dragged: Node[]) => {
       pointerDraggingRef.current = false;
-      setGuides(NO_GUIDES);
       persistPositions(dragged);
     },
     [persistPositions],
   );
 
-  // Keyboard actions. Arrow-key nudging is owned by xyflow's built-in a11y move
-  // (persisted via onNodesChange); here we only flip the `selected` flag across
-  // the controlled node set for select-all / clear.
+  // Keyboard select-all / clear flips the `selected` flag across the controlled
+  // node set. Arrow-key nudging is owned by xyflow's built-in a11y move (persisted
+  // via onNodesChange); zoom / fit-view are owned by the engine's shortcut layer.
   const selectAll = useCallback(
     () => setNodes((nds) => nds.map((n) => (n.selected ? n : { ...n, selected: true }))),
     [],
@@ -294,14 +242,6 @@ export function NodesView({
     [],
   );
 
-  useCanvasShortcuts(containerRef, {
-    onZoomIn: () => instanceRef.current?.zoomIn(),
-    onZoomOut: () => instanceRef.current?.zoomOut(),
-    onFitView: () => instanceRef.current?.fitView(),
-    onSelectAll: selectAll,
-    onClearSelection: clearSelection,
-  });
-
   const onNodeDoubleClick = useCallback(
     (_evt: React.MouseEvent, node: Node) => {
       if (node.type !== 'sceneNode') return;
@@ -310,21 +250,31 @@ export function NodesView({
     [onOpenScene],
   );
 
+  const noopEdgesChange = useCallback(() => {}, []);
+
   const actionContext = useMemo(
     () => ({ scriptId, chapters, startPoll, onReload }),
     [scriptId, chapters, startPoll, onReload],
   );
 
+  const minimapConfig = useMemo(
+    () => ({
+      nodeColor: (node: Node) =>
+        node.type === 'chapterNode' ? 'var(--indigo)' : 'var(--ink-faint)',
+      maskColor: 'var(--minimap-mask)',
+      ariaLabel: t('editor.nodesMinimapLabel'),
+    }),
+    [t],
+  );
+
   // Nothing to project: a script with neither scenes nor chapters would render a
   // bare xyflow canvas (a blank "invalid canvas" surface). Show an explicit
-  // empty state that points back to writing instead — and skip mounting
-  // ReactFlow entirely so an empty view pays none of its init cost.
+  // empty state that points back to writing instead — and skip mounting the
+  // engine entirely so an empty view pays none of its init cost.
   const isEmpty = scenes.length === 0 && chapters.length === 0;
 
   return (
     <div
-      ref={containerRef}
-      tabIndex={0}
       className="mh-nodes-view"
       data-testid="nodes-view"
       aria-label={t('editor.nodesViewLabel')}
@@ -345,43 +295,26 @@ export function NodesView({
           )}
         </div>
       ) : (
-      <ChapterActionContext.Provider value={actionContext}>
-        <ReactFlow
-          nodes={nodes}
-          edges={graph.edges as Edge[]}
-          nodeTypes={NODE_TYPES}
-          onInit={(instance) => {
-            instanceRef.current = instance;
-          }}
-          onNodesChange={onNodesChange}
-          onNodeDragStart={onNodeDragStart}
-          onNodeDrag={onNodeDrag}
-          onNodeDragStop={onNodeDragStop}
-          onSelectionDragStop={onSelectionDragStop}
-          onNodeDoubleClick={onNodeDoubleClick}
-          selectionMode={SelectionMode.Partial}
-          selectionKeyCode="Shift"
-          multiSelectionKeyCode={MULTI_SELECT_KEY}
-          snapGrid={SNAP_GRID}
-          snapToGrid
-          onlyRenderVisibleElements
-          fitView
-          proOptions={{ hideAttribution: true }}
-        >
-          <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
-          <Controls showInteractive={false} />
-          <MiniMap
-            pannable
-            zoomable
-            aria-label={t('editor.nodesMinimapLabel')}
-            maskColor="var(--minimap-mask)"
-            nodeColor={(node) =>
-              node.type === 'chapterNode' ? 'var(--indigo)' : 'var(--ink-faint)'
-            }
+        <ChapterActionContext.Provider value={actionContext}>
+          <CanvasEngine
+            nodeTypes={NODE_TYPES}
+            nodes={nodes}
+            edges={graph.edges as Edge[]}
+            fitView
+            nodeMeasure={sceneNodeMeasure}
+            onNodesChange={onNodesChange}
+            onEdgesChange={noopEdgesChange}
+            onNodeDragStart={onNodeDragStart}
+            onNodeDragStop={onNodeDragStop}
+            onSelectionDragStop={onSelectionDragStop}
+            onNodeDoubleClick={onNodeDoubleClick}
+            onSelectAll={selectAll}
+            onClearSelection={clearSelection}
+            allowConnect={false}
+            minimap={minimapConfig}
+            controls={{ showInteractive: false }}
           />
-          <GuideOverlay guides={guides} />
-        </ReactFlow>
-      </ChapterActionContext.Provider>
+        </ChapterActionContext.Provider>
       )}
     </div>
   );
