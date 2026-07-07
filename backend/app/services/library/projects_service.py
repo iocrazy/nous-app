@@ -25,6 +25,14 @@ from app.core.file_utils import (
 )
 from app.repositories.projects_repository import get_projects_repository
 
+# Card enrichment defaults when a project has no stage/members/history rows
+# (or the batch lookups failed) — the frontend renders the base card.
+_EMPTY_ENRICHMENT = {
+    "current_stage": None,
+    "members_preview": None,
+    "latest_activity": None,
+}
+
 
 class ProjectsService:
     """MediaTrack projects business logic"""
@@ -69,8 +77,72 @@ class ProjectsService:
         if not projects:
             return []
 
-        counts = await self.repo.get_project_file_counts([p["id"] for p in projects])
-        return [{**p, "file_count": counts.get(str(p["id"]), 0)} for p in projects]
+        ids = [p["id"] for p in projects]
+        counts = await self.repo.get_project_file_counts(ids)
+        enrichment = await self._get_card_enrichment(ids)
+        return [
+            {
+                **p,
+                "file_count": counts.get(str(p["id"]), 0),
+                **enrichment.get(str(p["id"]), _EMPTY_ENRICHMENT),
+            }
+            for p in projects
+        ]
+
+    async def _get_card_enrichment(self, project_ids: list) -> dict:
+        """Stage / members / activity card data for the list page (B1).
+
+        Three batch queries (stage join, latest history, member preview) run
+        concurrently — same no-N+1 contract as file counts. Each is
+        best-effort (returns {} on failure), so a broken enrichment degrades
+        the cards, never the list. Shapes:
+
+          current_stage:   {slug, name, index, total} | None
+            index/total derive from the stage catalog's sort_order ranking —
+            the card ring renders index-of-total without knowing sort_order.
+          members_preview: {count, members: [{user_id, username}, ...]} | None
+          latest_activity: {stage_name, actor, entered_at} | None
+        """
+        from app.repositories.project_stages_repository import (
+            get_project_stages_repository,
+        )
+
+        stages_repo = get_project_stages_repository()
+        try:
+            stage_map, activity, members, catalog = await asyncio.gather(
+                stages_repo.stages_for_projects(project_ids),
+                stages_repo.latest_activity_for_projects(project_ids),
+                self.repo.get_project_members_preview(project_ids),
+                stages_repo.list_catalog(),
+            )
+        except Exception as e:  # noqa: BLE001 — enrichment must not sink the list
+            logger.error(f"[projects] card enrichment failed: {e}")
+            return {}
+
+        order = [s["sort_order"] for s in catalog]
+        total = len(order)
+
+        out: dict = {}
+        for pid in [str(p) for p in project_ids]:
+            stage = stage_map.get(pid)
+            current_stage = None
+            if stage is not None:
+                try:
+                    index = order.index(stage["sort_order"]) + 1
+                except ValueError:
+                    index = 0
+                current_stage = {
+                    "slug": stage["slug"],
+                    "name": stage["name"],
+                    "index": index,
+                    "total": total,
+                }
+            out[pid] = {
+                "current_stage": current_stage,
+                "members_preview": members.get(pid),
+                "latest_activity": activity.get(pid),
+            }
+        return out
 
     async def create_project(self, user_id: str, data: dict) -> dict:
         """

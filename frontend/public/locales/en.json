@@ -1271,6 +1271,10 @@
       "deleteCollectionFailed": "Failed to delete collection link",
       "createShareFailed": "Failed to create share link",
       "loadVersionsFailed": "Failed to load version history"
+    },
+    "card": {
+      "enteredStage": "Entered {{stage}}",
+      "archived": "Archived"
     }
   },
   "storyboard": {
