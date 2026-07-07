@@ -1,7 +1,7 @@
 /**
  * CanvasEngine — the single ReactFlow assembly every canvas surface runs on
- * (canvas-kit). Extracted verbatim from canvas-core's CanvasSurface so the
- * classic / smart / scene consumers share one engine + one feel.
+ * (canvas-kit). Extracted from canvas-core's CanvasSurface so the classic /
+ * smart / scene consumers share one engine + one feel.
  *
  * The engine owns everything a canvas always wants: the ReactFlow shell with
  * Background / Controls / MiniMap, box-select + snap-grid + platform additive
@@ -13,6 +13,11 @@
  * Capability toggles keep read-only surfaces honest: `allowConnect={false}`
  * detaches every connection handler (scene projections stay uneditable);
  * `allowDragCreate={false}` detaches the wire-drag-to-create layer.
+ *
+ * Chrome (MiniMap colouring / mask / a11y label, Controls placement) and the
+ * fallback node box used for guide math differ per canvas, so they are config
+ * props with canvas-core-compatible defaults — a consumer that omits them gets
+ * exactly the classic/smart surface.
  */
 
 import {
@@ -31,6 +36,7 @@ import {
   type NodeMouseHandler,
   type NodeTypes,
   type OnSelectionChangeParams,
+  type PanelPosition,
   type ReactFlowInstance,
   type Viewport,
 } from '@xyflow/react';
@@ -65,6 +71,15 @@ const NO_GUIDES: AlignmentGuides = {};
 const FALLBACK_NODE_WIDTH = 200;
 const FALLBACK_NODE_HEIGHT = 120;
 
+/** Default node box: measured size when React Flow knows it, else the classic fallback. */
+function defaultNodeMeasure(node: AnyNode): { width: number; height: number } {
+  const measured = (node as { measured?: { width?: number; height?: number } }).measured;
+  return {
+    width: measured?.width ?? FALLBACK_NODE_WIDTH,
+    height: measured?.height ?? FALLBACK_NODE_HEIGHT,
+  };
+}
+
 /**
  * Additive-selection modifier: Cmd on Apple platforms, Ctrl elsewhere — matches
  * the OS conventions React Flow's defaults follow. Shift is reserved for
@@ -75,17 +90,6 @@ function detectMultiSelectKey(): 'Meta' | 'Control' {
   return /Mac|iPhone|iPad|iPod/i.test(platform) ? 'Meta' : 'Control';
 }
 const MULTI_SELECT_KEY = detectMultiSelectKey();
-
-/** Bounding rect of a React Flow node in flow space, using measured size when known. */
-function nodeRect(node: AnyNode): Rect {
-  const measured = (node as { measured?: { width?: number; height?: number } }).measured;
-  return {
-    x: node.position.x,
-    y: node.position.y,
-    width: measured?.width ?? FALLBACK_NODE_WIDTH,
-    height: measured?.height ?? FALLBACK_NODE_HEIGHT,
-  };
-}
 
 /**
  * Context handed to the caller when a wire is dropped into empty canvas: the
@@ -99,6 +103,33 @@ export interface CreateMenuContext {
   fromHandle: string | null;
 }
 
+/** What the engine computed on a node drag-stop, so the caller can persist it. */
+export interface NodeDragStopContext {
+  /** The dropped node was part of an active multi-selection (group move). */
+  isGroupDrop: boolean;
+  /** Alignment-snap target for a solo drop, or null when nothing snapped. */
+  snappedPosition: { x: number; y: number } | null;
+  /** The full rendered node list (snapshot at drop). */
+  nodes: AnyNode[];
+}
+
+/** MiniMap config — omit for the classic/smart selection-tinted map. */
+export interface MinimapConfig {
+  position?: PanelPosition;
+  pannable?: boolean;
+  zoomable?: boolean;
+  nodeColor?: (node: AnyNode) => string;
+  nodeStrokeWidth?: number;
+  maskColor?: string;
+  ariaLabel?: string;
+}
+
+/** Controls config — omit for the classic/smart bottom-right control cluster. */
+export interface ControlsConfig {
+  position?: PanelPosition;
+  showInteractive?: boolean;
+}
+
 export interface CanvasEngineProps {
   /** Node component registry for the current consumer (classic / smart / scene). */
   nodeTypes?: NodeTypes;
@@ -106,10 +137,14 @@ export interface CanvasEngineProps {
   nodes: AnyNode[];
   /** Controlled React Flow edges. */
   edges: Edge[];
-  /** Currently-selected node ids — drives MiniMap tint + group-drop detection. */
-  selectedIds: string[];
-  /** Controlled viewport. */
+  /** Selected node ids — drives the default (selection-tinted) MiniMap colour. */
+  selectedIds?: string[];
+  /** Controlled viewport; omit for an uncontrolled surface (e.g. with fitView). */
   viewport?: Viewport;
+  /** Fit the graph into view on mount. */
+  fitView?: boolean;
+  /** Node box for guide + snap math; defaults to measured-size-or-200×120. */
+  nodeMeasure?: (node: AnyNode) => { width: number; height: number };
 
   /** Raw React Flow node changes (caller applies + routes to its persist channel). */
   onNodesChange: (changes: NodeChange[]) => void;
@@ -118,10 +153,17 @@ export interface CanvasEngineProps {
   /** Fired once at the start of a node drag (pre-drag snapshot for history). */
   onNodeDragStart?: () => void;
   /**
-   * One-time solo-drop alignment snap: the full node list with the dropped
-   * node's position corrected to the guide. Caller commits through its store.
+   * Convenience solo-snap commit: the full node list with the dropped node's
+   * position corrected to the guide. Fires only when a solo drop snapped.
    */
   onNodesSnap?: (nodes: AnyNode[]) => void;
+  /**
+   * Full drag-stop hook (guides already cleared): the dropped node plus what the
+   * engine computed (group vs. solo, snap target). The caller owns persistence.
+   */
+  onNodeDragStop?: (node: AnyNode, ctx: NodeDragStopContext) => void;
+  /** Multi-selection box-drag settled — the dragged nodes (guides already cleared). */
+  onSelectionDragStop?: (nodes: AnyNode[]) => void;
   /** Viewport moved (caller owns any dirty-coalescing). */
   onMove?: (viewport: Viewport) => void;
   /** Selection changed — node ids in React Flow's selection order. */
@@ -146,6 +188,11 @@ export interface CanvasEngineProps {
   getPorts?: () => SnapPort[];
   /** Render the caller's node picker when a wire drops into empty canvas. */
   renderCreateMenu?: (ctx: CreateMenuContext, onClose: () => void) => ReactNode;
+
+  /** MiniMap chrome overrides. */
+  minimap?: MinimapConfig;
+  /** Controls chrome overrides. */
+  controls?: ControlsConfig;
 }
 
 const NOOP = () => {};
@@ -156,10 +203,14 @@ export function CanvasEngine({
   edges,
   selectedIds,
   viewport,
+  fitView = false,
+  nodeMeasure,
   onNodesChange,
   onEdgesChange,
   onNodeDragStart,
   onNodesSnap,
+  onNodeDragStop,
+  onSelectionDragStop,
   onMove,
   onSelectionChange,
   onNodeDoubleClick,
@@ -171,6 +222,8 @@ export function CanvasEngine({
   allowDragCreate = false,
   getPorts,
   renderCreateMenu,
+  minimap,
+  controls,
 }: CanvasEngineProps) {
   // Focusable host for the keyboard layer + the live React Flow instance it
   // drives (fit-view / zoom / port measurement).
@@ -182,29 +235,29 @@ export function CanvasEngine({
   // flow position + origin handle so a picked node lands + auto-wires correctly.
   const [createMenu, setCreateMenu] = useState<CreateMenuContext | null>(null);
 
-  const selectionSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  // Bounding rect of a node in flow space via the (possibly injected) measurer.
+  const toRect = useCallback(
+    (node: AnyNode): Rect => {
+      const { width, height } = (nodeMeasure ?? defaultNodeMeasure)(node);
+      return { x: node.position.x, y: node.position.y, width, height };
+    },
+    [nodeMeasure],
+  );
 
-  // Live selection read by the drag-stop handler (group vs. solo decision),
-  // without re-binding the handler on every selection change.
-  const selectionSetRef = useRef(selectionSet);
-  useEffect(() => {
-    selectionSetRef.current = selectionSet;
-  }, [selectionSet]);
-
-  // nodeColor for MiniMap — selected nodes get the app accent, others get muted.
-  const nodeColor = useCallback(
+  // Default MiniMap tint: selected nodes get the app accent, others get muted.
+  const selectionSet = useMemo(() => new Set(selectedIds ?? []), [selectedIds]);
+  const defaultNodeColor = useCallback(
     (n: AnyNode) => (selectionSet.has(n.id) ? INK_ACCENT : INK_MUTED),
     [selectionSet],
   );
 
-  // Latest rendered nodes, read synchronously by the drag handlers to compute
-  // alignment guides against the other nodes without re-binding on every tick.
+  // Latest rendered nodes, read synchronously by the drag handlers (guides +
+  // group-drop detection) without re-binding on every position change.
   const rfNodesRef = useRef(nodes);
   useEffect(() => {
     rfNodesRef.current = nodes;
   }, [nodes]);
 
-  // Fix 1 — capture pre-drag snapshot exactly once, before the first tick.
   const handleNodeDragStart = useCallback(() => {
     onNodeDragStart?.();
   }, [onNodeDragStart]);
@@ -212,38 +265,53 @@ export function CanvasEngine({
   // While a single node drags, match its edges against the others and draw the
   // alignment guides. The snap itself is applied once on drop so the node never
   // fights the cursor mid-drag.
-  const onNodeDrag = useCallback((_evt: unknown, node: AnyNode) => {
-    const others = rfNodesRef.current.filter((n) => n.id !== node.id);
-    setGuides(computeAlignmentGuides(nodeRect(node), others.map(nodeRect)));
-  }, []);
+  const onNodeDrag = useCallback(
+    (_evt: unknown, node: AnyNode) => {
+      const others = rfNodesRef.current.filter((n) => n.id !== node.id);
+      setGuides(computeAlignmentGuides(toRect(node), others.map(toRect)));
+    },
+    [toRect],
+  );
 
-  const onNodeDragStop = useCallback(
+  const handleNodeDragStop = useCallback(
     (_evt: unknown, node: AnyNode) => {
       setGuides(NO_GUIDES);
-      // Group drop: React Flow moved the whole selection and every position
-      // already flowed through onNodesChange (the caller's persist channel), so
-      // skip the single-node snap rather than fight it.
-      const selected = selectionSetRef.current;
-      if (selected.size > 1 && selected.has(node.id)) return;
-      // Solo drop: apply a one-time alignment snap (wins over the 8px grid),
-      // committed through the caller so revision/persist stay consistent.
-      const others = rfNodesRef.current.filter((n) => n.id !== node.id);
-      const g = computeAlignmentGuides(nodeRect(node), others.map(nodeRect));
-      if (g.snappedX == null && g.snappedY == null) return;
-      const snapped = rfNodesRef.current.map((n) =>
-        n.id === node.id
-          ? {
-              ...n,
-              position: {
-                x: g.snappedX ?? n.position.x,
-                y: g.snappedY ?? n.position.y,
-              },
-            }
-          : n,
-      );
-      onNodesSnap?.(snapped);
+      // Group drop: React Flow moved the whole selection; every position already
+      // flowed through onNodesChange, so the engine computes no solo snap here.
+      const selected = rfNodesRef.current.filter((n) => n.selected);
+      const isGroupDrop = selected.length > 1 && selected.some((n) => n.id === node.id);
+      let snappedPosition: { x: number; y: number } | null = null;
+      if (!isGroupDrop) {
+        const others = rfNodesRef.current.filter((n) => n.id !== node.id);
+        const g = computeAlignmentGuides(toRect(node), others.map(toRect));
+        if (g.snappedX != null || g.snappedY != null) {
+          snappedPosition = {
+            x: g.snappedX ?? node.position.x,
+            y: g.snappedY ?? node.position.y,
+          };
+          // Convenience path (classic/smart): commit the snap through the store.
+          if (onNodesSnap) {
+            const target = snappedPosition;
+            onNodesSnap(
+              rfNodesRef.current.map((n) =>
+                n.id === node.id ? { ...n, position: target } : n,
+              ),
+            );
+          }
+        }
+      }
+      // Full path (scene): hand the caller everything to persist as it sees fit.
+      onNodeDragStop?.(node, { isGroupDrop, snappedPosition, nodes: rfNodesRef.current });
     },
-    [onNodesSnap],
+    [toRect, onNodesSnap, onNodeDragStop],
+  );
+
+  const handleSelectionDragStop = useCallback(
+    (_evt: unknown, dragged: AnyNode[]) => {
+      setGuides(NO_GUIDES);
+      onSelectionDragStop?.(dragged);
+    },
+    [onSelectionDragStop],
   );
 
   // Adopt the shared canvas-kit keyboard layer for fit-view (f) and zoom (+/-).
@@ -330,7 +398,8 @@ export function CanvasEngine({
         onNodesChange={onNodesChange}
         onNodeDragStart={handleNodeDragStart}
         onNodeDrag={onNodeDrag}
-        onNodeDragStop={onNodeDragStop}
+        onNodeDragStop={handleNodeDragStop}
+        onSelectionDragStop={onSelectionDragStop ? handleSelectionDragStop : undefined}
         onNodeDoubleClick={onNodeDoubleClick}
         onEdgesChange={onEdgesChange}
         onConnect={allowConnect ? onConnect : undefined}
@@ -340,7 +409,7 @@ export function CanvasEngine({
         onSelectionChange={handleSelectionChange}
         isValidConnection={allowConnect ? isValidConnection : undefined}
         viewport={viewport}
-        fitView={false}
+        fitView={fitView}
         proOptions={{ hideAttribution: true }}
         // 6b.1 — skip rendering nodes/edges whose bounding box lies outside
         // the current viewport.  React Flow re-checks on every pan/zoom so
@@ -358,14 +427,19 @@ export function CanvasEngine({
         deleteKeyCode={null}
       >
         <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
-        <Controls position="bottom-right" />
+        <Controls
+          position={controls?.position ?? 'bottom-right'}
+          showInteractive={controls?.showInteractive}
+        />
         {/* 6b.2 — minimap: pannable + zoomable, selected nodes highlighted */}
         <MiniMap
-          position="bottom-left"
-          pannable
-          zoomable
-          nodeColor={nodeColor}
-          nodeStrokeWidth={3}
+          position={minimap?.position ?? 'bottom-left'}
+          pannable={minimap?.pannable ?? true}
+          zoomable={minimap?.zoomable ?? true}
+          nodeColor={minimap?.nodeColor ?? defaultNodeColor}
+          nodeStrokeWidth={minimap?.nodeStrokeWidth ?? 3}
+          maskColor={minimap?.maskColor}
+          aria-label={minimap?.ariaLabel}
         />
         <GuideOverlay guides={guides} />
       </ReactFlow>
