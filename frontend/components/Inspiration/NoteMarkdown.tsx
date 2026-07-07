@@ -3,13 +3,24 @@
 // code (rehype-highlight) and interactive task-list checkboxes on top of the
 // GFM tables/strikethrough react-markdown already gives us. Kept separate from
 // the shared AILibrary/MarkdownBody so AI-chat rendering is untouched.
-import React, { useMemo } from 'react';
+import React, { useContext, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import rehypeHighlight from 'rehype-highlight';
 import 'highlight.js/styles/github-dark.css';
 import { computeTaskOffsets } from './taskMarkers';
+
+/** Carries the enclosing task-list `li`'s document-order checkbox index down
+ *  to the `input` renderer, however deeply GFM/remark nests it. Needed
+ *  because a *loose* GFM list (items separated by a blank line) wraps each
+ *  item's inline content in a `<p>`, so the checkbox isn't a direct child of
+ *  `li` — it's `li > p > input`. The previous approach (React.Children.map
+ *  over `li`'s direct children, cloning a `taskIndex` prop onto whichever one
+ *  was a checkbox) only ever looked one level deep and silently missed the
+ *  loose-list shape, leaving every checkbox permanently disabled. Context
+ *  reads through arbitrary nesting for free and needs no child-tree walk. */
+const TaskIndexContext = React.createContext<number | null>(null);
 
 interface Props {
   source: string;
@@ -28,6 +39,37 @@ function findTaskIndexInRange(offsets: number[], start: number, end: number): nu
   }
   return null;
 }
+
+/** react-markdown's `components.input` renderer. Pulled out to a properly
+ *  capitalized named component (rather than an inline arrow assigned to the
+ *  lowercase `input` key) so eslint's react-hooks/rules-of-hooks recognizes
+ *  it as a component and allows the `useContext` call below — the rule keys
+ *  off identifier casing, and `input: (...) => {...}` reads as a plain
+ *  function to it. */
+const TaskCheckboxInput: React.FC<{ type?: string; checked?: boolean; onToggleTask?: (index: number) => void }> = ({
+  type,
+  checked,
+  onToggleTask,
+  ...rest
+}) => {
+  // Reads the index from the nearest enclosing task-list `li`'s Provider
+  // (set in the `li` renderer below), regardless of how many levels of
+  // `<p>`/other wrapper nodes GFM put between the `li` and this `input` —
+  // see TaskIndexContext's comment.
+  const taskIndex = useContext(TaskIndexContext);
+  if (type !== 'checkbox') return <input type={type} {...rest} />;
+  return (
+    <input
+      type="checkbox"
+      checked={!!checked}
+      disabled={!onToggleTask || taskIndex === null}
+      onChange={() => {
+        if (taskIndex !== null) onToggleTask?.(taskIndex);
+      }}
+      className="mr-1.5 align-middle accent-indigo-500"
+    />
+  );
+};
 
 export const NoteMarkdown: React.FC<Props> = ({ source, onToggleTask }) => {
   // Each task checkbox's document-order index is derived purely from the
@@ -50,20 +92,7 @@ export const NoteMarkdown: React.FC<Props> = ({ source, onToggleTask }) => {
         remarkPlugins={[remarkGfm, remarkBreaks]}
         rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
         components={{
-          input: ({ type, checked, taskIndex, ...rest }: any) => {
-            if (type !== 'checkbox') return <input type={type} {...rest} />;
-            return (
-              <input
-                type="checkbox"
-                checked={!!checked}
-                disabled={!onToggleTask || taskIndex == null}
-                onChange={() => {
-                  if (taskIndex != null) onToggleTask?.(taskIndex);
-                }}
-                className="mr-1.5 align-middle accent-indigo-500"
-              />
-            );
-          },
+          input: (props: any) => <TaskCheckboxInput {...props} onToggleTask={onToggleTask} />,
           a: ({ children, href }) => (
             <a href={href} target="_blank" rel="noreferrer" className="text-indigo-300 hover:underline">
               {children}
@@ -89,18 +118,19 @@ export const NoteMarkdown: React.FC<Props> = ({ source, onToggleTask }) => {
               return <li className={className}>{children}</li>;
             }
             // Derive this item's checkbox index from where it sits in
-            // source, then hand it to the `input` child as a plain prop —
-            // pure and StrictMode-safe (see NoteMarkdown's top comment).
+            // source (pure and StrictMode-safe — see NoteMarkdown's top
+            // comment), then provide it via context so the `input` renderer
+            // can read it no matter how deeply GFM nests the checkbox (loose
+            // lists wrap item content in a `<p>`, giving `li > p > input`).
             const start = node?.position?.start?.offset;
             const end = node?.position?.end?.offset;
             const taskIndex =
               start != null && end != null ? findTaskIndexInRange(taskOffsets, start, end) : null;
-            const patchedChildren = React.Children.map(children, (child) =>
-              React.isValidElement(child) && (child.props as any)?.type === 'checkbox'
-                ? React.cloneElement(child as React.ReactElement<any>, { taskIndex })
-                : child,
+            return (
+              <li className="list-none">
+                <TaskIndexContext.Provider value={taskIndex}>{children}</TaskIndexContext.Provider>
+              </li>
             );
-            return <li className="list-none">{patchedChildren}</li>;
           },
           ul: ({ children }) => <ul className="my-1 list-disc pl-5">{children}</ul>,
           ol: ({ children }) => <ol className="my-1 list-decimal pl-5">{children}</ol>,
