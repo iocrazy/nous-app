@@ -600,12 +600,14 @@ export function EditorShell({
   );
 
   // Group other participants by the scene they are focused on, for the soft
-  // per-scene badges on the sheet and in the node view.
+  // per-scene badges on the sheet and in the node view. Keys are String()'d to
+  // match the String(s.id) lookup at the render sites (#1006: scene ids are JSON
+  // numbers at runtime despite the string type).
   const presenceByScene = useMemo<ScenePresenceMap>(() => {
     const map: ScenePresenceMap = {};
     for (const u of onlineUsers) {
-      const sceneId = u.focused_scene_id;
-      if (!sceneId) continue;
+      if (u.focused_scene_id == null) continue;
+      const sceneId = String(u.focused_scene_id);
       (map[sceneId] ??= []).push(u);
     }
     return map;
@@ -618,31 +620,38 @@ export function EditorShell({
   // threshold), there is no handler to apply it — we record that scene id in
   // `droppedScenes` so the block refetches its (now stale) snapshot the moment it
   // remounts, rather than showing pre-op text until the next reload.
+  // Every scene id crossing into these Map/Set keys is String()'d on BOTH sides
+  // (#1006: the scenes API returns id as a JSON number, so `scene.id` is a number
+  // at runtime and `String(record.scene_id)` from the realtime row is a string —
+  // an un-coerced key silently misses and every op is dropped).
   const remoteApplyRef = useRef<Map<string, (row: RemoteOpRow) => void>>(new Map());
   const [droppedScenes, setDroppedScenes] = useState<ReadonlySet<string>>(new Set());
   const registerRemoteApply = useCallback(
     (sceneId: string, apply: ((row: RemoteOpRow) => void) | null) => {
-      if (apply) remoteApplyRef.current.set(sceneId, apply);
-      else remoteApplyRef.current.delete(sceneId);
+      const key = String(sceneId);
+      if (apply) remoteApplyRef.current.set(key, apply);
+      else remoteApplyRef.current.delete(key);
     },
     [],
   );
   const getSceneIds = useCallback(() => scenesRef.current.map((s) => String(s.id)), []);
   const dispatchToScene = useCallback((sceneId: string, row: RemoteOpRow) => {
-    const handler = remoteApplyRef.current.get(sceneId);
+    const key = String(sceneId);
+    const handler = remoteApplyRef.current.get(key);
     if (handler) {
       handler(row);
       return;
     }
     // No mounted block for this scene — remember it so the block refetches on
-    // remount (M1). Snapshot ids compare as strings (scenesRef holds strings).
-    setDroppedScenes((prev) => (prev.has(sceneId) ? prev : new Set(prev).add(sceneId)));
+    // remount (M1).
+    setDroppedScenes((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
   }, []);
   const handleRemoteStaleHandled = useCallback((sceneId: string) => {
+    const key = String(sceneId);
     setDroppedScenes((prev) => {
-      if (!prev.has(sceneId)) return prev;
+      if (!prev.has(key)) return prev;
       const next = new Set(prev);
-      next.delete(sceneId);
+      next.delete(key);
       return next;
     });
   }, []);
@@ -662,7 +671,9 @@ export function EditorShell({
   useEffect(() => {
     if (!COLLAB_ENABLED) return;
     const now = new Set(
-      scenes.filter((s) => syncStates[s.id]?.saveState === 'conflict').map((s) => s.id),
+      scenes
+        .filter((s) => syncStates[s.id]?.saveState === 'conflict')
+        .map((s) => String(s.id)),
     );
     for (const sceneId of now) {
       if (divergedRef.current.has(sceneId)) continue;
@@ -946,12 +957,12 @@ export function EditorShell({
                             onCopilotActivate={handleCopilotActivate}
                             onElementsChange={handleElementsChange}
                             typeCommand={typeCommand ?? undefined}
-                            focusPresence={presenceByScene[s.id]}
+                            focusPresence={presenceByScene[String(s.id)]}
                             selfActorId={currentUserId}
                             onRegisterRemoteApply={
                               COLLAB_ENABLED ? registerRemoteApply : undefined
                             }
-                            remoteStale={COLLAB_ENABLED && droppedScenes.has(s.id)}
+                            remoteStale={COLLAB_ENABLED && droppedScenes.has(String(s.id))}
                             onRemoteStaleHandled={
                               COLLAB_ENABLED ? handleRemoteStaleHandled : undefined
                             }

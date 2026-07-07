@@ -90,16 +90,19 @@ export function useScriptPresence(
   // Latest payload, kept in a ref so the throttle's trailing fire reads current
   // values without re-subscribing the tracking effect.
   const mode: PresenceMode = me?.isDirty ? 'editing' : 'viewing';
+  // focusedSceneId is a scene id (a JSON number at runtime, #1006) — String() it
+  // so the wire payload and the per-scene grouping key are strings on both sides.
+  const focusedSceneId = me?.focusedSceneId != null ? String(me.focusedSceneId) : null;
   const payloadRef = useRef<PresenceUser>({
     user_id: me?.userId ?? '',
     name: me?.name ?? '',
-    focused_scene_id: me?.focusedSceneId ?? null,
+    focused_scene_id: focusedSceneId,
     mode,
   });
   payloadRef.current = {
     user_id: me?.userId ?? '',
     name: me?.name ?? '',
-    focused_scene_id: me?.focusedSceneId ?? null,
+    focused_scene_id: focusedSceneId,
     mode,
   };
 
@@ -164,7 +167,10 @@ export function useScriptPresence(
           users.push({
             user_id: uid,
             name: typeof p.name === 'string' ? p.name : uid,
-            focused_scene_id: typeof p.focused_scene_id === 'string' ? p.focused_scene_id : null,
+            // Coerce, don't type-check: a focused_scene_id can arrive as a JSON
+            // number (#1006), and `typeof === 'string'` would drop it to null,
+            // silently breaking the per-scene grouping.
+            focused_scene_id: p.focused_scene_id != null ? String(p.focused_scene_id) : null,
             mode: pmode,
           });
           if (pmode === 'editing') refreshEditor(uid);

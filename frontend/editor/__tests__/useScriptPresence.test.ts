@@ -257,6 +257,30 @@ describe('useScriptPresence', () => {
     ]);
   });
 
+  // #1006: focused_scene_id can arrive as a JSON number over the wire; the old
+  // `typeof === 'string'` check dropped it to null, silently breaking grouping.
+  it('coerces a numeric focused_scene_id from the snapshot to a string', async () => {
+    setPresenceSnapshot({
+      'other-456': [{ user_id: 'other-456', name: 'Other', focused_scene_id: 900, mode: 'viewing' }],
+    });
+    const { result } = renderHook(() => useScriptPresence('s1', ME));
+    await flush();
+    act(() => subscribeNow());
+    act(() => capturedHandlers['presence:sync']());
+    expect(result.current.onlineUsers[0].focused_scene_id).toBe('900');
+  });
+
+  it('String()s a numeric focusedSceneId in the outbound track payload', async () => {
+    // Runtime scene ids are numbers despite the string type (#1006).
+    const me = { ...ME, focusedSceneId: 900 as unknown as string };
+    renderHook(() => useScriptPresence('s1', me));
+    await flush();
+    act(() => subscribeNow());
+    expect(fakeChannel.track).toHaveBeenCalledWith(
+      expect.objectContaining({ focused_scene_id: '900' }),
+    );
+  });
+
   // -------------------------------------------------------------------------
   // 4. Re-track on focus change + throttle
   // -------------------------------------------------------------------------
