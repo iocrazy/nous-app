@@ -8,9 +8,10 @@ live storage-api (SDK calls are mocked).
 from __future__ import annotations
 
 import hashlib
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import yarl
 
 from app.services.library.media_storage import (
     CHAT_MEDIA_BUCKET,
@@ -228,3 +229,96 @@ async def test_calls_are_time_capped():
     ):
         with pytest.raises(asyncio.TimeoutError):
             await store.put_bytes("k", b"x", "image/png")
+
+
+# ── get_size / get_stream (ranged reads, lower-level httpx mocked) ────────────
+
+
+def _range_proxy(*, head_headers=None, body=b""):
+    """Fake storage3 proxy exposing the private httpx plumbing get_size /
+    get_stream reach into (``_base_url`` / ``_headers`` / ``_client``)."""
+    captured: dict = {}
+
+    class _Resp:
+        def __init__(self, headers=None):
+            self.headers = headers or {}
+
+        def raise_for_status(self):
+            return None
+
+        async def aiter_bytes(self, chunk_size):
+            for i in range(0, len(body), chunk_size):
+                yield body[i : i + chunk_size]
+
+    class _Stream:
+        def __init__(self, resp):
+            self._resp = resp
+
+        async def __aenter__(self):
+            return self._resp
+
+        async def __aexit__(self, *exc):
+            return False
+
+    def _stream(method, url, headers=None):
+        captured["stream"] = {"method": method, "url": url, "headers": headers}
+        return _Stream(_Resp())
+
+    client = MagicMock()
+    client.head = AsyncMock(return_value=_Resp(head_headers))
+    client.stream = _stream
+
+    proxy = MagicMock()
+    proxy._base_url = yarl.URL("https://sb.example/storage/v1")
+    proxy._headers = {"apikey": "svc"}
+    proxy._client = client
+    return proxy, captured
+
+
+@pytest.mark.asyncio
+async def test_get_size_reads_content_length_header():
+    store = ObjectStore(CHAT_MEDIA_BUCKET)
+    proxy, _ = _range_proxy(head_headers={"content-length": "2048"})
+    with patch.object(store, "_proxy", new=AsyncMock(return_value=proxy)):
+        size = await store.get_size("t1/ab/cd/h.mp4")
+    assert size == 2048
+    called_url = proxy._client.head.call_args.args[0]
+    assert called_url.endswith("/object/chat-media/t1/ab/cd/h.mp4")
+
+
+@pytest.mark.asyncio
+async def test_get_size_raises_when_header_absent():
+    store = ObjectStore(CHAT_MEDIA_BUCKET)
+    proxy, _ = _range_proxy(head_headers={})
+    with patch.object(store, "_proxy", new=AsyncMock(return_value=proxy)):
+        with pytest.raises(RuntimeError, match="no content-length"):
+            await store.get_size("k")
+
+
+@pytest.mark.asyncio
+async def test_get_stream_full_sends_no_range_header():
+    store = ObjectStore(CHAT_MEDIA_BUCKET)
+    proxy, captured = _range_proxy(body=b"0123456789")
+    with patch.object(store, "_proxy", new=AsyncMock(return_value=proxy)):
+        chunks = [c async for c in store.get_stream("k", chunk_size=4)]
+    assert b"".join(chunks) == b"0123456789"
+    assert len(chunks) == 3  # 4 + 4 + 2 → three chunks
+    assert "Range" not in captured["stream"]["headers"]
+
+
+@pytest.mark.asyncio
+async def test_get_stream_closed_range_passes_range_header():
+    store = ObjectStore(CHAT_MEDIA_BUCKET)
+    proxy, captured = _range_proxy(body=b"abc")
+    with patch.object(store, "_proxy", new=AsyncMock(return_value=proxy)):
+        _ = [c async for c in store.get_stream("k", start=2, end=5)]
+    assert captured["stream"]["headers"]["Range"] == "bytes=2-5"
+
+
+@pytest.mark.asyncio
+async def test_get_stream_open_range_omits_end():
+    store = ObjectStore(CHAT_MEDIA_BUCKET)
+    proxy, captured = _range_proxy(body=b"abc")
+    with patch.object(store, "_proxy", new=AsyncMock(return_value=proxy)):
+        _ = [c async for c in store.get_stream("k", start=100)]
+    assert captured["stream"]["headers"]["Range"] == "bytes=100-"

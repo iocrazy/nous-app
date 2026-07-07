@@ -24,7 +24,7 @@ from __future__ import annotations
 import hashlib
 import mimetypes
 from dataclasses import dataclass
-from typing import Optional
+from typing import AsyncIterator, Optional
 
 _SB_SCHEME = "sb://"
 
@@ -120,6 +120,10 @@ def to_file_path(bucket: str, key: str) -> str:
 # in fast and the user barely notices.
 _STORAGE_CALL_TIMEOUT_S = 15.0
 
+# Chunk size for streamed GETs (get_stream). 64 KiB balances syscall overhead
+# against per-chunk memory — a ranged video read never buffers the whole file.
+_STREAM_CHUNK_BYTES = 64 * 1024
+
 
 class ObjectStore:
     """Thin async wrapper over the Supabase service-role storage client.
@@ -197,6 +201,60 @@ class ObjectStore:
     async def get_bytes(self, key: str) -> bytes:
         proxy = await self._proxy()
         return await self._capped(proxy.download(key))
+
+    def _object_target(self, proxy, key: str) -> tuple[str, dict]:
+        """Build the (absolute URL, auth headers) for a raw object GET/HEAD.
+
+        Reaches under the storage3 proxy to hit the object endpoint directly
+        (``.../object/{bucket}/{key}``) with httpx — the SDK's ``download`` only
+        returns fully-buffered bytes and can't carry a ``Range`` header, so
+        streaming and ranged reads have to go one level down. Key parts are
+        content-addressed (alnum/dot only), so a plain ``/`` split is safe.
+        """
+        url = str(proxy._base_url.joinpath("object", self._bucket, *key.split("/")))
+        return url, dict(proxy._headers)
+
+    async def get_size(self, key: str) -> int:
+        """Object size in bytes via a HEAD to storage-api (Content-Length).
+
+        Used by ranged serving to validate the requested range and to fill the
+        ``Content-Range`` total without buffering the object. Raises on a
+        missing object (HEAD 404 → raise_for_status) or an absent header.
+        """
+        proxy = await self._proxy()
+        url, headers = self._object_target(proxy, key)
+        resp = await self._capped(proxy._client.head(url, headers=headers))
+        resp.raise_for_status()
+        length = resp.headers.get("content-length")
+        if length is None:
+            raise RuntimeError(f"no content-length for key={key!r}")
+        return int(length)
+
+    async def get_stream(
+        self,
+        key: str,
+        *,
+        start: Optional[int] = None,
+        end: Optional[int] = None,
+        chunk_size: int = _STREAM_CHUNK_BYTES,
+    ) -> AsyncIterator[bytes]:
+        """Async-iterate an object's bytes, optionally a ``[start, end]`` slice.
+
+        When ``start`` is given a ``Range: bytes=start-end`` header is passed
+        straight through to storage-api, so only the requested slice crosses the
+        wire — no full-file buffering (the whole point of this path for video).
+        ``end=None`` means "to the last byte". The caller owns range validation
+        (see the router); this method just relays the bytes.
+        """
+        proxy = await self._proxy()
+        url, headers = self._object_target(proxy, key)
+        if start is not None:
+            end_part = "" if end is None else str(end)
+            headers["Range"] = f"bytes={start}-{end_part}"
+        async with proxy._client.stream("GET", url, headers=headers) as resp:
+            resp.raise_for_status()
+            async for chunk in resp.aiter_bytes(chunk_size):
+                yield chunk
 
     async def remove(self, key: str) -> None:
         proxy = await self._proxy()
