@@ -194,3 +194,117 @@ describe('ShotCard — generate', () => {
     expect(screen.getByText('editor.shotGenerate')).toBeDisabled();
   });
 });
+
+describe('ShotCard — video (flag-dark)', () => {
+  it('renders no video button or preview when the flag is off (default)', () => {
+    render(
+      <ShotCard
+        shot={shot({ video_url: 'https://x/clip.mp4' })}
+        index={1}
+        onUpdate={vi.fn()}
+        onDelete={vi.fn()}
+        onGenerateVideo={vi.fn()}
+        reorder={noReorder()}
+      />,
+    );
+    expect(screen.queryByTestId('shot-generate-video')).not.toBeInTheDocument();
+    // The <video> preview is fully behind the flag too (true dark launch).
+    expect(screen.queryByTestId('shot-video')).not.toBeInTheDocument();
+  });
+
+  it('shows the Generate Video button when the flag is on', () => {
+    render(
+      <ShotCard
+        shot={shot({})}
+        index={1}
+        onUpdate={vi.fn()}
+        onDelete={vi.fn()}
+        videoEnabled
+        onGenerateVideo={vi.fn()}
+        reorder={noReorder()}
+      />,
+    );
+    expect(screen.getByTestId('shot-generate-video')).toHaveTextContent('editor.shotGenerateVideo');
+  });
+
+  it('arms on first click and dispatches on the second (two-click confirm)', () => {
+    const onGenerateVideo = vi.fn();
+    render(
+      <ShotCard
+        shot={shot({})}
+        index={1}
+        onUpdate={vi.fn()}
+        onDelete={vi.fn()}
+        videoEnabled
+        onGenerateVideo={onGenerateVideo}
+        reorder={noReorder()}
+      />,
+    );
+    const btn = screen.getByTestId('shot-generate-video');
+    fireEvent.click(btn);
+    expect(onGenerateVideo).not.toHaveBeenCalled();
+    expect(btn).toHaveTextContent('editor.nodesConfirm');
+    fireEvent.click(btn);
+    expect(onGenerateVideo).toHaveBeenCalledWith('900');
+  });
+
+  it('renders the <video> preview when the flag is on and a video exists', () => {
+    render(
+      <ShotCard
+        shot={shot({ video_url: 'https://x/clip.mp4' })}
+        index={1}
+        onUpdate={vi.fn()}
+        onDelete={vi.fn()}
+        videoEnabled
+        onGenerateVideo={vi.fn()}
+        reorder={noReorder()}
+      />,
+    );
+    const video = screen.getByTestId('shot-video') as HTMLVideoElement;
+    expect(video.getAttribute('src')).toBe('https://x/clip.mp4');
+    expect(video).toHaveAttribute('controls');
+    expect(video).toHaveAttribute('preload', 'metadata');
+  });
+
+  it('shows a generating label and disables while video is busy', () => {
+    const onGenerateVideo = vi.fn();
+    render(
+      <ShotCard
+        shot={shot({})}
+        index={1}
+        onUpdate={vi.fn()}
+        onDelete={vi.fn()}
+        videoEnabled
+        onGenerateVideo={onGenerateVideo}
+        videoBusy
+        reorder={noReorder()}
+      />,
+    );
+    const btn = screen.getByTestId('shot-generate-video');
+    expect(btn).toHaveTextContent('editor.shotVideoGenerating');
+    expect(btn).toBeDisabled();
+    fireEvent.click(btn);
+    expect(onGenerateVideo).not.toHaveBeenCalled();
+  });
+
+  it('degrades to a disabled coming-soon button when the video feature is off', () => {
+    const onGenerateVideo = vi.fn();
+    render(
+      <ShotCard
+        shot={shot({})}
+        index={1}
+        onUpdate={vi.fn()}
+        onDelete={vi.fn()}
+        videoEnabled
+        onGenerateVideo={onGenerateVideo}
+        videoDisabled
+        reorder={noReorder()}
+      />,
+    );
+    const btn = screen.getByTestId('shot-generate-video');
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute('title', 'editor.shotVideoComingSoon');
+    fireEvent.click(btn);
+    expect(onGenerateVideo).not.toHaveBeenCalled();
+  });
+});

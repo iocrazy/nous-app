@@ -3,6 +3,8 @@
 Routes (all under prefix /generated-media, registered in app/api/__init__.py):
   GET  /generated-media                → {data: {items, next_cursor}}
   GET  /generated-media/{id}           → {data: row}   (404 if not in scope)
+  GET  /generated-media/{id}/cover     → FileResponse  (image, no auth — <img>)
+  GET  /generated-media/{id}/stream    → FileResponse  (video, no auth — <video>)
   GET  /generated-media/{id}/file      → FileResponse  (404 if row/file missing)
   DELETE /generated-media/{id}         → {data: {deleted: bool}}
 
@@ -86,6 +88,25 @@ async def get_generation_cover(gen_id: int):
         raise HTTPException(status_code=404, detail="not found")
     if row.get("media_kind") != "image":
         raise HTTPException(status_code=404, detail="no cover")
+    return await _serve_media_row(
+        row, headers={"Cache-Control": "public, max-age=604800, immutable"}
+    )
+
+
+@router.get("/{gen_id}/stream")
+async def get_generation_stream(gen_id: int):
+    """Serve a generated VIDEO's bytes (no auth required).
+
+    Same world-readable-by-id posture as ``/cover``: a bare ``<video src>`` can't
+    carry a Bearer header, and the snowflake id is unguessable. Video-only —
+    image rows 404 here (use ``/cover``). ``/file`` stays the auth-gated download.
+    Filesystem rows keep FileResponse (Range-capable); object-store rows buffer.
+    """
+    row = await GeneratedMediaRepository().get_by_id(gen_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="not found")
+    if row.get("media_kind") != "video":
+        raise HTTPException(status_code=404, detail="no video")
     return await _serve_media_row(
         row, headers={"Cache-Control": "public, max-age=604800, immutable"}
     )

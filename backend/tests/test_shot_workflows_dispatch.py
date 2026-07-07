@@ -23,6 +23,7 @@ from __future__ import annotations
 import importlib
 import os
 import tempfile
+import types
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -781,3 +782,300 @@ def test_shot_workflows_registered_in_dispatch_bundle():
 
     assert hasattr(_dispatch_bundle, "script_shot_breakdown_workflow")
     assert hasattr(_dispatch_bundle, "script_shot_generate_workflow")
+    # PR-J2: the video workflow must ALSO be in the bundle or it sticks 'queued'.
+    assert hasattr(_dispatch_bundle, "script_shot_video_workflow")
+
+
+# ---------------------------------------------------------------------------
+# PR-J2 Task 5: generate-video endpoint (flag gate + dispatch, NO status flip)
+# ---------------------------------------------------------------------------
+
+
+async def test_generate_video_404_when_flag_off(monkeypatch):
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(shots_router.settings, "FEATURE_SHOT_VIDEO", False)
+    with pytest.raises(HTTPException) as exc_info:
+        await shots_router.generate_shot_video(_SHOT, _auth())
+    assert exc_info.value.status_code == 404
+
+
+async def test_generate_video_dispatches_and_threads_wf_id(
+    monkeypatch, mock_task_manager
+):
+    monkeypatch.setattr(shots_router.settings, "FEATURE_SHOT_VIDEO", True)
+    # The video endpoint must NOT touch shot.status (image lane) — if it fetched
+    # the repo to flip status the test would catch an unexpected call.
+    repo = MagicMock()
+    repo.update_status = AsyncMock()
+    monkeypatch.setattr(shots_router, "get_script_shot_repository", lambda: repo)
+
+    dispatch = AsyncMock(return_value={"mode": "dbos"})
+    monkeypatch.setattr(
+        "app.services.infra.dbos_orchestrator.start_workflow_routed", dispatch
+    )
+
+    result = await shots_router.generate_shot_video(_SHOT, _auth())
+
+    assert result == {"success": True, "task_id": mock_task_manager.create.return_value}
+    # No status flip on the video path (unlike /generate).
+    repo.update_status.assert_not_awaited()
+    wf_id = mock_task_manager.create.call_args.kwargs.get("dbos_workflow_id")
+    assert wf_id == dispatch.call_args.kwargs.get("workflow_id")
+    assert mock_task_manager.create.call_args.kwargs["task_type"] == "shot_video"
+    assert len("shot_video") <= 20  # task_tracking.task_type VARCHAR(20)
+    assert dispatch.call_args.args[0] == "script_shot_video"
+    assert dispatch.call_args.kwargs["dbos_workflow_kwargs"] == {
+        "shot_id": _SHOT,
+        "user_id": _USER,
+    }
+
+
+# ---------------------------------------------------------------------------
+# PR-J2 Task 5: script_shot_video workflow steps
+# ---------------------------------------------------------------------------
+
+
+class _FakeVideoProvider:
+    """Records the generate_video call and returns a canned local path."""
+
+    def __init__(self, local_path: str):
+        self._local_path = local_path
+        self.calls: list = []
+
+    async def generate_video(self, **kwargs):
+        self.calls.append(kwargs)
+        return types.SimpleNamespace(local_path=self._local_path, mime="video/mp4")
+
+
+async def test_video_step_text2video_when_no_image(monkeypatch):
+    """No resolvable local image → image_path=None → text2video."""
+    from app.workflows import script_shot_video as m
+
+    shot_repo = MagicMock()
+    shot_repo.get_by_id = AsyncMock(
+        return_value={"id": int(_SHOT), "scene_id": int(_SCENE), "description": "d"}
+    )
+    scene_repo = MagicMock()
+    scene_repo.get_by_id = AsyncMock(return_value={"heading": "INT"})
+    provider = _FakeVideoProvider("/tmp/jimeng_x/clip.mp4")
+
+    async def _resolve(name):
+        return provider, "seedance2.0fast"
+
+    with (
+        patch(
+            "app.repositories.script_shot_repository.get_script_shot_repository",
+            MagicMock(return_value=shot_repo),
+        ),
+        patch(
+            "app.repositories.script_scene_repository.get_script_scene_repository",
+            MagicMock(return_value=scene_repo),
+        ),
+        patch(
+            "app.services.media.parsers.video_providers.db_registry."
+            "resolve_video_provider",
+            _resolve,
+        ),
+        patch.object(m, "_resolve_local_image_for_i2v", AsyncMock(return_value=None)),
+    ):
+        out = await m.generate_shot_video_step(_SHOT, None, None)
+
+    assert out == "/tmp/jimeng_x/clip.mp4"
+    assert provider.calls[0]["image_path"] is None
+    assert provider.calls[0]["model_version"] == "seedance2.0fast"
+
+
+async def test_video_step_image2video_when_local_image_resolves(monkeypatch):
+    """A filesystem-backed image → image_path passed → image2video."""
+    from app.workflows import script_shot_video as m
+
+    shot_repo = MagicMock()
+    shot_repo.get_by_id = AsyncMock(
+        return_value={
+            "id": int(_SHOT),
+            "scene_id": int(_SCENE),
+            "image_url": "/api/v1/generated-media/555/cover",
+        }
+    )
+    scene_repo = MagicMock()
+    scene_repo.get_by_id = AsyncMock(return_value={"heading": "INT"})
+    provider = _FakeVideoProvider("/tmp/jimeng_y/clip.mp4")
+
+    async def _resolve(name):
+        return provider, "seedance2.0fast"
+
+    with (
+        patch(
+            "app.repositories.script_shot_repository.get_script_shot_repository",
+            MagicMock(return_value=shot_repo),
+        ),
+        patch(
+            "app.repositories.script_scene_repository.get_script_scene_repository",
+            MagicMock(return_value=scene_repo),
+        ),
+        patch(
+            "app.services.media.parsers.video_providers.db_registry."
+            "resolve_video_provider",
+            _resolve,
+        ),
+        patch.object(
+            m,
+            "_resolve_local_image_for_i2v",
+            AsyncMock(return_value="/data/img/first.png"),
+        ),
+    ):
+        out = await m.generate_shot_video_step(_SHOT, None, None)
+
+    assert out == "/tmp/jimeng_y/clip.mp4"
+    assert provider.calls[0]["image_path"] == "/data/img/first.png"
+
+
+async def test_video_step_raises_when_no_file(monkeypatch):
+    from app.workflows import script_shot_video as m
+
+    shot_repo = MagicMock()
+    shot_repo.get_by_id = AsyncMock(
+        return_value={"id": int(_SHOT), "scene_id": int(_SCENE)}
+    )
+    scene_repo = MagicMock()
+    scene_repo.get_by_id = AsyncMock(return_value={})
+    provider = _FakeVideoProvider("")  # empty local_path → no file
+
+    async def _resolve(name):
+        return provider, "seedance2.0fast"
+
+    with (
+        patch(
+            "app.repositories.script_shot_repository.get_script_shot_repository",
+            MagicMock(return_value=shot_repo),
+        ),
+        patch(
+            "app.repositories.script_scene_repository.get_script_scene_repository",
+            MagicMock(return_value=scene_repo),
+        ),
+        patch(
+            "app.services.media.parsers.video_providers.db_registry."
+            "resolve_video_provider",
+            _resolve,
+        ),
+        patch.object(m, "_resolve_local_image_for_i2v", AsyncMock(return_value=None)),
+    ):
+        with pytest.raises(RuntimeError):
+            await m.generate_shot_video_step(_SHOT, None, None)
+
+
+async def test_persist_video_registers_and_reaps_temp_dir(monkeypatch):
+    """persist_video_generation ingests source_path (video/mp4), returns the
+    durable /stream url, and reaps the jimeng_ scratch dir (H1)."""
+    from app.workflows import script_shot_video as m
+
+    tmp_dir, local_path = _mk_jimeng_tmp()
+    shot_repo = MagicMock()
+    shot_repo.get_by_id = AsyncMock(
+        return_value={"id": int(_SHOT), "scene_id": int(_SCENE), "description": "d"}
+    )
+    scene_repo = MagicMock()
+    scene_repo.get_by_id = AsyncMock(return_value={"script_id": 700})
+    script_repo = MagicMock()
+    script_repo.get_by_id = AsyncMock(return_value={"id": 700, "team_id": 900})
+    register = AsyncMock(return_value={"id": 8888})
+
+    p1, p2, p3, p4 = _persist_patches(shot_repo, scene_repo, script_repo, register)
+    with p1, p2, p3, p4:
+        url = await m.persist_video_generation(
+            _SHOT, local_path, "seedance2.0fast", "jimeng-cli", _USER
+        )
+
+    assert url == "/api/v1/generated-media/8888/stream"
+    kwargs = register.call_args.kwargs
+    assert kwargs["source_path"] == local_path
+    assert kwargs["mime"] == "video/mp4"
+    assert kwargs["origin"].kind == "shot_video"
+    assert not os.path.exists(tmp_dir)  # H1: scratch dir reaped
+
+
+async def test_persist_video_raises_on_no_user_id_and_still_reaps(monkeypatch):
+    """No user_id → raise (route C: no ephemeral fallback for a local video), and
+    the scratch dir is still reaped in the finally."""
+    from app.workflows import script_shot_video as m
+
+    tmp_dir, local_path = _mk_jimeng_tmp()
+    register = AsyncMock()
+    with patch(
+        "app.services.library.generated_media_service.register_generated_media",
+        register,
+    ):
+        with pytest.raises(ValueError):
+            await m.persist_video_generation(
+                _SHOT, local_path, "seedance2.0fast", "jimeng-cli", None
+            )
+
+    register.assert_not_awaited()
+    assert not os.path.exists(tmp_dir)  # reaped despite the raise
+
+
+async def test_mark_shot_video_done_writes_only_video_url(monkeypatch):
+    """mark_shot_video_done writes video_url via the single-column repo method
+    (update_video_url) — never a read-modify-write of status, which would race a
+    concurrent image generation flipping status to 'done' (M2)."""
+    from app.workflows import script_shot_video as m
+
+    repo = MagicMock()
+    repo.update_video_url = AsyncMock(return_value={"id": int(_SHOT)})
+
+    with patch(
+        "app.repositories.script_shot_repository.get_script_shot_repository",
+        MagicMock(return_value=repo),
+    ):
+        await m.mark_shot_video_done(_SHOT, "/api/v1/generated-media/8888/stream")
+
+    repo.update_video_url.assert_awaited_once_with(
+        _SHOT, "/api/v1/generated-media/8888/stream"
+    )
+    # No status read-modify-write: the shot is never fetched, update_status untouched.
+    repo.get_by_id.assert_not_called()
+    repo.update_status.assert_not_called()
+
+
+async def test_resolve_local_image_none_when_path_escapes_download_dir(monkeypatch):
+    """NIT: a corrupt/hostile file_path that resolves outside DOWNLOAD_PATH must
+    yield None (same containment posture as _serve_media_row) — never handed to
+    the CLI as --image."""
+    from app.workflows import script_shot_video as m
+
+    row = {"id": 555, "media_kind": "image", "file_path": "../../etc/passwd"}
+    with patch(
+        "app.repositories.generated_media_repository.GeneratedMediaRepository."
+        "get_by_id",
+        AsyncMock(return_value=row),
+    ):
+        got = await m._resolve_local_image_for_i2v(
+            {"image_url": "/api/v1/generated-media/555/cover"}
+        )
+    assert got is None
+
+
+async def test_resolve_local_image_returns_none_for_non_cover_url(monkeypatch):
+    """A raw provider/ephemeral image url (not a /cover|/stream|/file URL) yields
+    None → the step falls back to text2video."""
+    from app.workflows import script_shot_video as m
+
+    got = await m._resolve_local_image_for_i2v({"image_url": "http://cdn/x.png"})
+    assert got is None
+
+
+async def test_resolve_local_image_none_for_object_store(monkeypatch):
+    """An object-store-backed image has no local path → None."""
+    from app.workflows import script_shot_video as m
+
+    row = {"id": 555, "media_kind": "image", "file_path": "sb://chat-media/x.png"}
+    with patch(
+        "app.repositories.generated_media_repository.GeneratedMediaRepository."
+        "get_by_id",
+        AsyncMock(return_value=row),
+    ):
+        got = await m._resolve_local_image_for_i2v(
+            {"image_url": "/api/v1/generated-media/555/cover"}
+        )
+    assert got is None

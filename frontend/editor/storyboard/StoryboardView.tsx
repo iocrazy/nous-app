@@ -23,10 +23,12 @@ import {
   createShot,
   deleteShot,
   generateShot,
+  generateShotVideo,
   getShot,
   listShots,
   moveShot,
   ShotGenerateDisabledError,
+  ShotVideoDisabledError,
   updateShot,
   type Shot,
 } from '../sceneService';
@@ -44,6 +46,16 @@ const CONFIRM_WINDOW_MS = 3000;
  */
 let generateFeatureOff = false;
 
+/**
+ * Video generation is a separate flag-dark surface (VITE_FEATURE_SHOT_VIDEO).
+ * Read once at module load (Vite inlines it); off → the whole video surface —
+ * the Generate Video button AND the <video> preview — never renders. Its own
+ * session-off latch degrades the video controls independently of image Generate
+ * once the endpoint 404s.
+ */
+const SHOT_VIDEO_ENABLED = import.meta.env.VITE_FEATURE_SHOT_VIDEO === 'true';
+let shotVideoFeatureOff = false;
+
 export interface StoryboardViewProps {
   scenes: SceneDoc[];
   scriptId: string;
@@ -51,6 +63,18 @@ export interface StoryboardViewProps {
 
 type ShotsByScene = Record<string, Shot[]>;
 type DropTarget = { shotId: string; edge: 'before' | 'after' };
+
+/**
+ * The video-regen poll settles ONLY on a NEW url — never the shot's prior one.
+ * Without the `!== priorUrl` guard a re-generation of a shot that already has a
+ * video would be satisfied immediately by the stale url (M1).
+ */
+export function videoRegenSettled(
+  freshUrl: string | null,
+  priorUrl: string | null,
+): boolean {
+  return !!freshUrl && freshUrl !== priorUrl;
+}
 
 /** `INT · Location · TIME`, empty parts dropped (mirrors OutlineView's head). */
 function headingLine(scene: SceneDoc): string {
@@ -68,6 +92,8 @@ export function StoryboardView({ scenes, scriptId }: StoryboardViewProps) {
   const [autoBusy, setAutoBusy] = useState<Record<string, boolean>>({});
   const [confirmingAuto, setConfirmingAuto] = useState<string | null>(null);
   const [generateDisabled, setGenerateDisabled] = useState(generateFeatureOff);
+  const [videoBusy, setVideoBusy] = useState<Record<string, boolean>>({});
+  const [videoDisabled, setVideoDisabled] = useState(shotVideoFeatureOff);
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Drag reorder is column-scoped: a shot may only drop within its own scene.
@@ -252,6 +278,45 @@ export function StoryboardView({ scenes, scriptId }: StoryboardViewProps) {
     [patchShotLocal, startPoll],
   );
 
+  // Generate a shot's video: an optimistic parent-held 'busy' flag (video state
+  // is NOT in shot.status — the image lane owns that), dispatch, then poll
+  // getShot until video_url appears. A flag-off 404 degrades the video controls
+  // for the session; a dispatch failure or poll timeout just clears busy (the
+  // Task Center carries the failure detail).
+  const handleGenerateVideo = useCallback(
+    async (sceneId: string, shot: Shot) => {
+      const key = String(shot.id);
+      // Capture the CURRENT url so a re-generation isn't instantly satisfied by
+      // the shot's existing video: the poll only settles on a NEW url.
+      const priorUrl = shot.video_url;
+      setVideoBusy((prev) => ({ ...prev, [key]: true }));
+      try {
+        await generateShotVideo(shot.id);
+      } catch (err) {
+        if (err instanceof ShotVideoDisabledError) {
+          shotVideoFeatureOff = true;
+          setVideoDisabled(true);
+        } else {
+          console.error('[StoryboardView] generateShotVideo dispatch failed', err);
+        }
+        setVideoBusy((prev) => ({ ...prev, [key]: false }));
+        return;
+      }
+      startPoll(
+        async () => {
+          const fresh = await getShot(shot.id);
+          if (videoRegenSettled(fresh.video_url, priorUrl)) {
+            patchShotLocal(sceneId, shot.id, { video_url: fresh.video_url });
+            return true;
+          }
+          return false;
+        },
+        () => setVideoBusy((prev) => ({ ...prev, [key]: false })),
+      );
+    },
+    [patchShotLocal, startPoll],
+  );
+
   const beginDrag = useCallback((shotId: string, sceneId: string) => {
     draggingRef.current = { shotId, sceneId: String(sceneId) };
     setDragging({ shotId, sceneId: String(sceneId) });
@@ -328,6 +393,12 @@ export function StoryboardView({ scenes, scriptId }: StoryboardViewProps) {
                     onDelete={(shotId) => handleDeleteShot(scene.id, shotId)}
                     onGenerate={() => handleGenerate(scene.id, shot)}
                     generateDisabled={generateDisabled}
+                    videoEnabled={SHOT_VIDEO_ENABLED}
+                    onGenerateVideo={
+                      SHOT_VIDEO_ENABLED ? () => handleGenerateVideo(scene.id, shot) : undefined
+                    }
+                    videoBusy={!!videoBusy[String(shot.id)]}
+                    videoDisabled={videoDisabled}
                     reorder={{
                       isDragging: dragging?.shotId === shot.id,
                       dropEdge,

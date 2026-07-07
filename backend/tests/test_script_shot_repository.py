@@ -262,6 +262,26 @@ async def test_update_status_is_the_status_lane():
     assert "video_url" not in set_clause
 
 
+@pytest.mark.asyncio
+async def test_update_video_url_writes_only_video_url_never_status():
+    """update_video_url emits a single-column UPDATE of video_url and NOTHING
+    else — never status (M2: a video write must not race/clobber the image lane's
+    'done')."""
+    session = _CaptureSession([_FakeResult(scalar_first=_shot_obj(status="done"))])
+    with patch.object(shot_mod, "write_scope", lambda: _ScopeCtx(session)):
+        await ScriptShotRepository().update_video_url(
+            str(_SHOT_ID), "/api/v1/generated-media/8888/stream"
+        )
+    upd_sql, upd_params = _rendered(session.statements[0])
+    set_clause = upd_sql.split("WHERE")[0]
+    assert "/api/v1/generated-media/8888/stream" in upd_params.values()
+    assert "video_url" in set_clause
+    # The image lane is untouched: no status / image_url / thumbnail_url column.
+    assert "status" not in set_clause
+    assert "image_url" not in set_clause
+    assert "thumbnail_url" not in set_clause
+
+
 # ── move_shot: renumber on gap exhaustion / sparse single update ──────────
 
 

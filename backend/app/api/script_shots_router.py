@@ -242,3 +242,53 @@ async def generate_shot(
                 f"[Shots] generate {shot_id} status rollback failed: {rollback_exc}"
             )
         raise HTTPException(status_code=500, detail="Failed to dispatch shot generate")
+
+
+@router.post("/shots/{shot_id}/generate-video")
+async def generate_shot_video(
+    shot_id: str,
+    auth: AuthDep,
+    _guard: None = Depends(verify_shot_access),
+) -> Dict[str, Any]:
+    """Dispatch async single-shot video generation (flag-gated).
+
+    - flag ``FEATURE_SHOT_VIDEO`` off → 404 (endpoint existence hidden).
+    - Unlike ``/generate`` this endpoint does NOT flip ``shot.status``: the
+      ``status`` column is the IMAGE lane's state machine and a video run must
+      not clobber it. The video lifecycle lives in ``task_tracking``
+      (task_type='shot_video') and the workflow writes only ``shot.video_url`` on
+      success (see script_shot_video docstring). With no status flip there is
+      nothing to roll back on dispatch failure — the 500 + the task row are the
+      surface.
+
+    LOW (known, accepted): ``verify_shot_access`` runs BEFORE this body, so a
+    caller without access gets 403/404 regardless of the flag — that leaks
+    nothing about the flag (access-scoped, not existence-scoped)."""
+    if not settings.FEATURE_SHOT_VIDEO:
+        raise HTTPException(status_code=404, detail="Not Found")
+    try:
+        mgr = get_task_manager()
+        wf_id = str(_uuid.uuid4())
+        task_id = await mgr.create(
+            user_id=auth.user_id,
+            task_type="shot_video",  # ≤20 chars: task_tracking.task_type is VARCHAR(20)
+            title="Generate shot video",
+            dbos_workflow_id=wf_id,
+        )
+
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
+        from app.workflows.script_shot_video import script_shot_video_workflow
+
+        await start_workflow_routed(
+            "script_shot_video",
+            dbos_workflow_callable=script_shot_video_workflow,
+            dbos_workflow_kwargs={
+                "shot_id": shot_id,
+                "user_id": auth.user_id,
+            },
+            workflow_id=wf_id,
+        )
+        return {"success": True, "task_id": task_id}
+    except Exception as exc:
+        logger.error(f"[Shots] generate-video {shot_id} dispatch failed: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to dispatch shot video")

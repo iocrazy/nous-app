@@ -378,6 +378,37 @@ export async function generateShot(shotId: string): Promise<string> {
   return body.task_id;
 }
 
+/**
+ * The generate-video endpoint answers 404 when `FEATURE_SHOT_VIDEO` is off. Its
+ * own disabled error (separate from the image one) lets the UI degrade only the
+ * video controls for the session while image Generate stays live.
+ */
+export class ShotVideoDisabledError extends Error {
+  constructor() {
+    super('shot_video_disabled');
+    this.name = 'ShotVideoDisabledError';
+  }
+}
+
+/**
+ * Dispatch async single-shot video generation. Returns the FLAT
+ * { success, task_id } envelope; unlike image generate the endpoint does NOT
+ * flip shot.status (the video lifecycle lives in the Task Center), and the
+ * workflow writes only `shot.video_url` on success — poll `getShot` until
+ * `video_url` appears. A 404 means the flag is off → throws
+ * ShotVideoDisabledError so the UI degrades the video controls globally.
+ */
+export async function generateShotVideo(shotId: string): Promise<string> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${apiBase()}/shots/${shotId}/generate-video`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+  });
+  if (res.status === 404) throw new ShotVideoDisabledError();
+  const body = await handleResponse<{ success: boolean; task_id: string }>(res);
+  return body.task_id;
+}
+
 // ---------------------------------------------------------------------------
 // Version history (Phase B P4 — commit tags + diff + rollback over script_ops)
 // ---------------------------------------------------------------------------
