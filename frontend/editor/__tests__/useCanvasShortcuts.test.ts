@@ -9,7 +9,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
-import { useCanvasShortcuts } from '../nodes/useCanvasShortcuts';
+import { useCanvasShortcuts } from '../../canvas-kit/useCanvasShortcuts';
 
 function makeHandlers() {
   return {

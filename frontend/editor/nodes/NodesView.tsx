@@ -34,9 +34,14 @@ import {
 } from './sceneNodeMapper';
 import { SceneFlowNode } from './SceneFlowNode';
 import { ChapterActionsNode, ChapterActionContext } from './ChapterActionsNode';
-import { GuideOverlay } from './GuideOverlay';
-import { computeAlignmentGuides, type AlignmentGuides, type Rect } from './alignmentGuides';
-import { useCanvasShortcuts } from './useCanvasShortcuts';
+import { GuideOverlay } from '../../canvas-kit/GuideOverlay';
+import {
+  computeAlignmentGuides,
+  type AlignmentGuides,
+  type Rect,
+} from '../../canvas-kit/alignmentGuides';
+import { useCanvasShortcuts } from '../../canvas-kit/useCanvasShortcuts';
+import { useGroupDragPersist } from '../../canvas-kit/useGroupDragPersist';
 import { useConvertPoll } from '../useConvertPoll';
 import { updateSceneMeta, updateChapterPosition, listShots } from '../sceneService';
 import type { SceneDoc } from '../types';
@@ -170,47 +175,16 @@ export function NodesView({ scenes, chapters, onOpenScene, scriptId, onReload }:
   // apart from a keyboard a11y move (also dragging===false, but no drag event).
   const pointerDraggingRef = useRef(false);
 
-  // One pending coordinate write per scene id; flushed after the debounce window.
-  // Keyed by scene id, so a group move schedules independent writes that never
-  // clobber each other.
-  const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-  useEffect(() => {
-    const timers = timersRef.current;
-    return () => {
-      timers.forEach((timer) => clearTimeout(timer));
-      timers.clear();
-    };
-  }, []);
-
-  // Debounce-persist every scene/chapter node in `changed`, each through its own
-  // lane: sceneNode → updateSceneMeta, chapterNode → updateChapterPosition. The
-  // timer map is keyed by the full node id (`sc-`/`ch-` prefixed), so the two
-  // lanes never collide even when a scene and chapter share a numeric id.
-  const persistPositions = useCallback((changed: Node[]) => {
-    const timers = timersRef.current;
-    for (const node of changed) {
-      if (node.type !== 'sceneNode' && node.type !== 'chapterNode') continue;
-      const key = String(node.id);
-      const entityId = key.slice(ID_PREFIX_LEN);
-      const position_x = Math.round(node.position.x);
-      const position_y = Math.round(node.position.y);
-      const write =
-        node.type === 'chapterNode'
-          ? () => updateChapterPosition(entityId, { position_x, position_y })
-          : () => updateSceneMeta(entityId, { position_x, position_y });
-      const existing = timers.get(key);
-      if (existing) clearTimeout(existing);
-      timers.set(
-        key,
-        setTimeout(() => {
-          timers.delete(key);
-          write().catch((err) =>
-            console.error('[NodesView] failed to persist node position', err),
-          );
-        }, DRAG_PERSIST_MS),
-      );
-    }
-  }, []);
+  // Debounce-persist every scene/chapter node through its own lane, keyed by the
+  // `sc-`/`ch-` id prefix: scene → updateSceneMeta, chapter → updateChapterPosition.
+  // The shared hook owns the per-id timer map + unmount cleanup.
+  const persistPositions = useGroupDragPersist({
+    lanes: {
+      'sc-': (id, pos) => updateSceneMeta(id, { position_x: pos.x, position_y: pos.y }),
+      'ch-': (id, pos) => updateChapterPosition(id, { position_x: pos.x, position_y: pos.y }),
+    },
+    debounceMs: DRAG_PERSIST_MS,
+  });
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
