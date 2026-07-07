@@ -42,14 +42,12 @@ import {
 } from '../services/aiService';
 import { relativeTime } from '../utils/taskDisplay';
 import { aiLibraryService } from '../services/aiLibraryService';
-import { StoryboardApiSettings } from './StoryboardApiSettings';
 import { MCPServersPanel } from './MCPServersPanel';
 import { ApprovalsPanel } from './ApprovalsPanel';
 import { NousCenterVerifyPanel } from '../features/canvas-core/smart/NousCenterVerifyPanel';
 import { MemoryPanel } from './MemoryPanel';
 import { AgentMemoriesPanel } from './AgentMemoriesPanel';
 import { AIHealthBoard } from './AIHealthBoard';
-import { useSettingsStore } from '../stores/settingsStore';
 
 interface AISettingsProps {
   settings: AISettingsType;
@@ -256,18 +254,7 @@ const COLOR_MAP: Record<string, { bg: string; text: string; border: string; badg
   },
 };
 
-type ProviderTab = 'text' | 'image';
 type TaskTab = 'media' | 'storyboard';
-
-const IMAGE_PROVIDERS = [
-  { id: 'kie', name: 'KIE' },
-  { id: 'ppio', name: 'PPIO' },
-  { id: 'fal', name: 'fal' },
-  { id: 'grsai', name: 'GRSAI' },
-  { id: 'comfly', name: 'Comfly' },
-  { id: 'runninghub', name: 'RunningHub' },
-  { id: 'zhenzhen', name: 'Zhenzhen' },
-] as const;
 
 /**
  * Curated-whitelist model picker for a provider. Renders chips for the
@@ -394,10 +381,8 @@ const ManagedNote: React.FC = () => (
 );
 
 export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
-  const [providerTab, setProviderTab] = useState<ProviderTab>('text');
   const [taskTab, setTaskTab] = useState<TaskTab>('media');
   const [governance, setGovernance] = useState<AIGovernanceFlags>(GOVERNANCE_ALL_ALLOWED);
-  const enabledSbProviders = useSettingsStore((s) => s.enabledSbProviders);
   const [localSettings, setLocalSettings] = useState<AISettingsType>(() => ({
     ...settings,
   }));
@@ -1089,51 +1074,6 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
         {/* Storyboard Tasks */}
         {taskTab === 'storyboard' && (
         <div className="px-6 pb-6 pt-2 space-y-5">
-          {/* Image Generation — multi-select, only shows enabled providers */}
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <ImageIcon size={16} className="text-ink-400" />
-              <span className="text-sm font-medium text-ink-300">Image Generation</span>
-              <span className="text-[11px] text-ink-600">(select per node in canvas)</span>
-            </div>
-            {(() => {
-              const enabledImageProviders = IMAGE_PROVIDERS.filter(({ id }) => enabledSbProviders[id]);
-              if (enabledImageProviders.length === 0) {
-                return (
-                  <p className="text-xs text-ink-600 py-2">
-                    No image providers enabled. Enable them in AI Providers → Image Generation below.
-                  </p>
-                );
-              }
-              return (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {enabledImageProviders.map(({ id, name }) => {
-                    const selected = (localSettings.task_assignment.image_generation ?? '').split(',').filter(Boolean).includes(id);
-                    return (
-                      <button
-                        key={id}
-                        type="button"
-                        onClick={() => {
-                          const current = (localSettings.task_assignment.image_generation ?? '').split(',').filter(Boolean);
-                          const next = selected ? current.filter((x) => x !== id) : [...current, id];
-                          updateTaskAssignment('image_generation' as keyof typeof localSettings.task_assignment, next.join(','));
-                        }}
-                        className={`px-3 py-2 rounded-lg text-xs font-medium transition-all border flex items-center gap-2 ${
-                          selected
-                            ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30'
-                            : 'bg-ink-950 text-ink-500 border-ink-800 hover:border-ink-700 hover:text-ink-300'
-                        }`}
-                      >
-                        {selected && <Check size={12} />}
-                        {name}
-                      </button>
-                    );
-                  })}
-                </div>
-              );
-            })()}
-          </div>
-
           {/* Script / Prompt — agent picker (script_generation routes to storyboard agent) */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
@@ -1173,36 +1113,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
           </div>
         </div>
 
-        {/* Provider Type Tabs */}
-        <div className="px-6 pt-4 pb-2">
-          <div className="flex gap-1 p-1 bg-ink-950 rounded-lg">
-            <button
-              type="button"
-              onClick={() => setProviderTab('text')}
-              className={`flex-1 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
-                providerTab === 'text'
-                  ? 'bg-ink-800 text-ink-100 shadow-sm'
-                  : 'text-ink-500 hover:text-ink-300'
-              }`}
-            >
-              Text / LLM
-            </button>
-            <button
-              type="button"
-              onClick={() => setProviderTab('image')}
-              className={`flex-1 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
-                providerTab === 'image'
-                  ? 'bg-ink-800 text-ink-100 shadow-sm'
-                  : 'text-ink-500 hover:text-ink-300'
-              }`}
-            >
-              Image Generation
-            </button>
-          </div>
-        </div>
-
         {/* Text / LLM Providers */}
-        {providerTab === 'text' && (
         <div className="p-6 pt-2 space-y-4">
           {Object.entries(PROVIDER_META).map(([providerKey, meta]) => {
             const config = getProviderConfig(providerKey);
@@ -1514,14 +1425,6 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
             </div>
           )}
         </div>
-        )}
-
-        {/* Image Generation Providers */}
-        {providerTab === 'image' && (
-          <div className="p-6 pt-2">
-            <StoryboardApiSettings />
-          </div>
-        )}
       </section>
       )}
 
