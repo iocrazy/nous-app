@@ -1187,7 +1187,15 @@
       "storyboard": "Storyboard",
       "generation": "Generation",
       "review": "Review",
-      "delivery": "Delivery"
+      "delivery": "Delivery",
+      "desc": {
+        "planning": "Define the brief, gather references, and set the project's direction.",
+        "script": "Draft and lock the script that drives everything downstream.",
+        "storyboard": "Turn the locked script into shot-level boards and camera notes.",
+        "generation": "Produce the shots — generate frames, video, and audio.",
+        "review": "Collect feedback and iterate until the cut is approved.",
+        "delivery": "Package the final deliverables and hand off."
+      }
     },
     "tools": {
       "files": "Files",
@@ -1275,6 +1283,12 @@
     "card": {
       "enteredStage": "Entered {{stage}}",
       "archived": "Archived"
+    },
+    "workbench": {
+      "currentStageOf": "Current stage · {{index}} of {{total}}",
+      "advanceTo": "Advance to {{stage}}",
+      "finalStage": "Final stage",
+      "recommendedTools": "Recommended tools"
     }
   },
   "storyboard": {
