@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import uuid
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy.dialects import postgresql
@@ -417,3 +417,131 @@ async def test_create_project_none_team_id_stays_none():
         )
     _, params = _rendered(session.statements[0])
     assert params.get("team_id") is None
+
+
+# ── service: B1 card enrichment (stage / members / activity) ─────────────
+
+
+def _stages_repo_mock(stage_map=None, activity=None, catalog=None):
+    repo = MagicMock()
+    repo.stages_for_projects = AsyncMock(return_value=stage_map or {})
+    repo.latest_activity_for_projects = AsyncMock(return_value=activity or {})
+    repo.list_catalog = AsyncMock(
+        return_value=(
+            catalog
+            if catalog is not None
+            else [
+                {"slug": "planning", "name": "Planning", "sort_order": 10},
+                {"slug": "script", "name": "Script", "sort_order": 20},
+                {"slug": "storyboard", "name": "Storyboard", "sort_order": 30},
+                {"slug": "generation", "name": "Generation", "sort_order": 40},
+                {"slug": "review", "name": "Review", "sort_order": 50},
+                {"slug": "delivery", "name": "Delivery", "sort_order": 60},
+            ]
+        )
+    )
+    return repo
+
+
+@pytest.mark.asyncio
+async def test_list_cards_carry_stage_members_activity():
+    """B1: each listed project carries current_stage {slug,name,index,total},
+    members_preview and latest_activity — assembled from THREE batch lookups
+    (no per-project queries)."""
+    from app.services.library.projects_service import ProjectsService
+
+    svc = ProjectsService()
+    projects = [{"id": _PROJECT_ID_1, "name": "A"}, {"id": _PROJECT_ID_2, "name": "B"}]
+    stages_repo = _stages_repo_mock(
+        stage_map={
+            str(_PROJECT_ID_1): {
+                "slug": "storyboard",
+                "name": "Storyboard",
+                "sort_order": 30,
+            }
+        },
+        activity={
+            str(_PROJECT_ID_1): {
+                "stage_name": "Storyboard",
+                "actor": "heygo",
+                "entered_at": "2026-07-02T00:00:00+00:00",
+            }
+        },
+    )
+    with (
+        patch.object(
+            svc.repo, "get_user_projects", new=AsyncMock(return_value=projects)
+        ),
+        patch.object(
+            svc.repo, "get_project_file_counts", new=AsyncMock(return_value={})
+        ),
+        patch.object(
+            svc.repo,
+            "get_project_members_preview",
+            new=AsyncMock(
+                return_value={
+                    str(_PROJECT_ID_1): {
+                        "count": 4,
+                        "members": [{"user_id": "u1", "username": "heygo"}],
+                    }
+                }
+            ),
+        ) as members_mock,
+        patch(
+            "app.repositories.project_stages_repository.get_project_stages_repository",
+            return_value=stages_repo,
+        ),
+    ):
+        out = await svc.get_projects_with_counts(_OWNER_ID)
+
+    a = next(p for p in out if p["id"] == _PROJECT_ID_1)
+    b = next(p for p in out if p["id"] == _PROJECT_ID_2)
+    # Stage index derives from catalog sort_order ranking: 30 → 3 of 6.
+    assert a["current_stage"] == {
+        "slug": "storyboard",
+        "name": "Storyboard",
+        "index": 3,
+        "total": 6,
+    }
+    assert a["members_preview"]["count"] == 4
+    assert a["latest_activity"]["stage_name"] == "Storyboard"
+    # Project with no stage/members/history rows degrades to None fields.
+    assert b["current_stage"] is None
+    assert b["members_preview"] is None
+    assert b["latest_activity"] is None
+    # Batched: one members call with the full id list.
+    members_mock.assert_awaited_once_with([_PROJECT_ID_1, _PROJECT_ID_2])
+
+
+@pytest.mark.asyncio
+async def test_list_survives_enrichment_failure():
+    """A broken enrichment lookup degrades the cards, never the list."""
+    from app.services.library.projects_service import ProjectsService
+
+    svc = ProjectsService()
+    projects = [{"id": _PROJECT_ID_1, "name": "A"}]
+    stages_repo = MagicMock()
+    stages_repo.stages_for_projects = AsyncMock(side_effect=RuntimeError("db down"))
+    stages_repo.latest_activity_for_projects = AsyncMock(return_value={})
+    stages_repo.list_catalog = AsyncMock(return_value=[])
+    with (
+        patch.object(
+            svc.repo, "get_user_projects", new=AsyncMock(return_value=projects)
+        ),
+        patch.object(
+            svc.repo,
+            "get_project_file_counts",
+            new=AsyncMock(return_value={str(_PROJECT_ID_1): 2}),
+        ),
+        patch.object(
+            svc.repo, "get_project_members_preview", new=AsyncMock(return_value={})
+        ),
+        patch(
+            "app.repositories.project_stages_repository.get_project_stages_repository",
+            return_value=stages_repo,
+        ),
+    ):
+        out = await svc.get_projects_with_counts(_OWNER_ID)
+
+    assert out[0]["file_count"] == 2
+    assert out[0]["current_stage"] is None

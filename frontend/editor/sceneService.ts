@@ -344,6 +344,76 @@ export async function moveShot(
   return unwrapResponse<Shot>(res);
 }
 
+// ── Beats (beat-sheet tier) ──────────────────────────────────────────────────
+
+export interface Beat {
+  id: string;
+  script_id: string;
+  title: string;
+  summary: string | null;
+  /** Ordered linked scene ids (Snowflake strings — never Number()-coerce). */
+  scene_ids: string[];
+  sort_order: number;
+}
+
+export interface BeatInput {
+  title?: string;
+  summary?: string | null;
+  scene_ids?: string[];
+}
+
+/** Coerce scene ids to strings on write (#1006 — a bigint id must not round-trip
+ *  as a JS number and lose precision / mismatch on read-back). */
+function normalizeBeatInput(data: BeatInput): BeatInput {
+  return data.scene_ids
+    ? { ...data, scene_ids: data.scene_ids.map((id) => String(id)) }
+    : data;
+}
+
+export async function listBeats(scriptId: string): Promise<Beat[]> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${apiBase()}/scripts/${scriptId}/beats`, { headers });
+  return unwrapResponse<Beat[]>(res);
+}
+
+export async function createBeat(scriptId: string, data: BeatInput = {}): Promise<Beat> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${apiBase()}/scripts/${scriptId}/beats`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(normalizeBeatInput(data)),
+  });
+  return unwrapResponse<Beat>(res);
+}
+
+export async function updateBeat(beatId: string, data: BeatInput): Promise<Beat> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${apiBase()}/beats/${beatId}`, {
+    method: 'PATCH',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(normalizeBeatInput(data)),
+  });
+  return unwrapResponse<Beat>(res);
+}
+
+export async function deleteBeat(beatId: string): Promise<void> {
+  const headers = await getAuthHeaders();
+  await fetch(`${apiBase()}/beats/${beatId}`, { method: 'DELETE', headers });
+}
+
+export async function moveBeat(
+  beatId: string,
+  args: { after_beat_id?: string | null },
+): Promise<Beat> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${apiBase()}/beats/${beatId}/move`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(args),
+  });
+  return unwrapResponse<Beat>(res);
+}
+
 /**
  * Dispatch the async AI storyboard breakdown of a scene. Returns the FLAT
  * { success, task_id } envelope (handleResponse) — the shots land some seconds

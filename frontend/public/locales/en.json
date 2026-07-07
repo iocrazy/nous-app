@@ -69,7 +69,8 @@
     "workforce": "Workforce",
     "sessions": "Sessions",
     "dashboard": "Dashboard",
-    "liveRuns": "{{count}} running"
+    "liveRuns": "{{count}} running",
+    "distribution": "Distribution"
   },
   "user": {
     "profile": "Profile",
@@ -151,6 +152,7 @@
     "create": "Create",
     "delete": "Delete",
     "deleting": "Deleting...",
+    "remove": "Remove",
     "previous": "Previous",
     "next": "Next",
     "save": "Save",
@@ -170,6 +172,31 @@
       "minutesAgo": "{{count}}m ago",
       "hoursAgo": "{{count}}h ago",
       "daysAgo": "{{count}}d ago"
+    }
+  },
+  "distribution": {
+    "accountsTitle": "Platform Accounts",
+    "accountsSubtitle": "Connect social accounts to publish from MediaHub",
+    "connectAccount": "Connect Account",
+    "connectAnother": "Connect another account",
+    "loadFailed": "Failed to load accounts",
+    "connectFailed": "Could not start Douyin authorization",
+    "refreshed": "Authorization refreshed",
+    "refreshFailed": "Refresh failed — reauthorize",
+    "deleteFailed": "Failed to remove account",
+    "active": "Active",
+    "expired": "Authorization expired",
+    "reauthorize": "Reauthorize",
+    "teamScope": "Team",
+    "personalScope": "Personal",
+    "nav": {
+      "publish": "Publish",
+      "accounts": "Accounts",
+      "allAccounts": "All accounts",
+      "insights": "Insights",
+      "analytics": "Analytics",
+      "settings": "Settings",
+      "soon": "Soon"
     }
   },
   "parser": {
@@ -1187,7 +1214,15 @@
       "storyboard": "Storyboard",
       "generation": "Generation",
       "review": "Review",
-      "delivery": "Delivery"
+      "delivery": "Delivery",
+      "desc": {
+        "planning": "Define the brief, gather references, and set the project's direction.",
+        "script": "Draft and lock the script that drives everything downstream.",
+        "storyboard": "Turn the locked script into shot-level boards and camera notes.",
+        "generation": "Produce the shots — generate frames, video, and audio.",
+        "review": "Collect feedback and iterate until the cut is approved.",
+        "delivery": "Package the final deliverables and hand off."
+      }
     },
     "tools": {
       "files": "Files",
@@ -1271,6 +1306,16 @@
       "deleteCollectionFailed": "Failed to delete collection link",
       "createShareFailed": "Failed to create share link",
       "loadVersionsFailed": "Failed to load version history"
+    },
+    "card": {
+      "enteredStage": "Entered {{stage}}",
+      "archived": "Archived"
+    },
+    "workbench": {
+      "currentStageOf": "Current stage · {{index}} of {{total}}",
+      "advanceTo": "Advance to {{stage}}",
+      "finalStage": "Final stage",
+      "recommendedTools": "Recommended tools"
     }
   },
   "storyboard": {
@@ -2459,6 +2504,44 @@
     "coldStartTitle": "Start your script",
     "coldStartSub": "Create the first scene and start writing. Tab cycles element types, Enter adds the next line.",
     "createStory": "Create Story",
+    "beatAdd": "Add Beat",
+    "beatDefaultTitle": "New Beat",
+    "beatTitle": "Beat title",
+    "beatTitlePlaceholder": "Beat title",
+    "beatNotes": "Notes",
+    "beatSummary": "Beat summary",
+    "beatSummaryPlaceholder": "What happens in this beat...",
+    "beatConfirmDelete": "Delete?",
+    "beatDragHandle": "Drag to reorder",
+    "beatLinkScene": "Link scene",
+    "beatUnlinkScene": "Unlink scene",
+    "beatSceneMissing": "Scene removed",
+    "beatsEmptyTitle": "No beats yet",
+    "beatsEmptySub": "Sketch your story in beats — add the first one to start.",
+    "beatsLoadFailed": "Failed to load beats",
+    "beatCreateFailed": "Failed to add beat",
+    "beatUpdateFailed": "Failed to save beat",
+    "beatDeleteFailed": "Failed to delete beat",
+    "beatMoveFailed": "Failed to reorder beats",
+    "importScript": "Import Script",
+    "importTitle": "Import Script",
+    "importName": "Name",
+    "importNamePlaceholder": "Enter script name...",
+    "importTabPaste": "Paste Text",
+    "importTabUpload": "Upload File",
+    "importPastePlaceholder": "Paste your screenplay or prose here...",
+    "importUploadHint": "Choose a .fountain or .txt file (max 1 MB)",
+    "importLoadedChars": "{{count}} characters loaded",
+    "importModeLabel": "Format",
+    "importModeFountain": "Fountain",
+    "importModeProse": "Prose",
+    "importProseHint": "Prose is split into scenes by AI — this can take about 30 seconds.",
+    "importSubmit": "Import",
+    "importing": "Importing...",
+    "importSuccess": "Script imported",
+    "importFailed": "Import failed",
+    "importErrorType": "Only .fountain and .txt files are supported",
+    "importErrorTooLarge": "File is too large (max 1 MB)",
     "statistics": "Statistics",
     "statScenes": "Scenes",
     "statWords": "Words",

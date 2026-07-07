@@ -1,7 +1,7 @@
 """Script Editor request/response Pydantic schemas."""
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, constr
 
@@ -16,6 +16,20 @@ class ScriptProjectCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     description: Optional[str] = Field(None, max_length=2000)
     project_id: int
+
+
+class ScriptImportRequest(BaseModel):
+    """Request body for creating a script from imported screenplay/prose text.
+
+    ``mode`` selects the parse path: ``fountain`` runs the deterministic
+    parser (zero LLM), ``prose`` routes the raw text through the existing
+    convert-to-scenes LLM pipeline. ``content`` size is additionally guarded
+    at the endpoint (422) so the message is explicit."""
+
+    name: str = Field(..., min_length=1, max_length=200)
+    project_id: int
+    mode: Literal["fountain", "prose"]
+    content: str = Field(..., min_length=1)
 
 
 class ScriptProjectUpdate(BaseModel):
@@ -218,6 +232,37 @@ class ShotMoveRequest(BaseModel):
 
     before_shot_id: Optional[str] = None
     after_shot_id: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Beat schemas (Beats view — classic beat sheet)
+# ---------------------------------------------------------------------------
+
+
+class BeatCreate(BaseModel):
+    """Request body for creating a beat under a script. ``script_id`` comes from
+    the path; ``scene_ids`` is an ordered list of linked scene id strings."""
+
+    title: str = Field(..., min_length=1, max_length=200)
+    summary: Optional[str] = None
+    scene_ids: Optional[List[str]] = None
+
+
+class BeatUpdate(BaseModel):
+    """Request body for updating a beat's title / summary / linked scenes."""
+
+    title: Optional[str] = Field(None, min_length=1, max_length=200)
+    summary: Optional[str] = None
+    scene_ids: Optional[List[str]] = None
+
+
+class BeatMoveRequest(BaseModel):
+    """Request body for `POST /beats/{beat_id}/move`.
+
+    ``after_beat_id`` names the beat this one lands just after; ``null`` moves it
+    to the front. Beats are reordered within their script only."""
+
+    after_beat_id: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------

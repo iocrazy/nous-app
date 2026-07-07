@@ -21,6 +21,7 @@ import {
   CreditCard,
   Coins,
   Share2,
+  Send,
 } from 'lucide-react';
 import { Team, Project, SidebarMode, ViewState } from '../types';
 import { SmartCollection } from '../services/smartCollectionService';
@@ -360,6 +361,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
               onClick={() => handleNav('ailibrary')}
               collapsed={collapsed}
             />
+            {import.meta.env.VITE_FEATURE_DISTRIBUTION === 'true' && (
+              <SidebarItem
+                icon={Send}
+                label={t('sidebar.distribution', 'Distribution')}
+                active={currentView === 'distribution'}
+                onClick={() => handleNav('distribution')}
+                collapsed={collapsed}
+              />
+            )}
           </SidebarSection>
 
           {hasPermission(permissions, 'member.view') && (
@@ -432,6 +442,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
             onClick={() => handleNav('ailibrary')}
             collapsed={collapsed}
           />
+          {import.meta.env.VITE_FEATURE_DISTRIBUTION === 'true' && (
+            <SidebarItem
+              icon={Send}
+              label={t('sidebar.distribution', 'Distribution')}
+              active={currentView === 'distribution'}
+              onClick={() => handleNav('distribution')}
+              collapsed={collapsed}
+            />
+          )}
         </SidebarSection>
       </nav>
 

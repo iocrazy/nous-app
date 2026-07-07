@@ -52,6 +52,7 @@ import {
 } from './SceneBlock';
 import { SceneRail } from './SceneRail';
 import { RailModules, type RailView } from './RailModules';
+import { BeatsView } from '../beats/BeatsView';
 import { NodesView } from '../nodes/NodesView';
 import { StoryboardView } from '../storyboard/StoryboardView';
 import { VersionDiff } from '../versions/VersionDiff';
@@ -64,6 +65,7 @@ import { WritingPanel, deriveStatistics } from './WritingPanel';
 import { SaveIndicator, aggregateSaveState } from './SaveIndicator';
 import { ConflictBar } from './ConflictBar';
 import { ColdStart } from './EmptyStates';
+import { ImportScriptModal } from './ImportScriptModal';
 import { ChapterFallback } from './ChapterFallback';
 import { useScriptPresence } from '../collab/useScriptPresence';
 import { useScriptOpsRealtime } from '../collab/useScriptOpsRealtime';
@@ -105,6 +107,7 @@ export function EditorShell({
   const [currentEpisodeId, setCurrentEpisodeId] = useState<string | null>(null);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [episodePanelOpen, setEpisodePanelOpen] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   // Live (optimistic) elements lifted from each SceneBlock so Statistics + rail
   // entities reflect in-flight edits, not just the last loaded snapshot (Task 6 ⑥).
   const [liveElements, setLiveElements] = useState<Record<string, ScriptElement[]>>({});
@@ -884,6 +887,8 @@ export function EditorShell({
             </ScenePresenceContext.Provider>
           ) : railView === 'storyboard' ? (
             <StoryboardView scenes={scenes} scriptId={scriptId} />
+          ) : railView === 'beats' ? (
+            <BeatsView scenes={scenes} scriptId={scriptId} onOpenScene={handleOpenScene} />
           ) : state.mode === 'cover' ? (
             <div className="mh-sheet-scroll">
               <div className="mh-cover-card" data-testid="cover-placeholder">
@@ -892,7 +897,10 @@ export function EditorShell({
             </div>
           ) : showColdStart ? (
             <div className="mh-sheet-scroll">
-              <ColdStart onCreateStory={handleCreateStory} />
+              <ColdStart
+                onCreateStory={handleCreateStory}
+                onImport={projectId ? () => setShowImportModal(true) : undefined}
+              />
             </div>
           ) : (
             <div className="mh-sheet-scroll" ref={sheetScrollRef}>
@@ -1045,6 +1053,13 @@ export function EditorShell({
           </>
         )}
       </aside>
+
+      {showImportModal && projectId && (
+        <ImportScriptModal
+          projectId={projectId}
+          onClose={() => setShowImportModal(false)}
+        />
+      )}
     </div>
   );
 }

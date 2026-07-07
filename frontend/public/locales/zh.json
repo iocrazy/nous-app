@@ -69,7 +69,8 @@
     "workforce": "工作团队",
     "sessions": "会话",
     "dashboard": "总览",
-    "liveRuns": "{{count}} 个运行中"
+    "liveRuns": "{{count}} 个运行中",
+    "distribution": "分发"
   },
   "user": {
     "profile": "个人资料",
@@ -151,6 +152,7 @@
     "create": "创建",
     "delete": "删除",
     "deleting": "删除中...",
+    "remove": "移除",
     "previous": "上一页",
     "next": "下一页",
     "save": "保存",
@@ -170,6 +172,31 @@
       "minutesAgo": "{{count}} 分钟前",
       "hoursAgo": "{{count}} 小时前",
       "daysAgo": "{{count}} 天前"
+    }
+  },
+  "distribution": {
+    "accountsTitle": "平台账号",
+    "accountsSubtitle": "连接社交平台账号，从 MediaHub 直接发布内容",
+    "connectAccount": "绑定账号",
+    "connectAnother": "绑定新账号",
+    "loadFailed": "加载账号失败",
+    "connectFailed": "无法发起抖音授权",
+    "refreshed": "授权已刷新",
+    "refreshFailed": "刷新失败，请重新授权",
+    "deleteFailed": "移除账号失败",
+    "active": "已激活",
+    "expired": "授权已过期",
+    "reauthorize": "重新授权",
+    "teamScope": "团队",
+    "personalScope": "个人",
+    "nav": {
+      "publish": "发布",
+      "accounts": "账号",
+      "allAccounts": "全部账号",
+      "insights": "洞察",
+      "analytics": "分析",
+      "settings": "设置",
+      "soon": "即将上线"
     }
   },
   "parser": {
@@ -1187,7 +1214,15 @@
       "storyboard": "分镜",
       "generation": "生成",
       "review": "审核",
-      "delivery": "交付"
+      "delivery": "交付",
+      "desc": {
+        "planning": "确定简报、收集参考、定下项目方向。",
+        "script": "撰写并锁定驱动后续环节的脚本。",
+        "storyboard": "把锁定的脚本转成分镜与运镜说明。",
+        "generation": "生产镜头——生成画面、视频、音频。",
+        "review": "收集反馈，迭代到成片通过。",
+        "delivery": "打包最终交付物并交接。"
+      }
     },
     "tools": {
       "files": "文件",
@@ -1271,6 +1306,16 @@
       "deleteCollectionFailed": "删除收集链接失败",
       "createShareFailed": "创建分享链接失败",
       "loadVersionsFailed": "加载版本历史失败"
+    },
+    "card": {
+      "enteredStage": "进入 {{stage}}",
+      "archived": "已归档"
+    },
+    "workbench": {
+      "currentStageOf": "当前阶段 · 第 {{index}}/{{total}} 步",
+      "advanceTo": "推进到 {{stage}}",
+      "finalStage": "最后阶段",
+      "recommendedTools": "推荐工具"
     }
   },
   "storyboard": {
@@ -2459,6 +2504,44 @@
     "coldStartTitle": "开始你的剧本",
     "coldStartSub": "创建第一个场景并开始写作。Tab 切换元素类型，Enter 添加下一行。",
     "createStory": "创建剧本",
+    "beatAdd": "添加节拍",
+    "beatDefaultTitle": "新节拍",
+    "beatTitle": "节拍标题",
+    "beatTitlePlaceholder": "节拍标题",
+    "beatNotes": "备注",
+    "beatSummary": "节拍概述",
+    "beatSummaryPlaceholder": "这个节拍发生了什么...",
+    "beatConfirmDelete": "删除？",
+    "beatDragHandle": "拖动重新排序",
+    "beatLinkScene": "关联场景",
+    "beatUnlinkScene": "取消关联场景",
+    "beatSceneMissing": "场景已删除",
+    "beatsEmptyTitle": "还没有节拍",
+    "beatsEmptySub": "用节拍勾勒你的故事——添加第一个开始吧。",
+    "beatsLoadFailed": "加载节拍失败",
+    "beatCreateFailed": "添加节拍失败",
+    "beatUpdateFailed": "保存节拍失败",
+    "beatDeleteFailed": "删除节拍失败",
+    "beatMoveFailed": "重新排序节拍失败",
+    "importScript": "导入剧本",
+    "importTitle": "导入剧本",
+    "importName": "名称",
+    "importNamePlaceholder": "输入剧本名称...",
+    "importTabPaste": "粘贴文本",
+    "importTabUpload": "上传文件",
+    "importPastePlaceholder": "在此粘贴剧本或散文...",
+    "importUploadHint": "选择 .fountain 或 .txt 文件（最大 1 MB）",
+    "importLoadedChars": "已加载 {{count}} 个字符",
+    "importModeLabel": "格式",
+    "importModeFountain": "Fountain",
+    "importModeProse": "散文",
+    "importProseHint": "散文将由 AI 拆分为场景——大约需要 30 秒。",
+    "importSubmit": "导入",
+    "importing": "导入中...",
+    "importSuccess": "剧本已导入",
+    "importFailed": "导入失败",
+    "importErrorType": "仅支持 .fountain 和 .txt 文件",
+    "importErrorTooLarge": "文件过大（最大 1 MB）",
     "statistics": "统计",
     "statScenes": "场景",
     "statWords": "字数",

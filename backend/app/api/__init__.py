@@ -48,9 +48,11 @@ from app.api.reviews_router import router as reviews_router
 from app.api.sb_gone_router import router as sb_gone_router
 from app.api.script_ai_router import router as script_ai_router
 from app.api.script_assets_router import router as script_assets_router
+from app.api.script_beats_router import router as script_beats_router
 from app.api.script_canvas_router import router as script_canvas_router
 from app.api.script_export_router import router as script_export_router
 from app.api.script_import_router import router as script_import_router
+from app.api.script_import_scenes_router import router as script_import_scenes_router
 from app.api.script_projects_router import router as script_projects_router
 from app.api.script_scenes_router import router as script_scenes_router
 from app.api.script_shots_router import router as script_shots_router
@@ -188,9 +190,11 @@ api_router.include_router(router=script_canvas_router, tags=["Scripts"])
 api_router.include_router(router=script_assets_router, tags=["Script Assets"])
 api_router.include_router(router=script_ai_router, tags=["Script AI"])
 api_router.include_router(router=script_import_router, tags=["Script Import"])
+api_router.include_router(router=script_import_scenes_router, tags=["Script Import"])
 api_router.include_router(router=script_export_router, tags=["Script Export"])
 api_router.include_router(router=script_scenes_router, tags=["Script Scenes"])
 api_router.include_router(router=script_shots_router, tags=["Script Shots"])
+api_router.include_router(router=script_beats_router, tags=["Script Beats"])
 api_router.include_router(router=script_versions_router, tags=["Script Versions"])
 api_router.include_router(router=episodes_router, tags=["Episodes"])
 
@@ -221,3 +225,13 @@ from app.api.issue_messages_router import router as issue_messages_router  # noq
 api_router.include_router(router=issue_messages_router, tags=["Issue Messages"])
 
 api_router.include_router(router=inspiration_router, tags=["Inspiration"])
+
+# PR-D1: distribution accounts (platform OAuth connect/callback/refresh).
+# NOTE: aliased to ``distribution_api_router`` (not ``distribution_router``) —
+# reusing the submodule's own basename as the local name here would overwrite
+# the ``app.api.distribution_router`` attribute with the APIRouter instance,
+# breaking any ``import app.api.distribution_router as x`` elsewhere (e.g.
+# the test module) which resolves via attribute traversal on the package.
+from app.api.distribution_router import router as distribution_api_router  # noqa: E402
+
+api_router.include_router(router=distribution_api_router, tags=["Distribution"])

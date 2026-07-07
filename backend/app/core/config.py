@@ -146,6 +146,10 @@ class Settings(BaseSettings):
         "FEATURE_SHOT_GENERATE. Flip true once the video chain is validated on "
         "the target stack (needs the dreamina CLI logged in on the NAS).",
     )
+    FEATURE_DISTRIBUTION: bool = Field(
+        default=False,
+        description="Distribution module (platform accounts + publishing). Flag-dark until go-live.",
+    )
     STORAGE_SIGNED_URL_PUBLIC_BASE: str = Field(
         default="",
         description="OPTIONAL public base URL (scheme+host[+port]) for storage "
@@ -316,6 +320,10 @@ class Settings(BaseSettings):
     MEDIA_PUBLIC_URL: str = Field(
         default="https://mediahubserver.heygo.cn:88",
         description="Public URL for media file access",
+    )
+    FRONTEND_URL: str = Field(
+        default="http://localhost:5175",
+        description="Frontend base URL for OAuth redirect back to the SPA",
     )
     NEWSNOW_API_URL: str = Field(
         default="http://localhost:4000",

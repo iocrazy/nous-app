@@ -80,19 +80,6 @@ export default function CanvasPage() {
     );
   }
 
-  // A ready-but-empty canvas (no nodes) renders an explicit empty state
-  // rather than a silently-blank React Flow grid, which read as broken.
-  if (nodeCount === 0) {
-    return (
-      <div className="flex h-full w-full items-center justify-center">
-        <div className="max-w-sm text-center text-slate-700 dark:text-slate-300">
-          <p className="text-base font-medium">{t('canvas.empty.title')}</p>
-          <p className="mt-1 text-xs opacity-70">{t('canvas.empty.hint')}</p>
-        </div>
-      </div>
-    );
-  }
-
   // Both modes render the same React Flow surface — CanvasSurface picks
   // the nodeTypes map (smart vs classic) off the store `kind`. The
   // per-mode overlays differ: SmartMode adds the node composer palette;
@@ -102,6 +89,20 @@ export default function CanvasPage() {
   return (
     <div ref={surfaceRef} className="relative h-full w-full">
       <CanvasSurface />
+      {/* Empty-canvas hint floats OVER the live surface instead of replacing
+          it: the palette/composer are the only way to add a first node, so a
+          full-screen empty state would dead-end a freshly created canvas
+          (New Canvas → navigate lands here with zero nodes). pointer-events
+          stay off so the surface underneath keeps every interaction; the
+          hint disappears with the first node. */}
+      {nodeCount === 0 && (
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+          <div className="max-w-sm text-center text-slate-700 dark:text-slate-300">
+            <p className="text-base font-medium">{t('canvas.empty.title')}</p>
+            <p className="mt-1 text-xs opacity-70">{t('canvas.empty.hint')}</p>
+          </div>
+        </div>
+      )}
       {kind === 'smart' && <CanvasComposer surfaceRef={surfaceRef} />}
       {kind === 'classic' && (
         <>

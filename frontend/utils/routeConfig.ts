@@ -24,6 +24,7 @@ export const VIEW_PATH_MAP: Record<ViewState, string> = {
   skills: '/skills',
   ailibrary: '/ai-library/agents',
   chat: '/chat',
+  distribution: '/distribution/accounts',
 };
 
 /**
@@ -53,6 +54,7 @@ export function pathnameToView(pathname: string): ViewState {
   // /ai-library/* is the new nested AI Library area — checked before the
   // flat /agents and /skills so it wins on match.
   if (stripped.startsWith('/ai-library')) return 'ailibrary';
+  if (stripped.startsWith('/distribution')) return 'distribution';
   if (stripped.startsWith('/agents')) return 'agents';
   if (stripped.startsWith('/skills')) return 'skills';
   if (stripped.startsWith('/chat')) return 'chat';

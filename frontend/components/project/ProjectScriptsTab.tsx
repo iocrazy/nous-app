@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Plus, FileText, ScrollText, X, Loader2 } from 'lucide-react';
+import { Plus, FileText, ScrollText, X, Loader2, Upload } from 'lucide-react';
 import {
   fetchScriptProjects,
   createScriptProject,
 } from '../../services/scriptService';
+import { ImportScriptModal } from '../../editor/components/ImportScriptModal';
 import { ScriptProjectSummary } from '../../types';
 
 interface Props {
@@ -17,6 +18,7 @@ export function ProjectScriptsTab({ projectId }: Props) {
   const [items, setItems] = useState<ScriptProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -57,13 +59,22 @@ export function ProjectScriptsTab({ projectId }: Props) {
           <h2 className="text-lg font-semibold text-ink-100">Scripts</h2>
           <p className="text-xs text-ink-500 mt-0.5">{items.length} item{items.length !== 1 ? 's' : ''}</p>
         </div>
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
-        >
-          <Plus size={15} />
-          New Script
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="flex items-center gap-2 border border-ink-700 text-ink-200 hover:bg-ink-800 rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+          >
+            <Upload size={15} />
+            Import Script
+          </button>
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+          >
+            <Plus size={15} />
+            New Script
+          </button>
+        </div>
       </div>
 
       {items.length === 0 ? (
@@ -125,6 +136,13 @@ export function ProjectScriptsTab({ projectId }: Props) {
           projectId={projectId}
           onClose={() => setShowCreateModal(false)}
           onCreated={handleCreated}
+        />
+      )}
+
+      {showImportModal && (
+        <ImportScriptModal
+          projectId={projectId}
+          onClose={() => setShowImportModal(false)}
         />
       )}
     </div>

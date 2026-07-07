@@ -244,6 +244,26 @@ async def verify_commit_access(
     await _assert_script_team_access(str(commit.get("script_id")), auth.user_id)
 
 
+async def verify_beat_access(
+    beat_id: str,
+    auth: AuthContext = Depends(get_auth),
+) -> None:
+    """Guard for `/beats/{beat_id}` targets — resolves beat → script_id, then
+    applies the same team check (404 if the beat is missing).
+
+    A one-hop wrapper over the script team check for the beat-scoped routes
+    (PATCH/DELETE `/beats/{beat_id}`, POST `/beats/{beat_id}/move`) that have no
+    ``script_id`` in the path. The ``str()`` coercion in
+    ``_assert_script_team_access`` handles the #1006 trap (the row's
+    ``script_id`` is a native int, the guard compares as str)."""
+    from app.repositories.script_beat_repository import get_script_beat_repository
+
+    beat = await get_script_beat_repository().get_by_id(beat_id)
+    if not beat:
+        raise HTTPException(status_code=404, detail="Beat not found")
+    await _assert_script_team_access(str(beat.get("script_id")), auth.user_id)
+
+
 async def verify_episode_write_access(
     episode_id: str,
     auth: AuthContext = Depends(get_auth),
