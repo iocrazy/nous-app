@@ -32,13 +32,25 @@ const AI_INTENTS = [
   { name: 'Analyze', label: 'Analyze', Icon: Eye },
 ] as const;
 
-export const FloatingParse: React.FC = () => {
+export const FloatingParse: React.FC<{
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}> = ({ open, onOpenChange }) => {
   const { t } = useTranslation();
   const { addToast } = useToast();
   const [phase, setPhase] = useState<Phase>('collapsed');
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ParseOutcome | null>(null);
+
+  // Controlled mode: when a parent passes `open`, keep phase in sync with it.
+  // Untouched (early-return) when `open` is undefined, so the uncontrolled
+  // callers (e.g. TopicInspirationPage's bare `<FloatingParse />`) are
+  // byte-for-byte unaffected.
+  useEffect(() => {
+    if (open === undefined) return;
+    setPhase(open ? (p) => (p === 'collapsed' ? 'input' : p) : 'collapsed');
+  }, [open]);
 
   // Tag state
   const [allTags, setAllTags] = useState<Tag[]>([]);
@@ -155,6 +167,7 @@ export const FloatingParse: React.FC = () => {
   const onClose = () => {
     setPhase('collapsed');
     setResult(null);
+    onOpenChange?.(false);
   };
 
   const onReset = () => {
@@ -162,12 +175,23 @@ export const FloatingParse: React.FC = () => {
     setResult(null);
     setInput('');
     setSelectedTagIds([]);
+    onOpenChange?.(false);
   };
 
   if (phase === 'collapsed') {
+    // Controlled mode (parent passes `open`): the entry point lives in the
+    // parent's own UI (e.g. InspirationPage's top-bar "Parse URL" button),
+    // so don't also render the floating trigger pill — that would give the
+    // page two redundant Parse entry points. Uncontrolled callers (`open`
+    // undefined, e.g. legacy TopicInspirationPage's bare `<FloatingParse />`)
+    // keep the floating button as their only entry point.
+    if (open !== undefined) return null;
     return (
       <button
-        onClick={() => setPhase('input')}
+        onClick={() => {
+          setPhase('input');
+          onOpenChange?.(true);
+        }}
         className={`fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-2.5 rounded-full shadow-lg text-sm font-semibold bg-island border border-line-strong text-content`}
       >
         <Link2 size={16} /> {t('topic.parseLink', 'Parse Link')}

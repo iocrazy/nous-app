@@ -2413,7 +2413,19 @@
     "noteCount": "{{count}} notes",
     "searchPlaceholder": "Search notes…",
     "openSource": "Open source",
-    "uploadFailed": "Upload failed: {{name}}"
+    "uploadFailed": "Upload failed: {{name}}",
+    "notes": "Notes",
+    "hotspotsTab": "Hotspots",
+    "parseUrl": "Parse URL",
+    "hotspots": "Hotspots",
+    "allHotspots": "All hotspots →",
+    "saveAsNote": "Save as note",
+    "parse": "Parse",
+    "notInterested": "Not interested",
+    "selectHotspot": "Select a hotspot to see details",
+    "noHotspots": "No hotspots for this day.",
+    "summary": "Summary",
+    "sourceCount": "{{count}} sources"
   },
   "editor": {
     "brand": "MediaHub Projects",
