@@ -1,0 +1,29 @@
+/*
+ * Alignment-guide lines for a canvas-kit surface. Bundled with the component so
+ * it is portable across surfaces (the script editor's NodesView and canvas-core)
+ * rather than depending on any one surface's stylesheet.
+ *
+ * Colour prefers the editor's --indigo (so the editor keeps its exact hue),
+ * falls back to the global accent, then a literal indigo — so the line is
+ * always visible wherever the overlay mounts.
+ */
+.mh-flow-guides {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+.mh-flow-guide {
+  position: absolute;
+  background: var(--indigo, var(--color-accent, #6366f1));
+}
+.mh-flow-guide-v {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+.mh-flow-guide-h {
+  left: 0;
+  right: 0;
+  height: 1px;
+}
