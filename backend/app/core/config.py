@@ -285,15 +285,11 @@ class Settings(BaseSettings):
     # ============================================
     # LLM Configuration (Script / Storyboard AI)
     # ============================================
-    # Deliberately EMPTY by default (was "http://localhost:8000/v1"): the
-    # implicit localhost fallback meant any un-configured deployment / new
-    # user with no provider silently dialed a dead socket and surfaced as a
-    # timeout instead of a clear "not configured" error — prod's .env never
-    # set this, so the qwen fallback path was a live landmine. Local dev
-    # with vLLM/ollama sets it explicitly in .env.
-    LLM_API_URL: str = Field(default="", description="LLM API base URL")
-    LLM_API_KEY: str = Field(default="", description="LLM API key")
-    LLM_MODEL: str = Field(default="gpt-4o", description="LLM model name")
+    # LLM credentials are DB-ONLY (铁律 2026-07-07): LLM_API_URL / LLM_API_KEY /
+    # LLM_MODEL, DEEPSEEK_*, DOUBAO_* and CLAUDE_API_KEY were removed. Platform
+    # models live in the admin-managed ``mediahub_models`` catalog (encrypted
+    # at rest); users bring their own keys in Settings → AI Providers. Only
+    # non-credential knobs (timeouts, budgets) remain here.
     LLM_TIMEOUT_SECONDS: float = Field(
         default=120.0, description="LLM request timeout in seconds"
     )
@@ -310,25 +306,6 @@ class Settings(BaseSettings):
         description="Cache TTL for agent config lookups (seconds)",
     )
 
-    # ============================================
-    # AI Provider Configuration
-    # ============================================
-    # DeepSeek provider (optional — set when using deepseek-* models)
-    DEEPSEEK_API_URL: str = Field(
-        default="https://api.deepseek.com/v1/chat/completions",
-        description="DeepSeek chat-completions endpoint URL",
-    )
-    DEEPSEEK_API_KEY: str = Field(default="", description="DeepSeek API Key")
-
-    # Claude (Anthropic) provider (optional — set when using claude-* models)
-    CLAUDE_API_KEY: str = Field(default="", description="Anthropic API key.")
-
-    # Doubao (Volcengine Ark) provider (optional — set when using doubao-*/ep-* models)
-    DOUBAO_API_URL: str = Field(
-        default="https://ark.cn-beijing.volces.com/api/v3/chat/completions",
-        description="Doubao (Volcengine Ark) chat-completions endpoint URL",
-    )
-    DOUBAO_API_KEY: str = Field(default="", description="Doubao API Key")
     MEDIA_PUBLIC_URL: str = Field(
         default="https://mediahubserver.heygo.cn:88",
         description="Public URL for media file access",

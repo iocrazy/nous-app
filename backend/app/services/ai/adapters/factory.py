@@ -1,22 +1,25 @@
 """Adapter factory — dispatches by model prefix to the right adapter.
 
-Used by ScriptAIService (and future AgentRunner callers) to pick the
-correct provider adapter based on an agent's ``model`` field.
-
 Known prefixes:
-- qwen-* / tongyi-* / "" (empty)           → QwenAdapter  (DashScope)
+- qwen-* / tongyi-* / "" (empty)           → QwenAdapter  (OpenAI-compatible)
 - deepseek-*                                → DeepSeekAdapter
 - doubao-* / ep-*                           → DoubaoAdapter
 - claude-*                                  → ClaudeAdapter
 - gpt-* / o1-* / o3-*                       → OpenAIAdapter (multimodal)
+- org/name                                  → ModelScopeAdapter (BYO-only)
 Unknown prefixes raise ValueError.
 
-Two entry points:
-- ``get_adapter(model, settings)``            — global settings only (legacy).
-- ``get_adapter_for_user(model, user_cfg, fallback_settings)`` — per-user BYO
-  api_key / base_url with a fallback to global settings when user hasn't
-  configured the provider. Used by Celery tasks that resolve an agent slug
-  to its configured model and need the end user's own keys.
+CREDENTIALS ARE DB-ONLY (铁律, 2026-07-07): environment variables no longer
+supply LLM keys or endpoints. The resolution order everywhere is
+  platform ``mediahub_models`` catalog (admin-managed, encrypted at rest)
+  → user BYOK (``user_settings.ai_settings.ai_providers``)
+  → ProviderNotConfiguredError.
+Use :func:`app.services.ai.providers.ai_provider_helpers.resolve_db_adapter`
+for the full DB-first resolution; call ``get_adapter_for_user`` directly only
+when the caller has already resolved credentials into the user-config shape.
+``get_adapter(model, settings)`` survives as a deprecated shim (the settings
+argument is ignored) so legacy call sites fail fast instead of silently
+reading env.
 """
 
 from __future__ import annotations
@@ -35,6 +38,30 @@ _KNOWN_PREFIXES = (
     "qwen-*, tongyi-*, deepseek-*, doubao-*, ep-*, claude-*, gpt-*, o1-*, o3-*, "
     "org/name (ModelScope)"
 )
+
+# Official public endpoints — an ENDPOINT is not a credential, so these may
+# live in code. Keys never may.
+DEEPSEEK_DEFAULT_URL = "https://api.deepseek.com/v1/chat/completions"
+DOUBAO_DEFAULT_URL = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
+
+
+class ProviderNotConfiguredError(ValueError):
+    """No credential resolved for the provider serving ``model``.
+
+    Raised instead of building a keyless adapter (opaque upstream 401) or —
+    the pre-2026-07-07 behavior — silently falling back to env vars. Users
+    configure their own keys in Settings → AI Providers; platform models are
+    managed by the admin in Admin → AI Models.
+    """
+
+    def __init__(self, provider: str, model: str):
+        self.provider = provider
+        self.model = model
+        super().__init__(
+            f"AI provider '{provider}' is not configured for model {model!r}. "
+            "Add your API key in Settings → AI Providers, or ask the admin "
+            "to enable a platform model (Admin → AI Models)."
+        )
 
 
 def _is_openai(model: str) -> bool:
@@ -75,71 +102,12 @@ def provider_key_for_model(model: str) -> str:
 
 
 def get_adapter(model: str, settings: Any) -> AIAdapter:
-    """Dispatch by model prefix. ``settings`` is the app settings object
-    (duck-typed — must expose LLM_*/DEEPSEEK_*/DOUBAO_*/CLAUDE_API_KEY)."""
-    m = (model or "").lower()
-
-    if "/" in m:
-        from app.services.ai.adapters.modelscope import MODELSCOPE_DEFAULT_URL
-
-        # BYO-first provider: global MODELSCOPE_* settings are optional.
-        return ModelScopeAdapter(
-            api_url=getattr(settings, "MODELSCOPE_API_URL", "")
-            or MODELSCOPE_DEFAULT_URL,
-            api_key=getattr(settings, "MODELSCOPE_API_KEY", "") or "",
-            default_model=model,
-        )
-
-    if m.startswith("claude-"):
-        return ClaudeAdapter(
-            api_key=settings.CLAUDE_API_KEY,
-            default_model=model or "claude-opus-4-5",
-        )
-
-    if m.startswith("deepseek-"):
-        return DeepSeekAdapter(
-            api_url=settings.DEEPSEEK_API_URL,
-            api_key=settings.DEEPSEEK_API_KEY,
-            default_model=model or "deepseek-chat",
-        )
-
-    if m.startswith("doubao-") or m.startswith("ep-"):
-        return DoubaoAdapter(
-            api_url=settings.DOUBAO_API_URL,
-            api_key=settings.DOUBAO_API_KEY,
-            default_model=model,
-        )
-
-    if _is_openai(m):
-        return OpenAIAdapter(
-            api_key=settings.OPENAI_API_KEY,
-            default_model=model or settings.OPENAI_MODEL,
-        )
-
-    if m == "" or m.startswith("qwen-") or m.startswith("tongyi-"):
-        return QwenAdapter(
-            api_url=_require_llm_url(settings.LLM_API_URL),
-            api_key=settings.LLM_API_KEY,
-            default_model=model or settings.LLM_MODEL,
-        )
-
-    raise ValueError(
-        f"unsupported model: {model!r} — known prefixes: {_KNOWN_PREFIXES}"
-    )
-
-
-def _require_llm_url(url: str) -> str:
-    """Fail fast with an actionable error instead of dialing an empty/dead
-    endpoint (the old default was localhost:8000 — a silent landmine on any
-    deployment that never set LLM_API_URL)."""
-    if not url:
-        raise ValueError(
-            "LLM provider not configured: no provider resolved from the "
-            "admin/user config and LLM_API_URL is unset. Configure a "
-            "provider in Admin → AI Models, or set LLM_API_URL to a local "
-            "OpenAI-compatible endpoint."
-        )
-    return url
+    """DEPRECATED shim — ``settings`` is IGNORED (env credentials retired
+    2026-07-07, 铁律). Delegates to :func:`get_adapter_for_user` with no user
+    config: callers that never resolved DB credentials now fail fast with
+    ProviderNotConfiguredError instead of silently reading env vars. Migrate
+    call sites to ``resolve_db_adapter`` (ai_provider_helpers)."""
+    return get_adapter_for_user(model, {}, None)
 
 
 def get_adapter_for_user(
@@ -150,11 +118,13 @@ def get_adapter_for_user(
     """Build an adapter using per-user BYO credentials with a global fallback.
 
     ``user_provider_config`` is the user's full ``ai_providers`` dict, e.g.
-    ``{"qwen": {"api_key": "...", "base_url": "..."}, "doubao": {...}}``.
-    For the provider key derived from ``model``, its ``api_key``, ``base_url``
-    (and where relevant ``app_id``) take precedence; if empty, we fall back to
-    ``fallback_settings.*`` — preserving backwards compatibility for users who
-    haven't configured the provider in the UI yet.
+    ``{"qwen": {"api_key": "...", "base_url": "..."}, "doubao": {...}}`` —
+    OR a platform-credential dict in the same shape, as produced by
+    ``resolve_db_adapter`` from the ``mediahub_models`` catalog.
+
+    ``fallback_settings`` is DEPRECATED AND IGNORED (env credentials retired
+    2026-07-07, 铁律): a provider with no resolved key raises
+    :class:`ProviderNotConfiguredError` instead of reading env vars.
 
     Raises ValueError for unknown model prefixes.
     """
@@ -197,29 +167,37 @@ def get_adapter_for_user(
     user_base = (user_cfg.get("base_url") or "").strip()
 
     if provider_key == "claude":
+        if not user_key:
+            raise ProviderNotConfiguredError("claude", model)
         return ClaudeAdapter(
-            api_key=user_key or fallback_settings.CLAUDE_API_KEY,
+            api_key=user_key,
             default_model=model or "claude-opus-4-5",
         )
 
     if provider_key == "deepseek":
+        if not user_key:
+            raise ProviderNotConfiguredError("deepseek", model)
         return DeepSeekAdapter(
-            api_url=user_base or fallback_settings.DEEPSEEK_API_URL,
-            api_key=user_key or fallback_settings.DEEPSEEK_API_KEY,
+            api_url=user_base or DEEPSEEK_DEFAULT_URL,
+            api_key=user_key,
             default_model=model or "deepseek-chat",
         )
 
     if provider_key == "doubao":
+        if not user_key:
+            raise ProviderNotConfiguredError("doubao", model)
         return DoubaoAdapter(
-            api_url=user_base or fallback_settings.DOUBAO_API_URL,
-            api_key=user_key or fallback_settings.DOUBAO_API_KEY,
+            api_url=user_base or DOUBAO_DEFAULT_URL,
+            api_key=user_key,
             default_model=model,
         )
 
     if provider_key == "openai":
+        if not user_key:
+            raise ProviderNotConfiguredError("openai", model)
         return OpenAIAdapter(
-            api_key=user_key or fallback_settings.OPENAI_API_KEY,
-            default_model=model or fallback_settings.OPENAI_MODEL,
+            api_key=user_key,
+            default_model=model or "gpt-4o",
             api_url=user_base or None,
         )
 
@@ -235,9 +213,13 @@ def get_adapter_for_user(
             default_model=model,
         )
 
-    # provider_key == "qwen" (default / only remaining case)
+    # provider_key == "qwen" (default / only remaining case). Qwen-compatible
+    # endpoints have no universal public URL — the base_url IS part of the
+    # credential set, so it must come from the DB (platform catalog or BYOK).
+    if not user_base:
+        raise ProviderNotConfiguredError("qwen", model)
     return QwenAdapter(
-        api_url=_require_llm_url(user_base or fallback_settings.LLM_API_URL),
-        api_key=user_key or fallback_settings.LLM_API_KEY,
-        default_model=model or fallback_settings.LLM_MODEL,
+        api_url=user_base,
+        api_key=user_key,
+        default_model=model,
     )

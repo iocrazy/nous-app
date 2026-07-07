@@ -29,17 +29,21 @@ async def default_consolidator(prompt: str, model: str = "") -> str:
     try:
         from uuid import UUID
 
-        from app.core.config import settings
         from app.schemas.ai_library import ComposedSystemPrompt
-        from app.services.ai.adapters.factory import get_adapter
+        from app.services.ai.providers.ai_provider_helpers import (
+            resolve_db_adapter,
+        )
 
         consolidation_model = (model or "").strip() or _FALLBACK_CONSOLIDATION_MODEL
         try:
-            adapter = get_adapter(consolidation_model, settings)
+            # DB-only credentials (铁律 2026-07-07): platform catalog → raise.
+            adapter = await resolve_db_adapter(consolidation_model, "agent_memory")
         except ValueError:
-            # Unknown model prefix → fall back to the cheap default provider.
+            # Unknown/unconfigured model → fall back to the cheap default
+            # (itself DB-resolved; a miss lands in the outer best-effort
+            # except and returns "").
             consolidation_model = _FALLBACK_CONSOLIDATION_MODEL
-            adapter = get_adapter(consolidation_model, settings)
+            adapter = await resolve_db_adapter(consolidation_model, "agent_memory")
 
         composed = ComposedSystemPrompt(
             # Use the nil UUID — maintenance call needs no real agent identity.

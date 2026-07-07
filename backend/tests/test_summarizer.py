@@ -2,7 +2,7 @@
 
 Pin the data-shape contract between summarizer and compactor:
   - return value is a non-empty string (the summary text)
-  - provider routes via ``ai.adapters.factory.get_adapter`` so a new
+  - provider routes via ``ai_provider_helpers.resolve_db_adapter`` so a new
     model added there works here automatically
   - timeouts and provider failures raise RuntimeError with provider
     name + reason in the message (compactor catches and falls back)
@@ -55,7 +55,8 @@ async def test_env_override_wins_over_system_settings(monkeypatch):
 
     with (
         patch(
-            "app.services.ai.adapters.factory.get_adapter", return_value=fake_adapter
+            "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+            new=AsyncMock(return_value=fake_adapter),
         ) as mock_factory,
         patch("app.db.supabase_client.get_async_supabase_admin") as mock_db,
     ):
@@ -82,7 +83,8 @@ async def test_system_settings_override_used_when_no_env(monkeypatch):
     with (
         patch("app.db.supabase_client.get_async_supabase_admin", return_value=fake_db),
         patch(
-            "app.services.ai.adapters.factory.get_adapter", return_value=fake_adapter
+            "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+            new=AsyncMock(return_value=fake_adapter),
         ) as mock_factory,
     ):
         await summarize(_make_msgs())
@@ -104,7 +106,8 @@ async def test_db_failure_falls_back_to_default(monkeypatch):
             side_effect=RuntimeError("supabase down"),
         ),
         patch(
-            "app.services.ai.adapters.factory.get_adapter", return_value=fake_adapter
+            "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+            new=AsyncMock(return_value=fake_adapter),
         ) as mock_factory,
     ):
         result = await summarize(_make_msgs())
@@ -118,7 +121,10 @@ async def test_empty_messages_returns_empty(monkeypatch):
     """No-op short-circuit: don't pay for an LLM call when there's
     nothing to summarize."""
     monkeypatch.setenv("COMPACTION_PROVIDER", "claude-haiku-4-5")
-    with patch("app.services.ai.adapters.factory.get_adapter") as mock_factory:
+    with patch(
+        "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+        new=AsyncMock(),
+    ) as mock_factory:
         result = await summarize([])
     assert result == ""
     mock_factory.assert_not_called()
@@ -139,7 +145,8 @@ async def test_provider_timeout_raises_runtime_error(monkeypatch):
 
     with (
         patch(
-            "app.services.ai.adapters.factory.get_adapter", return_value=fake_adapter
+            "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+            new=AsyncMock(return_value=fake_adapter),
         ),
         patch("app.agent_framework.summarizer.SUMMARIZE_TIMEOUT_S", 0.05),
     ):
@@ -155,7 +162,8 @@ async def test_provider_returns_empty_raises(monkeypatch):
     fake_adapter = _adapter_returning("")
 
     with patch(
-        "app.services.ai.adapters.factory.get_adapter", return_value=fake_adapter
+        "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+        new=AsyncMock(return_value=fake_adapter),
     ):
         with pytest.raises(RuntimeError, match="empty content"):
             await summarize(_make_msgs())
@@ -168,8 +176,8 @@ async def test_unsupported_provider_raises(monkeypatch):
     monkeypatch.setenv("COMPACTION_PROVIDER", "bogus-model-name")
 
     with patch(
-        "app.services.ai.adapters.factory.get_adapter",
-        side_effect=ValueError("unsupported"),
+        "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+        new=AsyncMock(side_effect=ValueError("unsupported")),
     ):
         with pytest.raises(RuntimeError, match="unsupported provider"):
             await summarize(_make_msgs())
@@ -194,7 +202,8 @@ async def test_call_passes_flattened_text(monkeypatch):
     fake_adapter = _adapter_returning("ok")
 
     with patch(
-        "app.services.ai.adapters.factory.get_adapter", return_value=fake_adapter
+        "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+        new=AsyncMock(return_value=fake_adapter),
     ):
         await summarize(_make_msgs())
 

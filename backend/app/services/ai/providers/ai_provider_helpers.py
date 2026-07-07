@@ -178,6 +178,43 @@ async def resolve_platform_model(
     return row["actual_provider"], provider_config, row["actual_model"]
 
 
+async def resolve_db_adapter(
+    model: str,
+    module: str,
+    user_provider_config: Optional[Dict[str, Any]] = None,
+):
+    """DB-first adapter resolution (铁律 2026-07-07: LLM credentials never
+    come from env). Order:
+
+      1. platform ``mediahub_models`` catalog (admin-managed) — hit swaps the
+         model for ``actual_model`` and injects the platform key/base_url;
+      2. user BYOK (``user_provider_config`` = the user's ``ai_providers``);
+      3. neither → :class:`ProviderNotConfiguredError` from the factory.
+
+    Returns an :class:`AIAdapter`. Platform credentials are injected under
+    BOTH the catalog's ``actual_provider`` and the factory's own prefix-derived
+    key, so a catalog row whose ``actual_provider`` label drifts from the
+    model-prefix convention still resolves.
+    """
+    from app.services.ai.adapters.factory import (
+        get_adapter_for_user,
+        provider_key_for_model,
+    )
+
+    hit = await resolve_mediahub_model(model, module)
+    if hit:
+        actual_provider, cfg, actual_model = hit
+        creds = {"api_key": cfg["api_key"], "base_url": cfg["base_url"]}
+        injected: Dict[str, Any] = {actual_provider: creds}
+        try:
+            injected[provider_key_for_model(actual_model)] = creds
+        except ValueError:
+            pass  # unknown prefix — factory will raise the same error below
+        return get_adapter_for_user(actual_model, injected, None)
+
+    return get_adapter_for_user(model, user_provider_config or {}, None)
+
+
 DEFAULT_ANALYZE_AGENT_SLUG = "analyze"
 DEFAULT_TRANSLATE_AGENT_SLUG = "translate"
 DEFAULT_CAPTION_AGENT_SLUG = "caption"

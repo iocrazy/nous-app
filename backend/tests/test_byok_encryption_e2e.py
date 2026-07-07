@@ -28,15 +28,9 @@ pytestmark = pytest.mark.asyncio
 
 
 def _fallback_settings(**overrides: Any) -> SimpleNamespace:
-    defaults: Dict[str, Any] = {
-        "OPENAI_API_KEY": "",
-        "OPENAI_MODEL": "gpt-4o",
-        "LLM_API_URL": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
-        "LLM_API_KEY": "",
-        "LLM_MODEL": "qwen-max",
-    }
-    defaults.update(overrides)
-    return SimpleNamespace(**defaults)
+    # 铁律 2026-07-07: fallback_settings is ignored by the factory — kept here
+    # (empty) only to prove passing it changes nothing.
+    return SimpleNamespace(**overrides)
 
 
 @pytest.fixture
@@ -91,7 +85,14 @@ async def test_multi_key_rotation_row_resolves_to_plaintext_adapters(real_key):
     repo.get_by_user_id = AsyncMock(
         return_value={
             "settings_json": {
-                "ai_settings": {"ai_providers": {"qwen": {"api_key": keys}}}
+                "ai_settings": {
+                    "ai_providers": {
+                        "qwen": {
+                            "api_key": keys,
+                            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        }
+                    }
+                }
             }
         }
     )

@@ -170,12 +170,15 @@ async def summarize(
     # Lazy imports — adapters pull in heavyweight SDKs we don't want
     # to load at module import time (this file is reachable from the
     # tokenizer hot path via context_compactor).
-    from app.core.config import settings
     from app.schemas.ai_library import ComposedSystemPrompt
-    from app.services.ai.adapters.factory import get_adapter
+    from app.services.ai.providers.ai_provider_helpers import resolve_db_adapter
 
     try:
-        adapter = get_adapter(provider, settings)
+        # DB-only credential resolution (铁律 2026-07-07): platform
+        # ``mediahub_models`` catalog first, no env fallback. The compaction
+        # provider is an admin-level system setting, so there is no user BYOK
+        # dict to thread through here.
+        adapter = await resolve_db_adapter(provider, "summarizer")
     except ValueError as exc:
         raise RuntimeError(
             f"[summarizer] unsupported provider {provider!r}: {exc}"

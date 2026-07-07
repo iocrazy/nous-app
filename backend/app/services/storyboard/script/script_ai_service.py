@@ -29,10 +29,8 @@ from uuid import UUID
 import bleach
 from loguru import logger
 
-from app.core.config import settings
 from app.repositories.agent_repository import get_agent_repository
 from app.repositories.skill_repository import get_skill_repository
-from app.services.ai.adapters import get_adapter
 from app.services.ai.adapters.factory import provider_key_for_model
 from app.services.ai.prompts.prompt_composer import ComposerInput, PromptComposer
 from app.services.ai.runner.agent_runner import AgentRunner
@@ -120,8 +118,9 @@ class ScriptAIService:
     ) -> None:
         # Retained for backwards compat with legacy smoke tests that
         # inspect ``.model``. The actual model per turn comes from the
-        # agent row via :class:`PromptComposer`.
-        self.model = settings.LLM_MODEL
+        # agent row via :class:`PromptComposer` — global settings no longer
+        # carry a default LLM model (env credentials retired 2026-07-07).
+        self.model = ""
         # Optional user_id enables RunRecorder telemetry on each _run_agent
         # call. When None, telemetry is skipped (legacy / smoke-test path).
         self._user_id = user_id
@@ -141,22 +140,25 @@ class ScriptAIService:
     def _build_composer(self) -> PromptComposer:
         return PromptComposer(get_agent_repository(), get_skill_repository())
 
-    def _build_runner(self, model: str = "") -> AgentRunner:
-        # Pick adapter based on the agent's configured model. Empty / unknown-to-
-        # the-factory models fall back to QwenAdapter + settings.LLM_MODEL for
-        # Phase 1 compat. The model is threaded in from ComposedSystemPrompt
-        # (composer.compose() pulls it from the ai_agents row), not read from
-        # global settings, so agents can declare their own provider in DB.
-        # When a governed caller supplied the user's BYO provider config, build
-        # the adapter with their key (parity with translate/caption services).
+    async def _build_runner(self, model: str = "") -> AgentRunner:
+        # Pick adapter based on the agent's configured model, threaded in from
+        # ComposedSystemPrompt (composer.compose() pulls it from the ai_agents
+        # row), so agents declare their own provider in DB. Credentials are
+        # DB-only (铁律 2026-07-07): a governed caller supplies the resolver's
+        # provider config; otherwise the platform ``mediahub_models`` catalog
+        # resolves the agent's model — no env fallback.
         if self._provider_key and self._provider_config and model:
             from app.services.ai.adapters.factory import get_adapter_for_user
 
             adapter = get_adapter_for_user(
-                model, {self._provider_key: self._provider_config}, settings
+                model, {self._provider_key: self._provider_config}, None
             )
         else:
-            adapter = get_adapter(model, settings)
+            from app.services.ai.providers.ai_provider_helpers import (
+                resolve_db_adapter,
+            )
+
+            adapter = await resolve_db_adapter(model, "script_generation")
         return AgentRunner(
             adapter=adapter, skill_tool=SkillToolService(get_skill_repository())
         )
@@ -186,7 +188,7 @@ class ScriptAIService:
                 request_instructions=request_instructions,
             )
         )
-        runner = self._build_runner(composed.model or "")
+        runner = await self._build_runner(composed.model or "")
         user_messages = [{"role": "user", "content": user_content}]
 
         # Resolve user_id: explicit arg wins, else fall back to instance's

@@ -31,7 +31,7 @@ from app.agent_framework.abort_controller import RunAborted
 from app.core.config import settings
 from app.repositories.agent_repository import get_agent_repository
 from app.repositories.skill_repository import get_skill_repository
-from app.services.ai.adapters.factory import get_adapter, provider_key_for_model
+from app.services.ai.adapters.factory import provider_key_for_model
 from app.services.ai.chat.ai_library_chat_wiring import build_agent_runner_stack
 from app.services.ai.chat.conversations_ai_store import ConversationsAiStore
 from app.services.ai.chat.message_store import MessageStore
@@ -1216,7 +1216,15 @@ class AILibraryChatService:
         async def _summarizer(head: List[Dict[str, Any]]) -> str:
             try:
                 cheap_model = "qwen-turbo"
-                adapter = get_adapter(cheap_model, settings)
+                # DB-only credentials (铁律 2026-07-07): resolve through the
+                # platform catalog; a miss raises and the compactor falls
+                # back to its emergency cap (pre-existing behavior — prod
+                # never had env creds for this path either).
+                from app.services.ai.providers.ai_provider_helpers import (
+                    resolve_db_adapter,
+                )
+
+                adapter = await resolve_db_adapter(cheap_model, "chat")
                 from uuid import UUID as _UUID
 
                 from app.schemas.ai_library import ComposedSystemPrompt

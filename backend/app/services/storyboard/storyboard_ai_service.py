@@ -11,7 +11,8 @@ Orchestrates AI-powered operations for the Storyboard Workbench:
 - Conversational chat with project context
 
 LLM calls use httpx.AsyncClient against an OpenAI-compatible endpoint
-configured via environment variables (LLM_API_URL, LLM_API_KEY).
+resolved from the platform ``mediahub_models`` catalog (DB-only credentials,
+铁律 2026-07-07) via the storyboard agent's configured model.
 """
 
 import asyncio
@@ -29,7 +30,6 @@ from app.repositories.skill_repository import get_skill_repository
 from app.repositories.storyboard_repository import (
     get_storyboard_character_repository,
 )
-from app.services.ai.adapters import get_adapter
 from app.services.ai.adapters.factory import provider_key_for_model
 from app.services.ai.prompts.prompt_composer import ComposerInput, PromptComposer
 from app.services.ai.runner.agent_runner import AgentRunner
@@ -95,7 +95,13 @@ class StoryboardAIService:
                 request_instructions=instruction,
             )
         )
-        adapter = get_adapter(composed.model or "", settings)
+        # DB-only credentials (铁律 2026-07-07): resolve the composed model
+        # through the platform catalog; no env fallback.
+        from app.services.ai.providers.ai_provider_helpers import (
+            resolve_db_adapter,
+        )
+
+        adapter = await resolve_db_adapter(composed.model or "", "storyboard")
         runner = AgentRunner(
             adapter=adapter,
             skill_tool=SkillToolService(get_skill_repository()),
@@ -176,20 +182,46 @@ class StoryboardAIService:
             The raw text content of the first choice.
 
         Raises:
-            RuntimeError: If the HTTP request fails or returns an error status.
+            RuntimeError: If the provider is unresolved, the HTTP request
+            fails, or the API returns an error status.
         """
-        if not settings.LLM_API_URL:
+        # Credentials are DB-only (铁律 2026-07-07): resolve the storyboard
+        # agent's configured model against the platform ``mediahub_models``
+        # catalog. This is a system service (no per-user BYOK context), so a
+        # catalog miss is an admin-configuration error, not an env problem.
+        from app.repositories.agent_repository import get_agent_repository
+        from app.services.ai.providers.ai_provider_helpers import (
+            resolve_mediahub_model,
+        )
+
+        agent = await get_agent_repository().get_by_slug(self.AGENT_SLUG)
+        agent_model = (agent or {}).get("model") or ""
+        resolved = await resolve_mediahub_model(agent_model, "storyboard")
+        if not resolved:
             raise RuntimeError(
-                "LLM provider not configured: LLM_API_URL is unset — "
-                "configure a provider in Admin → AI Models or set "
-                "LLM_API_URL for a local OpenAI-compatible endpoint."
+                "LLM provider not configured: storyboard agent model "
+                f"{agent_model!r} is not in the platform model catalog. "
+                "Ask the admin to enable it (Admin → AI Models)."
             )
+        _provider, provider_cfg, actual_model = resolved
+
+        api_url = (provider_cfg.get("base_url") or "").rstrip("/")
+        if not api_url:
+            raise RuntimeError(
+                f"Platform model {agent_model!r} has no base_url configured "
+                "(Admin → AI Models)."
+            )
+        # Catalog base_url may be either the provider root or the full
+        # chat-completions endpoint — normalize to the full endpoint.
+        if not api_url.endswith("/chat/completions"):
+            api_url = f"{api_url}/chat/completions"
+
         headers = {"Content-Type": "application/json"}
-        if settings.LLM_API_KEY:
-            headers["Authorization"] = f"Bearer {settings.LLM_API_KEY}"
+        if provider_cfg.get("api_key"):
+            headers["Authorization"] = f"Bearer {provider_cfg['api_key']}"
 
         payload = {
-            "model": settings.LLM_MODEL,
+            "model": actual_model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -200,7 +232,7 @@ class StoryboardAIService:
                 timeout=settings.LLM_TIMEOUT_SECONDS
             ) as client:
                 response = await client.post(
-                    f"{settings.LLM_API_URL}/chat/completions",
+                    api_url,
                     json=payload,
                     headers=headers,
                 )

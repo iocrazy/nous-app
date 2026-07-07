@@ -100,7 +100,6 @@ class Tasklet:
         # Defer imports so the module is cheap to import in test paths
         # that don't touch the LLM stack.
         from app.schemas.ai_library import ComposedSystemPrompt
-        from app.services.ai.adapters.factory import get_adapter
 
         formatted = self.format_input(user_input)
 
@@ -117,7 +116,13 @@ class Tasklet:
         )
 
         try:
-            adapter = get_adapter(self.model, settings)
+            # DB-only credentials (铁律 2026-07-07): platform catalog → raise
+            # (caught below — tasklets must not raise).
+            from app.services.ai.providers.ai_provider_helpers import (
+                resolve_db_adapter,
+            )
+
+            adapter = await resolve_db_adapter(self.model, "tasklet")
             resp = await adapter.call(
                 composed,
                 [{"role": "user", "content": formatted}],

@@ -298,21 +298,17 @@ async def build_agent_runner_stack(
         priority=80,
     )
 
-    # ── 3. Fallback-wrapped adapter (per-user BYO keys with global fallback) ─
-    # Loads user_settings.ai_settings.ai_providers once per turn so
-    # Doubao / OpenAI / Claude / Qwen all read the user's BYO key when
-    # configured, falling back to global env vars otherwise. M1.5 originally
-    # used the global-only get_adapter — that meant any agent on a
-    # provider without a global env key (like Doubao here) would 401.
-    #
+    # ── 3. Fallback-wrapped adapter (DB-only credentials) ────────────────
     # Chat resolution is unified through resolve_chat_config (Phase A4). Chat's
-    # governance is a pure toggle: locked → empty user_cfg → get_adapter_for_user
-    # falls back to platform env keys; allowed → the user's BYOK ai_providers
-    # dict flows in. The agent owns the model (primary_model), so the resolver
-    # only tags the credential origin; the dict it returns is byte-identical to
-    # the old inline branch. The load is injected so it happens ONLY on the
-    # allowed path (a locked module must skip the user BYOK read entirely).
-    from app.services.ai.providers.ai_provider_helpers import resolve_chat_config
+    # governance is a pure toggle: locked → platform providers only; allowed →
+    # the user's BYOK ai_providers merged over them. The agent owns the model
+    # (primary_model); the resolver only tags the credential origin. The load
+    # is injected so it happens ONLY on the allowed path (a locked module must
+    # skip the user BYOK read entirely).
+    from app.services.ai.providers.ai_provider_helpers import (
+        resolve_chat_config,
+        resolve_mediahub_model,
+    )
 
     _chat_cfg = await resolve_chat_config(
         user_id,
@@ -322,8 +318,29 @@ async def build_agent_runner_stack(
     )
     user_provider_config = _chat_cfg.provider_config
 
+    # Pre-resolve every model the fallback chain may dial against the platform
+    # ``mediahub_models`` catalog (async — the factory below must stay sync for
+    # LLMFallbackChain). A catalog hit is served by admin-managed credentials
+    # under the catalog's ``actual_model``; a found-but-disabled/gated model
+    # raises here (fail-closed) instead of silently 401-ing through BYOK.
+    # Credentials are DB-only (铁律 2026-07-07): a miss on both the catalog and
+    # the BYOK/platform-provider dict raises ProviderNotConfiguredError at dial
+    # time — there is no env fallback anymore.
+    _platform_adapters: dict = {}
+    for _m in dict.fromkeys([primary_model, *fallback_models]):
+        _hit = await resolve_mediahub_model(_m, "chat")
+        if _hit:
+            _prov, _pcfg, _actual = _hit
+            _creds = {"api_key": _pcfg["api_key"], "base_url": _pcfg["base_url"]}
+            _platform_adapters[_m] = get_adapter_for_user(
+                _actual, {_prov: _creds}, None
+            )
+
     def _adapter_factory(model: str):
-        return get_adapter_for_user(model, user_provider_config, settings)
+        pre_resolved = _platform_adapters.get(model)
+        if pre_resolved is not None:
+            return pre_resolved
+        return get_adapter_for_user(model, user_provider_config, None)
 
     # P1-5: pull the per-process ModelHealthRegistry off app.state if
     # available so cooled-down models are skipped on subsequent calls.
