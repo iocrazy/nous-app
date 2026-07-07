@@ -637,6 +637,13 @@ export const EDITOR_SHELL_STYLES = `
   box-shadow:var(--shadow-island);
 }
 .mh-coldstart-btn:hover{ background:var(--indigo-deep); }
+.mh-coldstart-actions{ margin-top:6px; display:flex; gap:10px; align-items:center; }
+.mh-coldstart-actions .mh-coldstart-btn{ margin-top:0; }
+.mh-coldstart-btn-secondary{
+  background:transparent; color:var(--ink); border:1px solid var(--hairline);
+  box-shadow:none;
+}
+.mh-coldstart-btn-secondary:hover{ background:var(--surface-2); }
 
 /* ===== RIGHT PANEL ===== */
 .mh-right-col{ width:296px; display:flex; flex-direction:column; min-height:0; transition:width 0.2s ease; }

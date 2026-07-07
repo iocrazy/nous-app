@@ -36,16 +36,21 @@ afterEach(() => {
 });
 
 describe('EmptyStates components', () => {
-  it('cold-start offers Create Story and never an Import affordance', () => {
+  it('cold-start offers Create Story and, when enabled, Import Script', () => {
     const onCreateStory = vi.fn();
-    render(<ColdStart onCreateStory={onCreateStory} />);
+    const onImport = vi.fn();
+    render(<ColdStart onCreateStory={onCreateStory} onImport={onImport} />);
 
-    const create = screen.getByRole('button', { name: 'editor.createStory' });
-    fireEvent.click(create);
+    fireEvent.click(screen.getByRole('button', { name: 'editor.createStory' }));
     expect(onCreateStory).toHaveBeenCalledTimes(1);
 
-    // Import Script must not appear anywhere on the cold-start screen.
-    expect(screen.queryByText(/import/i)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'editor.importScript' }));
+    expect(onImport).toHaveBeenCalledTimes(1);
+  });
+
+  it('cold-start omits Import when no onImport handler is given', () => {
+    render(<ColdStart onCreateStory={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: 'editor.importScript' })).toBeNull();
   });
 
   it('empty-scene hint nudges Tab / Character', () => {
