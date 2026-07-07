@@ -178,6 +178,128 @@ async def resolve_platform_model(
     return row["actual_provider"], provider_config, row["actual_model"]
 
 
+async def resolve_scorer_config() -> ResolvedAIConfig:
+    """Report the topic scorer's FIRST-CHOICE resolution (A5, read-only).
+
+    The scorer itself keeps its failover pool (``TopicScorer._resolve_candidates``
+    walks governance → every enabled platform llm model); this resolver mirrors
+    that order but reports only the first hit, for the health board:
+
+      1. admin per-module governance (``ai_module.topic_scorer.*`` with model
+         AND key) → ``origin="governance"``
+      2. first enabled platform ``llm`` catalog model with base_url+key
+         (nous gate honored) → ``origin="platform"``
+      3. nothing configured → empty config, ``origin="env"`` (the no-provider
+         fall-through convention shared with resolve_summarization_config).
+
+    Never raises — resolution failures degrade to the not-configured shape.
+    ``agent_slug`` is the scorer's fixed prompt agent (``topic-scorer``).
+    """
+    from app.services.ai.adapters.factory import provider_key_for_model
+    from app.services.ai.governance.ai_governance import (
+        get_module_governance,
+        is_nous_allowed,
+    )
+
+    def _pk(model: str) -> str:
+        try:
+            return provider_key_for_model(model)
+        except ValueError:
+            return ""
+
+    try:
+        gov = await get_module_governance("topic_scorer")
+        if gov.model and gov.api_key_present:
+            return ResolvedAIConfig(
+                provider_key=_pk(gov.model),
+                provider_config={
+                    "api_key": gov.api_key,
+                    "base_url": gov.base_url,
+                    "model": gov.model,
+                    "app_id": "",
+                },
+                model=gov.model,
+                agent_slug="topic-scorer",
+                origin="governance",
+            )
+        if await is_nous_allowed("topic_scorer"):
+            from app.repositories.mediahub_model_repository import (
+                get_mediahub_model_repository,
+            )
+
+            repo = get_mediahub_model_repository()
+            for m in await repo.list_enabled("llm"):
+                full = await repo.get_by_name(m["name"])
+                if full and full.get("base_url") and full.get("api_key"):
+                    return ResolvedAIConfig(
+                        provider_key=_pk(full["actual_model"]),
+                        provider_config={
+                            "api_key": full["api_key"],
+                            "base_url": full["base_url"],
+                            "model": full["actual_model"],
+                            "app_id": full.get("app_id") or "",
+                        },
+                        model=full["actual_model"],
+                        agent_slug="topic-scorer",
+                        origin="platform",
+                    )
+    except Exception as exc:  # noqa: BLE001 — health reporting must not raise
+        logger.warning(f"[resolve_scorer_config] degraded to not-configured: {exc}")
+
+    return ResolvedAIConfig(
+        provider_key="",
+        provider_config={"api_key": "", "base_url": "", "model": "", "app_id": ""},
+        model="",
+        agent_slug="topic-scorer",
+        origin="env",
+    )
+
+
+async def resolve_embedding_ai_config() -> ResolvedAIConfig:
+    """Typed wrapper over :func:`resolve_embedding_config` (A5, read-only).
+
+    Translates the embedder's own three-branch resolution (catalog →
+    admin-manual → legacy ``graph_embedder_*``) into the shared
+    :class:`ResolvedAIConfig` shape: catalog hit → ``origin="platform"``,
+    either admin-config branch → ``origin="governance"``, embeddings
+    disabled (None) → empty config with ``origin="env"`` (the shared
+    no-provider convention). Never raises. ``agent_slug`` is ``""`` —
+    embedding composes no agent prompt.
+    """
+    from app.services.ai.adapters.factory import provider_key_for_model
+    from app.services.ai.providers.embedding_config import resolve_embedding_config
+
+    try:
+        cfg = await resolve_embedding_config()
+    except Exception as exc:  # noqa: BLE001 — health reporting must not raise
+        logger.warning(f"[resolve_embedding_ai_config] read failed: {exc}")
+        cfg = None
+    if cfg is None:
+        return ResolvedAIConfig(
+            provider_key="",
+            provider_config={"api_key": "", "base_url": "", "model": "", "app_id": ""},
+            model="",
+            agent_slug="",
+            origin="env",
+        )
+    try:
+        provider_key = provider_key_for_model(cfg.model)
+    except ValueError:
+        provider_key = ""
+    return ResolvedAIConfig(
+        provider_key=provider_key,
+        provider_config={
+            "api_key": cfg.api_key,
+            "base_url": cfg.base_url,
+            "model": cfg.model,
+            "app_id": "",
+        },
+        model=cfg.model,
+        agent_slug="",
+        origin=cfg.source or "governance",
+    )
+
+
 # Built-in maintenance calls (context compaction, session-memory notes,
 # agent-memory promotion/consolidation) need a cheap default model when the
 # primary path gives them nothing. Credentials are DB-only, so this default

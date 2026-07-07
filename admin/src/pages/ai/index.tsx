@@ -5,6 +5,7 @@ import {
 } from '@arco-design/web-react'
 import { IconPlus, IconDelete, IconSync, IconEdit } from '@arco-design/web-react/icon'
 import { useAuth } from '../../auth/AuthProvider'
+import { JimengAuthCard } from './JimengAuthCard'
 
 const { Title, Text } = Typography
 const FormItem = Form.Item
@@ -528,6 +529,8 @@ export function AIModelsPage() {
         <Title heading={5} style={{ margin: 0 }}>MediaHub AI Models</Title>
         <Button type="primary" icon={<IconPlus />} onClick={openAddProvider}>Add Provider</Button>
       </div>
+
+      <JimengAuthCard />
 
       {loading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><Spin /></div>

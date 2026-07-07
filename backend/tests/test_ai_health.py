@@ -2,7 +2,7 @@
 →provider→key mapping so users can see (and fix) what each feature uses.
 
 Reuses the SAME resolvers the runtime uses so the panel can't drift from
-reality: resolve_task_provider_config for the agent-driven capabilities, and
+reality: resolve_task_ai_config for the agent-driven capabilities, and
 resolve_summarization_config for summarization (whose real workflow scans a
 hardcoded provider priority with no agent — audit finding D). The board is now
 honest about that path rather than reporting the agent-slug resolution the
@@ -22,7 +22,15 @@ def _patch(monkeypatch, *, settings, resolver, runtime=None):
         return settings
 
     async def _resolve(uid, task_key, default_slug):
-        return resolver(task_key, default_slug)
+        pk, cfg, model, slug = resolver(task_key, default_slug)
+        origin = "byok" if (cfg.get("api_key") or "").strip() else "env"
+        return ResolvedAIConfig(pk, cfg, model, slug, origin)
+
+    async def _no_system_rows(uid, ai_settings):
+        # System rows (chat/transcription/scorer/embedding/maintenance) have
+        # their own resolvers + dedicated tests; keep these agent-row tests
+        # isolated from them.
+        return []
 
     async def _resolve_summ(uid, settings_json=None):
         # Summarization resolves through its own path; echo the same tuple the
@@ -37,7 +45,8 @@ def _patch(monkeypatch, *, settings, resolver, runtime=None):
         return runtime or {}
 
     monkeypatch.setattr(ai_health, "get_ai_settings", _get_ai_settings)
-    monkeypatch.setattr(ai_health, "resolve_task_provider_config", _resolve)
+    monkeypatch.setattr(ai_health, "resolve_task_ai_config", _resolve)
+    monkeypatch.setattr(ai_health, "_system_capability_rows", _no_system_rows)
     monkeypatch.setattr(ai_health, "resolve_summarization_config", _resolve_summ)
     monkeypatch.setattr(ai_health, "fetch_runtime_summary", _runtime)
 
@@ -291,12 +300,16 @@ async def test_resolver_failure_is_isolated(monkeypatch):
         calls["n"] += 1
         if task_key == "caption":
             raise RuntimeError("boom")
-        return (
+        return ResolvedAIConfig(
             "qwen",
             {"model": "qwen-max", "api_key": "sk"},
             "qwen-max",
             default_slug,
+            "byok",
         )
+
+    async def _no_system_rows(uid, ai_settings):
+        return []
 
     async def _resolve_summ(uid, settings_json=None):
         return ResolvedAIConfig(
@@ -304,8 +317,9 @@ async def test_resolver_failure_is_isolated(monkeypatch):
         )
 
     monkeypatch.setattr(ai_health, "get_ai_settings", _get_ai_settings)
-    monkeypatch.setattr(ai_health, "resolve_task_provider_config", _resolve)
+    monkeypatch.setattr(ai_health, "resolve_task_ai_config", _resolve)
     monkeypatch.setattr(ai_health, "resolve_summarization_config", _resolve_summ)
+    monkeypatch.setattr(ai_health, "_system_capability_rows", _no_system_rows)
 
     rows = await ai_health.get_capability_health("u1")
     # The crashing capability becomes an 'error' row; siblings unaffected.
