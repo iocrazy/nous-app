@@ -13,7 +13,7 @@
  * axis is parked far away so only the intended edge is ever within tolerance.
  */
 import { describe, it, expect } from 'vitest';
-import { computeAlignmentGuides, type Rect } from '../nodes/alignmentGuides';
+import { computeAlignmentGuides, type Rect } from '../../canvas-kit/alignmentGuides';
 
 const other: Rect = { x: 0, y: 0, width: 100, height: 100 };
 const DRAG = 20; // dragged rect side length

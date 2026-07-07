@@ -94,20 +94,25 @@ class CanvasRefsRepository:
         return rows or []
 
     async def tree_for_projects(self, project_ids: List[str]) -> List[Dict[str, Any]]:
-        """Per-canvas count of unique non-trashed referenced resources."""
+        """Per-canvas count of unique non-trashed referenced resources, plus
+        the canvas node count (``nodes_json`` is ``NOT NULL DEFAULT '[]'`` so
+        the array length is always defined). The router drops canvases that
+        are empty on both axes (zero assets AND zero nodes) so orphaned blank
+        canvases never surface in the project-assets tree."""
         if not project_ids:
             return []
         ids = [int(str(p)) for p in project_ids]
         rows = await db_engine.fetch_all(
             "SELECT c.project_id::text AS project_id, c.id::text AS canvas_id, "
             "       c.name AS canvas_name, c.kind, "
+            "       jsonb_array_length(c.nodes_json) AS node_count, "
             "       COUNT(DISTINCT crr.resource_id) "
             "         FILTER (WHERE r.id IS NOT NULL) AS asset_count "
             "FROM canvases c "
             "LEFT JOIN canvas_resource_refs crr ON crr.canvas_id = c.id "
             "LEFT JOIN resources r ON r.id = crr.resource_id AND r.is_trashed = false "
             "WHERE c.project_id = ANY(:ids) "
-            "GROUP BY c.project_id, c.id, c.name, c.kind "
+            "GROUP BY c.project_id, c.id, c.name, c.kind, c.nodes_json "
             "ORDER BY c.name",
             {"ids": ids},
         )

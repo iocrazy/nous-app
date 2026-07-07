@@ -1366,6 +1366,10 @@
     "addImage": "+ Add Image",
     "generate": "Generate",
     "generateAll": "Generate All",
+    "empty": {
+      "title": "This canvas is empty",
+      "hint": "It doesn't have any content yet."
+    },
     "toolbar": {
       "zoomIn": "Zoom In",
       "zoomOut": "Zoom Out",
@@ -2184,6 +2188,9 @@
     "generations": "Generations",
     "noGenerations": "No generations yet",
     "noCanvases": "No canvases yet",
+    "newCanvas": "New Canvas",
+    "untitledCanvas": "Untitled Canvas",
+    "createFailed": "Failed to create canvas",
     "appearsInCanvases_one": "Appears in {{count}} canvas",
     "appearsInCanvases_other": "Appears in {{count}} canvases",
     "keep": "Keep",
@@ -2232,7 +2239,10 @@
     "unset": "Not configured",
     "default": "default",
     "recentFailures": "{{failures}} of {{runs}} recent runs failed",
-    "recentOk": "{{runs}} recent runs OK"
+    "recentOk": "{{runs}} recent runs OK",
+    "originPlatform": "Platform",
+    "originManaged": "Managed",
+    "originByok": "Your key"
   },
   "topic": {
     "title": "Topic Inspiration",

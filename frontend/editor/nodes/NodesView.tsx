@@ -21,6 +21,7 @@ import {
   type Edge,
   type Node,
   type NodeChange,
+  type NodePositionChange,
   type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -33,9 +34,14 @@ import {
 } from './sceneNodeMapper';
 import { SceneFlowNode } from './SceneFlowNode';
 import { ChapterActionsNode, ChapterActionContext } from './ChapterActionsNode';
-import { GuideOverlay } from './GuideOverlay';
-import { computeAlignmentGuides, type AlignmentGuides, type Rect } from './alignmentGuides';
-import { useCanvasShortcuts } from './useCanvasShortcuts';
+import { GuideOverlay } from '../../canvas-kit/GuideOverlay';
+import {
+  computeAlignmentGuides,
+  type AlignmentGuides,
+  type Rect,
+} from '../../canvas-kit/alignmentGuides';
+import { useCanvasShortcuts } from '../../canvas-kit/useCanvasShortcuts';
+import { useGroupDragPersist } from '../../canvas-kit/useGroupDragPersist';
 import { useConvertPoll } from '../useConvertPoll';
 import { updateSceneMeta, updateChapterPosition, listShots } from '../sceneService';
 import type { SceneDoc } from '../types';
@@ -51,6 +57,13 @@ const SNAP_GRID: [number, number] = [8, 8];
 const NO_GUIDES: AlignmentGuides = {};
 
 const NODE_TYPES = { sceneNode: SceneFlowNode, chapterNode: ChapterActionsNode };
+
+/** Content equality for the sceneId → cover-url maps (identical size + pairs). */
+function sameCovers(a: Map<string, string>, b: Map<string, string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [k, v] of a) if (b.get(k) !== v) return false;
+  return true;
+}
 
 /** Bounding rect of a node in flow space, using measured size when available. */
 function nodeRect(node: Node): Rect {
@@ -108,17 +121,25 @@ export function NodesView({ scenes, chapters, onOpenScene, scriptId, onReload }:
     setNodes(graph.nodes as Node[]);
   }, [graph]);
 
-  // Load each scene's first shot cover, once per scene set, and build a
-  // sceneId → cover-url map the mapper threads onto the cards. Best-effort: a
-  // scene whose shots fail to load just shows no cover (console.error, no toast),
-  // and the map is only committed when at least one cover exists so the no-image
-  // path never re-seeds the canvas (zero regression).
+  // Stable signature of the scene id set. The cover fetch keys off THIS, not the
+  // `scenes` array identity, so a persist-then-reload (same ids, fresh array)
+  // does not re-pull every scene's shots (F4). Ids are Snowflake numbers → no
+  // commas, so a join is a safe set key.
+  const sceneIdSig = useMemo(() => scenes.map((s) => String(s.id)).join(','), [scenes]);
+
+  // Load each scene's first shot cover and build a sceneId → cover-url map the
+  // mapper threads onto the cards. Best-effort: a scene whose shots fail to load
+  // just shows no cover (console.error, no toast). The map is committed via a
+  // content-diff (sameCovers): an unchanged result bails so the canvas never
+  // re-seeds needlessly (zero regression), while a scene whose cover was removed
+  // clears — the once-shown-then-emptied stale-cover case (F3).
   useEffect(() => {
+    const ids = sceneIdSig ? sceneIdSig.split(',') : [];
+    if (ids.length === 0) return;
     let cancelled = false;
     (async () => {
       const entries = await Promise.all(
-        scenes.map(async (s): Promise<[string, string | null]> => {
-          const sceneId = String(s.id);
+        ids.map(async (sceneId): Promise<[string, string | null]> => {
           try {
             const shots = await listShots(sceneId);
             const withImage = shots.find((shot) => !!shot.image_url);
@@ -134,17 +155,12 @@ export function NodesView({ scenes, chapters, onOpenScene, scriptId, onReload }:
       for (const [sceneId, url] of entries) {
         if (url) map.set(sceneId, url);
       }
-      if (map.size > 0) setShotCovers(map);
+      setShotCovers((prev) => (sameCovers(prev, map) ? prev : map));
     })();
     return () => {
       cancelled = true;
     };
-  }, [scenes]);
-
-  const onNodesChange = useCallback(
-    (changes: NodeChange[]) => setNodes((nds) => applyNodeChanges(changes, nds)),
-    [],
-  );
+  }, [sceneIdSig]);
 
   // Latest node set, read synchronously by the single-drag handler to learn the
   // current selection without re-binding the callback on every position change.
@@ -153,46 +169,53 @@ export function NodesView({ scenes, chapters, onOpenScene, scriptId, onReload }:
     nodesRef.current = nodes;
   }, [nodes]);
 
-  // One pending coordinate write per scene id; flushed after the debounce window.
-  // Keyed by scene id, so a group move schedules independent writes that never
-  // clobber each other.
-  const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-  useEffect(() => {
-    const timers = timersRef.current;
-    return () => {
-      timers.forEach((timer) => clearTimeout(timer));
-      timers.clear();
-    };
-  }, []);
+  // True between onNodeDragStart and onNodeDragStop. A pointer drag settles
+  // through the drag-stop handlers; this flag lets onNodesChange tell a drag's
+  // final position change (dragging===false, emitted just before drag-stop)
+  // apart from a keyboard a11y move (also dragging===false, but no drag event).
+  const pointerDraggingRef = useRef(false);
 
-  // Debounce-persist every scene/chapter node in `changed`, each through its own
-  // lane: sceneNode → updateSceneMeta, chapterNode → updateChapterPosition. The
-  // timer map is keyed by the full node id (`sc-`/`ch-` prefixed), so the two
-  // lanes never collide even when a scene and chapter share a numeric id.
-  const persistPositions = useCallback((changed: Node[]) => {
-    const timers = timersRef.current;
-    for (const node of changed) {
-      if (node.type !== 'sceneNode' && node.type !== 'chapterNode') continue;
-      const key = String(node.id);
-      const entityId = key.slice(ID_PREFIX_LEN);
-      const position_x = Math.round(node.position.x);
-      const position_y = Math.round(node.position.y);
-      const write =
-        node.type === 'chapterNode'
-          ? () => updateChapterPosition(entityId, { position_x, position_y })
-          : () => updateSceneMeta(entityId, { position_x, position_y });
-      const existing = timers.get(key);
-      if (existing) clearTimeout(existing);
-      timers.set(
-        key,
-        setTimeout(() => {
-          timers.delete(key);
-          write().catch((err) =>
-            console.error('[NodesView] failed to persist node position', err),
-          );
-        }, DRAG_PERSIST_MS),
-      );
-    }
+  // Debounce-persist every scene/chapter node through its own lane, keyed by the
+  // `sc-`/`ch-` id prefix: scene → updateSceneMeta, chapter → updateChapterPosition.
+  // The shared hook owns the per-id timer map + unmount cleanup.
+  const persistPositions = useGroupDragPersist({
+    lanes: {
+      'sc-': (id, pos) => updateSceneMeta(id, { position_x: pos.x, position_y: pos.y }),
+      'ch-': (id, pos) => updateChapterPosition(id, { position_x: pos.x, position_y: pos.y }),
+    },
+    debounceMs: DRAG_PERSIST_MS,
+  });
+
+  const onNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      setNodes((nds) => applyNodeChanges(changes, nds));
+      // Persist xyflow's built-in a11y keyboard move (arrow keys): it emits a
+      // `position` change with dragging===false and has no drag-stop event to
+      // hang persistence on. Only settled (non-drag) moves of SELECTED scene
+      // nodes qualify — mid-drag frames (dragging===true) and drag-end frames
+      // (guarded by pointerDraggingRef) are handled by the drag-stop lane, so we
+      // never double-write or re-add a custom nudge (F1).
+      if (pointerDraggingRef.current) return;
+      const byId = new Map(nodesRef.current.map((n) => [String(n.id), n]));
+      const moved: Node[] = [];
+      for (const c of changes) {
+        if (c.type !== 'position') continue;
+        const pos = c as NodePositionChange;
+        if (pos.dragging || !pos.position) continue;
+        const node = byId.get(String(pos.id));
+        if (node?.selected && node.type === 'sceneNode') {
+          moved.push({ ...node, position: pos.position });
+        }
+      }
+      if (moved.length > 0) persistPositions(moved);
+    },
+    [persistPositions],
+  );
+
+  // Raise the drag flag before any position change reaches onNodesChange, so its
+  // keyboard-move persistence never mistakes a drag frame for an arrow nudge.
+  const onNodeDragStart = useCallback(() => {
+    pointerDraggingRef.current = true;
   }, []);
 
   // While a single node drags, match its edges against every other node and draw
@@ -205,6 +228,7 @@ export function NodesView({ scenes, chapters, onOpenScene, scriptId, onReload }:
 
   const onNodeDragStop = useCallback(
     (_evt: React.MouseEvent, node: Node) => {
+      pointerDraggingRef.current = false;
       setGuides(NO_GUIDES);
       // If the dragged node belongs to a multi-selection, React Flow moved the
       // whole group with it — persist every selected node, not just this one.
@@ -242,37 +266,16 @@ export function NodesView({ scenes, chapters, onOpenScene, scriptId, onReload }:
 
   const onSelectionDragStop = useCallback(
     (_evt: React.MouseEvent, dragged: Node[]) => {
+      pointerDraggingRef.current = false;
       setGuides(NO_GUIDES);
       persistPositions(dragged);
     },
     [persistPositions],
   );
 
-  // Keyboard actions. Nudge moves + persists the selected scenes; select-all /
-  // clear flip the `selected` flag across the controlled node set.
-  const nudgeSelected = useCallback(
-    (dx: number, dy: number) => {
-      const selected = nodesRef.current.filter(
-        (n) => n.selected && n.type === 'sceneNode',
-      );
-      if (selected.length === 0) return;
-      const moved = selected.map((n) => ({
-        ...n,
-        position: { x: n.position.x + dx, y: n.position.y + dy },
-      }));
-      const movedById = new Map(moved.map((n) => [String(n.id), n.position]));
-      setNodes((nds) =>
-        nds.map((n) =>
-          movedById.has(String(n.id))
-            ? { ...n, position: movedById.get(String(n.id))! }
-            : n,
-        ),
-      );
-      persistPositions(moved);
-    },
-    [persistPositions],
-  );
-
+  // Keyboard actions. Arrow-key nudging is owned by xyflow's built-in a11y move
+  // (persisted via onNodesChange); here we only flip the `selected` flag across
+  // the controlled node set for select-all / clear.
   const selectAll = useCallback(
     () => setNodes((nds) => nds.map((n) => (n.selected ? n : { ...n, selected: true }))),
     [],
@@ -283,7 +286,6 @@ export function NodesView({ scenes, chapters, onOpenScene, scriptId, onReload }:
   );
 
   useCanvasShortcuts(containerRef, {
-    onNudge: nudgeSelected,
     onZoomIn: () => instanceRef.current?.zoomIn(),
     onZoomOut: () => instanceRef.current?.zoomOut(),
     onFitView: () => instanceRef.current?.fitView(),
@@ -321,6 +323,7 @@ export function NodesView({ scenes, chapters, onOpenScene, scriptId, onReload }:
             instanceRef.current = instance;
           }}
           onNodesChange={onNodesChange}
+          onNodeDragStart={onNodeDragStart}
           onNodeDrag={onNodeDrag}
           onNodeDragStop={onNodeDragStop}
           onSelectionDragStop={onSelectionDragStop}

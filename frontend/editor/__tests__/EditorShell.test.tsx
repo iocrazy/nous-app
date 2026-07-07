@@ -7,11 +7,52 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string) => k }),
 }));
 
+// Mock the FULL sceneService surface, not just the handful this file's older
+// tests happened to touch. EditorShell always mounts WritingPanel → VersionPanel,
+// which calls listCommits() on mount; a missing export makes that an
+// `undefined is not a function` throw on every render — the stderr noise that
+// perturbed effect scheduling and, under parallel CI load, flaked the rail
+// scroll test (F5-v2). Keep this in lockstep with sceneService's real exports:
+// every network function is a vi.fn(), list-returning ones default to [], and
+// the error classes are real (so `instanceof` in catch paths behaves).
 const svc = vi.hoisted(() => ({
+  // Scenes
   listScenes: vi.fn(),
-  listEpisodes: vi.fn(),
-  convertToScenes: vi.fn(),
+  getScene: vi.fn(),
+  createScene: vi.fn(),
+  deleteScene: vi.fn(),
+  updateSceneMeta: vi.fn(),
   moveScene: vi.fn(),
+  applyOps: vi.fn(),
+  convertToScenes: vi.fn(),
+  autoStoryboard: vi.fn(),
+  updateChapterPosition: vi.fn(),
+  newElementId: () => 'el_test0001',
+  // Episodes
+  listEpisodes: vi.fn().mockResolvedValue([]),
+  createEpisode: vi.fn(),
+  updateEpisode: vi.fn(),
+  deleteEpisode: vi.fn(),
+  // Shots
+  listShots: vi.fn().mockResolvedValue([]),
+  getShot: vi.fn(),
+  createShot: vi.fn(),
+  updateShot: vi.fn(),
+  deleteShot: vi.fn(),
+  moveShot: vi.fn(),
+  generateShot: vi.fn(),
+  generateShotVideo: vi.fn(),
+  // Version history (P4) — VersionPanel loads these on mount
+  listCommits: vi.fn().mockResolvedValue([]),
+  createCommit: vi.fn(),
+  deleteCommit: vi.fn(),
+  rollbackCommit: vi.fn(),
+  diffCommit: vi.fn(),
+  // Error classes (real, for instanceof checks in catch paths)
+  OpRejectedError: class OpRejectedError extends Error {},
+  VersionConflictError: class VersionConflictError extends Error {},
+  ShotGenerateDisabledError: class ShotGenerateDisabledError extends Error {},
+  ShotVideoDisabledError: class ShotVideoDisabledError extends Error {},
 }));
 vi.mock('../sceneService', () => svc);
 
@@ -129,13 +170,17 @@ describe('EditorShell', () => {
     const scrollSpy = vi.fn();
     HTMLElement.prototype.scrollIntoView = scrollSpy;
     render(<EditorShell scriptId="1" />);
-    await waitFor(() => expect(screen.getByTestId('scene-rail')).toBeInTheDocument());
 
-    // "Rooftop Access" now also appears as a Locations entity row, so scope to
-    // the scene list to click the scene row specifically.
-    const sceneRail = screen.getByTestId('scene-rail');
-    fireEvent.click(within(sceneRail).getByText('Rooftop Access'));
-    expect(scrollSpy).toHaveBeenCalled();
+    // Settle the rail AND the specific scene row before clicking — findBy retries
+    // until they render, killing the pre-click race that flaked under load (F5).
+    // "Rooftop Access" also appears as a Locations entity row, so scope to the
+    // scene list to click the scene row specifically.
+    const sceneRail = await screen.findByTestId('scene-rail');
+    const sceneRow = await within(sceneRail).findByText('Rooftop Access');
+    fireEvent.click(sceneRow);
+    // Retry window on the assertion too (harmless): the scroll can land a tick
+    // after the click's state flush.
+    await waitFor(() => expect(scrollSpy).toHaveBeenCalled());
   });
 
   it('orders the rail: modules nav, then Characters, then the Scenes list', async () => {

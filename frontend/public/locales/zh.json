@@ -1366,6 +1366,10 @@
     "addImage": "+ 添加图片",
     "generate": "生成",
     "generateAll": "全部生成",
+    "empty": {
+      "title": "画布为空",
+      "hint": "这里还没有任何内容。"
+    },
     "toolbar": {
       "zoomIn": "放大",
       "zoomOut": "缩小",
@@ -2184,6 +2188,9 @@
     "generations": "Generations",
     "noGenerations": "No generations yet",
     "noCanvases": "暂无画布",
+    "newCanvas": "新建画布",
+    "untitledCanvas": "未命名画布",
+    "createFailed": "创建画布失败",
     "appearsInCanvases_one": "出现在 {{count}} 个画布",
     "appearsInCanvases_other": "出现在 {{count}} 个画布",
     "keep": "保存",
@@ -2232,7 +2239,10 @@
     "unset": "未配置",
     "default": "默认",
     "recentFailures": "近期 {{runs}} 次运行中 {{failures}} 次失败",
-    "recentOk": "近期 {{runs}} 次运行正常"
+    "recentOk": "近期 {{runs}} 次运行正常",
+    "originPlatform": "平台",
+    "originManaged": "托管",
+    "originByok": "自有 Key"
   },
   "topic": {
     "title": "Topic Inspiration",

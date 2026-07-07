@@ -54,12 +54,18 @@ async def project_assets_tree(auth: AuthDep):
 
     by_project: dict[str, list] = {}
     for row in rows:
+        asset_count = int(row.get("asset_count") or 0)
+        node_count = int(row.get("node_count") or 0)
+        # Hide orphaned blank canvases — zero referenced assets AND zero nodes.
+        # They carry no content and only add noise to the tree.
+        if asset_count == 0 and node_count == 0:
+            continue
         by_project.setdefault(row["project_id"], []).append(
             {
                 "canvas_id": row["canvas_id"],
                 "canvas_name": row["canvas_name"],
                 "kind": row["kind"],
-                "asset_count": int(row.get("asset_count") or 0),
+                "asset_count": asset_count,
             }
         )
 

@@ -85,6 +85,7 @@ async def test_returns_config_from_settings() -> None:
         api_key="sk-x",
         model="qwen3-embedding-8b",
         dimensions=4096,
+        source="governance",
     )
 
 
