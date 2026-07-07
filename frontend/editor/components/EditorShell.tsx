@@ -879,6 +879,7 @@ export function EditorShell({
                 onOpenScene={handleOpenScene}
                 scriptId={scriptId}
                 onReload={reloadAll}
+                onBackToScript={() => selectRailView('script')}
               />
             </ScenePresenceContext.Provider>
           ) : railView === 'storyboard' ? (

@@ -97,9 +97,18 @@ export interface NodesViewProps {
   scriptId: string;
   /** Refresh scenes+chapters after a chapter action settles. */
   onReload: () => void | Promise<void>;
+  /** Switch the shell back to the Script view (shown in the empty state). */
+  onBackToScript?: () => void;
 }
 
-export function NodesView({ scenes, chapters, onOpenScene, scriptId, onReload }: NodesViewProps) {
+export function NodesView({
+  scenes,
+  chapters,
+  onOpenScene,
+  scriptId,
+  onReload,
+  onBackToScript,
+}: NodesViewProps) {
   const { t } = useTranslation();
   const [shotCovers, setShotCovers] = useState<Map<string, string>>(() => new Map());
   const graph = useMemo(
@@ -306,6 +315,12 @@ export function NodesView({ scenes, chapters, onOpenScene, scriptId, onReload }:
     [scriptId, chapters, startPoll, onReload],
   );
 
+  // Nothing to project: a script with neither scenes nor chapters would render a
+  // bare xyflow canvas (a blank "invalid canvas" surface). Show an explicit
+  // empty state that points back to writing instead — and skip mounting
+  // ReactFlow entirely so an empty view pays none of its init cost.
+  const isEmpty = scenes.length === 0 && chapters.length === 0;
+
   return (
     <div
       ref={containerRef}
@@ -314,6 +329,22 @@ export function NodesView({ scenes, chapters, onOpenScene, scriptId, onReload }:
       data-testid="nodes-view"
       aria-label={t('editor.nodesViewLabel')}
     >
+      {isEmpty ? (
+        <div className="mh-nodes-empty" data-testid="nodes-empty">
+          <div className="mh-nodes-empty-title">{t('editor.nodesEmptyTitle')}</div>
+          <p className="mh-nodes-empty-sub">{t('editor.nodesEmptySub')}</p>
+          {onBackToScript && (
+            <button
+              type="button"
+              className="mh-nodes-empty-btn"
+              data-testid="nodes-empty-back"
+              onClick={onBackToScript}
+            >
+              {t('editor.nodesEmptyAction')}
+            </button>
+          )}
+        </div>
+      ) : (
       <ChapterActionContext.Provider value={actionContext}>
         <ReactFlow
           nodes={nodes}
@@ -351,6 +382,7 @@ export function NodesView({ scenes, chapters, onOpenScene, scriptId, onReload }:
           <GuideOverlay guides={guides} />
         </ReactFlow>
       </ChapterActionContext.Provider>
+      )}
     </div>
   );
 }

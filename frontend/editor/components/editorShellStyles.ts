@@ -764,6 +764,20 @@ export const EDITOR_SHELL_STYLES = `
   background:var(--surface-2); border:1px solid var(--surface-border);
   border-radius:var(--radius-lg); overflow:hidden;
 }
+/* Empty state — no scenes and no chapters to project (ReactFlow unmounted). */
+.mh-nodes-empty{
+  position:absolute; inset:0; margin:auto; max-width:420px; height:100%;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:10px; text-align:center; padding:24px;
+}
+.mh-nodes-empty-title{ font-size:16px; font-weight:800; color:var(--ink); letter-spacing:-0.01em; }
+.mh-nodes-empty-sub{ font-size:13px; line-height:1.65; color:var(--ink-faint); margin:0; }
+.mh-nodes-empty-btn{
+  margin-top:6px; font-family:var(--sans); font-size:12.5px; font-weight:700;
+  padding:9px 18px; border-radius:var(--radius-md); cursor:pointer;
+  background:var(--indigo); color:var(--accent-on); border:none; box-shadow:var(--shadow-island);
+}
+.mh-nodes-empty-btn:hover{ background:var(--indigo-deep); }
 /* React Flow chrome tinted to the editor palette (dots + controls). */
 .mh-nodes-view .react-flow__background{ color:var(--surface-border); }
 .mh-nodes-view .react-flow__controls{
