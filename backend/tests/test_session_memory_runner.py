@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.services.ai.runner.session_memory_runner import (
-    _FALLBACK_SUMMARY_MODEL,
     _default_summarizer,
 )
 
@@ -41,13 +40,19 @@ async def test_summarizer_routes_through_agent_model():
 @pytest.mark.asyncio
 async def test_summarizer_falls_back_to_qwen_when_model_empty():
     adapter = _fake_adapter()
-    with patch(
-        "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
-        new=AsyncMock(return_value=adapter),
-    ) as get_adapter:
+    with (
+        patch(
+            "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+            new=AsyncMock(return_value=adapter),
+        ) as get_adapter,
+        patch(
+            "app.services.ai.providers.ai_provider_helpers.get_maintenance_model",
+            new=AsyncMock(return_value="mediahub-maint-model"),
+        ),
+    ):
         await _default_summarizer("p", model="")
 
-    assert get_adapter.call_args.args[0] == _FALLBACK_SUMMARY_MODEL
+    assert get_adapter.call_args.args[0] == "mediahub-maint-model"
 
 
 @pytest.mark.unit
@@ -62,14 +67,20 @@ async def test_summarizer_falls_back_on_unknown_prefix():
             raise ValueError("unsupported model")
         return adapter
 
-    with patch(
-        "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
-        new=_factory,
+    with (
+        patch(
+            "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+            new=_factory,
+        ),
+        patch(
+            "app.services.ai.providers.ai_provider_helpers.get_maintenance_model",
+            new=AsyncMock(return_value="mediahub-maint-model"),
+        ),
     ):
         out = await _default_summarizer("p", model="weird-model")
 
     assert out == "NOTES"
-    assert adapter.call.await_args.args[0].model == _FALLBACK_SUMMARY_MODEL
+    assert adapter.call.await_args.args[0].model == "mediahub-maint-model"
 
 
 @pytest.mark.unit

@@ -17,7 +17,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.agent_framework.summarizer import (
-    DEFAULT_COMPACTION_PROVIDER,
     SUMMARIZE_SYSTEM_PROMPT,
     SUMMARIZE_TIMEOUT_S,
     summarize,
@@ -39,12 +38,16 @@ def _adapter_returning(text: str):
     return fake_adapter
 
 
-async def test_default_provider_is_haiku():
-    """If no env override and no system_settings override, fall back
-    to DEFAULT_COMPACTION_PROVIDER. The default must be a cheap model
-    (Haiku 4.5) — pin the value so a future "let's switch to Sonnet"
-    PR makes a loud diff in the test output."""
-    assert "haiku" in DEFAULT_COMPACTION_PROVIDER.lower()
+async def test_default_provider_is_maintenance_model():
+    """If no env override and no system_settings override, fall back to
+    the maintenance-tier catalog default — a name that actually exists in
+    the platform catalog (DB-only credentials; the old Haiku literal
+    resolved to nothing). Pin it so a silent default change diffs loudly."""
+    from app.services.ai.providers.ai_provider_helpers import (
+        DEFAULT_MAINTENANCE_MODEL,
+    )
+
+    assert DEFAULT_MAINTENANCE_MODEL == "mediahub-doubao-seed-2-0-lite"
 
 
 async def test_env_override_wins_over_system_settings(monkeypatch):
@@ -75,13 +78,23 @@ async def test_system_settings_override_used_when_no_env(monkeypatch):
     monkeypatch.delenv("COMPACTION_PROVIDER", raising=False)
     fake_adapter = _adapter_returning("summary text")
 
-    fake_db = AsyncMock()
+    # The client's query-builder chain is SYNC (only execute() is awaited),
+    # so fake_db must be a MagicMock — an AsyncMock's .table() returns a
+    # coroutine and the chain silently breaks (the pre-2026-07-07 version of
+    # this test passed by accident: the read failed and the fallback default
+    # happened to equal the asserted value).
+    from unittest.mock import MagicMock
+
+    fake_db = MagicMock()
     fake_db.table.return_value.select.return_value.eq.return_value.limit.return_value.execute = AsyncMock(
         return_value=type("R", (), {"data": [{"value": "claude-haiku-4-5"}]})()
     )
 
     with (
-        patch("app.db.supabase_client.get_async_supabase_admin", return_value=fake_db),
+        patch(
+            "app.db.supabase_client.get_async_supabase_admin",
+            new=AsyncMock(return_value=fake_db),
+        ),
         patch(
             "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
             new=AsyncMock(return_value=fake_adapter),
@@ -112,8 +125,12 @@ async def test_db_failure_falls_back_to_default(monkeypatch):
     ):
         result = await summarize(_make_msgs())
 
+    from app.services.ai.providers.ai_provider_helpers import (
+        DEFAULT_MAINTENANCE_MODEL,
+    )
+
     args, _ = mock_factory.call_args
-    assert args[0] == DEFAULT_COMPACTION_PROVIDER
+    assert args[0] == DEFAULT_MAINTENANCE_MODEL
     assert result == "summary text"
 
 
