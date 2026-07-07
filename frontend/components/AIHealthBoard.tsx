@@ -120,9 +120,15 @@ const HealthRow: React.FC<{ row: CapabilityHealth; t: (k: string, o?: object) =>
   t,
 }) => {
   const ok = row.status === 'ok';
-  // runtime_failing means the config resolves but live calls are being
-  // rejected — that's broken now, so it reads as an error, not a warning.
-  const isError = row.status === 'error' || row.status === 'runtime_failing';
+  // runtime_failing / probe_failing / key_test_failed all mean the config
+  // resolves but the provider is UNREACHABLE right now (rejected call,
+  // failed platform probe, failed key test) — that's broken now, so they
+  // read as errors (red), not configuration warnings (amber).
+  const isError =
+    row.status === 'error' ||
+    row.status === 'runtime_failing' ||
+    row.status === 'probe_failing' ||
+    row.status === 'key_test_failed';
   const runs = row.recent_runs ?? 0;
   const failures = row.recent_failures ?? 0;
   return (
