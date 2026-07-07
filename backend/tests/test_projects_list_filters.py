@@ -379,3 +379,41 @@ async def test_service_update_project_no_archived_key_passes_through_unchanged()
     sent = update_mock.call_args.args[1]
     assert "archived_at" not in sent
     assert sent["name"] == "Renamed"
+
+
+# ── create_project: team_id str → int coercion (asyncpg int8 strict) ─────
+
+
+@pytest.mark.asyncio
+async def test_create_project_coerces_str_team_id_to_int():
+    """The request schema types ``team_id`` as ``str`` but the column is
+    BIGINT and asyncpg's int8 codec rejects strings (DataError → 500, hit
+    live 2026-07-06: team projects could not be created via the API at all).
+    The repo must coerce before the INSERT, mirroring ``list_projects``."""
+    session = _CaptureSession(rows=[_project_row(team_id=324864736396535)])
+    repo = ProjectsRepository()
+    with patch.object(orm_mod, "write_scope", lambda: _ScopeCtx(session)):
+        await repo.create_project(
+            {
+                "name": "Team Project",
+                "owner_id": _OWNER_ID,
+                "project_type": "internal",
+                "team_id": "324864736396535",
+            }
+        )
+    assert len(session.statements) == 1
+    _, params = _rendered(session.statements[0])
+    assert params["team_id"] == 324864736396535
+    assert isinstance(params["team_id"], int)
+
+
+@pytest.mark.asyncio
+async def test_create_project_none_team_id_stays_none():
+    session = _CaptureSession(rows=[_project_row()])
+    repo = ProjectsRepository()
+    with patch.object(orm_mod, "write_scope", lambda: _ScopeCtx(session)):
+        await repo.create_project(
+            {"name": "Solo Project", "owner_id": _OWNER_ID, "team_id": None}
+        )
+    _, params = _rendered(session.statements[0])
+    assert params.get("team_id") is None
