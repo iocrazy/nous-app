@@ -321,6 +321,10 @@ class Settings(BaseSettings):
         default="https://mediahubserver.heygo.cn:88",
         description="Public URL for media file access",
     )
+    FRONTEND_URL: str = Field(
+        default="http://localhost:5175",
+        description="Frontend base URL for OAuth redirect back to the SPA",
+    )
     NEWSNOW_API_URL: str = Field(
         default="http://localhost:4000",
         description=(

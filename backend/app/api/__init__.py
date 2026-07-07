@@ -225,3 +225,13 @@ from app.api.issue_messages_router import router as issue_messages_router  # noq
 api_router.include_router(router=issue_messages_router, tags=["Issue Messages"])
 
 api_router.include_router(router=inspiration_router, tags=["Inspiration"])
+
+# PR-D1: distribution accounts (platform OAuth connect/callback/refresh).
+# NOTE: aliased to ``distribution_api_router`` (not ``distribution_router``) —
+# reusing the submodule's own basename as the local name here would overwrite
+# the ``app.api.distribution_router`` attribute with the APIRouter instance,
+# breaking any ``import app.api.distribution_router as x`` elsewhere (e.g.
+# the test module) which resolves via attribute traversal on the package.
+from app.api.distribution_router import router as distribution_api_router  # noqa: E402
+
+api_router.include_router(router=distribution_api_router, tags=["Distribution"])
