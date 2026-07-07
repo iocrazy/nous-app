@@ -2232,7 +2232,10 @@
     "unset": "Not configured",
     "default": "default",
     "recentFailures": "{{failures}} of {{runs}} recent runs failed",
-    "recentOk": "{{runs}} recent runs OK"
+    "recentOk": "{{runs}} recent runs OK",
+    "originPlatform": "Platform",
+    "originManaged": "Managed",
+    "originByok": "Your key"
   },
   "topic": {
     "title": "Topic Inspiration",

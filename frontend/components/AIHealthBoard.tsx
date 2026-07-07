@@ -82,6 +82,39 @@ export const AIHealthBoard: React.FC = () => {
   );
 };
 
+/**
+ * Which resolution branch serves this capability. "env" (the shared
+ * no-provider fall-through) and error rows ('') render nothing — an origin
+ * badge on an unconfigured row would just be noise.
+ */
+const OriginBadge: React.FC<{
+  origin?: string;
+  t: (k: string, o?: object) => string;
+}> = ({ origin, t }) => {
+  if (origin === 'platform') {
+    return (
+      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/30">
+        {t('aiHealth.originPlatform')}
+      </span>
+    );
+  }
+  if (origin === 'governance') {
+    return (
+      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-500/15 text-violet-300 border border-violet-500/30">
+        {t('aiHealth.originManaged')}
+      </span>
+    );
+  }
+  if (origin === 'byok') {
+    return (
+      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+        {t('aiHealth.originByok')}
+      </span>
+    );
+  }
+  return null;
+};
+
 const HealthRow: React.FC<{ row: CapabilityHealth; t: (k: string, o?: object) => string }> = ({
   row,
   t,
@@ -108,12 +141,13 @@ const HealthRow: React.FC<{ row: CapabilityHealth; t: (k: string, o?: object) =>
           <span className="text-sm text-ink-200">{row.label}</span>
           {row.model ? (
             <span className="text-xs font-mono text-ink-500">
-              {row.agent_slug} → {row.model}
+              {row.agent_slug ? `${row.agent_slug} → ${row.model}` : row.model}
             </span>
           ) : (
             <span className="text-xs text-ink-600">{t('aiHealth.unset')}</span>
           )}
-          {!row.assigned && row.model && (
+          <OriginBadge origin={row.origin} t={t} />
+          {!row.assigned && row.agent_slug && row.model && (
             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-ink-800 text-ink-500 border border-ink-700">
               {t('aiHealth.default')}
             </span>

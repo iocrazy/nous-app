@@ -327,10 +327,14 @@ export interface CapabilityHealth {
     | 'no_key'
     | 'no_model'
     | 'not_vision'
+    | 'not_configured'
     | 'unknown_provider'
     | 'runtime_failing'
     | 'error';
   hint: string;
+  // Which resolution branch produced the config (Phase B): platform catalog,
+  // admin governance lock, or the user's BYOK. Absent/'' on error rows.
+  origin?: 'platform' | 'governance' | 'byok' | 'env' | '';
   // Runtime layer — present only for capabilities backed by a tracked
   // workflow (e.g. visual_analysis → ai_extract). Recent terminal-run stats
   // surface a capability that resolves fine but is failing at call time.

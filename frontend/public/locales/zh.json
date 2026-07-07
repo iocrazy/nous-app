@@ -2232,7 +2232,10 @@
     "unset": "未配置",
     "default": "默认",
     "recentFailures": "近期 {{runs}} 次运行中 {{failures}} 次失败",
-    "recentOk": "近期 {{runs}} 次运行正常"
+    "recentOk": "近期 {{runs}} 次运行正常",
+    "originPlatform": "平台",
+    "originManaged": "托管",
+    "originByok": "自有 Key"
   },
   "topic": {
     "title": "Topic Inspiration",
