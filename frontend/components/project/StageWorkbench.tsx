@@ -17,7 +17,13 @@ import { ArrowRight, CheckCircle2 } from 'lucide-react';
 import { fetchStageCatalog, setCurrentStage } from '../../services/projectsService';
 import { TOOL_CATALOG } from '../../features/projects/stageTools';
 import { StageSelector } from './StageSelector';
+import { StageSuggestion } from './StageSuggestion';
 import type { ProjectStage, ProjectTab } from '../../types';
+
+// Phase B B3 — stage-aware "next step" suggestion card. Independent flag so
+// it stays dark while B2's workbench is already live.
+const AI_SUGGEST_ENABLED =
+  import.meta.env.VITE_FEATURE_PROJECT_AI_SUGGEST === 'true';
 
 interface StageWorkbenchProps {
   projectId: string;
@@ -152,6 +158,14 @@ export function StageWorkbench({
           </div>
         )}
       </div>
+
+      {AI_SUGGEST_ENABLED && (
+        <StageSuggestion
+          projectId={projectId}
+          currentStage={currentStage}
+          setActiveTab={setActiveTab}
+        />
+      )}
     </div>
   );
 }
