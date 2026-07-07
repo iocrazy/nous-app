@@ -126,7 +126,6 @@ async def _register_self_bounds(app: FastAPI) -> None:
             inventory_providers,
             inventory_workflow_names,
         )
-        from app.core.config import settings
         from app.repositories.agent_repository import get_agent_repository
 
         worker_id = f"{socket.gethostname()}-pid{os.getpid()}"
@@ -143,7 +142,7 @@ async def _register_self_bounds(app: FastAPI) -> None:
             logger.warning(f"Bounds: workflow inventory failed: {inv_exc}")
 
         agent_slugs = await inventory_agent_slugs(get_agent_repository())
-        providers = inventory_providers(settings)
+        providers = await inventory_providers()
 
         self_bound = BoundsAdvertisement(
             worker_id=worker_id,

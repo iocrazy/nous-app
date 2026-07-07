@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import ModuleType, SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -150,30 +151,55 @@ async def test_inventory_agent_slugs_swallows_errors():
 # ─── providers ────────────────────────────────────────────────────────
 
 
-@pytest.mark.unit
-def test_inventory_providers_detects_configured():
-    settings = SimpleNamespace(
-        QWEN_API_KEY="sk-qwen",
-        OPENAI_API_KEY="sk-openai",
-        DEEPSEEK_API_KEY="",  # configured but empty → not available
-        DOUBAO_API_KEY=None,
-    )
-    providers = inventory_providers(settings)
-    assert providers == frozenset({"qwen", "openai"})
+def _catalog_repo(rows):
+    repo = MagicMock()
+    repo.list_all = AsyncMock(return_value=rows)
+    return repo
 
 
 @pytest.mark.unit
-def test_inventory_providers_alternate_attr_name():
-    """Qwen accepts QWEN_API_KEY OR DASHSCOPE_API_KEY (legacy)."""
-    settings = SimpleNamespace(DASHSCOPE_API_KEY="sk-dash")
-    providers = inventory_providers(settings)
-    assert "qwen" in providers
+@pytest.mark.asyncio
+async def test_inventory_providers_reads_enabled_catalog_rows():
+    """DB-only credentials (铁律 2026-07-07): availability = enabled catalog
+    rows' actual_provider values; disabled rows and blanks are excluded."""
+    rows = [
+        {"actual_provider": "doubao", "is_enabled": True},
+        {"actual_provider": "deepseek", "is_enabled": True},
+        {"actual_provider": "qwen", "is_enabled": False},  # disabled → out
+        {"actual_provider": "", "is_enabled": True},  # blank → out
+    ]
+    with patch(
+        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        return_value=_catalog_repo(rows),
+    ):
+        providers = await inventory_providers()
+    assert providers == frozenset({"doubao", "deepseek"})
 
 
 @pytest.mark.unit
-def test_inventory_providers_empty_when_nothing_configured():
-    settings = SimpleNamespace()
-    assert inventory_providers(settings) == frozenset()
+@pytest.mark.asyncio
+async def test_inventory_providers_settings_arg_is_ignored():
+    with patch(
+        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        return_value=_catalog_repo([{"actual_provider": "doubao", "is_enabled": True}]),
+    ):
+        providers = await inventory_providers(
+            SimpleNamespace(OPENAI_API_KEY="sk-env-leak")
+        )
+    assert providers == frozenset({"doubao"})
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_inventory_providers_empty_on_catalog_failure():
+    """Best-effort: a broken catalog read degrades to no provider capability."""
+    repo = MagicMock()
+    repo.list_all = AsyncMock(side_effect=RuntimeError("db down"))
+    with patch(
+        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        return_value=repo,
+    ):
+        assert await inventory_providers() == frozenset()
 
 
 # ─── merge_lane_capacity ──────────────────────────────────────────────

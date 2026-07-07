@@ -202,9 +202,11 @@ def get_adapter_for_user(
         )
 
     if provider_key == "modelscope":
-        # BYO-only provider — no global MODELSCOPE_* settings exist, so a
-        # missing user config builds a keyless adapter (request then fails
-        # with ModelScope's own auth error instead of an AttributeError).
+        # DB-only like every other provider (2026-07-07 follow-up): a missing
+        # key raises here instead of building a keyless adapter that dies
+        # upstream with ModelScope's opaque auth error.
+        if not user_key:
+            raise ProviderNotConfiguredError("modelscope", model)
         from app.services.ai.adapters.modelscope import MODELSCOPE_DEFAULT_URL
 
         return ModelScopeAdapter(
