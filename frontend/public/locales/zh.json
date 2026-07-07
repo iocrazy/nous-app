@@ -2413,7 +2413,19 @@
     "noteCount": "{{count}} 条",
     "searchPlaceholder": "搜索笔记…",
     "openSource": "查看来源",
-    "uploadFailed": "上传失败: {{name}}"
+    "uploadFailed": "上传失败: {{name}}",
+    "notes": "笔记",
+    "hotspotsTab": "热点",
+    "parseUrl": "解析链接",
+    "hotspots": "热点",
+    "allHotspots": "全部热点 →",
+    "saveAsNote": "存为灵感",
+    "parse": "解析",
+    "notInterested": "不感兴趣",
+    "selectHotspot": "选择一个热点查看详情",
+    "noHotspots": "当天没有热点。",
+    "summary": "摘要",
+    "sourceCount": "{{count}} 个来源"
   },
   "editor": {
     "brand": "MediaHub Projects",

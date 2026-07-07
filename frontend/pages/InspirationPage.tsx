@@ -1,14 +1,20 @@
 // New notes-first Inspiration workspace (spec §2, mockup v7). Rendered by
-// TopicInspirationPage when VITE_FEATURE_INSPIRATION_NOTES is on; hotspot
-// integration (tab, side panel, save-as-note) arrives in P3.
+// TopicInspirationPage when VITE_FEATURE_INSPIRATION_NOTES is on. P3 adds the
+// Notes/Hotspots tabs, the save-as-note loop and a global Parse entry point.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Search, X } from 'lucide-react';
+import { Link2, Search, X } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { Composer } from '../components/Inspiration/Composer';
 import { NoteTimeline } from '../components/Inspiration/NoteTimeline';
 import { ActivityPanel } from '../components/Inspiration/ActivityPanel';
 import { TagsPanel } from '../components/Inspiration/TagsPanel';
+import { HotspotsWorkspace } from '../components/Inspiration/HotspotsWorkspace';
+import { HotspotsSidePanel } from '../components/Inspiration/HotspotsSidePanel';
+import { useHotspots } from '../components/Inspiration/useHotspots';
+import { hotspotToRef } from '../components/Inspiration/hotspotToRef';
+import { FloatingParse } from '../components/TopicInspiration/FloatingParse';
+import type { Hotspot } from '../services/topicService';
 import {
   deleteNote,
   getTagCounts,
@@ -16,6 +22,7 @@ import {
   updateNote,
   type InspirationNote,
   type NoteAttachment,
+  type RefHotspot,
 } from '../services/inspirationService';
 
 const PAGE_SIZE = 50;
@@ -34,6 +41,18 @@ export const InspirationPage: React.FC = () => {
   const [refreshKey, setRefreshKey] = useState(0);
   const [editing, setEditing] = useState<InspirationNote | null>(null);
   const [editText, setEditText] = useState('');
+  const [tab, setTab] = useState<'notes' | 'hotspots'>('notes');
+  const [prefill, setPrefill] = useState<{ content: string; refHotspot: RefHotspot } | null>(null);
+  const [prefillNonce, setPrefillNonce] = useState(0);
+  const [parseOpen, setParseOpen] = useState(false);
+  // Read-only category chips for the Hotspots-tab sidebar (spec §2 #7,
+  // simplified to display-only for P3). The hook is always called — only its
+  // `enabled` flag toggles the underlying fetch — so hook order never
+  // depends on which tab is active.
+  const { hotspots: categoryHotspots } = useHotspots({
+    enabled: tab === 'hotspots',
+    day: date ?? undefined,
+  });
   // Monotonic request version: guards both the main filter-driven fetch and
   // loadMore against applying a stale response after filters (date/tag/q)
   // change mid-flight (see task-7 review finding).
@@ -48,6 +67,15 @@ export const InspirationPage: React.FC = () => {
     () => ({ date: date ?? undefined, tag: tag ?? undefined, q: q || undefined }),
     [date, tag, q],
   );
+
+  const hotspotCategories = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const h of categoryHotspots) {
+      if (!h.category) continue;
+      counts.set(h.category, (counts.get(h.category) ?? 0) + 1);
+    }
+    return Array.from(counts.entries()).map(([category, cnt]) => ({ category, cnt }));
+  }, [categoryHotspots]);
 
   useEffect(() => {
     let alive = true;
@@ -104,6 +132,15 @@ export const InspirationPage: React.FC = () => {
     setRefreshKey((k) => k + 1);
   };
 
+  // Save-as-note loop (spec §2 #6): snapshot the hotspot into a ref, hand it
+  // to the Composer as a prefill, and jump to the Notes tab. Shared by the
+  // Hotspots-tab workspace and the Notes-tab sidebar Top3.
+  const handleSaveAsNote = (h: Hotspot) => {
+    setPrefill({ content: '', refHotspot: hotspotToRef(h) });
+    setPrefillNonce((n) => n + 1);
+    setTab('notes');
+  };
+
   // A Composer retry succeeded after the note was already created/rendered —
   // merge the attachment into that note's card in place.
   const onAttachmentUploaded = (noteId: string, attachment: NoteAttachment) => {
@@ -157,6 +194,24 @@ export const InspirationPage: React.FC = () => {
         <h2 className="text-[15px] font-semibold text-content">
           {t('inspiration.title', 'Inspiration')}
         </h2>
+        <div className="flex items-center gap-0.5 rounded-lg bg-island-2 p-0.5">
+          <button
+            onClick={() => setTab('notes')}
+            className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+              tab === 'notes' ? 'bg-island text-content shadow-sm' : 'text-content-3 hover:text-content-2'
+            }`}
+          >
+            {t('inspiration.notes', 'Notes')}
+          </button>
+          <button
+            onClick={() => setTab('hotspots')}
+            className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+              tab === 'hotspots' ? 'bg-island text-content shadow-sm' : 'text-content-3 hover:text-content-2'
+            }`}
+          >
+            {t('inspiration.hotspotsTab', 'Hotspots')}
+          </button>
+        </div>
         {tag && (
           <button
             onClick={() => setTag(null)}
@@ -182,31 +237,74 @@ export const InspirationPage: React.FC = () => {
             className="w-full bg-transparent text-xs text-content placeholder:text-content-4 focus:outline-none"
           />
         </div>
+        <button
+          onClick={() => setParseOpen(true)}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-indigo-500/15 px-3 py-1.5 text-xs font-semibold text-indigo-300 hover:bg-indigo-500/25"
+        >
+          <Link2 size={13} />
+          {t('inspiration.parseUrl', 'Parse URL')}
+        </button>
       </div>
 
       <div className="flex gap-3">
         <div className="min-w-0 flex-1 space-y-2.5">
-          <Composer
-            onCreated={onCreated}
-            onAttachmentUploaded={onAttachmentUploaded}
-            tagSuggestions={tags.map((x) => x.tag)}
-          />
-          <NoteTimeline
-            notes={notes}
-            onEdit={startEdit}
-            onTogglePin={onTogglePin}
-            onDelete={onDelete}
-            onTagClick={(tg) => setTag(tg)}
-            hasMore={hasMore}
-            loading={loading}
-            loadMore={() => void loadMore()}
-          />
+          {tab === 'notes' ? (
+            <>
+              <Composer
+                key={prefillNonce}
+                prefill={prefill}
+                onCreated={(note) => {
+                  onCreated(note);
+                  setPrefill(null);
+                }}
+                onAttachmentUploaded={onAttachmentUploaded}
+                tagSuggestions={tags.map((x) => x.tag)}
+              />
+              <NoteTimeline
+                notes={notes}
+                onEdit={startEdit}
+                onTogglePin={onTogglePin}
+                onDelete={onDelete}
+                onTagClick={(tg) => setTag(tg)}
+                hasMore={hasMore}
+                loading={loading}
+                loadMore={() => void loadMore()}
+              />
+            </>
+          ) : (
+            <HotspotsWorkspace day={date} onSaveAsNote={handleSaveAsNote} onParse={() => setParseOpen(true)} />
+          )}
         </div>
         <div className="hidden w-[292px] shrink-0 space-y-2.5 lg:block">
           <ActivityPanel selectedDate={date} onSelectDate={setDate} refreshKey={refreshKey} />
-          <TagsPanel tags={tags} activeTag={tag} onTagClick={setTag} />
+          {tab === 'notes' ? (
+            <>
+              <HotspotsSidePanel day={date} onSaveAsNote={handleSaveAsNote} onOpenAll={() => setTab('hotspots')} />
+              <TagsPanel tags={tags} activeTag={tag} onTagClick={setTag} />
+            </>
+          ) : (
+            hotspotCategories.length > 0 && (
+              <div className="rounded-xl bg-island px-4 py-3.5">
+                <h3 className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-content-3">
+                  {t('inspiration.hotspots', 'Hotspots')}
+                </h3>
+                <div className="flex flex-wrap gap-1.5">
+                  {hotspotCategories.map(({ category, cnt }) => (
+                    <span
+                      key={category}
+                      className="inline-flex items-center gap-1 rounded-full bg-island-2 px-2.5 py-1 text-xs text-content-2"
+                    >
+                      {`#${category} (${cnt})`}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )
+          )}
         </div>
       </div>
+
+      <FloatingParse open={parseOpen} onOpenChange={setParseOpen} />
 
       {editing && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
