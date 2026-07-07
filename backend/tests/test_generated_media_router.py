@@ -415,6 +415,191 @@ async def test_stream_happy_path_no_auth(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# /stream object-store branch — ranged, streamed serving (no full-file buffer)
+# ---------------------------------------------------------------------------
+
+# Deterministic 500-byte "video" blob served by the fake object store.
+_OBJ_VIDEO = bytes(i % 251 for i in range(500))
+
+
+class _FakeStore:
+    """Stand-in for ObjectStore backed by an in-memory blob.
+
+    Mirrors the real contract the router relies on: ``get_size`` returns the
+    total, ``get_stream`` yields the requested inclusive ``[start, end]`` slice
+    in small chunks. Class-level blob so the router's fresh instance shares it.
+    """
+
+    blob = _OBJ_VIDEO
+
+    def __init__(self, bucket: str) -> None:
+        self.bucket = bucket
+
+    async def get_size(self, key: str) -> int:
+        return len(self.blob)
+
+    async def get_stream(self, key: str, *, start=None, end=None, chunk_size=64):
+        if start is None:
+            data = self.blob
+        else:
+            data = self.blob[start : (end + 1) if end is not None else None]
+        for i in range(0, len(data), chunk_size):
+            yield data[i : i + chunk_size]
+
+
+class _MissingStore(_FakeStore):
+    async def get_size(self, key: str) -> int:
+        raise RuntimeError("object missing")
+
+
+def _object_row(gen_id: int) -> dict:
+    return {
+        "id": gen_id,
+        "file_path": "sb://chat-media/t7/ab/cd/deadbeef.mp4",
+        "mime": "video/mp4",
+        "media_kind": "video",
+    }
+
+
+@pytest.mark.asyncio
+async def test_stream_object_store_no_range_streams_full_200(monkeypatch, client):
+    """No Range header → 200, whole blob streamed, Accept-Ranges advertised."""
+
+    async def _fake_get_by_id(self, gen_id: int):
+        return _object_row(gen_id)
+
+    monkeypatch.setattr(r.GeneratedMediaRepository, "get_by_id", _fake_get_by_id)
+    monkeypatch.setattr(r, "ObjectStore", _FakeStore)
+
+    resp = await client.get("/api/v1/generated-media/40/stream")
+    assert resp.status_code == 200, resp.text
+    assert resp.content == _OBJ_VIDEO
+    assert resp.headers["accept-ranges"] == "bytes"
+    assert resp.headers["content-length"] == str(len(_OBJ_VIDEO))
+    assert "video/mp4" in resp.headers.get("content-type", "")
+    assert "public" in resp.headers.get("cache-control", "")
+
+
+@pytest.mark.asyncio
+async def test_stream_object_store_closed_range_206(monkeypatch, client):
+    """bytes=0-99 → 206 with correct Content-Range/Content-Length and slice."""
+
+    async def _fake_get_by_id(self, gen_id: int):
+        return _object_row(gen_id)
+
+    monkeypatch.setattr(r.GeneratedMediaRepository, "get_by_id", _fake_get_by_id)
+    monkeypatch.setattr(r, "ObjectStore", _FakeStore)
+
+    resp = await client.get(
+        "/api/v1/generated-media/40/stream", headers={"Range": "bytes=0-99"}
+    )
+    assert resp.status_code == 206, resp.text
+    assert resp.content == _OBJ_VIDEO[0:100]
+    assert resp.headers["content-range"] == f"bytes 0-99/{len(_OBJ_VIDEO)}"
+    assert resp.headers["content-length"] == "100"
+    assert resp.headers["accept-ranges"] == "bytes"
+
+
+@pytest.mark.asyncio
+async def test_stream_object_store_open_range_206(monkeypatch, client):
+    """bytes=100- (open end) → 206 covering [100, size-1]."""
+
+    async def _fake_get_by_id(self, gen_id: int):
+        return _object_row(gen_id)
+
+    monkeypatch.setattr(r.GeneratedMediaRepository, "get_by_id", _fake_get_by_id)
+    monkeypatch.setattr(r, "ObjectStore", _FakeStore)
+
+    size = len(_OBJ_VIDEO)
+    resp = await client.get(
+        "/api/v1/generated-media/40/stream", headers={"Range": "bytes=100-"}
+    )
+    assert resp.status_code == 206, resp.text
+    assert resp.content == _OBJ_VIDEO[100:]
+    assert resp.headers["content-range"] == f"bytes 100-{size - 1}/{size}"
+    assert resp.headers["content-length"] == str(size - 100)
+
+
+@pytest.mark.asyncio
+async def test_stream_object_store_unsatisfiable_range_416(monkeypatch, client):
+    """A well-formed range past the end → 416 with Content-Range bytes */size."""
+
+    async def _fake_get_by_id(self, gen_id: int):
+        return _object_row(gen_id)
+
+    monkeypatch.setattr(r.GeneratedMediaRepository, "get_by_id", _fake_get_by_id)
+    monkeypatch.setattr(r, "ObjectStore", _FakeStore)
+
+    size = len(_OBJ_VIDEO)
+    resp = await client.get(
+        "/api/v1/generated-media/40/stream",
+        headers={"Range": f"bytes={size + 10}-{size + 20}"},
+    )
+    assert resp.status_code == 416
+    assert resp.headers["content-range"] == f"bytes */{size}"
+    assert resp.headers["accept-ranges"] == "bytes"
+
+
+@pytest.mark.asyncio
+async def test_stream_object_store_malformed_range_serves_full_200(monkeypatch, client):
+    """A malformed Range unit is ignored per RFC 7233 → full 200."""
+
+    async def _fake_get_by_id(self, gen_id: int):
+        return _object_row(gen_id)
+
+    monkeypatch.setattr(r.GeneratedMediaRepository, "get_by_id", _fake_get_by_id)
+    monkeypatch.setattr(r, "ObjectStore", _FakeStore)
+
+    resp = await client.get(
+        "/api/v1/generated-media/40/stream", headers={"Range": "items=0-9"}
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.content == _OBJ_VIDEO
+
+
+@pytest.mark.asyncio
+async def test_stream_object_store_missing_object_404(monkeypatch, client):
+    """get_size raising (object gone) → 404, no half-open stream."""
+
+    async def _fake_get_by_id(self, gen_id: int):
+        return _object_row(gen_id)
+
+    monkeypatch.setattr(r.GeneratedMediaRepository, "get_by_id", _fake_get_by_id)
+    monkeypatch.setattr(r, "ObjectStore", _MissingStore)
+
+    resp = await client.get("/api/v1/generated-media/40/stream")
+    assert resp.status_code == 404
+    assert resp.json()["error"] == "file missing"
+
+
+@pytest.mark.asyncio
+async def test_stream_filesystem_range_206_no_regression(monkeypatch, tmp_path, client):
+    """Filesystem branch still answers Range with 206 via FileResponse."""
+    file_name = "clip.mp4"
+    file_content = bytes(i % 251 for i in range(300))
+    (tmp_path / file_name).write_bytes(file_content)
+
+    async def _fake_get_by_id(self, gen_id: int):
+        return {
+            "id": gen_id,
+            "file_path": file_name,
+            "mime": "video/mp4",
+            "media_kind": "video",
+        }
+
+    fake_settings = types.SimpleNamespace(DOWNLOAD_PATH=str(tmp_path))
+    monkeypatch.setattr(r.GeneratedMediaRepository, "get_by_id", _fake_get_by_id)
+    monkeypatch.setattr(r, "settings", fake_settings)
+
+    resp = await client.get(
+        "/api/v1/generated-media/40/stream", headers={"Range": "bytes=0-49"}
+    )
+    assert resp.status_code == 206, resp.text
+    assert resp.content == file_content[0:50]
+    assert resp.headers["content-range"] == f"bytes 0-49/{len(file_content)}"
+
+
 @pytest.mark.asyncio
 async def test_cover_404_for_path_traversal(monkeypatch, tmp_path, client):
     """GET /{id}/cover returns 404 when file_path escapes DOWNLOAD_PATH.
