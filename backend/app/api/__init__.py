@@ -24,6 +24,7 @@ from app.api.error_report_router import router as error_report_router
 from app.api.flows_router import router as flows_router
 from app.api.frontend_config_router import router as frontend_config_router
 from app.api.generated_media_router import router as generated_media_router
+from app.api.inspiration_router import router as inspiration_router
 from app.api.invites_router import router as invites_router
 from app.api.libraries_router import router as libraries_router
 from app.api.logs_router import router as logs_router
@@ -218,3 +219,5 @@ api_router.include_router(router=ws_ticket_router, tags=["WS Ticket"])
 from app.api.issue_messages_router import router as issue_messages_router  # noqa: E402
 
 api_router.include_router(router=issue_messages_router, tags=["Issue Messages"])
+
+api_router.include_router(router=inspiration_router, tags=["Inspiration"])
