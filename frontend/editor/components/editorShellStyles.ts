@@ -928,7 +928,7 @@ export const EDITOR_SHELL_STYLES = `
   border:1px solid var(--surface-border); background:var(--surface); color:var(--ink);
 }
 .mh-shot-desc:focus-visible{ outline:2px solid var(--indigo); outline-offset:1px; }
-.mh-shot-foot{ display:flex; }
+.mh-shot-foot{ display:flex; gap:6px; }
 .mh-shot-generate{
   flex:1; font-family:var(--sans); font-size:11.5px; font-weight:600;
   padding:6px 10px; border-radius:var(--radius-sm); cursor:pointer;
@@ -936,6 +936,18 @@ export const EDITOR_SHELL_STYLES = `
 }
 .mh-shot-generate:hover:not(:disabled){ background:var(--indigo-soft); color:var(--indigo-deep); border-color:var(--indigo); }
 .mh-shot-generate:disabled{ opacity:0.5; cursor:default; }
+.mh-shot-generate-video{
+  flex:1; font-family:var(--sans); font-size:11.5px; font-weight:600;
+  padding:6px 10px; border-radius:var(--radius-sm); cursor:pointer;
+  background:var(--surface); color:var(--ink-soft); border:1px solid var(--surface-border);
+}
+.mh-shot-generate-video:hover:not(:disabled){ background:var(--indigo-soft); color:var(--indigo-deep); border-color:var(--indigo); }
+.mh-shot-generate-video:disabled{ opacity:0.5; cursor:default; }
+.mh-shot-generate-video.confirming{ background:var(--indigo); color:#fff; border-color:var(--indigo); }
+.mh-shot-video{
+  width:100%; max-width:100%; border-radius:6px; margin-top:2px;
+  border:1px solid var(--surface-border); background:#000; display:block;
+}
 
 /* ── Version history panel (right island top section, Phase B P4) ─────────── */
 .mh-version-panel{ display:flex; flex-direction:column; gap:8px; }
