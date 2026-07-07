@@ -10,17 +10,9 @@ import {
 export type UiRadiusPreset = 'compact' | 'default' | 'large';
 export type ThemeTonePreset = 'neutral' | 'warm' | 'cool';
 export type CanvasEdgeRoutingMode = 'spline' | 'orthogonal' | 'smartOrthogonal';
-export type ProviderApiKeys = Record<string, string>;
-export type ProviderEndpoints = Record<string, string>;
-export type EnabledProviders = Record<string, boolean>;
-export const DEFAULT_GRSAI_NANO_BANANA_PRO_MODEL = 'nano-banana-pro';
 
 interface SettingsState {
   isHydrated: boolean;
-  apiKeys: ProviderApiKeys;
-  providerEndpoints: ProviderEndpoints;
-  enabledSbProviders: EnabledProviders;
-  grsaiNanoBananaProModel: string;
   hideProviderGuidePopover: boolean;
   useUploadFilenameAsNodeTitle: boolean;
   storyboardGenKeepStyleConsistent: boolean;
@@ -39,10 +31,6 @@ interface SettingsState {
   themeTonePreset: ThemeTonePreset;
   accentColor: string;
   downloadPresetPaths: string[];
-  setProviderApiKey: (providerId: string, key: string) => void;
-  setProviderEndpoint: (providerId: string, url: string) => void;
-  setSbProviderEnabled: (providerId: string, enabled: boolean) => void;
-  setGrsaiNanoBananaProModel: (model: string) => void;
   setHideProviderGuidePopover: (hide: boolean) => void;
   setUseUploadFilenameAsNodeTitle: (enabled: boolean) => void;
   setStoryboardGenKeepStyleConsistent: (enabled: boolean) => void;
@@ -71,10 +59,6 @@ function normalizeHexColor(input: string): string {
     return '#3B82F6';
   }
   return trimmed.startsWith('#') ? trimmed.toUpperCase() : `#${trimmed.toUpperCase()}`;
-}
-
-function normalizeApiKey(input: string): string {
-  return input.trim();
 }
 
 function normalizePriceDisplayCurrencyMode(
@@ -110,14 +94,6 @@ function normalizeGrsaiCreditTierId(
   }
 }
 
-function normalizeGrsaiNanoBananaProModel(input: string | null | undefined): string {
-  const trimmed = (input ?? '').trim().toLowerCase();
-  if (trimmed === DEFAULT_GRSAI_NANO_BANANA_PRO_MODEL || trimmed.startsWith('nano-banana-pro-')) {
-    return trimmed;
-  }
-  return DEFAULT_GRSAI_NANO_BANANA_PRO_MODEL;
-}
-
 function normalizeCanvasEdgeRoutingMode(
   input: CanvasEdgeRoutingMode | string | null | undefined
 ): CanvasEdgeRoutingMode {
@@ -127,47 +103,10 @@ function normalizeCanvasEdgeRoutingMode(
   return 'spline';
 }
 
-function normalizeApiKeys(input: ProviderApiKeys | null | undefined): ProviderApiKeys {
-  if (!input) {
-    return {};
-  }
-
-  return Object.entries(input).reduce<ProviderApiKeys>((acc, [providerId, key]) => {
-    const normalizedProviderId = providerId.trim();
-    if (!normalizedProviderId) {
-      return acc;
-    }
-
-    acc[normalizedProviderId] = normalizeApiKey(key);
-    return acc;
-  }, {});
-}
-
-export function hasConfiguredApiKey(apiKeys: ProviderApiKeys): boolean {
-  return getConfiguredApiKeyCount(apiKeys) > 0;
-}
-
-export function getConfiguredApiKeyCount(
-  apiKeys: ProviderApiKeys,
-  providerIds?: readonly string[]
-): number {
-  const keysToCount = providerIds
-    ? providerIds.map((providerId) => apiKeys[providerId] ?? '')
-    : Object.values(apiKeys);
-
-  return keysToCount.reduce((count, key) => {
-    return normalizeApiKey(key).length > 0 ? count + 1 : count;
-  }, 0);
-}
-
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
       isHydrated: false,
-      apiKeys: {},
-      providerEndpoints: {},
-      enabledSbProviders: {},
-      grsaiNanoBananaProModel: DEFAULT_GRSAI_NANO_BANANA_PRO_MODEL,
       hideProviderGuidePopover: false,
       useUploadFilenameAsNodeTitle: true,
       storyboardGenKeepStyleConsistent: true,
@@ -186,31 +125,6 @@ export const useSettingsStore = create<SettingsState>()(
       themeTonePreset: 'neutral',
       accentColor: '#3B82F6',
       downloadPresetPaths: [],
-      setProviderApiKey: (providerId, key) =>
-        set((state) => ({
-          apiKeys: {
-            ...state.apiKeys,
-            [providerId]: normalizeApiKey(key),
-          },
-        })),
-      setProviderEndpoint: (providerId, url) =>
-        set((state) => ({
-          providerEndpoints: {
-            ...state.providerEndpoints,
-            [providerId]: url.trim(),
-          },
-        })),
-      setSbProviderEnabled: (providerId, enabled) =>
-        set((state) => ({
-          enabledSbProviders: {
-            ...state.enabledSbProviders,
-            [providerId]: enabled,
-          },
-        })),
-      setGrsaiNanoBananaProModel: (model) =>
-        set({
-          grsaiNanoBananaProModel: normalizeGrsaiNanoBananaProModel(model),
-        }),
       setHideProviderGuidePopover: (hide) => set({ hideProviderGuidePopover: hide }),
       setUseUploadFilenameAsNodeTitle: (enabled) => set({ useUploadFilenameAsNodeTitle: enabled }),
       setStoryboardGenKeepStyleConsistent: (enabled) =>
@@ -245,7 +159,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'storyboard-settings-storage',
-      version: 1,
+      version: 2,
       onRehydrateStorage: () => {
         return (_state, error) => {
           if (error) {
@@ -270,10 +184,19 @@ export const useSettingsStore = create<SettingsState>()(
         };
       },
       migrate: (persistedState: unknown) => {
-        const state = (persistedState ?? {}) as {
-          apiKeys?: ProviderApiKeys;
+        // Drop retired client-side storyboard BYOK fields (v2): the storyboard
+        // provider config panel was retired — image generation is fully driven
+        // by the backend DB (mediahub_models), so these persisted keys are dead.
+        const {
+          apiKeys: _apiKeys,
+          providerEndpoints: _providerEndpoints,
+          enabledSbProviders: _enabledSbProviders,
+          grsaiNanoBananaProModel: _grsaiNanoBananaProModel,
+          ...rest
+        } = (persistedState ?? {}) as Record<string, unknown>;
+
+        const state = rest as {
           ignoreAtTagWhenCopyingAndGenerating?: boolean;
-          grsaiNanoBananaProModel?: string;
           hideProviderGuidePopover?: boolean;
           canvasEdgeRoutingMode?: CanvasEdgeRoutingMode | string;
           showNodePrice?: boolean;
@@ -283,17 +206,11 @@ export const useSettingsStore = create<SettingsState>()(
           grsaiCreditTierId?: GrsaiCreditTierId | string;
         };
 
-        const migratedApiKeys = normalizeApiKeys(state.apiKeys);
-
         return {
-          ...(persistedState as object),
+          ...rest,
           isHydrated: true,
-          apiKeys: migratedApiKeys,
           ignoreAtTagWhenCopyingAndGenerating:
             state.ignoreAtTagWhenCopyingAndGenerating ?? true,
-          grsaiNanoBananaProModel: normalizeGrsaiNanoBananaProModel(
-            state.grsaiNanoBananaProModel
-          ),
           hideProviderGuidePopover: state.hideProviderGuidePopover ?? false,
           canvasEdgeRoutingMode: normalizeCanvasEdgeRoutingMode(state.canvasEdgeRoutingMode),
           showNodePrice: state.showNodePrice ?? true,
