@@ -21,10 +21,12 @@ import { SourceHealthBadge } from '../components/TopicInspiration/SourceHealthBa
 import { TopicFilterBar } from '../components/TopicInspiration/TopicFilterBar';
 import { topHotspots, partitionBySignal } from '../components/TopicInspiration/hotspotRanking';
 import { useTopicModuleStatus } from '../hooks/useTopicModuleEnabled';
+import { InspirationPage } from './InspirationPage';
 
 const TOP_HOTSPOTS_COUNT = 5;
 
 export const TopicInspirationPage: React.FC = () => {
+  const notesEnabled = import.meta.env.VITE_FEATURE_INSPIRATION_NOTES === 'true';
   const { t } = useTranslation();
   const { addToast } = useToast();
   const { visible: moduleVisible, enabled: moduleEnabled } = useTopicModuleStatus();
@@ -164,6 +166,11 @@ export const TopicInspirationPage: React.FC = () => {
 
   const cPrimary = 'text-content';
   const cSub = 'text-content-3';
+
+  // Flag-gated switch to the new notes workspace (Task 7 InspirationPage).
+  // Placed after all hook calls above so both branches keep hooks order
+  // identical (rules-of-hooks) — this is a plain constant, not a hook.
+  if (notesEnabled) return <InspirationPage />;
 
   // Display switch (admin) — when not visible, hide the whole page (also
   // blocks direct-URL access, not just the nav item). A paused pipeline
