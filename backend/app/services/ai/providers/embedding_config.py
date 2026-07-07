@@ -32,6 +32,11 @@ class EmbeddingConfig:
     # (/embeddings/multimodal): input is typed parts, vector nests at
     # data.embedding (dict), NOT the OpenAI /v1/embeddings shape.
     multimodal: bool = False
+    # WHICH resolution branch produced this config (for the health board):
+    # "platform" = mediahub_models catalog hit; "governance" = admin manual
+    # config (ai_module.embedding.* or legacy graph_embedder_*). "" = legacy
+    # constructor without attribution.
+    source: str = ""
 
 
 def _is_multimodal(model: str, base_url: str) -> bool:
@@ -72,6 +77,7 @@ async def resolve_embedding_config() -> Optional["EmbeddingConfig"]:
                 model=actual_model,
                 dimensions=0,
                 multimodal=_is_multimodal(actual_model, base),
+                source="platform",
             )
 
     # 2. Manual admin config (base_url + model + api_key typed directly).
@@ -82,6 +88,7 @@ async def resolve_embedding_config() -> Optional["EmbeddingConfig"]:
             model=gov.model,
             dimensions=0,
             multimodal=_is_multimodal(gov.model, gov.base_url),
+            source="governance",
         )
 
     # 3. Legacy graph_embedder_* fallback.
@@ -137,6 +144,11 @@ async def get_embedding_config() -> Optional[EmbeddingConfig]:
             base_url = (cfg.get("base_url") or base_url).strip()
             api_key = (cfg.get("api_key") or api_key).strip()
             model = actual
+            source = "platform"
+        else:
+            source = "governance"
+    else:
+        source = "governance"
     if not base_url or not api_key or not model:
         return None
     try:
@@ -144,5 +156,9 @@ async def get_embedding_config() -> Optional[EmbeddingConfig]:
     except (TypeError, ValueError):
         dims = 0
     return EmbeddingConfig(
-        base_url=base_url, api_key=api_key, model=model, dimensions=dims
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        dimensions=dims,
+        source=source,
     )
