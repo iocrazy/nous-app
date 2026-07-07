@@ -1,7 +1,7 @@
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
 import { handleResponse, unwrapResponse } from '../utils/apiHelpers';
-import { ScriptProject, ScriptChapter, ScriptProjectSummary, ScriptAsset, ScriptAssetType } from '../types';
+import { ScriptProject, ScriptChapter, ScriptProjectSummary } from '../types';
 
 // ─── Script Project CRUD ─────────────────────────────────────────────────────
 
@@ -69,68 +69,16 @@ export async function deleteScriptProject(scriptId: string): Promise<void> {
   });
 }
 
-// ─── Canvas Sync ─────────────────────────────────────────────────────────────
-
-export async function syncScriptCanvas(
-  scriptId: string,
-  syncRequest: {
-    added_chapters: Partial<ScriptChapter>[];
-    updated_chapters: Partial<ScriptChapter>[];
-    deleted_chapter_ids: string[];
-  },
-): Promise<{ chapters: ScriptChapter[] }> {
-  const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/v1/scripts/projects/${scriptId}/canvas/sync`, {
-    method: 'POST',
-    headers: { ...headers, 'Content-Type': 'application/json' },
-    body: JSON.stringify(syncRequest),
-  });
-  return unwrapResponse<{ chapters: ScriptChapter[] }>(res);
-}
-
-// ─── Viewport ────────────────────────────────────────────────────────────────
-
-export async function updateScriptViewport(
-  scriptId: string,
-  viewport: { x: number; y: number; zoom: number },
-): Promise<void> {
-  const headers = await getAuthHeaders();
-  await fetch(`${getApiUrl()}/api/v1/scripts/projects/${scriptId}/viewport`, {
-    method: 'PATCH',
-    headers: { ...headers, 'Content-Type': 'application/json' },
-    body: JSON.stringify(viewport),
-  });
-}
-
-// ─── AI Operations ───────────────────────────────────────────────────────────
-
 // ─── AI Operations (async) ───────────────────────────────────────────────────
-// These four endpoints dispatch a DBOS workflow and return a FLAT
+// These endpoints dispatch a DBOS workflow and return a FLAT
 // `{ success, task_id }` envelope (the async-dispatch convention shared by
 // aiService / sb AI / resource AI) — task_id is TOP-LEVEL, not under `data`,
 // so they use handleResponse (raw json), NOT unwrapResponse (which reads
 // `.data` and would yield undefined → 'cannot destructure task_id').
-// These four endpoints now dispatch a DBOS workflow and return a `task_id`
-// immediately (the LLM work happens in the background). Callers watch
-// task_tracking via `useTaskCompletion(task_id, …)` and reload the script
-// from the server on completion. See:
+// The LLM work happens in the background. Callers watch task_tracking via
+// `useTaskCompletion(task_id, …)` and reload the script from the server on
+// completion. See:
 //   docs/superpowers/specs/2026-06-09-async-script-ai-design.md
-
-export async function generateOutline(data: {
-  script_id: string;
-  premise: string;
-  chapter_count: number;
-  genre?: string;
-  style_guide?: string;
-}): Promise<{ task_id: string }> {
-  const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/v1/scripts/generate-outline`, {
-    method: 'POST',
-    headers: { ...headers, 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
-  return handleResponse<{ task_id: string }>(res);
-}
 
 export async function expandChapter(data: {
   script_id: string;
@@ -165,110 +113,4 @@ export async function createBranches(data: {
     body: JSON.stringify(data),
   });
   return handleResponse<{ task_id: string }>(res);
-}
-
-export async function convertToStoryboard(data: {
-  script_id: string;
-  chapter_id: string;
-  storyboard_project_id?: string;
-}): Promise<{ task_id: string }> {
-  const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/v1/scripts/convert-to-storyboard`, {
-    method: 'POST',
-    headers: { ...headers, 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
-  return handleResponse<{ task_id: string }>(res);
-}
-
-// ─── Script Assets ───────────────────────────────────────────────────────────
-
-export async function fetchScriptAssets(
-  scriptId: string,
-  assetType?: ScriptAssetType,
-): Promise<ScriptAsset[]> {
-  const headers = await getAuthHeaders();
-  const params = new URLSearchParams();
-  if (assetType) params.set('asset_type', assetType);
-  const res = await fetch(
-    `${getApiUrl()}/api/v1/scripts/projects/${scriptId}/assets?${params}`,
-    { headers },
-  );
-  return unwrapResponse<ScriptAsset[]>(res);
-}
-
-export async function createScriptAsset(data: {
-  script_id: string;
-  asset_type: ScriptAssetType;
-  name: string;
-  content?: string;
-}): Promise<ScriptAsset> {
-  const headers = await getAuthHeaders();
-  const res = await fetch(
-    `${getApiUrl()}/api/v1/scripts/projects/${data.script_id}/assets`,
-    {
-      method: 'POST',
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    },
-  );
-  return unwrapResponse<ScriptAsset>(res);
-}
-
-export async function updateScriptAsset(
-  assetId: string,
-  data: Partial<Pick<ScriptAsset, 'name' | 'content' | 'data_json' | 'sort_order'>>,
-): Promise<ScriptAsset> {
-  const headers = await getAuthHeaders();
-  const res = await fetch(
-    `${getApiUrl()}/api/v1/scripts/projects/assets/${assetId}`,
-    {
-      method: 'PUT',
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    },
-  );
-  return unwrapResponse<ScriptAsset>(res);
-}
-
-export async function deleteScriptAsset(assetId: string): Promise<void> {
-  const headers = await getAuthHeaders();
-  await fetch(`${getApiUrl()}/api/v1/scripts/projects/assets/${assetId}`, {
-    method: 'DELETE',
-    headers,
-  });
-}
-
-// ─── Import / Export ─────────────────────────────────────────────────────────
-
-export interface ImportedChapter {
-  title: string;
-  summary: string;
-  content: string;
-  content_html: string;
-}
-
-export async function importScript(
-  scriptId: string,
-  file: File,
-): Promise<{ chapters: ImportedChapter[] }> {
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('script_id', scriptId);
-  const headers = await getAuthHeaders();
-  // Remove Content-Type — FormData sets it automatically with the multipart boundary
-  delete (headers as Record<string, string>)['Content-Type'];
-  const res = await fetch(`${getApiUrl()}/api/v1/scripts/import`, {
-    method: 'POST',
-    headers,
-    body: formData,
-  });
-  if (!res.ok) throw new Error(`Import failed: ${res.status}`);
-  return res.json();
-}
-
-export function getExportUrl(scriptId: string, format: string, branchId?: string): string {
-  const params = new URLSearchParams({ format });
-  if (branchId) params.set('branch_id', branchId);
-  return `${getApiUrl()}/api/v1/scripts/${scriptId}/export?${params}`;
 }
