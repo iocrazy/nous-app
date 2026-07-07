@@ -121,11 +121,15 @@ async def generate_shot_image_step(
         model=model,
         provider_name=provider,
     )
-    image_url = (result or {}).get("image_url")
-    if not image_url:
-        raise RuntimeError(f"Image provider returned no url for shot {shot_id}")
-    logger.info(f"[script_shot_generate][step] shot {shot_id} → {image_url}")
-    return image_url
+    # URL providers (Ark) return image_url; the jimeng-cli adapter returns a
+    # local image_path instead (the CLI wrote the file to disk, no URL). Carry
+    # whichever is present through to persist, which routes local paths to
+    # register_generated_media(source_path=...).
+    produced = (result or {}).get("image_url") or (result or {}).get("image_path")
+    if not produced:
+        raise RuntimeError(f"Image provider returned no image for shot {shot_id}")
+    logger.info(f"[script_shot_generate][step] shot {shot_id} → {produced}")
+    return produced
 
 
 async def _resolve_scope_id(scene: Optional[dict[str, Any]], user_id: str) -> int:
@@ -191,10 +195,14 @@ async def persist_generation(
         prompt = _compose_prompt(shot, scene)
         scope_id = await _resolve_scope_id(scene, str(user_id))
 
+        # provider_url is a URL (Ark) or a local file path (jimeng-cli). Route to
+        # the matching ingest input — register_generated_media takes exactly one.
+        is_url = provider_url.startswith(("http://", "https://"))
         row = await register_generated_media(
             user_id=str(user_id),
             scope_id=scope_id,
-            source_url=provider_url,
+            source_url=provider_url if is_url else None,
+            source_path=None if is_url else provider_url,
             mime="image/png",
             origin=GenerationOrigin(
                 kind="shot_generate",

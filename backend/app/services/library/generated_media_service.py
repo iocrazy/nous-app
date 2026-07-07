@@ -98,6 +98,54 @@ async def _download_to_bytes(source_url: str, *, max_bytes: int) -> bytes:
     return b"".join(chunks)
 
 
+async def _copy_local_to(
+    dest_path: str,
+    source_path: str,
+    *,
+    max_bytes: int = _DEFAULT_MAX_BYTES,
+) -> int:
+    """Copy a LOCAL source file → dest_path, byte-capped + atomic (.part → replace).
+
+    The local-file counterpart of ``_download_to`` for provider outputs that are
+    already on disk (dreamina/jimeng-cli writes to a temp dir; no URL to fetch)."""
+    dest = Path(dest_path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    part = dest.with_name(dest.name + ".part")
+    written = 0
+    try:
+        async with (
+            aiofiles.open(source_path, "rb") as src,
+            aiofiles.open(part, "wb") as fp,
+        ):
+            while True:
+                chunk = await src.read(1024 * 1024)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > max_bytes:
+                    raise ValueError(
+                        f"source file exceeds max_bytes ({max_bytes}): {source_path}"
+                    )
+                await fp.write(chunk)
+        os.replace(part, dest)
+        return written
+    except BaseException:
+        Path(part).unlink(missing_ok=True)
+        logger.opt(exception=True).warning(
+            "[genmedia] local copy failed: {}", source_path
+        )
+        raise
+
+
+def _read_file_capped(path: str, max_bytes: int) -> bytes:
+    """Read a local file fully, raising if it exceeds ``max_bytes`` (image path)."""
+    size = os.path.getsize(path)
+    if size > max_bytes:
+        raise ValueError(f"source file exceeds max_bytes ({max_bytes}): {path}")
+    with open(path, "rb") as fp:
+        return fp.read()
+
+
 def _sha256_file(path: str) -> str:
     """Stream-hash a file (no full read into memory) — for video blobs."""
     h = hashlib.sha256()
@@ -148,6 +196,32 @@ async def _write_generation_to_object_store(
     return to_file_path(CHAT_MEDIA_BUCKET, key), size, sha
 
 
+async def _write_local_generation_to_object_store(
+    *, scope_id: int, source_path: str, mime: str, kind: str
+) -> tuple[str, int, str]:
+    """Content-address a LOCAL generated file into the chat-media bucket.
+
+    The local-file counterpart of ``_write_generation_to_object_store`` — reads
+    the file instead of downloading a URL (video: stream-hash + put_file from
+    disk; image: read bytes + put_bytes). Same dedup + return contract."""
+    store = chat_media_store()
+    if kind == "video":
+        sha = await asyncio.to_thread(_sha256_file, source_path)
+        key = content_key_from_sha(scope_id=scope_id, sha=sha, mime=mime)
+        size = os.path.getsize(source_path)
+        if not await store.exists(key):
+            await store.put_file(key, source_path, mime)
+    else:
+        data = await asyncio.to_thread(
+            _read_file_capped, source_path, _OBJECT_STORE_IMAGE_MAX_BYTES
+        )
+        sha, key = content_key(scope_id=scope_id, data=data, mime=mime)
+        size = len(data)
+        if not await store.exists(key):
+            await store.put_bytes(key, data, mime)
+    return to_file_path(CHAT_MEDIA_BUCKET, key), size, sha
+
+
 @dataclass
 class GenerationOrigin:
     kind: str  # 'agent_run' | 'canvas_run' | 'chat_upload'
@@ -169,20 +243,28 @@ async def register_generated_media(
     *,
     user_id: str,
     scope_id: int,
-    source_url: str,
+    source_url: Optional[str] = None,
+    source_path: Optional[str] = None,
     mime: str,
     origin: GenerationOrigin,
 ) -> dict:
-    """Download a generated media URL into Tier-1 and insert one row. Returns it.
+    """Ingest a generated media blob into Tier-1 and insert one row. Returns it.
+
+    Exactly one of ``source_url`` (fetch a URL) or ``source_path`` (a local file
+    a subprocess provider already wrote, e.g. dreamina/jimeng-cli) must be given.
 
     Object-store path (flag on + generated image/video): the blob is
     content-addressed into the chat-media bucket — images buffer in memory,
-    short videos stream via a temp file. Any failure (storage error OR
-    over-cap) falls back to the streamed-to-disk filesystem path, so a
+    short videos stream via a temp file (URL) or read from disk (local). Any
+    failure (storage error OR over-cap) falls back to the filesystem path, so a
     generation never fails to persist. NOTE: this covers only AI *generations*
     (Tier-1 generated_media) — the media library's downloaded/uploaded videos
     live on their own path and stay on the filesystem+nginx.
     """
+    if bool(source_url) == bool(source_path):
+        raise ValueError(
+            "register_generated_media requires exactly one of source_url / source_path"
+        )
     kind = media_kind_from_mime(mime)
     file_path: Optional[str] = None
     size: int = 0
@@ -190,11 +272,18 @@ async def register_generated_media(
 
     if settings.FEATURE_CHAT_MEDIA_OBJECT_STORE and kind in ("image", "video"):
         try:
-            file_path, size, content_sha256 = (
-                await _write_generation_to_object_store(
-                    scope_id=scope_id, source_url=source_url, mime=mime, kind=kind
+            if source_path is not None:
+                file_path, size, content_sha256 = (
+                    await _write_local_generation_to_object_store(
+                        scope_id=scope_id, source_path=source_path, mime=mime, kind=kind
+                    )
                 )
-            )
+            else:
+                file_path, size, content_sha256 = (
+                    await _write_generation_to_object_store(
+                        scope_id=scope_id, source_url=source_url, mime=mime, kind=kind
+                    )
+                )
         except Exception as exc:
             logger.warning(
                 f"[register_generated_media] object-store write failed, "
@@ -210,7 +299,10 @@ async def register_generated_media(
             f"{gen_uuid}/media{ext_for(mime, kind)}"
         )
         dest = f"{settings.DOWNLOAD_PATH}/{rel}"
-        size = await _download_to(dest, source_url)
+        if source_path is not None:
+            size = await _copy_local_to(dest, source_path)
+        else:
+            size = await _download_to(dest, source_url)
         file_path = rel
 
     row = await db_engine.execute_returning_one(
