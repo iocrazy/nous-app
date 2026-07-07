@@ -510,6 +510,44 @@ class ScriptShots(Base):
     )
 
 
+class ScriptBeats(Base):
+    __tablename__ = "script_beats"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["script_id"],
+            ["public.script_projects.id"],
+            ondelete="CASCADE",
+            name="script_beats_script_id_fkey",
+        ),
+        PrimaryKeyConstraint("id", name="script_beats_pkey"),
+        Index("idx_script_beats_script", "script_id", "sort_order"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")
+    )
+    script_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    summary: Mapped[Optional[str]] = mapped_column(Text)
+    scene_ids: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
 class ScriptOps(Base):
     __tablename__ = "script_ops"
     __table_args__ = (

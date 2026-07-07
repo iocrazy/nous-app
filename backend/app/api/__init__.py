@@ -48,6 +48,7 @@ from app.api.reviews_router import router as reviews_router
 from app.api.sb_gone_router import router as sb_gone_router
 from app.api.script_ai_router import router as script_ai_router
 from app.api.script_assets_router import router as script_assets_router
+from app.api.script_beats_router import router as script_beats_router
 from app.api.script_canvas_router import router as script_canvas_router
 from app.api.script_export_router import router as script_export_router
 from app.api.script_import_router import router as script_import_router
@@ -193,6 +194,7 @@ api_router.include_router(router=script_import_scenes_router, tags=["Script Impo
 api_router.include_router(router=script_export_router, tags=["Script Export"])
 api_router.include_router(router=script_scenes_router, tags=["Script Scenes"])
 api_router.include_router(router=script_shots_router, tags=["Script Shots"])
+api_router.include_router(router=script_beats_router, tags=["Script Beats"])
 api_router.include_router(router=script_versions_router, tags=["Script Versions"])
 api_router.include_router(router=episodes_router, tags=["Episodes"])
 

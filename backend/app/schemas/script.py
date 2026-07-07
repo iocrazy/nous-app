@@ -235,6 +235,37 @@ class ShotMoveRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Beat schemas (Beats view — classic beat sheet)
+# ---------------------------------------------------------------------------
+
+
+class BeatCreate(BaseModel):
+    """Request body for creating a beat under a script. ``script_id`` comes from
+    the path; ``scene_ids`` is an ordered list of linked scene id strings."""
+
+    title: str = Field(..., min_length=1, max_length=200)
+    summary: Optional[str] = None
+    scene_ids: Optional[List[str]] = None
+
+
+class BeatUpdate(BaseModel):
+    """Request body for updating a beat's title / summary / linked scenes."""
+
+    title: Optional[str] = Field(None, min_length=1, max_length=200)
+    summary: Optional[str] = None
+    scene_ids: Optional[List[str]] = None
+
+
+class BeatMoveRequest(BaseModel):
+    """Request body for `POST /beats/{beat_id}/move`.
+
+    ``after_beat_id`` names the beat this one lands just after; ``null`` moves it
+    to the front. Beats are reordered within their script only."""
+
+    after_beat_id: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
 # Version / commit schemas (Phase B P4 — manual tags over the op ledger)
 # ---------------------------------------------------------------------------
 
