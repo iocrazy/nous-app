@@ -1370,6 +1370,9 @@
       "title": "This canvas is empty",
       "hint": "It doesn't have any content yet."
     },
+    "dragCreate": {
+      "title": "Add node"
+    },
     "toolbar": {
       "zoomIn": "Zoom In",
       "zoomOut": "Zoom Out",

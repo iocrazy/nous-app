@@ -43,6 +43,9 @@ import {
 } from '../../../canvas-kit/alignmentGuides';
 import { GuideOverlay } from '../../../canvas-kit/GuideOverlay';
 import { useCanvasShortcuts } from '../../../canvas-kit/useCanvasShortcuts';
+import { useDragToCreate } from '../../../canvas-kit/useDragToCreate';
+import type { SnapPort } from '../../../canvas-kit/portSnap';
+import { DragCreateMenu } from './DragCreateMenu';
 
 type AnyNode = Node;
 
@@ -125,6 +128,14 @@ export function CanvasSurface() {
   const instanceRef = useRef<ReactFlowInstance | null>(null);
   // Alignment-guide lines drawn while a single node drags.
   const [guides, setGuides] = useState<AlignmentGuides>(NO_GUIDES);
+  // Drag-to-create menu: open at a container-relative screen point, carrying the
+  // flow position + origin handle so a picked node lands + auto-wires correctly.
+  const [createMenu, setCreateMenu] = useState<{
+    screenPosition: { x: number; y: number };
+    flowPosition: { x: number; y: number };
+    fromNodeId: string;
+    fromHandle: string | null;
+  } | null>(null);
 
   const selectionSet = useMemo(() => new Set(selection), [selection]);
 
@@ -306,6 +317,52 @@ export function CanvasSurface() {
     [kind, nodeTypeById, connections, setConnections],
   );
 
+  // Flow-space target ports of every node, measured by React Flow. Used by the
+  // magnetic snap; empty until the instance has measured handles (e.g. jsdom),
+  // in which case a wire-drop simply falls through to the create menu.
+  const collectTargetPorts = useCallback((): SnapPort[] => {
+    const inst = instanceRef.current;
+    if (!inst) return [];
+    const ports: SnapPort[] = [];
+    for (const n of inst.getNodes()) {
+      const internal = inst.getInternalNode?.(n.id);
+      const bounds = internal?.internals?.handleBounds?.target;
+      if (!bounds) continue;
+      for (const h of bounds) {
+        ports.push({
+          id: h.id ?? '',
+          nodeId: n.id,
+          x: n.position.x + h.x + h.width / 2,
+          y: n.position.y + h.y + h.height / 2,
+        });
+      }
+    }
+    return ports;
+  }, []);
+
+  // Drag a wire off a source handle → magnetic snap to a nearby port, or open a
+  // create menu on empty canvas. All commits route through the store actions.
+  const dragToCreate = useDragToCreate({
+    getPorts: collectTargetPorts,
+    onMagneticConnect: ({ fromNodeId, fromHandle, toNodeId, toHandle }) =>
+      onConnect({
+        source: fromNodeId,
+        target: toNodeId,
+        sourceHandle: fromHandle,
+        targetHandle: toHandle,
+      }),
+    onOpenCreateMenu: ({ flowPosition, fromNodeId, fromHandle }) => {
+      const inst = instanceRef.current;
+      const rect = containerRef.current?.getBoundingClientRect();
+      let screenPosition = { x: 0, y: 0 };
+      if (inst && rect) {
+        const client = inst.flowToScreenPosition(flowPosition);
+        screenPosition = { x: client.x - rect.left, y: client.y - rect.top };
+      }
+      setCreateMenu({ screenPosition, flowPosition, fromNodeId, fromHandle });
+    },
+  });
+
   const nodeTypes =
     kind === 'smart'
       ? SMART_NODE_TYPES
@@ -328,6 +385,8 @@ export function CanvasSurface() {
         onNodeDragStop={onNodeDragStop}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onConnectStart={dragToCreate.onConnectStart}
+        onConnectEnd={dragToCreate.onConnectEnd}
         onMove={onMove}
         onSelectionChange={onSelectionChange}
         isValidConnection={isConnectionValid}
@@ -361,6 +420,15 @@ export function CanvasSurface() {
         />
         <GuideOverlay guides={guides} />
       </ReactFlow>
+      {createMenu && (
+        <DragCreateMenu
+          screenPosition={createMenu.screenPosition}
+          flowPosition={createMenu.flowPosition}
+          fromNodeId={createMenu.fromNodeId}
+          fromHandle={createMenu.fromHandle}
+          onClose={() => setCreateMenu(null)}
+        />
+      )}
     </div>
   );
 }
