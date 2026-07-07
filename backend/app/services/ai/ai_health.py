@@ -229,7 +229,88 @@ async def get_capability_health(user_id: str) -> list[dict[str, Any]]:
                 }
             )
     rows.extend(await _system_capability_rows(user_id, ai_settings))
+    await _overlay_probe_health(rows, ai_settings)
     return rows
+
+
+async def _overlay_probe_health(rows: list[dict[str, Any]], ai_settings: dict) -> None:
+    """Overlay LIVE key verdicts onto config-healthy rows.
+
+    Static resolution proves which model+key a chain WILL dial, not that the
+    key still works — an exhausted/402 key resolves fine and the board reads
+    green while every call fails. Two verdict sources already exist in the DB;
+    join them instead of dialing anything new:
+
+      - platform/governance rows → the admin probe board
+        (``mediahub_models.last_test_status`` / ``last_test_detail``). For a
+        governance row the admin's manual key usually IS the catalog key, so
+        the probe verdict is the best available signal (hint says so).
+      - byok rows → the user's persisted test-connection verdicts
+        (``settings_json.ai_provider_health.<provider>`` — #973). Never
+        tested ≠ failing: absence stays green.
+
+    Config problems keep priority (same philosophy as the runtime overlay):
+    only ``ok`` rows are overlaid. Best-effort — a broken lookup leaves the
+    row untouched.
+    """
+    provider_health = ai_settings.get("ai_provider_health") or {}
+
+    # Batch the catalog lookups (dedup by model) — the board renders on every
+    # Settings visit, so avoid one query per row.
+    catalog_models = {
+        r["model"]
+        for r in rows
+        if r.get("status") == "ok"
+        and r.get("origin") in ("platform", "governance")
+        and r.get("model")
+    }
+    verdicts: dict[str, tuple[str, str]] = {}
+    if catalog_models:
+        try:
+            from app.repositories.mediahub_model_repository import (
+                get_mediahub_model_repository,
+            )
+
+            repo = get_mediahub_model_repository()
+            for model in catalog_models:
+                row = await repo.get_by_name(model)
+                if not row:
+                    row = await repo.get_by_actual_model(model)
+                if row and (row.get("last_test_status") or "") == "fail":
+                    verdicts[model] = (
+                        "fail",
+                        (row.get("last_test_detail") or "").strip(),
+                    )
+        except Exception as exc:  # noqa: BLE001 — overlay must not sink the board
+            logger.warning("[ai_health] probe overlay lookup failed: %s", exc)
+            return
+
+    for r in rows:
+        if r.get("status") != "ok":
+            continue
+        origin = r.get("origin") or ""
+        if origin in ("platform", "governance"):
+            verdict = verdicts.get(r.get("model") or "")
+            if verdict:
+                detail = verdict[1][:160] or "see Admin → AI Models"
+                r["status"] = "probe_failing"
+                r["hint"] = (
+                    f"Latest platform probe of '{r['model']}' FAILED: {detail} "
+                    "— the config resolves but calls will likely be rejected "
+                    "(Admin → AI Models)."
+                )
+        elif origin == "byok":
+            entry = provider_health.get(r.get("provider") or "") or {}
+            if entry.get("status") == "fail":
+                detail = (entry.get("detail") or "").strip()[:160]
+                tested = (entry.get("tested_at") or "")[:10]
+                r["status"] = "key_test_failed"
+                r["hint"] = (
+                    f"Your '{r['provider']}' key failed its last test"
+                    f"{f' ({tested})' if tested else ''}: "
+                    f"{detail or 'no detail recorded'} — re-test it in "
+                    "Settings → AI Providers."
+                )
 
 
 def _resolved_row(

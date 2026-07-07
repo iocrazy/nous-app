@@ -231,3 +231,118 @@ async def test_system_row_failure_is_isolated(monkeypatch):
     # siblings unaffected
     assert rows["embedding"]["status"] == "ok"
     assert rows["maintenance"]["status"] == "ok"
+
+
+# ─── probe overlay(live key verdicts joined onto ok rows)──────────────
+
+
+async def test_probe_overlay_flags_failed_platform_model(monkeypatch):
+    from unittest.mock import MagicMock
+
+    import app.repositories.mediahub_model_repository as repo_mod
+
+    repo = MagicMock()
+    repo.get_by_name = AsyncMock(
+        return_value={
+            "last_test_status": "fail",
+            "last_test_detail": "HTTP 402: insufficient balance",
+        }
+    )
+    monkeypatch.setattr(repo_mod, "get_mediahub_model_repository", lambda: repo)
+
+    rows = [
+        {
+            "capability": "x",
+            "status": "ok",
+            "origin": "platform",
+            "model": "deepseek-v4-flash",
+            "provider": "deepseek",
+            "hint": "",
+        },
+        {
+            "capability": "y",
+            "status": "ok",
+            "origin": "byok",
+            "model": "m2",
+            "provider": "qwen",
+            "hint": "",
+        },
+    ]
+    await ai_health._overlay_probe_health(rows, {"ai_provider_health": {}})
+    assert rows[0]["status"] == "probe_failing"
+    assert "402" in rows[0]["hint"]
+    assert rows[1]["status"] == "ok"  # byok row untouched (no health entry)
+
+
+async def test_probe_overlay_flags_failed_byok_key(monkeypatch):
+    from unittest.mock import MagicMock
+
+    import app.repositories.mediahub_model_repository as repo_mod
+
+    repo = MagicMock()
+    repo.get_by_name = AsyncMock(return_value=None)
+    repo.get_by_actual_model = AsyncMock(return_value=None)
+    monkeypatch.setattr(repo_mod, "get_mediahub_model_repository", lambda: repo)
+
+    rows = [
+        {
+            "capability": "y",
+            "status": "ok",
+            "origin": "byok",
+            "model": "qwen-max",
+            "provider": "qwen",
+            "hint": "",
+        },
+    ]
+    health = {
+        "ai_provider_health": {
+            "qwen": {
+                "status": "fail",
+                "detail": "401 invalid key",
+                "tested_at": "2026-07-07T00:00:00+00:00",
+            }
+        }
+    }
+    await ai_health._overlay_probe_health(rows, health)
+    assert rows[0]["status"] == "key_test_failed"
+    assert "401" in rows[0]["hint"]
+
+
+async def test_probe_overlay_never_masks_config_problems(monkeypatch):
+    rows = [
+        {
+            "capability": "x",
+            "status": "no_key",
+            "origin": "platform",
+            "model": "m",
+            "provider": "p",
+            "hint": "orig",
+        },
+    ]
+    await ai_health._overlay_probe_health(rows, {})
+    assert rows[0]["status"] == "no_key"
+    assert rows[0]["hint"] == "orig"
+
+
+async def test_probe_overlay_ok_probe_stays_green(monkeypatch):
+    from unittest.mock import MagicMock
+
+    import app.repositories.mediahub_model_repository as repo_mod
+
+    repo = MagicMock()
+    repo.get_by_name = AsyncMock(
+        return_value={"last_test_status": "ok", "last_test_detail": ""}
+    )
+    monkeypatch.setattr(repo_mod, "get_mediahub_model_repository", lambda: repo)
+    rows = [
+        {
+            "capability": "x",
+            "status": "ok",
+            "origin": "platform",
+            "model": "m",
+            "provider": "p",
+            "hint": "",
+        },
+    ]
+    await ai_health._overlay_probe_health(rows, {})
+    assert rows[0]["status"] == "ok"
