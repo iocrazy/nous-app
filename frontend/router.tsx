@@ -1,9 +1,10 @@
-import { lazy, Suspense, type LazyExoticComponent } from 'react';
-import { createBrowserRouter, Navigate } from 'react-router-dom';
+import { lazy, Suspense, type LazyExoticComponent, type ReactNode } from 'react';
+import { createBrowserRouter, Navigate, useParams } from 'react-router-dom';
 import { AuthGuard } from './components/AuthGuard';
 import { AppLayout } from './components/AppLayout';
 import { ModuleGuard } from './components/ModuleGuard';
 import { RedirectToTeam, RedirectToDefaultTeam } from './components/RedirectToTeam';
+import { useDistributionModuleStatus } from './hooks/useDistributionModuleStatus';
 
 // Eagerly loaded (needed immediately)
 import { LoginPage } from './pages/LoginPage';
@@ -85,9 +86,18 @@ const AccountsPage = lazyWithRetry(() =>
   import('./components/Distribution/AccountsPage').then(m => ({ default: m.AccountsPage })),
 );
 
-// Build-time flag: the whole Distribution area (secondary sidebar + Accounts
-// page) is gated behind this so it ships flag-dark until PR-D2/D3 land.
-const distributionEnabled = import.meta.env.VITE_FEATURE_DISTRIBUTION === 'true';
+// Distribution area visibility is admin-controlled (DB `distribution.module`
+// display switch), NOT a build-time env flag — same model as Topic Inspiration.
+// The routes are always registered; this guard redirects to the team root when
+// the module isn't visible. It waits for `loading` so the fail-closed default
+// (visible=false) never bounces the user out before the real status arrives.
+function DistributionModuleGuard({ children }: { children: ReactNode }) {
+  const { visible, loading } = useDistributionModuleStatus();
+  const { teamId } = useParams();
+  if (loading) return null;
+  if (!visible) return <Navigate to={teamId ? `/team/${teamId}` : '/'} replace />;
+  return <>{children}</>;
+}
 
 function PageLoader() {
   return (
@@ -146,10 +156,8 @@ export const router = createBrowserRouter([
       { path: 'agents/:slug', element: <RedirectToTeam view="agents" /> },
       { path: 'skills', element: <RedirectToTeam view="skills" /> },
       { path: 'skills/:slug', element: <RedirectToTeam view="skills" /> },
-      ...(distributionEnabled ? [
-        { path: 'distribution', element: <RedirectToTeam view="distribution" /> },
-        { path: 'distribution/accounts', element: <RedirectToTeam view="distribution" /> },
-      ] : []),
+      { path: 'distribution', element: <RedirectToTeam view="distribution" /> },
+      { path: 'distribution/accounts', element: <RedirectToTeam view="distribution" /> },
 
       // Settings is account-level (no team scope)
       { path: 'settings', element: <AppLayout />, children: [
@@ -221,15 +229,23 @@ export const router = createBrowserRouter([
             ],
           },
 
-          // Distribution — secondary sidebar + Accounts page (flag-dark).
-          ...(distributionEnabled ? [{
+          // Distribution — secondary sidebar + Accounts page. Always
+          // registered; DistributionModuleGuard hides it at runtime until an
+          // admin flips the DB `distribution.module` display switch.
+          {
             path: 'distribution',
-            element: <SuspenseWrap><DistributionLayout /></SuspenseWrap>,
+            element: (
+              <SuspenseWrap>
+                <DistributionModuleGuard>
+                  <DistributionLayout />
+                </DistributionModuleGuard>
+              </SuspenseWrap>
+            ),
             children: [
               { index: true, element: <Navigate to="accounts" replace /> },
               { path: 'accounts', element: <SuspenseWrap><AccountsPage /></SuspenseWrap> },
             ],
-          }] : []),
+          },
           { path: 'player/:displayId', element: <SuspenseWrap><DownloadDetailPage /></SuspenseWrap> },
           { path: 'chat', element: <SuspenseWrap><ChatPage /></SuspenseWrap> },
           // Script & Storyboard editors handled by fullscreen routes below

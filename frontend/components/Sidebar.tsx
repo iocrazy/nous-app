@@ -30,6 +30,7 @@ import { SidebarSection } from './sidebar/SidebarSection';
 import { hasPermission } from '../utils/permissions';
 import { VIEW_PATH_MAP, pathnameToView } from '../utils/routeConfig';
 import { useTopicModuleStatus } from '../hooks/useTopicModuleEnabled';
+import { useDistributionModuleStatus } from '../hooks/useDistributionModuleStatus';
 
 // ---------------------------------------------------------------------------
 // SidebarItem
@@ -221,6 +222,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // Topic Inspiration display switch (admin) — hide the nav item only when the
   // module is not VISIBLE; a paused pipeline (enabled=false) keeps the entry.
   const { visible: topicModuleVisible } = useTopicModuleStatus();
+  // Distribution display switch (admin, DB-backed). Opt-in / fail-closed: the
+  // nav entry only appears once an admin flips `distribution.module.visible`.
+  const { visible: distributionModuleVisible } = useDistributionModuleStatus();
 
   // iconRail (detail routes, D5) pins the narrow rail → render icon-only.
   const collapsed = iconRail || collapsedProp;
@@ -361,7 +365,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               onClick={() => handleNav('ailibrary')}
               collapsed={collapsed}
             />
-            {import.meta.env.VITE_FEATURE_DISTRIBUTION === 'true' && (
+            {distributionModuleVisible && (
               <SidebarItem
                 icon={Send}
                 label={t('sidebar.distribution', 'Distribution')}
@@ -442,7 +446,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             onClick={() => handleNav('ailibrary')}
             collapsed={collapsed}
           />
-          {import.meta.env.VITE_FEATURE_DISTRIBUTION === 'true' && (
+          {distributionModuleVisible && (
             <SidebarItem
               icon={Send}
               label={t('sidebar.distribution', 'Distribution')}
