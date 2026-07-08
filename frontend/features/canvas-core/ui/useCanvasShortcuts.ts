@@ -23,8 +23,8 @@
 import { useEffect, useRef } from 'react';
 
 import {
-  copyNodesToClipboard,
-  preparePastedNodes,
+  copyToClipboard,
+  preparePaste,
   readClipboard,
 } from '../store/clipboard';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
@@ -97,18 +97,28 @@ export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
         if (store.selection.length === 0) return;
         event.preventDefault();
         const selected = collectSelectedNodes(store.nodes, store.selection);
-        copyNodesToClipboard(selected);
+        // Carry the edges internal to the selection + the canvas kind.
+        copyToClipboard(store.kind, selected, store.connections);
         return;
       }
       if (meta && (key === 'v' || key === 'V')) {
         const buf = readClipboard();
         if (!buf || buf.nodes.length === 0) return;
+        // Don't paste a classic selection into a smart canvas (or vice versa):
+        // the node types wouldn't render in the other kind's registry.
+        if (buf.kind !== store.kind) return;
         event.preventDefault();
         const existing = collectIds(store.nodes);
-        const pasted = preparePastedNodes(buf.nodes, existing);
-        store.setNodes([...store.nodes, ...pasted]);
+        const prepared = preparePaste(existing);
+        if (!prepared) return;
+        store.setNodes([...store.nodes, ...prepared.nodes]);
+        // Re-map internal edges onto the pasted nodes so the pasted subgraph
+        // keeps its wiring instead of landing as orphaned nodes.
+        if (prepared.connections.length > 0) {
+          store.setConnections([...store.connections, ...prepared.connections]);
+        }
         store.setSelection(
-          pasted
+          prepared.nodes
             .map((n) => idOf(n))
             .filter((v): v is string => v !== null),
         );
