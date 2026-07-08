@@ -3,10 +3,16 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import app.api.distribution_router as dr
+import app.services.distribution.module_config as mc
 
 
 def _make_app(flag: bool, monkeypatch) -> TestClient:
-    monkeypatch.setattr(dr.settings, "FEATURE_DISTRIBUTION", flag)
+    # The access gate is now the DB-backed module switch (admin-controlled),
+    # not an env flag: require_distribution consults module_config.is_module_enabled.
+    async def fake_enabled() -> bool:
+        return flag
+
+    monkeypatch.setattr(mc, "is_module_enabled", fake_enabled)
     test_app = FastAPI()
     test_app.include_router(dr.router, prefix="/api/v1")
     test_app.dependency_overrides[dr.get_current_user] = lambda: {"id": "u-1"}
@@ -16,6 +22,21 @@ def _make_app(flag: bool, monkeypatch) -> TestClient:
 def test_flag_off_is_404(monkeypatch):
     client = _make_app(False, monkeypatch)
     assert client.get("/api/v1/distribution/accounts").status_code == 404
+
+
+def test_module_status_reports_switches_and_is_reachable_when_off(monkeypatch):
+    """``/module-status`` must be reachable even when the module is off (the
+    frontend reads it to decide whether to show the nav) and report both
+    switches."""
+    client = _make_app(False, monkeypatch)
+
+    async def fake_visible() -> bool:
+        return True
+
+    monkeypatch.setattr(mc, "is_module_visible", fake_visible)
+    resp = client.get("/api/v1/distribution/module-status")
+    assert resp.status_code == 200
+    assert resp.json() == {"enabled": False, "visible": True}
 
 
 def test_connect_returns_auth_url_and_persists_state(monkeypatch):
