@@ -46,9 +46,12 @@ function dragToEmpty(): void {
       {},
       { nodeId: 'gen', handleId: 'image-out', handleType: 'source' },
     );
+    // The release point now comes from the pointer event's client coords (the
+    // engine converts them via screenToFlowPosition; with no measured instance
+    // in this stub, that conversion is identity). `to` is ignored.
     (capturedProps.onConnectEnd as (e: unknown, s: unknown) => void)(
-      {},
-      { isValid: false, to: { x: 240, y: 160 } },
+      { clientX: 240, clientY: 160 },
+      { isValid: false, to: { x: -1, y: -1 } },
     );
   });
 }
