@@ -113,6 +113,19 @@ describe('validateCanvasConnection', () => {
     ).toBe(false);
   });
 
+  it('smart mode: rejects a self-loop even when the node types would allow it', () => {
+    // prompt→prompt is type-allowed by canConnectSmart, but a node must never
+    // wire to itself — the guard now covers smart, not just classic.
+    const types = typeOf({ p1: 'prompt' });
+    expect(
+      validateCanvasConnection(
+        { source: 'p1', target: 'p1', sourceHandle: null, targetHandle: null },
+        'smart',
+        types,
+      ),
+    ).toBe(false);
+  });
+
   it('smart mode: resolves the node type for both endpoints', () => {
     const resolver = vi.fn((id: string) => (id === 's1' ? 'shot' : 'prompt'));
     validateCanvasConnection(

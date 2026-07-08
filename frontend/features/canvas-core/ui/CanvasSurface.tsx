@@ -181,12 +181,24 @@ export function CanvasSurface() {
   const onConnect = useCallback(
     (connection: Connection) => {
       if (!validateCanvasConnection(connection, kind, nodeTypeById)) return;
+      const sourceHandle = connection.sourceHandle ?? null;
+      const targetHandle = connection.targetHandle ?? null;
+      // Skip a duplicate of an existing edge (same endpoints + handles) so a
+      // second identical connect gesture doesn't stack a redundant edge.
+      const isDuplicate = connections.some(
+        (c) =>
+          c.source === connection.source &&
+          c.target === connection.target &&
+          (c.sourceHandle ?? null) === sourceHandle &&
+          (c.targetHandle ?? null) === targetHandle,
+      );
+      if (isDuplicate) return;
       const newEdge: CanvasConnection = {
         id: `edge-${crypto.randomUUID()}`,
         source: connection.source,
         target: connection.target,
-        sourceHandle: connection.sourceHandle ?? null,
-        targetHandle: connection.targetHandle ?? null,
+        sourceHandle,
+        targetHandle,
       };
       setConnections([...connections, newEdge]);
     },
