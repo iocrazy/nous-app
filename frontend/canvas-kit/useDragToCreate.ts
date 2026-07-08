@@ -10,8 +10,16 @@
  *   • A release that xyflow itself judged valid (dropped squarely on a handle
  *     within its own radius) is left alone: xyflow's onConnect already committed.
  *
- * Store-agnostic: candidate ports and the connect/create actions are injected,
- * so both the script editor and canvas-core could reuse it.
+ * Coordinate contract (xyflow 0.0.76): on the INVALID branch — which is exactly
+ * where we run, after the `isValid` early-return — `connectionState.to` is
+ * pane-relative SCREEN pixels, not flow coordinates. Using it against flow-space
+ * ports or as a node position is only correct at pan=0/zoom=1 (and autoPan makes
+ * even that transient). So we derive the release point from the raw pointer
+ * event and convert it through the injected `toFlowPosition`.
+ *
+ * Store-agnostic: candidate ports, the flow-space conversion, and the
+ * connect/create actions are all injected, so both the script editor and
+ * canvas-core reuse it.
  */
 import { useCallback, useEffect, useRef } from 'react';
 import type { OnConnectStart, OnConnectEnd } from '@xyflow/react';
@@ -33,12 +41,20 @@ export interface MagneticConnectArgs {
 }
 
 export interface UseDragToCreateOptions {
-  /** Candidate target ports in flow space (caller excludes the origin node). */
+  /** Candidate target ports in flow space. The origin node is excluded here. */
   getPorts: () => SnapPort[];
+  /** Convert a viewport SCREEN point (clientX/clientY) to flow space. */
+  toFlowPosition: (screenPoint: { x: number; y: number }) => { x: number; y: number };
   /** Called when the release snaps to an existing port. */
   onMagneticConnect: (args: MagneticConnectArgs) => void;
   /** Called when the release lands in empty canvas. */
   onOpenCreateMenu: (ctx: DragToCreateContext) => void;
+  /**
+   * Optional legality gate for a magnetic snap. When it returns false, the
+   * snap is rejected and the gesture falls through to the create menu instead
+   * of being silently dropped.
+   */
+  isValidTarget?: (args: MagneticConnectArgs) => boolean;
   /** Magnetic radius, flow-space px. Defaults to portSnap's 48. */
   snapRadius?: number;
 }
@@ -46,6 +62,13 @@ export interface UseDragToCreateOptions {
 export interface DragToCreateHandlers {
   onConnectStart: OnConnectStart;
   onConnectEnd: OnConnectEnd;
+}
+
+/** Screen (client) coordinates of the pointer that ended the drag. */
+function clientPointOf(evt: MouseEvent | TouchEvent): { x: number; y: number } | null {
+  if ('clientX' in evt) return { x: evt.clientX, y: evt.clientY };
+  const touch = evt.changedTouches?.[0] ?? evt.touches?.[0];
+  return touch ? { x: touch.clientX, y: touch.clientY } : null;
 }
 
 export function useDragToCreate(opts: UseDragToCreateOptions): DragToCreateHandlers {
@@ -75,7 +98,7 @@ export function useDragToCreate(opts: UseDragToCreateOptions): DragToCreateHandl
     cancelledRef.current = false;
   }, []);
 
-  const onConnectEnd = useCallback<OnConnectEnd>((_evt, connectionState) => {
+  const onConnectEnd = useCallback<OnConnectEnd>((evt, connectionState) => {
     const from = fromRef.current;
     fromRef.current = null;
     if (!from) return;
@@ -86,21 +109,32 @@ export function useDragToCreate(opts: UseDragToCreateOptions): DragToCreateHandl
     // Dropped squarely on a valid handle → xyflow's own onConnect already
     // committed the edge; nothing to add here.
     if (connectionState.isValid) return;
-    const to = connectionState.to;
-    if (!to) return;
 
-    const hit = nearestPort({ x: to.x, y: to.y }, optsRef.current.getPorts(), optsRef.current.snapRadius);
+    // Release point → flow space (see the coordinate contract note above).
+    const client = clientPointOf(evt);
+    if (!client) return;
+    const flow = optsRef.current.toFlowPosition(client);
+
+    // Candidate ports exclude the origin node so a wire never snaps back onto
+    // its own source node (which would create a self-loop edge).
+    const ports = optsRef.current.getPorts().filter((p) => p.nodeId !== from.nodeId);
+    const hit = nearestPort(flow, ports, optsRef.current.snapRadius);
     if (hit) {
-      optsRef.current.onMagneticConnect({
+      const args: MagneticConnectArgs = {
         fromNodeId: from.nodeId,
         fromHandle: from.handleId,
         toNodeId: hit.nodeId,
         toHandle: hit.id,
-      });
-      return;
+      };
+      // Snap only completes when the connection is legal; an illegal snap
+      // falls through to the create menu rather than vanishing with no feedback.
+      if (optsRef.current.isValidTarget?.(args) ?? true) {
+        optsRef.current.onMagneticConnect(args);
+        return;
+      }
     }
     optsRef.current.onOpenCreateMenu({
-      flowPosition: { x: to.x, y: to.y },
+      flowPosition: flow,
       fromNodeId: from.nodeId,
       fromHandle: from.handleId,
     });

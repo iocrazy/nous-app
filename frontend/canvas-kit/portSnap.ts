@@ -11,8 +11,8 @@
  */
 
 export interface SnapPort {
-  /** Handle id on the target node. */
-  id: string;
+  /** Handle id on the target node (null for an unnamed/default handle). */
+  id: string | null;
   /** Owning node id. */
   nodeId: string;
   /** Flow-space port position. */

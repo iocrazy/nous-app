@@ -353,7 +353,10 @@ export function CanvasEngine({
       if (!bounds) continue;
       for (const h of bounds) {
         ports.push({
-          id: h.id ?? '',
+          // Keep null for unnamed handles so it matches the create-menu path
+          // (which auto-wires with targetHandle: null); '' vs null differ to
+          // React Flow's handle matching.
+          id: h.id ?? null,
           nodeId: n.id,
           x: n.position.x + h.x + h.width / 2,
           y: n.position.y + h.y + h.height / 2,
@@ -367,13 +370,31 @@ export function CanvasEngine({
   // through the caller's onConnect), or open the create menu on empty canvas.
   const dragToCreate = useDragToCreate({
     getPorts: getPorts ?? collectTargetPorts,
-    onMagneticConnect: ({ fromNodeId, fromHandle, toNodeId, toHandle }) =>
+    // Release point comes in as viewport SCREEN coords; convert to flow space.
+    toFlowPosition: (screenPoint) =>
+      instanceRef.current?.screenToFlowPosition(screenPoint) ?? screenPoint,
+    // A magnetic snap must respect the same legality rule as a manual connect;
+    // an illegal snap falls through to the create menu (handled in the hook).
+    isValidTarget: ({ fromNodeId, fromHandle, toNodeId, toHandle }) =>
+      isValidConnection
+        ? isValidConnection({
+            source: fromNodeId,
+            target: toNodeId,
+            sourceHandle: fromHandle,
+            targetHandle: toHandle,
+          })
+        : true,
+    onMagneticConnect: ({ fromNodeId, fromHandle, toNodeId, toHandle }) => {
+      // Read-only surfaces (allowConnect=false) must never gain an edge, even
+      // if a consumer opts into drag-create — the two switches are orthogonal.
+      if (!allowConnect) return;
       onConnect?.({
         source: fromNodeId,
         target: toNodeId,
         sourceHandle: fromHandle,
         targetHandle: toHandle,
-      }),
+      });
+    },
     onOpenCreateMenu: ({ flowPosition, fromNodeId, fromHandle }) => {
       const inst = instanceRef.current;
       const rect = containerRef.current?.getBoundingClientRect();
