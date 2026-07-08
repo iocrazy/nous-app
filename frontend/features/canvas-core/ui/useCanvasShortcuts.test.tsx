@@ -131,6 +131,19 @@ describe('useCanvasShortcuts — copy / paste', () => {
     expect(state.selection).toEqual(['a-2', 'b-2']);
   });
 
+  it('Cmd+V re-wires edges internal to the copied selection (no orphaned paste)', () => {
+    render(<Host />);
+    // a→b (e1) is internal to the {a,b} selection.
+    useCanvasCoreStore.getState().setSelection(['a', 'b']);
+    fireKey({ key: 'c', meta: true });
+    fireKey({ key: 'v', meta: true });
+    const state = useCanvasCoreStore.getState();
+    // Original e1 + a re-mapped a-2→b-2 edge.
+    expect(state.connections).toHaveLength(2);
+    const pasted = state.connections.find((c) => c.id !== 'e1')!;
+    expect(pasted).toMatchObject({ source: 'a-2', target: 'b-2' });
+  });
+
   it('Cmd+C with empty selection is a no-op', () => {
     render(<Host />);
     const ev = fireKey({ key: 'c', meta: true });
@@ -140,6 +153,18 @@ describe('useCanvasShortcuts — copy / paste', () => {
   it('Cmd+V with empty clipboard is a no-op', () => {
     render(<Host />);
     const ev = fireKey({ key: 'v', meta: true });
+    expect(ev.defaultPrevented).toBe(false);
+  });
+
+  it('Cmd+V does not paste a copy from a different canvas kind', () => {
+    render(<Host />);
+    useCanvasCoreStore.setState({ kind: 'smart' });
+    useCanvasCoreStore.getState().setSelection(['a']);
+    fireKey({ key: 'c', meta: true }); // copied under kind 'smart'
+    useCanvasCoreStore.setState({ kind: 'classic' }); // switch canvas kind
+    const before = useCanvasCoreStore.getState().nodes.length;
+    const ev = fireKey({ key: 'v', meta: true });
+    expect(useCanvasCoreStore.getState().nodes).toHaveLength(before); // no paste
     expect(ev.defaultPrevented).toBe(false);
   });
 });

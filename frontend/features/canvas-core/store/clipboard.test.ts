@@ -1,12 +1,21 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
+import type { CanvasConnection, CanvasNode } from '../types';
 import {
   PASTE_OFFSET,
   clearClipboard,
-  copyNodesToClipboard,
-  preparePastedNodes,
+  copyToClipboard,
+  preparePaste,
   readClipboard,
 } from './clipboard';
+
+const node = (id: string, extra: Record<string, unknown> = {}): CanvasNode =>
+  ({ id, ...extra }) as CanvasNode;
+const edge = (
+  id: string,
+  source: string,
+  target: string,
+): CanvasConnection => ({ id, source, target }) as CanvasConnection;
 
 afterEach(() => clearClipboard());
 
@@ -15,14 +24,25 @@ describe('clipboard module', () => {
     expect(readClipboard()).toBeNull();
   });
 
-  it('roundtrips nodes through copy → read', () => {
-    copyNodesToClipboard([{ id: 'a' }, { id: 'b' }]);
+  it('roundtrips nodes + kind through copy → read', () => {
+    copyToClipboard('smart', [node('a'), node('b')], []);
     const got = readClipboard();
-    expect(got?.nodes).toEqual([{ id: 'a' }, { id: 'b' }]);
+    expect(got?.kind).toBe('smart');
+    expect(got?.nodes).toEqual([node('a'), node('b')]);
   });
 
-  it('copy is a deep clone — mutating returned nodes does not affect later reads', () => {
-    copyNodesToClipboard([{ id: 'a', data: { label: 'one' } }]);
+  it('copy captures only edges internal to the selection', () => {
+    copyToClipboard(
+      'classic',
+      [node('a'), node('b')],
+      [edge('e1', 'a', 'b'), edge('e2', 'a', 'outside')],
+    );
+    const got = readClipboard()!;
+    expect(got.connections).toEqual([edge('e1', 'a', 'b')]);
+  });
+
+  it('copy is a deep clone — mutating a read does not affect later reads', () => {
+    copyToClipboard('smart', [node('a', { data: { label: 'one' } })], []);
     const first = readClipboard()!;
     (first.nodes[0] as Record<string, unknown>).data = { label: 'mutated' };
     const second = readClipboard()!;
@@ -32,55 +52,61 @@ describe('clipboard module', () => {
   });
 
   it('clearClipboard wipes the payload', () => {
-    copyNodesToClipboard([{ id: 'a' }]);
+    copyToClipboard('smart', [node('a')], []);
     clearClipboard();
     expect(readClipboard()).toBeNull();
   });
 });
 
-describe('preparePastedNodes', () => {
+describe('preparePaste', () => {
+  it('returns null when the clipboard is empty', () => {
+    expect(preparePaste(new Set())).toBeNull();
+  });
+
   it('re-ids nodes whose id collides with existing', () => {
-    const pasted = preparePastedNodes(
-      [{ id: 'a' }, { id: 'b' }],
-      new Set(['a']),
-    );
-    expect(pasted[0]).toMatchObject({ id: 'a-2' });
-    expect(pasted[1]).toMatchObject({ id: 'b' });
+    copyToClipboard('smart', [node('a'), node('b')], []);
+    const out = preparePaste(new Set(['a']))!;
+    expect(out.nodes[0]).toMatchObject({ id: 'a-2' });
+    expect(out.nodes[1]).toMatchObject({ id: 'b' });
   });
 
-  it('does not collide repeatedly on a third paste', () => {
-    const existing = new Set(['a', 'a-2']);
-    const pasted = preparePastedNodes([{ id: 'a' }], existing);
-    expect(pasted[0]).toMatchObject({ id: 'a-3' });
+  it('remaps internal edges onto the new node ids (no orphaned paste)', () => {
+    copyToClipboard('smart', [node('a'), node('b')], [edge('e1', 'a', 'b')]);
+    const out = preparePaste(new Set(['a', 'b']))!;
+    const newA = (out.nodes[0] as Record<string, unknown>).id as string;
+    const newB = (out.nodes[1] as Record<string, unknown>).id as string;
+    expect(out.connections).toHaveLength(1);
+    expect(out.connections[0]).toMatchObject({ source: newA, target: newB });
+    expect(out.connections[0].id).not.toBe('e1'); // fresh edge id
   });
 
-  it('offsets position by PASTE_OFFSET', () => {
-    const pasted = preparePastedNodes(
-      [{ id: 'a', position: { x: 100, y: 50 } }],
-      new Set(),
-    );
-    expect((pasted[0] as Record<string, unknown>).position).toEqual({
+  it('offsets position by PASTE_OFFSET on the first paste', () => {
+    copyToClipboard('smart', [node('a', { position: { x: 100, y: 50 } })], []);
+    const out = preparePaste(new Set())!;
+    expect((out.nodes[0] as Record<string, unknown>).position).toEqual({
       x: 100 + PASTE_OFFSET,
       y: 50 + PASTE_OFFSET,
     });
   });
 
-  it('falls back to PASTE_OFFSET when position is missing', () => {
-    const pasted = preparePastedNodes(
-      [{ id: 'a' }],
-      new Set(),
-    );
-    expect((pasted[0] as Record<string, unknown>).position).toEqual({
+  it('cascades the offset outward on repeated pastes', () => {
+    copyToClipboard('smart', [node('a', { position: { x: 0, y: 0 } })], []);
+    const first = preparePaste(new Set())!;
+    const second = preparePaste(new Set())!;
+    expect((first.nodes[0] as Record<string, unknown>).position).toEqual({
       x: PASTE_OFFSET,
       y: PASTE_OFFSET,
     });
+    expect((second.nodes[0] as Record<string, unknown>).position).toEqual({
+      x: PASTE_OFFSET * 2,
+      y: PASTE_OFFSET * 2,
+    });
   });
 
-  it('synthesises a random id when source lacks one', () => {
-    const pasted = preparePastedNodes(
-      [{ position: { x: 0, y: 0 } }],
-      new Set(),
-    );
-    expect(typeof (pasted[0] as Record<string, unknown>).id).toBe('string');
+  it('synthesises a random id when the source node lacks one', () => {
+    const anon = { position: { x: 0, y: 0 } } as unknown as CanvasNode;
+    copyToClipboard('smart', [anon], []);
+    const out = preparePaste(new Set())!;
+    expect(typeof (out.nodes[0] as Record<string, unknown>).id).toBe('string');
   });
 });
