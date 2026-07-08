@@ -36,3 +36,27 @@ class NoteOut(BaseModel):
     created_at: str
     updated_at: str
     attachments: List[AttachmentOut] = []
+
+
+# ─── Personal Access Tokens (spec §3.3 — external ingestion) ─────────────────
+
+
+class ApiTokenCreateIn(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+
+
+class ApiTokenOut(BaseModel):
+    """Token metadata — never carries the plaintext or its hash."""
+
+    model_config = ConfigDict(coerce_numbers_to_str=True, extra="ignore")
+    id: str
+    name: str
+    last_used_at: Optional[str] = None
+    created_at: str
+    revoked_at: Optional[str] = None
+
+
+class ApiTokenCreated(ApiTokenOut):
+    """Create response — the plaintext `token` is returned exactly once."""
+
+    token: str

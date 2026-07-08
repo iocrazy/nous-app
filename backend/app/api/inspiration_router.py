@@ -1,4 +1,4 @@
-"""Inspiration notes REST API (spec §4). PAT auth + /tokens arrive in P4."""
+"""Inspiration notes REST API (spec §4), including PAT external ingestion (§3.3)."""
 
 from __future__ import annotations
 
@@ -20,7 +20,15 @@ from app.core.deps import get_current_user
 from app.repositories.inspiration_attachments_repository import (
     get_inspiration_attachments_repository,
 )
-from app.schemas.inspiration import AttachmentOut, NoteCreateIn, NoteOut, NoteUpdateIn
+from app.schemas.inspiration import (
+    ApiTokenCreated,
+    ApiTokenCreateIn,
+    ApiTokenOut,
+    AttachmentOut,
+    NoteCreateIn,
+    NoteOut,
+    NoteUpdateIn,
+)
 from app.services.inspiration.attachment_service import (
     AttachmentService,
     AttachmentStorageFailed,
@@ -30,6 +38,10 @@ from app.services.inspiration.notes_service import (
     NoteNotFound,
     NotePersistFailed,
     get_notes_service,
+)
+from app.services.inspiration.token_service import (
+    TOKEN_PREFIX,
+    get_inspiration_token_service,
 )
 
 router = APIRouter(prefix="/inspiration", tags=["Inspiration"])
@@ -46,6 +58,32 @@ def _attachments() -> AttachmentService:
 
 def _uid(current_user: dict) -> str:
     return str(current_user["id"])
+
+
+async def get_inspiration_actor(authorization: str = Header(...)) -> dict:
+    """Dual auth for inspiration write endpoints.
+
+    Accepts either a Supabase JWT (the page) or a `mhk_`-prefixed Personal
+    Access Token (external scripts / shortcuts / bots). A PAT is scoped to
+    inspiration read/write only — it can create notes and upload attachments
+    but cannot manage tokens (those endpoints stay JWT-only).
+    """
+    token = authorization.replace("Bearer ", "", 1).strip()
+    if token.startswith(TOKEN_PREFIX):
+        user_id = await get_inspiration_token_service().authenticate(token)
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="invalid or revoked API token",
+            )
+        return {
+            "id": user_id,
+            "email": None,
+            "role": None,
+            "aud": None,
+            "auth_via": "pat",
+        }
+    return await get_current_user(authorization)
 
 
 @router.get("/notes", response_model=list[NoteOut])
@@ -66,8 +104,15 @@ async def list_notes(
 
 @router.post("/notes", response_model=NoteOut, status_code=status.HTTP_201_CREATED)
 async def create_note(
-    body: NoteCreateIn, current_user: dict = Depends(get_current_user)
+    body: NoteCreateIn, current_user: dict = Depends(get_inspiration_actor)
 ):
+    """Create a note. Accepts a Supabase JWT or a PAT for external ingestion:
+
+        curl -X POST .../api/v1/inspiration/notes \\
+          -H "Authorization: Bearer mhk_..." \\
+          -H "Content-Type: application/json" \\
+          -d '{"content_md": "a captured idea #inbox"}'
+    """
     row = await get_notes_service().create_note(
         _uid(current_user), body.content_md, ref_hotspot=body.ref_hotspot
     )
@@ -123,7 +168,7 @@ async def notes_tags(current_user: dict = Depends(get_current_user)):
 async def upload_attachment(
     note_id: str,
     file: UploadFile = File(...),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_inspiration_actor),
 ):
     try:
         await get_notes_service().assert_owned(_uid(current_user), note_id)
@@ -205,3 +250,35 @@ async def delete_attachment(
         raise HTTPException(status_code=404, detail="attachment not found")
     if not await _attachments().delete(att):
         raise HTTPException(status_code=502, detail="attachment deletion failed")
+
+
+# ─── Personal Access Tokens (spec §3.3) ──────────────────────────────────────
+# Token management is JWT-only: a leaked PAT must not be able to mint or revoke
+# tokens, only exercise the inspiration write scope.
+
+
+@router.get("/tokens", response_model=list[ApiTokenOut])
+async def list_tokens(current_user: dict = Depends(get_current_user)):
+    return await get_inspiration_token_service().list(_uid(current_user))
+
+
+@router.post(
+    "/tokens", response_model=ApiTokenCreated, status_code=status.HTTP_201_CREATED
+)
+async def create_token(
+    body: ApiTokenCreateIn, current_user: dict = Depends(get_current_user)
+):
+    """Mint a PAT. The plaintext `token` is returned exactly once here."""
+    result = await get_inspiration_token_service().create(
+        _uid(current_user), body.name.strip()
+    )
+    if result is None:
+        raise HTTPException(status_code=502, detail="token creation failed")
+    row, plaintext = result
+    return ApiTokenCreated(**row, token=plaintext)
+
+
+@router.delete("/tokens/{token_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_token(token_id: str, current_user: dict = Depends(get_current_user)):
+    if not await get_inspiration_token_service().revoke(_uid(current_user), token_id):
+        raise HTTPException(status_code=404, detail="token not found")
