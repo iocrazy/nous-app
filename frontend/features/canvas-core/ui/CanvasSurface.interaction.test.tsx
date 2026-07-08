@@ -112,3 +112,35 @@ describe('CanvasSurface — solo-drop alignment snap', () => {
     expect((a.position as { x: number }).x).toBe(0);
   });
 });
+
+describe('CanvasSurface — onNodesChange persistence hygiene', () => {
+  it('routes select/dimensions changes through the transient path (no dirty, no history)', () => {
+    seed('classic', [{ id: 'a', type: 'output', position: { x: 0, y: 0 }, data: {} }]);
+    render(<CanvasSurface />);
+    const onNodesChange = capturedProps.onNodesChange as (c: unknown[]) => void;
+    const rev0 = useCanvasCoreStore.getState().revision;
+
+    onNodesChange([{ id: 'a', type: 'select', selected: true }]);
+    expect(useCanvasCoreStore.getState().revision).toBe(rev0); // not dirtied
+    expect(useCanvasCoreStore.getState().canUndo()).toBe(false); // no history
+
+    onNodesChange([
+      { id: 'a', type: 'dimensions', dimensions: { width: 100, height: 50 } },
+    ]);
+    expect(useCanvasCoreStore.getState().revision).toBe(rev0); // still clean
+    expect(useCanvasCoreStore.getState().canUndo()).toBe(false);
+  });
+
+  it('routes a committed position change through setNodes (dirty + history base)', () => {
+    seed('classic', [{ id: 'a', type: 'output', position: { x: 0, y: 0 }, data: {} }]);
+    render(<CanvasSurface />);
+    const onNodesChange = capturedProps.onNodesChange as (c: unknown[]) => void;
+    const rev0 = useCanvasCoreStore.getState().revision;
+
+    onNodesChange([
+      { id: 'a', type: 'position', position: { x: 5, y: 5 }, dragging: false },
+    ]);
+    expect(useCanvasCoreStore.getState().revision).toBe(rev0 + 1); // dirtied
+    expect(useCanvasCoreStore.getState().canUndo()).toBe(true); // history captured
+  });
+});

@@ -307,4 +307,99 @@ describe('undo / redo', () => {
     expect(s.selection).toEqual([]);
     expect(s.nodes).toEqual([]);
   });
+
+  it('redo pressed inside the debounce window after a NEW edit does not resurrect the invalidated future (ghost redo)', async () => {
+    const stubs = makeStubs();
+    // Long history window so the new edit stays PENDING when redo fires.
+    const useStore = createCanvasCoreStore({
+      ...stubs,
+      debounceMs: 9999,
+      historyDebounceMs: 999,
+    });
+    await useStore.getState().loadCanvas('4242');
+    useStore.getState().setNodes([{ id: 'a' }]);
+    await vi.advanceTimersByTimeAsync(999); // commit
+    useStore.getState().undo(); // nodes=[], future=[{a}]
+    expect(useStore.getState().nodes).toEqual([]);
+
+    // New edit E, still inside its debounce window (not committed).
+    useStore.getState().setNodes([{ id: 'e' }]);
+    // Redo must NOT bring back {a}: the new edit invalidated the future.
+    useStore.getState().redo();
+    expect(useStore.getState().nodes).toEqual([{ id: 'e' }]);
+    expect(useStore.getState().canRedo()).toBe(false);
+  });
+
+  it('flushHistory commits a pending edit burst immediately', async () => {
+    const stubs = makeStubs();
+    const useStore = createCanvasCoreStore({
+      ...stubs,
+      debounceMs: 9999,
+      historyDebounceMs: 999,
+    });
+    await useStore.getState().loadCanvas('4242');
+    useStore.getState().setNodes([{ id: 'a' }]);
+    expect(useStore.getState().historyPast).toHaveLength(0); // still pending
+    useStore.getState().flushHistory();
+    expect(useStore.getState().historyPast).toHaveLength(1);
+  });
+});
+
+// ============================================================
+// Transient (select/measurement) + persistence hygiene
+// ============================================================
+
+describe('transient updates + save hygiene', () => {
+  it('setNodesTransient updates nodes without history or a revision bump', async () => {
+    const stubs = makeStubs();
+    const useStore = createCanvasCoreStore({
+      ...stubs,
+      debounceMs: 9999,
+      historyDebounceMs: 50,
+    });
+    await useStore.getState().loadCanvas('4242');
+    const rev = useStore.getState().revision;
+    useStore.getState().setNodesTransient([{ id: 'x', selected: true }]);
+    expect(useStore.getState().nodes).toEqual([{ id: 'x', selected: true }]);
+    expect(useStore.getState().canUndo()).toBe(false); // no history
+    expect(useStore.getState().revision).toBe(rev); // not dirtied
+  });
+
+  it('save strips React Flow-internal fields from nodes_json', async () => {
+    const stubs = makeStubs();
+    const useStore = createCanvasCoreStore({
+      ...stubs,
+      debounceMs: 10,
+      historyDebounceMs: 9999,
+    });
+    await useStore.getState().loadCanvas('4242');
+    useStore.getState().setNodes([
+      {
+        id: 'a',
+        type: 'shot',
+        position: { x: 1, y: 2 },
+        data: { label: 'A' },
+        selected: true,
+        dragging: false,
+        measured: { width: 100, height: 50 },
+        width: 100,
+        height: 50,
+      },
+    ]);
+    await vi.advanceTimersByTimeAsync(10); // save debounce fires
+
+    expect(stubs.saveImpl).toHaveBeenCalledTimes(1);
+    const payload = stubs.saveImpl.mock.calls[0][1];
+    const saved = (payload.nodes_json as Array<Record<string, unknown>>)[0];
+    // Domain fields kept…
+    expect(saved.id).toBe('a');
+    expect(saved.type).toBe('shot');
+    expect(saved.position).toEqual({ x: 1, y: 2 });
+    // …RF-internals stripped.
+    expect(saved.selected).toBeUndefined();
+    expect(saved.dragging).toBeUndefined();
+    expect(saved.measured).toBeUndefined();
+    expect(saved.width).toBeUndefined();
+    expect(saved.height).toBeUndefined();
+  });
 });

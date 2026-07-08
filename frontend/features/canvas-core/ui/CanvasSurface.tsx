@@ -19,7 +19,7 @@ import {
   applyEdgeChanges,
   applyNodeChanges,
 } from '@xyflow/react';
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 import type { CanvasConnection, CanvasNode } from '../types';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
@@ -59,11 +59,26 @@ export function CanvasSurface() {
   const setSelection = useCanvasCoreStore((s) => s.setSelection);
   const noteDragStart = useCanvasCoreStore((s) => s.noteDragStart);
   const setNodesDragTick = useCanvasCoreStore((s) => s.setNodesDragTick);
+  const setNodesTransient = useCanvasCoreStore((s) => s.setNodesTransient);
+  const flushHistory = useCanvasCoreStore((s) => s.flushHistory);
   const setViewportOnMove = useCanvasCoreStore((s) => s.setViewportOnMove);
   const flushViewportDirty = useCanvasCoreStore((s) => s.flushViewportDirty);
 
   // RAF handle for coalescing per-tick onMove dirty signals (Fix 2).
   const viewportRafRef = useRef<number | null>(null);
+
+  // On unmount (e.g. rail view switch mid-drag) commit any in-flight history
+  // base and cancel a pending viewport frame so nothing leaks into the next
+  // mount of the singleton store.
+  useEffect(() => {
+    return () => {
+      if (viewportRafRef.current !== null) {
+        cancelAnimationFrame(viewportRafRef.current);
+        viewportRafRef.current = null;
+      }
+      flushHistory();
+    };
+  }, [flushHistory]);
 
   const selectionSet = useMemo(() => new Set(selection), [selection]);
 
@@ -101,11 +116,23 @@ export function CanvasSurface() {
       );
       if (isMidDragOnly) {
         setNodesDragTick(next as unknown as CanvasNode[]);
-      } else {
+        return;
+      }
+      // Split document edits from React Flow-internal changes. `select` (handled
+      // separately via onSelectionChange) and `dimensions` (measurement) must
+      // NOT create undo history or dirty/persist the document — otherwise a
+      // mere click or the load-time measure pass saves the canvas and drops a
+      // phantom undo step. Route those through the render-only transient path.
+      const hasDocEdit = changes.some(
+        (c) => c.type !== 'select' && c.type !== 'dimensions',
+      );
+      if (hasDocEdit) {
         setNodes(next as unknown as CanvasNode[]);
+      } else {
+        setNodesTransient(next as unknown as CanvasNode[]);
       }
     },
-    [rfNodes, setNodes, setNodesDragTick],
+    [rfNodes, setNodes, setNodesDragTick, setNodesTransient],
   );
 
   const onEdgesChange = useCallback(
