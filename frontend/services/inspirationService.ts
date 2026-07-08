@@ -37,6 +37,20 @@ export interface NoteFilters {
   q?: string;
 }
 
+export interface ApiToken {
+  id: string;
+  name: string;
+  last_used_at: string | null;
+  created_at: string;
+  revoked_at: string | null;
+}
+
+// Returned only by POST /tokens: the plaintext `mhk_...` secret is present
+// exactly once at creation time and is never persisted or re-fetchable.
+export interface ApiTokenCreated extends ApiToken {
+  token: string;
+}
+
 const base = () => `${getApiUrl()}/api/v1/inspiration`;
 
 async function jsonOrThrow(resp: Response) {
@@ -161,4 +175,33 @@ export async function deleteAttachment(attachmentId: string): Promise<void> {
 export function attachmentUrlWithToken(attachmentId: string, token?: string): string {
   const url = `${base()}/attachments/${attachmentId}`;
   return token ? `${url}?token=${encodeURIComponent(token)}` : url;
+}
+
+// ── Personal Access Tokens (PAT) — external write access to the library ──
+
+export async function listTokens(): Promise<ApiToken[]> {
+  const resp = await fetch(`${base()}/tokens`, {
+    headers: await getAuthHeaders(),
+  });
+  return jsonOrThrow(resp);
+}
+
+export async function createToken(name: string): Promise<ApiTokenCreated> {
+  const resp = await fetch(`${base()}/tokens`, {
+    method: 'POST',
+    headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  return jsonOrThrow(resp);
+}
+
+export async function revokeToken(id: string): Promise<void> {
+  const resp = await fetch(`${base()}/tokens/${id}`, {
+    method: 'DELETE',
+    headers: await getAuthHeaders(),
+  });
+  if (!resp.ok) {
+    const e = await resp.json().catch(() => ({ detail: 'Revoke failed' }));
+    throw new Error(e.detail || `HTTP ${resp.status}`);
+  }
 }
