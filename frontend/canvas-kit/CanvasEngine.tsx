@@ -67,6 +67,9 @@ const INK_MUTED = '#52525b';
 const SNAP_GRID: [number, number] = [8, 8];
 /** Stable empty-guides object so clearing never allocates a new render key. */
 const NO_GUIDES: AlignmentGuides = {};
+
+/** Alignment snap tolerance, in SCREEN pixels (divided by zoom at use). */
+const GUIDE_TOLERANCE_SCREEN_PX = 5;
 /** Node box used for guide math before React Flow has measured a node (flow px). */
 const FALLBACK_NODE_WIDTH = 200;
 const FALLBACK_NODE_HEIGHT = 120;
@@ -262,15 +265,25 @@ export function CanvasEngine({
     onNodeDragStart?.();
   }, [onNodeDragStart]);
 
+  // Alignment tolerance is a constant on SCREEN, so divide the flow-space
+  // tolerance by the live zoom — otherwise a fixed flow px value snaps too
+  // eagerly when zoomed in and never snaps when zoomed out.
+  const guideTolerance = useCallback(() => {
+    const zoom = instanceRef.current?.getViewport?.().zoom ?? viewport?.zoom ?? 1;
+    return GUIDE_TOLERANCE_SCREEN_PX / (zoom > 0 ? zoom : 1);
+  }, [viewport]);
+
   // While a single node drags, match its edges against the others and draw the
   // alignment guides. The snap itself is applied once on drop so the node never
   // fights the cursor mid-drag.
   const onNodeDrag = useCallback(
     (_evt: unknown, node: AnyNode) => {
       const others = rfNodesRef.current.filter((n) => n.id !== node.id);
-      setGuides(computeAlignmentGuides(toRect(node), others.map(toRect)));
+      setGuides(
+        computeAlignmentGuides(toRect(node), others.map(toRect), guideTolerance()),
+      );
     },
-    [toRect],
+    [toRect, guideTolerance],
   );
 
   const handleNodeDragStop = useCallback(
@@ -283,7 +296,11 @@ export function CanvasEngine({
       let snappedPosition: { x: number; y: number } | null = null;
       if (!isGroupDrop) {
         const others = rfNodesRef.current.filter((n) => n.id !== node.id);
-        const g = computeAlignmentGuides(toRect(node), others.map(toRect));
+        const g = computeAlignmentGuides(
+          toRect(node),
+          others.map(toRect),
+          guideTolerance(),
+        );
         if (g.snappedX != null || g.snappedY != null) {
           snappedPosition = {
             x: g.snappedX ?? node.position.x,
@@ -303,7 +320,7 @@ export function CanvasEngine({
       // Full path (scene): hand the caller everything to persist as it sees fit.
       onNodeDragStop?.(node, { isGroupDrop, snappedPosition, nodes: rfNodesRef.current });
     },
-    [toRect, onNodesSnap, onNodeDragStop],
+    [toRect, onNodesSnap, onNodeDragStop, guideTolerance],
   );
 
   const handleSelectionDragStop = useCallback(

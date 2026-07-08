@@ -104,4 +104,39 @@ describe('CanvasSurface drag-to-create', () => {
     expect(screen.queryByRole('menu')).toBeNull();
     expect(useCanvasCoreStore.getState().nodes).toHaveLength(1);
   });
+
+  it('offers only node types that can legally receive the source wire', () => {
+    // Dragging from an `image-out` (image type) → only nodes with an image
+    // input may be created + auto-wired. Zero-input / type-mismatched nodes
+    // must not be offered (they would produce an edge the validator rejects).
+    seed('classic', [{ id: 'gen', type: 'image', position: { x: 0, y: 0 }, data: {} }]);
+    render(<CanvasSurface />);
+    dragToEmpty();
+    expect(screen.getByRole('menuitem', { name: 'Output' })).toBeTruthy();
+    // Zero-input source-only nodes are excluded.
+    expect(screen.queryByRole('menuitem', { name: 'Image' })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: 'Prompt' })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: 'Text' })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: 'Note' })).toBeNull();
+  });
+});
+
+describe('CanvasSurface onConnect — duplicate guard', () => {
+  it('does not add a second identical edge', () => {
+    seed('classic', [
+      { id: 'img', type: 'image', position: { x: 0, y: 0 }, data: {} },
+      { id: 'out', type: 'output', position: { x: 200, y: 0 }, data: {} },
+    ]);
+    render(<CanvasSurface />);
+    const onConnect = capturedProps.onConnect as (c: unknown) => void;
+    const conn = {
+      source: 'img',
+      target: 'out',
+      sourceHandle: 'image-out',
+      targetHandle: 'image-in',
+    };
+    act(() => onConnect(conn));
+    act(() => onConnect(conn)); // identical second attempt
+    expect(useCanvasCoreStore.getState().connections).toHaveLength(1);
+  });
 });

@@ -12,7 +12,8 @@ import { useTranslation } from 'react-i18next';
 
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import type { CanvasConnection, CanvasNode } from '../types';
-import { CLASSIC_NODE_DEFINITIONS } from '../classic/registry';
+import { CLASSIC_NODE_DEFINITIONS, getClassicNodeDefinition } from '../classic/registry';
+import { canConnectSmart } from '../smart/types';
 import {
   createLoopNode,
   createOutputNode,
@@ -45,13 +46,34 @@ const SMART_ITEMS: MenuItem[] = [
   { type: 'loop', label: 'Loop', targetHandle: null, make: (p) => createLoopNode({}, { position: p }) as CanvasNode },
 ];
 
-function classicItems(): MenuItem[] {
-  return CLASSIC_NODE_DEFINITIONS.filter((def) => def.type !== 'group').map((def) => ({
-    type: def.type,
-    label: def.label,
-    targetHandle: def.inputs[0]?.id ?? null,
-    make: (p) => ({ id: `${def.type}-${crypto.randomUUID()}`, type: def.type, position: p, data: { label: def.label } }),
-  }));
+/**
+ * Classic menu items that can LEGALLY receive a wire from the source output
+ * (port type `srcOutType`): only node types with an input port of the matching
+ * type, wired into THAT input (not blindly `inputs[0]`). Zero-input and
+ * type-incompatible nodes are dropped so drag-create can't produce an edge the
+ * connection validator would reject.
+ */
+function classicItems(srcOutType: string | undefined): MenuItem[] {
+  const items: MenuItem[] = [];
+  for (const def of CLASSIC_NODE_DEFINITIONS) {
+    if (def.type === 'group') continue;
+    const input = srcOutType
+      ? def.inputs.find((i) => i.type === srcOutType)
+      : undefined;
+    if (!input) continue;
+    items.push({
+      type: def.type,
+      label: def.label,
+      targetHandle: input.id,
+      make: (p) => ({
+        id: `${def.type}-${crypto.randomUUID()}`,
+        type: def.type,
+        position: p,
+        data: { label: def.label },
+      }),
+    });
+  }
+  return items;
 }
 
 export function DragCreateMenu({
@@ -69,10 +91,23 @@ export function DragCreateMenu({
   const setConnections = useCanvasCoreStore((s) => s.setConnections);
   const setSelection = useCanvasCoreStore((s) => s.setSelection);
 
-  const items = useMemo<MenuItem[]>(
-    () => (kind === 'smart' ? SMART_ITEMS : kind === 'classic' ? classicItems() : []),
-    [kind],
-  );
+  const items = useMemo<MenuItem[]>(() => {
+    const srcNode = nodes.find(
+      (n) => (n as { id?: string }).id === fromNodeId,
+    ) as { type?: string } | undefined;
+    const srcType = srcNode?.type;
+    if (kind === 'smart') {
+      // Only node types the source may legally feed (excludes e.g. Shot as a
+      // target and anything when the source is an Output).
+      return SMART_ITEMS.filter((item) => canConnectSmart(srcType, item.type));
+    }
+    if (kind === 'classic') {
+      const srcDef = getClassicNodeDefinition(srcType);
+      const srcOutType = srcDef?.outputs.find((o) => o.id === fromHandle)?.type;
+      return classicItems(srcOutType);
+    }
+    return [];
+  }, [kind, nodes, fromNodeId, fromHandle]);
 
   // Escape closes the menu without creating anything.
   useEffect(() => {
@@ -119,17 +154,23 @@ export function DragCreateMenu({
         <div className="px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-ink-400">
           {t('canvas.dragCreate.title', 'Add node')}
         </div>
-        {items.map((item) => (
-          <button
-            key={item.type}
-            type="button"
-            role="menuitem"
-            onClick={() => create(item)}
-            className="block w-full rounded-md px-2 py-1 text-left text-xs font-medium text-ink-100 hover:bg-ink-800 hover:text-white"
-          >
-            {item.label}
-          </button>
-        ))}
+        {items.length === 0 ? (
+          <div className="px-2 py-1 text-xs text-ink-500">
+            {t('canvas.dragCreate.noCompatible', 'No compatible node')}
+          </div>
+        ) : (
+          items.map((item) => (
+            <button
+              key={item.type}
+              type="button"
+              role="menuitem"
+              onClick={() => create(item)}
+              className="block w-full rounded-md px-2 py-1 text-left text-xs font-medium text-ink-100 hover:bg-ink-800 hover:text-white"
+            >
+              {item.label}
+            </button>
+          ))
+        )}
       </div>
     </>
   );

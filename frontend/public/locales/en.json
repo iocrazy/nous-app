@@ -1429,7 +1429,8 @@
       "hint": "It doesn't have any content yet."
     },
     "dragCreate": {
-      "title": "Add node"
+      "title": "Add node",
+      "noCompatible": "No compatible node"
     },
     "toolbar": {
       "zoomIn": "Zoom In",

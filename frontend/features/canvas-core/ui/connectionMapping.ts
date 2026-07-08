@@ -52,6 +52,11 @@ export function validateCanvasConnection(
   kind: CanvasKind | null,
   nodeTypeById: (id: string) => string | undefined,
 ): boolean {
+  // A node may never wire to itself, in ANY kind. This is the only layer that
+  // sees node IDs (`canConnectClassic`/`canConnectSmart` see only types), so
+  // the self-loop guard lives here — and must cover smart too, else dragging a
+  // wire from a prompt's output back onto its own input would be accepted.
+  if (connection.source === connection.target) return false;
   if (kind === 'smart') {
     return canConnectSmart(
       nodeTypeById(connection.source),
@@ -59,9 +64,6 @@ export function validateCanvasConnection(
     );
   }
   if (kind === 'classic') {
-    // Reject self-loops here — this is the only layer that sees node IDS;
-    // `canConnectClassic` only sees node types + handle ids.
-    if (connection.source === connection.target) return false;
     return canConnectClassic(
       nodeTypeById(connection.source),
       nodeTypeById(connection.target),

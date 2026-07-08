@@ -1429,7 +1429,8 @@
       "hint": "这里还没有任何内容。"
     },
     "dragCreate": {
-      "title": "添加节点"
+      "title": "添加节点",
+      "noCompatible": "无兼容节点"
     },
     "toolbar": {
       "zoomIn": "放大",
