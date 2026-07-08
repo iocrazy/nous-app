@@ -47,6 +47,34 @@ const DEFAULT_DEBOUNCE_MS = 500;
 const DEFAULT_HISTORY_DEBOUNCE_MS = 250;
 const MAX_HISTORY = 30;
 
+/** React Flow-internal fields that must never be persisted to `nodes_json`.
+ *  `selected`/`dragging` are UI state; `measured`/`width`/`height`/`positionAbsolute`
+ *  are layout output React Flow recomputes on load. Persisting them bloats the
+ *  row and makes two editors' rows diverge → false realtime conflicts. */
+const RF_INTERNAL_KEYS = [
+  'selected',
+  'dragging',
+  'measured',
+  'width',
+  'height',
+  'positionAbsolute',
+] as const;
+
+function stripRfInternals(node: CanvasNode): CanvasNode {
+  const obj = node as Record<string, unknown>;
+  let dirty = false;
+  for (const k of RF_INTERNAL_KEYS) {
+    if (k in obj) {
+      dirty = true;
+      break;
+    }
+  }
+  if (!dirty) return node;
+  const clone: Record<string, unknown> = { ...obj };
+  for (const k of RF_INTERNAL_KEYS) delete clone[k];
+  return clone as CanvasNode;
+}
+
 export type CanvasLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
 export type CanvasSaveStatus = 'idle' | 'saving' | 'error';
 
@@ -135,6 +163,22 @@ interface CanvasState {
    * entry regardless of how many ticks it spans.
    */
   setNodesDragTick(nodes: CanvasNode[]): void;
+
+  /**
+   * Replace the nodes array for RENDER purposes only — no history entry, no
+   * revision bump, no save. Used for React Flow-internal change types
+   * (`select`, `dimensions`/measurement) that must never enter the undo
+   * history or be persisted to `nodes_json`. Selection is tracked separately
+   * (see `setSelection`); measurement is RF-internal and stripped on save.
+   */
+  setNodesTransient(nodes: CanvasNode[]): void;
+
+  /**
+   * Commit any in-flight edit burst's history base immediately. Call on
+   * surface unmount so a drag/edit that never reached its debounce commit
+   * does not leak its pending base into the next mount of the singleton store.
+   */
+  flushHistory(): void;
 
   /**
    * Update the viewport during an `onMove` tick without bumping `revision`
@@ -295,7 +339,11 @@ export function createCanvasCoreStore(
         payload: {
           base_updated_at: state.baseUpdatedAt,
           viewport_json: state.viewport,
-          nodes_json: state.nodes,
+          // Strip React Flow-internal fields — `selected`/`dragging` are UI
+          // state and `measured`/`width`/`height` are layout output; none
+          // belong in the persisted document (they also spuriously diverge
+          // two editors' rows and trigger false realtime conflicts).
+          nodes_json: state.nodes.map(stripRfInternals),
           connections_json: state.connections,
           node_ops_json: state.nodeOps,
           connection_ops_json: state.connectionOps,
@@ -490,6 +538,11 @@ export function createCanvasCoreStore(
       },
 
       redo() {
+        // Symmetric with undo(): flush any in-flight edit burst first. This
+        // commits the pending base (which clears historyFuture), so a redo
+        // pressed inside the 250ms debounce window after a NEW edit correctly
+        // no-ops instead of resurrecting a future that edit already invalidated.
+        flushPendingHistory();
         const { historyFuture } = get();
         if (historyFuture.length === 0) return;
         const [next, ...rest] = historyFuture;
@@ -551,6 +604,17 @@ export function createCanvasCoreStore(
         // the drag-end setNodes() call will start the 250ms commit timer.
         set({ nodes });
         markDirty();
+      },
+
+      setNodesTransient(nodes: CanvasNode[]) {
+        // Render-only update (select / measurement). No history, no dirty,
+        // no save — these change types must never become undoable edits or
+        // reach persistence.
+        set({ nodes });
+      },
+
+      flushHistory() {
+        flushPendingHistory();
       },
 
       setViewportOnMove(viewport: CanvasViewport) {
