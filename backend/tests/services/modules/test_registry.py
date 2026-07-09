@@ -7,6 +7,7 @@ from app.services.modules.registry import (
     MODULES_BY_KEY,
     ModuleState,
     parse_module_state,
+    read_state_for_key,
 )
 
 
@@ -70,3 +71,33 @@ def test_parse_garbage_falls_back_to_defaults():
     assert parse_module_state({"enabled": "yes"}, _mod("distribution")) == ModuleState(
         False, False
     )
+
+
+@pytest.mark.asyncio
+async def test_read_state_for_key_known_key_registry_defaults_win(monkeypatch):
+    # No stored blob (simulates a missing/unreadable system_settings row).
+    async def _no_stored_value(key):
+        return None
+
+    monkeypatch.setattr(registry, "_read_raw", _no_stored_value)
+
+    # Deliberately pass defaults that DISAGREE with the registry's
+    # fail-closed False/False for "distribution.module" — they must be
+    # silently ignored because the key is registered.
+    state = await read_state_for_key(
+        "distribution.module", enabled_default=True, visible_default=True
+    )
+    assert state == ModuleState(False, False)
+
+
+@pytest.mark.asyncio
+async def test_read_state_for_key_unknown_key_uses_passed_defaults(monkeypatch):
+    async def _no_stored_value(key):
+        return None
+
+    monkeypatch.setattr(registry, "_read_raw", _no_stored_value)
+
+    state = await read_state_for_key(
+        "some.unknown.key", enabled_default=True, visible_default=False
+    )
+    assert state == ModuleState(True, False)

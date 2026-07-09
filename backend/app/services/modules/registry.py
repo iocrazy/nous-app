@@ -108,7 +108,16 @@ async def read_module_state(module: ModuleDef) -> ModuleState:
 async def read_state_for_key(
     key: str, enabled_default: bool, visible_default: bool
 ) -> ModuleState:
-    """Reader for the thin shims that only know their key + defaults."""
+    """Reader for the thin shims that only know their key + defaults.
+
+    Precedence: if ``key`` is a registered module (present in
+    ``MODULES_BY_KEY``), that module's own registry defaults take precedence
+    and the passed-in ``enabled_default``/``visible_default`` are ignored.
+    The passed-in defaults are used ONLY as the fallback ``ModuleDef`` for
+    keys that are NOT in the registry. This keeps the registry the single
+    source of truth — a caller cannot override a registered module's
+    fail-open/fail-closed behavior by passing disagreeing defaults.
+    """
     module = MODULES_BY_KEY.get(key) or ModuleDef(
         id=key,
         key=key,
