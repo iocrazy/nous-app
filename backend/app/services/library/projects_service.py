@@ -897,10 +897,9 @@ class ProjectsService:
         kind="" so the frontend renders nothing.
         """
         stage = await self._stages_repo().get_current(project_id)
-        if not stage:
+        slug = (stage or {}).get("slug")
+        if not slug:
             return {"stage_slug": None, "kind": "", "progress": None, "action": None}
-
-        slug = stage["slug"]
 
         if slug == _STORYBOARD_STAGE:
             p = await self._shots_repo().storyboard_progress_for_project(project_id)

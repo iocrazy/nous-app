@@ -86,6 +86,23 @@ async def test_storyboard_all_done_is_ready():
 
 
 @pytest.mark.asyncio
+async def test_storyboard_with_script_but_no_shots_navigates_to_breakdown():
+    stage = {"slug": "storyboard", "name": "Storyboarding"}
+    progress = {
+        "total": 0,
+        "done": 0,
+        "empty": 0,
+        "generating": 0,
+        "failed": 0,
+        "script_count": 1,
+        "scene_count": 2,
+    }
+    out = await _svc(stage, progress).build_stage_suggestion(1)
+    assert out["kind"] == "storyboard_no_shots"
+    assert out["action"]["type"] == "navigate" and out["action"]["tab"] == "scripts"
+
+
+@pytest.mark.asyncio
 async def test_non_storyboard_stage_is_nav():
     stage = {"slug": "planning", "name": "Planning"}
     out = await _svc(stage, {}).build_stage_suggestion(1)
