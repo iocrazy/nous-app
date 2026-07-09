@@ -774,7 +774,7 @@ git commit -m "test(projects): true-DB integration for generate-missing fan-out"
 - Modify: `frontend/services/projectsService.ts`
 
 **Interfaces:**
-- Produces: `fetchStageSuggestion(projectId: string): Promise<StageSuggestion>`, `generateMissingFrames(projectId: string): Promise<{ parent_task_id: string; dispatched_count: number }>`.
+- Produces: `fetchStageSuggestion(projectId: string): Promise<StageSuggestion>`, `generateMissingFrames(projectId: string): Promise<{ dispatched_count: number; task_ids: string[] }>`.
 
 - [ ] **Step 1: Add types**
 
@@ -815,7 +815,7 @@ export async function fetchStageSuggestion(projectId: string): Promise<StageSugg
 
 export async function generateMissingFrames(
   projectId: string,
-): Promise<{ parent_task_id: string; dispatched_count: number }> {
+): Promise<{ dispatched_count: number; task_ids: string[] }> {
   const res = await fetch(
     `${API_BASE}/api/v1/projects/${projectId}/storyboard/generate-missing`,
     { method: 'POST', headers: await getAuthHeaders() },
@@ -906,7 +906,7 @@ test('storyboard_generate renders count and fires batch on click', async () => {
     progress: { total: 12, done: 9, empty: 3, generating: 0, failed: 0, script_count: 2, scene_count: 5 },
     action: { type: 'generate_missing_frames', label_key: 'projects.suggest.ctaGenerate', count: 3 },
   });
-  const gen = vi.spyOn(svc, 'generateMissingFrames').mockResolvedValue({ parent_task_id: 't1', dispatched_count: 3 });
+  const gen = vi.spyOn(svc, 'generateMissingFrames').mockResolvedValue({ dispatched_count: 3, task_ids: ['t1', 't2', 't3'] });
 
   render(<StageSuggestion projectId="p1" currentStage={stage} setActiveTab={vi.fn()} />);
   const btn = await screen.findByTestId('suggest-cta');
