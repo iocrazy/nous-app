@@ -40,10 +40,12 @@ test('navigate kind switches tab, does not call batch', async () => {
     action: { type: 'navigate', tab: 'scripts', label_key: 'projects.suggest.cta_planning', count: null },
   });
   const setTab = vi.fn();
+  const gen = vi.spyOn(svc, 'generateMissingFrames');
   render(<StageSuggestion projectId="p1" currentStage={{ ...stage, slug: 'planning' }} setActiveTab={setTab} />);
   const btn = await screen.findByTestId('suggest-cta');
   fireEvent.click(btn);
   expect(setTab).toHaveBeenCalledWith('scripts');
+  expect(gen).not.toHaveBeenCalled();
 });
 
 test('empty kind renders nothing', async () => {

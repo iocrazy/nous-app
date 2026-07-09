@@ -469,6 +469,11 @@ export const setCurrentStage = async (
 // Stage suggestion (Phase B B3)
 // ============================================
 
+// NOTE: unlike the stage-catalog / current-stage endpoints above (which the backend
+// wraps as `{data: ...}` and we unwrap via `.data`), PR-1's stage-suggestion and
+// generate-missing endpoints return their response model DIRECTLY (no envelope), so
+// these consume the body as-is. Do not add a `.data` unwrap here — it would be undefined.
+
 /** Fetch the single most-relevant "next step" suggestion for the project's current stage. */
 export const fetchStageSuggestion = async (
   projectId: string,
