@@ -17,6 +17,7 @@ import { AIGovernance } from './pages/settings/AIGovernance'
 import { TopicScoring } from './pages/settings/TopicScoring'
 import { SignalSources } from './pages/settings/SignalSources'
 import { MemorySettings } from './pages/settings/MemorySettings'
+import { Modules } from './pages/settings/Modules'
 import { RequestLogs } from './pages/request-logs'
 import { MonitoringDashboard } from './pages/monitoring'
 import { GlobalSearch } from './pages/search'
@@ -67,6 +68,7 @@ export default function App() {
                 }
               />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/settings/modules" element={<Modules />} />
               <Route path="/settings/ai-governance" element={<AIGovernance />} />
               <Route path="/settings/topic-scoring" element={<TopicScoring />} />
               <Route path="/settings/signal-sources" element={<SignalSources />} />

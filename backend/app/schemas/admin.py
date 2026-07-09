@@ -752,25 +752,23 @@ class TopicScoringConfigResponse(BaseModel):
     enabled: bool = True
 
 
-class TopicModuleConfigResponse(BaseModel):
-    """Topic Inspiration module switches (system_settings['topics.module']).
-    ``enabled`` pauses/resumes the backend pipeline; ``visible`` shows/hides
-    the frontend nav entry + page. Independent — pausing processing no longer
-    hides the surface."""
+class ModuleSummaryResponse(BaseModel):
+    """One product module's central switch state + its defaults."""
 
-    enabled: bool = True
-    visible: bool = True
+    id: str
+    key: str
+    label: str
+    enabled: bool
+    visible: bool
+    enabled_default: bool
+    visible_default: bool
 
 
-class DistributionModuleConfigResponse(BaseModel):
-    """Distribution module switches (system_settings['distribution.module']).
-    ``enabled`` gates the backend account/OAuth API (off → 404); ``visible``
-    shows/hides the frontend nav entry + routes. Independent. Opt-in: both
-    default OFF (fail-closed) so the module stays dark until an admin turns it
-    on."""
+class ModuleSwitchUpdate(BaseModel):
+    """Both switches for one module (whole-blob replace)."""
 
-    enabled: bool = False
-    visible: bool = False
+    enabled: bool
+    visible: bool
 
 
 class TopicContentFetchConfigResponse(BaseModel):

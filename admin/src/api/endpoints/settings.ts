@@ -290,71 +290,43 @@ export function useUpdateTopicPrefilterConfig() {
   })
 }
 
-// ── Topic Inspiration module switches (processing + visibility) ───────────
-export interface TopicModuleConfig {
-  /** Processing switch — off pauses the pipeline (fetch/score/embed/cluster). */
+// ── Central module switches (processing + visibility) ─────────────────────
+export interface ModuleSummary {
+  id: string
+  key: string
+  label: string
+  /** Processing/access switch. */
   enabled: boolean
-  /** Display switch — off hides the frontend nav entry + page. */
+  /** Display switch — off hides the frontend nav entry + pages. */
   visible: boolean
+  enabled_default: boolean
+  visible_default: boolean
 }
 
-const TOPIC_MODULE_URL = '/api/v1/admin/settings/topics-module'
+const MODULES_URL = '/api/v1/admin/settings/modules'
 
-export function useTopicModuleConfig() {
+export function useModules() {
   return useQuery({
-    queryKey: ['settings', 'topics-module'],
+    queryKey: ['settings', 'modules'],
     queryFn: async () => {
-      const { data } = await apiClient.get<TopicModuleConfig>(TOPIC_MODULE_URL)
+      const { data } = await apiClient.get<ModuleSummary[]>(MODULES_URL)
       return data
     },
   })
 }
 
-export function useUpdateTopicModuleConfig() {
+export function useUpdateModule() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (update: TopicModuleConfig) => {
-      const { data } = await apiClient.put<TopicModuleConfig>(TOPIC_MODULE_URL, update)
-      return data
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['settings', 'topics-module'] })
-    },
-  })
-}
-
-// ── Distribution module switches (access + visibility) ────────────────────
-export interface DistributionModuleConfig {
-  /** Access switch — off makes the backend account/OAuth API 404. */
-  enabled: boolean
-  /** Display switch — off hides the frontend nav entry + routes. */
-  visible: boolean
-}
-
-const DISTRIBUTION_MODULE_URL = '/api/v1/admin/settings/distribution-module'
-
-export function useDistributionModuleConfig() {
-  return useQuery({
-    queryKey: ['settings', 'distribution-module'],
-    queryFn: async () => {
-      const { data } = await apiClient.get<DistributionModuleConfig>(DISTRIBUTION_MODULE_URL)
-      return data
-    },
-  })
-}
-
-export function useUpdateDistributionModuleConfig() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: async (update: DistributionModuleConfig) => {
-      const { data } = await apiClient.put<DistributionModuleConfig>(
-        DISTRIBUTION_MODULE_URL,
-        update,
+    mutationFn: async (vars: { id: string; enabled: boolean; visible: boolean }) => {
+      const { data } = await apiClient.put<ModuleSummary>(
+        `${MODULES_URL}/${vars.id}`,
+        { enabled: vars.enabled, visible: vars.visible },
       )
       return data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['settings', 'distribution-module'] })
+      queryClient.invalidateQueries({ queryKey: ['settings', 'modules'] })
     },
   })
 }
