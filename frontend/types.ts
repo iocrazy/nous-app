@@ -944,6 +944,33 @@ export interface ProjectStage {
   updated_at?: string;
 }
 
+/** Aggregate shot-frame progress for the storyboard stage suggestion (Phase B B3). */
+export interface StoryboardProgress {
+  total: number;
+  done: number;
+  empty: number;
+  generating: number;
+  failed: number;
+  script_count: number;
+  scene_count: number;
+}
+
+/** The action a stage-suggestion CTA performs: fire the one-click batch, or navigate a tab. */
+export interface SuggestionAction {
+  type: 'generate_missing_frames' | 'navigate';
+  label_key: string;
+  tab?: ProjectTab | null;
+  count?: number | null;
+}
+
+/** The single most-relevant "next step" suggestion for a project's current SOP stage. */
+export interface StageSuggestion {
+  stage_slug: string | null;
+  kind: string;
+  progress?: StoryboardProgress | null;
+  action?: SuggestionAction | null;
+}
+
 export type ScriptAssetType = 'worldview' | 'character' | 'location' | 'prop' | 'plot_point';
 
 export interface ScriptAsset {
