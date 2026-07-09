@@ -1,0 +1,435 @@
+<!--
+  Projects Phase B — B0 三版对比设计稿(2026-07-07)。用户选定 A · Stage Ring。
+  artifact: https://claude.ai/code/artifact/f1d342c2-dadf-4786-9d1d-3011d6b8abed
+  spec: docs/superpowers/specs/2026-07-04-projects-module-security-and-redesign-design.md (Phase B 节)
+  ⚠️ 2026-07-08 用户指出实现与本稿"很大偏差"待重做,清单见 memory project_projects_phase_a.md:
+     ①B3 建议卡被降级(A 稿=数据感知+一键 Generate,实现=导航版)②B2 缺 Stage history 按钮
+     ③B1 动态行(A 稿=工作事件+状态色,实现=阶段跃迁)④视觉像素未验证
+-->
+<title>Projects Phase B — 三版设计对比</title>
+<style>
+  /* MediaHub island tokens (index.css verbatim) — deliberate single dark theme:
+     these mockups replicate the shipped product surface. */
+  :root {
+    --app-bg: #050507; --island: #15151a; --island-2: #17171b; --card: #1d1d22;
+    --line: rgba(255,255,255,.065); --line-strong: rgba(255,255,255,.12);
+    --c1: #e7e7ea; --c2: #a3a3ad; --c3: #74747e; --c4: #55555e;
+    --indigo: #6366f1; --indigo-soft: rgba(99,102,241,.16);
+    --emerald: #34d399; --amber: #fbbf24; --red: #f87171;
+  }
+  * { margin: 0; box-sizing: border-box; }
+  body {
+    background: var(--app-bg); color: var(--c1);
+    font: 14px/1.55 -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+    padding: 40px 24px 120px;
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums; }
+
+  /* ── page header ── */
+  .eyebrow { color: var(--c3); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; }
+  h1 { font-size: 26px; font-weight: 650; letter-spacing: -.02em; margin: 6px 0 8px; text-wrap: balance; }
+  .lede { color: var(--c2); max-width: 62ch; }
+  nav.toc { display: flex; gap: 8px; margin: 22px 0 48px; flex-wrap: wrap; }
+  nav.toc a {
+    color: var(--c2); text-decoration: none; font-size: 13px;
+    border: 1px solid var(--line-strong); border-radius: 999px; padding: 6px 14px;
+  }
+  nav.toc a:hover, nav.toc a:focus-visible { color: var(--c1); border-color: var(--indigo); outline: none; }
+  nav.toc a.rec { color: var(--indigo); border-color: var(--indigo); }
+
+  /* ── proposal section ── */
+  section.prop { margin-bottom: 72px; scroll-margin-top: 24px; }
+  .prop-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px; }
+  .prop-head .tag {
+    font-size: 11px; letter-spacing: .1em; color: var(--c3);
+    border: 1px solid var(--line-strong); border-radius: 4px; padding: 2px 8px;
+  }
+  .prop-head h2 { font-size: 19px; font-weight: 650; letter-spacing: -.01em; }
+  .prop-head .rec-chip { font-size: 11px; color: #0b0b10; background: var(--indigo); border-radius: 999px; padding: 3px 10px; font-weight: 600; }
+  .prop-sub { color: var(--c2); max-width: 70ch; margin-bottom: 20px; }
+  .prop-sub b { color: var(--c1); font-weight: 600; }
+
+  .board {
+    background: var(--island); border: 1px solid var(--line); border-radius: 16px;
+    padding: 24px; margin-bottom: 14px;
+  }
+  .board-label { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--c4); margin-bottom: 14px; }
+
+  .notes { color: var(--c3); font-size: 13px; display: grid; gap: 4px; padding-left: 16px; }
+  .notes li::marker { color: var(--c4); }
+  .notes b { color: var(--c2); font-weight: 600; }
+
+  /* ── shared card scaffolding ── */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+  .pcard {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 16px; cursor: pointer; transition: border-color .15s;
+  }
+  .pcard:hover { border-color: var(--line-strong); }
+  .pname { font-weight: 600; font-size: 15px; letter-spacing: -.01em; }
+  .pdesc { color: var(--c3); font-size: 12.5px; margin-top: 3px; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+  .meta { display: flex; align-items: center; gap: 10px; color: var(--c4); font-size: 11.5px; }
+  .avatars { display: flex; }
+  .av {
+    width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--card);
+    display: grid; place-items: center; font-size: 9px; font-weight: 700; color: #0b0b10;
+    margin-left: -6px;
+  }
+  .av:first-child { margin-left: 0; }
+  .activity { display: flex; align-items: center; gap: 6px; color: var(--c3); font-size: 12px; }
+  .activity .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--emerald); flex: none; }
+  .stage-chip { font-size: 11px; color: var(--indigo); background: var(--indigo-soft); border-radius: 999px; padding: 2px 9px; font-weight: 600; }
+
+  /* A: stage ring */
+  .ringrow { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .ring { flex: none; }
+  /* B: cover */
+  .pcard.cover-card { padding: 0; overflow: hidden; }
+  .cover {
+    height: 108px; display: grid; place-items: center; font-size: 30px; font-weight: 700;
+    color: rgba(255,255,255,.28); letter-spacing: .04em; position: relative;
+  }
+  .cover.imgless-1 { background: linear-gradient(135deg, #232338, #17171f); }
+  .cover.imgless-2 { background: linear-gradient(135deg, #1f2d2a, #15181a); }
+  .cover.imgless-3 { background: linear-gradient(135deg, #2d2333, #17151d); }
+  .cover .stage-chip { position: absolute; top: 10px; left: 10px; }
+  .cover-body { padding: 14px 16px 16px; }
+  .segbar { display: flex; gap: 3px; margin-top: 12px; }
+  .segbar i { height: 3px; flex: 1; border-radius: 2px; background: var(--c4); opacity: .35; }
+  .segbar i.done { background: var(--indigo); opacity: 1; }
+  .segbar i.cur { background: var(--indigo); opacity: 1; box-shadow: 0 0 6px rgba(99,102,241,.8); }
+
+  /* C: dense rows */
+  table.rows { width: 100%; border-collapse: collapse; }
+  table.rows th { text-align: left; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--c4); font-weight: 600; padding: 0 12px 10px; }
+  table.rows td { padding: 11px 12px; border-top: 1px solid var(--line); font-size: 13px; }
+  table.rows tr.item:hover td { background: rgba(255,255,255,.02); }
+  .microsteps { display: inline-flex; gap: 2.5px; vertical-align: middle; }
+  .microsteps i { width: 9px; height: 9px; border-radius: 2px; background: var(--c4); opacity: .3; }
+  .microsteps i.done { background: var(--indigo); opacity: 1; }
+  .microsteps i.cur { background: var(--indigo); opacity: 1; outline: 1.5px solid rgba(99,102,241,.4); outline-offset: 1px; }
+
+  /* workbench shared */
+  .wb { display: grid; gap: 14px; }
+  .stage-card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px;
+  }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600;
+    border-radius: 8px; padding: 7px 14px; border: 1px solid transparent; cursor: pointer;
+  }
+  .btn.primary { background: var(--indigo); color: #0b0b10; }
+  .btn.ghost { background: transparent; color: var(--c2); border-color: var(--line-strong); }
+  .toolcard {
+    background: var(--island-2); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 14px; display: flex; align-items: center; gap: 10px; cursor: pointer;
+  }
+  .toolcard:hover { border-color: var(--indigo); }
+  .toolcard .ic { width: 28px; height: 28px; border-radius: 8px; background: var(--indigo-soft); display: grid; place-items: center; color: var(--indigo); flex: none; }
+  .toolcard .tl { font-size: 13px; font-weight: 600; }
+  .toolcard .ts { font-size: 11.5px; color: var(--c3); }
+  .ai-card {
+    border: 1px solid rgba(99,102,241,.35); background: linear-gradient(180deg, rgba(99,102,241,.08), transparent);
+    border-radius: 12px; padding: 14px 16px; display: flex; gap: 12px; align-items: flex-start;
+  }
+  .ai-card .badge { font-size: 10px; letter-spacing: .1em; color: var(--indigo); font-weight: 700; text-transform: uppercase; }
+  .timeline-h { display: flex; align-items: center; gap: 0; margin-top: 4px; }
+  .tstep { display: flex; align-items: center; flex: 1; min-width: 0; }
+  .tdot { width: 10px; height: 10px; border-radius: 50%; background: var(--c4); flex: none; }
+  .tdot.done { background: var(--indigo); }
+  .tdot.cur { background: var(--indigo); outline: 3px solid rgba(99,102,241,.25); }
+  .tline { height: 2px; flex: 1; background: var(--line-strong); }
+  .tline.done { background: var(--indigo); }
+  .tlabel { font-size: 10.5px; color: var(--c4); margin-top: 6px; white-space: nowrap; }
+  .tlabel.cur { color: var(--c1); font-weight: 600; }
+  .vtl { display: grid; gap: 0; }
+  .vrow { display: flex; gap: 12px; }
+  .vrail { display: flex; flex-direction: column; align-items: center; width: 12px; flex: none; }
+  .vline { width: 2px; flex: 1; background: var(--line-strong); }
+  .vline.done { background: var(--indigo); }
+  .vbody { padding: 0 0 18px; min-width: 0; }
+  .vname { font-size: 13px; font-weight: 600; }
+  .vtime { font-size: 11px; color: var(--c4); }
+
+  footer { margin-top: 60px; color: var(--c4); font-size: 12px; border-top: 1px solid var(--line); padding-top: 18px; }
+  @media (max-width: 640px) { .cards { grid-template-columns: 1fr; } table.rows .hide-sm { display: none; } }
+  :focus-visible { outline: 2px solid var(--indigo); outline-offset: 2px; }
+</style>
+
+<div class="wrap">
+  <div class="eyebrow">MediaHub · Projects Phase B · B0 design exploration</div>
+  <h1>项目列表 + 阶段工作台:三版对比</h1>
+  <p class="lede">同一批真实数据(6 个 SOP 阶段、成员、file_count、最新动态)在三种信息密度下的取舍。每版含「列表卡片」与「详情页工作台头部」两个画面,色板与圆角均取自线上岛式 token,所见即最终质感。</p>
+  <nav class="toc">
+    <a href="#a" class="rec">A · Stage Ring(推荐)</a>
+    <a href="#b">B · Cover Gallery</a>
+    <a href="#c">C · Dense Rows</a>
+  </nav>
+
+  <!-- ═══════════════ A ═══════════════ -->
+  <section class="prop" id="a">
+    <div class="prop-head"><span class="tag">A</span><h2>Stage Ring — 阶段即主角</h2><span class="rec-chip">推荐</span></div>
+    <p class="prop-sub">签名元素是<b>六段阶段环</b>:每段对应一个真实 SOP 阶段,填充段=已过,发光段=当前。卡片一眼回答「这个项目走到哪了」;工作台把当前阶段放大成引导卡,推荐工具与 AI 建议都挂在阶段语境下。</p>
+
+    <div class="board">
+      <div class="board-label">列表卡片</div>
+      <div class="cards">
+        <div class="pcard">
+          <div class="ringrow">
+            <svg class="ring" width="44" height="44" viewBox="0 0 44 44" aria-label="Stage 3 of 6">
+              <g fill="none" stroke-width="4" stroke-linecap="round">
+                <path d="M22 4 A18 18 0 0 1 37.6 13" stroke="#6366f1"/>
+                <path d="M39.5 17.5 A18 18 0 0 1 39.5 26.5" stroke="#6366f1"/>
+                <path d="M37.6 31 A18 18 0 0 1 30 39" stroke="#6366f1" opacity=".95" filter="drop-shadow(0 0 3px rgba(99,102,241,.9))"/>
+                <path d="M25 39.9 A18 18 0 0 1 14 38" stroke="#55555e" opacity=".4"/>
+                <path d="M10 35 A18 18 0 0 1 4.6 26.5" stroke="#55555e" opacity=".4"/>
+                <path d="M4.5 17.5 A18 18 0 0 1 14 6" stroke="#55555e" opacity=".4"/>
+              </g>
+              <text x="22" y="26" text-anchor="middle" font-size="11" font-weight="700" fill="#e7e7ea">3/6</text>
+            </svg>
+            <div style="min-width:0">
+              <div class="pname">Spring Campaign 2026</div>
+              <div class="pdesc">Short-form ad series for the spring launch</div>
+            </div>
+          </div>
+          <div class="activity"><span class="dot"></span>Storyboard v3 approved · 2h ago</div>
+          <div class="meta" style="margin-top:12px; justify-content:space-between">
+            <span class="stage-chip">Storyboarding</span>
+            <span class="avatars">
+              <span class="av" style="background:#8b9dc3">HG</span><span class="av" style="background:#c3a78b">LM</span><span class="av" style="background:#8bc3a1">+2</span>
+            </span>
+            <span class="mono">128 files</span>
+          </div>
+        </div>
+        <div class="pcard">
+          <div class="ringrow">
+            <svg class="ring" width="44" height="44" viewBox="0 0 44 44" aria-label="Stage 5 of 6">
+              <g fill="none" stroke-width="4" stroke-linecap="round">
+                <path d="M22 4 A18 18 0 0 1 37.6 13" stroke="#6366f1"/>
+                <path d="M39.5 17.5 A18 18 0 0 1 39.5 26.5" stroke="#6366f1"/>
+                <path d="M37.6 31 A18 18 0 0 1 30 39" stroke="#6366f1"/>
+                <path d="M25 39.9 A18 18 0 0 1 14 38" stroke="#6366f1"/>
+                <path d="M10 35 A18 18 0 0 1 4.6 26.5" stroke="#6366f1" filter="drop-shadow(0 0 3px rgba(99,102,241,.9))"/>
+                <path d="M4.5 17.5 A18 18 0 0 1 14 6" stroke="#55555e" opacity=".4"/>
+              </g>
+              <text x="22" y="26" text-anchor="middle" font-size="11" font-weight="700" fill="#e7e7ea">5/6</text>
+            </svg>
+            <div style="min-width:0">
+              <div class="pname">Client Reel — Northwind</div>
+              <div class="pdesc">External review deliverables, cut 2</div>
+            </div>
+          </div>
+          <div class="activity"><span class="dot" style="background:var(--amber)"></span>Waiting on client review · 3d ago</div>
+          <div class="meta" style="margin-top:12px; justify-content:space-between">
+            <span class="stage-chip" style="color:var(--amber); background:rgba(251,191,36,.12)">Review</span>
+            <span class="avatars"><span class="av" style="background:#c38b8b">HG</span></span>
+            <span class="mono">64 files</span>
+          </div>
+        </div>
+        <div class="pcard" style="opacity:.55">
+          <div class="ringrow">
+            <svg class="ring" width="44" height="44" viewBox="0 0 44 44" aria-label="Archived">
+              <g fill="none" stroke-width="4" stroke-linecap="round">
+                <circle cx="22" cy="22" r="18" stroke="#55555e" opacity=".35"/>
+              </g>
+              <text x="22" y="26" text-anchor="middle" font-size="10" font-weight="700" fill="#74747e">✓</text>
+            </svg>
+            <div style="min-width:0">
+              <div class="pname" style="color:var(--c2)">Q4 Retrospective Edit</div>
+              <div class="pdesc">Delivered December — archived</div>
+            </div>
+          </div>
+          <div class="meta" style="margin-top:12px; justify-content:space-between">
+            <span class="stage-chip" style="color:var(--c3); background:rgba(255,255,255,.05)">Archived</span>
+            <span class="mono">211 files</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="board">
+      <div class="board-label">详情页工作台头部</div>
+      <div class="wb">
+        <div class="stage-card">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap">
+            <div style="min-width:220px">
+              <div class="eyebrow" style="color:var(--indigo)">Current stage · 3 of 6</div>
+              <div style="font-size:20px; font-weight:650; margin:4px 0 2px">Storyboarding</div>
+              <div style="color:var(--c3); font-size:13px; max-width:52ch">Turn the approved script into shot-level boards. Generate frames, tag camera moves, lock the sequence.</div>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center">
+              <button class="btn ghost">Stage history</button>
+              <button class="btn primary">Advance to Production →</button>
+            </div>
+          </div>
+          <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; margin-top:16px">
+            <div class="toolcard"><span class="ic">▦</span><div><div class="tl">Storyboard</div><div class="ts">12 shots · 3 pending frames</div></div></div>
+            <div class="toolcard"><span class="ic">✎</span><div><div class="tl">Script editor</div><div class="ts">v4 locked yesterday</div></div></div>
+            <div class="toolcard"><span class="ic">◫</span><div><div class="tl">Canvas</div><div class="ts">2 boards</div></div></div>
+          </div>
+        </div>
+        <div class="ai-card">
+          <div style="flex:1">
+            <div class="badge">Suggested next</div>
+            <div style="font-size:13.5px; margin-top:3px">Script v4 is locked and 9 of 12 shots have frames — <b>generate the 3 missing frames</b> with the project style profile, then this stage is ready to advance.</div>
+          </div>
+          <button class="btn primary" style="flex:none">Generate 3 frames</button>
+        </div>
+      </div>
+    </div>
+
+    <ul class="notes">
+      <li><b>信息优先级</b>:阶段环 → 名称 → 最新动态一行 → 成员/计数。回答「走到哪、谁在动、动了什么」。</li>
+      <li><b>推导数据</b>:环=current_stage_id+sort_order;动态行=stage_history/最新文件事件;头像=project_members;全部现有表,不落新列。</li>
+      <li><b>AI 建议卡</b>(B3)挂在阶段卡下方,按钮直连 Script/Storyboard AI 端点;建议内容阶段感知。</li>
+      <li>归档项目降透明度+满环,不再混在 Active 里假装活跃。</li>
+    </ul>
+  </section>
+
+  <!-- ═══════════════ B ═══════════════ -->
+  <section class="prop" id="b">
+    <div class="prop-head"><span class="tag">B</span><h2>Cover Gallery — 内容即主角</h2></div>
+    <p class="prop-sub">卡片以<b>封面缩略图</b>(项目内最新媒体推导,无媒体时字母渐变)为主视觉,阶段退为底部六段细进度条。适合视觉型团队「按画面认项目」;工作台用竖向时间线呈现阶段史。</p>
+
+    <div class="board">
+      <div class="board-label">列表卡片</div>
+      <div class="cards">
+        <div class="pcard cover-card">
+          <div class="cover imgless-1"><span class="stage-chip">Storyboarding</span>SC</div>
+          <div class="cover-body">
+            <div class="pname">Spring Campaign 2026</div>
+            <div class="meta" style="margin-top:8px; justify-content:space-between">
+              <span class="avatars"><span class="av" style="background:#8b9dc3">HG</span><span class="av" style="background:#c3a78b">LM</span><span class="av" style="background:#8bc3a1">+2</span></span>
+              <span class="mono">128 files · 2h</span>
+            </div>
+            <div class="segbar"><i class="done"></i><i class="done"></i><i class="cur"></i><i></i><i></i><i></i></div>
+          </div>
+        </div>
+        <div class="pcard cover-card">
+          <div class="cover imgless-2"><span class="stage-chip" style="color:var(--amber); background:rgba(251,191,36,.14)">Review</span>CR</div>
+          <div class="cover-body">
+            <div class="pname">Client Reel — Northwind</div>
+            <div class="meta" style="margin-top:8px; justify-content:space-between">
+              <span class="avatars"><span class="av" style="background:#c38b8b">HG</span></span>
+              <span class="mono">64 files · 3d</span>
+            </div>
+            <div class="segbar"><i class="done"></i><i class="done"></i><i class="done"></i><i class="done"></i><i class="cur"></i><i></i></div>
+          </div>
+        </div>
+        <div class="pcard cover-card" style="opacity:.55">
+          <div class="cover imgless-3"><span class="stage-chip" style="color:var(--c3); background:rgba(255,255,255,.07)">Archived</span>Q4</div>
+          <div class="cover-body">
+            <div class="pname" style="color:var(--c2)">Q4 Retrospective Edit</div>
+            <div class="meta" style="margin-top:8px; justify-content:space-between">
+              <span class="mono">211 files</span>
+            </div>
+            <div class="segbar"><i class="done"></i><i class="done"></i><i class="done"></i><i class="done"></i><i class="done"></i><i class="done"></i></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="board">
+      <div class="board-label">详情页工作台头部(竖向时间线 + 工具区)</div>
+      <div style="display:grid; grid-template-columns: 240px 1fr; gap:18px">
+        <div class="vtl">
+          <div class="vrow"><div class="vrail"><div class="tdot done"></div><div class="vline done"></div></div><div class="vbody"><div class="vname" style="color:var(--c3)">Planning</div><div class="vtime">Jun 12 · HG</div></div></div>
+          <div class="vrow"><div class="vrail"><div class="tdot done"></div><div class="vline done"></div></div><div class="vbody"><div class="vname" style="color:var(--c3)">Scripting</div><div class="vtime">Jun 25 · LM</div></div></div>
+          <div class="vrow"><div class="vrail"><div class="tdot cur"></div><div class="vline"></div></div><div class="vbody"><div class="vname">Storyboarding</div><div class="vtime">since Jul 2 · 5 days</div></div></div>
+          <div class="vrow"><div class="vrail"><div class="tdot"></div><div class="vline"></div></div><div class="vbody"><div class="vname" style="color:var(--c4)">Production</div></div></div>
+          <div class="vrow"><div class="vrail"><div class="tdot"></div></div><div class="vbody"><div class="vname" style="color:var(--c4)">Review → Delivery</div></div></div>
+        </div>
+        <div class="wb">
+          <div class="stage-card" style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap">
+            <div>
+              <div style="font-size:17px; font-weight:650">Storyboarding</div>
+              <div style="color:var(--c3); font-size:12.5px">12 shots · 3 pending frames · style profile active</div>
+            </div>
+            <button class="btn primary">Advance →</button>
+          </div>
+          <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px">
+            <div class="toolcard"><span class="ic">▦</span><div><div class="tl">Storyboard</div><div class="ts">open board</div></div></div>
+            <div class="toolcard"><span class="ic">✎</span><div><div class="tl">Script editor</div><div class="ts">v4 locked</div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <ul class="notes">
+      <li><b>封面推导</b>:项目内最新图片/视频首帧;无媒体 → 项目名首字母 + 类型色渐变。不落新列,读端推导。</li>
+      <li><b>时间线含时间成本</b>:每阶段驻留天数直读 stage_history,停滞项目一眼可见("since Jul 2 · 5 days")。</li>
+      <li>取舍:卡片更高(封面占 108px),同屏项目数比 A 少 ~30%;封面请求走懒加载(cover 302 直出已就位)。</li>
+    </ul>
+  </section>
+
+  <!-- ═══════════════ C ═══════════════ -->
+  <section class="prop" id="c">
+    <div class="prop-head"><span class="tag">C</span><h2>Dense Rows — 密度即主角</h2></div>
+    <p class="prop-sub">项目多的团队用<b>行表</b>:微缩六格阶段条内嵌行内,一屏 15+ 项目。工作台仅升级现有横条(改动最小),把垂直空间全留给内容 tab。</p>
+
+    <div class="board">
+      <div class="board-label">列表(行式)</div>
+      <div style="overflow-x:auto">
+      <table class="rows">
+        <thead><tr><th>Project</th><th>Stage</th><th class="hide-sm">Members</th><th class="hide-sm">Activity</th><th style="text-align:right">Files</th></tr></thead>
+        <tbody>
+          <tr class="item">
+            <td><div class="pname" style="font-size:13.5px">Spring Campaign 2026</div></td>
+            <td><span class="microsteps"><i class="done"></i><i class="done"></i><i class="cur"></i><i></i><i></i><i></i></span> <span style="color:var(--c2); font-size:12px; margin-left:6px">Storyboarding</span></td>
+            <td class="hide-sm"><span class="avatars"><span class="av" style="background:#8b9dc3">HG</span><span class="av" style="background:#c3a78b">+3</span></span></td>
+            <td class="hide-sm" style="color:var(--c3); font-size:12px">Storyboard v3 approved · 2h</td>
+            <td class="mono" style="text-align:right">128</td>
+          </tr>
+          <tr class="item">
+            <td><div class="pname" style="font-size:13.5px">Client Reel — Northwind</div></td>
+            <td><span class="microsteps"><i class="done"></i><i class="done"></i><i class="done"></i><i class="done"></i><i class="cur"></i><i></i></span> <span style="color:var(--amber); font-size:12px; margin-left:6px">Review</span></td>
+            <td class="hide-sm"><span class="avatars"><span class="av" style="background:#c38b8b">HG</span></span></td>
+            <td class="hide-sm" style="color:var(--c3); font-size:12px">Waiting on client · 3d</td>
+            <td class="mono" style="text-align:right">64</td>
+          </tr>
+          <tr class="item" style="opacity:.5">
+            <td><div class="pname" style="font-size:13.5px">Q4 Retrospective Edit</div></td>
+            <td><span class="microsteps"><i class="done"></i><i class="done"></i><i class="done"></i><i class="done"></i><i class="done"></i><i class="done"></i></span> <span style="color:var(--c4); font-size:12px; margin-left:6px">Archived</span></td>
+            <td class="hide-sm"></td>
+            <td class="hide-sm" style="color:var(--c4); font-size:12px">Delivered Dec 20</td>
+            <td class="mono" style="text-align:right">211</td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+
+    <div class="board">
+      <div class="board-label">详情页工作台头部(紧凑横条,现状升级)</div>
+      <div class="stage-card" style="display:flex; align-items:center; gap:18px; flex-wrap:wrap">
+        <div style="flex:1; min-width:280px">
+          <div class="timeline-h">
+            <div class="tstep"><div class="tdot done"></div><div class="tline done"></div></div>
+            <div class="tstep"><div class="tdot done"></div><div class="tline done"></div></div>
+            <div class="tstep"><div class="tdot cur"></div><div class="tline"></div></div>
+            <div class="tstep"><div class="tdot"></div><div class="tline"></div></div>
+            <div class="tstep"><div class="tdot"></div><div class="tline"></div></div>
+            <div class="tdot"></div>
+          </div>
+          <div style="display:flex; justify-content:space-between">
+            <span class="tlabel">Plan</span><span class="tlabel">Script</span><span class="tlabel cur">Storyboard</span><span class="tlabel">Prod</span><span class="tlabel">Review</span><span class="tlabel">Deliver</span>
+          </div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center">
+          <div class="toolcard" style="padding:8px 12px"><span class="ic" style="width:22px;height:22px">▦</span><div class="tl" style="font-size:12px">Storyboard</div></div>
+          <button class="btn primary">Advance →</button>
+        </div>
+      </div>
+    </div>
+
+    <ul class="notes">
+      <li><b>改动最小</b>:列表加一种视图(卡片视图保留切换),工作台横条替换现有 StageSelector+StageToolGrid 两行。</li>
+      <li>取舍:没有给 AI 建议卡留出显眼位置(只能塞进横条右侧或 toast),B3 的表达力最弱。</li>
+    </ul>
+  </section>
+
+  <footer>
+    数据来源全部现有表:project_stages(6 阶段目录)· current_stage_id · project_stage_history · project_members · file_count 聚合 · 最新媒体推导封面。三版均不需要新 migration。实施拆分:B1 列表 → B2 工作台 → B3 AI 建议卡,各自独立 PR,flag-dark。
+  </footer>
+</div>
