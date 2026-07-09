@@ -10,15 +10,25 @@ Per-module feature/visibility toggles today are **ad-hoc and duplicated**. Two
 modules follow a `{enabled, visible}` blob stored in `system_settings`, but each
 has its own copy-pasted service and no shared abstraction:
 
-| Module | `system_settings` key | Service file | Defaults | Admin UI today |
+| Module | `system_settings` key | Service file | Defaults | Admin toggle lives… |
 |---|---|---|---|---|
-| Topic Inspiration | `topics.module` | `backend/app/services/topics/module_config.py` | ON / fail-open | toggles buried inside `TopicScoring.tsx` |
-| Distribution | `distribution.module` | `backend/app/services/distribution/module_config.py` | OFF / fail-closed | **none** — only the generic raw Settings page |
+| Topic Inspiration | `topics.module` | `backend/app/services/topics/module_config.py` | ON / fail-open | inside `TopicScoring.tsx` (route `/settings/topic-scoring`) |
+| Distribution | `distribution.module` | `backend/app/services/distribution/module_config.py` | OFF / fail-closed | `DistributionModule.tsx`, rendered inside the generic Settings page (`settings/index.tsx:176`) |
+
+Both modules already have dedicated admin GET/PUT endpoints
+(`/api/v1/admin/settings/topics-module` and `/distribution-module`) and their own
+`{enabled, visible}` schemas (`TopicModuleConfigResponse`,
+`DistributionModuleConfigResponse`). The problem is not that they're missing UI —
+it's that the two toggles are **scattered across two different admin pages** with
+copy-pasted backend + frontend code, and there is no single place to see or flip
+every module.
 
 Problems this causes:
 - The two `module_config.py` files are near-identical siblings, not a shared unit.
-- Distribution has **no dedicated admin UI** — its toggle is only reachable as a
-  stringified JSONB row on the generic Settings page.
+- The two admin endpoints, schemas, API hooks, and toggle components are
+  copy-paste duplicates.
+- A Distribution toggle sitting on the generic Settings page is easy to miss; a
+  Topic toggle sitting on the *scoring* page is a poor home for it.
 - The topic `module_config` does **not** defensively handle the asyncpg
   "jsonb-returned-as-string" quirk (distribution's does, via `_coerce_dict`), so
   a string-typed value would silently fall back to defaults — a latent bug.
@@ -104,9 +114,13 @@ already used by `PUT /topics-module`:
   write an audit-log entry (same helper the topics-module PUT uses); return the
   updated `ModuleSummary`.
 
-The dedicated `GET/PUT /topics-module` endpoint is **removed** (its only consumer
-is the TopicScoring toggle card, which is being deleted). The generic
-`PATCH /settings/{key}` path remains for everything else.
+The dedicated `GET/PUT /topics-module` **and** `GET/PUT /distribution-module`
+endpoints are **removed** — their only consumers are the two scattered toggle UIs
+being deleted, and the unified `/modules` endpoint supersedes both. Their request
+schemas (`TopicModuleConfigResponse`, `DistributionModuleConfigResponse`) are
+removed from the settings-router imports (the classes may remain in
+`schemas/admin.py` if referenced elsewhere — verify with grep at implementation
+time). The generic `PATCH /settings/{key}` path remains for everything else.
 
 **Unchanged and intentionally so:** the public
 `GET /topics/module-status` and `GET /distribution/module-status` endpoints, and
@@ -116,7 +130,7 @@ now route through the registry — behavior is identical.
 ### 3. Admin frontend — new page, hooks, nav
 
 - New page `admin/src/pages/settings/Modules.tsx`: one Card per module, reusing
-  the two-switch card layout from `TopicScoring.tsx:144-187` — a **Processing**
+  the two-switch card layout from `DistributionModule.tsx` — a **Processing**
   switch (bound to `enabled`) and a **Visibility** switch (bound to `visible`),
   each with the open/close consequence hint text below it. Modules whose
   `enabled_default === false` show a small "Opt-in · default off" badge. The PUT
@@ -124,14 +138,20 @@ now route through the registry — behavior is identical.
 - API hooks in `admin/src/api/endpoints/settings.ts`: `ModuleSummary` interface,
   `useModules()` (GET `/api/v1/admin/settings/modules`), `useUpdateModule()`
   (PUT `/api/v1/admin/settings/modules/{id}`). Remove the now-dead
-  `useTopicModuleConfig` / `useUpdateTopicModuleConfig` / `TOPIC_MODULE_URL`.
+  `useTopicModuleConfig` / `useUpdateTopicModuleConfig` / `TOPIC_MODULE_URL` and
+  `useDistributionModuleConfig` / `useUpdateDistributionModuleConfig` /
+  `DISTRIBUTION_MODULE_URL` / `DistributionModuleConfig` / `TopicModuleConfig`.
 - Route: `admin/src/App.tsx` add
   `<Route path="/settings/modules" element={<Modules />} />`.
 - Nav: `admin/src/layouts/AdminLayout.tsx` add a `<MenuItem key="/settings/modules">`
   labelled **"Modules"** in the **System** group (next to Settings / AI
   Governance) and add `/settings/modules` to `allMenuKeys`.
-- Cleanup: delete the two toggle cards and `patchModule` from `TopicScoring.tsx`
-  (that page keeps only the scoring configuration).
+- Cleanup:
+  - delete the two toggle cards + `patchModule` + the `useTopicModuleConfig` /
+    `useUpdateTopicModuleConfig` usage from `TopicScoring.tsx` (that page keeps
+    only the scoring / prefilter / content-fetch configuration).
+  - delete `admin/src/pages/settings/DistributionModule.tsx` and remove its
+    `import` + `<DistributionModule />` render from `settings/index.tsx`.
 
 ### 4. Explicitly not done (YAGNI)
 
@@ -192,11 +212,15 @@ New:
 Modified:
 - `backend/app/services/topics/module_config.py` (→ shim)
 - `backend/app/services/distribution/module_config.py` (→ shim)
-- `backend/app/api/admin/settings_router.py` (add `/modules` GET+PUT, remove `/topics-module`)
-- `admin/src/api/endpoints/settings.ts` (add module hooks, remove topic-module hooks)
+- `backend/app/api/admin/settings_router.py` (add `/modules` GET+PUT, remove `/topics-module` + `/distribution-module`)
+- `admin/src/api/endpoints/settings.ts` (add module hooks, remove topic + distribution module hooks)
 - `admin/src/App.tsx` (route)
 - `admin/src/layouts/AdminLayout.tsx` (nav item + allMenuKeys)
 - `admin/src/pages/settings/TopicScoring.tsx` (remove toggle cards)
+- `admin/src/pages/settings/index.tsx` (remove `<DistributionModule />` render + import)
+
+Deleted:
+- `admin/src/pages/settings/DistributionModule.tsx`
 
 Unchanged (verified): `frontend/` Sidebar, router, module status services/hooks;
 public `/module-status` endpoints; `require_distribution`; `distribution.douyin`.
