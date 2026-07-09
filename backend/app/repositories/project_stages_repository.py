@@ -94,6 +94,19 @@ _LATEST_ACTIVITY_FOR_PROJECTS_SQL = """
     ORDER BY psh.project_id, psh.entered_at DESC
 """
 
+# Most recent non-trashed file added per project (B1 hybrid activity row).
+# project_files (not resources) is the actual project->file linkage table —
+# same one get_project_file_counts joins on in projects_repository.py.
+_LATEST_FILE_ACTIVITY_SQL = """
+    SELECT DISTINCT ON (pf.project_id)
+           pf.project_id, pf.created_at,
+           up.username AS actor
+    FROM public.project_files pf
+    LEFT JOIN public.user_profiles up ON up.id = pf.uploaded_by
+    WHERE pf.project_id = ANY(:pids) AND COALESCE(pf.is_trashed, false) = false
+    ORDER BY pf.project_id, pf.created_at DESC
+"""
+
 
 # ── Serialiser ───────────────────────────────────────────────────────────────
 
@@ -216,6 +229,41 @@ class ProjectStagesRepository:
             return out
         except Exception as e:  # noqa: BLE001 — enrichment must not sink the list
             logger.error(f"[project_stages] batch activity lookup failed: {e}")
+            return {}
+
+    async def latest_file_activity_for_projects(
+        self, project_ids: list[Any]
+    ) -> dict[str, dict[str, Any]]:
+        """Most recent file added per project in ONE query (B1 hybrid activity row).
+
+        Returns ``{str(project_id): {kind: "file", actor, created_at}}``;
+        projects with no non-trashed files are absent. Never raises — the
+        list page degrades to stage-only activity on failure.
+        """
+        if not project_ids:
+            return {}
+        from app.db import engine as db_engine
+
+        try:
+            rows = await db_engine.fetch_all(
+                _LATEST_FILE_ACTIVITY_SQL,
+                {"pids": [int(p) for p in project_ids]},
+            )
+            out: dict[str, dict[str, Any]] = {}
+            for r in rows:
+                created = r["created_at"]
+                out[str(r["project_id"])] = {
+                    "kind": "file",
+                    "actor": r["actor"] or "",
+                    "created_at": (
+                        created.isoformat()
+                        if hasattr(created, "isoformat")
+                        else created
+                    ),
+                }
+            return out
+        except Exception as e:  # noqa: BLE001 — enrichment must not sink the list
+            logger.error(f"[project_stages] file activity lookup failed: {e}")
             return {}
 
     async def set_current_stage(
