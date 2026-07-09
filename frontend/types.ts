@@ -714,9 +714,11 @@ export interface ProjectMembersPreview {
 }
 
 export interface ProjectCardActivity {
-  stage_name: string;
-  actor: string;
-  entered_at: string;
+  kind: 'file' | 'stage';
+  actor?: string;
+  at?: string | null;
+  label?: string; // stage: the stage name
+  stalled?: boolean;
 }
 
 export interface ProjectMember {

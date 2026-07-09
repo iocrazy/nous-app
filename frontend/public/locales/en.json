@@ -1308,7 +1308,9 @@
       "loadVersionsFailed": "Failed to load version history"
     },
     "card": {
-      "enteredStage": "Entered {{stage}}",
+      "activityFile": "Added files",
+      "activityStage": "Entered {{stage}}",
+      "activityStalled": "Waiting in {{stage}}",
       "archived": "Archived"
     },
     "workbench": {
