@@ -41,7 +41,9 @@ export function Modules() {
 
   return (
     <div>
-      {modules.map((m) => (
+      {modules.map((m) => {
+        const isUpdating = update.isPending && update.variables?.id === m.id
+        return (
         <Card key={m.id} style={{ marginBottom: 20 }}>
           <SectionHeader
             icon={<IconThunderbolt />}
@@ -68,7 +70,7 @@ export function Modules() {
             </div>
             <Switch
               checked={m.enabled}
-              loading={update.isPending}
+              loading={isUpdating}
               onChange={(v: boolean) =>
                 patch(m, { enabled: v }, v ? `${m.label} processing enabled.` : `${m.label} processing paused.`)
               }
@@ -85,14 +87,15 @@ export function Modules() {
             </div>
             <Switch
               checked={m.visible}
-              loading={update.isPending}
+              loading={isUpdating}
               onChange={(v: boolean) =>
                 patch(m, { visible: v }, v ? `${m.label} visible to users.` : `${m.label} hidden from users.`)
               }
             />
           </div>
         </Card>
-      ))}
+        )
+      })}
     </div>
   )
 }
