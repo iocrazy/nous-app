@@ -12,7 +12,6 @@ import { IconSettings, IconThunderbolt } from '@arco-design/web-react/icon'
 import { useSystemSettings, useUpdateSetting } from '../../api/endpoints/settings'
 import type { SystemSetting } from '../../api/endpoints/settings'
 import { SectionHeader } from './SectionHeader'
-import { DistributionModule } from './DistributionModule'
 
 const { Title } = Typography
 
@@ -172,8 +171,6 @@ export function Settings() {
       <Title heading={5} style={{ marginTop: 0, marginBottom: 20 }}>
         Settings
       </Title>
-
-      <DistributionModule />
 
       <Card style={{ marginBottom: 20 }}>
         <SectionHeader

@@ -11,7 +11,7 @@ export function SectionHeader({
   subtitle,
 }: {
   icon: ReactNode
-  title: string
+  title: ReactNode
   subtitle?: string
 }) {
   return (

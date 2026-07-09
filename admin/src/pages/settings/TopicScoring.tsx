@@ -18,12 +18,9 @@ import {
   useUpdateTopicPrefilterConfig,
   useTopicContentFetchConfig,
   useUpdateTopicContentFetchConfig,
-  useTopicModuleConfig,
-  useUpdateTopicModuleConfig,
   type TopicScoringConfig,
   type TopicPrefilterConfig,
   type TopicContentFetchConfig,
-  type TopicModuleConfig,
 } from '../../api/endpoints/settings'
 
 // Order + labels for the five LLM-rated dimensions (the agent emits raw 0..1
@@ -56,24 +53,6 @@ export function TopicScoring() {
   const { data: cfData, isLoading: cfLoading } = useTopicContentFetchConfig()
   const updateCf = useUpdateTopicContentFetchConfig()
   const [cf, setCf] = useState<TopicContentFetchConfig | null>(null)
-
-  const { data: modData } = useTopicModuleConfig()
-  const updateMod = useUpdateTopicModuleConfig()
-
-  // PUT persists the WHOLE blob — always send both fields (merging the patch
-  // over current values) or the untouched switch would reset to its default.
-  const patchModule = async (patch: Partial<TopicModuleConfig>, ok: string) => {
-    try {
-      await updateMod.mutateAsync({
-        enabled: modData?.enabled ?? true,
-        visible: modData?.visible ?? true,
-        ...patch,
-      })
-      Message.success(ok)
-    } catch (e) {
-      Message.error(`Save failed: ${(e as Error).message}`)
-    }
-  }
 
   useEffect(() => {
     if (data) setCfg(data)
@@ -141,51 +120,6 @@ export function TopicScoring() {
 
   return (
     <div style={{ maxWidth: 720 }}>
-      <Card
-        style={{ marginBottom: 24, borderColor: 'rgb(var(--primary-6))' }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 600, fontSize: 15 }}>Topic Inspiration — processing（内容处理）</div>
-            <div style={{ fontSize: 12, color: 'var(--color-text-3)', lineHeight: 1.6 }}>
-              后台管线开关，只管处理不管显示。<br />
-              <b>开启</b>：正常采集热点、评分、正文抓取、聚类。<br />
-              <b>关闭</b>：立即暂停所有后台处理，页面仍可见（顶部显示「内容更新已暂停」），已采集的数据保留。
-            </div>
-          </div>
-          <Switch
-            checked={modData?.enabled ?? true}
-            loading={updateMod.isPending}
-            onChange={(v: boolean) =>
-              patchModule(
-                { enabled: v },
-                v ? 'Processing resumed.' : 'Processing paused — page stays visible.',
-              )
-            }
-          />
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 600, fontSize: 15 }}>Topic Inspiration — visibility（用户可见）</div>
-            <div style={{ fontSize: 12, color: 'var(--color-text-3)', lineHeight: 1.6 }}>
-              前端显示开关，只管显示不管处理。<br />
-              <b>开启</b>：所有用户可见导航入口和话题灵感页面。<br />
-              <b>关闭</b>：对所有用户隐藏导航和页面（含直链访问）；后台处理不受影响。
-            </div>
-          </div>
-          <Switch
-            checked={modData?.visible ?? true}
-            loading={updateMod.isPending}
-            onChange={(v: boolean) =>
-              patchModule(
-                { visible: v },
-                v ? 'Topic Inspiration is now visible to users.' : 'Topic Inspiration hidden from users.',
-              )
-            }
-          />
-        </div>
-      </Card>
-
       <SectionHeader
         icon={<IconThunderbolt />}
         title="Topic Scoring"
