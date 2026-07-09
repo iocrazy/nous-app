@@ -10,6 +10,7 @@ file uploads with metadata extraction (ffprobe), and video linking.
 import asyncio
 import json
 import mimetypes
+import uuid as _uuid
 from pathlib import Path
 from typing import Optional
 
@@ -24,6 +25,35 @@ from app.core.file_utils import (
     stream_upload_to_disk,
 )
 from app.repositories.projects_repository import get_projects_repository
+from app.services.infra.dbos_orchestrator import start_workflow_routed
+from app.services.infra.unified_task_manager import get_task_manager
+
+# task_tracking.task_type is VARCHAR(20) — keep this at or under that bound.
+_GENERATE_ALL_TASK_TYPE = "sb_generate_all"
+
+
+async def _load_style_profile(project_id) -> dict:
+    """Style guidance passed to each shot-generate workflow (best-effort).
+
+    NOTE (deviation from the task-4 brief): ``script_shot_generate_workflow``
+    does not currently accept a ``style_profile`` kwarg (grepped
+    ``app/workflows/script_shot_generate.py`` — it only reads
+    ``shot_id``/``model``/``provider``/``user_id``). This helper is kept so the
+    fan-out call site is ready to thread project style through the moment the
+    workflow grows that kwarg, but for now its return value is loaded and
+    discarded by the caller rather than forwarded — passing an unread kwarg
+    would silently do nothing and mislead readers into thinking style is
+    already wired end-to-end."""
+    try:
+        from app.repositories.project_style_profile_repository import (
+            get_project_style_profile_repository,
+        )
+
+        prof = await get_project_style_profile_repository().get(project_id)
+        return prof or {}
+    except Exception:  # noqa: BLE001 — style guidance is best-effort
+        return {}
+
 
 # Card enrichment defaults when a project has no stage/members/history rows
 # (or the batch lookups failed) — the frontend renders the base card.
@@ -963,3 +993,71 @@ class ProjectsService:
                 "count": None,
             },
         }
+
+    # ------------------------------------------------------------------ #
+    # Batch generate-missing-frames (B3 one-click action)
+    # ------------------------------------------------------------------ #
+
+    async def generate_missing_frames(self, project_id, user_id: str) -> dict:
+        """Fan out one shot-generate workflow per empty shot in the project.
+
+        One parent task_tracking row for the batch (subtitle/metadata set at
+        INSERT time via ``get_task_manager().create()`` — route-C compliant:
+        those are business-decorated columns, and writing them through the
+        manager's own INSERT is the manager API, not a raw PATCH of the
+        phase/status lane). Per-shot dispatch failures roll that shot back to
+        'empty' and are skipped so the batch degrades to partial success
+        instead of failing whole-call.
+        """
+        from app.workflows.script_shot_generate import script_shot_generate_workflow
+
+        shots_repo = self._shots_repo()
+        empty_ids = await shots_repo.list_empty_shot_ids_for_project(project_id)
+
+        mgr = get_task_manager()
+        parent_task_id = await mgr.create(
+            user_id=user_id,
+            task_type=_GENERATE_ALL_TASK_TYPE,
+            title="Generate storyboard frames",
+            dbos_workflow_id=str(_uuid.uuid4()),
+            subtitle=f"Generating {len(empty_ids)} frames",
+            metadata={"project_id": str(project_id), "empty_count": len(empty_ids)},
+        )
+
+        if not empty_ids:
+            return {"parent_task_id": parent_task_id, "dispatched_count": 0}
+
+        # Best-effort project style guidance — see _load_style_profile's note:
+        # the shot-generate workflow does not yet consume this, so it is loaded
+        # here (ready for the day the workflow grows the kwarg) but NOT
+        # forwarded into dbos_workflow_kwargs below.
+        await _load_style_profile(project_id)
+
+        dispatched = 0
+        for shot_id in empty_ids:
+            try:
+                await shots_repo.update_status(shot_id, "generating")
+                wf_id = str(_uuid.uuid4())
+                await start_workflow_routed(
+                    "script_shot_generate",
+                    dbos_workflow_callable=script_shot_generate_workflow,
+                    dbos_workflow_kwargs={
+                        "shot_id": shot_id,
+                        "user_id": user_id,
+                    },
+                    workflow_id=wf_id,
+                )
+                dispatched += 1
+            except Exception as exc:  # noqa: BLE001 — skip this shot, keep the batch
+                logger.error(
+                    f"[projects] generate-missing shot {shot_id} failed: {exc}"
+                )
+                try:
+                    await shots_repo.update_status(shot_id, "empty")
+                except Exception as rollback_exc:  # noqa: BLE001
+                    logger.error(
+                        f"[projects] generate-missing shot {shot_id} rollback "
+                        f"failed: {rollback_exc}"
+                    )
+
+        return {"parent_task_id": parent_task_id, "dispatched_count": dispatched}

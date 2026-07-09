@@ -89,6 +89,18 @@ _ZERO_PROGRESS = {
     "scene_count": 0,
 }
 
+# Empty-shot-id fan-out — every 'empty' shot across the project's non-deleted
+# scripts (Task 4 — batch generate-missing-frames dispatch source).
+_EMPTY_SHOT_IDS_SQL = """
+    SELECT sh.id
+    FROM public.script_projects sp
+    JOIN public.script_scenes sc ON sc.script_id = sp.id
+    JOIN public.script_shots  sh ON sh.scene_id  = sc.id
+    WHERE sp.project_id = :pid AND sp.status != 'deleted'
+      AND sh.status = 'empty'
+    ORDER BY sh.id
+"""
+
 
 def _bigint(v: Any) -> Optional[int]:
     """Coerce a bigint id/FK bind value to native int; None passes through."""
@@ -184,6 +196,18 @@ class ScriptShotRepository:
                 f"[script_shots] storyboard progress for {project_id} failed: {e}"
             )
             return dict(_ZERO_PROGRESS)
+
+    async def list_empty_shot_ids_for_project(self, project_id) -> List[str]:
+        """IDs of every 'empty' shot across the project's non-deleted scripts.
+
+        Fan-out source for the batch generate-missing-frames dispatch (Task 4).
+        Best-effort is NOT applied here (unlike storyboard_progress_for_project)
+        — a failed read must surface to the caller rather than silently
+        dispatching zero workflows."""
+        from app.db import engine as db_engine
+
+        rows = await db_engine.fetch_all(_EMPTY_SHOT_IDS_SQL, {"pid": int(project_id)})
+        return [str(r["id"]) for r in rows]
 
     # ------------------------------------------------------------------ #
     # Writes — create / create_many / update / update_status / delete
