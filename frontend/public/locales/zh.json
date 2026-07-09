@@ -1315,7 +1315,10 @@
       "currentStageOf": "当前阶段 · 第 {{index}}/{{total}} 步",
       "advanceTo": "推进到 {{stage}}",
       "finalStage": "最后阶段",
-      "recommendedTools": "推荐工具"
+      "recommendedTools": "推荐工具",
+      "stageHistory": "阶段历史",
+      "historyEmpty": "暂无阶段变更记录。",
+      "historyCurrent": "当前"
     },
     "suggest": {
       "eyebrow": "下一步建议",

@@ -944,6 +944,16 @@ export interface ProjectStage {
   updated_at?: string;
 }
 
+/** A single row from ``project_stage_history`` — one stage occupancy interval. */
+export interface StageHistoryEntry {
+  id: string;
+  stage_slug: string;
+  stage_name: string;
+  entered_at: string;
+  exited_at: string | null;
+  transitioned_by?: string;
+}
+
 export type ScriptAssetType = 'worldview' | 'character' | 'location' | 'prop' | 'plot_point';
 
 export interface ScriptAsset {

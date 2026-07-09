@@ -8,6 +8,7 @@ import {
   ReviewComment,
   ReviewStatus,
   ProjectStage,
+  StageHistoryEntry,
 } from '../types';
 import { apiClient, apiFetch } from './apiClient';
 
@@ -462,4 +463,14 @@ export const setCurrentStage = async (
     { stage_id: Number(stageId) },
   );
   return response.data ?? null;
+};
+
+/** Fetch the project's stage-transition history, newest first (server-ordered DESC). */
+export const fetchStageHistory = async (
+  projectId: string,
+): Promise<StageHistoryEntry[]> => {
+  const response = await apiClient.get<Envelope<StageHistoryEntry[]>>(
+    `/api/v1/projects/${projectId}/stage_history`,
+  );
+  return response.data ?? [];
 };
