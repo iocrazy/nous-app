@@ -28,10 +28,6 @@ from app.repositories.projects_repository import get_projects_repository
 from app.services.infra.dbos_orchestrator import start_workflow_routed
 from app.services.infra.unified_task_manager import get_task_manager
 
-# task_tracking.task_type is VARCHAR(20) — keep this at or under that bound.
-_GENERATE_ALL_TASK_TYPE = "sb_generate_all"
-
-
 # Card enrichment defaults when a project has no stage/members/history rows
 # (or the batch lookups failed) — the frontend renders the base card.
 _EMPTY_ENRICHMENT = {
@@ -975,16 +971,17 @@ class ProjectsService:
     # Batch generate-missing-frames (B3 one-click action)
     # ------------------------------------------------------------------ #
 
-    async def generate_missing_frames(self, project_id, user_id: str) -> dict:
-        """Fan out one shot-generate workflow per empty shot in the project.
+    async def generate_missing_frames(
+        self, project_id: int | str, user_id: str
+    ) -> dict:
+        """Dispatch one shot-generate workflow per empty shot in the project.
 
-        One parent task_tracking row for the batch (subtitle/metadata set at
-        INSERT time via ``get_task_manager().create()`` — route-C compliant:
-        those are business-decorated columns, and writing them through the
-        manager's own INSERT is the manager API, not a raw PATCH of the
-        phase/status lane). Per-shot dispatch failures roll that shot back to
-        'empty' and are skipped so the batch degrades to partial success
-        instead of failing whole-call.
+        Mirrors the single-shot /generate endpoint per shot so each generation
+        gets its OWN task_tracking row driven by the DBOS lifecycle trigger
+        (route-C discipline). Per-shot dispatch failure rolls that shot back to
+        'empty', marks its task failed, and the loop continues (partial success
+        is fine). No artificial parent row — N generations = N tracked tasks,
+        consistent with clicking generate on each shot individually.
         """
         from app.workflows.script_shot_generate import script_shot_generate_workflow
 
@@ -992,36 +989,24 @@ class ProjectsService:
         empty_ids = await shots_repo.list_empty_shot_ids_for_project(project_id)
 
         mgr = get_task_manager()
-        parent_task_id = await mgr.create(
-            user_id=user_id,
-            task_type=_GENERATE_ALL_TASK_TYPE,
-            title="Generate storyboard frames",
-            dbos_workflow_id=str(_uuid.uuid4()),
-            subtitle=f"Generating {len(empty_ids)} frames",
-            metadata={"project_id": str(project_id), "empty_count": len(empty_ids)},
-        )
-
-        if not empty_ids:
-            return {"parent_task_id": parent_task_id, "dispatched_count": 0}
-
-        # NOTE: shot-generate workflow does not consume project style yet
-        # (backlog); parity with single-shot /generate.
-
-        dispatched = 0
+        task_ids: list[str] = []
         for shot_id in empty_ids:
+            wf_id = str(_uuid.uuid4())
+            task_id = await mgr.create(
+                user_id=user_id,
+                task_type="shot_generate",  # ≤20 chars (task_tracking.task_type VARCHAR(20))
+                title="Generate shot image",
+                dbos_workflow_id=wf_id,
+            )
             try:
                 await shots_repo.update_status(shot_id, "generating")
-                wf_id = str(_uuid.uuid4())
                 await start_workflow_routed(
                     "script_shot_generate",
                     dbos_workflow_callable=script_shot_generate_workflow,
-                    dbos_workflow_kwargs={
-                        "shot_id": shot_id,
-                        "user_id": user_id,
-                    },
+                    dbos_workflow_kwargs={"shot_id": shot_id, "user_id": user_id},
                     workflow_id=wf_id,
                 )
-                dispatched += 1
+                task_ids.append(task_id)
             except Exception as exc:  # noqa: BLE001 — skip this shot, keep the batch
                 logger.error(
                     f"[projects] generate-missing shot {shot_id} failed: {exc}"
@@ -1033,5 +1018,12 @@ class ProjectsService:
                         f"[projects] generate-missing shot {shot_id} rollback "
                         f"failed: {rollback_exc}"
                     )
+                try:
+                    await mgr.fail(task_id, f"dispatch failed: {exc}")
+                except Exception as fail_exc:  # noqa: BLE001
+                    logger.error(
+                        f"[projects] generate-missing shot {shot_id} fail() "
+                        f"itself failed: {fail_exc}"
+                    )
 
-        return {"parent_task_id": parent_task_id, "dispatched_count": dispatched}
+        return {"dispatched_count": len(task_ids), "task_ids": task_ids}

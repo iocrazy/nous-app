@@ -282,5 +282,5 @@ class StageSuggestionResponse(BaseModel):
 
 
 class GenerateMissingResponse(BaseModel):
-    parent_task_id: str
     dispatched_count: int
+    task_ids: list[str]
