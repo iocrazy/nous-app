@@ -13,6 +13,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from loguru import logger
 
+from app.core.config import settings
 from app.core.deps import AuthDep
 from app.core.scope_guards import (
     verify_project_read_access,
@@ -25,6 +26,7 @@ from app.schemas.projects import (
     CreateFolderRequest,
     CreateShareRequest,
     CurrentStageUpdate,
+    GenerateMissingResponse,
     LinkMediaRequest,
     MoveFileRequest,
     ProjectCreate,
@@ -32,6 +34,7 @@ from app.schemas.projects import (
     ProjectUpdate,
     RenameFolderRequest,
     ReviewStatusUpdate,
+    StageSuggestionResponse,
     StyleProfileUpdate,
     UpdateMemberRoleRequest,
 )
@@ -310,6 +313,38 @@ async def get_stage_history(
     except Exception as e:
         logger.error(f"Failed to get stage history for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to get stage history")
+
+
+@router.get("/{project_id}/stage-suggestion", response_model=StageSuggestionResponse)
+async def get_stage_suggestion(
+    project_id: str,
+    auth: AuthDep,
+    _guard: None = Depends(verify_project_read_access),
+) -> StageSuggestionResponse:
+    """Typed 'one next step' for the project's current SOP stage (Phase B B3)."""
+    svc = ProjectsService()
+    data = await svc.build_stage_suggestion(project_id)
+    return StageSuggestionResponse(**data)
+
+
+@router.post(
+    "/{project_id}/storyboard/generate-missing",
+    response_model=GenerateMissingResponse,
+)
+async def generate_missing_frames(
+    project_id: str,
+    auth: AuthDep,
+    _guard: None = Depends(verify_project_write_access),
+) -> GenerateMissingResponse:
+    """Batch-generate every empty storyboard shot in the project (flag-gated).
+
+    Flag ``FEATURE_SHOT_GENERATE`` off → 404 (existence hidden), mirroring
+    ``script_shots_router.py::generate_shot``."""
+    if not settings.FEATURE_SHOT_GENERATE:
+        raise HTTPException(status_code=404, detail="Not Found")
+    svc = ProjectsService()
+    data = await svc.generate_missing_frames(project_id, auth.user_id)
+    return GenerateMissingResponse(**data)
 
 
 # ============================================

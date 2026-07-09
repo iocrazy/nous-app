@@ -69,9 +69,11 @@ describe('ProjectCard', () => {
         ],
       },
       latest_activity: {
-        stage_name: 'Storyboard',
+        kind: 'stage',
+        label: 'Storyboard',
         actor: 'heygo',
-        entered_at: '2026-07-05T00:00:00+00:00',
+        at: '2026-07-05T00:00:00+00:00',
+        stalled: false,
       },
     };
     render(<ProjectCard project={project} onClick={noop} onToggleStar={noop} />);
@@ -87,6 +89,40 @@ describe('ProjectCard', () => {
     expect(screen.getByTestId('member-stack')).toBeTruthy();
     expect(screen.getByText('HE')).toBeTruthy();
     expect(screen.getByText('+2')).toBeTruthy();
+  });
+
+  it('stalled activity renders amber dot instead of emerald', () => {
+    const project: Project = {
+      ...base,
+      latest_activity: {
+        kind: 'stage',
+        label: 'Review',
+        at: '2026-07-01T00:00:00',
+        stalled: true,
+      },
+    };
+    const { container } = render(<ProjectCard project={project} onClick={noop} onToggleStar={noop} />);
+    expect(container.querySelector('.bg-amber-400')).not.toBeNull();
+    expect(container.querySelector('.bg-emerald-400')).toBeNull();
+  });
+
+  it('file activity renders the file label and relative time', () => {
+    const project: Project = {
+      ...base,
+      latest_activity: {
+        kind: 'file',
+        actor: 'HG',
+        at: '2026-07-08T00:00:00',
+        stalled: false,
+      },
+    };
+    render(<ProjectCard project={project} onClick={noop} onToggleStar={noop} />);
+    expect(screen.getByText(/projects\.card\.activityFile/)).toBeTruthy();
+    expect(screen.getByText(/HG/)).toBeTruthy();
+    expect(screen.getByText(/2h ago/)).toBeTruthy();
+    // Emerald dot (not stalled).
+    const { container } = render(<ProjectCard project={project} onClick={noop} onToggleStar={noop} />);
+    expect(container.querySelector('.bg-emerald-400')).not.toBeNull();
   });
 
   it('archived projects dim, show the archived chip, and drop the ring', () => {

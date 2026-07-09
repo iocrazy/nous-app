@@ -116,12 +116,19 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
       <div className="flex items-center gap-1.5 mt-3 text-xs text-ink-400 min-w-0">
         {activity ? (
           <>
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
+            <span
+              className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                activity.stalled ? 'bg-amber-400' : 'bg-emerald-400'
+              }`}
+            />
             <span className="truncate">
-              {t('projects.card.enteredStage', { stage: activity.stage_name })}
+              {activity.kind === 'file'
+                ? t('projects.card.activityFile')
+                : t(activity.stalled ? 'projects.card.activityStalled' : 'projects.card.activityStage', {
+                    stage: activity.label,
+                  })}
               {activity.actor ? ` · ${activity.actor}` : ''}
-              {' · '}
-              {formatRelativeTime(activity.entered_at, t)}
+              {activity.at ? ` · ${formatRelativeTime(activity.at, t)}` : ''}
             </span>
           </>
         ) : (
