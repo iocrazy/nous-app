@@ -870,7 +870,7 @@ Add to `frontend/public/locales/en.json` under `projects.suggest` (merge, don't 
   "cta_delivery": "Prepare delivery",
   "storyboard_no_script": "No script yet — write one, then storyboard it.",
   "storyboard_no_shots": "Script ready — break {{scene_count}} scenes into shots.",
-  "storyboard_generate": "{{done}} of {{total}} shots have frames — generate the {{count}} missing frames with the project style profile, then this stage is ready to advance.",
+  "storyboard_generate": "{{done}} of {{total}} shots have frames — generate the {{count}} missing frames, then this stage is ready to advance.",
   "storyboard_ready": "All {{total}} shots have frames — review the boards, then advance.",
   "planning_nav": "Outline the project and start the first script.",
   "script_nav": "Draft or refine the script for this project.",
@@ -881,7 +881,7 @@ Add to `frontend/public/locales/en.json` under `projects.suggest` (merge, don't 
 }
 ```
 
-Add Chinese values to `zh.json` (English keys, Chinese values), e.g. `"ctaGenerate": "生成 {{count}} 帧"`, `"storyboard_generate": "{{total}} 个分镜已生成 {{done}} 个 — 用项目风格档案生成缺的 {{count}} 帧，即可推进本阶段。"`, etc.
+Add Chinese values to `zh.json` (English keys, Chinese values), e.g. `"ctaGenerate": "生成 {{count}} 帧"`, `"storyboard_generate": "{{total}} 个分镜已生成 {{done}} 个 — 生成缺的 {{count}} 帧，即可推进本阶段。"`, etc.
 
 - [ ] **Step 2: Write the failing tests**
 
