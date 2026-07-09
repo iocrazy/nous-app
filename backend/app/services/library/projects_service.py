@@ -32,29 +32,6 @@ from app.services.infra.unified_task_manager import get_task_manager
 _GENERATE_ALL_TASK_TYPE = "sb_generate_all"
 
 
-async def _load_style_profile(project_id) -> dict:
-    """Style guidance passed to each shot-generate workflow (best-effort).
-
-    NOTE (deviation from the task-4 brief): ``script_shot_generate_workflow``
-    does not currently accept a ``style_profile`` kwarg (grepped
-    ``app/workflows/script_shot_generate.py`` — it only reads
-    ``shot_id``/``model``/``provider``/``user_id``). This helper is kept so the
-    fan-out call site is ready to thread project style through the moment the
-    workflow grows that kwarg, but for now its return value is loaded and
-    discarded by the caller rather than forwarded — passing an unread kwarg
-    would silently do nothing and mislead readers into thinking style is
-    already wired end-to-end."""
-    try:
-        from app.repositories.project_style_profile_repository import (
-            get_project_style_profile_repository,
-        )
-
-        prof = await get_project_style_profile_repository().get(project_id)
-        return prof or {}
-    except Exception:  # noqa: BLE001 — style guidance is best-effort
-        return {}
-
-
 # Card enrichment defaults when a project has no stage/members/history rows
 # (or the batch lookups failed) — the frontend renders the base card.
 _EMPTY_ENRICHMENT = {
@@ -1027,11 +1004,8 @@ class ProjectsService:
         if not empty_ids:
             return {"parent_task_id": parent_task_id, "dispatched_count": 0}
 
-        # Best-effort project style guidance — see _load_style_profile's note:
-        # the shot-generate workflow does not yet consume this, so it is loaded
-        # here (ready for the day the workflow grows the kwarg) but NOT
-        # forwarded into dbos_workflow_kwargs below.
-        await _load_style_profile(project_id)
+        # NOTE: shot-generate workflow does not consume project style yet
+        # (backlog); parity with single-shot /generate.
 
         dispatched = 0
         for shot_id in empty_ids:
