@@ -422,10 +422,11 @@ async def test_create_project_none_team_id_stays_none():
 # ── service: B1 card enrichment (stage / members / activity) ─────────────
 
 
-def _stages_repo_mock(stage_map=None, activity=None, catalog=None):
+def _stages_repo_mock(stage_map=None, activity=None, file_activity=None, catalog=None):
     repo = MagicMock()
     repo.stages_for_projects = AsyncMock(return_value=stage_map or {})
     repo.latest_activity_for_projects = AsyncMock(return_value=activity or {})
+    repo.latest_file_activity_for_projects = AsyncMock(return_value=file_activity or {})
     repo.list_catalog = AsyncMock(
         return_value=(
             catalog
@@ -446,8 +447,9 @@ def _stages_repo_mock(stage_map=None, activity=None, catalog=None):
 @pytest.mark.asyncio
 async def test_list_cards_carry_stage_members_activity():
     """B1: each listed project carries current_stage {slug,name,index,total},
-    members_preview and latest_activity — assembled from THREE batch lookups
-    (no per-project queries)."""
+    members_preview and latest_activity — assembled from FOUR batch lookups
+    (no per-project queries). latest_activity is merged (Task 12) from the
+    stage-transition and file-activity batches via ``_merge_activity``."""
     from app.services.library.projects_service import ProjectsService
 
     svc = ProjectsService()
@@ -504,7 +506,9 @@ async def test_list_cards_carry_stage_members_activity():
         "total": 6,
     }
     assert a["members_preview"]["count"] == 4
-    assert a["latest_activity"]["stage_name"] == "Storyboard"
+    # No file activity mocked → merged activity falls back to the stage event.
+    assert a["latest_activity"]["kind"] == "stage"
+    assert a["latest_activity"]["label"] == "Storyboard"
     # Project with no stage/members/history rows degrades to None fields.
     assert b["current_stage"] is None
     assert b["members_preview"] is None
@@ -523,6 +527,7 @@ async def test_list_survives_enrichment_failure():
     stages_repo = MagicMock()
     stages_repo.stages_for_projects = AsyncMock(side_effect=RuntimeError("db down"))
     stages_repo.latest_activity_for_projects = AsyncMock(return_value={})
+    stages_repo.latest_file_activity_for_projects = AsyncMock(return_value={})
     stages_repo.list_catalog = AsyncMock(return_value=[])
     with (
         patch.object(
