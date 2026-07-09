@@ -96,7 +96,16 @@ async def test_put_module_persists_and_returns_summary():
     repo.upsert_setting.assert_called_once_with(
         "distribution.module", {"enabled": True, "visible": True}, "admin-1"
     )
-    audit_mock.assert_awaited_once()
+    audit_mock.assert_awaited_once_with(
+        admin_id="admin-1",
+        action="update_module_switches",
+        target_type="system_setting",
+        target_id="distribution.module",
+        details={
+            "module_id": "distribution",
+            "value": {"enabled": True, "visible": True},
+        },
+    )
 
 
 @pytest.mark.asyncio
