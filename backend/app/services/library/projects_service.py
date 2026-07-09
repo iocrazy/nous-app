@@ -10,6 +10,7 @@ file uploads with metadata extraction (ffprobe), and video linking.
 import asyncio
 import json
 import mimetypes
+import uuid as _uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -25,6 +26,8 @@ from app.core.file_utils import (
     stream_upload_to_disk,
 )
 from app.repositories.projects_repository import get_projects_repository
+from app.services.infra.dbos_orchestrator import start_workflow_routed
+from app.services.infra.unified_task_manager import get_task_manager
 
 # Card enrichment defaults when a project has no stage/members/history rows
 # (or the batch lookups failed) — the frontend renders the base card.
@@ -32,6 +35,19 @@ _EMPTY_ENRICHMENT = {
     "current_stage": None,
     "members_preview": None,
     "latest_activity": None,
+}
+
+# Stage suggestion resolver: storyboard is the only data-aware + one-click
+# stage; every other SOP stage is data-aware + navigation only.
+_STORYBOARD_STAGE = "storyboard"
+
+# Tab each non-storyboard stage's nav CTA targets.
+_STAGE_NAV_TAB = {
+    "planning": "scripts",
+    "script": "scripts",
+    "generation": "output",
+    "review": "files",
+    "delivery": "output",
 }
 
 # Days a project may dwell in a given stage before the card flags it as
@@ -919,3 +935,165 @@ class ProjectsService:
         except Exception as e:
             logger.warning(f"ffprobe failed for {filepath}: {e}")
             return {}
+
+    # ------------------------------------------------------------------ #
+    # Stage suggestion (B3)
+    # ------------------------------------------------------------------ #
+
+    def _stages_repo(self):
+        """Lazy accessor honoring test overrides (see test_stage_suggestion.py)."""
+        override = getattr(self, "_stages_repo_override", None)
+        if override is not None:
+            return override
+        from app.repositories.project_stages_repository import (
+            get_project_stages_repository,
+        )
+
+        return get_project_stages_repository()
+
+    def _shots_repo(self):
+        """Lazy accessor honoring test overrides (see test_stage_suggestion.py)."""
+        override = getattr(self, "_shots_repo_override", None)
+        if override is not None:
+            return override
+        from app.repositories.script_shot_repository import (
+            get_script_shot_repository,
+        )
+
+        return get_script_shot_repository()
+
+    async def build_stage_suggestion(self, project_id) -> dict:
+        """Typed 'what's the one next step' for the project's current stage.
+
+        Storyboard stage is data-aware + one-click (generate_missing_frames);
+        every other stage is data-aware + navigation. Unknown / no stage →
+        kind="" so the frontend renders nothing.
+        """
+        stage = await self._stages_repo().get_current(project_id)
+        slug = (stage or {}).get("slug")
+        if not slug:
+            return {"stage_slug": None, "kind": "", "progress": None, "action": None}
+
+        if slug == _STORYBOARD_STAGE:
+            p = await self._shots_repo().storyboard_progress_for_project(project_id)
+            if p["script_count"] == 0:
+                return {
+                    "stage_slug": slug,
+                    "kind": "storyboard_no_script",
+                    "progress": p,
+                    "action": {
+                        "type": "navigate",
+                        "tab": "scripts",
+                        "label_key": "projects.suggest.ctaScripts",
+                        "count": None,
+                    },
+                }
+            if p["total"] == 0:
+                return {
+                    "stage_slug": slug,
+                    "kind": "storyboard_no_shots",
+                    "progress": p,
+                    "action": {
+                        "type": "navigate",
+                        "tab": "scripts",
+                        "label_key": "projects.suggest.ctaBreakdown",
+                        "count": None,
+                    },
+                }
+            if p["empty"] > 0:
+                return {
+                    "stage_slug": slug,
+                    "kind": "storyboard_generate",
+                    "progress": p,
+                    "action": {
+                        "type": "generate_missing_frames",
+                        "tab": None,
+                        "label_key": "projects.suggest.ctaGenerate",
+                        "count": p["empty"],
+                    },
+                }
+            return {
+                "stage_slug": slug,
+                "kind": "storyboard_ready",
+                "progress": p,
+                "action": {
+                    "type": "navigate",
+                    "tab": "scripts",
+                    "label_key": "projects.suggest.ctaReady",
+                    "count": None,
+                },
+            }
+
+        tab = _STAGE_NAV_TAB.get(slug, "files")
+        return {
+            "stage_slug": slug,
+            "kind": f"{slug}_nav",
+            "progress": None,
+            "action": {
+                "type": "navigate",
+                "tab": tab,
+                "label_key": f"projects.suggest.cta_{slug}",
+                "count": None,
+            },
+        }
+
+    # ------------------------------------------------------------------ #
+    # Batch generate-missing-frames (B3 one-click action)
+    # ------------------------------------------------------------------ #
+
+    async def generate_missing_frames(
+        self, project_id: int | str, user_id: str
+    ) -> dict:
+        """Dispatch one shot-generate workflow per empty shot in the project.
+
+        Mirrors the single-shot /generate endpoint per shot so each generation
+        gets its OWN task_tracking row driven by the DBOS lifecycle trigger
+        (route-C discipline). Per-shot dispatch failure rolls that shot back to
+        'empty', marks its task failed, and the loop continues (partial success
+        is fine). No artificial parent row — N generations = N tracked tasks,
+        consistent with clicking generate on each shot individually.
+        """
+        from app.workflows.script_shot_generate import script_shot_generate_workflow
+
+        shots_repo = self._shots_repo()
+        empty_ids = await shots_repo.list_empty_shot_ids_for_project(project_id)
+
+        mgr = get_task_manager()
+        task_ids: list[str] = []
+        for shot_id in empty_ids:
+            wf_id = str(_uuid.uuid4())
+            task_id = await mgr.create(
+                user_id=user_id,
+                task_type="shot_generate",  # ≤20 chars (task_tracking.task_type VARCHAR(20))
+                title="Generate shot image",
+                dbos_workflow_id=wf_id,
+            )
+            try:
+                await shots_repo.update_status(shot_id, "generating")
+                await start_workflow_routed(
+                    "script_shot_generate",
+                    dbos_workflow_callable=script_shot_generate_workflow,
+                    dbos_workflow_kwargs={"shot_id": shot_id, "user_id": user_id},
+                    workflow_id=wf_id,
+                )
+                task_ids.append(task_id)
+            except Exception as exc:  # noqa: BLE001 — skip this shot, keep the batch
+                logger.error(
+                    f"[projects] generate-missing shot {shot_id} failed: {exc}"
+                )
+                try:
+                    await shots_repo.update_status(shot_id, "empty")
+                except Exception as rollback_exc:  # noqa: BLE001
+                    logger.error(
+                        f"[projects] generate-missing shot {shot_id} rollback "
+                        f"failed: {rollback_exc}"
+                    )
+                try:
+                    await mgr.fail(task_id, f"dispatch failed: {exc}")
+                except Exception as fail_exc:  # noqa: BLE001
+                    logger.error(
+                        f"[projects] generate-missing shot {shot_id} fail() "
+                        f"itself failed: {fail_exc}"
+                    )
+
+        return {"dispatched_count": len(task_ids), "task_ids": task_ids}

@@ -62,6 +62,45 @@ _UPDATE_FIELDS = frozenset(
 # update_status() whitelist — the status machine + its produced media URLs.
 _STATUS_FIELDS = ("status", "image_url", "thumbnail_url", "video_url")
 
+# Storyboard-progress rollup — shot completion counts across ALL non-deleted
+# scripts of a project (script_projects → script_scenes → script_shots).
+_STORYBOARD_PROGRESS_SQL = """
+    SELECT
+        COUNT(sh.id)                                             AS total,
+        COUNT(sh.id) FILTER (WHERE sh.status = 'done')          AS done,
+        COUNT(sh.id) FILTER (WHERE sh.status = 'empty')         AS empty,
+        COUNT(sh.id) FILTER (WHERE sh.status = 'generating')    AS generating,
+        COUNT(sh.id) FILTER (WHERE sh.status = 'failed')        AS failed,
+        COUNT(DISTINCT sp.id)                                    AS script_count,
+        COUNT(DISTINCT sc.id)                                    AS scene_count
+    FROM public.script_projects sp
+    LEFT JOIN public.script_scenes sc ON sc.script_id = sp.id
+    LEFT JOIN public.script_shots  sh ON sh.scene_id  = sc.id
+    WHERE sp.project_id = :pid AND sp.status != 'deleted'
+"""
+
+_ZERO_PROGRESS = {
+    "total": 0,
+    "done": 0,
+    "empty": 0,
+    "generating": 0,
+    "failed": 0,
+    "script_count": 0,
+    "scene_count": 0,
+}
+
+# Empty-shot-id fan-out — every 'empty' shot across the project's non-deleted
+# scripts (Task 4 — batch generate-missing-frames dispatch source).
+_EMPTY_SHOT_IDS_SQL = """
+    SELECT sh.id
+    FROM public.script_projects sp
+    JOIN public.script_scenes sc ON sc.script_id = sp.id
+    JOIN public.script_shots  sh ON sh.scene_id  = sc.id
+    WHERE sp.project_id = :pid AND sp.status != 'deleted'
+      AND sh.status = 'empty'
+    ORDER BY sh.id
+"""
+
 
 def _bigint(v: Any) -> Optional[int]:
     """Coerce a bigint id/FK bind value to native int; None passes through."""
@@ -135,6 +174,40 @@ class ScriptShotRepository:
         except Exception as e:
             logger.error(f"Failed to get shot {shot_id}: {e}")
             return None
+
+    async def storyboard_progress_for_project(self, project_id) -> Dict[str, Any]:
+        """Shot completion rolled up across ALL non-deleted scripts in a project.
+
+        One JOIN script_projects → script_scenes → script_shots. Best-effort:
+        any failure returns the all-zero shape so the suggestion card degrades
+        to a navigation nudge instead of 500ing the workbench.
+        """
+        from app.db import engine as db_engine
+
+        try:
+            row = await db_engine.fetch_one(
+                _STORYBOARD_PROGRESS_SQL, {"pid": int(project_id)}
+            )
+            if not row:
+                return dict(_ZERO_PROGRESS)
+            return {k: int(row[k] or 0) for k in _ZERO_PROGRESS}
+        except Exception as e:  # noqa: BLE001 — enrichment must not sink the workbench
+            logger.error(
+                f"[script_shots] storyboard progress for {project_id} failed: {e}"
+            )
+            return dict(_ZERO_PROGRESS)
+
+    async def list_empty_shot_ids_for_project(self, project_id) -> List[str]:
+        """IDs of every 'empty' shot across the project's non-deleted scripts.
+
+        Fan-out source for the batch generate-missing-frames dispatch (Task 4).
+        Best-effort is NOT applied here (unlike storyboard_progress_for_project)
+        — a failed read must surface to the caller rather than silently
+        dispatching zero workflows."""
+        from app.db import engine as db_engine
+
+        rows = await db_engine.fetch_all(_EMPTY_SHOT_IDS_SQL, {"pid": int(project_id)})
+        return [str(r["id"]) for r in rows]
 
     # ------------------------------------------------------------------ #
     # Writes — create / create_many / update / update_status / delete

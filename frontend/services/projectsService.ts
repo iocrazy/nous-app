@@ -8,6 +8,7 @@ import {
   ReviewComment,
   ReviewStatus,
   ProjectStage,
+  StageSuggestion,
 } from '../types';
 import { apiClient, apiFetch } from './apiClient';
 
@@ -463,3 +464,26 @@ export const setCurrentStage = async (
   );
   return response.data ?? null;
 };
+
+// ============================================
+// Stage suggestion (Phase B B3)
+// ============================================
+
+// NOTE: unlike the stage-catalog / current-stage endpoints above (which the backend
+// wraps as `{data: ...}` and we unwrap via `.data`), PR-1's stage-suggestion and
+// generate-missing endpoints return their response model DIRECTLY (no envelope), so
+// these consume the body as-is. Do not add a `.data` unwrap here — it would be undefined.
+
+/** Fetch the single most-relevant "next step" suggestion for the project's current stage. */
+export const fetchStageSuggestion = async (
+  projectId: string,
+): Promise<StageSuggestion> =>
+  apiClient.get<StageSuggestion>(`/api/v1/projects/${projectId}/stage-suggestion`);
+
+/** Fire the storyboard one-click batch: dispatch generation for every shot missing a frame. */
+export const generateMissingFrames = async (
+  projectId: string,
+): Promise<{ dispatched_count: number; task_ids: string[] }> =>
+  apiClient.post<{ dispatched_count: number; task_ids: string[] }>(
+    `/api/v1/projects/${projectId}/storyboard/generate-missing`,
+  );

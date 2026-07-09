@@ -1,23 +1,25 @@
 /**
  * StageSuggestion — the single most-relevant "next step" for the current SOP
- * stage (Phase B B3). A guided suggestion card inside the workbench: one
- * stage-aware line (specialized by the project's script count where it helps)
- * plus one navigation CTA to the tool that carries out that step.
+ * stage (Phase B B3, redone). A data-aware guided card inside the workbench:
+ * the backend's `/stage-suggestion` endpoint returns a `kind` (drives the
+ * message copy + interpolation from `progress`) and an `action` (either
+ * `navigate` — switch tabs — or `generate_missing_frames` — fire the
+ * storyboard one-click batch directly from the card).
  *
  * Deliberately NOT a second tool grid (that's B2's recommended-tools row) —
- * this is the narrative "do this next" nudge. The CTA navigates rather than
- * firing an AI action directly: generation lives inside the script editor,
- * not behind a project-level one-click endpoint.
+ * this is the narrative "do this next" nudge, now backed by real progress
+ * data instead of a static per-stage table.
  *
- * Flag-gated by VITE_FEATURE_PROJECT_AI_SUGGEST; the caller renders nothing
- * when off. Renders nothing for an unknown stage slug (degrades cleanly).
+ * Renders nothing when the payload has no kind/action (unknown stage, or
+ * project has nothing left to suggest).
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Lightbulb, ArrowRight } from 'lucide-react';
-import { fetchScriptProjects } from '../../services/scriptService';
-import type { ProjectStage, ProjectTab } from '../../types';
+import { Lightbulb, ArrowRight, Loader2 } from 'lucide-react';
+import { fetchStageSuggestion, generateMissingFrames } from '../../services/projectsService';
+import { useToast } from '../Toast';
+import type { ProjectStage, ProjectTab, StageSuggestion as Suggestion } from '../../types';
 
 interface StageSuggestionProps {
   projectId: string;
@@ -25,61 +27,58 @@ interface StageSuggestionProps {
   setActiveTab: (tab: ProjectTab) => void;
 }
 
-// Per-stage suggestion: which tab the CTA opens and which i18n CTA label.
-// The message key is derived from the slug; `script` additionally swaps to
-// `scriptEmpty` when the project has no scripts yet.
-const STAGE_CTA: Record<string, { tab: ProjectTab; labelKey: string }> = {
-  planning: { tab: 'scripts', labelKey: 'projects.suggest.ctaScripts' },
-  script: { tab: 'scripts', labelKey: 'projects.suggest.ctaScripts' },
-  storyboard: { tab: 'scripts', labelKey: 'projects.suggest.ctaScripts' },
-  generation: { tab: 'output', labelKey: 'projects.suggest.ctaOutput' },
-  review: { tab: 'files', labelKey: 'projects.suggest.ctaFiles' },
-  delivery: { tab: 'output', labelKey: 'projects.suggest.ctaOutput' },
-};
-
 export function StageSuggestion({
   projectId,
   currentStage,
   setActiveTab,
 }: StageSuggestionProps) {
   const { t } = useTranslation();
-  const [scriptCount, setScriptCount] = useState<number | null>(null);
+  const { addToast } = useToast();
+  const [data, setData] = useState<Suggestion | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  const slug = currentStage?.slug ?? '';
-  const needsCount = slug === 'script';
-
-  useEffect(() => {
-    if (!needsCount) {
-      setScriptCount(null);
-      return;
-    }
+  const load = useCallback(() => {
     let cancelled = false;
-    fetchScriptProjects(projectId, 1, 1)
-      .then((res) => {
-        if (!cancelled) setScriptCount(res.total);
+    fetchStageSuggestion(projectId)
+      .then((s) => {
+        if (!cancelled) setData(s);
       })
       .catch((err) => {
-        console.error('[StageSuggestion] failed to load script count:', err);
-        if (!cancelled) setScriptCount(null);
+        console.error('[StageSuggestion] failed to load suggestion:', err);
+        if (!cancelled) setData(null);
       });
     return () => {
       cancelled = true;
     };
-  }, [projectId, needsCount]);
+  }, [projectId, currentStage?.slug]);
 
-  const cta = STAGE_CTA[slug];
-  if (!currentStage || !cta) return null;
+  useEffect(() => load(), [load]);
 
-  // `script` stage speaks to whether any scripts exist yet.
-  let message: string;
-  if (slug === 'script') {
-    message =
-      scriptCount && scriptCount > 0
-        ? t('projects.suggest.script', { count: scriptCount })
-        : t('projects.suggest.scriptEmpty');
-  } else {
-    message = t(`projects.suggest.${slug}`);
-  }
+  const onGenerate = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await generateMissingFrames(projectId);
+      addToast(t('projects.suggest.generating', { count: res.dispatched_count }), 'success');
+      load();
+    } catch (err) {
+      console.error('[StageSuggestion] generate-missing failed:', err);
+      addToast(t('common.error'), 'error');
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, projectId, addToast, t, load]);
+
+  if (!data || !data.kind || !data.action) return null;
+
+  const progress = data.progress ?? undefined;
+  const message = t(`projects.suggest.${data.kind}`, {
+    done: progress?.done,
+    total: progress?.total,
+    count: data.action.count,
+    scene_count: progress?.scene_count,
+  });
+  const isGenerate = data.action.type === 'generate_missing_frames';
 
   return (
     <div
@@ -97,12 +96,18 @@ export function StageSuggestion({
         <p className="text-sm text-ink-200 mt-1">{message}</p>
       </div>
       <button
-        onClick={() => setActiveTab(cta.tab)}
-        className="flex items-center gap-1.5 shrink-0 rounded-lg border border-indigo-500/40 hover:bg-indigo-500/15
-                   text-indigo-300 font-medium text-sm px-3 py-1.5 transition-colors"
+        data-testid="suggest-cta"
+        disabled={busy}
+        onClick={() => (isGenerate ? onGenerate() : setActiveTab(data.action!.tab as ProjectTab))}
+        className={`flex items-center gap-1.5 shrink-0 rounded-lg font-medium text-sm px-3 py-1.5 transition-colors ${
+          isGenerate
+            ? 'bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 text-ink-950'
+            : 'border border-indigo-500/40 hover:bg-indigo-500/15 text-indigo-300'
+        }`}
       >
-        {t(cta.labelKey)}
-        <ArrowRight size={14} />
+        {busy ? <Loader2 size={14} className="animate-spin" /> : null}
+        {t(data.action.label_key, { count: data.action.count })}
+        {!isGenerate && <ArrowRight size={14} />}
       </button>
     </div>
   );

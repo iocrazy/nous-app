@@ -254,3 +254,33 @@ class CurrentStageUpdate(BaseModel):
     """Request body for PUT /projects/{id}/current_stage."""
 
     stage_id: int = Field(..., description="Target project_stages.id")
+
+
+class StoryboardProgress(BaseModel):
+    total: int
+    done: int
+    empty: int
+    generating: int
+    failed: int
+    script_count: int
+    scene_count: int
+
+
+class SuggestionAction(BaseModel):
+    # "generate_missing_frames" fires the batch endpoint; "navigate" switches tab.
+    type: str
+    label_key: str
+    tab: Optional[str] = None  # navigate target: scripts|output|files
+    count: Optional[int] = None  # generate_missing_frames: number of empty shots
+
+
+class StageSuggestionResponse(BaseModel):
+    stage_slug: Optional[str] = None  # None when project has no current stage
+    kind: str  # see spec kind decision table; "" = render nothing
+    progress: Optional[StoryboardProgress] = None
+    action: Optional[SuggestionAction] = None
+
+
+class GenerateMissingResponse(BaseModel):
+    dispatched_count: int
+    task_ids: list[str]
