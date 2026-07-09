@@ -323,6 +323,42 @@ export function useUpdateTopicModuleConfig() {
   })
 }
 
+// ── Distribution module switches (access + visibility) ────────────────────
+export interface DistributionModuleConfig {
+  /** Access switch — off makes the backend account/OAuth API 404. */
+  enabled: boolean
+  /** Display switch — off hides the frontend nav entry + routes. */
+  visible: boolean
+}
+
+const DISTRIBUTION_MODULE_URL = '/api/v1/admin/settings/distribution-module'
+
+export function useDistributionModuleConfig() {
+  return useQuery({
+    queryKey: ['settings', 'distribution-module'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<DistributionModuleConfig>(DISTRIBUTION_MODULE_URL)
+      return data
+    },
+  })
+}
+
+export function useUpdateDistributionModuleConfig() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (update: DistributionModuleConfig) => {
+      const { data } = await apiClient.put<DistributionModuleConfig>(
+        DISTRIBUTION_MODULE_URL,
+        update,
+      )
+      return data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings', 'distribution-module'] })
+    },
+  })
+}
+
 // ── Topic L0.5 content-fetch (trafilatura) config ─────────────────────────
 export interface TopicContentFetchConfig {
   /** Master switch for trafilatura body-fetch. Off = stop fetching article bodies. */

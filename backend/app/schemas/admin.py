@@ -762,6 +762,17 @@ class TopicModuleConfigResponse(BaseModel):
     visible: bool = True
 
 
+class DistributionModuleConfigResponse(BaseModel):
+    """Distribution module switches (system_settings['distribution.module']).
+    ``enabled`` gates the backend account/OAuth API (off → 404); ``visible``
+    shows/hides the frontend nav entry + routes. Independent. Opt-in: both
+    default OFF (fail-closed) so the module stays dark until an admin turns it
+    on."""
+
+    enabled: bool = False
+    visible: bool = False
+
+
 class TopicContentFetchConfigResponse(BaseModel):
     """Admin-tunable L0.5 article-body enrichment
     (system_settings['topics.content_fetch']).

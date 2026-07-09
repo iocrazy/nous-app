@@ -22,6 +22,7 @@ from app.schemas.admin import (
     ChatModuleGovernanceResponse,
     ConsolidateRequest,
     ConsolidateResponse,
+    DistributionModuleConfigResponse,
     GraphMemorySettingsResponse,
     GraphMemorySettingsUpdate,
     HonchoConnectionResponse,
@@ -53,6 +54,7 @@ from app.services.ai.telemetry.langfuse_exporter import (
     LangfuseConfig,
     get_langfuse_exporter,
 )
+from app.services.distribution import module_config as dist_module_config
 from app.services.topics.content_fetcher import (
     CONTENT_FETCH_CONFIG_KEY,
     content_fetch_payload,
@@ -230,6 +232,43 @@ async def update_topics_module_config(
         details={"value": payload},
     )
     return TopicModuleConfigResponse(**payload)
+
+
+@router.get("/distribution-module", response_model=DistributionModuleConfigResponse)
+async def get_distribution_module_config(auth: AdminAuthDep):
+    """Distribution switches: access (enabled) + display (visible)."""
+    return DistributionModuleConfigResponse(
+        enabled=await dist_module_config.is_module_enabled(),
+        visible=await dist_module_config.is_module_visible(),
+    )
+
+
+@router.put("/distribution-module", response_model=DistributionModuleConfigResponse)
+async def update_distribution_module_config(
+    body: DistributionModuleConfigResponse,
+    auth: AdminAuthDep,
+):
+    """Persist both Distribution switches to
+    ``system_settings['distribution.module']``. ``enabled`` off = the backend
+    account/OAuth API 404s; ``visible`` off = hide the frontend nav entry +
+    routes. Independent, opt-in (both default OFF). Instant, no redeploy."""
+    raw = body.model_dump()
+    payload = {
+        "enabled": dist_module_config.parse_module_enabled(raw),
+        "visible": dist_module_config.parse_module_visible(raw),
+    }
+    repo = get_system_settings_repository()
+    await repo.upsert_setting(
+        dist_module_config.MODULE_CONFIG_KEY, payload, auth.user_id
+    )
+    await create_audit_log(
+        admin_id=auth.user_id,
+        action="update_distribution_module_config",
+        target_type="system_setting",
+        target_id=dist_module_config.MODULE_CONFIG_KEY,
+        details={"value": payload},
+    )
+    return DistributionModuleConfigResponse(**payload)
 
 
 @router.get("/topics-content-fetch", response_model=TopicContentFetchConfigResponse)
