@@ -18,6 +18,7 @@ import { fetchStageCatalog, setCurrentStage } from '../../services/projectsServi
 import { TOOL_CATALOG } from '../../features/projects/stageTools';
 import { StageSelector } from './StageSelector';
 import { StageSuggestion } from './StageSuggestion';
+import { StageHistoryDrawer } from './StageHistoryDrawer';
 import type { ProjectStage, ProjectTab } from '../../types';
 
 // Phase B B3 — stage-aware "next step" suggestion card. Independent flag so
@@ -43,6 +44,7 @@ export function StageWorkbench({
   const { t } = useTranslation();
   const [catalog, setCatalog] = useState<ProjectStage[]>([]);
   const [advancing, setAdvancing] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -109,25 +111,34 @@ export function StageWorkbench({
               <p className="text-sm text-ink-400 mt-1 max-w-prose">{description}</p>
             )}
           </div>
-          {canWrite &&
-            (nextStage ? (
-              <button
-                onClick={handleAdvance}
-                disabled={advancing}
-                className="flex items-center gap-1.5 shrink-0 rounded-lg bg-indigo-500 hover:bg-indigo-400
-                           disabled:opacity-50 text-ink-950 font-semibold text-sm px-4 py-2 transition-colors"
-              >
-                {t('projects.workbench.advanceTo', {
-                  stage: t(`projects.stages.${nextStage.slug}`, nextStage.name),
-                })}
-                <ArrowRight size={15} />
-              </button>
-            ) : (
-              <span className="flex items-center gap-1.5 shrink-0 text-sm text-emerald-400 font-medium">
-                <CheckCircle2 size={15} />
-                {t('projects.workbench.finalStage')}
-              </span>
-            ))}
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              data-testid="stage-history-btn"
+              onClick={() => setHistoryOpen(true)}
+              className="rounded-lg border border-ink-700 hover:border-ink-500 text-ink-300 font-medium text-sm px-3 py-2 transition-colors"
+            >
+              {t('projects.workbench.stageHistory')}
+            </button>
+            {canWrite &&
+              (nextStage ? (
+                <button
+                  onClick={handleAdvance}
+                  disabled={advancing}
+                  className="flex items-center gap-1.5 shrink-0 rounded-lg bg-indigo-500 hover:bg-indigo-400
+                             disabled:opacity-50 text-ink-950 font-semibold text-sm px-4 py-2 transition-colors"
+                >
+                  {t('projects.workbench.advanceTo', {
+                    stage: t(`projects.stages.${nextStage.slug}`, nextStage.name),
+                  })}
+                  <ArrowRight size={15} />
+                </button>
+              ) : (
+                <span className="flex items-center gap-1.5 shrink-0 text-sm text-emerald-400 font-medium">
+                  <CheckCircle2 size={15} />
+                  {t('projects.workbench.finalStage')}
+                </span>
+              ))}
+          </div>
         </div>
 
         {tools.length > 0 && (
@@ -166,6 +177,12 @@ export function StageWorkbench({
           setActiveTab={setActiveTab}
         />
       )}
+
+      <StageHistoryDrawer
+        projectId={projectId}
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+      />
     </div>
   );
 }

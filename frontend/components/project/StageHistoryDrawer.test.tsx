@@ -1,5 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react';
-import { vi } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import { StageHistoryDrawer } from './StageHistoryDrawer';
 import * as svc from '../../services/projectsService';
 
