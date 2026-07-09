@@ -22,7 +22,6 @@ from app.schemas.admin import (
     ChatModuleGovernanceResponse,
     ConsolidateRequest,
     ConsolidateResponse,
-    DistributionModuleConfigResponse,
     GraphMemorySettingsResponse,
     GraphMemorySettingsUpdate,
     HonchoConnectionResponse,
@@ -34,6 +33,8 @@ from app.schemas.admin import (
     MemorySlotStatus,
     MemorySlotUpdate,
     MemoryStatsResponse,
+    ModuleSummaryResponse,
+    ModuleSwitchUpdate,
     PlatformAiProvidersResponse,
     PlatformAiProviderStatus,
     PlatformAiProvidersUpdate,
@@ -43,7 +44,6 @@ from app.schemas.admin import (
     SystemSettingUpdate,
     TaskModuleGovernanceResponse,
     TopicContentFetchConfigResponse,
-    TopicModuleConfigResponse,
     TopicPrefilterConfigResponse,
     TopicScoringConfigResponse,
 )
@@ -54,7 +54,11 @@ from app.services.ai.telemetry.langfuse_exporter import (
     LangfuseConfig,
     get_langfuse_exporter,
 )
-from app.services.distribution import module_config as dist_module_config
+from app.services.modules.registry import (
+    MODULES_BY_ID,
+    list_module_summaries,
+    write_module_state,
+)
 from app.services.topics.content_fetcher import (
     CONTENT_FETCH_CONFIG_KEY,
     content_fetch_payload,
@@ -66,13 +70,6 @@ from app.services.topics.keyword_filter import (
     load_prefilter_config,
     merge_prefilter_config,
     prefilter_payload,
-)
-from app.services.topics.module_config import (
-    MODULE_CONFIG_KEY,
-    is_module_enabled,
-    is_module_visible,
-    parse_module_enabled,
-    parse_module_visible,
 )
 from app.services.topics.scoring import (
     SCORING_CONFIG_KEY,
@@ -200,75 +197,48 @@ async def update_topics_prefilter_config(
     return TopicPrefilterConfigResponse(**payload)
 
 
-@router.get("/topics-module", response_model=TopicModuleConfigResponse)
-async def get_topics_module_config(auth: AdminAuthDep):
-    """Topic Inspiration switches: processing (enabled) + display (visible)."""
-    return TopicModuleConfigResponse(
-        enabled=await is_module_enabled(),
-        visible=await is_module_visible(),
-    )
+@router.get("/modules", response_model=list[ModuleSummaryResponse])
+async def get_modules(auth: AdminAuthDep):
+    """Every product module's central switches (processing + visibility) plus
+    each module's default fail-mode. Driven by the module registry."""
+    summaries = await list_module_summaries()
+    return [ModuleSummaryResponse(**s) for s in summaries]
 
 
-@router.put("/topics-module", response_model=TopicModuleConfigResponse)
-async def update_topics_module_config(
-    body: TopicModuleConfigResponse,
+@router.put("/modules/{module_id}", response_model=ModuleSummaryResponse)
+async def update_module(
+    module_id: str,
+    body: ModuleSwitchUpdate,
     auth: AdminAuthDep,
 ):
-    """Persist both module switches to ``system_settings['topics.module']``.
-    ``enabled`` off = pause the pipeline (scheduled tick skipped); ``visible``
-    off = hide the frontend nav entry + page. Independent. Instant, no redeploy."""
-    raw = body.model_dump()
-    payload = {
-        "enabled": parse_module_enabled(raw),
-        "visible": parse_module_visible(raw),
-    }
-    repo = get_system_settings_repository()
-    await repo.upsert_setting(MODULE_CONFIG_KEY, payload, auth.user_id)
+    """Persist both switches for one module (whole-blob replace). ``enabled`` =
+    processing/access; ``visible`` = frontend nav + pages. Instant, no redeploy."""
+    module = MODULES_BY_ID.get(module_id)
+    if module is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown module: {module_id}",
+        )
+    state = await write_module_state(module, body.enabled, body.visible, auth.user_id)
     await create_audit_log(
         admin_id=auth.user_id,
-        action="update_topics_module_config",
+        action="update_module_switches",
         target_type="system_setting",
-        target_id=MODULE_CONFIG_KEY,
-        details={"value": payload},
+        target_id=module.key,
+        details={
+            "module_id": module_id,
+            "value": {"enabled": state.enabled, "visible": state.visible},
+        },
     )
-    return TopicModuleConfigResponse(**payload)
-
-
-@router.get("/distribution-module", response_model=DistributionModuleConfigResponse)
-async def get_distribution_module_config(auth: AdminAuthDep):
-    """Distribution switches: access (enabled) + display (visible)."""
-    return DistributionModuleConfigResponse(
-        enabled=await dist_module_config.is_module_enabled(),
-        visible=await dist_module_config.is_module_visible(),
+    return ModuleSummaryResponse(
+        id=module.id,
+        key=module.key,
+        label=module.label,
+        enabled=state.enabled,
+        visible=state.visible,
+        enabled_default=module.enabled_default,
+        visible_default=module.visible_default,
     )
-
-
-@router.put("/distribution-module", response_model=DistributionModuleConfigResponse)
-async def update_distribution_module_config(
-    body: DistributionModuleConfigResponse,
-    auth: AdminAuthDep,
-):
-    """Persist both Distribution switches to
-    ``system_settings['distribution.module']``. ``enabled`` off = the backend
-    account/OAuth API 404s; ``visible`` off = hide the frontend nav entry +
-    routes. Independent, opt-in (both default OFF). Instant, no redeploy."""
-    raw = body.model_dump()
-    payload = {
-        "enabled": dist_module_config.parse_module_enabled(raw),
-        "visible": dist_module_config.parse_module_visible(raw),
-    }
-    repo = get_system_settings_repository()
-    await repo.upsert_setting(
-        dist_module_config.MODULE_CONFIG_KEY, payload, auth.user_id
-    )
-    await create_audit_log(
-        admin_id=auth.user_id,
-        action="update_distribution_module_config",
-        target_type="system_setting",
-        target_id=dist_module_config.MODULE_CONFIG_KEY,
-        details={"value": payload},
-    )
-    return DistributionModuleConfigResponse(**payload)
 
 
 @router.get("/topics-content-fetch", response_model=TopicContentFetchConfigResponse)
