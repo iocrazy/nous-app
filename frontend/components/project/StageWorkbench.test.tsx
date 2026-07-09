@@ -14,6 +14,7 @@ import type { ProjectStage } from '../../types';
 const mockService = vi.hoisted(() => ({
   fetchStageCatalog: vi.fn(),
   setCurrentStage: vi.fn(),
+  fetchStageHistory: vi.fn(),
 }));
 vi.mock('../../services/projectsService', () => mockService);
 
@@ -21,6 +22,13 @@ vi.mock('../../services/projectsService', () => mockService);
 // suite exercises only the workbench card.
 vi.mock('./StageSelector', () => ({
   StageSelector: () => <div data-testid="stage-selector" />,
+}));
+
+// relativeTime pulls in the real i18n instance via formatDate — stub it so
+// this suite doesn't need initReactI18next (mirrors ProjectCard.test.tsx).
+// Pulled in transitively via StageHistoryDrawer.
+vi.mock('../../utils/relativeTime', () => ({
+  formatRelativeTime: () => '2h ago',
 }));
 
 vi.mock('react-i18next', () => ({
@@ -54,6 +62,8 @@ const noop = () => {};
 beforeEach(() => {
   mockService.fetchStageCatalog.mockResolvedValue(CATALOG);
   mockService.setCurrentStage.mockReset();
+  mockService.fetchStageHistory.mockReset();
+  mockService.fetchStageHistory.mockResolvedValue([]);
 });
 
 describe('StageWorkbench', () => {
@@ -130,5 +140,19 @@ describe('StageWorkbench', () => {
     );
     fireEvent.click(await screen.findByText('projects.tools.storyboard'));
     expect(setActiveTab).toHaveBeenCalledWith('storyboard');
+  });
+
+  it('opens the stage-history drawer when the history button is clicked', async () => {
+    render(
+      <StageWorkbench
+        projectId="p1"
+        currentStage={CATALOG[2]}
+        onStageChange={noop}
+        setActiveTab={noop}
+      />,
+    );
+    const btn = await screen.findByTestId('stage-history-btn');
+    fireEvent.click(btn);
+    expect(await screen.findByTestId('stage-history-drawer')).toBeInTheDocument();
   });
 });

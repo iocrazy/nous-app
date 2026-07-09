@@ -946,6 +946,16 @@ export interface ProjectStage {
   updated_at?: string;
 }
 
+/** A single row from ``project_stage_history`` — one stage occupancy interval. */
+export interface StageHistoryEntry {
+  id: string;
+  stage_slug: string;
+  stage_name: string;
+  entered_at: string;
+  exited_at: string | null;
+  transitioned_by?: string;
+}
+
 /** Aggregate shot-frame progress for the storyboard stage suggestion (Phase B B3). */
 export interface StoryboardProgress {
   total: number;

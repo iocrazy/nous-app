@@ -1317,7 +1317,10 @@
       "currentStageOf": "Current stage · {{index}} of {{total}}",
       "advanceTo": "Advance to {{stage}}",
       "finalStage": "Final stage",
-      "recommendedTools": "Recommended tools"
+      "recommendedTools": "Recommended tools",
+      "stageHistory": "Stage history",
+      "historyEmpty": "No stage transitions yet.",
+      "historyCurrent": "Current"
     },
     "suggest": {
       "eyebrow": "Suggested next",
