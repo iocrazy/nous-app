@@ -8,6 +8,7 @@ import {
   ReviewComment,
   ReviewStatus,
   ProjectStage,
+  StageSuggestion,
 } from '../types';
 import { apiClient, apiFetch } from './apiClient';
 
@@ -463,3 +464,21 @@ export const setCurrentStage = async (
   );
   return response.data ?? null;
 };
+
+// ============================================
+// Stage suggestion (Phase B B3)
+// ============================================
+
+/** Fetch the single most-relevant "next step" suggestion for the project's current stage. */
+export const fetchStageSuggestion = async (
+  projectId: string,
+): Promise<StageSuggestion> =>
+  apiClient.get<StageSuggestion>(`/api/v1/projects/${projectId}/stage-suggestion`);
+
+/** Fire the storyboard one-click batch: dispatch generation for every shot missing a frame. */
+export const generateMissingFrames = async (
+  projectId: string,
+): Promise<{ dispatched_count: number; task_ids: string[] }> =>
+  apiClient.post<{ dispatched_count: number; task_ids: string[] }>(
+    `/api/v1/projects/${projectId}/storyboard/generate-missing`,
+  );
