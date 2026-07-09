@@ -33,6 +33,19 @@ _EMPTY_ENRICHMENT = {
     "latest_activity": None,
 }
 
+# Stage suggestion resolver: storyboard is the only data-aware + one-click
+# stage; every other SOP stage is data-aware + navigation only.
+_STORYBOARD_STAGE = "storyboard"
+
+# Tab each non-storyboard stage's nav CTA targets.
+_STAGE_NAV_TAB = {
+    "planning": "scripts",
+    "script": "scripts",
+    "generation": "output",
+    "review": "files",
+    "delivery": "output",
+}
+
 
 class ProjectsService:
     """MediaTrack projects business logic"""
@@ -849,3 +862,105 @@ class ProjectsService:
         except Exception as e:
             logger.warning(f"ffprobe failed for {filepath}: {e}")
             return {}
+
+    # ------------------------------------------------------------------ #
+    # Stage suggestion (B3)
+    # ------------------------------------------------------------------ #
+
+    def _stages_repo(self):
+        """Lazy accessor honoring test overrides (see test_stage_suggestion.py)."""
+        override = getattr(self, "_stages_repo_override", None)
+        if override is not None:
+            return override
+        from app.repositories.project_stages_repository import (
+            get_project_stages_repository,
+        )
+
+        return get_project_stages_repository()
+
+    def _shots_repo(self):
+        """Lazy accessor honoring test overrides (see test_stage_suggestion.py)."""
+        override = getattr(self, "_shots_repo_override", None)
+        if override is not None:
+            return override
+        from app.repositories.script_shot_repository import (
+            get_script_shot_repository,
+        )
+
+        return get_script_shot_repository()
+
+    async def build_stage_suggestion(self, project_id) -> dict:
+        """Typed 'what's the one next step' for the project's current stage.
+
+        Storyboard stage is data-aware + one-click (generate_missing_frames);
+        every other stage is data-aware + navigation. Unknown / no stage →
+        kind="" so the frontend renders nothing.
+        """
+        stage = await self._stages_repo().get_current(project_id)
+        if not stage:
+            return {"stage_slug": None, "kind": "", "progress": None, "action": None}
+
+        slug = stage["slug"]
+
+        if slug == _STORYBOARD_STAGE:
+            p = await self._shots_repo().storyboard_progress_for_project(project_id)
+            if p["script_count"] == 0:
+                return {
+                    "stage_slug": slug,
+                    "kind": "storyboard_no_script",
+                    "progress": p,
+                    "action": {
+                        "type": "navigate",
+                        "tab": "scripts",
+                        "label_key": "projects.suggest.ctaScripts",
+                        "count": None,
+                    },
+                }
+            if p["total"] == 0:
+                return {
+                    "stage_slug": slug,
+                    "kind": "storyboard_no_shots",
+                    "progress": p,
+                    "action": {
+                        "type": "navigate",
+                        "tab": "scripts",
+                        "label_key": "projects.suggest.ctaBreakdown",
+                        "count": None,
+                    },
+                }
+            if p["empty"] > 0:
+                return {
+                    "stage_slug": slug,
+                    "kind": "storyboard_generate",
+                    "progress": p,
+                    "action": {
+                        "type": "generate_missing_frames",
+                        "tab": None,
+                        "label_key": "projects.suggest.ctaGenerate",
+                        "count": p["empty"],
+                    },
+                }
+            return {
+                "stage_slug": slug,
+                "kind": "storyboard_ready",
+                "progress": p,
+                "action": {
+                    "type": "navigate",
+                    "tab": "scripts",
+                    "label_key": "projects.suggest.ctaReady",
+                    "count": None,
+                },
+            }
+
+        tab = _STAGE_NAV_TAB.get(slug, "files")
+        return {
+            "stage_slug": slug,
+            "kind": f"{slug}_nav",
+            "progress": None,
+            "action": {
+                "type": "navigate",
+                "tab": tab,
+                "label_key": f"projects.suggest.cta_{slug}",
+                "count": None,
+            },
+        }
