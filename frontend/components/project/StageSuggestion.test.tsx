@@ -1,92 +1,55 @@
 /**
- * StageSuggestion (Phase B B3) — stage-aware "next step" guided card.
+ * StageSuggestion (Phase B B3) — data-aware "next step" guided card.
  *
- * Pins: the message + CTA follow the current stage; the script stage
- * specializes on script count; an unknown stage renders nothing.
+ * Pins: the message + CTA are driven by the `/stage-suggestion` payload
+ * (kind + progress + action), not a static per-stage table. The storyboard
+ * one-click CTA fires the batch-generate endpoint directly; a `navigate`
+ * action switches tabs instead. An empty payload (no kind/action) renders
+ * nothing.
  */
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-
+import { test, expect, vi } from 'vitest';
 import { StageSuggestion } from './StageSuggestion';
-import type { ProjectStage } from '../../types';
-
-const mockService = vi.hoisted(() => ({ fetchScriptProjects: vi.fn() }));
-vi.mock('../../services/scriptService', () => mockService);
+import * as svc from '../../services/projectsService';
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (key: string, opts?: Record<string, unknown>) => {
-      if (key === 'projects.suggest.script') return `You have ${opts?.count} scripts`;
-      return key;
-    },
-  }),
+  useTranslation: () => ({ t: (k: string, o?: any) => (o?.count != null ? `${k}:${o.count}` : k) }),
 }));
+vi.mock('../../components/Toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
 
-function stage(slug: string): ProjectStage {
-  return { id: '1', slug, name: slug, sort_order: 10, tools_recommended: [] };
-}
+const stage = { id: '30', slug: 'storyboard', name: 'Storyboarding' } as any;
 
-const noop = () => {};
+test('storyboard_generate renders count and fires batch on click', async () => {
+  vi.spyOn(svc, 'fetchStageSuggestion').mockResolvedValue({
+    stage_slug: 'storyboard', kind: 'storyboard_generate',
+    progress: { total: 12, done: 9, empty: 3, generating: 0, failed: 0, script_count: 2, scene_count: 5 },
+    action: { type: 'generate_missing_frames', label_key: 'projects.suggest.ctaGenerate', count: 3 },
+  });
+  const gen = vi.spyOn(svc, 'generateMissingFrames').mockResolvedValue({ dispatched_count: 3, task_ids: ['t1', 't2', 't3'] });
 
-beforeEach(() => {
-  mockService.fetchScriptProjects.mockReset();
-  mockService.fetchScriptProjects.mockResolvedValue({ data: [], total: 0 });
+  render(<StageSuggestion projectId="p1" currentStage={stage} setActiveTab={vi.fn()} />);
+  const btn = await screen.findByTestId('suggest-cta');
+  expect(btn.textContent).toContain('3');
+  fireEvent.click(btn);
+  await waitFor(() => expect(gen).toHaveBeenCalledWith('p1'));
 });
 
-describe('StageSuggestion', () => {
-  it('renders nothing for an unknown stage slug', () => {
-    const { container } = render(
-      <StageSuggestion projectId="p1" currentStage={stage('mystery')} setActiveTab={noop} />,
-    );
-    expect(container.querySelector('[data-testid="stage-suggestion"]')).toBeNull();
+test('navigate kind switches tab, does not call batch', async () => {
+  vi.spyOn(svc, 'fetchStageSuggestion').mockResolvedValue({
+    stage_slug: 'planning', kind: 'planning_nav', progress: null,
+    action: { type: 'navigate', tab: 'scripts', label_key: 'projects.suggest.cta_planning', count: null },
   });
+  const setTab = vi.fn();
+  render(<StageSuggestion projectId="p1" currentStage={{ ...stage, slug: 'planning' }} setActiveTab={setTab} />);
+  const btn = await screen.findByTestId('suggest-cta');
+  fireEvent.click(btn);
+  expect(setTab).toHaveBeenCalledWith('scripts');
+});
 
-  it('renders nothing when there is no current stage', () => {
-    const { container } = render(
-      <StageSuggestion projectId="p1" currentStage={null} setActiveTab={noop} />,
-    );
-    expect(container.firstChild).toBeNull();
+test('empty kind renders nothing', async () => {
+  vi.spyOn(svc, 'fetchStageSuggestion').mockResolvedValue({
+    stage_slug: null, kind: '', progress: null, action: null,
   });
-
-  it('shows the generation suggestion and an Output CTA', () => {
-    render(
-      <StageSuggestion projectId="p1" currentStage={stage('generation')} setActiveTab={noop} />,
-    );
-    expect(screen.getByText('projects.suggest.generation')).toBeTruthy();
-    expect(screen.getByText('projects.suggest.ctaOutput')).toBeTruthy();
-    // Non-script stages don't hit the script-count endpoint.
-    expect(mockService.fetchScriptProjects).not.toHaveBeenCalled();
-  });
-
-  it('specializes the script stage on the live script count', async () => {
-    mockService.fetchScriptProjects.mockResolvedValue({ data: [], total: 3 });
-    render(
-      <StageSuggestion projectId="p1" currentStage={stage('script')} setActiveTab={noop} />,
-    );
-    expect(await screen.findByText('You have 3 scripts')).toBeTruthy();
-    expect(mockService.fetchScriptProjects).toHaveBeenCalledWith('p1', 1, 1);
-  });
-
-  it('falls back to the empty-script message when the project has no scripts', async () => {
-    mockService.fetchScriptProjects.mockResolvedValue({ data: [], total: 0 });
-    render(
-      <StageSuggestion projectId="p1" currentStage={stage('script')} setActiveTab={noop} />,
-    );
-    await waitFor(() =>
-      expect(screen.getByText('projects.suggest.scriptEmpty')).toBeTruthy(),
-    );
-  });
-
-  it('navigates to the CTA tab when clicked', () => {
-    const setActiveTab = vi.fn();
-    render(
-      <StageSuggestion
-        projectId="p1"
-        currentStage={stage('review')}
-        setActiveTab={setActiveTab}
-      />,
-    );
-    fireEvent.click(screen.getByText('projects.suggest.ctaFiles'));
-    expect(setActiveTab).toHaveBeenCalledWith('files');
-  });
+  const { container } = render(<StageSuggestion projectId="p1" currentStage={null} setActiveTab={vi.fn()} />);
+  await waitFor(() => expect(container.querySelector('[data-testid="stage-suggestion"]')).toBeNull());
 });
