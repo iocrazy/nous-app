@@ -11,6 +11,7 @@ import asyncio
 import json
 import mimetypes
 import uuid as _uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -48,6 +49,68 @@ _STAGE_NAV_TAB = {
     "review": "files",
     "delivery": "output",
 }
+
+# Days a project may dwell in a given stage before the card flags it as
+# stalled (B1 hybrid activity row). "review" gets a tighter SLA than the
+# rest of the pipeline; everything else falls back to _DEFAULT_STALL_DAYS.
+STAGE_STALL_THRESHOLDS = {"review": 3}
+_DEFAULT_STALL_DAYS = 7
+
+
+def _parse_iso(s):
+    """Best-effort ISO-8601 string -> datetime. Returns None on falsy/invalid input."""
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _merge_activity(stage_act, file_act, *, stage_slug, now=None):
+    """Pick the newer of the stage/file event; flag stall from current-stage dwell.
+
+    Pure function (Task 12 — B1 hybrid activity row): no I/O, no mutation of
+    its inputs. ``now`` is injectable for tests (ISO str); production passes
+    None which resolves to ``datetime.now(timezone.utc)``.
+
+    Returns ``{kind: "file"|"stage", actor, at, stalled}`` (plus ``label``
+    for stage events), or ``None`` when both inputs are empty.
+    """
+    now_dt = _parse_iso(now) or datetime.now(timezone.utc)
+    stage_at = _parse_iso(stage_act.get("entered_at")) if stage_act else None
+    file_at = _parse_iso(file_act.get("created_at")) if file_act else None
+
+    # Stall = dwell time in the *current* stage beyond its threshold.
+    stalled = False
+    if stage_at is not None:
+        threshold = STAGE_STALL_THRESHOLDS.get(stage_slug, _DEFAULT_STALL_DAYS)
+        stalled = (now_dt - stage_at).days >= threshold
+
+    use_file = file_at is not None and (stage_at is None or file_at > stage_at)
+    if use_file:
+        return {
+            "kind": "file",
+            "actor": file_act["actor"],
+            "at": file_act["created_at"],
+            "stalled": stalled,
+        }
+    if stage_act is not None:
+        return {
+            "kind": "stage",
+            "actor": stage_act.get("actor", ""),
+            "label": stage_act.get("stage_name", ""),
+            "at": stage_act.get("entered_at"),
+            "stalled": stalled,
+        }
+    if file_act is not None:
+        return {
+            "kind": "file",
+            "actor": file_act["actor"],
+            "at": file_act["created_at"],
+            "stalled": False,
+        }
+    return None
 
 
 class ProjectsService:
@@ -117,7 +180,9 @@ class ProjectsService:
             index/total derive from the stage catalog's sort_order ranking —
             the card ring renders index-of-total without knowing sort_order.
           members_preview: {count, members: [{user_id, username}, ...]} | None
-          latest_activity: {stage_name, actor, entered_at} | None
+          latest_activity: {kind, actor, at, stalled, label?} | None
+            merged from the latest stage transition and the latest file add
+            (whichever is newer) via ``_merge_activity`` — see Task 12.
         """
         from app.repositories.project_stages_repository import (
             get_project_stages_repository,
@@ -125,9 +190,10 @@ class ProjectsService:
 
         stages_repo = get_project_stages_repository()
         try:
-            stage_map, activity, members, catalog = await asyncio.gather(
+            stage_map, activity, file_activity, members, catalog = await asyncio.gather(
                 stages_repo.stages_for_projects(project_ids),
                 stages_repo.latest_activity_for_projects(project_ids),
+                stages_repo.latest_file_activity_for_projects(project_ids),
                 self.repo.get_project_members_preview(project_ids),
                 stages_repo.list_catalog(),
             )
@@ -156,7 +222,11 @@ class ProjectsService:
             out[pid] = {
                 "current_stage": current_stage,
                 "members_preview": members.get(pid),
-                "latest_activity": activity.get(pid),
+                "latest_activity": _merge_activity(
+                    activity.get(pid),
+                    file_activity.get(pid),
+                    stage_slug=(stage or {}).get("slug"),
+                ),
             }
         return out
 

@@ -1308,7 +1308,9 @@
       "loadVersionsFailed": "加载版本历史失败"
     },
     "card": {
-      "enteredStage": "进入 {{stage}}",
+      "activityFile": "新增文件",
+      "activityStage": "进入 {{stage}}",
+      "activityStalled": "停在 {{stage}}",
       "archived": "已归档"
     },
     "workbench": {
