@@ -75,6 +75,15 @@
   --color-content-2: var(--content-2);
   --color-content-3: var(--content-3);
   --color-content-4: var(--content-4);
+  /* Canvas namespace (Infinite-Canvas parity Phase 0 G10) — bg-canvas-card,
+     border-canvas-line, text-canvas-text, … Defined in § Canvas Tokens. */
+  --color-canvas-page: var(--canvas-page);
+  --color-canvas-card: var(--canvas-card);
+  --color-canvas-line: var(--canvas-line);
+  --color-canvas-text: var(--canvas-text);
+  --color-canvas-muted: var(--canvas-muted);
+  --color-canvas-strong: var(--canvas-strong);
+  --color-canvas-accent: var(--canvas-accent);
 }
 
 /* Light theme — ladder inverted + tuned (spec §5.4). Semantic colors
@@ -673,6 +682,61 @@ body {
   --node-inner-radius: 12px;
 }
 
+/* ===== Canvas Tokens (Infinite-Canvas parity Phase 0 G10) =====
+   Namespaced --canvas-*, follows [data-theme] (unlike the legacy dark-only
+   block above, which storyboard/editor surfaces still consume). Color values
+   are translated from Infinite-Canvas canvas.css:2-3; radii/shadow/blur/ease
+   from its layout spec. We NEVER port theme.css itself. Primary stays
+   MediaHub indigo (--canvas-accent) until the neutral-vs-color decision;
+   --canvas-strong carries Infinite's neutral flip for when it lands. */
+:root,
+[data-theme="dark"] {
+  --canvas-page: #0f141d;
+  --canvas-grid: rgba(148, 163, 184, 0.18);
+  --canvas-card: #171d29;
+  --canvas-panel: rgba(23, 29, 41, 0.92);
+  --canvas-line: #2a3444;
+  --canvas-line-strong: #8f9aab;
+  --canvas-text: #e5e9f0;
+  --canvas-muted: #8f9aab;
+  --canvas-strong: #d8dee9;
+  --canvas-accent: #6366f1;
+  --canvas-accent-rgb: 99 102 241;
+  --canvas-mask: rgba(15, 20, 29, 0.6);
+  --canvas-r-panel: 24px;
+  --canvas-r-node: 22px;
+  --canvas-r-island: 18px;
+  --canvas-shadow-island: 0 16px 42px rgba(0, 0, 0, 0.45);
+  --canvas-blur: 18px;
+  --canvas-ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+[data-theme="light"] {
+  --canvas-page: #f8fafc;
+  --canvas-grid: #d9e1ea;
+  --canvas-card: #ffffff;
+  --canvas-panel: rgba(255, 255, 255, 0.92);
+  --canvas-line: #e8edf3;
+  --canvas-line-strong: #64748b;
+  --canvas-text: #111827;
+  --canvas-muted: #64748b;
+  --canvas-strong: #111827;
+  --canvas-mask: rgba(248, 250, 252, 0.6);
+  --canvas-shadow-island: 0 16px 42px rgba(15, 23, 42, 0.16);
+}
+
+/* Floating canvas chrome: the Infinite glass island (panel glass + blur +
+   island radius + soft wide shadow). Use on toolbars, palettes, menus that
+   float over the canvas. */
+.canvas-island {
+  background: var(--canvas-panel);
+  border: 1px solid var(--canvas-line);
+  border-radius: var(--canvas-r-island);
+  box-shadow: var(--canvas-shadow-island);
+  backdrop-filter: blur(var(--canvas-blur));
+  -webkit-backdrop-filter: blur(var(--canvas-blur));
+}
+
 /* ===== Storyboard Canvas UI Utilities ===== */
 .ui-panel {
   background: var(--ui-surface-panel);
@@ -748,6 +812,53 @@ body {
 /* Background dots subtle opacity */
 .react-flow__background pattern circle {
   opacity: 0.6;
+}
+
+/* ===== Canvas chrome, scoped to CanvasEngine (.mh-canvas) =====
+   Infinite-Canvas parity Phase 0 G10. Scoped so other ReactFlow surfaces
+   (storyboard workbench) keep their existing look. Runtime edge colors set
+   inline by the runners (processing/run states) still win over these. */
+.mh-canvas {
+  background: var(--canvas-page);
+}
+
+.mh-canvas .react-flow__background pattern circle {
+  fill: var(--canvas-grid);
+  opacity: 1;
+}
+
+/* Edges: faint by default, strong on hover/selection (Infinite .link). */
+.mh-canvas .react-flow__edge-path {
+  stroke: var(--canvas-line-strong);
+  stroke-width: 2.5px;
+  transition: stroke 0.14s var(--canvas-ease);
+}
+
+.mh-canvas .react-flow__edge:hover .react-flow__edge-path,
+.mh-canvas .react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--canvas-strong);
+}
+
+.mh-canvas .react-flow__connection-path {
+  stroke: var(--canvas-accent);
+  stroke-width: 2;
+  stroke-dasharray: 5 5;
+}
+
+.mh-canvas .react-flow__handle {
+  border: 2px solid var(--canvas-card);
+}
+
+.mh-canvas .react-flow__minimap {
+  border-radius: var(--canvas-r-island) !important;
+  background: var(--canvas-panel) !important;
+  box-shadow: var(--canvas-shadow-island);
+}
+
+.mh-canvas .react-flow__controls {
+  border-radius: var(--canvas-r-island);
+  overflow: hidden;
+  box-shadow: var(--canvas-shadow-island);
 }
 
 /* Downloads grid: mobile 2 cols (Tailwind), desktop auto-fill fixed-width cards */

@@ -134,6 +134,13 @@ export interface ControlsConfig {
 }
 
 export interface CanvasEngineProps {
+  /**
+   * Opt-in Infinite-Canvas-parity chrome (Phase 0 G10): adds the `mh-canvas`
+   * scope class (index.css § Canvas chrome — page/grid/edge/handle/minimap
+   * tokens) and the 24px dot lattice. OFF by default so surfaces with their
+   * own theming (editor NodesView inside `.mh-editor-shell`) keep their look.
+   */
+  themedChrome?: boolean;
   /** Node component registry for the current consumer (classic / smart / scene). */
   nodeTypes?: NodeTypes;
   /** Controlled React Flow nodes (already carrying `selected`). */
@@ -201,6 +208,7 @@ export interface CanvasEngineProps {
 const NOOP = () => {};
 
 export function CanvasEngine({
+  themedChrome = false,
   nodeTypes,
   nodes,
   edges,
@@ -425,7 +433,14 @@ export function CanvasEngine({
   });
 
   return (
-    <div ref={containerRef} tabIndex={0} className="relative h-full w-full outline-none">
+    // `mh-canvas` scopes the Infinite-Canvas-parity chrome (grid/edge/handle/
+    // minimap tokens, index.css § Canvas chrome) to opted-in surfaces only —
+    // the editor NodesView keeps its own `.mh-editor-shell` theming.
+    <div
+      ref={containerRef}
+      tabIndex={0}
+      className={`${themedChrome ? 'mh-canvas ' : ''}relative h-full w-full outline-none`}
+    >
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -464,7 +479,10 @@ export function CanvasEngine({
         multiSelectionKeyCode={MULTI_SELECT_KEY}
         deleteKeyCode={null}
       >
-        <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
+        {/* 24px dot lattice per Infinite-Canvas (`radial-gradient … 24px`)
+            when the parity chrome is on; dot color comes from --canvas-grid
+            via the .mh-canvas override. Legacy surfaces keep the 20px grid. */}
+        <Background variant={BackgroundVariant.Dots} gap={themedChrome ? 24 : 20} size={1} />
         <Controls
           position={controls?.position ?? 'bottom-right'}
           showInteractive={controls?.showInteractive}
@@ -476,7 +494,14 @@ export function CanvasEngine({
           zoomable={minimap?.zoomable ?? true}
           nodeColor={minimap?.nodeColor ?? defaultNodeColor}
           nodeStrokeWidth={minimap?.nodeStrokeWidth ?? 3}
-          maskColor={minimap?.maskColor}
+          // xyflow pipes maskColor through a CSS custom property, so a var()
+          // resolves fine and the mask follows the theme (RF's default is a
+          // light gray that glares on dark canvases). Chrome-gated: legacy
+          // surfaces keep the RF default unless they pass their own.
+          maskColor={
+            minimap?.maskColor ??
+            (themedChrome ? 'var(--canvas-mask, rgba(15, 20, 29, 0.6))' : undefined)
+          }
           aria-label={minimap?.ariaLabel}
         />
         <GuideOverlay guides={guides} />
