@@ -20,11 +20,19 @@ import { ProjectOutputTab } from '../components/project/ProjectOutputTab';
 import { StageSelector } from '../components/project/StageSelector';
 import { StageToolGrid } from '../components/project/StageToolGrid';
 import { StageWorkbench } from '../components/project/StageWorkbench';
+import { ProjectWorkspace } from '../components/workspace/ProjectWorkspace';
 
 // Phase B B2 — stage-driven workbench header. Off = legacy stepper + tool
 // strip; on = the workbench card. Dark by default until prod-verified.
 const WORKBENCH_ENABLED =
   import.meta.env.VITE_FEATURE_PROJECT_WORKBENCH === 'true';
+
+// PR-10b — the workspace shell (top project bar + scoped sidebar +
+// Overview + episode switching) replaces the entire detail pane (nav
+// sidebar + stage strip + tab content) below. Off = today's JSX, byte for
+// byte. Dark by default until the Wave 2 module content lands.
+const WORKSPACE_V2_ENABLED =
+  import.meta.env.VITE_FEATURE_PROJECT_WORKSPACE_V2 === 'true';
 
 // Map URL tab param → ProjectNavSidebar section key
 const TAB_TO_SECTION: Record<string, string> = {
@@ -229,6 +237,20 @@ export function ProjectsPage() {
 
   // ─── Project Detail View ────────────────────────────────────
   if (selectedProject) {
+    // PR-10b (Wave 1) — the workspace shell owns the entire detail pane
+    // (its own sidebar + top bar + module content) once the flag is on;
+    // the legacy nav sidebar + stage strip + tab content below is
+    // byte-for-byte untouched when it's off.
+    if (WORKSPACE_V2_ENABLED) {
+      return (
+        <ProjectWorkspace
+          project={selectedProject}
+          teamId={teamId}
+          onBack={handleBackToList}
+        />
+      );
+    }
+
     const sectionCounts: Record<string, number> = {};
     if (shareCount > 0) sectionCounts.shares = shareCount;
     if (trashCount > 0) sectionCounts.trash = trashCount;

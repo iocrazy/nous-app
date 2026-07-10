@@ -929,6 +929,10 @@ export interface ScriptProjectSummary {
   created_at: string;
   updated_at: string;
   chapter_count?: number;
+  // Present at runtime (episodes_router / script_projects.episode_id) but
+  // was missing from this summary type — PR-10b workspace shell resolves
+  // "this episode's script" by filtering on it (see ProjectWorkspace).
+  episode_id?: string | null;
 }
 
 export type ProjectTab = 'files' | 'scripts' | 'storyboard' | 'output' | 'shares' | 'trash';
@@ -954,6 +958,26 @@ export interface StageHistoryEntry {
   entered_at: string;
   exited_at: string | null;
   transitioned_by?: string;
+}
+
+/**
+ * Per-episode progress row from `GET /api/v1/projects/{id}/episodes/progress`
+ * (PR-10b workspace shell, spec G12) — script/scene/shot counts plus a
+ * server-derived pipeline status. `status` is one of
+ * planned/drafting/boarding/boarded/rendered (see episode_repository.py
+ * `_derive_episode_status`); kept as `string` here so the frontend degrades
+ * gracefully instead of throwing on a future status value.
+ */
+export interface EpisodeProgress {
+  episode_id: string;
+  title: string;
+  sort_order: number;
+  script_count: number;
+  scene_count: number;
+  shots_total: number;
+  shots_done: number;
+  renders_count: number;
+  status: string;
 }
 
 /** Aggregate shot-frame progress for the storyboard stage suggestion (Phase B B3). */

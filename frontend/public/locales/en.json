@@ -1321,6 +1321,7 @@
     },
     "workbench": {
       "currentStageOf": "Current stage · {{index}} of {{total}}",
+      "stageProgress": "Stage progress",
       "advanceTo": "Advance to {{stage}}",
       "finalStage": "Final stage",
       "recommendedTools": "Recommended tools",
@@ -1350,6 +1351,38 @@
       "review_nav": "Review deliverables and gather feedback.",
       "delivery_nav": "Package and hand off the finished work.",
       "generating": "Generating {{count}} frames…"
+    },
+    "workspace": {
+      "comingSoon": "Coming soon",
+      "assets": "Assets",
+      "manage": "Manage",
+      "modules": {
+        "overview": "Overview",
+        "canvas": "Canvas",
+        "episodes": "Episodes",
+        "script": "Script",
+        "storyboard": "Storyboard",
+        "renders": "Renders",
+        "characters": "Characters",
+        "locations": "Locations",
+        "files": "Files",
+        "trash": "Trash",
+        "settings": "Settings"
+      },
+      "episodeStatus": {
+        "planned": "Planned",
+        "drafting": "Drafting",
+        "boarding": "Boarding",
+        "boarded": "Boarded",
+        "rendered": "Rendered"
+      },
+      "overview": {
+        "continue": "Continue",
+        "openStudio": "Open studio",
+        "scriptScenes": "{{count}} scenes",
+        "shotsProgress": "Shots {{done}}/{{total}}",
+        "rendersCount": "Renders {{count}}"
+      }
     }
   },
   "storyboard": {

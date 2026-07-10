@@ -1321,6 +1321,7 @@
     },
     "workbench": {
       "currentStageOf": "当前阶段 · 第 {{index}}/{{total}} 步",
+      "stageProgress": "阶段进度",
       "advanceTo": "推进到 {{stage}}",
       "finalStage": "最后阶段",
       "recommendedTools": "推荐工具",
@@ -1350,6 +1351,38 @@
       "review_nav": "审阅交付物并收集反馈。",
       "delivery_nav": "打包并交接完成的作品。",
       "generating": "正在生成 {{count}} 帧…"
+    },
+    "workspace": {
+      "comingSoon": "即将上线",
+      "assets": "素材",
+      "manage": "管理",
+      "modules": {
+        "overview": "总览",
+        "canvas": "画布",
+        "episodes": "剧集",
+        "script": "脚本",
+        "storyboard": "分镜",
+        "renders": "成片",
+        "characters": "人物",
+        "locations": "场景",
+        "files": "文件",
+        "trash": "回收站",
+        "settings": "设置"
+      },
+      "episodeStatus": {
+        "planned": "待规划",
+        "drafting": "创作中",
+        "boarding": "分镜中",
+        "boarded": "分镜完成",
+        "rendered": "已产出"
+      },
+      "overview": {
+        "continue": "继续",
+        "openStudio": "打开工作室",
+        "scriptScenes": "{{count}} 场",
+        "shotsProgress": "镜头 {{done}}/{{total}}",
+        "rendersCount": "成片 {{count}}"
+      }
     }
   },
   "storyboard": {

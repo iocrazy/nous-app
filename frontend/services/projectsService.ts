@@ -11,6 +11,7 @@ import {
   StageHistoryEntry,
   StageSuggestion,
   ProjectSuggestionItem,
+  EpisodeProgress,
 } from '../types';
 import { apiClient, apiFetch } from './apiClient';
 
@@ -473,6 +474,20 @@ export const fetchStageHistory = async (
 ): Promise<StageHistoryEntry[]> => {
   const response = await apiClient.get<Envelope<StageHistoryEntry[]>>(
     `/api/v1/projects/${projectId}/stage_history`,
+  );
+  return response.data ?? [];
+};
+
+/**
+ * Per-episode progress feed for the workspace shell's Episodes sidebar
+ * (PR-10b, spec G12) — script/scene/shot counts + derived status, ordered
+ * by sort_order. Envelope-wrapped like the other stage endpoints above.
+ */
+export const fetchEpisodesProgress = async (
+  projectId: string,
+): Promise<EpisodeProgress[]> => {
+  const response = await apiClient.get<Envelope<EpisodeProgress[]>>(
+    `/api/v1/projects/${projectId}/episodes/progress`,
   );
   return response.data ?? [];
 };
