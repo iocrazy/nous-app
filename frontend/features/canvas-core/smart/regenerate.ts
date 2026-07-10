@@ -11,7 +11,7 @@
 
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { upsertGenerationSlots } from './genSlots';
-import { useRegenStore } from './regenStore';
+import { regenKey, useRegenStore } from './regenStore';
 import { withGenerationRunner } from './generationRunner';
 import { createBackendRunner } from './runner.backend';
 import {
@@ -49,10 +49,10 @@ function resolveCaller(canvasId: string | null): PromptCaller {
  * run succeeded AND its results were written into this canvas.
  */
 export async function regenerateForOutput(outputNodeId: string): Promise<boolean> {
-  const regen = useRegenStore.getState();
-  if (regen.running[outputNodeId]) return false;
-
   const { nodes, patchNode, canvasId } = useCanvasCoreStore.getState();
+  const regen = useRegenStore.getState();
+  const key = regenKey(canvasId, outputNodeId);
+  if (regen.running[key]) return false;
   const promptId = promptIdForOutput(outputNodeId);
   if (!promptId) return false;
   const prompt = nodes.find((n) => asObj(n).id === promptId);
@@ -70,7 +70,7 @@ export async function regenerateForOutput(outputNodeId: string): Promise<boolean
     gen: data.gen ?? null,
   };
 
-  regen.start(outputNodeId);
+  regen.start(key);
   try {
     const result = await runSinglePrompt(ctx, resolveCaller(startCanvasId), {
       onStatusChange: (id, status, fields) => {
@@ -88,6 +88,6 @@ export async function regenerateForOutput(outputNodeId: string): Promise<boolean
     }
     return true;
   } finally {
-    useRegenStore.getState().finish(outputNodeId);
+    useRegenStore.getState().finish(key);
   }
 }

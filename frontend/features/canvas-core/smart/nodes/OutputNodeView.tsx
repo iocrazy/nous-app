@@ -22,7 +22,7 @@ import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { createOutputNode } from '../factories';
 import { latestHistoryImageUrl } from '../outputHistory';
 import { promptIdForOutput, regenerateForOutput } from '../regenerate';
-import { useRegenStore } from '../regenStore';
+import { regenKey, useRegenStore } from '../regenStore';
 import type { OutputNodeData } from '../types';
 import { SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { OutputLightbox, type LightboxItem } from './OutputLightbox';
@@ -78,7 +78,8 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
   const [outpaintError, setOutpaintError] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const lightboxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const regenerating = useRegenStore((s) => !!s.running[id]);
+  const canvasId = useCanvasCoreStore((s) => s.canvasId);
+  const regenerating = useRegenStore((s) => !!s.running[regenKey(canvasId, id)]);
 
   useEffect(
     () => () => {
@@ -464,6 +465,17 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
             draggable={false}
             onClick={() => queueLightbox(0)}
             className="block w-full rounded object-contain"
+          />
+        ) : kind === 'video' && (preview_url || images?.[0]?.url) ? (
+          /* Clickable inline preview — the lightbox owns playback controls
+             (G7 review #2: video slots previously rendered nothing). */
+          <video
+            data-testid="output-video-preview"
+            src={preview_url || images?.[0]?.url}
+            muted
+            preload="metadata"
+            onClick={() => queueLightbox(0)}
+            className="block w-full cursor-zoom-in rounded"
           />
         ) : preview_text ? (
           <div className="line-clamp-4 whitespace-pre-wrap text-sm text-slate-800 dark:text-slate-200">

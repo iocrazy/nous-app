@@ -93,3 +93,20 @@ describe('OutputLightbox', () => {
     expect(onRegenerate).toHaveBeenCalled();
   });
 });
+
+describe('OutputLightbox portal + key isolation', () => {
+  it('portals to document.body so RF transform ancestors cannot trap fixed', () => {
+    const { container } = renderBox();
+    const box = screen.getByTestId('output-lightbox');
+    // Must NOT live inside the render container (the RF node subtree).
+    expect(container.contains(box)).toBe(false);
+    expect(box.parentElement).toBe(document.body);
+  });
+
+  it('arrow keys on the compare slider do not switch images', () => {
+    const { onIndexChange } = renderBox({ compareUrl: '/gm/0/cover' });
+    fireEvent.click(screen.getByRole('button', { name: 'Compare' }));
+    fireEvent.keyDown(screen.getByRole('slider'), { key: 'ArrowRight' });
+    expect(onIndexChange).not.toHaveBeenCalled();
+  });
+});

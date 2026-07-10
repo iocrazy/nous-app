@@ -6,10 +6,13 @@
 import { expect, test, type Page } from '@playwright/test';
 import { setupStubbedSession, TEAM_ID } from './helpers/stubs';
 
-// 1×1 transparent PNG — same-origin data URLs render instantly and avoid
-// network flakiness for image loads.
-const PNG =
-  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+// Visible colored SVG data URLs (512×512) — instant, zero network, and big
+// enough to eyeball the lightbox layout in the artifact screenshots.
+const svg = (color: string) =>
+  `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='512' height='512'><rect width='512' height='512' fill='%23${color}'/></svg>`;
+const PNG = svg('e11d48'); // rose — current versions
+const PNG2 = svg('10b981'); // emerald — second image
+const PNG_OLD = svg('6366f1'); // indigo — archived history version
 
 const CANVAS = {
   id: 'c-media',
@@ -36,7 +39,7 @@ const CANVAS = {
         crop_region: null,
         images: [
           { url: PNG, kind: 'image', name: 'one.png' },
-          { url: PNG, kind: 'image', name: 'two.png' },
+          { url: PNG2, kind: 'image', name: 'two.png' },
         ],
         gen_slot: { node_id: 'p1', index: 0 },
       },
@@ -51,7 +54,7 @@ const CANVAS = {
         preview_text: 'History',
         preview_url: null,
         crop_region: null,
-        images: [{ url: PNG, kind: 'image', name: 'old.png' }],
+        images: [{ url: PNG_OLD, kind: 'image', name: 'old.png' }],
         history_for: 'out1',
       },
     },
@@ -109,6 +112,14 @@ test('image click opens the lightbox; arrows navigate; Escape closes', async ({ 
     .click();
   const lightbox = page.getByTestId('output-lightbox');
   await expect(lightbox).toBeVisible();
+  // MUST truly cover the viewport — without a body portal, RF's transformed
+  // ancestors collapse position:fixed into a small box inside the node.
+  const viewport = page.viewportSize();
+  const box = await lightbox.boundingBox();
+  expect(box?.width).toBe(viewport?.width);
+  expect(box?.height).toBe(viewport?.height);
+  expect(box?.x).toBe(0);
+  expect(box?.y).toBe(0);
   await expect(page.getByTestId('lightbox-counter')).toHaveText('1 / 2');
 
   await page.getByRole('button', { name: 'Next' }).click();

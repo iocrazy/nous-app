@@ -72,3 +72,20 @@ describe('OutputNodeView lightbox wiring', () => {
     expect(screen.queryByTestId('output-lightbox')).toBeNull();
   });
 });
+
+describe('video output entry (G7 review #2)', () => {
+  it('renders a clickable video preview that opens the video lightbox', () => {
+    renderOutput({
+      kind: 'video',
+      resource_id: null,
+      preview_text: '',
+      preview_url: '/gm/9/stream',
+      crop_region: null,
+    });
+    const preview = screen.getByTestId('output-video-preview');
+    fireEvent.click(preview);
+    act(() => vi.advanceTimersByTime(300));
+    expect(screen.getByTestId('output-lightbox')).toBeTruthy();
+    expect(screen.getByTestId('lightbox-video')).toBeTruthy();
+  });
+});

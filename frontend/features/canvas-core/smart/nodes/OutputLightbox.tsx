@@ -16,6 +16,7 @@ import {
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 export interface LightboxItem {
   url: string;
@@ -121,7 +122,11 @@ export function OutputLightbox({
 
   if (!current) return null;
 
-  return (
+  // Portal to <body>: this component renders inside an RF node subtree whose
+  // ancestors carry CSS transforms — a transform makes the ancestor the
+  // containing block for position:fixed, collapsing "fullscreen" to a small
+  // box inside the node (adversarial-review CRITICAL, screenshot-proven).
+  return createPortal(
     <div
       ref={rootRef}
       data-testid="output-lightbox"
@@ -215,19 +220,22 @@ export function OutputLightbox({
             />
           ) : compareOn && compareUrl ? (
             <div className="relative select-none" data-testid="compare-stage">
+              {/* The CURRENT image defines the box (no letterbox), so the
+                  divider always aligns with its real pixels; the previous
+                  version sits underneath, letterboxed if aspects differ. */}
               <img
                 data-testid="compare-original"
                 src={compareUrl}
                 alt="Previous version"
                 draggable={false}
-                className="block max-h-[80vh] max-w-full"
+                className="absolute inset-0 block h-full w-full object-contain"
               />
               <img
                 data-testid="compare-result"
                 src={current.url}
                 alt="Current version"
                 draggable={false}
-                className="absolute inset-0 block h-full w-full object-contain"
+                className="relative block max-h-[80vh] max-w-full"
                 style={{ clipPath: `inset(0 ${100 - sliderPct}% 0 0)` }}
               />
               <div
@@ -242,6 +250,7 @@ export function OutputLightbox({
                 value={sliderPct}
                 aria-label="Compare position"
                 onChange={(e) => setSliderPct(Number(e.target.value))}
+                onKeyDown={(e) => e.stopPropagation()}
                 className="absolute inset-x-0 bottom-2 mx-auto w-2/3 cursor-ew-resize"
               />
             </div>
@@ -275,7 +284,8 @@ export function OutputLightbox({
           </button>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

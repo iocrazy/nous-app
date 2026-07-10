@@ -136,7 +136,8 @@ describe('regenerateForOutput', () => {
     resolveRun?.();
     await first;
     expect(runs).toBe(1);
-    expect(useRegenStore.getState().running.out1).toBeFalsy();
+    // Keyed per canvas ('9' seeded) so same-id nodes on other canvases stay usable.
+    expect(useRegenStore.getState().running['9:out1']).toBeFalsy();
   });
 
   it('marks the prompt failed (and returns false) on a failed run', async () => {
