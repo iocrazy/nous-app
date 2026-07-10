@@ -63,3 +63,33 @@ describe('ActivityPanel', () => {
     await waitFor(() => expect(getActivity).toHaveBeenCalledTimes(2));
   });
 });
+
+describe('ActivityPanel calendar enrichment (go-live feedback)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem('inspiration.activityMode', 'calendar');
+    getActivity.mockResolvedValue([{ day: '2026-07-07', cnt: 3 }]);
+  });
+
+  it('days with notes show a visible count badge', async () => {
+    render(<ActivityPanel selectedDate={null} onSelectDate={vi.fn()} refreshKey={0} />);
+    const cell = await screen.findByLabelText('2026-07-07: 3 notes');
+    expect(cell.textContent).toContain('3');
+  });
+
+  it('Today button selects today and shows the month footer total', async () => {
+    const onSelectDate = vi.fn();
+    render(<ActivityPanel selectedDate={null} onSelectDate={onSelectDate} refreshKey={0} />);
+    await screen.findByLabelText('2026-07-07: 3 notes');
+    fireEvent.click(screen.getByText('Today'));
+    expect(onSelectDate).toHaveBeenCalledWith(expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/));
+    expect(screen.getByText(/notes this month/)).toBeTruthy();
+  });
+
+  it('selected date shows an in-panel clear chip', async () => {
+    const onSelectDate = vi.fn();
+    render(<ActivityPanel selectedDate="2026-07-07" onSelectDate={onSelectDate} refreshKey={0} />);
+    fireEvent.click(await screen.findByLabelText('Clear selected day'));
+    expect(onSelectDate).toHaveBeenCalledWith(null);
+  });
+});

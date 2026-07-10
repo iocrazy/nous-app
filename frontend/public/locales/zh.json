@@ -2588,7 +2588,11 @@
       "exampleTitle": "示例"
     },
     "pinned": "置顶",
-    "noMatching": "没有匹配的笔记。"
+    "noMatching": "没有匹配的笔记。",
+    "today": "今天",
+    "dayNotes": "{{count}} 条",
+    "monthNotes": "本月 {{count}} 条",
+    "hasNotes": "有笔记"
   },
   "editor": {
     "brand": "MediaHub Projects",
