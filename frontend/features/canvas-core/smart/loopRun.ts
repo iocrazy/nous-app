@@ -17,6 +17,7 @@
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import type { CanvasNode } from '../types';
 import { createOutputNode } from './factories';
+import type { OutputNodeData } from './types';
 import { runLoopCascade, type LoopRunSummary } from './loopRunner';
 import { useLoopRunStore } from './loopRunStore';
 import { createBackendRunner } from './runner.backend';
@@ -57,13 +58,29 @@ function upsertRoundSlot(args: {
   const store = useCanvasCoreStore.getState();
   const text = args.results[args.results.length - 1]?.text ?? '';
   const preview = `Run ${args.roundIndex}: ${text}`;
+  // Generation rounds (G4-F2) carry durable URLs — the slot becomes a media
+  // node with images[] instead of a text preview.
+  const urls = args.results.flatMap((r) => r.urls ?? []);
+  const mediaKind = (args.results.find((r) => r.media_kind)?.media_kind ??
+    'image') as OutputNodeData['kind'];
+  const mediaData =
+    urls.length > 0
+      ? {
+          kind: mediaKind,
+          images: urls.map((url) => ({ url, kind: mediaKind })),
+          preview_url: urls[0],
+          preview_text: `Run ${args.roundIndex}`,
+        }
+      : null;
 
   const existing = store.nodes.find((n) => {
     const tag = slotTagOf(n);
     return tag?.loop_id === args.loopId && tag?.round_index === args.roundIndex;
   });
   if (existing) {
-    store.patchNode(String(asObj(existing).id), { data: { preview_text: preview } });
+    store.patchNode(String(asObj(existing).id), {
+      data: mediaData ?? { preview_text: preview },
+    });
     return;
   }
 
@@ -74,7 +91,7 @@ function upsertRoundSlot(args: {
   const tailPos = (asObj(tail).position as { x: number; y: number }) ?? { x: 0, y: 0 };
 
   const base = createOutputNode(
-    { kind: 'text', preview_text: preview },
+    mediaData ?? { kind: 'text', preview_text: preview },
     {
       position: {
         x: tailPos.x + SLOT_OFFSET_X,
