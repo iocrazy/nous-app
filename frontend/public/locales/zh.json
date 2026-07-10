@@ -57,6 +57,7 @@
     "points": "积分",
     "shared": "分享管理",
     "workspace": "Workspace",
+    "canvas": "画布",
     "aiLibrary": "AI 库",
     "agents": "智能体",
     "skills": "技能",
@@ -1434,6 +1435,20 @@
       "extremeWide": "极远景"
     },
     "readOnlyBanner": "此旧版分镜已只读 — 镜头现已迁入剧本编辑器"
+  },
+  "canvasList": {
+    "title": "画布",
+    "subtitle": "所有项目下的画布",
+    "newCanvas": "新建画布",
+    "untitled": "未命名画布",
+    "emptyProjects": "还没有项目——先创建一个项目再开始画布。",
+    "loadFailed": "加载画布失败",
+    "groupLoadFailed": "加载该项目的画布失败",
+    "createFailed": "创建画布失败",
+    "kind": {
+      "smart": "智能",
+      "classic": "经典"
+    }
   },
   "canvas": {
     "addImage": "+ 添加图片",

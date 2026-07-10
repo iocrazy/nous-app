@@ -57,6 +57,7 @@
     "points": "Points",
     "shared": "Shared",
     "workspace": "Workspace",
+    "canvas": "Canvas",
     "aiLibrary": "AI Library",
     "agents": "Agents",
     "skills": "Skills",
@@ -1434,6 +1435,20 @@
       "extremeWide": "Extreme Wide"
     },
     "readOnlyBanner": "This legacy storyboard is read-only — shots now live in the script editor"
+  },
+  "canvasList": {
+    "title": "Canvas",
+    "subtitle": "All canvases across your projects",
+    "newCanvas": "New Canvas",
+    "untitled": "Untitled Canvas",
+    "emptyProjects": "No projects yet — create a project to start a canvas.",
+    "loadFailed": "Failed to load canvases",
+    "groupLoadFailed": "Failed to load canvases for this project",
+    "createFailed": "Failed to create canvas",
+    "kind": {
+      "smart": "Smart",
+      "classic": "Classic"
+    }
   },
   "canvas": {
     "addImage": "+ Add Image",

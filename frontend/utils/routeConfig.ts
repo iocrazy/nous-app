@@ -25,6 +25,7 @@ export const VIEW_PATH_MAP: Record<ViewState, string> = {
   ailibrary: '/ai-library/agents',
   chat: '/chat',
   distribution: '/distribution/accounts',
+  canvas: '/canvas',
 };
 
 /**
@@ -55,6 +56,8 @@ export function pathnameToView(pathname: string): ViewState {
   // flat /agents and /skills so it wins on match.
   if (stripped.startsWith('/ai-library')) return 'ailibrary';
   if (stripped.startsWith('/distribution')) return 'distribution';
+  // Matches both the list (/canvas) and the editor (/canvas/:canvasId).
+  if (stripped.startsWith('/canvas')) return 'canvas';
   if (stripped.startsWith('/agents')) return 'agents';
   if (stripped.startsWith('/skills')) return 'skills';
   if (stripped.startsWith('/chat')) return 'chat';
