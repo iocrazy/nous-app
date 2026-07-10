@@ -74,6 +74,12 @@ export const InspirationPage: React.FC = () => {
     return () => clearTimeout(id);
   }, [queryInput]);
 
+  // Category chips are per-day: switching the day resets the filter so a
+  // vanished chip can't leave an invisible, unclearable filter behind.
+  useEffect(() => {
+    setActiveCategory(null);
+  }, [date]);
+
   const filters = useMemo(
     () => ({ date: date ?? undefined, tag: tag ?? undefined, q: q || undefined }),
     [date, tag, q],
