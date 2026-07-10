@@ -130,3 +130,25 @@ describe('CanvasListPage — trash (G9)', () => {
     });
   });
 });
+
+describe('CanvasListPage — trash cache hygiene (review F3/F4)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  it('re-expanding the trash refetches instead of serving the first load', async () => {
+    listTeamCanvases.mockResolvedValue(TREE);
+    listTeamCanvasTrash.mockResolvedValueOnce([]).mockResolvedValueOnce(TRASHED);
+    await renderPage();
+
+    const toggle = screen.getByRole('button', { name: /Trash/ });
+    fireEvent.click(toggle);
+    await screen.findByText('Trash is empty');
+    fireEvent.click(toggle); // collapse
+    fireEvent.click(toggle); // expand again — must refetch
+    await screen.findByText('Old Canvas');
+    expect(listTeamCanvasTrash).toHaveBeenCalledTimes(2);
+  });
+});

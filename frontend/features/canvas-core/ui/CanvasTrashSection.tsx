@@ -49,7 +49,9 @@ export function CanvasTrashSection({
     const next = !open;
     setOpen(next);
     setArmedId(null);
-    if (next && rows === null) void loadTrash();
+    // Refetch on EVERY expand — cards deleted while collapsed must show up
+    // (review F4: a once-loaded cache read as "Trash is empty" forever).
+    if (next) void loadTrash();
   };
 
   const handleRestore = async (canvasId: string) => {

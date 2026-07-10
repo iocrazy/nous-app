@@ -169,6 +169,10 @@ class CanvasRepository:
                 .update(mutable)
                 .eq("id", _bigint(canvas_id))
                 .eq("base_updated_at", expected_base_updated_at)
+                # A zombie tab must not autosave into a trashed document —
+                # soft delete doesn't rotate the lock token, so the eq()
+                # guard alone would still match.
+                .is_("deleted_at", "null")
                 .execute()
             )
             if not result.data:
@@ -360,6 +364,9 @@ class CanvasRepository:
     # ------------------------------------------------------------------
 
     async def get_project_id(self, canvas_id: str) -> Optional[str]:
+        # MUST NOT filter deleted_at — the restore/purge write gates depend
+        # on resolving TRASHED canvases; adding the filter here would turn
+        # every restore into a 404.
         """Cheap project lookup for membership checks (skips the JSONB)."""
         try:
             client = await self._client()

@@ -8,7 +8,7 @@
 // whose orphan filter hides freshly created empty canvases, and no
 // per-project N+1 fan-out.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Frame, Loader2, Plus, Trash2 } from 'lucide-react';
@@ -38,13 +38,17 @@ export default function CanvasListPage() {
   const [reloadTick, setReloadTick] = useState(0);
   const reload = useCallback(() => setReloadTick((n) => n + 1), []);
 
+  const lastTeamRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!CANVAS_NAV_ENABLED || !teamId) return undefined;
     let cancelled = false;
     // Reset before each run so a stale error (or another team's groups)
-    // never survives a teamId change. reloadTick > 0 keeps the current
-    // list on screen while a trash restore refetches.
-    if (reloadTick === 0) {
+    // never survives a teamId change — a restore-triggered refetch of the
+    // SAME team keeps the current list on screen instead (no flash).
+    const teamChanged = lastTeamRef.current !== teamId;
+    lastTeamRef.current = teamId;
+    if (teamChanged) {
       setGroups(null);
     }
     setLoadFailed(false);
@@ -193,7 +197,9 @@ export default function CanvasListPage() {
           ))}
 
         {!loadFailed && groups !== null && teamId && (
-          <CanvasTrashSection teamId={teamId} onRestored={reload} />
+          /* key: switching teams must remount the section — its rows/open
+             state belong to ONE team (review F3: cross-team trash bleed). */
+          <CanvasTrashSection key={teamId} teamId={teamId} onRestored={reload} />
         )}
       </div>
     </div>
