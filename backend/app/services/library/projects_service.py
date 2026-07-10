@@ -361,6 +361,50 @@ class ProjectsService:
                 f"[projects] default-stage init failed for {project.get('id')}: {e}"
             )
 
+        # G3 (final UI spec): every project is born with an Episode 1 + an
+        # empty script attached, so Episodes/Canvas always have a target.
+        # Best-effort, same discipline as the default-stage block above — a
+        # hiccup here must never fail project creation. team_id falls back
+        # to the creator's own team (script_projects.team_id is NOT NULL
+        # regardless of whether the *project* itself belongs to a team —
+        # see create_script_project's require_team_id for the same pattern).
+        try:
+            episode_team_id = project.get("team_id")
+            if not episode_team_id:
+                from app.core.deps import get_team_id_for_user
+
+                episode_team_id = await get_team_id_for_user(user_id)
+
+            if episode_team_id:
+                from app.repositories.episode_repository import (
+                    get_episode_repository,
+                )
+                from app.repositories.script_repository import (
+                    get_script_project_repository,
+                )
+
+                episode = await get_episode_repository().create(
+                    {
+                        "project_id": project["id"],
+                        "title": "Episode 1",
+                        "sort_order": 1,
+                    }
+                )
+                await get_script_project_repository().create(
+                    {
+                        "project_id": project["id"],
+                        "team_id": episode_team_id,
+                        "episode_id": episode["id"],
+                        "name": "Episode 1",
+                        "status": "active",
+                        "created_by": user_id,
+                    }
+                )
+        except Exception as e:  # noqa: BLE001 — default episode/script is enrichment
+            logger.error(
+                f"[projects] default-episode init failed for {project.get('id')}: {e}"
+            )
+
         return project
 
     async def update_project(self, project_id: str, user_id: str, data: dict) -> dict:
