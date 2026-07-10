@@ -264,4 +264,11 @@ describe('ProjectWorkspace', () => {
     expect(navigate).not.toHaveBeenCalled();
     expect(mockEditorShell).not.toHaveBeenCalled();
   });
+
+  it('shows the disabled Publish placeholder in the current-episode block (PR-11, G12)', async () => {
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    const publishBtn = await screen.findByTestId('ws-ep-publish');
+    expect(publishBtn).toBeDisabled();
+  });
 });
