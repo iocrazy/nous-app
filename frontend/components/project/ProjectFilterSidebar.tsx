@@ -1,5 +1,5 @@
 import {
-  LayoutGrid, Star, Clock, Zap, Archive,
+  LayoutGrid, Star, Archive,
   FolderOpen, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -11,8 +11,6 @@ interface ProjectFilterSidebarProps {
   projectCounts: {
     all: number;
     starred: number;
-    recent: number;
-    active: number;
     archived: number;
   };
   folderCounts: Record<string, number>;
@@ -21,11 +19,13 @@ interface ProjectFilterSidebarProps {
   onToggleCollapse: () => void;
 }
 
+// PR-9 (G7): Views rail reduced to All / Starred / Archived — Recent and
+// Active are dropped (the homepage work queue now surfaces "needs
+// attention" directly, making a separate Active filter redundant, and
+// Recent duplicated the project switcher's own recency sort).
 const VIEW_FILTERS = [
   { key: 'all', labelKey: 'projects.view.all', icon: LayoutGrid },
   { key: 'starred', labelKey: 'projects.view.starred', icon: Star },
-  { key: 'recent', labelKey: 'projects.view.recent', icon: Clock },
-  { key: 'active', labelKey: 'projects.view.active', icon: Zap },
   { key: 'archived', labelKey: 'projects.view.archived', icon: Archive },
 ] as const;
 

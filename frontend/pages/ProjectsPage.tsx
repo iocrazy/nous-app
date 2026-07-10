@@ -129,13 +129,12 @@ export function ProjectsPage() {
     return [...groups].sort();
   }, [projects]);
 
+  // PR-9 (G7): Views rail reduced to All / Starred / Archived.
   const projectCounts = useMemo(() => ({
     all: projects.length,
     starred: starredProjects.length,
-    recent: recentProjects.length,
-    active: projects.filter(p => !p.archived_at).length,
     archived: projects.filter(p => !!p.archived_at).length,
-  }), [projects, starredProjects, recentProjects]);
+  }), [projects, starredProjects]);
 
   const folderCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -147,11 +146,10 @@ export function ProjectsPage() {
   }, [projects]);
 
   // Filter projects for card view
+  // PR-9 (G7): Views rail reduced to All / Starred / Archived.
   const filteredProjects = useMemo(() => {
     switch (activeFilter) {
       case 'starred': return starredProjects;
-      case 'recent': return recentProjects;
-      case 'active': return projects.filter(p => !p.archived_at);
       case 'archived': return projects.filter(p => !!p.archived_at);
       default:
         // Check if it's a folder filter
@@ -160,13 +158,11 @@ export function ProjectsPage() {
         }
         return projects;
     }
-  }, [activeFilter, projects, starredProjects, recentProjects, folders]);
+  }, [activeFilter, projects, starredProjects, folders]);
 
   const filterTitle = useMemo(() => {
     switch (activeFilter) {
       case 'starred': return t('projects.filterTitle.starred');
-      case 'recent': return t('projects.filterTitle.recent');
-      case 'active': return t('projects.filterTitle.active');
       case 'archived': return t('projects.filterTitle.archived');
       default:
         if (folders.includes(activeFilter)) return activeFilter;

@@ -5,11 +5,12 @@
  * are all optional: a legacy project renders the base card, an enriched one
  * gains ring + activity + member stack. Both paths are pinned here.
  */
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ProjectCard } from './ProjectCard';
-import type { Project } from '../types';
+import * as svc from '../services/projectsService';
+import type { Project, ProjectSuggestionItem } from '../types';
 
 // relativeTime pulls in the real i18n instance via formatDate — stub it so
 // this suite doesn't need initReactI18next.
@@ -21,11 +22,17 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, opts?: Record<string, unknown> | string) => {
       if (typeof opts === 'object' && opts && 'stage' in opts) return `Entered ${opts.stage}`;
+      if (typeof opts === 'object' && opts && 'count' in opts && opts.count != null) return `${key}:${opts.count}`;
       if (typeof opts === 'string') return opts;
       return key;
     },
   }),
 }));
+
+// PR-9 grid suggestion row fires generateMissingFrames via useToast() — the
+// pre-existing tests below don't wrap a ToastProvider, so stub the hook
+// (harmless for suites that never render a suggestion row).
+vi.mock('./Toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
 
 const base: Project = {
   id: '1',
@@ -140,5 +147,67 @@ describe('ProjectCard', () => {
     expect(screen.getByTestId('stage-ring-archived')).toBeTruthy();
     expect(screen.getByRole('img', { name: 'Archived' })).toBeTruthy();
     expect(screen.queryByText('6/6')).toBeNull();
+  });
+
+  // PR-9 (G7) — grid secondary view: bottom next-action row driven by an
+  // optional `suggestion` prop, absent by default (all prior tests above
+  // pass no `suggestion` and must keep rendering exactly as before).
+  describe('suggestion row (PR-9)', () => {
+    const navigateSuggestion: ProjectSuggestionItem = {
+      project_id: '1',
+      name: base.name,
+      stage_slug: 'review',
+      kind: 'review_nav',
+      stalled: false,
+      action: { type: 'navigate', tab: 'shares', label_key: 'projects.suggest.cta_review', count: null },
+    };
+
+    const generateSuggestion: ProjectSuggestionItem = {
+      project_id: '1',
+      name: base.name,
+      stage_slug: 'storyboard',
+      kind: 'storyboard_generate',
+      stalled: false,
+      progress: { total: 12, done: 9, empty: 3, generating: 0, failed: 0, script_count: 2, scene_count: 5 },
+      action: { type: 'generate_missing_frames', label_key: 'projects.suggest.ctaGenerate', count: 3 },
+    };
+
+    it('renders no suggestion row when the prop is absent', () => {
+      render(<ProjectCard project={base} onClick={noop} onToggleStar={noop} />);
+      expect(screen.queryByTestId('project-card-suggestion')).toBeNull();
+    });
+
+    it('renders the message + navigate CTA and calls onClick without touching generateMissingFrames', () => {
+      const onClick = vi.fn();
+      const gen = vi.spyOn(svc, 'generateMissingFrames');
+      render(
+        <ProjectCard project={base} onClick={onClick} onToggleStar={noop} suggestion={navigateSuggestion} />,
+      );
+      expect(screen.getByTestId('project-card-suggestion')).toBeTruthy();
+      const cta = screen.getByTestId('project-card-suggestion-cta');
+      fireEvent.click(cta);
+      expect(onClick).toHaveBeenCalled();
+      expect(gen).not.toHaveBeenCalled();
+    });
+
+    it('generate CTA fires generateMissingFrames and the refetch callback', async () => {
+      const gen = vi
+        .spyOn(svc, 'generateMissingFrames')
+        .mockResolvedValue({ dispatched_count: 3, task_ids: ['t1', 't2', 't3'] });
+      const onRefetch = vi.fn();
+      render(
+        <ProjectCard
+          project={base}
+          onClick={noop}
+          onToggleStar={noop}
+          suggestion={generateSuggestion}
+          onSuggestionRefetch={onRefetch}
+        />,
+      );
+      const cta = screen.getByTestId('project-card-suggestion-cta');
+      fireEvent.click(cta);
+      await waitFor(() => expect(gen).toHaveBeenCalledWith('1'));
+      await waitFor(() => expect(onRefetch).toHaveBeenCalled());
+    });
   });
 });

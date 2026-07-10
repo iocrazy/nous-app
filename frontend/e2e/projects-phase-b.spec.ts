@@ -3,8 +3,11 @@ import { setupStubbedSession, TEAM_ID } from './helpers/stubs';
 
 /**
  * Visual regression stub spec for Projects Phase B (B1 Stage Ring cards +
- * B2 Stage Workbench + B3 data-aware Stage Suggestion), checked against the
- * approved "A · Stage Ring" mockup (docs/superpowers/specs/2026-07-08...).
+ * B2 Stage Workbench + B3 data-aware Stage Suggestion) and PR-9 (G7 homepage
+ * work queue + grid secondary view), checked against the approved mockups
+ * (docs/superpowers/specs/2026-07-08-projects-phase-b-mockups.html for the
+ * card states, 2026-07-10-projects-workspace-final.html "主页" section for
+ * the queue rows).
  *
  * MediaHub has no runnable dev backend for e2e (see helpers/stubs.ts), so the
  * whole `/api/v1/projects*` surface is intercepted at the network layer with
@@ -97,10 +100,39 @@ const STORYBOARD_SUGGESTION = {
 };
 
 /**
+ * PR-9 (G7) homepage work-queue batch fixture — deliberately ordered
+ * generate-then-stalled here to prove the queue view sorts (stalled first),
+ * not just passes fixtures through in fixture order. Project 3 (archived) is
+ * intentionally absent — the real endpoint excludes archived projects.
+ */
+const PROJECT_SUGGESTIONS = [
+  {
+    project_id: '1',
+    name: 'Spring Campaign 2026',
+    stage_slug: 'storyboard',
+    kind: 'storyboard_generate',
+    stalled: false,
+    progress: { total: 12, done: 9, empty: 3, generating: 0, failed: 0, script_count: 2, scene_count: 5 },
+    action: { type: 'generate_missing_frames', label_key: 'projects.suggest.ctaGenerate', count: 3 },
+    latest_activity: { kind: 'file', actor: 'HG', at: '2026-07-08T10:00:00Z', stalled: false },
+  },
+  {
+    project_id: '2',
+    name: 'Client Reel — Northwind',
+    stage_slug: 'review',
+    kind: 'review_nav',
+    stalled: true,
+    action: { type: 'navigate', tab: 'shares', label_key: 'projects.suggest.cta_review', count: null },
+    latest_activity: { kind: 'stage', label: 'Review', at: '2026-07-05T00:00:00Z', stalled: true },
+  },
+];
+
+/**
  * Installs the single `**\/api/v1/projects*` handler that dispatches on
- * pathname to the list / stage-catalog / current-stage / stage-suggestion
- * fixtures. Registered after `setupStubbedSession`'s catch-alls, so it wins
- * (Playwright resolves the most-recently-registered matching route first).
+ * pathname to the list / suggestions / stage-catalog / current-stage /
+ * stage-suggestion fixtures. Registered after `setupStubbedSession`'s
+ * catch-alls, so it wins (Playwright resolves the most-recently-registered
+ * matching route first).
  */
 async function routeProjectsApi(
   page: Page,
@@ -116,6 +148,9 @@ async function routeProjectsApi(
 
     if (pathname === '/api/v1/projects') {
       return route.fulfill({ json: { data: PROJECTS } });
+    }
+    if (pathname === '/api/v1/projects/suggestions') {
+      return route.fulfill({ json: { items: PROJECT_SUGGESTIONS } });
     }
     if (opts.withWorkbench && pathname === '/api/v1/projects/stages/catalog') {
       return route.fulfill({ json: { data: CATALOG } });
@@ -153,35 +188,41 @@ test.describe('Projects Phase B — Stage Ring alignment', () => {
     });
   });
 
-  test('list cards match A mockup states', async ({ page }) => {
+  test('homepage queue: stalled row first + amber, generate CTA, toggle to grid', async ({ page }) => {
     await routeProjectsApi(page);
     await page.goto(PROJECTS_URL);
 
-    await expect(page.getByText('Spring Campaign 2026')).toBeVisible();
-    await expect(page.getByText('Client Reel — Northwind')).toBeVisible();
-    await expect(page.getByText('Q4 Retrospective Edit')).toBeVisible();
+    // PR-9 (G7) — Queue is the new homepage default, not the card grid.
+    await expect(page.getByTestId('projects-queue-view')).toBeVisible();
+    const rows = page.getByTestId('queue-row');
+    await expect(rows).toHaveCount(2);
 
-    // B1 — segmented stage ring renders for cards with a current_stage.
+    // Stalled project sorts first regardless of fixture order, its
+    // attention dot + meta line use the stall token (amber in dark mode).
+    await expect(rows.nth(0)).toContainText('Client Reel — Northwind');
+    await expect(rows.nth(0).locator('[class*="var(--stall)"]').first()).toBeVisible();
+
+    // One-click generate row sorts second, CTA text driven by action.count.
+    await expect(rows.nth(1)).toContainText('Spring Campaign 2026');
+    await expect(rows.nth(1).getByTestId('queue-cta')).toHaveText('Generate 3 frames');
+
+    await page.screenshot({ path: 'e2e-artifacts/projects-list-phase-b.png', fullPage: true });
+
+    // Toggle to Grid — the B1 stage-ring cards still render underneath.
+    await page.getByTestId('home-view-grid-btn').click();
+    await expect(page.getByTestId('projects-queue-view')).not.toBeVisible();
     await expect(
       page.getByRole('img', { name: 'Stage 3 of 6: Storyboarding' }),
     ).toBeVisible();
     await expect(
       page.getByRole('img', { name: 'Stage 5 of 6: Review' }),
     ).toBeVisible();
-
-    // B1 — stalled stage activity renders the stall-token dot (card 2); the
-    // healthy card's dot is emerald, so this selector uniquely identifies it.
-    await expect(page.locator('[class*="var(--stall)"]').first()).toBeVisible();
-
-    // Archived card (card 3) renders at reduced opacity, no stage ring.
     const archivedCard = page.locator('.opacity-55', { hasText: 'Q4 Retrospective Edit' });
     await expect(archivedCard).toBeVisible();
     await expect(archivedCard.getByText('Archived')).toBeVisible();
-
-    await page.screenshot({ path: 'e2e-artifacts/projects-list-phase-b.png', fullPage: true });
   });
 
-  test('list cards match A mockup states — light theme', async ({ page }) => {
+  test('homepage queue matches A mockup states — light theme', async ({ page }) => {
     // Same fixtures/assertions as the dark-theme run above, but forces the
     // light color scheme + `mediahub.theme=light` (D5 stall-token needs
     // coverage in both grounds — see the light [data-theme="light"] override
@@ -200,9 +241,9 @@ test.describe('Projects Phase B — Stage Ring alignment', () => {
     await routeProjectsApi(page);
     await page.goto(PROJECTS_URL);
 
+    await expect(page.getByTestId('projects-queue-view')).toBeVisible();
     await expect(page.getByText('Spring Campaign 2026')).toBeVisible();
     await expect(page.getByText('Client Reel — Northwind')).toBeVisible();
-    await expect(page.getByText('Q4 Retrospective Edit')).toBeVisible();
 
     await page.screenshot({ path: 'e2e-artifacts/projects-list-phase-b-light.png', fullPage: true });
   });

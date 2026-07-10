@@ -1057,7 +1057,12 @@
       "recent": "最近",
       "active": "活跃",
       "archived": "已归档",
-      "folders": "文件夹"
+      "folders": "文件夹",
+      "queue": "队列",
+      "grid": "网格"
+    },
+    "queue": {
+      "empty": "暂无需要处理的事项"
     },
     "nav": {
       "files": "文件",
