@@ -15,6 +15,7 @@ import type { CropRegion } from '../editor/types';
 import type {
   Canvas,
   CanvasCreatePayload,
+  CanvasKind,
   CanvasSaveResult,
   CanvasUpdatePayload,
 } from '../types';
@@ -323,4 +324,31 @@ export async function deriveOutpaint(
     { method: 'POST', json: payload },
   );
   return readEnvelope<DerivedResource>(response);
+}
+
+// ============================================================
+// Team canvas tree (canvas nav N+1 fix)
+// ============================================================
+
+export interface TeamCanvasSummary {
+  id: string;
+  name: string;
+  kind: CanvasKind;
+  updated_at: string;
+}
+
+export interface TeamCanvasProject {
+  project_id: string;
+  project_name: string;
+  canvases: TeamCanvasSummary[];
+}
+
+/**
+ * Every project in the team with its canvases as summary rows — ONE call,
+ * replacing the landing page's fetchProjects + per-project listCanvases
+ * fan-out (and its full-document payload).
+ */
+export async function listTeamCanvases(teamId: string): Promise<TeamCanvasProject[]> {
+  const response = await apiFetch(`/api/v1/canvases/team/${teamId}`);
+  return readEnvelope<TeamCanvasProject[]>(response);
 }
