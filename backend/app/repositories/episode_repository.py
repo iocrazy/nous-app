@@ -21,6 +21,7 @@ from sqlalchemy import and_
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, insert, select, update
 
+from app.db import engine as db_engine
 from app.db.session import read_scope, write_scope
 from app.models import Episodes, ScriptProjects
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
@@ -63,11 +64,110 @@ def _episode_write_values(data: Dict[str, Any]) -> Dict[str, Any]:
     return known
 
 
+# ------------------------------------------------------------------ #
+# Episode progress aggregate (PR-10a, spec G12) — raw SQL, not ORM. The
+# episode -> script -> scene -> shot join chain needs multiple independently
+# FILTERed counts over the same leaf table (shots_done, renders_count),
+# which doesn't map cleanly onto a single ORM group_by; this follows the
+# app.db.engine raw-SQL house idiom (see project_stages_repository.py)
+# instead of read_scope. renders_count uses a single FILTER with an OR
+# (image_url IS NOT NULL OR video_url IS NOT NULL) rather than two summed
+# FILTERed counts — a shot can have both an image and a video (the
+# image-then-video generation flow), and summing two separate FILTERs
+# would double-count that shot. A primary read like list_by_project — a
+# query failure is NOT swallowed here; it propagates so the router's
+# generic except->500 fires, same as every sibling read endpoint.
+# ------------------------------------------------------------------ #
+
+_PROGRESS_SQL = """
+    SELECT
+      e.id AS episode_id,
+      e.title AS title,
+      e.sort_order AS sort_order,
+      COUNT(DISTINCT sp.id) AS script_count,
+      COUNT(DISTINCT sc.id) AS scene_count,
+      COUNT(DISTINCT sh.id) AS shots_total,
+      COUNT(DISTINCT sh.id) FILTER (WHERE sh.status = 'done') AS shots_done,
+      COUNT(DISTINCT sh.id) FILTER (
+        WHERE sh.image_url IS NOT NULL OR sh.video_url IS NOT NULL
+      ) AS renders_count
+    FROM public.episodes e
+    LEFT JOIN public.script_projects sp
+      ON sp.episode_id = e.id AND sp.status != 'deleted'
+    LEFT JOIN public.script_scenes sc
+      ON sc.script_id = sp.id
+    LEFT JOIN public.script_shots sh
+      ON sh.scene_id = sc.id
+    WHERE e.project_id = :project_id
+    GROUP BY e.id, e.title, e.sort_order
+    ORDER BY e.sort_order ASC
+"""
+
+
+def _derive_episode_status(
+    script_count: int,
+    scene_count: int,
+    shots_total: int,
+    shots_done: int,
+    renders_count: int,
+) -> str:
+    """Derive an episode's pipeline status from its counts (spec G12).
+
+    Ladder: no scripts -> planned; has a script -> drafting; shots exist
+    but aren't all done -> boarding; all shots done -> boarded; any render
+    present -> rendered. Each check runs in ascending order and overrides
+    the previous result, so the highest applicable status wins."""
+    if script_count == 0:
+        return "planned"
+    status = "drafting"
+    if shots_total > 0 and shots_done < shots_total:
+        status = "boarding"
+    if shots_total > 0 and shots_done == shots_total:
+        status = "boarded"
+    if renders_count > 0:
+        status = "rendered"
+    return status
+
+
+def _progress_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    """One raw SQL row -> JSON-safe progress dict with derived status."""
+    script_count = int(row["script_count"] or 0)
+    scene_count = int(row["scene_count"] or 0)
+    shots_total = int(row["shots_total"] or 0)
+    shots_done = int(row["shots_done"] or 0)
+    renders_count = int(row["renders_count"] or 0)
+    return {
+        "episode_id": str(row["episode_id"]),
+        "title": row["title"],
+        "sort_order": int(row["sort_order"]),
+        "script_count": script_count,
+        "scene_count": scene_count,
+        "shots_total": shots_total,
+        "shots_done": shots_done,
+        "renders_count": renders_count,
+        "status": _derive_episode_status(
+            script_count, scene_count, shots_total, shots_done, renders_count
+        ),
+    }
+
+
 class EpisodeRepository:
     """Episodes data access (async, SQLAlchemy 2.0 ORM)."""
 
     def __init__(self):
         pass
+
+    async def progress_by_project(self, project_id: str) -> List[Dict[str, Any]]:
+        """Per-episode progress (script/scene/shot counts + derived status)
+        for the workspace shell episodes panel (spec G12). LEFT JOINs so an
+        empty episode (no scripts yet) still appears with all-zero counts."""
+        rows = (
+            await db_engine.fetch_all(
+                _PROGRESS_SQL, {"project_id": _bigint(project_id)}
+            )
+            or []
+        )
+        return [_progress_row(r) for r in rows]
 
     async def list_by_project(self, project_id: str) -> List[Dict[str, Any]]:
         """All episodes for a project, ordered by sort_order, each annotated

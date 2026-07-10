@@ -1269,3 +1269,22 @@ class ProjectsService:
                     )
 
         return {"dispatched_count": len(task_ids), "task_ids": task_ids}
+
+    # ------------------------------------------------------------------ #
+    # Project entities — Characters/Locations ASSETS view (PR-10a, G13)
+    # ------------------------------------------------------------------ #
+
+    async def get_project_entities(self, project_id) -> dict:
+        """Project-level Characters/Locations roll-up, derived from every
+        non-deleted script's scenes. Fetch + pure-derive split: the counting
+        logic lives in ``project_entities.derive_project_entities`` so it's
+        independently unit-testable without a DB."""
+        from app.repositories.script_scene_repository import (
+            get_script_scene_repository,
+        )
+        from app.services.library.project_entities import derive_project_entities
+
+        rows = await get_script_scene_repository().list_scene_rows_for_project(
+            project_id
+        )
+        return derive_project_entities(rows)

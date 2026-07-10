@@ -28,6 +28,7 @@ from loguru import logger
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, insert, select, update
 
+from app.db import engine as db_engine
 from app.db.session import read_scope, write_scope
 from app.models import ScriptOps, ScriptScenes
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
@@ -98,6 +99,24 @@ def _scene_write_values(data: Dict[str, Any]) -> Dict[str, Any]:
     return known
 
 
+# ------------------------------------------------------------------ #
+# Project-level scene rows (PR-10a, spec G13) — raw SQL, not ORM. This is
+# a thin cross-table projection (episode_id / location_text / content_json)
+# feeding the pure derivation helper in ``project_entities.py``, not a scene
+# CRUD read — follows the app.db.engine raw-SQL house idiom (see
+# project_stages_repository.py) rather than this file's read_scope pattern.
+# ------------------------------------------------------------------ #
+
+_PROJECT_SCENE_ROWS_SQL = """
+    SELECT sp.episode_id AS episode_id,
+           sc.location_text AS location_text,
+           sc.content_json AS content_json
+    FROM public.script_scenes sc
+    JOIN public.script_projects sp ON sp.id = sc.script_id
+    WHERE sp.project_id = :project_id AND sp.status != 'deleted'
+"""
+
+
 class VersionConflict(Exception):
     """Raised when an ``apply_element_ops`` optimistic version guard fails.
 
@@ -153,6 +172,19 @@ class ScriptSceneRepository:
         except Exception as e:
             logger.error(f"Failed to get scene {scene_id}: {e}")
             return None
+
+    async def list_scene_rows_for_project(
+        self, project_id: str
+    ) -> List[Dict[str, Any]]:
+        """Scene rows (episode_id / location_text / content_json) for every
+        non-deleted script in a project — the derivation source for the
+        project-level Characters/Locations ASSETS view (spec G13). A primary
+        read: a query failure propagates (not swallowed to []), matching the
+        house convention for aggregate reads that feed a 500 on failure."""
+        rows = await db_engine.fetch_all(
+            _PROJECT_SCENE_ROWS_SQL, {"project_id": _bigint(project_id)}
+        )
+        return rows or []
 
     async def list_ops_by_scene(self, scene_id: str) -> List[Dict[str, Any]]:
         """The immutable op ledger for a scene, ordered by ``op_seq`` ASC (replay

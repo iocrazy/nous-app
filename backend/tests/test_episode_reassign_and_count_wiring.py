@@ -113,3 +113,38 @@ async def test_list_episodes_returns_script_count(client, monkeypatch):
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert [e["script_count"] for e in data] == [2, 0]
+
+
+@pytest.mark.asyncio
+async def test_episodes_progress_returns_flat_array(client, monkeypatch):
+    """GET /projects/{id}/episodes/progress returns a bare array under
+    ``data`` (matching sibling ``GET /episodes``), not a nested
+    ``{"items": [...]}`` wrapper (PR-10a review fix 3)."""
+    from app.repositories.episode_repository import EpisodeRepository
+
+    async def fake_progress(self, project_id):
+        return [
+            {
+                "episode_id": "10",
+                "title": "Ep 1",
+                "sort_order": 0,
+                "script_count": 1,
+                "scene_count": 1,
+                "shots_total": 1,
+                "shots_done": 1,
+                "renders_count": 1,
+                "status": "rendered",
+            }
+        ]
+
+    monkeypatch.setattr(EpisodeRepository, "progress_by_project", fake_progress)
+    app.dependency_overrides[verify_project_read_access] = lambda: None
+    try:
+        resp = await client.get("/api/v1/projects/700/episodes/progress")
+    finally:
+        app.dependency_overrides.pop(verify_project_read_access, None)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert isinstance(body["data"], list)
+    assert body["data"][0]["episode_id"] == "10"

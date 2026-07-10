@@ -44,6 +44,24 @@ async def list_episodes(
         raise HTTPException(status_code=500, detail="Failed to list episodes")
 
 
+@router.get("/projects/{project_id}/episodes/progress")
+async def get_episodes_progress(
+    project_id: str,
+    auth: AuthDep,
+    _guard: None = Depends(verify_project_read_access),
+) -> Dict[str, Any]:
+    """Per-episode progress (script/scene/shot counts + derived status) for
+    the workspace shell Episodes panel (spec G12). A static 'progress'
+    segment after the collection path — no route-order conflict with the
+    single-segment `/episodes` list above, FastAPI matches by full path."""
+    try:
+        items = await get_episode_repository().progress_by_project(project_id)
+        return {"success": True, "data": items}
+    except Exception as exc:
+        logger.error(f"[Episodes] progress for project {project_id} failed: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to load episode progress")
+
+
 @router.post("/projects/{project_id}/episodes")
 async def create_episode(
     project_id: str,

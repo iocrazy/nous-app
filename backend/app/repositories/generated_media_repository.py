@@ -59,7 +59,71 @@ def _decode_cursor(cursor: Optional[str]) -> Optional[tuple[str, int]]:
         return None
 
 
+# Columns for the project-renders join, prefixed so postgres doesn't choke
+# on ambiguous names against script_shots/script_scenes/script_projects
+# (all of which also have an `id`). Row dict keys come back as the bare
+# column name (postgres ignores the qualifier for output naming), so
+# `_normalize` works unchanged.
+_PROJECT_COLS = ", ".join(f"gm.{c.strip()}" for c in _COLS.split(","))
+
+# origin_kind values that represent a shot's rendered output (image or
+# video) — the only generated_media rows addressable from a project via
+# node_id = str(shot_id).
+_SHOT_ORIGIN_KINDS = ("shot_generate", "shot_video")
+
+
 class GeneratedMediaRepository:
+    async def list_for_project(
+        self,
+        project_id: str | int,
+        *,
+        episode_id: Optional[str | int] = None,
+        cursor: Optional[str] = None,
+        limit: int = 50,
+    ) -> dict:
+        """Renders for a project (optionally narrowed to one episode).
+
+        generated_media has no direct project/episode column — the join
+        chain is generated_media.node_id (= str(shot_id) for shot-origin
+        rows) -> script_shots.scene_id -> script_scenes.script_id ->
+        script_projects.project_id/episode_id. Same cursor-pagination shape
+        as ``list_for_scope`` (keyset on (created_at, id) DESC, exclusive
+        upper bound via a peek-ahead row).
+        """
+        limit = max(1, min(int(limit), 100))
+        params: dict = {"project_id": int(project_id), "limit": limit + 1}
+        kinds_sql = ", ".join(f"'{k}'" for k in _SHOT_ORIGIN_KINDS)
+        where = [
+            "sp.project_id = :project_id",
+            "sp.status != 'deleted'",
+            f"gm.origin_kind IN ({kinds_sql})",
+        ]
+        if episode_id is not None:
+            where.append("sp.episode_id = :episode_id")
+            params["episode_id"] = int(episode_id)
+        decoded = _decode_cursor(cursor)
+        if decoded:
+            params["c_ts"], params["c_id"] = decoded
+            where.append("(gm.created_at, gm.id) < (CAST(:c_ts AS timestamptz), :c_id)")
+        rows = (
+            await db_engine.fetch_all(
+                f"SELECT {_PROJECT_COLS} FROM public.generated_media gm "
+                "JOIN public.script_shots ss ON gm.node_id = CAST(ss.id AS TEXT) "
+                "JOIN public.script_scenes sc ON sc.id = ss.scene_id "
+                "JOIN public.script_projects sp ON sp.id = sc.script_id "
+                f"WHERE {' AND '.join(where)} "
+                "ORDER BY gm.created_at DESC, gm.id DESC LIMIT :limit",
+                params,
+            )
+            or []
+        )
+        next_cursor = None
+        if len(rows) > limit:
+            last = rows[limit - 1]
+            next_cursor = _encode_cursor(str(last["created_at"]), int(last["id"]))
+            rows = rows[:limit]
+        return {"items": [_normalize(r) for r in rows], "next_cursor": next_cursor}
+
     async def list_for_scope(
         self,
         scope_id: int,
