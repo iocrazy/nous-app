@@ -2550,6 +2550,10 @@
     "noHotspots": "No hotspots for this day.",
     "summary": "Summary",
     "sourceCount": "{{count}} sources",
+    "notesPanel": "Notes",
+    "quickNote": "Quick note…",
+    "fileCount": "{{count}} files",
+    "openInNotes": "Open in Notes →",
     "tokens": {
       "title": "API Tokens",
       "close": "Close",

@@ -12,12 +12,14 @@ import { ActivityPanel } from '../components/Inspiration/ActivityPanel';
 import { TagsPanel } from '../components/Inspiration/TagsPanel';
 import { HotspotsWorkspace } from '../components/Inspiration/HotspotsWorkspace';
 import { HotspotsSidePanel } from '../components/Inspiration/HotspotsSidePanel';
+import { NotesSidePanel } from '../components/Inspiration/NotesSidePanel';
 import { useHotspots } from '../components/Inspiration/useHotspots';
 import { buildPrefillContent, hotspotToRef } from '../components/Inspiration/hotspotToRef';
 import { toggleTaskItem } from '../components/Inspiration/toggleTaskItem';
 import { FloatingParse } from '../components/TopicInspiration/FloatingParse';
 import type { Hotspot } from '../services/topicService';
 import {
+  createNote,
   deleteNote,
   getTagCounts,
   listNotes,
@@ -354,28 +356,43 @@ export const InspirationPage: React.FC = () => {
               <TagsPanel tags={tags} activeTag={tag} onTagClick={setTag} />
             </>
           ) : (
-            hotspotCategories.length > 0 && (
-              <div className="rounded-xl bg-island px-4 py-3.5">
-                <h3 className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-content-3">
-                  {t('inspiration.hotspots', 'Hotspots')}
-                </h3>
-                <div className="flex flex-wrap gap-1.5">
-                  {hotspotCategories.map(({ category, cnt }) => (
-                    <button
-                      key={category}
-                      onClick={() => onCategoryClick(category)}
-                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs transition-colors ${
-                        activeCategory === category
-                          ? 'bg-indigo-500/25 text-indigo-300'
-                          : 'bg-island-2 text-content-2 hover:bg-line'
-                      }`}
-                    >
-                      {`#${category} (${cnt})`}
-                    </button>
-                  ))}
+            <>
+              {hotspotCategories.length > 0 && (
+                <div className="rounded-xl bg-island px-4 py-3.5">
+                  <h3 className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-content-3">
+                    {t('inspiration.hotspots', 'Hotspots')}
+                  </h3>
+                  <div className="flex flex-wrap gap-1.5">
+                    {hotspotCategories.map(({ category, cnt }) => (
+                      <button
+                        key={category}
+                        onClick={() => onCategoryClick(category)}
+                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs transition-colors ${
+                          activeCategory === category
+                            ? 'bg-indigo-500/25 text-indigo-300'
+                            : 'bg-island-2 text-content-2 hover:bg-line'
+                        }`}
+                      >
+                        {`#${category} (${cnt})`}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )
+              )}
+              <NotesSidePanel
+                recentNotes={notes.slice(0, 3)}
+                onQuickSave={async (content) => {
+                  try {
+                    const note = await createNote(content);
+                    onCreated(note);
+                  } catch (err) {
+                    addToast((err as Error).message, 'error');
+                    throw err;
+                  }
+                }}
+                onOpenNotes={() => setTab('notes')}
+              />
+            </>
           )}
         </div>
       </div>
