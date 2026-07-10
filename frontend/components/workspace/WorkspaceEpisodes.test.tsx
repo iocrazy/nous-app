@@ -114,7 +114,7 @@ describe('WorkspaceEpisodes', () => {
     expect(screen.getByTestId('ws-episode-open-2')).toHaveTextContent('start');
   });
 
-  it('creates a new episode via the header button', async () => {
+  it('creates a new episode via the header button with a sequential title', async () => {
     const onEpisodesChanged = vi.fn();
     render(
       <WorkspaceEpisodes
@@ -125,7 +125,12 @@ describe('WorkspaceEpisodes', () => {
       />,
     );
     fireEvent.click(screen.getByTestId('ws-episodes-new-btn'));
-    await waitFor(() => expect(mockService.createEpisode).toHaveBeenCalledWith('p1'));
+    // 2 episodes already exist, so the new one should be "Episode 3" — not
+    // the server default ("Ep 1"), which would collide with an existing
+    // "Episode 1" title.
+    await waitFor(() =>
+      expect(mockService.createEpisode).toHaveBeenCalledWith('p1', 'Episode 3'),
+    );
     await waitFor(() => expect(onEpisodesChanged).toHaveBeenCalled());
   });
 
