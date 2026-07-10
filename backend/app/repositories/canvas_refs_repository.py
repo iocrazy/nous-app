@@ -88,6 +88,7 @@ class CanvasRefsRepository:
             "FROM canvas_resource_refs crr "
             "JOIN canvases c ON c.id = crr.canvas_id "
             "WHERE crr.resource_id = :rid "
+            "  AND c.deleted_at IS NULL "
             "ORDER BY c.name",
             {"rid": int(str(resource_id))},
         )
@@ -112,6 +113,7 @@ class CanvasRefsRepository:
             "LEFT JOIN canvas_resource_refs crr ON crr.canvas_id = c.id "
             "LEFT JOIN resources r ON r.id = crr.resource_id AND r.is_trashed = false "
             "WHERE c.project_id = ANY(:ids) "
+            "  AND c.deleted_at IS NULL "
             "GROUP BY c.project_id, c.id, c.name, c.kind, c.nodes_json "
             "ORDER BY c.name",
             {"ids": ids},

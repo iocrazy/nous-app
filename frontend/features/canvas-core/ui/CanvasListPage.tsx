@@ -8,15 +8,17 @@
 // whose orphan filter hides freshly created empty canvases, and no
 // per-project N+1 fan-out.
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Frame, Loader2, Plus } from 'lucide-react';
+import { Frame, Loader2, Plus, Trash2 } from 'lucide-react';
 import { PageHeader } from '../../../components/AILibrary/PageHeader';
 import { useToast } from '../../../components/Toast';
 import { CANVAS_NAV_ENABLED } from '../flags';
+import { CanvasTrashSection } from './CanvasTrashSection';
 import {
   createCanvas,
+  deleteCanvas,
   listTeamCanvases,
   type TeamCanvasProject,
 } from '../services/canvasService';
@@ -33,13 +35,22 @@ export default function CanvasListPage() {
   const [groups, setGroups] = useState<TeamCanvasProject[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [creatingProjectId, setCreatingProjectId] = useState<string | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
+  const reload = useCallback(() => setReloadTick((n) => n + 1), []);
+
+  const lastTeamRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!CANVAS_NAV_ENABLED || !teamId) return undefined;
     let cancelled = false;
     // Reset before each run so a stale error (or another team's groups)
-    // never survives a teamId change.
-    setGroups(null);
+    // never survives a teamId change — a restore-triggered refetch of the
+    // SAME team keeps the current list on screen instead (no flash).
+    const teamChanged = lastTeamRef.current !== teamId;
+    lastTeamRef.current = teamId;
+    if (teamChanged) {
+      setGroups(null);
+    }
     setLoadFailed(false);
     (async () => {
       try {
@@ -55,7 +66,25 @@ export default function CanvasListPage() {
     return () => {
       cancelled = true;
     };
-  }, [teamId]);
+  }, [teamId, reloadTick]);
+
+  const handleDeleteCanvas = async (canvasId: string) => {
+    try {
+      await deleteCanvas(canvasId);
+      // Optimistic prune — the row is in the trash now.
+      setGroups(
+        (prev) =>
+          prev?.map((g) => ({
+            ...g,
+            canvases: g.canvases.filter((c) => c.id !== canvasId),
+          })) ?? prev,
+      );
+      addToast(t('canvasList.movedToTrash', 'Moved to trash'), 'info');
+    } catch (err) {
+      console.error('[CanvasListPage] delete failed:', err);
+      addToast(t('canvasList.deleteFailed', 'Failed to delete canvas'), 'error');
+    }
+  };
 
   // Mirrors ProjectAssetsTree.handleCreateCanvas: create empty, then drop
   // the user straight into the editor.
@@ -120,27 +149,36 @@ export default function CanvasListPage() {
               </h2>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {canvases.map((canvas) => (
-                    <button
-                      key={canvas.id}
-                      onClick={() => navigate(`/team/${teamId}/canvas/${canvas.id}`)}
-                      className={`group flex flex-col items-start gap-2 rounded-2xl border border-line bg-island p-4 text-left transition-all duration-200 hover:border-indigo-500/40 hover:bg-island-2 ${FOCUS_RING}`}
-                    >
-                      <div className="flex w-full items-center gap-2">
-                        <Frame
-                          size={16}
-                          className="shrink-0 text-content-3 group-hover:text-indigo-400"
-                        />
-                        <span className="truncate text-sm font-medium text-content">
-                          {canvas.name || t('canvasList.untitled', 'Untitled Canvas')}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2 text-xs text-content-3">
-                        <span className="rounded-full border border-line px-2 py-0.5 uppercase tracking-wide">
-                          {t(`canvasList.kind.${canvas.kind}`, canvas.kind)}
-                        </span>
-                        <span>{new Date(canvas.updated_at).toLocaleDateString()}</span>
-                      </div>
-                    </button>
+                    <div key={canvas.id} className="group relative">
+                      <button
+                        onClick={() => navigate(`/team/${teamId}/canvas/${canvas.id}`)}
+                        className={`flex w-full flex-col items-start gap-2 rounded-2xl border border-line bg-island p-4 text-left transition-all duration-200 hover:border-indigo-500/40 hover:bg-island-2 ${FOCUS_RING}`}
+                      >
+                        <div className="flex w-full items-center gap-2">
+                          <Frame
+                            size={16}
+                            className="shrink-0 text-content-3 group-hover:text-indigo-400"
+                          />
+                          <span className="truncate pr-6 text-sm font-medium text-content">
+                            {canvas.name || t('canvasList.untitled', 'Untitled Canvas')}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-content-3">
+                          <span className="rounded-full border border-line px-2 py-0.5 uppercase tracking-wide">
+                            {t(`canvasList.kind.${canvas.kind}`, canvas.kind)}
+                          </span>
+                          <span>{new Date(canvas.updated_at).toLocaleDateString()}</span>
+                        </div>
+                      </button>
+                      <button
+                        aria-label={t('canvasList.moveToTrash', 'Move to trash')}
+                        title={t('canvasList.moveToTrash', 'Move to trash')}
+                        onClick={() => void handleDeleteCanvas(canvas.id)}
+                        className={`absolute right-2.5 top-2.5 rounded-lg p-1.5 text-content-4 opacity-0 transition-opacity hover:bg-rose-500/10 hover:text-rose-400 focus-visible:opacity-100 group-hover:opacity-100 ${FOCUS_RING}`}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   ))}
                   <button
                     onClick={() => handleCreateCanvas(project_id)}
@@ -157,6 +195,12 @@ export default function CanvasListPage() {
               </div>
             </section>
           ))}
+
+        {!loadFailed && groups !== null && teamId && (
+          /* key: switching teams must remount the section — its rows/open
+             state belong to ONE team (review F3: cross-team trash bleed). */
+          <CanvasTrashSection key={teamId} teamId={teamId} onRestored={reload} />
+        )}
       </div>
     </div>
   );

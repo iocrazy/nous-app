@@ -93,8 +93,26 @@ class FakeCanvasRepository:
         row["base_updated_at"] = new_ts
         return row
 
-    async def delete(self, canvas_id: str) -> bool:
-        return self.rows.pop(str(canvas_id), None) is not None
+    async def soft_delete(self, canvas_id: str) -> bool:
+        row = self.rows.get(str(canvas_id))
+        if row is None or row.get("deleted_at"):
+            return False
+        row["deleted_at"] = "2026-01-03T00:00:00Z"
+        return True
+
+    async def restore(self, canvas_id: str) -> bool:
+        row = self.rows.get(str(canvas_id))
+        if row is None or not row.get("deleted_at"):
+            return False
+        row["deleted_at"] = None
+        return True
+
+    async def purge(self, canvas_id: str) -> bool:
+        row = self.rows.get(str(canvas_id))
+        if row is None or not row.get("deleted_at"):
+            return False
+        self.rows.pop(str(canvas_id))
+        return True
 
 
 # ============================================================
@@ -269,13 +287,26 @@ class TestOptimisticLock:
 
 class TestCanvasDelete:
     @pytest.mark.asyncio
-    async def test_delete_removes_row(self, svc):
+    async def test_soft_delete_stamps_and_keeps_the_row(self, svc):
         service, repo = svc
         row = repo._seed()
-        assert await service.delete(row["id"]) is True
-        assert row["id"] not in repo.rows
+        assert await service.soft_delete(row["id"]) is True
+        assert repo.rows[str(row["id"])]["deleted_at"] is not None
 
     @pytest.mark.asyncio
-    async def test_delete_missing_returns_false(self, svc):
+    async def test_soft_delete_missing_returns_false(self, svc):
         service, _ = svc
-        assert await service.delete("99999") is False
+        assert await service.soft_delete("99999") is False
+
+    @pytest.mark.asyncio
+    async def test_restore_then_purge_lifecycle(self, svc):
+        service, repo = svc
+        row = repo._seed()
+        # Purge refuses a live canvas — trash first.
+        assert await service.purge(row["id"]) is False
+        assert await service.soft_delete(row["id"]) is True
+        assert await service.restore(row["id"]) is True
+        assert repo.rows[str(row["id"])]["deleted_at"] is None
+        assert await service.soft_delete(row["id"]) is True
+        assert await service.purge(row["id"]) is True
+        assert str(row["id"]) not in repo.rows

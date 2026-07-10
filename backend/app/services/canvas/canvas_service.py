@@ -127,8 +127,14 @@ class CanvasService:
         except Exception as e:  # noqa: BLE001 — deliberately swallow
             logger.warning(f"canvas {canvas_id} refs sync failed (non-fatal): {e}")
 
-    async def delete(self, canvas_id: str) -> bool:
-        return await self.repo.delete(canvas_id)
+    async def soft_delete(self, canvas_id: str) -> bool:
+        return await self.repo.soft_delete(canvas_id)
+
+    async def restore(self, canvas_id: str) -> bool:
+        return await self.repo.restore(canvas_id)
+
+    async def purge(self, canvas_id: str) -> bool:
+        return await self.repo.purge(canvas_id)
 
 
 def _tokens_match(client: str, server: str) -> bool:

@@ -10,6 +10,7 @@ historically been the source of silent NULL-returns).
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
@@ -44,6 +45,7 @@ class CanvasRepository:
                 await client.table(self.TABLE)
                 .select("*")
                 .eq("id", _bigint(canvas_id))
+                .is_("deleted_at", "null")
                 .maybe_single()
                 .execute()
             )
@@ -60,6 +62,7 @@ class CanvasRepository:
                 await client.table(self.TABLE)
                 .select("*")
                 .eq("project_id", _bigint(project_id))
+                .is_("deleted_at", "null")
                 .order("updated_at", desc=True)
                 .execute()
             )
@@ -81,6 +84,7 @@ class CanvasRepository:
                 await client.table("projects")
                 .select("id, name, canvases(id, name, kind, updated_at)")
                 .eq("team_id", _bigint(team_id))
+                .is_("canvases.deleted_at", "null")
                 .order("created_at", desc=True)
                 .order("updated_at", desc=True, foreign_table="canvases")
                 .execute()
@@ -165,6 +169,10 @@ class CanvasRepository:
                 .update(mutable)
                 .eq("id", _bigint(canvas_id))
                 .eq("base_updated_at", expected_base_updated_at)
+                # A zombie tab must not autosave into a trashed document —
+                # soft delete doesn't rotate the lock token, so the eq()
+                # guard alone would still match.
+                .is_("deleted_at", "null")
                 .execute()
             )
             if not result.data:
@@ -279,25 +287,86 @@ class CanvasRepository:
             logger.error(f"canvas patch_node_run_results({canvas_id}) failed: {e}")
             return False
 
-    async def delete(self, canvas_id: str) -> bool:
+    async def soft_delete(self, canvas_id: str) -> bool:
+        """Move a live canvas to the trash (G9). Idempotence guard: already-
+        trashed rows don't match, so a double DELETE reads as 404."""
+        try:
+            client = await self._client()
+            result = (
+                await client.table(self.TABLE)
+                .update({"deleted_at": datetime.now(timezone.utc).isoformat()})
+                .eq("id", _bigint(canvas_id))
+                .is_("deleted_at", "null")
+                .execute()
+            )
+            return bool(result.data)
+        except Exception as e:
+            logger.error(f"canvas soft_delete({canvas_id}) failed: {e}")
+            return False
+
+    async def restore(self, canvas_id: str) -> bool:
+        """Bring a trashed canvas back to life."""
+        try:
+            client = await self._client()
+            result = (
+                await client.table(self.TABLE)
+                .update({"deleted_at": None})
+                .eq("id", _bigint(canvas_id))
+                .not_.is_("deleted_at", "null")
+                .execute()
+            )
+            return bool(result.data)
+        except Exception as e:
+            logger.error(f"canvas restore({canvas_id}) failed: {e}")
+            return False
+
+    async def purge(self, canvas_id: str) -> bool:
+        """Permanently delete — but ONLY from the trash. A live canvas must
+        be soft-deleted first; that keeps a single accidental call from
+        destroying data."""
         try:
             client = await self._client()
             result = (
                 await client.table(self.TABLE)
                 .delete()
                 .eq("id", _bigint(canvas_id))
+                .not_.is_("deleted_at", "null")
                 .execute()
             )
             return bool(result.data)
         except Exception as e:
-            logger.error(f"canvas delete({canvas_id}) failed: {e}")
+            logger.error(f"canvas purge({canvas_id}) failed: {e}")
             return False
+
+    async def list_trashed_for_team(self, team_id: str) -> List[Dict[str, Any]]:
+        """A team's trashed canvases (summary columns + owning project),
+        newest-trashed first."""
+        try:
+            client = await self._client()
+            result = (
+                await client.table(self.TABLE)
+                .select(
+                    "id, name, kind, updated_at, deleted_at, project_id,"
+                    " projects!inner(team_id, name)"
+                )
+                .eq("projects.team_id", _bigint(team_id))
+                .not_.is_("deleted_at", "null")
+                .order("deleted_at", desc=True)
+                .execute()
+            )
+            return list(result.data or [])
+        except Exception as e:
+            logger.error(f"canvas list_trashed_for_team({team_id}) failed: {e}")
+            return []
 
     # ------------------------------------------------------------------
     # Helpers used by access checks
     # ------------------------------------------------------------------
 
     async def get_project_id(self, canvas_id: str) -> Optional[str]:
+        # MUST NOT filter deleted_at — the restore/purge write gates depend
+        # on resolving TRASHED canvases; adding the filter here would turn
+        # every restore into a 404.
         """Cheap project lookup for membership checks (skips the JSONB)."""
         try:
             client = await self._client()
