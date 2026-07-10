@@ -29,6 +29,7 @@ from app.core.scope_guards import (
 from app.schemas.canvas import (
     CanvasConflictResponse,
     CanvasCreate,
+    CanvasGenerationRequest,
     CanvasResponse,
     CanvasUpdate,
 )
@@ -42,6 +43,7 @@ from app.schemas.canvas_run import (
 )
 from app.services.canvas import CanvasConflict, CanvasService
 from app.services.canvas.canvas_run_service import CanvasRunService
+from app.services.infra.unified_task_manager import get_task_manager
 
 router = APIRouter()
 
@@ -90,6 +92,53 @@ async def _gate_canvas_read(canvas_id: str, auth: AuthDep) -> str:
         raise HTTPException(status_code=404, detail="canvas not found")
     await verify_project_read_access(project_id=project_id, auth=auth)
     return project_id
+
+
+# ============================================================
+# Smart-canvas generation (G4-B1) — static paths MUST register before the
+# dynamic /canvases/{canvas_id} below or they get captured as a canvas id.
+# ============================================================
+
+_GENERATION_MODEL_PUBLIC_FIELDS = (
+    "name",
+    "display_name",
+    "type",
+    "actual_provider",
+    "sort_order",
+)
+
+
+@router.get("/canvases/generation-models")
+async def list_generation_models(auth: AuthDep) -> dict:
+    """Image/video rows from the mediahub_models catalog (public columns
+    only — no api_key/base_url) for the composer's model picker."""
+    from app.repositories import mediahub_model_repository as _repo_mod
+
+    rows = await _repo_mod.get_mediahub_model_repository().list_enabled()
+    data = [
+        {k: r.get(k) for k in _GENERATION_MODEL_PUBLIC_FIELDS}
+        for r in rows
+        if r.get("type") in ("image", "video")
+    ]
+    return {"success": True, "data": data}
+
+
+@router.get("/canvases/generations/{task_id}")
+async def get_canvas_generation(task_id: str, auth: AuthDep) -> dict:
+    """Poll one generation task. Reads task_tracking (the UI's single source
+    of truth — route C); the durable result lands in metadata.result_url."""
+    client = await get_task_manager()._get_client()
+    result = await (
+        client.table("task_tracking")
+        .select("dbos_workflow_id, phase, status, error_msg, metadata")
+        .eq("dbos_workflow_id", task_id)
+        .eq("user_id", auth.user_id)
+        .single()
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {"success": True, "data": result.data}
 
 
 # ============================================================
@@ -174,6 +223,63 @@ async def create_project_canvas(
     if row is None:
         raise HTTPException(status_code=500, detail="canvas create failed")
     return {"success": True, "data": _to_response(row)}
+
+
+@router.post("/canvases/{canvas_id}/generations")
+async def dispatch_canvas_generations(
+    auth: AuthDep,
+    payload: CanvasGenerationRequest,
+    canvas_id: str = Path(..., description="Snowflake canvas ID"),
+) -> dict:
+    """Dispatch ``count``× image/video generation tasks for one node.
+
+    Each item is an independent DBOS workflow with its own task_tracking row
+    (the queue is the concurrency governor — the frontend never opens its own
+    parallelism). ``count`` clamps to 8 (Infinite's cap); video always 1.
+    Results arrive via GET /canvases/generations/{task_id} (metadata.result_url).
+    """
+    await _gate_canvas_write(canvas_id, auth)
+    count = 1 if payload.kind == "video" else max(1, min(payload.count, 8))
+    canvas_id_int = int(canvas_id) if canvas_id.isdigit() else None
+
+    from app.services.infra import dbos_orchestrator
+    from app.workflows.canvas_generation import canvas_generation_workflow
+
+    mgr = get_task_manager()
+    task_ids: list[str] = []
+    for index in range(count):
+        wf_id = str(uuid.uuid4())
+        task_id = await mgr.create(
+            user_id=auth.user_id,
+            task_type="canvas_gen",  # ≤20 chars (task_tracking.task_type VARCHAR(20))
+            title=f"Generate {payload.kind}",
+            subtitle=payload.prompt[:80],
+            dbos_workflow_id=wf_id,
+            metadata={
+                "canvas_id": canvas_id,
+                "node_id": payload.node_id,
+                "kind": payload.kind,
+                "index": index + 1,
+                "count": count,
+            },
+        )
+        await dbos_orchestrator.start_workflow_routed(
+            "canvas_generation",
+            dbos_workflow_callable=canvas_generation_workflow,
+            dbos_workflow_kwargs={
+                "kind": payload.kind,
+                "prompt": payload.prompt,
+                "model": payload.model,
+                "params": payload.params,
+                "canvas_id": canvas_id_int,
+                "node_id": payload.node_id,
+                "user_id": auth.user_id,
+                "source_url": payload.source_url,
+            },
+            workflow_id=wf_id,
+        )
+        task_ids.append(task_id)
+    return {"success": True, "task_ids": task_ids}
 
 
 # ============================================================
