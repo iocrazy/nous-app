@@ -1363,11 +1363,15 @@
         "script": "脚本",
         "storyboard": "分镜",
         "renders": "成片",
+        "publish": "发布",
         "characters": "人物",
         "locations": "场景",
         "files": "文件",
         "trash": "回收站",
         "settings": "设置"
+      },
+      "publish": {
+        "comingSoon": "发布功能将随 Distribution D2 上线"
       },
       "episodeStatus": {
         "planned": "待规划",

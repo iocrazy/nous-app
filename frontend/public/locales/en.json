@@ -1363,11 +1363,15 @@
         "script": "Script",
         "storyboard": "Storyboard",
         "renders": "Renders",
+        "publish": "Publish",
         "characters": "Characters",
         "locations": "Locations",
         "files": "Files",
         "trash": "Trash",
         "settings": "Settings"
+      },
+      "publish": {
+        "comingSoon": "Publishing arrives with Distribution D2"
       },
       "episodeStatus": {
         "planned": "Planned",
