@@ -141,6 +141,11 @@ interface CanvasState {
     patch: { data?: Record<string, unknown>; [k: string]: unknown },
   ): void;
 
+  /** Append runtime-produced nodes/edges (loop output slots) in one atomic
+   *  set. Marks dirty but does NOT push to history — operational output,
+   *  not a user-undoable edit (mirrors patchNode's contract). */
+  appendElementsNoHistory(nodes: CanvasNode[], connections: CanvasConnection[]): void;
+
   // ---- Phase 6e performance: drag-tick + viewport throttle ----
   /**
    * Capture the pre-drag history snapshot without starting the 250ms
@@ -496,6 +501,18 @@ export function createCanvasCoreStore(
         // Do NOT call noteDocumentEditStarting — runtime status churn
         // shouldn't pollute the undo stack.
         set({ nodes: next });
+        markDirty();
+      },
+
+      appendElementsNoHistory(nodes, connections) {
+        if (nodes.length === 0 && connections.length === 0) return;
+        const s = get();
+        set({
+          nodes: nodes.length ? [...s.nodes, ...nodes] : s.nodes,
+          connections: connections.length
+            ? [...s.connections, ...connections]
+            : s.connections,
+        });
         markDirty();
       },
 

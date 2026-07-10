@@ -69,6 +69,12 @@ export interface PromptNodeData {
 
 export type OutputKind = 'text' | 'image' | 'video' | 'audio';
 
+/** Tag on loop-produced output slots — reused by (loop, round) on re-runs. */
+export interface LoopSlotTag {
+  loop_id: string;
+  round_index: number;
+}
+
 export interface OutputNodeData {
   kind: OutputKind;
   /** Snowflake resource id that owns the rendered artifact, when one
