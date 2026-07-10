@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 CanvasKind = Literal["smart", "classic"]
 
@@ -73,3 +73,24 @@ class CanvasConflictResponse(BaseModel):
 
     error: Literal["canvas_conflict"] = "canvas_conflict"
     current: CanvasResponse
+
+
+class CanvasGenerationRequest(BaseModel):
+    """POST /canvases/{id}/generations — dispatch image/video generation
+    tasks for a smart-canvas node (G4-B1). ``count`` fans out to N
+    independent DBOS tasks (clamped 1..8, video always 1)."""
+
+    node_id: str = Field(..., min_length=1)
+    kind: Literal["image", "video"]
+    prompt: str = Field(..., min_length=1)
+    model: str = ""
+    count: int = Field(default=1, ge=1)
+    params: Dict[str, Any] = Field(default_factory=dict)
+    source_url: Optional[str] = None
+
+    @field_validator("prompt")
+    @classmethod
+    def _prompt_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("prompt must not be blank")
+        return v

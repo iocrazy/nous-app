@@ -225,13 +225,19 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def _handle_validation(
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
+        # jsonable_encoder mirrors FastAPI's default handler: a pydantic
+        # field_validator raising ValueError puts the exception OBJECT into
+        # each error's ctx — serializing that raw turns every such 422 into
+        # a 500 (TypeError inside JSONResponse rendering).
+        from fastapi.encoders import jsonable_encoder
+
         return JSONResponse(
             status_code=422,
             content=ErrorResponse(
                 error="Request validation failed",
                 code="validation_error",
                 request_id=_request_id(request),
-                details=exc.errors(),
+                details=jsonable_encoder(exc.errors()),
             ).model_dump(),
             headers=_cors_headers_for(request),
         )
