@@ -88,3 +88,16 @@ export function replaceOutputImagesWithHistory(
     },
   });
 }
+
+/** Newest archived image URL for a slot — the G7 compare source
+ *  ("previous version vs current"), null when never regenerated. */
+export function latestHistoryImageUrl(nodeId: string): string | null {
+  const store = useCanvasCoreStore.getState();
+  const history = store.nodes.find((n) => {
+    const d = asObj(n).data as OutputNodeData | undefined;
+    return d?.history_for === nodeId;
+  });
+  if (!history) return null;
+  const data = (asObj(history).data ?? {}) as OutputNodeData;
+  return data.images?.[0]?.url ?? null;
+}
