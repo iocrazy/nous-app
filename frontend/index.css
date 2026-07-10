@@ -51,6 +51,9 @@
   --content-2: #a3a3ad;
   --content-3: #74747e;
   --content-4: #55555e;
+
+  /* Stalled-activity semantic token (PR-7 D5) — amber that reads on dark. */
+  --stall: #fbbf24;
 }
 
 @theme inline {
@@ -103,6 +106,9 @@
   --content-2: #52525b;
   --content-3: #8b8b94;
   --content-4: #b0b0b8;
+
+  /* Stalled-activity semantic token (PR-7 D5) — darker amber for light bg. */
+  --stall: #d97706;
 }
 
 /* ── Tinted button system — island redesign D6

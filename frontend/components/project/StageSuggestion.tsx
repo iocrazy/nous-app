@@ -99,11 +99,8 @@ export function StageSuggestion({
         data-testid="suggest-cta"
         disabled={busy}
         onClick={() => (isGenerate ? onGenerate() : setActiveTab(data.action!.tab as ProjectTab))}
-        className={`flex items-center gap-1.5 shrink-0 rounded-lg font-medium text-sm px-3 py-1.5 transition-colors ${
-          isGenerate
-            ? 'bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 text-ink-950'
-            : 'border border-indigo-500/40 hover:bg-indigo-500/15 text-indigo-300'
-        }`}
+        className="flex items-center gap-1.5 shrink-0 rounded-lg font-medium text-sm px-3 py-1.5 transition-colors
+                   bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 text-ink-950"
       >
         {busy ? <Loader2 size={14} className="animate-spin" /> : null}
         {t(data.action.label_key, { count: data.action.count })}

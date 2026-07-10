@@ -169,9 +169,9 @@ test.describe('Projects Phase B — Stage Ring alignment', () => {
       page.getByRole('img', { name: 'Stage 5 of 6: Review' }),
     ).toBeVisible();
 
-    // B1 — stalled stage activity renders the amber dot (card 2); the healthy
-    // card's dot is emerald, so `.bg-amber-400` uniquely identifies the stall.
-    await expect(page.locator('.bg-amber-400').first()).toBeVisible();
+    // B1 — stalled stage activity renders the stall-token dot (card 2); the
+    // healthy card's dot is emerald, so this selector uniquely identifies it.
+    await expect(page.locator('[class*="var(--stall)"]').first()).toBeVisible();
 
     // Archived card (card 3) renders at reduced opacity, no stage ring.
     const archivedCard = page.locator('.opacity-55', { hasText: 'Q4 Retrospective Edit' });
@@ -179,6 +179,32 @@ test.describe('Projects Phase B — Stage Ring alignment', () => {
     await expect(archivedCard.getByText('Archived')).toBeVisible();
 
     await page.screenshot({ path: 'e2e-artifacts/projects-list-phase-b.png', fullPage: true });
+  });
+
+  test('list cards match A mockup states — light theme', async ({ page }) => {
+    // Same fixtures/assertions as the dark-theme run above, but forces the
+    // light color scheme + `mediahub.theme=light` (D5 stall-token needs
+    // coverage in both grounds — see the light [data-theme="light"] override
+    // block in index.css). Registered after beforeEach's dark-forcing
+    // addInitScript, so this one wins (init scripts run in registration
+    // order on every navigation).
+    await page.emulateMedia({ colorScheme: 'light' });
+    await page.addInitScript(() => {
+      try {
+        localStorage.setItem('mediahub.theme', 'light');
+      } catch {
+        /* localStorage unavailable — nothing we can do */
+      }
+    });
+
+    await routeProjectsApi(page);
+    await page.goto(PROJECTS_URL);
+
+    await expect(page.getByText('Spring Campaign 2026')).toBeVisible();
+    await expect(page.getByText('Client Reel — Northwind')).toBeVisible();
+    await expect(page.getByText('Q4 Retrospective Edit')).toBeVisible();
+
+    await page.screenshot({ path: 'e2e-artifacts/projects-list-phase-b-light.png', fullPage: true });
   });
 
   test('storyboard suggestion card shows generate CTA', async ({ page }) => {
@@ -191,6 +217,11 @@ test.describe('Projects Phase B — Stage Ring alignment', () => {
     // B2 — workbench header renders once the stage catalog + current stage
     // resolve (flag on via playwright.config.ts webServer env).
     await expect(page.getByTestId('stage-history-btn')).toBeVisible({ timeout: 10_000 });
+
+    // D2 — pills row is gone; the mini stepper (one dot per catalog stage)
+    // renders in its place, top-right of the stage card.
+    await expect(page.getByTestId('stage-ministep')).toBeVisible();
+    await expect(page.getByTestId(`ministep-dot-${CURRENT_STAGE_STORYBOARD.slug}`)).toBeVisible();
 
     // B3 — data-aware suggestion card, CTA driven by `action.count`.
     await expect(page.getByTestId('stage-suggestion')).toBeVisible();

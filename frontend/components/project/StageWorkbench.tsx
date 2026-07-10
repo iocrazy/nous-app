@@ -1,14 +1,17 @@
 /**
  * StageWorkbench — stage-driven workbench header for the project detail page
- * (Phase B B2, design A). Replaces the two-row StageSelector + StageToolGrid
- * strip with a workbench centered on the current SOP stage: a large stage
- * card (name + guidance + one-click advance) over a row of recommended-tool
- * cards derived from ``current_stage.tools_recommended``.
+ * (Phase B B2, design A; PR-7 final redesign D1/D2). Replaces the two-row
+ * StageSelector + StageToolGrid strip with a workbench centered on the
+ * current SOP stage: a large stage card (name + guidance + one-click
+ * advance) over a row of recommended-tool cards derived from
+ * ``current_stage.tools_recommended``.
  *
  * Flag-gated by VITE_FEATURE_PROJECT_WORKBENCH — the caller renders the
- * legacy strip when the flag is off. The horizontal StageSelector is kept
- * above the card so any-stage jumps stay available; the Advance button is
- * the guided happy-path to the next stage.
+ * legacy strip (still using StageSelector) when the flag is off. Inside the
+ * workbench, the pills-row StageSelector has been replaced by a compact
+ * 6-dot mini stepper in the stage card (D2) — any-stage jumps stay available
+ * via dot clicks; the Advance button remains the guided happy-path to the
+ * next stage. The content strip is capped at 1120px (D1), left-aligned.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -16,7 +19,6 @@ import { useTranslation } from 'react-i18next';
 import { ArrowRight, CheckCircle2 } from 'lucide-react';
 import { fetchStageCatalog, fetchStageSuggestion, setCurrentStage } from '../../services/projectsService';
 import { TOOL_CATALOG } from '../../features/projects/stageTools';
-import { StageSelector } from './StageSelector';
 import { StageSuggestion } from './StageSuggestion';
 import { StageHistoryDrawer } from './StageHistoryDrawer';
 import type { ProjectStage, ProjectTab, StoryboardProgress } from '../../types';
@@ -88,18 +90,29 @@ export function StageWorkbench({
   const nextStage =
     currentIndex >= 0 && currentIndex < total - 1 ? catalog[currentIndex + 1] : null;
 
-  const handleAdvance = useCallback(async () => {
-    if (!nextStage || advancing) return;
-    setAdvancing(true);
-    try {
-      const updated = await setCurrentStage(projectId, nextStage.id);
-      if (updated) onStageChange(updated);
-    } catch (err) {
-      console.error('[StageWorkbench] failed to advance stage:', err);
-    } finally {
-      setAdvancing(false);
-    }
-  }, [nextStage, advancing, projectId, onStageChange]);
+  // Shared by the Advance button and the mini-stepper dots (D2) — both are
+  // "set current_stage to this stage" requests, just with different targets
+  // (guided next-stage vs any-stage jump). Keeps the single busy guard.
+  const jumpTo = useCallback(
+    async (stage: ProjectStage) => {
+      if (advancing) return;
+      setAdvancing(true);
+      try {
+        const updated = await setCurrentStage(projectId, stage.id);
+        if (updated) onStageChange(updated);
+      } catch (err) {
+        console.error('[StageWorkbench] failed to change stage:', err);
+      } finally {
+        setAdvancing(false);
+      }
+    },
+    [advancing, projectId, onStageChange],
+  );
+
+  const handleAdvance = useCallback(() => {
+    if (!nextStage) return;
+    return jumpTo(nextStage);
+  }, [nextStage, jumpTo]);
 
   // No stage catalog / no current stage → render nothing (project predates
   // the SOP machine); the detail page still shows its content tabs.
@@ -112,114 +125,145 @@ export function StageWorkbench({
   const description = t(descKey);
 
   return (
-    <div className="flex flex-col gap-3 px-8 pt-3 pb-3 border-b border-ink-800">
-      <StageSelector
-        projectId={projectId}
-        canWrite={canWrite}
-        currentStage={currentStage}
-        onStageChange={onStageChange}
-      />
-
-      <div className="rounded-xl border border-ink-800 bg-ink-900/40 p-4">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="min-w-0">
-            <div className="text-[11px] uppercase tracking-wider text-indigo-400 font-medium">
-              {t('projects.workbench.currentStageOf', {
-                index: currentIndex + 1,
-                total,
-              })}
+    <div className="px-8 pt-3 pb-3 border-b border-ink-800">
+      <div className="max-w-[1120px] flex flex-col gap-3">
+        <div className="rounded-xl border border-ink-800 bg-ink-900/40 p-4">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div className="min-w-0">
+              <div className="text-[11px] uppercase tracking-wider text-indigo-400 font-medium">
+                {t('projects.workbench.currentStageOf', {
+                  index: currentIndex + 1,
+                  total,
+                })}
+              </div>
+              <h2 className="text-lg font-semibold text-ink-100 mt-0.5">
+                {t(`projects.stages.${currentStage.slug}`, currentStage.name)}
+              </h2>
+              {description !== descKey && (
+                <p className="text-sm text-ink-400 mt-1 max-w-prose">{description}</p>
+              )}
             </div>
-            <h2 className="text-lg font-semibold text-ink-100 mt-0.5">
-              {t(`projects.stages.${currentStage.slug}`, currentStage.name)}
-            </h2>
-            {description !== descKey && (
-              <p className="text-sm text-ink-400 mt-1 max-w-prose">{description}</p>
-            )}
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              data-testid="stage-history-btn"
-              onClick={() => setHistoryOpen(true)}
-              className="rounded-lg border border-ink-700 hover:border-ink-500 text-ink-300 font-medium text-sm px-3 py-2 transition-colors"
-            >
-              {t('projects.workbench.stageHistory')}
-            </button>
-            {canWrite &&
-              (nextStage ? (
+            <div className="flex flex-col items-end gap-2 shrink-0">
+              <div
+                data-testid="stage-ministep"
+                role="group"
+                aria-label={t('projects.workbench.stageProgress', 'Stage progress')}
+                className="flex items-center"
+              >
+                {catalog.map((stage, i) => (
+                  <div key={stage.id} className="flex items-center">
+                    {i > 0 && (
+                      <span
+                        style={{ width: 14 }}
+                        className={`h-[2px] shrink-0 ${
+                          i - 1 < currentIndex ? 'bg-indigo-500' : 'bg-ink-700'
+                        }`}
+                      />
+                    )}
+                    <button
+                      type="button"
+                      data-testid={`ministep-dot-${stage.slug}`}
+                      title={t(`projects.stages.${stage.slug}`, stage.name)}
+                      aria-label={t(`projects.stages.${stage.slug}`, stage.name)}
+                      disabled={!canWrite || i === currentIndex || advancing}
+                      onClick={() => jumpTo(stage)}
+                      className={`w-2 h-2 rounded-full transition-colors shrink-0 disabled:cursor-default ${
+                        i === currentIndex
+                          ? 'bg-indigo-500 ring-[3px] ring-indigo-500/25'
+                          : i < currentIndex
+                            ? 'bg-indigo-500'
+                            : 'bg-ink-600 opacity-50'
+                      }`}
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={handleAdvance}
-                  disabled={advancing}
-                  className="flex items-center gap-1.5 shrink-0 rounded-lg bg-indigo-500 hover:bg-indigo-400
-                             disabled:opacity-50 text-ink-950 font-semibold text-sm px-4 py-2 transition-colors"
+                  data-testid="stage-history-btn"
+                  onClick={() => setHistoryOpen(true)}
+                  className="rounded-lg border border-ink-700 hover:border-ink-500 text-ink-300 font-medium text-sm px-3 py-2 transition-colors"
                 >
-                  {t('projects.workbench.advanceTo', {
-                    stage: t(`projects.stages.${nextStage.slug}`, nextStage.name),
-                  })}
-                  <ArrowRight size={15} />
+                  {t('projects.workbench.stageHistory')}
                 </button>
-              ) : (
-                <span className="flex items-center gap-1.5 shrink-0 text-sm text-emerald-400 font-medium">
-                  <CheckCircle2 size={15} />
-                  {t('projects.workbench.finalStage')}
-                </span>
-              ))}
+                {canWrite &&
+                  (nextStage ? (
+                    <button
+                      onClick={handleAdvance}
+                      disabled={advancing}
+                      className="flex items-center gap-1.5 shrink-0 rounded-lg bg-indigo-500 hover:bg-indigo-400
+                                 disabled:opacity-50 text-ink-950 font-semibold text-sm px-4 py-2 transition-colors"
+                    >
+                      {t('projects.workbench.advanceTo', {
+                        stage: t(`projects.stages.${nextStage.slug}`, nextStage.name),
+                      })}
+                      <ArrowRight size={15} />
+                    </button>
+                  ) : (
+                    <span className="flex items-center gap-1.5 shrink-0 text-sm text-emerald-400 font-medium">
+                      <CheckCircle2 size={15} />
+                      {t('projects.workbench.finalStage')}
+                    </span>
+                  ))}
+              </div>
+            </div>
           </div>
+
+          {tools.length > 0 && (
+            <div className="mt-4">
+              <div className="text-[11px] uppercase tracking-wider text-ink-500 mb-2">
+                {t('projects.workbench.recommendedTools')}
+              </div>
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-2">
+                {tools.map((tool) => {
+                  const Icon = tool.icon;
+                  const frames =
+                    tool.slug === 'storyboard' && storyboardProgress
+                      ? t('projects.workbench.toolFrames', {
+                          done: storyboardProgress.done,
+                          total: storyboardProgress.total,
+                        })
+                      : null;
+                  return (
+                    <button
+                      key={tool.slug}
+                      onClick={() => setActiveTab(tool.tab)}
+                      className="flex items-center gap-2.5 rounded-lg border border-ink-800 bg-ink-900/60
+                                 hover:border-indigo-500 hover:bg-ink-800/60 px-3 py-2.5 text-left transition-colors"
+                    >
+                      <span className="grid place-items-center w-7 h-7 rounded-lg bg-indigo-500/15 text-indigo-400 shrink-0">
+                        <Icon className="w-3.5 h-3.5" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="text-sm font-medium text-ink-200 truncate block">
+                          {t(tool.labelKey)}
+                        </span>
+                        {frames && (
+                          <span className="text-[11px] text-ink-500 truncate block">{frames}</span>
+                        )}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
-        {tools.length > 0 && (
-          <div className="mt-4">
-            <div className="text-[11px] uppercase tracking-wider text-ink-500 mb-2">
-              {t('projects.workbench.recommendedTools')}
-            </div>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-2">
-              {tools.map((tool) => {
-                const Icon = tool.icon;
-                const frames =
-                  tool.slug === 'storyboard' && storyboardProgress
-                    ? t('projects.workbench.toolFrames', {
-                        done: storyboardProgress.done,
-                        total: storyboardProgress.total,
-                      })
-                    : null;
-                return (
-                  <button
-                    key={tool.slug}
-                    onClick={() => setActiveTab(tool.tab)}
-                    className="flex items-center gap-2.5 rounded-lg border border-ink-800 bg-ink-900/60
-                               hover:border-indigo-500 hover:bg-ink-800/60 px-3 py-2.5 text-left transition-colors"
-                  >
-                    <span className="grid place-items-center w-7 h-7 rounded-lg bg-indigo-500/15 text-indigo-400 shrink-0">
-                      <Icon className="w-3.5 h-3.5" />
-                    </span>
-                    <span className="min-w-0">
-                      <span className="text-sm font-medium text-ink-200 truncate block">
-                        {t(tool.labelKey)}
-                      </span>
-                      {frames && (
-                        <span className="text-[11px] text-ink-500 truncate block">{frames}</span>
-                      )}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+        {AI_SUGGEST_ENABLED && (
+          <StageSuggestion
+            projectId={projectId}
+            currentStage={currentStage}
+            setActiveTab={setActiveTab}
+          />
         )}
-      </div>
 
-      {AI_SUGGEST_ENABLED && (
-        <StageSuggestion
+        <StageHistoryDrawer
           projectId={projectId}
-          currentStage={currentStage}
-          setActiveTab={setActiveTab}
+          open={historyOpen}
+          onClose={() => setHistoryOpen(false)}
         />
-      )}
-
-      <StageHistoryDrawer
-        projectId={projectId}
-        open={historyOpen}
-        onClose={() => setHistoryOpen(false)}
-      />
+      </div>
     </div>
   );
 }

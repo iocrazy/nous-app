@@ -102,7 +102,9 @@ describe('ProjectCard', () => {
       },
     };
     const { container } = render(<ProjectCard project={project} onClick={noop} onToggleStar={noop} />);
-    expect(container.querySelector('.bg-amber-400')).not.toBeNull();
+    // Stall dot/label use the `--stall` theme token (D5), not a hardcoded
+    // amber utility — match the arbitrary-value class substring instead.
+    expect(container.querySelector('[class*="var(--stall)"]')).not.toBeNull();
     expect(container.querySelector('.bg-emerald-400')).toBeNull();
   });
 
