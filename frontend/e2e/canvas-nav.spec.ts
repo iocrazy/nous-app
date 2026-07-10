@@ -49,18 +49,26 @@ const CANVASES = [
 
 /** Register canvas-list stubs AFTER setupStubbedSession so they win priority. */
 async function setupCanvasListStubs(page: Page): Promise<void> {
-  await page.route('**/api/v1/projects?*', (route) =>
+  // Single team-tree endpoint (N+1 fix): projects with embedded summaries.
+  await page.route(`**/api/v1/canvases/team/${TEAM_ID}`, (route) =>
     route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ success: true, data: [PROJECT] }),
-    }),
-  );
-  await page.route('**/api/v1/projects/p1/canvases', (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ success: true, data: CANVASES }),
+      body: JSON.stringify({
+        success: true,
+        data: [
+          {
+            project_id: PROJECT.id,
+            project_name: PROJECT.name,
+            canvases: CANVASES.map((c) => ({
+              id: c.id,
+              name: c.name,
+              kind: c.kind,
+              updated_at: c.updated_at,
+            })).sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1)),
+          },
+        ],
+      }),
     }),
   );
 }
@@ -135,7 +143,7 @@ test.describe('canvas nav entry + landing page (Phase 0 G11)', () => {
 
   test('empty project list shows the empty state', async ({ page }) => {
     await setupStubbedSession(page);
-    await page.route('**/api/v1/projects?*', (route) =>
+    await page.route(`**/api/v1/canvases/team/${TEAM_ID}`, (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',

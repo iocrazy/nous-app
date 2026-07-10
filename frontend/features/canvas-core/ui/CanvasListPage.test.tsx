@@ -21,26 +21,20 @@ vi.mock('../../../components/Toast', () => ({
   useToast: () => ({ addToast: mockAddToast }),
 }));
 
-const fetchProjects = vi.fn();
-vi.mock('../../../services/projectsService', () => ({
-  fetchProjects: (...args: unknown[]) => fetchProjects(...args),
-}));
-
-const listCanvases = vi.fn();
+const listTeamCanvases = vi.fn();
 const createCanvas = vi.fn();
 vi.mock('../services/canvasService', () => ({
-  listCanvases: (...args: unknown[]) => listCanvases(...args),
+  listTeamCanvases: (...args: unknown[]) => listTeamCanvases(...args),
   createCanvas: (...args: unknown[]) => createCanvas(...args),
 }));
 
-const PROJECT = { id: 'p1', name: 'Demo Project' };
 const CANVAS = {
   id: 'c1',
-  project_id: 'p1',
   name: 'Hero Canvas',
   kind: 'smart',
   updated_at: '2026-07-01T00:00:00Z',
 };
+const TREE = [{ project_id: 'p1', project_name: 'Demo Project', canvases: [CANVAS] }];
 
 async function loadPage() {
   const mod = await import('./CanvasListPage');
@@ -63,8 +57,7 @@ describe('CanvasListPage', () => {
 
   it('lists canvases grouped by project when the flag is on', async () => {
     vi.stubEnv('VITE_FEATURE_CANVAS_NAV', 'true');
-    fetchProjects.mockResolvedValue([PROJECT]);
-    listCanvases.mockResolvedValue([CANVAS]);
+    listTeamCanvases.mockResolvedValue(TREE);
     const CanvasListPage = await loadPage();
     render(<CanvasListPage />);
 
@@ -72,14 +65,12 @@ describe('CanvasListPage', () => {
       expect(screen.getByText('Demo Project')).toBeTruthy();
       expect(screen.getByText('Hero Canvas')).toBeTruthy();
     });
-    expect(fetchProjects).toHaveBeenCalledWith({ teamId: 'team-1' });
-    expect(listCanvases).toHaveBeenCalledWith('p1');
+    expect(listTeamCanvases).toHaveBeenCalledWith('team-1');
   });
 
   it('navigates into the editor when a canvas card is clicked', async () => {
     vi.stubEnv('VITE_FEATURE_CANVAS_NAV', 'true');
-    fetchProjects.mockResolvedValue([PROJECT]);
-    listCanvases.mockResolvedValue([CANVAS]);
+    listTeamCanvases.mockResolvedValue(TREE);
     const CanvasListPage = await loadPage();
     render(<CanvasListPage />);
 
@@ -90,8 +81,7 @@ describe('CanvasListPage', () => {
 
   it('creates a canvas and navigates into it', async () => {
     vi.stubEnv('VITE_FEATURE_CANVAS_NAV', 'true');
-    fetchProjects.mockResolvedValue([PROJECT]);
-    listCanvases.mockResolvedValue([]);
+    listTeamCanvases.mockResolvedValue([{ project_id: 'p1', project_name: 'Demo Project', canvases: [] }]);
     createCanvas.mockResolvedValue({ ...CANVAS, id: 'c-new' });
     const CanvasListPage = await loadPage();
     render(<CanvasListPage />);
@@ -107,8 +97,7 @@ describe('CanvasListPage', () => {
 
   it('surfaces a toast when canvas creation fails', async () => {
     vi.stubEnv('VITE_FEATURE_CANVAS_NAV', 'true');
-    fetchProjects.mockResolvedValue([PROJECT]);
-    listCanvases.mockResolvedValue([]);
+    listTeamCanvases.mockResolvedValue([{ project_id: 'p1', project_name: 'Demo Project', canvases: [] }]);
     createCanvas.mockRejectedValue(new Error('boom'));
     const CanvasListPage = await loadPage();
     render(<CanvasListPage />);
@@ -123,10 +112,16 @@ describe('CanvasListPage', () => {
 
   it('sorts canvases newest-first within a project group', async () => {
     vi.stubEnv('VITE_FEATURE_CANVAS_NAV', 'true');
-    fetchProjects.mockResolvedValue([PROJECT]);
-    listCanvases.mockResolvedValue([
-      { ...CANVAS, id: 'c-old', name: 'Old Canvas', updated_at: '2026-01-01T00:00:00Z' },
-      { ...CANVAS, id: 'c-new', name: 'New Board', updated_at: '2026-06-01T00:00:00Z' },
+    // The endpoint orders canvases newest-first; the page renders as-is.
+    listTeamCanvases.mockResolvedValue([
+      {
+        project_id: 'p1',
+        project_name: 'Demo Project',
+        canvases: [
+          { ...CANVAS, id: 'c-new', name: 'New Board', updated_at: '2026-06-01T00:00:00Z' },
+          { ...CANVAS, id: 'c-old', name: 'Old Canvas', updated_at: '2026-01-01T00:00:00Z' },
+        ],
+      },
     ]);
     const CanvasListPage = await loadPage();
     render(<CanvasListPage />);
@@ -139,30 +134,9 @@ describe('CanvasListPage', () => {
     expect(newIndex).toBeLessThan(oldIndex);
   });
 
-  it('renders an inline failure notice when one project list fails, keeping the rest usable', async () => {
-    vi.stubEnv('VITE_FEATURE_CANVAS_NAV', 'true');
-    fetchProjects.mockResolvedValue([PROJECT, { id: 'p2', name: 'Broken Project' }]);
-    listCanvases.mockImplementation((projectId: unknown) =>
-      projectId === 'p1'
-        ? Promise.resolve([CANVAS])
-        : Promise.reject(new Error('backend down')),
-    );
-    const CanvasListPage = await loadPage();
-    render(<CanvasListPage />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Hero Canvas')).toBeTruthy();
-      expect(screen.getByText('Broken Project')).toBeTruthy();
-      expect(screen.getByText('Failed to load canvases for this project')).toBeTruthy();
-    });
-    // Partial failure must not escalate to the whole-page error state.
-    expect(screen.queryByText('Failed to load canvases')).toBeNull();
-  });
-
   it('ignores a second click while a create is already in flight', async () => {
     vi.stubEnv('VITE_FEATURE_CANVAS_NAV', 'true');
-    fetchProjects.mockResolvedValue([PROJECT]);
-    listCanvases.mockResolvedValue([]);
+    listTeamCanvases.mockResolvedValue([{ project_id: 'p1', project_name: 'Demo Project', canvases: [] }]);
     let resolveCreate: (value: unknown) => void = () => {};
     createCanvas.mockImplementation(
       () => new Promise((resolve) => { resolveCreate = resolve; }),
@@ -183,7 +157,7 @@ describe('CanvasListPage', () => {
 
   it('shows an empty state when there are no projects', async () => {
     vi.stubEnv('VITE_FEATURE_CANVAS_NAV', 'true');
-    fetchProjects.mockResolvedValue([]);
+    listTeamCanvases.mockResolvedValue([]);
     const CanvasListPage = await loadPage();
     render(<CanvasListPage />);
 
@@ -196,7 +170,7 @@ describe('CanvasListPage', () => {
 
   it('shows an error state when loading fails', async () => {
     vi.stubEnv('VITE_FEATURE_CANVAS_NAV', 'true');
-    fetchProjects.mockRejectedValue(new Error('network down'));
+    listTeamCanvases.mockRejectedValue(new Error('network down'));
     const CanvasListPage = await loadPage();
     render(<CanvasListPage />);
 
