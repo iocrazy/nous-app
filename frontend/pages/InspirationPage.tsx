@@ -49,14 +49,15 @@ export const InspirationPage: React.FC = () => {
   const [parseOpen, setParseOpen] = useState(false);
   const [parseUrl, setParseUrl] = useState<string | null>(null);
   const [tokensOpen, setTokensOpen] = useState(false);
-  // Read-only category chips for the Hotspots-tab sidebar (spec §2 #7,
-  // simplified to display-only for P3). The hook is always called — only its
-  // `enabled` flag toggles the underlying fetch — so hook order never
-  // depends on which tab is active.
-  const { hotspots: categoryHotspots } = useHotspots({
-    enabled: tab === 'hotspots',
+  // Single page-wide hotspots instance (task-3): the Hotspots-tab workspace,
+  // the Notes-tab side panel and the category chips all read off this one
+  // fetch, so hiding a hotspot (applyState) is instantly consistent
+  // everywhere instead of each component holding its own stale copy.
+  const { hotspots, loading: hotspotsLoading, applyState } = useHotspots({
+    enabled: true,
     day: date ?? undefined,
   });
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
   // Monotonic request version: guards both the main filter-driven fetch and
   // loadMore against applying a stale response after filters (date/tag/q)
   // change mid-flight (see task-7 review finding).
@@ -80,12 +81,17 @@ export const InspirationPage: React.FC = () => {
 
   const hotspotCategories = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const h of categoryHotspots) {
+    for (const h of hotspots) {
       if (!h.category) continue;
       counts.set(h.category, (counts.get(h.category) ?? 0) + 1);
     }
     return Array.from(counts.entries()).map(([category, cnt]) => ({ category, cnt }));
-  }, [categoryHotspots]);
+  }, [hotspots]);
+
+  // Clicking the active category again clears the filter.
+  const onCategoryClick = (category: string) => {
+    setActiveCategory((prev) => (prev === category ? null : category));
+  };
 
   useEffect(() => {
     let alive = true;
@@ -317,7 +323,10 @@ export const InspirationPage: React.FC = () => {
             </>
           ) : (
             <HotspotsWorkspace
-              day={date}
+              hotspots={hotspots}
+              loading={hotspotsLoading}
+              applyState={applyState}
+              activeCategory={activeCategory}
               onSaveAsNote={handleSaveAsNote}
               onParse={(h) => {
                 setParseUrl(h.origin_url || h.url || null);
@@ -330,7 +339,12 @@ export const InspirationPage: React.FC = () => {
           <ActivityPanel selectedDate={date} onSelectDate={setDate} refreshKey={refreshKey} />
           {tab === 'notes' ? (
             <>
-              <HotspotsSidePanel day={date} onSaveAsNote={handleSaveAsNote} onOpenAll={() => setTab('hotspots')} />
+              <HotspotsSidePanel
+                hotspots={hotspots}
+                day={date}
+                onSaveAsNote={handleSaveAsNote}
+                onOpenAll={() => setTab('hotspots')}
+              />
               <TagsPanel tags={tags} activeTag={tag} onTagClick={setTag} />
             </>
           ) : (
@@ -341,12 +355,17 @@ export const InspirationPage: React.FC = () => {
                 </h3>
                 <div className="flex flex-wrap gap-1.5">
                   {hotspotCategories.map(({ category, cnt }) => (
-                    <span
+                    <button
                       key={category}
-                      className="inline-flex items-center gap-1 rounded-full bg-island-2 px-2.5 py-1 text-xs text-content-2"
+                      onClick={() => onCategoryClick(category)}
+                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs transition-colors ${
+                        activeCategory === category
+                          ? 'bg-indigo-500/25 text-indigo-300'
+                          : 'bg-island-2 text-content-2 hover:bg-line'
+                      }`}
                     >
                       {`#${category} (${cnt})`}
-                    </span>
+                    </button>
                   ))}
                 </div>
               </div>
