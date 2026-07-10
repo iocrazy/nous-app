@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import Any, Dict, List
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -680,3 +680,102 @@ class TestRunClassicVideoGen:
         )
         assert result.ok is False
         assert "video_url" in (result.error or "")
+
+
+class TestRunClassicVideoGenLocalFile:
+    """G4-B0: a DB-fallback (jimeng-cli) video result is a LOCAL FILE —
+    ``video_path`` set, ``video_url`` empty. The op must then treat
+    generated-media registration as REQUIRED (it is the only way to mint a
+    servable URL), returning the durable /stream URL — unlike the remote-URL
+    branch where registration stays best-effort."""
+
+    @staticmethod
+    def _service_with_video(video_service):
+        svc = make_service(FakeAdapter())
+        svc._storyboard_ai_service = lambda: video_service  # type: ignore[assignment]
+        return svc
+
+    @staticmethod
+    def _node():
+        return {
+            "data": {
+                "source_image_url": "/api/v1/generated-media/42/cover",
+                "prompt": "animate",
+                "model": "",
+                "provider_name": "",
+            }
+        }
+
+    @pytest.mark.asyncio
+    async def test_local_video_registers_and_returns_durable_stream_url(self):
+        gen = AsyncMock(return_value={"video_url": "", "video_path": "/tmp/jimeng_x/clip.mp4"})
+        svc = self._service_with_video(SimpleNamespace(generate_video=gen))
+
+        with (
+            patch(
+                "app.services.canvas.canvas_run_service.register_generated_media",
+                new=AsyncMock(return_value={"id": 77}),
+            ) as register,
+            patch(
+                "app.services.canvas.canvas_run_service._resolve_personal_team_id",
+                new=AsyncMock(return_value="9"),
+            ),
+        ):
+            result = await svc.run_classic_node(
+                node_type="video_gen",
+                node=self._node(),
+                body="x",
+                node_id="node-1",
+                project_id="proj-1",
+                user_id="user-1",
+            )
+
+        assert result.ok is True
+        assert result.text == "/api/v1/generated-media/77/stream"
+        assert result.result is not None
+        assert result.result["video_url"] == "/api/v1/generated-media/77/stream"
+        register.assert_awaited_once()
+        assert register.await_args.kwargs["source_path"] == "/tmp/jimeng_x/clip.mp4"
+
+    @pytest.mark.asyncio
+    async def test_local_video_registration_failure_is_an_inband_error(self):
+        gen = AsyncMock(return_value={"video_url": "", "video_path": "/tmp/jimeng_x/clip.mp4"})
+        svc = self._service_with_video(SimpleNamespace(generate_video=gen))
+
+        with (
+            patch(
+                "app.services.canvas.canvas_run_service.register_generated_media",
+                new=AsyncMock(side_effect=RuntimeError("disk full")),
+            ),
+            patch(
+                "app.services.canvas.canvas_run_service._resolve_personal_team_id",
+                new=AsyncMock(return_value="9"),
+            ),
+        ):
+            result = await svc.run_classic_node(
+                node_type="video_gen",
+                node=self._node(),
+                body="x",
+                node_id="node-1",
+                project_id="proj-1",
+                user_id="user-1",
+            )
+
+        assert result.ok is False
+        assert "persist" in (result.error or "").lower() or "register" in (result.error or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_local_video_without_user_context_is_an_inband_error(self):
+        gen = AsyncMock(return_value={"video_url": "", "video_path": "/tmp/jimeng_x/clip.mp4"})
+        svc = self._service_with_video(SimpleNamespace(generate_video=gen))
+
+        result = await svc.run_classic_node(
+            node_type="video_gen",
+            node=self._node(),
+            body="x",
+            node_id="node-1",
+            project_id="proj-1",
+        )
+
+        assert result.ok is False
+        assert "user" in (result.error or "").lower()

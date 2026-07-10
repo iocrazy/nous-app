@@ -599,7 +599,21 @@ class StoryboardAIService:
             RuntimeError: If the provider raises during generation.
         """
         try:
-            video_provider = provider_registry.get_video_provider(provider_name)
+            # In practice this in-proc registry ships EMPTY for video (same as
+            # images), so every call KeyErrors and resolves against the DB
+            # mediahub_models catalog below (config env→DB house rule). The
+            # registry hit is kept for tests / future in-proc providers.
+            try:
+                video_provider = provider_registry.get_video_provider(provider_name)
+            except KeyError:
+                return await self._generate_video_via_catalog(
+                    project_id=project_id,
+                    node_id=node_id,
+                    source_image_url=source_image_url,
+                    prompt=prompt,
+                    provider_name=provider_name,
+                    model=model,
+                )
 
             result: VideoGenResult = await video_provider.generate(
                 source_image_url,
@@ -617,14 +631,6 @@ class StoryboardAIService:
             )
             return asdict(result)
 
-        except KeyError:
-            logger.error(
-                "Video provider not found: %s (project=%s node=%s)",
-                provider_name,
-                project_id,
-                node_id,
-            )
-            raise
         except Exception as exc:
             logger.error(
                 "Video generation failed for project=%s node=%s: %s",
@@ -633,6 +639,65 @@ class StoryboardAIService:
                 exc,
             )
             raise
+
+    async def _generate_video_via_catalog(
+        self,
+        *,
+        project_id: str,
+        node_id: str,
+        source_image_url: str,
+        prompt: str,
+        provider_name: str,
+        model: str,
+    ) -> Dict[str, Any]:
+        """DB-catalog video fallback (G4-B0), mirroring the image path.
+
+        Resolves the provider from ``mediahub_models`` (only jimeng-cli has a
+        wired video path today) and bridges the durable ``/cover`` source URL
+        back to its local file for image2video — an unbridgeable source (raw
+        provider URL, object-store row) degrades to text2video, matching the
+        shot workflow's semantics. The CLI product is a LOCAL FILE, so the
+        result carries ``video_path`` and an empty ``video_url``; callers must
+        persist through the generated-media store to mint a servable URL.
+        """
+        from app.services.library.generated_media_service import (
+            resolve_generated_media_local_path,
+        )
+        from app.services.media.parsers.video_providers import db_registry
+
+        video_provider, actual_model = await db_registry.resolve_video_provider(
+            provider_name or None
+        )
+        gen_model = model or actual_model
+
+        image_path = await resolve_generated_media_local_path(
+            source_image_url, media_kind="image"
+        )
+        cli_result = await video_provider.generate_video(
+            prompt=prompt,
+            aspect="",
+            model_version=gen_model or None,
+            image_path=image_path,
+        )
+
+        logger.info(
+            "Video generated via catalog for project=%s node=%s model=%s i2v=%s",
+            project_id,
+            node_id,
+            gen_model,
+            bool(image_path),
+        )
+        result = VideoGenResult(
+            video_url="",
+            video_path=cli_result.local_path,
+            provider="jimeng-cli",
+            model=gen_model or "",
+            metadata={
+                "mime": getattr(cli_result, "mime", None),
+                **(getattr(cli_result, "raw", None) or {}),
+            },
+        )
+        return asdict(result)
 
     # ------------------------------------------------------------------ #
     # 4. split_script
