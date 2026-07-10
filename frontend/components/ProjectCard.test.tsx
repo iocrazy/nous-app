@@ -125,7 +125,7 @@ describe('ProjectCard', () => {
     expect(container.querySelector('.bg-emerald-400')).not.toBeNull();
   });
 
-  it('archived projects dim, show the archived chip, and drop the ring', () => {
+  it('archived projects dim, show the archived chip, and render a muted check ring', () => {
     const project: Project = {
       ...base,
       archived_at: '2026-07-01T00:00:00+00:00',
@@ -133,6 +133,10 @@ describe('ProjectCard', () => {
     };
     render(<ProjectCard project={project} onClick={noop} onToggleStar={noop} />);
     expect(screen.getByText('projects.card.archived')).toBeTruthy();
-    expect(screen.queryByRole('img')).toBeNull();
+    // Archived ring takes precedence over the stage segments: a full muted
+    // circle with a check mark, not the segmented "index/total" ring.
+    expect(screen.getByTestId('stage-ring-archived')).toBeTruthy();
+    expect(screen.getByRole('img', { name: 'Archived' })).toBeTruthy();
+    expect(screen.queryByText('6/6')).toBeNull();
   });
 });

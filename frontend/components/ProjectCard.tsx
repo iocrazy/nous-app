@@ -73,7 +73,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
     >
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3 flex-1 min-w-0">
-          <StageRing stage={isArchived ? null : stage} />
+          <StageRing stage={stage} archived={isArchived} />
           <div className="min-w-0">
             <h3 className="text-ink-50 font-medium text-base truncate group-hover:text-indigo-300 transition-colors">
               {project.name}

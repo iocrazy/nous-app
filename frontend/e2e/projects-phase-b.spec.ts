@@ -132,13 +132,21 @@ async function routeProjectsApi(
 
 test.describe('Projects Phase B — Stage Ring alignment', () => {
   test.beforeEach(async ({ page }) => {
+    // Force dark colorScheme so the CI screenshots match the dark "A · Stage
+    // Ring" mockup (docs/superpowers/specs/2026-07-08...) instead of
+    // whatever OS-level scheme the headless browser defaults to.
+    await page.emulateMedia({ colorScheme: 'dark' });
     await setupStubbedSession(page);
     // i18n defaults to 'zh' when no `language` key is stored (see i18n.ts).
     // Force English so text assertions and the screenshot match the UI-must-
     // be-English convention (CLAUDE.md) and the A mockup, which is English.
+    // Also pin the theme preference explicitly (mirrors the language seed
+    // above) — ThemeContext defaults to 'system' which would otherwise
+    // resolve off the emulated media query alone.
     await page.addInitScript(() => {
       try {
         localStorage.setItem('language', 'en');
+        localStorage.setItem('mediahub.theme', 'dark');
       } catch {
         /* localStorage unavailable — nothing we can do */
       }

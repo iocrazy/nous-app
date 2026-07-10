@@ -14,12 +14,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowRight, CheckCircle2 } from 'lucide-react';
-import { fetchStageCatalog, setCurrentStage } from '../../services/projectsService';
+import { fetchStageCatalog, fetchStageSuggestion, setCurrentStage } from '../../services/projectsService';
 import { TOOL_CATALOG } from '../../features/projects/stageTools';
 import { StageSelector } from './StageSelector';
 import { StageSuggestion } from './StageSuggestion';
 import { StageHistoryDrawer } from './StageHistoryDrawer';
-import type { ProjectStage, ProjectTab } from '../../types';
+import type { ProjectStage, ProjectTab, StoryboardProgress } from '../../types';
 
 // Phase B B3 — stage-aware "next step" suggestion card. Independent flag so
 // it stays dark while B2's workbench is already live.
@@ -45,6 +45,7 @@ export function StageWorkbench({
   const [catalog, setCatalog] = useState<ProjectStage[]>([]);
   const [advancing, setAdvancing] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [storyboardProgress, setStoryboardProgress] = useState<StoryboardProgress | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,6 +58,30 @@ export function StageWorkbench({
       cancelled = true;
     };
   }, []);
+
+  // Light data subtitle for the storyboard toolcard ("N/M frames"), matching
+  // the A-mockup toolcards carrying data. Only fetched when the current
+  // stage is storyboard — every other toolcard stays label-only.
+  // NOTE: duplicate of StageSuggestion's fetch — acceptable, endpoint is
+  // cheap+best-effort; consolidate if a third consumer appears.
+  useEffect(() => {
+    if (currentStage?.slug !== 'storyboard') {
+      setStoryboardProgress(null);
+      return;
+    }
+    let cancelled = false;
+    fetchStageSuggestion(projectId)
+      .then((s) => {
+        if (!cancelled) setStoryboardProgress(s.progress ?? null);
+      })
+      .catch((err) => {
+        console.error('[StageWorkbench] failed to load storyboard progress:', err);
+        if (!cancelled) setStoryboardProgress(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, currentStage?.slug]);
 
   const currentIndex = catalog.findIndex((s) => s.id === currentStage?.id);
   const total = catalog.length;
@@ -149,6 +174,13 @@ export function StageWorkbench({
             <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-2">
               {tools.map((tool) => {
                 const Icon = tool.icon;
+                const frames =
+                  tool.slug === 'storyboard' && storyboardProgress
+                    ? t('projects.workbench.toolFrames', {
+                        done: storyboardProgress.done,
+                        total: storyboardProgress.total,
+                      })
+                    : null;
                 return (
                   <button
                     key={tool.slug}
@@ -159,8 +191,13 @@ export function StageWorkbench({
                     <span className="grid place-items-center w-7 h-7 rounded-lg bg-indigo-500/15 text-indigo-400 shrink-0">
                       <Icon className="w-3.5 h-3.5" />
                     </span>
-                    <span className="text-sm font-medium text-ink-200 truncate">
-                      {t(tool.labelKey)}
+                    <span className="min-w-0">
+                      <span className="text-sm font-medium text-ink-200 truncate block">
+                        {t(tool.labelKey)}
+                      </span>
+                      {frames && (
+                        <span className="text-[11px] text-ink-500 truncate block">{frames}</span>
+                      )}
                     </span>
                   </button>
                 );

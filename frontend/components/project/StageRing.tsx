@@ -15,6 +15,12 @@ interface StageRingProps {
   stage: ProjectCardStage | null | undefined;
   /** Ring diameter in px. */
   size?: number;
+  /**
+   * Archived projects render a muted full circle with a check mark instead
+   * of the segmented stage progress (mockup "A · Stage Ring"). Takes
+   * precedence over `stage` when true.
+   */
+  archived?: boolean;
 }
 
 const TAU = Math.PI * 2;
@@ -31,7 +37,34 @@ function segmentPath(cx: number, cy: number, r: number, from: number, to: number
   return `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r} ${r} 0 ${largeArc} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
 }
 
-export const StageRing: React.FC<StageRingProps> = ({ stage, size = 44 }) => {
+export const StageRing: React.FC<StageRingProps> = ({ stage, size = 44, archived = false }) => {
+  if (archived) {
+    const c = size / 2;
+    const r = c - 4;
+    return (
+      <svg
+        width={size}
+        height={size}
+        viewBox={`0 0 ${size} ${size}`}
+        role="img"
+        aria-label="Archived"
+        data-testid="stage-ring-archived"
+        className="shrink-0"
+      >
+        <circle cx={c} cy={c} r={r} fill="none" stroke="#55555e" strokeWidth={4} opacity={0.35} />
+        <text
+          x={c}
+          y={c + 4}
+          textAnchor="middle"
+          className="fill-ink-400 font-semibold"
+          fontSize={14}
+        >
+          ✓
+        </text>
+      </svg>
+    );
+  }
+
   if (!stage || stage.total <= 0 || stage.index <= 0) return null;
 
   const { index, total } = stage;
