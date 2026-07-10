@@ -214,6 +214,7 @@ export function CanvasSurface() {
 
   return (
     <CanvasEngine
+      themedChrome
       nodeTypes={nodeTypes}
       nodes={rfNodes}
       edges={rfEdges}
