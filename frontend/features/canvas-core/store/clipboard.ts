@@ -71,19 +71,20 @@ export interface PreparedPaste {
 }
 
 /**
- * Clone the clipboard for insertion: fresh unique node ids, internal edges
+ * Clone a subgraph for insertion: fresh unique node ids, internal edges
  * remapped onto those ids (edges whose endpoints didn't come along are
- * dropped), and a cascading offset so a second paste lands further out than
- * the first. Returns null when the clipboard is empty. Every pasted node /
- * edge is deep-cloned so pastes never alias each other or the clipboard.
+ * dropped), smart data tags re-pointed or stripped, and every node / edge
+ * deep-cloned so clones never alias their source. Shared by paste (from the
+ * clipboard payload) and duplicate (straight from the live selection, G6).
  */
-export function preparePaste(existingIds: Set<string>): PreparedPaste | null {
-  if (!payload) return null;
-  pasteGeneration += 1;
-  const offset = PASTE_OFFSET * pasteGeneration;
-
+export function cloneSubgraph(
+  sourceNodes: CanvasNode[],
+  sourceConnections: CanvasConnection[],
+  existingIds: Set<string>,
+  offset: number,
+): PreparedPaste {
   const idMap = new Map<string, string>();
-  const nodes = payload.nodes.map((node) => {
+  const nodes = sourceNodes.map((node) => {
     const clone = JSON.parse(JSON.stringify(node)) as Record<string, unknown>;
     const oldId = typeof clone.id === 'string' ? clone.id : null;
     const baseId =
@@ -96,8 +97,16 @@ export function preparePaste(existingIds: Set<string>): PreparedPaste | null {
     return clone as CanvasNode;
   });
 
+  // Second pass (idMap is complete now): smart data tags reference OTHER
+  // node ids — left untouched, a cloned gen slot would STEAL the original
+  // prompt's future results (upsertGenerationSlots matches the first tag).
+  // Re-point tags whose referent came along; strip the rest.
+  for (const node of nodes) {
+    remapSmartTags(node as Record<string, unknown>, idMap);
+  }
+
   const connections: CanvasConnection[] = [];
-  for (const c of payload.connections) {
+  for (const c of sourceConnections) {
     const source = idMap.get(String(c.source));
     const target = idMap.get(String(c.target));
     if (!source || !target) continue; // an endpoint didn't come along → drop
@@ -111,6 +120,71 @@ export function preparePaste(existingIds: Set<string>): PreparedPaste | null {
   }
 
   return { nodes, connections };
+}
+
+/** Smart-mode data tags that point at other nodes by id. */
+function remapSmartTags(
+  node: Record<string, unknown>,
+  idMap: Map<string, string>,
+): void {
+  const data = node.data as
+    | {
+        gen_slot?: { node_id?: string };
+        loop_slot?: { loop_id?: string };
+        history_for?: string;
+      }
+    | undefined;
+  if (!data || typeof data !== 'object') return;
+  if (data.gen_slot) {
+    const mapped = idMap.get(String(data.gen_slot.node_id));
+    if (mapped) data.gen_slot.node_id = mapped;
+    else delete data.gen_slot;
+  }
+  if (data.loop_slot) {
+    const mapped = idMap.get(String(data.loop_slot.loop_id));
+    if (mapped) data.loop_slot.loop_id = mapped;
+    else delete data.loop_slot;
+  }
+  if (typeof data.history_for === 'string') {
+    const mapped = idMap.get(data.history_for);
+    if (mapped) data.history_for = mapped;
+    else delete data.history_for;
+  }
+}
+
+/**
+ * Clone the clipboard for insertion with a cascading offset so a second
+ * paste lands further out than the first. Null when the clipboard is empty.
+ */
+export function preparePaste(existingIds: Set<string>): PreparedPaste | null {
+  if (!payload) return null;
+  pasteGeneration += 1;
+  return cloneSubgraph(
+    payload.nodes,
+    payload.connections,
+    existingIds,
+    PASTE_OFFSET * pasteGeneration,
+  );
+}
+
+/**
+ * Clone the live selection for duplication (Cmd/Ctrl+D — Infinite's
+ * alt-drag-copy): same re-id/remap machinery, fixed one-step offset, and
+ * the user's copy/paste clipboard is left untouched.
+ */
+export function prepareDuplicate(
+  selectedNodes: CanvasNode[],
+  allConnections: CanvasConnection[],
+  existingIds: Set<string>,
+): PreparedPaste | null {
+  if (selectedNodes.length === 0) return null;
+  const ids = new Set(
+    selectedNodes.map(idOf).filter((v): v is string => v !== null),
+  );
+  const internal = allConnections.filter(
+    (c) => ids.has(String(c.source)) && ids.has(String(c.target)),
+  );
+  return cloneSubgraph(selectedNodes, internal, existingIds, PASTE_OFFSET);
 }
 
 function offsetPosition(pos: unknown, offset: number): { x: number; y: number } {

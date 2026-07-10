@@ -126,6 +126,18 @@ test('Arrange lays the graph out left-to-right by rank', async ({ page }) => {
   await page.screenshot({ path: 'e2e-artifacts/canvas-feel-arrange.png', fullPage: true });
 });
 
+test('mod+A then mod+D duplicates the whole graph with its wiring', async ({ page }) => {
+  await openCanvas(page);
+  await expect(page.locator('.react-flow__edge')).toHaveCount(2);
+
+  await page.locator('.react-flow').click({ position: { x: 30, y: 200 } });
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.press('ControlOrMeta+d');
+
+  await expect(page.locator('.react-flow__node')).toHaveCount(6);
+  await expect(page.locator('.react-flow__edge')).toHaveCount(4);
+});
+
 test('bare z toggles the overview and returns', async ({ page }) => {
   await openCanvas(page);
 
