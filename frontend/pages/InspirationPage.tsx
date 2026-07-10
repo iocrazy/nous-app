@@ -13,7 +13,7 @@ import { TagsPanel } from '../components/Inspiration/TagsPanel';
 import { HotspotsWorkspace } from '../components/Inspiration/HotspotsWorkspace';
 import { HotspotsSidePanel } from '../components/Inspiration/HotspotsSidePanel';
 import { useHotspots } from '../components/Inspiration/useHotspots';
-import { hotspotToRef } from '../components/Inspiration/hotspotToRef';
+import { buildPrefillContent, hotspotToRef } from '../components/Inspiration/hotspotToRef';
 import { toggleTaskItem } from '../components/Inspiration/toggleTaskItem';
 import { FloatingParse } from '../components/TopicInspiration/FloatingParse';
 import type { Hotspot } from '../services/topicService';
@@ -145,7 +145,7 @@ export const InspirationPage: React.FC = () => {
   // to the Composer as a prefill, and jump to the Notes tab. Shared by the
   // Hotspots-tab workspace and the Notes-tab sidebar Top3.
   const handleSaveAsNote = (h: Hotspot) => {
-    setPrefill({ content: '', refHotspot: hotspotToRef(h) });
+    setPrefill({ content: buildPrefillContent(h), refHotspot: hotspotToRef(h) });
     setPrefillNonce((n) => n + 1);
     setTab('notes');
   };
@@ -291,6 +291,7 @@ export const InspirationPage: React.FC = () => {
               <Composer
                 key={prefillNonce}
                 prefill={prefill}
+                autoFocus={!!prefill}
                 onCreated={(note) => {
                   onCreated(note);
                   setPrefill(null);

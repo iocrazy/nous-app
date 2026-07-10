@@ -1,6 +1,6 @@
 // Quick-capture box: inline #tag autocomplete, staged multi-format
 // attachments (paste / drop / picker), Cmd+Enter submit.
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Image as ImageIcon, Mic, Paperclip, X } from 'lucide-react';
 import { useToast } from '../Toast';
@@ -20,6 +20,11 @@ interface Props {
   onAttachmentUploaded?: (noteId: string, attachment: NoteAttachment) => void;
   tagSuggestions: string[];
   prefill?: { content: string; refHotspot?: RefHotspot } | null;
+  /** Focus the textarea (caret at start, before any prefilled tag line) on
+   * mount — used when a save-as-note prefill just landed. Composer remounts
+   * (keyed by prefillNonce) on every new prefill, so this only needs to run
+   * once per mount, not react to later changes. */
+  autoFocus?: boolean;
 }
 
 /** A staged file, tagged with the note it failed to attach to (if any) so a
@@ -35,6 +40,7 @@ export const Composer: React.FC<Props> = ({
   onAttachmentUploaded,
   tagSuggestions,
   prefill,
+  autoFocus,
 }) => {
   const { t } = useTranslation();
   const { addToast } = useToast();
@@ -46,6 +52,18 @@ export const Composer: React.FC<Props> = ({
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const nextKey = useRef(0);
+
+  // Mount-level focus: Composer remounts (keyed by prefillNonce) on every new
+  // prefill, so this effect naturally runs exactly once per prefill — no
+  // dependency-driven re-focus needed.
+  useEffect(() => {
+    if (!autoFocus) return;
+    const ta = taRef.current;
+    if (ta) {
+      ta.focus();
+      ta.setSelectionRange(0, 0);
+    }
+  }, [autoFocus]);
 
   const active = useMemo(() => findActiveTag(text, caret), [text, caret]);
   const suggestions = useMemo(() => {

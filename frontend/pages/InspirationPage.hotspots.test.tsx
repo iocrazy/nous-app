@@ -66,4 +66,20 @@ describe('InspirationPage P3 hotspots', () => {
     // composer now shows the referenced hotspot title
     await waitFor(() => expect(screen.getAllByText('Hot 1').length).toBeGreaterThan(0));
   });
+
+  it('save-as-note prefills hotspot tags into the composer', async () => {
+    getHotspots.mockResolvedValue([{ id: '1', title: 'Hot 1', tags: ['trend'], category: 'food', heat: 90, source_label: 'WEIBO' }]);
+    render(<InspirationPage />);
+    await waitFor(() => expect(screen.getByText('Hot 1')).toBeTruthy());
+    fireEvent.click(screen.getAllByLabelText('Save as note')[0]);
+    // Two textbox-role elements are on screen (the header search input plus
+    // the composer textarea) — disambiguate by tag, not just role.
+    const ta = await waitFor(() => {
+      const el = screen.getAllByRole('textbox').find((e) => e.tagName === 'TEXTAREA');
+      if (!el) throw new Error('composer textarea not found');
+      return el as HTMLTextAreaElement;
+    });
+    expect(ta.value).toContain('#food');
+    expect(ta.value).toContain('#trend');
+  });
 });
