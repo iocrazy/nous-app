@@ -867,6 +867,14 @@ body {
   box-shadow: var(--canvas-shadow-island);
 }
 
+/* Snap-connect hover target (Phase 1 G1) — Infinite's `.drop-target`
+   dashed outline, on the .react-flow__node wrapper. */
+.mh-canvas .react-flow__node.mh-snap-target {
+  outline: 2px dashed var(--canvas-strong);
+  outline-offset: 4px;
+  border-radius: var(--canvas-r-island);
+}
+
 /* Downloads grid: mobile 2 cols (Tailwind), desktop auto-fill fixed-width cards */
 @media (min-width: 768px) {
   .downloads-grid {

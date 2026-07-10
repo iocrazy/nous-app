@@ -44,7 +44,15 @@ function toReactFlowNodes(nodes: CanvasNode[]): AnyNode[] {
       obj.data && typeof obj.data === 'object'
         ? (obj.data as Record<string, unknown>)
         : { label: typeof obj.label === 'string' ? obj.label : id };
-    return { id, position, type, data } as AnyNode;
+    // xyflow v12 contract: controlled flows must echo the `measured` field
+    // applyNodeChanges writes back into the nodes prop — NodeWrapper keeps a
+    // node `visibility: hidden` until it has dimensions, so stripping this
+    // left every node permanently invisible in a real browser.
+    const measured =
+      obj.measured && typeof obj.measured === 'object'
+        ? { measured: obj.measured as { width?: number; height?: number } }
+        : {};
+    return { id, position, type, data, ...measured } as AnyNode;
   });
 }
 
@@ -205,6 +213,37 @@ export function CanvasSurface() {
     [kind, nodeTypeById, connections, setConnections],
   );
 
+  // Drag-snap-connect (Infinite-Canvas parity G1, smart only): a ctrl-dropped
+  // node becomes the SOURCE of a new edge into the hovered target, then snaps
+  // back to where the drag started — the gesture wires, it never moves.
+  // Prompt/loop sources probe with the pointer (their bodies are large and
+  // text-heavy); everything else probes with the node center, per Infinite.
+  const snapProbeFor = useCallback(
+    (node: AnyNode) =>
+      node.type === 'prompt' || node.type === 'loop' ? ('pointer' as const) : ('center' as const),
+    [],
+  );
+
+  const onSnapConnect = useCallback(
+    (args: { source: AnyNode; target: AnyNode; dragStartPosition: { x: number; y: number } }) => {
+      onConnect({
+        source: args.source.id,
+        target: args.target.id,
+        sourceHandle: null,
+        targetHandle: null,
+      });
+      const current = useCanvasCoreStore.getState().nodes;
+      setNodes(
+        current.map((n) =>
+          (n as { id?: unknown }).id === args.source.id
+            ? { ...n, position: { ...args.dragStartPosition } }
+            : n,
+        ) as CanvasNode[],
+      );
+    },
+    [onConnect, setNodes],
+  );
+
   const nodeTypes =
     kind === 'smart'
       ? SMART_NODE_TYPES
@@ -229,6 +268,9 @@ export function CanvasSurface() {
       allowConnect
       onConnect={onConnect}
       isValidConnection={isConnectionValid}
+      allowSnapConnect={kind === 'smart'}
+      snapProbeFor={snapProbeFor}
+      onSnapConnect={onSnapConnect}
       allowDragCreate
       renderCreateMenu={(ctx, onClose) => (
         <DragCreateMenu
