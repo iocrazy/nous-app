@@ -70,6 +70,7 @@ const SessionsPage = lazyWithRetry(() => import('./pages/SessionsPage').then(m =
 const MemoryPage = lazyWithRetry(() => import('./pages/MemoryPage').then(m => ({ default: m.MemoryPage })));
 const IssuesPage = lazyWithRetry(() => import('./pages/IssuesPage').then(m => ({ default: m.IssuesPage })));
 const CanvasPage = lazyWithRetry(() => import('./features/canvas-core/ui/CanvasPage'));
+const CanvasListPage = lazyWithRetry(() => import('./features/canvas-core/ui/CanvasListPage'));
 const AILibraryLayout = lazyWithRetry(() =>
   import('./components/AILibrary/AILibraryLayout').then(m => ({ default: m.AILibraryLayout })),
 );
@@ -158,6 +159,8 @@ export const router = createBrowserRouter([
       { path: 'skills/:slug', element: <RedirectToTeam view="skills" /> },
       { path: 'distribution', element: <RedirectToTeam view="distribution" /> },
       { path: 'distribution/accounts', element: <RedirectToTeam view="distribution" /> },
+      { path: 'canvas', element: <RedirectToTeam view="canvas" /> },
+      { path: 'canvas/:canvasId', element: <RedirectToTeam view="canvas" /> },
 
       // Settings is account-level (no team scope)
       { path: 'settings', element: <AppLayout />, children: [
@@ -186,6 +189,10 @@ export const router = createBrowserRouter([
           { path: 'projects', element: <SuspenseWrap><ModuleGuard moduleKey="projects"><ProjectsPage /></ModuleGuard></SuspenseWrap> },
           { path: 'projects/:projectId', element: <SuspenseWrap><ModuleGuard moduleKey="projects"><ProjectsPage /></ModuleGuard></SuspenseWrap> },
           { path: 'projects/:projectId/review/:fileId', element: <SuspenseWrap><ModuleGuard moduleKey="projects"><ProjectsPage /></ModuleGuard></SuspenseWrap> },
+          // Canvas landing page (Infinite-Canvas parity Phase 0). Always
+          // registered; the page itself redirects to the team root while
+          // VITE_FEATURE_CANVAS_NAV is off.
+          { path: 'canvas', element: <SuspenseWrap><CanvasListPage /></SuspenseWrap> },
           { path: 'canvas/:canvasId', element: <SuspenseWrap><CanvasPage /></SuspenseWrap> },
           { path: 'settings', element: <SuspenseWrap><SettingsPage /></SuspenseWrap> },
           { path: 'cleanup', element: <SuspenseWrap><ModuleGuard moduleKey="cleanup"><CleanupPage /></ModuleGuard></SuspenseWrap> },

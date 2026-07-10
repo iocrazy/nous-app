@@ -27,7 +27,7 @@ export default defineConfig({
   // dev server.
   webServer: {
     command:
-      'VITE_SUPABASE_URL=https://e2e.supabase.co VITE_SUPABASE_ANON_KEY=sb_e2e_anon_key VITE_API_URL=http://localhost:4173 VITE_FEATURE_PROJECT_WORKBENCH=true VITE_FEATURE_PROJECT_AI_SUGGEST=true npm run build && npm run preview -- --port 4173 --strictPort',
+      'VITE_SUPABASE_URL=https://e2e.supabase.co VITE_SUPABASE_ANON_KEY=sb_e2e_anon_key VITE_API_URL=http://localhost:4173 VITE_FEATURE_PROJECT_WORKBENCH=true VITE_FEATURE_PROJECT_AI_SUGGEST=true VITE_FEATURE_CANVAS_NAV=true npm run build && npm run preview -- --port 4173 --strictPort',
     url: 'http://localhost:4173',
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
