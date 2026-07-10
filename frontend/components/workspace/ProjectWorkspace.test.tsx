@@ -227,6 +227,7 @@ describe('ProjectWorkspace', () => {
     fireEvent.click(await screen.findByTestId('ws-ep-script'));
     const shell = await screen.findByTestId('mock-editor-shell');
     expect(shell).toHaveAttribute('data-script-id', 's1');
+    expect(shell).toHaveAttribute('data-project-id', 'p1');
     // Script (not Storyboard) — no view preset, EditorShell falls back to its
     // own stored/'script' default.
     expect(shell).toHaveAttribute('data-initial-rail-view', '');
@@ -249,6 +250,7 @@ describe('ProjectWorkspace', () => {
     fireEvent.click(await screen.findByTestId('ws-ep-storyboard'));
     const shell = await screen.findByTestId('mock-editor-shell');
     expect(shell).toHaveAttribute('data-script-id', 's1');
+    expect(shell).toHaveAttribute('data-project-id', 'p1');
     expect(shell).toHaveAttribute('data-initial-rail-view', 'storyboard');
     expect(navigate).not.toHaveBeenCalled();
   });

@@ -377,6 +377,7 @@ export function ProjectWorkspace({
               scriptId={resolvedScriptId}
               currentUserId={currentUserId}
               currentUserName={userProfile.name}
+              projectId={project.id}
               initialRailView={scriptInitialRailView}
             />
           </div>
