@@ -46,4 +46,19 @@ describe('useResourceSearch', () => {
       expect(spy).toHaveBeenCalledWith(expect.objectContaining({ teamId: 'team-900' })),
     );
   });
+
+  it('degrades a malformed response to the empty shape instead of crashing consumers', async () => {
+    // Wrong envelope (e.g. a generic {success,data} body or proxy HTML parsed
+    // to junk). Consumers read `data.results.length` unconditionally — a
+    // shapeless object here white-screens the whole canvas page.
+    const spy = vi
+      .spyOn(svc, 'searchResources')
+      .mockResolvedValue({ success: true, data: [] } as never);
+    const { result } = renderHook(() => useResourceSearch('hero', ''));
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(Array.isArray(result.current.data.results)).toBe(true);
+    expect(result.current.data.results).toHaveLength(0);
+    expect(result.current.data.counts.all).toBe(0);
+  });
 });

@@ -49,6 +49,7 @@ import {
   type Rect,
 } from './alignmentGuides';
 import { GuideOverlay } from './GuideOverlay';
+import { snapConnectTargetFor } from './snapConnect';
 import { useCanvasShortcuts } from './useCanvasShortcuts';
 import { useDragToCreate } from './useDragToCreate';
 import type { SnapPort } from './portSnap';
@@ -192,6 +193,26 @@ export interface CanvasEngineProps {
   /** Live drag-validity hint. */
   isValidConnection?: IsValidConnection;
 
+  /**
+   * Alt-dragging a single node so its probe point lands inside a valid
+   * target offers an automatic connection (Infinite-Canvas parity G1).
+   * Infinite gates on Ctrl, but d3-drag's default filter swallows
+   * ctrl+mousedown and ReactFlow suppresses node drags while the Shift
+   * selection key is held — Alt is the only modifier that starts a node
+   * drag cleanly. (G6 duplicate-drag will arbitrate gestures when it lands.)
+   * The engine highlights the hovered target (`mh-snap-target`) and fires
+   * `onSnapConnect` on drop; the caller owns edge creation + snap-back.
+   */
+  allowSnapConnect?: boolean;
+  /** Probe used for the hit test: node center (default) or the pointer. */
+  snapProbeFor?: (node: AnyNode) => 'center' | 'pointer';
+  /** An alt-drop landed on a valid target — create the edge, restore the node. */
+  onSnapConnect?: (args: {
+    source: AnyNode;
+    target: AnyNode;
+    dragStartPosition: { x: number; y: number };
+  }) => void;
+
   /** When true, wire-drag off a source handle snaps to a port or opens a picker. */
   allowDragCreate?: boolean;
   /** Candidate target ports in flow space; defaults to every measured target handle. */
@@ -230,6 +251,9 @@ export function CanvasEngine({
   allowConnect = true,
   onConnect,
   isValidConnection,
+  allowSnapConnect = false,
+  snapProbeFor,
+  onSnapConnect,
   allowDragCreate = false,
   getPorts,
   renderCreateMenu,
@@ -269,9 +293,61 @@ export function CanvasEngine({
     rfNodesRef.current = nodes;
   }, [nodes]);
 
-  const handleNodeDragStart = useCallback(() => {
-    onNodeDragStart?.();
-  }, [onNodeDragStart]);
+  // Drag-start position of the current solo drag — snap-connect restores the
+  // node here (the gesture creates a wire, it must not move the node).
+  const dragStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  // Hovered snap-connect target (drives the `mh-snap-target` highlight).
+  const [snapTargetId, setSnapTargetId] = useState<string | null>(null);
+
+  const handleNodeDragStart = useCallback(
+    (_evt: unknown, node?: AnyNode) => {
+      dragStartPosRef.current = node ? { ...node.position } : null;
+      onNodeDragStart?.();
+    },
+    [onNodeDragStart],
+  );
+
+  // Snap-connect hit test (Infinite parity): Alt held, solo drag, probe point
+  // (node center; pointer for prompt/loop-style sources) inside a candidate
+  // box, pair accepted by the caller's connection validator.
+  const snapConnectTarget = useCallback(
+    (evt: unknown, node: AnyNode): AnyNode | null => {
+      if (!allowSnapConnect || !onSnapConnect) return null;
+      const e = evt as { altKey?: boolean; clientX?: number; clientY?: number } | null;
+      if (!e?.altKey) return null;
+      const selected = rfNodesRef.current.filter((n) => n.selected);
+      if (selected.length > 1 && selected.some((n) => n.id === node.id)) return null;
+
+      let probePoint: { x: number; y: number };
+      if (snapProbeFor?.(node) === 'pointer' && e.clientX != null && e.clientY != null) {
+        const client = { x: e.clientX, y: e.clientY };
+        // snapToGrid:false — the probe is an exact hit test; the flow's 8px
+        // lattice would quantize it by up to ±4px at target edges.
+        probePoint =
+          instanceRef.current?.screenToFlowPosition?.(client, { snapToGrid: false }) ?? client;
+      } else {
+        const r = toRect(node);
+        probePoint = { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      }
+
+      const hit = snapConnectTargetFor({
+        draggedId: node.id,
+        probePoint,
+        candidates: rfNodesRef.current.map((n) => ({ id: n.id, rect: toRect(n) })),
+      });
+      if (!hit) return null;
+      const valid =
+        isValidConnection?.({
+          source: node.id,
+          target: hit.id,
+          sourceHandle: null,
+          targetHandle: null,
+        }) !== false;
+      if (!valid) return null;
+      return rfNodesRef.current.find((n) => n.id === hit.id) ?? null;
+    },
+    [allowSnapConnect, onSnapConnect, snapProbeFor, isValidConnection, toRect],
+  );
 
   // Alignment tolerance is a constant on SCREEN, so divide the flow-space
   // tolerance by the live zoom — otherwise a fixed flow px value snaps too
@@ -285,18 +361,36 @@ export function CanvasEngine({
   // alignment guides. The snap itself is applied once on drop so the node never
   // fights the cursor mid-drag.
   const onNodeDrag = useCallback(
-    (_evt: unknown, node: AnyNode) => {
+    (evt: unknown, node: AnyNode) => {
       const others = rfNodesRef.current.filter((n) => n.id !== node.id);
       setGuides(
         computeAlignmentGuides(toRect(node), others.map(toRect), guideTolerance()),
       );
+      setSnapTargetId(snapConnectTarget(evt, node)?.id ?? null);
     },
-    [toRect, guideTolerance],
+    [toRect, guideTolerance, snapConnectTarget],
   );
 
   const handleNodeDragStop = useCallback(
-    (_evt: unknown, node: AnyNode) => {
+    (evt: unknown, node: AnyNode) => {
       setGuides(NO_GUIDES);
+      setSnapTargetId(null);
+      // Snap-connect drop: the caller creates the edge and restores the node's
+      // position — the alignment-snap commit below must not fight that.
+      const snapTarget = snapConnectTarget(evt, node);
+      if (snapTarget) {
+        onSnapConnect?.({
+          source: node,
+          target: snapTarget,
+          dragStartPosition: dragStartPosRef.current ?? { ...node.position },
+        });
+        onNodeDragStop?.(node, {
+          isGroupDrop: false,
+          snappedPosition: null,
+          nodes: rfNodesRef.current,
+        });
+        return;
+      }
       // Group drop: React Flow moved the whole selection; every position already
       // flowed through onNodesChange, so the engine computes no solo snap here.
       const selected = rfNodesRef.current.filter((n) => n.selected);
@@ -328,7 +422,7 @@ export function CanvasEngine({
       // Full path (scene): hand the caller everything to persist as it sees fit.
       onNodeDragStop?.(node, { isGroupDrop, snappedPosition, nodes: rfNodesRef.current });
     },
-    [toRect, onNodesSnap, onNodeDragStop, guideTolerance],
+    [toRect, onNodesSnap, onNodeDragStop, guideTolerance, snapConnectTarget, onSnapConnect],
   );
 
   const handleSelectionDragStop = useCallback(
@@ -432,6 +526,17 @@ export function CanvasEngine({
     },
   });
 
+  // Hovered snap-connect target gets the dashed `mh-snap-target` outline
+  // (index.css § Canvas chrome). Identity when nothing is hovered.
+  const displayNodes = useMemo(() => {
+    if (!snapTargetId) return nodes;
+    return nodes.map((n) =>
+      n.id === snapTargetId
+        ? { ...n, className: `${n.className ?? ''} mh-snap-target`.trim() }
+        : n,
+    );
+  }, [nodes, snapTargetId]);
+
   return (
     // `mh-canvas` scopes the Infinite-Canvas-parity chrome (grid/edge/handle/
     // minimap tokens, index.css § Canvas chrome) to opted-in surfaces only —
@@ -442,7 +547,7 @@ export function CanvasEngine({
       className={`${themedChrome ? 'mh-canvas ' : ''}relative h-full w-full outline-none`}
     >
       <ReactFlow
-        nodes={nodes}
+        nodes={displayNodes}
         edges={edges}
         nodeTypes={nodeTypes}
         onInit={(instance) => {
