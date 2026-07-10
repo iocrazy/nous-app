@@ -19,6 +19,7 @@ from app.core.scope_guards import (
     verify_project_read_access,
     verify_project_write_access,
 )
+from app.repositories.generated_media_repository import GeneratedMediaRepository
 from app.schemas.projects import (
     AddMemberRequest,
     CreateCollectionRequest,
@@ -388,6 +389,35 @@ async def get_project_entities(
     except Exception as e:
         logger.error(f"Failed to get entities for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to get project entities")
+
+
+# ============================================
+# Project renders — shot-generated media listing (PR-10a, G14)
+# ============================================
+
+
+@router.get("/{project_id}/renders")
+async def list_project_renders(
+    project_id: str,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_read_access),
+    episode_id: Optional[str] = Query(None, description="Filter to one episode"),
+    cursor: Optional[str] = Query(None, description="Keyset pagination cursor"),
+    limit: int = Query(50, ge=1, le=100),
+):
+    """Project-wide shot renders (images + videos), derived by joining
+    generated_media.node_id (= str(shot_id) for shot-origin rows) back
+    through script_shots -> script_scenes -> script_projects. Newest-first,
+    cursor-paginated the same way as GET /generated-media."""
+    try:
+        repo = GeneratedMediaRepository()
+        data = await repo.list_for_project(
+            project_id, episode_id=episode_id, cursor=cursor, limit=limit
+        )
+        return {"success": True, "data": data}
+    except Exception as e:
+        logger.error(f"Failed to list renders for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list project renders")
 
 
 # ============================================
