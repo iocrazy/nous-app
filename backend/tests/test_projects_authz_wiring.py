@@ -22,6 +22,10 @@ EXEMPT = {
     ("GET", "/projects"),
     ("POST", "/projects"),
     ("GET", "/projects/stages/catalog"),
+    # PR-8 Task A: batch queue data source scoped by user_id (same
+    # visible-projects call the GET /projects list route uses), not a
+    # single project_id — no per-object guard applies.
+    ("GET", "/projects/suggestions"),
 }
 
 
