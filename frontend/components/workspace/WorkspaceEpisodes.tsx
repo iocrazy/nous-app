@@ -168,7 +168,7 @@ export function WorkspaceEpisodes({
               } ${isBusy ? 'opacity-50' : ''}`}
             >
               <span className="font-mono text-[11px] text-ink-500 w-10 shrink-0">
-                {t('projects.workspace.modules.episodes')} {i + 1}
+                {t('projects.workspace.episodes.epPrefix', { n: i + 1 })}
               </span>
 
               <div className="min-w-0 flex-1">

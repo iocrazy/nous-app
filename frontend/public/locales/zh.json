@@ -1384,7 +1384,8 @@
         "rendersCount": "成片 {{count}}"
       },
       "episodes": {
-        "title": "Episodes",
+        "title": "剧集",
+        "epPrefix": "Ep {{n}}",
         "newEpisode": "+ 新建剧集",
         "open": "打开 →",
         "start": "开始 →",
@@ -1399,9 +1400,7 @@
         "deleteConfirm": "删除这一集？",
         "deleteConfirmYes": "删除",
         "deleteConfirmCancel": "取消",
-        "notEmpty": "该集仍有脚本，无法删除",
-        "renameSave": "保存",
-        "renameCancel": "取消"
+        "notEmpty": "该集仍有脚本，无法删除"
       },
       "entities": {
         "derivedNote": "从脚本 cue 自动派生",
@@ -1420,7 +1419,6 @@
         "chipRenders": "成片",
         "chipDocs": "文档",
         "upload": "上传",
-        "uploading": "上传中…",
         "folder": "文件夹",
         "render": "成片",
         "currentEpOnly": "仅当前集",

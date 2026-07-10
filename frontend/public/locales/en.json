@@ -1385,6 +1385,7 @@
       },
       "episodes": {
         "title": "Episodes",
+        "epPrefix": "Ep {{n}}",
         "newEpisode": "+ New episode",
         "open": "Open →",
         "start": "Start →",
@@ -1399,9 +1400,7 @@
         "deleteConfirm": "Delete this episode?",
         "deleteConfirmYes": "Delete",
         "deleteConfirmCancel": "Cancel",
-        "notEmpty": "Episode not empty",
-        "renameSave": "Save",
-        "renameCancel": "Cancel"
+        "notEmpty": "Episode not empty"
       },
       "entities": {
         "derivedNote": "derived from script cues",
@@ -1420,7 +1419,6 @@
         "chipRenders": "Renders",
         "chipDocs": "Docs",
         "upload": "Upload",
-        "uploading": "Uploading…",
         "folder": "Folder",
         "render": "Render",
         "currentEpOnly": "Current episode only",

@@ -211,9 +211,26 @@ class EpisodeRepository:
             return None
 
     async def create(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Create an episode."""
+        """Create an episode.
+
+        When the caller doesn't pass an explicit ``sort_order`` (the
+        episodes_router POST path), assign the next slot after the
+        project's current max via a correlated subquery in the same
+        INSERT (``COALESCE(MAX(sort_order)+1, 1)``) — otherwise every new
+        episode lands at the ``episodes.sort_order`` DB default of 0, so
+        the first Move up/Move down against an existing row is a same-
+        value 0<->0 PATCH swap: a visible no-op. Callers that DO pass an
+        explicit ``sort_order`` (e.g. the auto-Ep1 project-creation block,
+        which always seeds ``sort_order=1``) keep that value untouched.
+        """
         try:
             values = _episode_write_values(data)
+            if "sort_order" not in values and values.get("project_id") is not None:
+                values["sort_order"] = (
+                    select(func.coalesce(func.max(Episodes.sort_order) + 1, 1))
+                    .where(Episodes.project_id == values["project_id"])
+                    .scalar_subquery()
+                )
             async with write_scope() as session:
                 result = await session.execute(
                     insert(Episodes).values(**values).returning(Episodes)

@@ -19,6 +19,7 @@ vi.mock('react-i18next', () => ({
       if (key === 'projects.workspace.episodes.scriptScenes') return `Script ✓ ${opts?.count} scenes`;
       if (key === 'projects.workspace.episodes.shotsProgress') return `Shots ${opts?.done}/${opts?.total}`;
       if (key === 'projects.workspace.episodes.rendersCount') return `Renders ${opts?.count}`;
+      if (key === 'projects.workspace.episodes.epPrefix') return `Ep ${opts?.n}`;
       if (key.startsWith('projects.workspace.episodes.')) return key.split('.').pop()!;
       if (key.startsWith('projects.workspace.episodeStatus.')) return key.split('.').pop()!;
       if (key.startsWith('projects.workspace.modules.')) return key.split('.').pop()!;
@@ -100,6 +101,8 @@ describe('WorkspaceEpisodes', () => {
 
     const row1 = screen.getByTestId('ws-episode-row-1');
     expect(row1).toHaveTextContent('Pilot');
+    expect(row1).toHaveTextContent('Ep 1');
+    expect(screen.getByTestId('ws-episode-row-2')).toHaveTextContent('Ep 2');
     expect(screen.getByTestId('ws-episode-status-1')).toHaveTextContent('boarding');
     expect(screen.getByTestId('ws-episode-progress-1')).toHaveTextContent('Script ✓ 4 scenes');
     expect(screen.getByTestId('ws-episode-progress-1')).toHaveTextContent('Shots 9/12');
