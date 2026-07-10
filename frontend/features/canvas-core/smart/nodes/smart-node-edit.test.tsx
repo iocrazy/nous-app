@@ -273,6 +273,103 @@ describe('LoopNodeView — edit affordances', () => {
 });
 
 // ============================================================
+// Loop batch fields (Infinite parity Phase 1 G3a)
+// ============================================================
+
+describe('LoopNodeView — batch fields', () => {
+  const LEGACY = { mode: 'serial', label: '' };
+  const FULL = { mode: 'serial', label: '', rounds: 3, round_start: 1, prompts: ['first'] };
+
+  function nodeData(): Record<string, unknown> {
+    const node = useCanvasCoreStore.getState().nodes[0] as Record<
+      string,
+      Record<string, unknown>
+    >;
+    return node.data;
+  }
+
+  it('renders legacy data (mode+label only) with safe defaults', () => {
+    seedNode('l1', 'loop', LEGACY);
+    render(
+      <Wrap>
+        <LoopNodeView {...baseProps} id="l1" type="loop" data={LEGACY} />
+      </Wrap>,
+    );
+    expect((screen.getByLabelText('Loop rounds') as HTMLInputElement).value).toBe('1');
+    expect((screen.getByLabelText('Start index') as HTMLInputElement).value).toBe('1');
+  });
+
+  it('editing rounds patches a clamped value', () => {
+    seedNode('l1', 'loop', FULL);
+    render(
+      <Wrap>
+        <LoopNodeView {...baseProps} id="l1" type="loop" data={FULL} />
+      </Wrap>,
+    );
+    fireEvent.change(screen.getByLabelText('Loop rounds'), { target: { value: '500' } });
+    expect(nodeData().rounds).toBe(100);
+  });
+
+  it('editing start index patches a clamped value', () => {
+    seedNode('l1', 'loop', FULL);
+    render(
+      <Wrap>
+        <LoopNodeView {...baseProps} id="l1" type="loop" data={FULL} />
+      </Wrap>,
+    );
+    fireEvent.change(screen.getByLabelText('Start index'), { target: { value: '0' } });
+    expect(nodeData().round_start).toBe(1);
+  });
+
+  it('adds and edits a rotating prompt', () => {
+    seedNode('l1', 'loop', FULL);
+    render(
+      <Wrap>
+        <LoopNodeView {...baseProps} id="l1" type="loop" data={FULL} />
+      </Wrap>,
+    );
+    fireEvent.click(screen.getByLabelText('Add prompt'));
+    expect(nodeData().prompts).toEqual(['first', '']);
+
+    fireEvent.change(screen.getByLabelText('Loop prompt 1'), {
+      target: { value: '生成第《计数》张' },
+    });
+    expect((nodeData().prompts as string[])[0]).toBe('生成第《计数》张');
+  });
+
+  it('removes a prompt but keeps at least one entry deletable-free', () => {
+    seedNode('l1', 'loop', { ...FULL, prompts: ['a', 'b'] });
+    render(
+      <Wrap>
+        <LoopNodeView
+          {...baseProps}
+          id="l1"
+          type="loop"
+          data={{ ...FULL, prompts: ['a', 'b'] }}
+        />
+      </Wrap>,
+    );
+    fireEvent.click(screen.getByLabelText('Remove prompt 2'));
+    expect(nodeData().prompts).toEqual(['a']);
+  });
+
+  it('disables removal of the last remaining prompt (matches Infinite)', () => {
+    seedNode('l1', 'loop', { ...FULL, prompts: ['only'] });
+    render(
+      <Wrap>
+        <LoopNodeView
+          {...baseProps}
+          id="l1"
+          type="loop"
+          data={{ ...FULL, prompts: ['only'] }}
+        />
+      </Wrap>,
+    );
+    expect(screen.getByLabelText('Remove prompt 1')).toBeDisabled();
+  });
+});
+
+// ============================================================
 // History invariant
 // ============================================================
 

@@ -125,6 +125,9 @@ export function createLoopNode(
     data: {
       mode: data.mode ?? 'serial',
       label: data.label ?? '',
+      rounds: data.rounds ?? 1,
+      round_start: data.round_start ?? 1,
+      prompts: data.prompts ?? [''],
     },
   };
 }

@@ -91,6 +91,17 @@ export interface LoopNodeData {
   mode: LoopMode;
   /** Optional human label, e.g. "for each shot". */
   label: string;
+  /**
+   * Batch fields (Infinite parity G3a). Optional so canvases persisted
+   * before this slice keep loading — consumers default them via
+   * `clampRounds(rounds ?? 1)` etc. (see loopVars.ts).
+   */
+  /** How many rounds a from-loop run executes (1..100, Infinite `count`). */
+  rounds?: number;
+  /** First 《计数》 value (≥1, Infinite `loopStart`). */
+  round_start?: number;
+  /** Rotating prompt list — round N uses entry (N-1) % length. */
+  prompts?: string[];
 }
 
 export interface SmartNode<T> extends Record<string, unknown> {
