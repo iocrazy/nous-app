@@ -68,6 +68,28 @@ class CanvasRepository:
             logger.error(f"canvas list_for_project({project_id}) failed: {e}")
             return []
 
+    async def list_team_tree(self, team_id: str) -> List[Dict[str, Any]]:
+        """Every project in the team with its canvases embedded as SUMMARY
+        columns (no nodes_json/connections_json — the landing page renders
+        cards, not documents). Projects without canvases are included so
+        the canvas list can offer "New Canvas" on them. One query — this
+        replaces the frontend's fetchProjects + per-project listCanvases
+        N+1 fan-out (G4 review follow-up)."""
+        try:
+            client = await self._client()
+            result = (
+                await client.table("projects")
+                .select("id, name, canvases(id, name, kind, updated_at)")
+                .eq("team_id", _bigint(team_id))
+                .order("created_at", desc=True)
+                .order("updated_at", desc=True, foreign_table="canvases")
+                .execute()
+            )
+            return list(result.data or [])
+        except Exception as e:
+            logger.error(f"canvas list_team_tree({team_id}) failed: {e}")
+            return []
+
     # ------------------------------------------------------------------
     # Writes
     # ------------------------------------------------------------------

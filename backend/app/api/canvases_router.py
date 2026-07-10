@@ -26,6 +26,7 @@ from app.core.scope_guards import (
     verify_project_read_access,
     verify_project_write_access,
 )
+from app.repositories.canvas_repository import CanvasRepository
 from app.schemas.canvas import (
     CanvasConflictResponse,
     CanvasCreate,
@@ -139,6 +140,49 @@ async def get_canvas_generation(task_id: str, auth: AuthDep) -> dict:
     if not result.data:
         raise HTTPException(status_code=404, detail="Task not found")
     return {"success": True, "data": result.data}
+
+
+async def _is_team_member(team_id: str, user_id: str) -> bool:
+    """Same membership check as scope_guards.verify_scope_access."""
+    from app.db import get_async_supabase_admin
+
+    client = await get_async_supabase_admin()
+    result = (
+        await client.table("team_members")
+        .select("team_id")
+        .eq("team_id", team_id)
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    return bool(result.data)
+
+
+@router.get("/canvases/team/{team_id}")
+async def list_team_canvases(team_id: str, auth: AuthDep) -> dict:
+    """Every project in the team with its canvases embedded as summary
+    columns — one query, replacing the canvas landing page's
+    fetchProjects + per-project listCanvases N+1 fan-out."""
+    if not await _is_team_member(team_id, auth.user_id):
+        raise HTTPException(status_code=403, detail="You are not a member of this team")
+    rows = await CanvasRepository().list_team_tree(team_id)
+    data = [
+        {
+            "project_id": str(r.get("id")),
+            "project_name": r.get("name") or "",
+            "canvases": [
+                {
+                    "id": str(c.get("id")),
+                    "name": c.get("name") or "",
+                    "kind": c.get("kind") or "smart",
+                    "updated_at": c.get("updated_at"),
+                }
+                for c in (r.get("canvases") or [])
+            ],
+        }
+        for r in rows
+    ]
+    return {"success": True, "data": data}
 
 
 # ============================================================
@@ -367,7 +411,6 @@ async def enqueue_canvas_graph_run(
     so the task_tracking row and the DBOS workflow are always linked.
     """
     from app.services.infra.dbos_orchestrator import start_workflow_routed
-    from app.services.infra.unified_task_manager import get_task_manager
     from app.workflows.canvas_graph import canvas_graph_workflow
 
     await _gate_canvas_write(canvas_id, auth)
