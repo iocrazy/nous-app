@@ -259,6 +259,25 @@ class ProjectsService:
             except Exception as exc:
                 logger.warning(f"Failed to generate display_code: {exc}")
 
+        # D4 (final UI spec): every project is born on the first SOP stage so
+        # the stage workbench is always present. Best-effort — a stage-machine
+        # hiccup must never fail project creation.
+        try:
+            stages_repo = self._stages_repo()
+            catalog = await stages_repo.list_catalog()
+            if catalog:
+                updated = await stages_repo.set_current_stage(
+                    project["id"], int(catalog[0]["id"]), user_id
+                )
+                if updated is not None:
+                    project = {**project, "current_stage_id": str(catalog[0]["id"])}
+        except (
+            Exception
+        ) as e:  # noqa: BLE001 — stage init is enrichment, not core create
+            logger.error(
+                f"[projects] default-stage init failed for {project.get('id')}: {e}"
+            )
+
         return project
 
     async def update_project(self, project_id: str, user_id: str, data: dict) -> dict:

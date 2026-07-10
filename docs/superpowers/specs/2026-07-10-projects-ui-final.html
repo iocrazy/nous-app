@@ -1,0 +1,404 @@
+<!--
+  Projects UI 定版设计稿(FINAL v2, 2026-07-10)。唯一执行基准。
+  artifact: https://claude.ai/code/artifact/fd133ec7-0348-45af-afaf-f3b28d9da27f
+  v2: 补第 0 节主页整页布局 + D9(主页维持现有 IA)。决策 D1-D9 见文内表格。
+-->
+<title>Projects UI — 定版设计稿 (Final)</title>
+<style>
+  /* ── Token system: light default, dark via media + data-theme override ── */
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --card: #ffffff; --card-2: #f7f8fa;
+    --line: rgba(15,18,25,.08); --line-strong: rgba(15,18,25,.16);
+    --c1: #1b1d23; --c2: #565a66; --c3: #8a8e99; --c4: #b0b3bc;
+    --indigo: #6366f1; --indigo-ink: #4f46e5; --indigo-soft: rgba(99,102,241,.10);
+    --emerald: #10b981; --amber: #d97706; --amber-soft: rgba(217,119,6,.12);
+    --btn-ink: #ffffff; --shadow: 0 1px 3px rgba(15,18,25,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #050507; --panel: #15151a; --card: #1d1d22; --card-2: #17171b;
+      --line: rgba(255,255,255,.065); --line-strong: rgba(255,255,255,.12);
+      --c1: #e7e7ea; --c2: #a3a3ad; --c3: #74747e; --c4: #55555e;
+      --indigo: #6366f1; --indigo-ink: #818cf8; --indigo-soft: rgba(99,102,241,.16);
+      --emerald: #34d399; --amber: #fbbf24; --amber-soft: rgba(251,191,36,.12);
+      --btn-ink: #0b0b10; --shadow: none;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #050507; --panel: #15151a; --card: #1d1d22; --card-2: #17171b;
+    --line: rgba(255,255,255,.065); --line-strong: rgba(255,255,255,.12);
+    --c1: #e7e7ea; --c2: #a3a3ad; --c3: #74747e; --c4: #55555e;
+    --indigo: #6366f1; --indigo-ink: #818cf8; --indigo-soft: rgba(99,102,241,.16);
+    --emerald: #34d399; --amber: #fbbf24; --amber-soft: rgba(251,191,36,.12);
+    --btn-ink: #0b0b10; --shadow: none;
+  }
+  :root[data-theme="light"] {
+    --bg: #f4f5f7; --panel: #ffffff; --card: #ffffff; --card-2: #f7f8fa;
+    --line: rgba(15,18,25,.08); --line-strong: rgba(15,18,25,.16);
+    --c1: #1b1d23; --c2: #565a66; --c3: #8a8e99; --c4: #b0b3bc;
+    --indigo: #6366f1; --indigo-ink: #4f46e5; --indigo-soft: rgba(99,102,241,.10);
+    --emerald: #10b981; --amber: #d97706; --amber-soft: rgba(217,119,6,.12);
+    --btn-ink: #ffffff; --shadow: 0 1px 3px rgba(15,18,25,.06);
+  }
+
+  * { margin: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--c1);
+    font: 14px/1.55 -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+    padding: 40px 24px 120px;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums; }
+
+  .eyebrow { color: var(--c3); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; }
+  h1 { font-size: 26px; font-weight: 650; letter-spacing: -.02em; margin: 6px 0 8px; text-wrap: balance; }
+  h2 { font-size: 18px; font-weight: 650; letter-spacing: -.01em; }
+  .lede { color: var(--c2); max-width: 68ch; }
+  .final-chip { display:inline-block; font-size: 11px; color: var(--btn-ink); background: var(--indigo); border-radius: 999px; padding: 3px 10px; font-weight: 700; vertical-align: 3px; margin-left: 10px; letter-spacing: .04em; }
+
+  section { margin-top: 56px; }
+  .sec-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 6px; }
+  .sec-head .tag { font-size: 11px; letter-spacing: .1em; color: var(--c3); border: 1px solid var(--line-strong); border-radius: 4px; padding: 2px 8px; }
+  .sec-sub { color: var(--c2); max-width: 72ch; margin-bottom: 18px; }
+  .sec-sub b { color: var(--c1); font-weight: 600; }
+
+  .board { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 24px; margin-bottom: 12px; box-shadow: var(--shadow); }
+  .board-label { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--c4); margin-bottom: 14px; }
+
+  /* ── list cards ── */
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+  .pcard { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; cursor: pointer; transition: border-color .15s; box-shadow: var(--shadow); }
+  .pcard:hover { border-color: var(--line-strong); }
+  .pname { font-weight: 600; font-size: 15px; letter-spacing: -.01em; }
+  .pdesc { color: var(--c3); font-size: 12.5px; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ringrow { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .activity { display: flex; align-items: center; gap: 6px; color: var(--c3); font-size: 12px; }
+  .activity .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--emerald); flex: none; }
+  .meta { display: flex; align-items: center; gap: 10px; color: var(--c4); font-size: 11.5px; justify-content: space-between; margin-top: 12px; }
+  .stage-chip { font-size: 11px; color: var(--indigo-ink); background: var(--indigo-soft); border-radius: 999px; padding: 2px 9px; font-weight: 600; }
+  .avatars { display: flex; }
+  .av { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--card); display: grid; place-items: center; font-size: 9px; font-weight: 700; color: #0b0b10; margin-left: -6px; }
+  .av:first-child { margin-left: 0; }
+
+  /* ── workbench ── */
+  .appframe { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 20px; position: relative; overflow-x: auto; }
+  .constraint { max-width: 1120px; position: relative; }
+  .constraint::after {
+    content: "max-width 1120px — 宽屏不再拉满"; position: absolute; top: -14px; right: 0;
+    font-size: 10px; color: var(--indigo-ink); letter-spacing: .06em;
+  }
+  .constraint-outline { outline: 1.5px dashed var(--indigo-soft); outline-offset: 8px; border-radius: 14px; }
+  .wb { display: grid; gap: 12px; }
+  .stage-card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; box-shadow: var(--shadow); }
+  .btn { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; border-radius: 8px; padding: 7px 14px; border: 1px solid transparent; cursor: pointer; }
+  .btn.primary { background: var(--indigo); color: var(--btn-ink); }
+  .btn.ghost { background: transparent; color: var(--c2); border-color: var(--line-strong); }
+  .btn:focus-visible { outline: 2px solid var(--indigo); outline-offset: 2px; }
+
+  .ministep { display: flex; align-items: center; gap: 0; }
+  .ministep i { width: 8px; height: 8px; border-radius: 50%; background: var(--c4); opacity: .45; flex: none; cursor: pointer; }
+  .ministep i.done { background: var(--indigo); opacity: 1; }
+  .ministep i.cur { background: var(--indigo); opacity: 1; outline: 3px solid var(--indigo-soft); }
+  .ministep s { width: 14px; height: 2px; background: var(--line-strong); flex: none; text-decoration: none; }
+  .ministep s.done { background: var(--indigo); }
+
+  .toolrow { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 220px)); gap: 10px; margin-top: 16px; }
+  .toolcard { background: var(--card-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: flex; align-items: center; gap: 10px; cursor: pointer; }
+  .toolcard:hover { border-color: var(--indigo); }
+  .toolcard .ic { width: 28px; height: 28px; border-radius: 8px; background: var(--indigo-soft); display: grid; place-items: center; color: var(--indigo-ink); flex: none; font-size: 13px; }
+  .toolcard .tl { font-size: 13px; font-weight: 600; }
+  .toolcard .ts { font-size: 11.5px; color: var(--c3); }
+
+  .ai-card { border: 1px solid var(--indigo); border-color: color-mix(in srgb, var(--indigo) 40%, transparent); background: linear-gradient(180deg, var(--indigo-soft), transparent); border-radius: 12px; padding: 14px 16px; display: flex; gap: 12px; align-items: center; }
+  .ai-card .badge { font-size: 10px; letter-spacing: .1em; color: var(--indigo-ink); font-weight: 700; text-transform: uppercase; }
+
+  /* decisions table */
+  table.dec { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.dec th { text-align: left; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--c4); font-weight: 600; padding: 0 12px 10px; }
+  table.dec td { padding: 10px 12px; border-top: 1px solid var(--line); vertical-align: top; }
+  table.dec td:first-child { white-space: nowrap; font-weight: 600; color: var(--indigo-ink); }
+  table.dec b { color: var(--c1); font-weight: 600; }
+
+  .notes { color: var(--c3); font-size: 13px; display: grid; gap: 4px; padding-left: 16px; margin-top: 10px; }
+  .notes li::marker { color: var(--c4); }
+  .notes b { color: var(--c2); font-weight: 600; }
+
+  footer { margin-top: 64px; color: var(--c4); font-size: 12px; border-top: 1px solid var(--line); padding-top: 18px; }
+  :focus-visible { outline: 2px solid var(--indigo); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <div class="eyebrow">MediaHub · Projects · 定版 UI 设计稿</div>
+  <h1>项目列表 + 阶段工作台 — 定版<span class="final-chip">FINAL</span></h1>
+  <p class="lede">基于已选定的 A · Stage Ring 稿(artifact f1d342c2),修正为产品真实形态后的<b>唯一执行基准</b>。与旧稿的差异全部来自八项锁定决策(见文末 D1–D8)。本稿为双主题:切换你的系统/站内主题即可看到亮/暗两版,<b>所见即两个主题各自的验收标准</b>。UI 文案为英文(产品规范),中文经 i18n。</p>
+
+  <!-- ═══════ 0 · 项目主页整页 ═══════ -->
+  <section>
+    <div class="sec-head"><span class="tag">0</span><h2>项目主页 — 整页布局(视图侧栏 · 标签页 · 工具条)</h2></div>
+    <p class="sec-sub">主页面维持现有信息架构(D9):左侧<b>视图栏</b>(All/Starred/Recent/Active/Archived + 计数)· 顶部<b>类型标签页</b>(All/Internal/External)+ 搜索 + New Project · 工具条(计数 + 排序 + 网格/表格切换)· 下方卡片网格。D4 生效后<b>每张卡都有阶段环</b>——不再出现无环裸卡。</p>
+    <div class="appframe" style="padding:0; overflow:hidden">
+      <div style="display:flex; min-height:380px">
+        <div style="width:184px; flex:none; background:var(--panel); border-right:1px solid var(--line); padding:16px 10px">
+          <div style="font-weight:650; font-size:14px; padding:0 8px 12px">Projects</div>
+          <div class="eyebrow" style="padding:0 8px 8px; font-size:10px">Views</div>
+          <div style="display:grid; gap:2px; font-size:13px">
+            <div style="display:flex; justify-content:space-between; padding:7px 10px; border-radius:8px; background:var(--indigo-soft); color:var(--indigo-ink); font-weight:600"><span>▦ All</span><span class="mono">2</span></div>
+            <div style="display:flex; justify-content:space-between; padding:7px 10px; border-radius:8px; color:var(--c2)"><span>☆ Starred</span><span class="mono" style="color:var(--c4)">1</span></div>
+            <div style="display:flex; justify-content:space-between; padding:7px 10px; border-radius:8px; color:var(--c2)"><span>◷ Recent</span><span class="mono" style="color:var(--c4)">2</span></div>
+            <div style="display:flex; justify-content:space-between; padding:7px 10px; border-radius:8px; color:var(--c2)"><span>⚡ Active</span><span class="mono" style="color:var(--c4)">2</span></div>
+            <div style="display:flex; justify-content:space-between; padding:7px 10px; border-radius:8px; color:var(--c2)"><span>▤ Archived</span><span class="mono" style="color:var(--c4)">1</span></div>
+          </div>
+        </div>
+        <div style="flex:1; min-width:0; padding:18px 22px">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap">
+            <div style="font-size:18px; font-weight:650">All Projects</div>
+            <div style="display:flex; gap:8px; align-items:center">
+              <span style="border:1px solid var(--line); border-radius:8px; padding:6px 12px; color:var(--c4); font-size:12.5px">⌕ Search projects</span>
+              <button class="btn primary">+ New Project</button>
+            </div>
+          </div>
+          <div style="display:flex; gap:18px; border-bottom:1px solid var(--line); margin-top:12px; font-size:13.5px">
+            <span style="padding:8px 2px; border-bottom:2px solid var(--indigo); font-weight:600">All</span>
+            <span style="padding:8px 2px; color:var(--c3)">Internal</span>
+            <span style="padding:8px 2px; color:var(--c3)">External</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin:12px 0; font-size:12px; color:var(--c3)">
+            <span>2 projects</span>
+            <span style="display:flex; gap:8px; align-items:center">
+              <span style="border:1px solid var(--line); border-radius:7px; padding:4px 10px">Last active ▾</span>
+              <span style="border:1px solid var(--line); border-radius:7px; padding:4px 8px; color:var(--indigo-ink)">▦</span><span style="border:1px solid var(--line); border-radius:7px; padding:4px 8px">☰</span>
+            </span>
+          </div>
+          <div class="cards" style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr))">
+            <div class="pcard">
+              <div class="ringrow">
+                <svg width="40" height="40" viewBox="0 0 44 44" aria-label="Stage 1 of 6">
+                  <g fill="none" stroke-width="4" stroke-linecap="round">
+                    <path d="M22 4 A18 18 0 0 1 37.6 13" stroke="#6366f1"></path>
+                    <path d="M39.5 17.5 A18 18 0 0 1 39.5 26.5" stroke="var(--c4)" opacity=".4"></path>
+                    <path d="M37.6 31 A18 18 0 0 1 30 39" stroke="var(--c4)" opacity=".4"></path>
+                    <path d="M25 39.9 A18 18 0 0 1 14 38" stroke="var(--c4)" opacity=".4"></path>
+                    <path d="M10 35 A18 18 0 0 1 4.6 26.5" stroke="var(--c4)" opacity=".4"></path>
+                    <path d="M4.5 17.5 A18 18 0 0 1 14 6" stroke="var(--c4)" opacity=".4"></path>
+                  </g>
+                  <text x="22" y="26" text-anchor="middle" font-size="11" font-weight="700" fill="var(--c1)">1/6</text>
+                </svg>
+                <div style="min-width:0"><div class="pname">Personal Test Project</div></div>
+              </div>
+              <div class="activity"><span class="dot"></span>Entered Planning · 1d ago</div>
+              <div class="meta"><span class="stage-chip">Planning</span><span class="mono">0 files</span></div>
+            </div>
+            <div class="pcard">
+              <div class="ringrow">
+                <svg width="40" height="40" viewBox="0 0 44 44" aria-label="Stage 1 of 6">
+                  <g fill="none" stroke-width="4" stroke-linecap="round">
+                    <path d="M22 4 A18 18 0 0 1 37.6 13" stroke="#6366f1"></path>
+                    <path d="M39.5 17.5 A18 18 0 0 1 39.5 26.5" stroke="var(--c4)" opacity=".4"></path>
+                    <path d="M37.6 31 A18 18 0 0 1 30 39" stroke="var(--c4)" opacity=".4"></path>
+                    <path d="M25 39.9 A18 18 0 0 1 14 38" stroke="var(--c4)" opacity=".4"></path>
+                    <path d="M10 35 A18 18 0 0 1 4.6 26.5" stroke="var(--c4)" opacity=".4"></path>
+                    <path d="M4.5 17.5 A18 18 0 0 1 14 6" stroke="var(--c4)" opacity=".4"></path>
+                  </g>
+                  <text x="22" y="26" text-anchor="middle" font-size="11" font-weight="700" fill="var(--c1)">1/6</text>
+                </svg>
+                <div style="min-width:0"><div class="pname">21321</div></div>
+              </div>
+              <div class="activity"><span class="dot"></span>Entered Planning · just now</div>
+              <div class="meta"><span class="stage-chip">Planning</span><span class="mono">0 files</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <ul class="notes">
+      <li><b>右下卡即今日截图里的"21321"修复后形态</b>:D4 回填后它有 1/6 环 + Planning chip + 动态行,与左卡完全一致。</li>
+      <li>类型 badge(Internal/External/Personal)在有阶段 chip 时退位(chip 优先);color_label 左边条保留。</li>
+      <li>空态(0 projects):居中插画 + "Create your first project" + New Project 按钮(现有形态,不改)。</li>
+    </ul>
+  </section>
+
+  <!-- ═══════ 1 · 列表卡片 ═══════ -->
+  <section>
+    <div class="sec-head"><span class="tag">1</span><h2>列表卡片(维持已上线形态,本稿定双主题基准)</h2></div>
+    <p class="sec-sub">网格 <b>auto-fill minmax(280px,1fr)</b> 拉伸;三种状态:进行中(文件事件·绿)、停滞(琥珀,驻留超阈值)、归档(降透明+灰满环✓)。</p>
+    <div class="board">
+      <div class="board-label">Projects · Grid</div>
+      <div class="cards">
+        <div class="pcard">
+          <div class="ringrow">
+            <svg width="44" height="44" viewBox="0 0 44 44" aria-label="Stage 3 of 6">
+              <g fill="none" stroke-width="4" stroke-linecap="round">
+                <path d="M22 4 A18 18 0 0 1 37.6 13" stroke="#6366f1"></path>
+                <path d="M39.5 17.5 A18 18 0 0 1 39.5 26.5" stroke="#6366f1"></path>
+                <path d="M37.6 31 A18 18 0 0 1 30 39" stroke="#6366f1" opacity=".95"></path>
+                <path d="M25 39.9 A18 18 0 0 1 14 38" stroke="var(--c4)" opacity=".4"></path>
+                <path d="M10 35 A18 18 0 0 1 4.6 26.5" stroke="var(--c4)" opacity=".4"></path>
+                <path d="M4.5 17.5 A18 18 0 0 1 14 6" stroke="var(--c4)" opacity=".4"></path>
+              </g>
+              <text x="22" y="26" text-anchor="middle" font-size="11" font-weight="700" fill="var(--c1)">3/6</text>
+            </svg>
+            <div style="min-width:0">
+              <div class="pname">Spring Campaign 2026</div>
+              <div class="pdesc">Short-form ad series for the spring launch</div>
+            </div>
+          </div>
+          <div class="activity"><span class="dot"></span>Added files · HG · 2h ago</div>
+          <div class="meta">
+            <span class="stage-chip">Storyboard</span>
+            <span class="avatars"><span class="av" style="background:#8b9dc3">HG</span><span class="av" style="background:#c3a78b">LM</span><span class="av" style="background:#8bc3a1">+2</span></span>
+            <span class="mono">128 files</span>
+          </div>
+        </div>
+        <div class="pcard">
+          <div class="ringrow">
+            <svg width="44" height="44" viewBox="0 0 44 44" aria-label="Stage 5 of 6">
+              <g fill="none" stroke-width="4" stroke-linecap="round">
+                <path d="M22 4 A18 18 0 0 1 37.6 13" stroke="#6366f1"></path>
+                <path d="M39.5 17.5 A18 18 0 0 1 39.5 26.5" stroke="#6366f1"></path>
+                <path d="M37.6 31 A18 18 0 0 1 30 39" stroke="#6366f1"></path>
+                <path d="M25 39.9 A18 18 0 0 1 14 38" stroke="#6366f1"></path>
+                <path d="M10 35 A18 18 0 0 1 4.6 26.5" stroke="#6366f1"></path>
+                <path d="M4.5 17.5 A18 18 0 0 1 14 6" stroke="var(--c4)" opacity=".4"></path>
+              </g>
+              <text x="22" y="26" text-anchor="middle" font-size="11" font-weight="700" fill="var(--c1)">5/6</text>
+            </svg>
+            <div style="min-width:0">
+              <div class="pname">Client Reel — Northwind</div>
+              <div class="pdesc">External review deliverables, cut 2</div>
+            </div>
+          </div>
+          <div class="activity"><span class="dot" style="background:var(--amber)"></span><span style="color:var(--amber)">Waiting in Review · 4d ago</span></div>
+          <div class="meta">
+            <span class="stage-chip" style="color:var(--amber); background:var(--amber-soft)">Review</span>
+            <span class="avatars"><span class="av" style="background:#c38b8b">HG</span></span>
+            <span class="mono">64 files</span>
+          </div>
+        </div>
+        <div class="pcard" style="opacity:.55">
+          <div class="ringrow">
+            <svg width="44" height="44" viewBox="0 0 44 44" aria-label="Archived">
+              <circle cx="22" cy="22" r="18" fill="none" stroke="var(--c4)" stroke-width="4" opacity=".35"></circle>
+              <text x="22" y="26" text-anchor="middle" font-size="12" font-weight="700" fill="var(--c3)">✓</text>
+            </svg>
+            <div style="min-width:0">
+              <div class="pname" style="color:var(--c2)">Q4 Retrospective Edit</div>
+              <div class="pdesc">Delivered December — archived</div>
+            </div>
+          </div>
+          <div class="meta">
+            <span class="stage-chip" style="color:var(--c3); background:var(--card-2)">Archived</span>
+            <span class="mono">211 files</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════ 2 · 工作台 ═══════ -->
+  <section>
+    <div class="sec-head"><span class="tag">2</span><h2>详情页工作台(定版:去 pills 行 · 点式跳转 · 1120px 约束 · 实心 CTA)</h2></div>
+    <p class="sec-sub">顶部整行阶段 pills <b>删除</b>——阶段位置由卡内 <b>6 点迷你步进器</b>(可点跳转)承担;工作台条带限宽 <b>1120px</b>,下方 Files 区维持全宽。建议卡 CTA 一律<b>实心 indigo</b>。每个项目<b>必有</b>阶段机(新建默认 Planning,存量回填)。</p>
+
+    <div class="appframe">
+      <div class="constraint constraint-outline">
+        <div class="wb">
+          <div class="stage-card">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap">
+              <div style="min-width:240px">
+                <div class="eyebrow" style="color:var(--indigo-ink)">Current stage · 3 of 6</div>
+                <div style="font-size:20px; font-weight:650; margin:4px 0 2px">Storyboard</div>
+                <div style="color:var(--c3); font-size:13px; max-width:52ch">Turn the script into shot-level boards and camera notes.</div>
+              </div>
+              <div style="display:flex; flex-direction:column; align-items:flex-end; gap:10px">
+                <div class="ministep" role="group" aria-label="Jump to stage">
+                  <i class="done" title="Planning"></i><s class="done"></s><i class="done" title="Script"></i><s class="done"></s><i class="cur" title="Storyboard"></i><s></s><i title="Generation"></i><s></s><i title="Review"></i><s></s><i title="Delivery"></i>
+                </div>
+                <div style="display:flex; gap:8px">
+                  <button class="btn ghost">Stage history</button>
+                  <button class="btn primary">Advance to Generation →</button>
+                </div>
+              </div>
+            </div>
+            <div class="toolrow">
+              <div class="toolcard"><span class="ic">▦</span><div><div class="tl">Storyboard</div><div class="ts mono">9/12 frames</div></div></div>
+              <div class="toolcard"><span class="ic">✎</span><div><div class="tl">Scripts</div></div></div>
+            </div>
+          </div>
+          <div class="ai-card">
+            <div style="flex:1; min-width:0">
+              <div class="badge">Suggested next</div>
+              <div style="font-size:13.5px; margin-top:3px">9 of 12 shots have frames — generate the 3 missing frames, then this stage is ready to advance.</div>
+            </div>
+            <button class="btn primary" style="flex:none">Generate 3 frames</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="appframe" style="margin-top:12px">
+      <div class="constraint">
+        <div class="wb">
+          <div class="stage-card">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap">
+              <div style="min-width:240px">
+                <div class="eyebrow" style="color:var(--indigo-ink)">Current stage · 1 of 6</div>
+                <div style="font-size:20px; font-weight:650; margin:4px 0 2px">Planning</div>
+                <div style="color:var(--c3); font-size:13px; max-width:52ch">Define the brief, gather references, set the direction.</div>
+              </div>
+              <div style="display:flex; flex-direction:column; align-items:flex-end; gap:10px">
+                <div class="ministep" aria-label="Jump to stage">
+                  <i class="cur" title="Planning"></i><s></s><i title="Script"></i><s></s><i title="Storyboard"></i><s></s><i title="Generation"></i><s></s><i title="Review"></i><s></s><i title="Delivery"></i>
+                </div>
+                <div style="display:flex; gap:8px">
+                  <button class="btn ghost">Stage history</button>
+                  <button class="btn primary">Advance to Script →</button>
+                </div>
+              </div>
+            </div>
+            <div class="toolrow">
+              <div class="toolcard"><span class="ic">🗀</span><div><div class="tl">Files</div></div></div>
+            </div>
+          </div>
+          <div class="ai-card">
+            <div style="flex:1; min-width:0">
+              <div class="badge">Suggested next</div>
+              <div style="font-size:13.5px; margin-top:3px">Outline the project and start the first script.</div>
+            </div>
+            <button class="btn primary" style="flex:none">Start planning →</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <ul class="notes">
+      <li><b>新建项目态(上图第二帧即是)</b>:默认落 Planning,工作台完整可见——不会再出现"某些项目整个工作台消失"。</li>
+      <li><b>迷你步进器</b>:hover 显示阶段名 tooltip,点击=任意跳转(替代旧 pills 行的能力);当前点带光环,已过点实心。</li>
+      <li><b>工具卡</b>:storyboard 带 <span class="mono">9/12 frames</span> 实数;其余暂为标签式(无可靠数据不硬造)。</li>
+    </ul>
+  </section>
+
+  <!-- ═══════ 3 · 决策表 ═══════ -->
+  <section>
+    <div class="sec-head"><span class="tag">3</span><h2>锁定决策(执行基准)</h2></div>
+    <div class="board" style="overflow-x:auto">
+      <table class="dec">
+        <thead><tr><th>决策</th><th>内容</th><th>为什么</th></tr></thead>
+        <tbody>
+          <tr><td>D1</td><td>工作台条带 <b>max-width 1120px</b>;Files 内容区维持全宽</td><td>宽屏拉满是"稀疏感"最大来源;旧稿即 ~1060px 框架</td></tr>
+          <tr><td>D2</td><td><b>删除顶部阶段 pills 行</b>;跳转能力移入卡内 6 点迷你步进器</td><td>旧稿工作台没有这行;一屏少一层重复信息</td></tr>
+          <tr><td>D3</td><td>建议卡 CTA <b>一律实心 indigo</b>(导航与一键同款)</td><td>与旧稿一致;描边样式弱化了"下一步"的召唤力</td></tr>
+          <tr><td>D4</td><td><b>新建项目默认 Planning</b> + 存量 NULL 回填(migration)</td><td>修"两个项目内部不一致":无阶段的项目整个工作台消失</td></tr>
+          <tr><td>D5</td><td><b>双主题同为一等公民</b>:本稿 token 即亮/暗验收标准</td><td>旧稿只有暗色;用户实际在亮色下使用,亮色不能是"未设计"</td></tr>
+          <tr><td>D6</td><td>列表卡维持已上线形态(环/混合动态行/停滞琥珀/归档✓环)</td><td>已对齐旧稿并验证;仅按本稿校两主题对比度</td></tr>
+          <tr><td>D7</td><td>工具卡副标题仅上真实数据(storyboard 9/12);不造 "v4 locked"</td><td>无 lock/board-count 数据模型,拒绝空承诺</td></tr>
+          <tr><td>D8</td><td>UI 英文、中文走 i18n;截图验收以英文为准</td><td>产品规范(CLAUDE.md)</td></tr>
+          <tr><td>D9</td><td><b>主页面维持现有信息架构</b>(视图栏/类型标签/工具条),本稿第 0 节为其双主题视觉基准;不重排布局</td><td>IA 已稳定可用;偏差在质感与卡片一致性,不在结构</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    定版依据:B0 选稿 A(artifact f1d342c2)+ 2026-07-09 真机反馈(宽屏稀疏 / 亮色气质 / 项目间不一致)。执行拆分:PR-6 后端(D4 默认阶段+回填)→ PR-7 前端(D1/D2/D3 工作台重排 + D5 亮色校准)→ e2e 双主题截图更新。数据与端点零变更(全部复用 Phase B 已上线后端)。
+  </footer>
+</div>
