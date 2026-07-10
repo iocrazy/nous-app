@@ -1,9 +1,11 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { Plus, X } from 'lucide-react';
+import { Plus, Square, Workflow, X } from 'lucide-react';
 
 import type { LoopMode, LoopNodeData } from '../types';
 import { LOOP_MODE_TONE, SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { clampRoundStart, clampRounds } from '../loopVars';
+import { startLoopRun } from '../loopRun';
+import { useLoopRunStore } from '../loopRunStore';
 import { useNodeDataPatch } from './useNodeDataPatch';
 
 const MODE_OPTIONS: ReadonlyArray<{ value: LoopMode; label: string }> = [
@@ -15,6 +17,8 @@ const MODE_OPTIONS: ReadonlyArray<{ value: LoopMode; label: string }> = [
 export function LoopNodeView({ id, data, selected }: NodeProps) {
   const { mode, label, rounds, round_start, prompts } = data as unknown as LoopNodeData;
   const patch = useNodeDataPatch(id);
+  const running = useLoopRunStore((s) => Boolean(s.running[id]));
+  const stopping = useLoopRunStore((s) => s.running[id]?.stopRequested ?? false);
   const tone = selected ? 'border-indigo-500' : LOOP_MODE_TONE[mode];
   // Canvases persisted before G3a lack the batch fields — default in view.
   const safeRounds = clampRounds(rounds ?? 1);
@@ -40,18 +44,43 @@ export function LoopNodeView({ id, data, selected }: NodeProps) {
         <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
           Loop
         </div>
-        <select
-          className="nodrag rounded border border-slate-200 bg-transparent px-1 py-0 text-[10px] uppercase tracking-wider text-slate-500 outline-none focus:ring-1 focus:ring-indigo-300 dark:border-slate-700 dark:text-slate-400"
-          value={mode}
-          onChange={(e) => patch({ mode: e.target.value as LoopMode })}
-          aria-label="Loop mode"
-        >
-          {MODE_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
+        <div className="flex items-center gap-1">
+          <select
+            className="nodrag rounded border border-slate-200 bg-transparent px-1 py-0 text-[10px] uppercase tracking-wider text-slate-500 outline-none focus:ring-1 focus:ring-indigo-300 dark:border-slate-700 dark:text-slate-400"
+            value={mode}
+            onChange={(e) => patch({ mode: e.target.value as LoopMode })}
+            aria-label="Loop mode"
+          >
+            {MODE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          {/* Infinite's loop-smart-run: Run ↔ Stop, disabled while stopping. */}
+          <button
+            type="button"
+            className={`nodrag rounded p-1 disabled:cursor-not-allowed disabled:opacity-40 ${
+              running
+                ? 'text-rose-500 hover:text-rose-600'
+                : 'text-indigo-500 hover:text-indigo-600'
+            }`}
+            onClick={() => {
+              if (running) {
+                useLoopRunStore.getState().requestStop(id);
+                return;
+              }
+              startLoopRun(id).catch((err) => {
+                console.error('[LoopNodeView] loop run failed:', err);
+              });
+            }}
+            disabled={stopping}
+            aria-label={running ? 'Stop loop' : 'Run loop'}
+            title={running ? (stopping ? 'Stopping…' : 'Stop after this round') : 'Run all rounds'}
+          >
+            {running ? <Square size={11} /> : <Workflow size={11} />}
+          </button>
+        </div>
       </div>
       <div className="space-y-2 p-3">
         <input
