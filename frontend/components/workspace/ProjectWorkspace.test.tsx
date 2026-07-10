@@ -1,12 +1,16 @@
 /**
- * ProjectWorkspace (PR-10b Wave 1) — the workspace shell smoke suite.
+ * ProjectWorkspace (PR-10b Wave 1 / PR-11) — the workspace shell smoke suite.
  *
  * Pins: sidebar groups + current-episode block render from the episodes
  * progress feed; the ⇄ switcher popover swaps the current episode (and
  * persists the choice to localStorage); non-overview sidebar clicks switch
  * to the shared placeholder; the Script/Storyboard children resolve the
- * current episode's script and navigate, falling back to the Episodes
- * module when none exists.
+ * current episode's script and mount it INLINE via EditorShell (PR-11 —
+ * no more route jump), falling back to the Episodes module when none
+ * exists. EditorShell itself is mocked to a thin stub (it's a heavy
+ * component with its own extensive test suite) that records the props it
+ * was called with, so this suite only pins ProjectWorkspace's own wiring:
+ * which scriptId/projectId/initialRailView it resolves and passes down.
  */
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
@@ -26,6 +30,31 @@ vi.mock('react-router-dom', async (importOriginal) => {
 const addToast = vi.fn();
 vi.mock('../Toast', () => ({
   useToast: () => ({ addToast }),
+}));
+
+vi.mock('../../contexts/AuthContext', () => ({
+  useAuth: () => ({ currentUserId: 'u1', userProfile: { name: 'Test Writer' } }),
+}));
+
+const mockEditorShell = vi.hoisted(() => vi.fn());
+vi.mock('../../editor/components/EditorShell', () => ({
+  EditorShell: (props: {
+    scriptId: string;
+    projectId?: string;
+    initialRailView?: string;
+    currentUserId?: string | null;
+    currentUserName?: string;
+  }) => {
+    mockEditorShell(props);
+    return (
+      <div
+        data-testid="mock-editor-shell"
+        data-script-id={props.scriptId}
+        data-project-id={props.projectId ?? ''}
+        data-initial-rail-view={props.initialRailView ?? ''}
+      />
+    );
+  },
 }));
 
 // relativeTime pulls in the real i18n instance via formatDate — stub it so
@@ -108,6 +137,7 @@ const EPISODES: EpisodeProgress[] = [
 beforeEach(() => {
   navigate.mockClear();
   addToast.mockClear();
+  mockEditorShell.mockClear();
   mockProjectsService.fetchStageCatalog.mockReset().mockResolvedValue([]);
   mockProjectsService.fetchCurrentStage.mockReset().mockResolvedValue(null);
   mockProjectsService.setCurrentStage.mockReset();
@@ -185,7 +215,7 @@ describe('ProjectWorkspace', () => {
     expect(screen.queryByTestId('ws-overview')).toBeNull();
   });
 
-  it('opens the current episode script when one exists', async () => {
+  it('mounts EditorShell inline with the resolved scriptId when the Script child is clicked (PR-11)', async () => {
     mockScriptService.fetchScriptProjects.mockResolvedValue({
       data: [
         { id: 's1', name: 'Draft', status: 'active', created_at: '', updated_at: '2026-07-01T00:00:00Z', episode_id: '1' },
@@ -195,9 +225,32 @@ describe('ProjectWorkspace', () => {
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
 
     fireEvent.click(await screen.findByTestId('ws-ep-script'));
-    await waitFor(() =>
-      expect(navigate).toHaveBeenCalledWith('/team/t1/projects/p1/scripts/s1'),
-    );
+    const shell = await screen.findByTestId('mock-editor-shell');
+    expect(shell).toHaveAttribute('data-script-id', 's1');
+    // Script (not Storyboard) — no view preset, EditorShell falls back to its
+    // own stored/'script' default.
+    expect(shell).toHaveAttribute('data-initial-rail-view', '');
+    expect(navigate).not.toHaveBeenCalled();
+    // The workspace sidebar stays mounted alongside the inline editor — no
+    // deep-link route jump (Overview's module content is what's replaced).
+    expect(screen.getByTestId('workspace-sidebar')).toBeTruthy();
+    expect(screen.queryByTestId('ws-overview')).toBeNull();
+  });
+
+  it('mounts EditorShell preset to the storyboard view when the Storyboard child is clicked (PR-11)', async () => {
+    mockScriptService.fetchScriptProjects.mockResolvedValue({
+      data: [
+        { id: 's1', name: 'Draft', status: 'active', created_at: '', updated_at: '2026-07-01T00:00:00Z', episode_id: '1' },
+      ],
+      total: 1,
+    });
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    fireEvent.click(await screen.findByTestId('ws-ep-storyboard'));
+    const shell = await screen.findByTestId('mock-editor-shell');
+    expect(shell).toHaveAttribute('data-script-id', 's1');
+    expect(shell).toHaveAttribute('data-initial-rail-view', 'storyboard');
+    expect(navigate).not.toHaveBeenCalled();
   });
 
   it('falls back to the Episodes module when the current episode has no script', async () => {
@@ -207,5 +260,6 @@ describe('ProjectWorkspace', () => {
     fireEvent.click(await screen.findByTestId('ws-ep-script'));
     expect(await screen.findByTestId('ws-episodes')).toBeTruthy();
     expect(navigate).not.toHaveBeenCalled();
+    expect(mockEditorShell).not.toHaveBeenCalled();
   });
 });

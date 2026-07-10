@@ -20,8 +20,10 @@ interface WorkspaceSidebarProps {
   episodes: EpisodeProgress[];
   currentEpisode: EpisodeProgress | null;
   onEpisodeChange: (episodeId: string) => void;
-  /** Script or Storyboard child clicked — resolve + open the episode's script editor. */
+  /** Script child clicked — resolve + open the episode's script editor (script view). */
   onOpenScript: () => void;
+  /** Storyboard child clicked — resolve + open the episode's script editor, preset to the storyboard view. */
+  onOpenStoryboard: () => void;
   /** Renders child clicked — switch to Files with the Renders chip + current-episode filter preset. */
   onOpenRenders: () => void;
 }
@@ -41,6 +43,7 @@ export function WorkspaceSidebar({
   currentEpisode,
   onEpisodeChange,
   onOpenScript,
+  onOpenStoryboard,
   onOpenRenders,
 }: WorkspaceSidebarProps) {
   const { t } = useTranslation();
@@ -153,7 +156,7 @@ export function WorkspaceSidebar({
             </button>
             <button
               data-testid="ws-ep-storyboard"
-              onClick={onOpenScript}
+              onClick={onOpenStoryboard}
               className="flex items-center justify-between gap-2 rounded-md pl-6 pr-2.5 py-1.5 text-[12.5px] text-ink-300 hover:text-ink-100 hover:bg-ink-800/50 transition-colors text-left"
             >
               <span className="flex items-center gap-2 min-w-0">

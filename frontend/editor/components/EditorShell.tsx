@@ -86,11 +86,21 @@ export function EditorShell({
   scriptId,
   currentUserId = null,
   currentUserName,
+  initialRailView,
 }: {
   scriptId: string;
   /** Local user identity for collaboration presence (supplied by the route). */
   currentUserId?: string | null;
   currentUserName?: string;
+  /**
+   * Preset which centre-pane view (RailModules) this mount opens on — e.g.
+   * the workspace's "Storyboard" sidebar child opens straight onto the
+   * storyboard view instead of the script sheet (PR-11). Re-applied whenever
+   * the prop changes (so re-clicking a different sidebar child while the
+   * shell is already mounted for the same script still switches the view).
+   * Omitted preserves the existing per-script localStorage preference.
+   */
+  initialRailView?: RailView;
 }) {
   const { t } = useTranslation();
   // Restore the per-script layout engine synchronously so the first paint uses
@@ -234,6 +244,15 @@ export function EditorShell({
   useEffect(() => {
     persistRailView(scriptId, railView);
   }, [scriptId, railView]);
+
+  // PR-11: the caller's preset view (e.g. the workspace's Storyboard sidebar
+  // child) wins over the stored preference. A one-way input — it only reacts
+  // to the PROP changing, never to the writer's own RailModules clicks, so
+  // switching views inside an already-open shell isn't fought back to the
+  // preset on every render.
+  useEffect(() => {
+    if (initialRailView) setRailView(initialRailView);
+  }, [initialRailView]);
 
   const selectMode = useCallback(
     (m: EditorMode) => {
