@@ -15,6 +15,7 @@ const mockService = vi.hoisted(() => ({
   fetchStageCatalog: vi.fn(),
   setCurrentStage: vi.fn(),
   fetchStageHistory: vi.fn(),
+  fetchStageSuggestion: vi.fn(),
 }));
 vi.mock('../../services/projectsService', () => mockService);
 
@@ -37,6 +38,7 @@ vi.mock('react-i18next', () => ({
       if (key === 'projects.workbench.currentStageOf')
         return `Current stage · ${opts?.index} of ${opts?.total}`;
       if (key === 'projects.workbench.advanceTo') return `Advance to ${opts?.stage}`;
+      if (key === 'projects.workbench.toolFrames') return `${opts?.done}/${opts?.total} frames`;
       // Stage slug labels echo the slug's last segment; descriptions echo the key
       // (so `description !== descKey` is false → description hidden unless real).
       return key;
@@ -64,6 +66,13 @@ beforeEach(() => {
   mockService.setCurrentStage.mockReset();
   mockService.fetchStageHistory.mockReset();
   mockService.fetchStageHistory.mockResolvedValue([]);
+  mockService.fetchStageSuggestion.mockReset();
+  mockService.fetchStageSuggestion.mockResolvedValue({
+    stage_slug: null,
+    kind: '',
+    progress: null,
+    action: null,
+  });
 });
 
 describe('StageWorkbench', () => {
@@ -140,6 +149,39 @@ describe('StageWorkbench', () => {
     );
     fireEvent.click(await screen.findByText('projects.tools.storyboard'));
     expect(setActiveTab).toHaveBeenCalledWith('storyboard');
+  });
+
+  it('shows the storyboard progress subtitle on the storyboard toolcard when the stage is storyboard', async () => {
+    mockService.fetchStageSuggestion.mockResolvedValue({
+      stage_slug: 'storyboard',
+      kind: 'storyboard_generate',
+      progress: { total: 12, done: 9, empty: 3, generating: 0, failed: 0, script_count: 2, scene_count: 5 },
+      action: { type: 'generate_missing_frames', label_key: 'projects.suggest.ctaGenerate', count: 3 },
+    });
+    render(
+      <StageWorkbench
+        projectId="p1"
+        currentStage={CATALOG[2]}
+        onStageChange={noop}
+        setActiveTab={noop}
+      />,
+    );
+    expect(await screen.findByText('9/12 frames')).toBeTruthy();
+    // Other toolcards (scripts) stay label-only — no subtitle for them.
+    expect(screen.getByText('projects.tools.scripts').nextSibling).toBeNull();
+  });
+
+  it('does not fetch or show a subtitle when the current stage is not storyboard', async () => {
+    render(
+      <StageWorkbench
+        projectId="p1"
+        currentStage={CATALOG[1]}
+        onStageChange={noop}
+        setActiveTab={noop}
+      />,
+    );
+    await screen.findByText('Current stage · 2 of 4');
+    expect(mockService.fetchStageSuggestion).not.toHaveBeenCalled();
   });
 
   it('opens the stage-history drawer when the history button is clicked', async () => {

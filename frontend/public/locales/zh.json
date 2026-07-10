@@ -1318,6 +1318,7 @@
       "advanceTo": "推进到 {{stage}}",
       "finalStage": "最后阶段",
       "recommendedTools": "推荐工具",
+      "toolFrames": "{{done}}/{{total}} 帧",
       "stageHistory": "阶段历史",
       "historyEmpty": "暂无阶段变更记录。",
       "historyCurrent": "当前"

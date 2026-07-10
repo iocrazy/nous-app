@@ -1318,6 +1318,7 @@
       "advanceTo": "Advance to {{stage}}",
       "finalStage": "Final stage",
       "recommendedTools": "Recommended tools",
+      "toolFrames": "{{done}}/{{total}} frames",
       "stageHistory": "Stage history",
       "historyEmpty": "No stage transitions yet.",
       "historyCurrent": "Current"

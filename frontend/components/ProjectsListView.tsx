@@ -246,9 +246,9 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
 
       {/* Grid view */}
       {filteredProjects.length > 0 && viewMode === 'grid' && (
-        <div className="flex flex-wrap gap-4">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4">
           {filteredProjects.map(project => (
-            <div key={project.id} className="w-[260px]" data-testid="project-card">
+            <div key={project.id} data-testid="project-card">
               <ProjectCard
                 project={project}
                 onClick={() => onProjectSelect(project)}
