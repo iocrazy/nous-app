@@ -1,16 +1,18 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   Plus, Star, LayoutGrid, LayoutList, FolderOpen,
   Search, ArrowUpDown, MoreVertical
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Project } from '../types';
-import { updateProject, deleteProject } from '../services/projectsService';
+import { Project, ProjectSuggestionItem } from '../types';
+import { updateProject, deleteProject, fetchProjectSuggestions } from '../services/projectsService';
+import { useTeamContext } from '../contexts/TeamContext';
 import { formatRelativeTime } from '../utils/relativeTime';
 import { ProjectCard } from './ProjectCard';
 import { ProjectContextMenu } from './ProjectContextMenu';
 import { ProjectSettingsPanel } from './ProjectSettingsPanel';
 import { ProjectMembersPanel } from './ProjectMembersPanel';
+import { ProjectsQueueView } from './ProjectsQueueView';
 
 interface ProjectsListViewProps {
   projects: Project[];
@@ -20,14 +22,26 @@ interface ProjectsListViewProps {
   title?: string;
 }
 
-type FilterTab = 'all' | 'internal' | 'external';
 type SortKey = 'updated_at' | 'created_at' | 'name';
+/** Homepage top-level view (PR-9, G7) — Queue (work-queue rows) is the default, Grid is secondary. */
+type HomeView = 'queue' | 'grid';
+
+const HOME_VIEW_STORAGE_KEY = 'mediahub.projects.view';
+
+function readStoredHomeView(): HomeView {
+  try {
+    return localStorage.getItem(HOME_VIEW_STORAGE_KEY) === 'grid' ? 'grid' : 'queue';
+  } catch {
+    return 'queue';
+  }
+}
 
 export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
   projects, onProjectSelect, onCreateProject, onProjectsChange, title: externalTitle
 }) => {
   const { t } = useTranslation();
-  const [filter, setFilter] = useState<FilterTab>('all');
+  const { selectedTeamId, personalTeamId } = useTeamContext();
+  const [homeView, setHomeView] = useState<HomeView>(readStoredHomeView);
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<SortKey>('updated_at');
@@ -35,6 +49,40 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
   const [contextMenu, setContextMenu] = useState<{ project: Project; x: number; y: number } | null>(null);
   const [settingsProject, setSettingsProject] = useState<Project | null>(null);
   const [membersProject, setMembersProject] = useState<Project | null>(null);
+  const [suggestions, setSuggestions] = useState<ProjectSuggestionItem[]>([]);
+
+  // Fetched once here (mount + whenever a generate CTA — queue row or grid
+  // card — asks for a refetch) and passed down to both the queue and grid
+  // views, so a project only needs one round-trip through the suggestions
+  // batch endpoint regardless of which view is active.
+  const loadSuggestions = useCallback(async () => {
+    try {
+      const isPersonal = !selectedTeamId || selectedTeamId === personalTeamId;
+      const data = await fetchProjectSuggestions(isPersonal ? 'personal' : selectedTeamId ?? undefined);
+      setSuggestions(data);
+    } catch (err) {
+      console.error('Failed to load project suggestions:', err);
+    }
+  }, [selectedTeamId, personalTeamId]);
+
+  useEffect(() => {
+    loadSuggestions();
+  }, [loadSuggestions]);
+
+  const suggestionsById = useMemo(() => {
+    const map = new Map<string, ProjectSuggestionItem>();
+    for (const item of suggestions) map.set(String(item.project_id), item);
+    return map;
+  }, [suggestions]);
+
+  const handleHomeViewChange = useCallback((next: HomeView) => {
+    setHomeView(next);
+    try {
+      localStorage.setItem(HOME_VIEW_STORAGE_KEY, next);
+    } catch {
+      /* localStorage unavailable — in-memory only for this session */
+    }
+  }, []);
 
   const handleToggleStar = async (e: React.MouseEvent, project: Project) => {
     e.stopPropagation();
@@ -106,9 +154,6 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
 
   const filteredProjects = useMemo(() => {
     let items = projects;
-    // Tab filter
-    if (filter === 'internal') items = items.filter(p => p.project_type !== 'external');
-    if (filter === 'external') items = items.filter(p => p.project_type === 'external');
     // Search
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
@@ -123,13 +168,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
       return sortDir === 'desc' ? -cmp : cmp;
     });
     return items;
-  }, [projects, filter, searchQuery, sortBy, sortDir]);
-
-  const tabs: { key: FilterTab; label: string }[] = [
-    { key: 'all', label: t('projects.tab.all', 'All Projects') },
-    { key: 'internal', label: t('projects.tab.internal', 'Internal') },
-    { key: 'external', label: t('projects.tab.external', 'External') },
-  ];
+  }, [projects, searchQuery, sortBy, sortDir]);
 
   return (
     <div>
@@ -150,6 +189,32 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
             />
           </div>
 
+          {/* Home view toggle: Queue (default work queue) vs Grid (cards/table) */}
+          <div className="flex bg-ink-800 rounded-lg p-0.5" role="group">
+            <button
+              onClick={() => handleHomeViewChange('queue')}
+              aria-label={t('projects.view.queue', 'Queue view')}
+              title={t('projects.view.queue', 'Queue view')}
+              data-testid="home-view-queue-btn"
+              className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                homeView === 'queue' ? 'bg-ink-700 text-ink-50' : 'text-ink-400 hover:text-ink-200'
+              }`}
+            >
+              ☰ {t('projects.view.queue', 'Queue')}
+            </button>
+            <button
+              onClick={() => handleHomeViewChange('grid')}
+              aria-label={t('projects.view.grid', 'Grid view')}
+              title={t('projects.view.grid', 'Grid view')}
+              data-testid="home-view-grid-btn"
+              className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                homeView === 'grid' ? 'bg-ink-700 text-ink-50' : 'text-ink-400 hover:text-ink-200'
+              }`}
+            >
+              ▦ {t('projects.view.grid', 'Grid')}
+            </button>
+          </div>
+
           {/* New Project button */}
           <button
             onClick={onCreateProject}
@@ -162,67 +227,64 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
         </div>
       </div>
 
-      {/* Tab bar (underline style) */}
-      <div className="flex gap-6 border-b border-ink-800 mb-4">
-        {tabs.map(tab => (
-          <button key={tab.key} onClick={() => setFilter(tab.key)}
-            className={`pb-2 text-sm font-medium border-b-2 transition-colors ${
-              filter === tab.key
-                ? 'border-indigo-500 text-ink-50'
-                : 'border-transparent text-ink-500 hover:text-ink-300'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Stats + sort + view toggle */}
+      {/* Stats + sort + (grid-only) card/table view toggle */}
       <div className="flex items-center justify-between mb-4">
         <span className="text-xs text-ink-500">
           {t('projects.totalProjects', '{{count}} projects', { count: filteredProjects.length })}
         </span>
-        <div className="flex items-center gap-2">
-          {/* Sort */}
-          <select value={sortBy} onChange={e => setSortBy(e.target.value as SortKey)}
-            className="text-xs bg-ink-800 border border-ink-700/50 rounded-lg px-2 py-1.5 text-ink-300
-                       focus:outline-none focus:border-indigo-500 cursor-pointer">
-            <option value="updated_at">{t('projects.sortUpdatedAt', 'Last active')}</option>
-            <option value="created_at">{t('projects.sortCreatedAt', 'Created')}</option>
-            <option value="name">{t('projects.sortName', 'Name')}</option>
-          </select>
-          <button
-            onClick={() => setSortDir(d => d === 'desc' ? 'asc' : 'desc')}
-            className="p-1.5 text-ink-400 hover:text-ink-200 hover:bg-ink-800 rounded-lg transition-colors"
-            title={sortDir === 'desc' ? t('projects.sort.descending') : t('projects.sort.ascending')}
-          >
-            <ArrowUpDown size={14} />
-          </button>
+        {homeView === 'grid' && (
+          <div className="flex items-center gap-2">
+            {/* Sort */}
+            <select value={sortBy} onChange={e => setSortBy(e.target.value as SortKey)}
+              className="text-xs bg-ink-800 border border-ink-700/50 rounded-lg px-2 py-1.5 text-ink-300
+                         focus:outline-none focus:border-indigo-500 cursor-pointer">
+              <option value="updated_at">{t('projects.sortUpdatedAt', 'Last active')}</option>
+              <option value="created_at">{t('projects.sortCreatedAt', 'Created')}</option>
+              <option value="name">{t('projects.sortName', 'Name')}</option>
+            </select>
+            <button
+              onClick={() => setSortDir(d => d === 'desc' ? 'asc' : 'desc')}
+              className="p-1.5 text-ink-400 hover:text-ink-200 hover:bg-ink-800 rounded-lg transition-colors"
+              title={sortDir === 'desc' ? t('projects.sort.descending') : t('projects.sort.ascending')}
+            >
+              <ArrowUpDown size={14} />
+            </button>
 
-          {/* View toggle */}
-          <div className="flex bg-ink-800 rounded-lg p-0.5">
-            <button
-              onClick={() => setViewMode('grid')}
-              className={`p-1.5 rounded-md transition-colors ${
-                viewMode === 'grid' ? 'bg-ink-700 text-ink-50' : 'text-ink-400 hover:text-ink-200'
-              }`}
-            >
-              <LayoutGrid size={14} />
-            </button>
-            <button
-              onClick={() => setViewMode('table')}
-              className={`p-1.5 rounded-md transition-colors ${
-                viewMode === 'table' ? 'bg-ink-700 text-ink-50' : 'text-ink-400 hover:text-ink-200'
-              }`}
-            >
-              <LayoutList size={14} />
-            </button>
+            {/* View toggle */}
+            <div className="flex bg-ink-800 rounded-lg p-0.5">
+              <button
+                onClick={() => setViewMode('grid')}
+                className={`p-1.5 rounded-md transition-colors ${
+                  viewMode === 'grid' ? 'bg-ink-700 text-ink-50' : 'text-ink-400 hover:text-ink-200'
+                }`}
+              >
+                <LayoutGrid size={14} />
+              </button>
+              <button
+                onClick={() => setViewMode('table')}
+                className={`p-1.5 rounded-md transition-colors ${
+                  viewMode === 'table' ? 'bg-ink-700 text-ink-50' : 'text-ink-400 hover:text-ink-200'
+                }`}
+              >
+                <LayoutList size={14} />
+              </button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
-      {/* Empty state */}
-      {filteredProjects.length === 0 && (
+      {/* Queue view (default) */}
+      {homeView === 'queue' && (
+        <ProjectsQueueView
+          projects={filteredProjects}
+          suggestions={suggestions}
+          onProjectSelect={onProjectSelect}
+          onRefetchSuggestions={loadSuggestions}
+        />
+      )}
+
+      {/* Empty state (grid view only — queue view has its own empty state) */}
+      {homeView === 'grid' && filteredProjects.length === 0 && (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <div className="p-4 bg-ink-800 rounded-2xl mb-4">
             <FolderOpen size={40} className="text-ink-500" />
@@ -244,8 +306,8 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
         </div>
       )}
 
-      {/* Grid view */}
-      {filteredProjects.length > 0 && viewMode === 'grid' && (
+      {/* Grid view — cards */}
+      {homeView === 'grid' && filteredProjects.length > 0 && viewMode === 'grid' && (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4">
           {filteredProjects.map(project => (
             <div key={project.id} data-testid="project-card">
@@ -254,14 +316,16 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
                 onClick={() => onProjectSelect(project)}
                 onToggleStar={(e) => handleToggleStar(e, project)}
                 onContextMenu={(e) => handleContextMenu(e, project)}
+                suggestion={suggestionsById.get(String(project.id))}
+                onSuggestionRefetch={loadSuggestions}
               />
             </div>
           ))}
         </div>
       )}
 
-      {/* Table view */}
-      {filteredProjects.length > 0 && viewMode === 'table' && (
+      {/* Grid view — table */}
+      {homeView === 'grid' && filteredProjects.length > 0 && viewMode === 'table' && (
         <div className="bg-ink-800/50 border border-ink-700/50 rounded-xl overflow-hidden">
           <table className="w-full">
             <thead>

@@ -1,15 +1,26 @@
-import React from 'react';
-import { Star, Clock, FileText, MoreVertical } from 'lucide-react';
+import React, { useCallback, useState } from 'react';
+import { Star, Clock, FileText, MoreVertical, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Project } from '../types';
+import { Project, ProjectSuggestionItem } from '../types';
 import { formatRelativeTime } from '../utils/relativeTime';
 import { StageRing } from './project/StageRing';
+import { generateMissingFrames } from '../services/projectsService';
+import { useToast } from './Toast';
 
 interface ProjectCardProps {
   project: Project;
   onClick: () => void;
   onToggleStar: (e: React.MouseEvent) => void;
   onContextMenu?: (e: React.MouseEvent) => void;
+  /**
+   * Homepage grid secondary view (PR-9, G7): when present, renders a
+   * bottom "next action" row (dashed-top divider) with the same generate /
+   * navigate CTA behaviors as the work-queue row. Absent → card renders
+   * exactly as before (Phase B B1 layout, no suggestion row).
+   */
+  suggestion?: ProjectSuggestionItem | null;
+  /** Called after a successful in-card generate CTA, so the caller can refetch the suggestions batch. */
+  onSuggestionRefetch?: () => void;
 }
 
 const typeColors: Record<string, { border: string; badge: string; text: string }> = {
@@ -53,8 +64,12 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
   onClick,
   onToggleStar,
   onContextMenu,
+  suggestion,
+  onSuggestionRefetch,
 }) => {
   const { t } = useTranslation();
+  const { addToast } = useToast();
+  const [genBusy, setGenBusy] = useState(false);
   const colors = typeColors[project.project_type] || typeColors.personal;
   const borderColor = project.color_label
     ? colorLabelBorders[project.color_label] || colors.border
@@ -63,6 +78,34 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
   const stage = project.current_stage ?? null;
   const membersPreview = project.members_preview ?? null;
   const activity = project.latest_activity ?? null;
+  const hasSuggestion = Boolean(suggestion && suggestion.kind && suggestion.action);
+
+  const handleGenerate = useCallback(
+    async (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (!suggestion || genBusy) return;
+      setGenBusy(true);
+      try {
+        const res = await generateMissingFrames(suggestion.project_id);
+        addToast(t('projects.suggest.generating', { count: res.dispatched_count }), 'success');
+        onSuggestionRefetch?.();
+      } catch (err) {
+        console.error('[ProjectCard] generate-missing failed:', err);
+        addToast(t('common.error'), 'error');
+      } finally {
+        setGenBusy(false);
+      }
+    },
+    [suggestion, genBusy, addToast, t, onSuggestionRefetch],
+  );
+
+  const handleNavigate = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      onClick();
+    },
+    [onClick],
+  );
 
   return (
     <div
@@ -193,6 +236,43 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
           </span>
         </div>
       </div>
+
+      {hasSuggestion && suggestion && (
+        <div
+          className="mt-3 pt-3 border-t border-dashed border-ink-700/60 flex items-center gap-2"
+          data-testid="project-card-suggestion"
+        >
+          <span className="flex-1 min-w-0 text-xs text-ink-400 truncate">
+            {t(`projects.suggest.${suggestion.kind}`, {
+              done: suggestion.progress?.done,
+              total: suggestion.progress?.total,
+              count: suggestion.action?.count,
+              scene_count: suggestion.progress?.scene_count,
+            })}
+          </span>
+          {suggestion.action?.type === 'generate_missing_frames' ? (
+            <button
+              data-testid="project-card-suggestion-cta"
+              disabled={genBusy}
+              onClick={handleGenerate}
+              className="flex items-center gap-1 flex-shrink-0 rounded-lg font-medium text-xs px-2.5 py-1
+                         transition-colors bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 text-ink-950"
+            >
+              {genBusy ? <Loader2 size={12} className="animate-spin" /> : null}
+              {t(suggestion.action.label_key, { count: suggestion.action.count })}
+            </button>
+          ) : (
+            <button
+              data-testid="project-card-suggestion-cta"
+              onClick={handleNavigate}
+              className="flex-shrink-0 rounded-lg font-medium text-xs px-2.5 py-1 border border-ink-600
+                         text-ink-200 hover:bg-ink-700 transition-colors"
+            >
+              {t(suggestion.action!.label_key, { count: suggestion.action!.count })}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 };

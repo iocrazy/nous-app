@@ -10,6 +10,7 @@ import {
   ProjectStage,
   StageHistoryEntry,
   StageSuggestion,
+  ProjectSuggestionItem,
 } from '../types';
 import { apiClient, apiFetch } from './apiClient';
 
@@ -498,3 +499,22 @@ export const generateMissingFrames = async (
   apiClient.post<{ dispatched_count: number; task_ids: string[] }>(
     `/api/v1/projects/${projectId}/storyboard/generate-missing`,
   );
+
+// ============================================
+// Homepage work-queue suggestions batch (PR-9, G7)
+// ============================================
+
+// NOTE: same convention as fetchStageSuggestion/generateMissingFrames above —
+// this endpoint returns its response model DIRECTLY (no `{data}` envelope),
+// so we consume `{items: [...]}` as-is. Do not add a `.data` unwrap here.
+
+/** Fetch the batch "what's next" suggestion for every project in scope, for the homepage work queue. */
+export const fetchProjectSuggestions = async (
+  teamId?: string,
+): Promise<ProjectSuggestionItem[]> => {
+  const response = await apiClient.get<{ items: ProjectSuggestionItem[] }>(
+    '/api/v1/projects/suggestions',
+    { query: { team_id: teamId } },
+  );
+  return response.items ?? [];
+};
