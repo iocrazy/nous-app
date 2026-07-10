@@ -5,7 +5,7 @@
  * catalog stage, the final stage shows a terminal marker instead, and
  * recommended-tool cards navigate to their tab.
  */
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 import { StageWorkbench } from './StageWorkbench';
@@ -18,12 +18,6 @@ const mockService = vi.hoisted(() => ({
   fetchStageSuggestion: vi.fn(),
 }));
 vi.mock('../../services/projectsService', () => mockService);
-
-// StageSelector fetches the catalog too; stub it to a no-op child so this
-// suite exercises only the workbench card.
-vi.mock('./StageSelector', () => ({
-  StageSelector: () => <div data-testid="stage-selector" />,
-}));
 
 // relativeTime pulls in the real i18n instance via formatDate — stub it so
 // this suite doesn't need initReactI18next (mirrors ProjectCard.test.tsx).
@@ -196,5 +190,63 @@ describe('StageWorkbench', () => {
     const btn = await screen.findByTestId('stage-history-btn');
     fireEvent.click(btn);
     expect(await screen.findByTestId('stage-history-drawer')).toBeInTheDocument();
+  });
+
+  // D2 — the pills-row StageSelector is gone from the workbench; a 6-dot
+  // mini stepper in the stage card now carries the "current position" +
+  // "jump to any stage" affordances it used to provide.
+  it('renders a mini stepper dot per catalog stage, with the current one marked', async () => {
+    render(
+      <StageWorkbench
+        projectId="p1"
+        currentStage={CATALOG[2]}
+        onStageChange={noop}
+        setActiveTab={noop}
+      />,
+    );
+    const stepper = await screen.findByTestId('stage-ministep');
+    expect(within(stepper).getAllByRole('button')).toHaveLength(CATALOG.length);
+    // storyboard (index 2) is current — ring class marks it.
+    const currentDot = screen.getByTestId(`ministep-dot-${CATALOG[2].slug}`);
+    expect(currentDot.className).toContain('ring-indigo-500/25');
+    // planning/script (indexes 0/1) are done — no ring, but indigo fill.
+    expect(screen.getByTestId(`ministep-dot-${CATALOG[0].slug}`).className).not.toContain('ring-indigo-500/25');
+    // delivery (index 3) is future.
+    expect(screen.getByTestId(`ministep-dot-${CATALOG[3].slug}`).className).toContain('bg-ink-600');
+  });
+
+  it('jumps to any stage when a non-current dot is clicked and canWrite is true', async () => {
+    mockService.setCurrentStage.mockResolvedValue(CATALOG[0]);
+    const onStageChange = vi.fn();
+    render(
+      <StageWorkbench
+        projectId="p1"
+        canWrite
+        currentStage={CATALOG[2]}
+        onStageChange={onStageChange}
+        setActiveTab={noop}
+      />,
+    );
+    const dot = await screen.findByTestId(`ministep-dot-${CATALOG[0].slug}`);
+    fireEvent.click(dot);
+    await waitFor(() =>
+      expect(mockService.setCurrentStage).toHaveBeenCalledWith('p1', CATALOG[0].id),
+    );
+    expect(onStageChange).toHaveBeenCalledWith(CATALOG[0]);
+  });
+
+  it('does not jump when a dot is clicked and canWrite is false', async () => {
+    render(
+      <StageWorkbench
+        projectId="p1"
+        canWrite={false}
+        currentStage={CATALOG[2]}
+        onStageChange={noop}
+        setActiveTab={noop}
+      />,
+    );
+    const dot = await screen.findByTestId(`ministep-dot-${CATALOG[0].slug}`);
+    fireEvent.click(dot);
+    expect(mockService.setCurrentStage).not.toHaveBeenCalled();
   });
 });

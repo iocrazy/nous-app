@@ -118,10 +118,10 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
           <>
             <span
               className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                activity.stalled ? 'bg-amber-400' : 'bg-emerald-400'
+                activity.stalled ? 'bg-[var(--stall)]' : 'bg-emerald-400'
               }`}
             />
-            <span className="truncate">
+            <span className={`truncate ${activity.stalled ? 'text-[var(--stall)]' : ''}`}>
               {activity.kind === 'file'
                 ? t('projects.card.activityFile')
                 : t(activity.stalled ? 'projects.card.activityStalled' : 'projects.card.activityStage', {
