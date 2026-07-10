@@ -14,3 +14,17 @@ export function hotspotToRef(h: Hotspot): RefHotspot {
   if (h.captured_at) ref.captured_at = h.captured_at;
   return ref;
 }
+
+// Save-as-note prefill (spec P4d): turn the hotspot's category + tags into a
+// leading `#tag` line so the user's own words land above it — two leading
+// newlines push the tag line below wherever the cursor starts typing.
+export function buildPrefillContent(h: Hotspot): string {
+  const tags: string[] = [];
+  const push = (raw?: string | null) => {
+    const t = (raw ?? '').trim().toLowerCase().replace(/\s+/g, '-');
+    if (t && !tags.includes(t)) tags.push(t);
+  };
+  push(h.category);
+  for (const t of h.tags ?? []) push(t);
+  return tags.length ? `\n\n${tags.map((t) => `#${t}`).join(' ')}` : '';
+}

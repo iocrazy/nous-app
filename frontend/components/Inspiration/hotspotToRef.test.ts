@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hotspotToRef } from './hotspotToRef';
+import { buildPrefillContent, hotspotToRef } from './hotspotToRef';
 import type { Hotspot } from '../../services/topicService';
 
 const base = (over: Partial<Hotspot> = {}): Hotspot => ({
@@ -35,5 +35,17 @@ describe('hotspotToRef', () => {
     expect(ref).toEqual({ hotspot_id: '42', title: 'Silent vlog cooking passes 2.1B' });
     expect('source' in ref).toBe(false);
     expect('url' in ref).toBe(false);
+  });
+});
+
+describe('buildPrefillContent', () => {
+  it('merges category + tags, lowercased/deduped/hyphenated, category first', () => {
+    expect(
+      buildPrefillContent(base({ category: 'Short Form', tags: ['Trend', 'trend', 'AI Video'] })),
+    ).toBe('\n\n#short-form #trend #ai-video');
+  });
+
+  it('returns empty string when there is no category or tags', () => {
+    expect(buildPrefillContent(base({ category: null, tags: [] }))).toBe('');
   });
 });

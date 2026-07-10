@@ -1,6 +1,11 @@
 // Main note feed (spec §2.2 #4): groups notes by note_date with a day
 // header + divider, renders NoteCard per row, and a trailing "load more"
 // affordance for keyset pagination.
+//
+// IMPORTANT: Pinned group only contains already-loaded notes. Pinned notes
+// that haven't been fetched yet won't float to the top (would require backend
+// keyset to support global pinned ordering). This component is honest about
+// its scope: it organizes _loaded_ notes, doesn't re-fetch for missed pinned items.
 import React, { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { NoteCard } from './NoteCard';
@@ -17,26 +22,39 @@ interface Props {
   hasMore: boolean;
   loading: boolean;
   loadMore: () => void;
+  filtered?: boolean;
 }
 
 export const NoteTimeline: React.FC<Props> = ({
-  notes, onEdit, onTogglePin, onDelete, onTagClick, onToggleTask, hasMore, loading, loadMore,
+  notes, onEdit, onTogglePin, onDelete, onTagClick, onToggleTask, hasMore, loading, loadMore, filtered,
 }) => {
   const { t } = useTranslation();
   const groups = useMemo(() => {
+    const pinnedNotes = notes.filter((n) => n.pinned);
+    const restNotes = notes.filter((n) => !n.pinned);
+
     const byDay = new Map<string, InspirationNote[]>();
-    for (const n of notes) {
+    for (const n of restNotes) {
       const list = byDay.get(n.note_date) ?? [];
       list.push(n);
       byDay.set(n.note_date, list);
     }
-    return Array.from(byDay.entries());
+
+    const result: Array<[string, InspirationNote[]]> = [];
+    if (pinnedNotes.length > 0) {
+      result.push(['__pinned__', pinnedNotes]);
+    }
+    result.push(...Array.from(byDay.entries()));
+    return result;
   }, [notes]);
 
   if (!notes.length && !loading) {
+    const emptyText = filtered
+      ? t('inspiration.noMatching', 'No matching notes.')
+      : t('inspiration.empty', 'No notes yet — capture your first idea above.');
     return (
       <div className="rounded-xl bg-island px-4 py-10 text-center text-sm text-content-3">
-        {t('inspiration.empty', 'No notes yet — capture your first idea above.')}
+        {emptyText}
       </div>
     );
   }
@@ -46,7 +64,7 @@ export const NoteTimeline: React.FC<Props> = ({
       {groups.map(([day, dayNotes]) => (
         <React.Fragment key={day}>
           <div className="flex items-center gap-2.5 px-0.5 pt-1 text-[11px] font-semibold uppercase tracking-wide text-content-3 tabular-nums">
-            {formatDateShort(day)}
+            {day === '__pinned__' ? t('inspiration.pinned', 'Pinned') : formatDateShort(day)}
             <span className="font-normal text-content-4">
               · {t('inspiration.noteCount', '{{count}} notes', { count: dayNotes.length })}
             </span>

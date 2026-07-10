@@ -2554,6 +2554,10 @@
     "noHotspots": "当天没有热点。",
     "summary": "摘要",
     "sourceCount": "{{count}} 个来源",
+    "notesPanel": "笔记",
+    "quickNote": "快速记录…",
+    "fileCount": "{{count}} 个文件",
+    "openInNotes": "打开笔记 →",
     "tokens": {
       "title": "API 令牌",
       "close": "关闭",
@@ -2582,7 +2586,9 @@
       "loadFailed": "加载令牌失败",
       "createFailed": "创建令牌失败",
       "exampleTitle": "示例"
-    }
+    },
+    "pinned": "置顶",
+    "noMatching": "没有匹配的笔记。"
   },
   "editor": {
     "brand": "MediaHub Projects",

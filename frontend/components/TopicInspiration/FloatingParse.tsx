@@ -35,7 +35,8 @@ const AI_INTENTS = [
 export const FloatingParse: React.FC<{
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
-}> = ({ open, onOpenChange }) => {
+  initialUrl?: string;
+}> = ({ open, onOpenChange, initialUrl }) => {
   const { t } = useTranslation();
   const { addToast } = useToast();
   const [phase, setPhase] = useState<Phase>('collapsed');
@@ -49,8 +50,13 @@ export const FloatingParse: React.FC<{
   // byte-for-byte unaffected.
   useEffect(() => {
     if (open === undefined) return;
-    setPhase(open ? (p) => (p === 'collapsed' ? 'input' : p) : 'collapsed');
-  }, [open]);
+    if (open) {
+      setPhase((p) => (p === 'collapsed' ? 'input' : p));
+      if (initialUrl) setInput((prev) => (prev ? prev : initialUrl));
+    } else {
+      setPhase('collapsed');
+    }
+  }, [open, initialUrl]);
 
   // Tag state
   const [allTags, setAllTags] = useState<Tag[]>([]);

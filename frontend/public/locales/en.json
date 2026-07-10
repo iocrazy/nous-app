@@ -2554,6 +2554,10 @@
     "noHotspots": "No hotspots for this day.",
     "summary": "Summary",
     "sourceCount": "{{count}} sources",
+    "notesPanel": "Notes",
+    "quickNote": "Quick note…",
+    "fileCount": "{{count}} files",
+    "openInNotes": "Open in Notes →",
     "tokens": {
       "title": "API Tokens",
       "close": "Close",
@@ -2582,7 +2586,9 @@
       "loadFailed": "Failed to load tokens",
       "createFailed": "Failed to create token",
       "exampleTitle": "Example"
-    }
+    },
+    "pinned": "Pinned",
+    "noMatching": "No matching notes."
   },
   "editor": {
     "brand": "MediaHub Projects",

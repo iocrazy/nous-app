@@ -18,6 +18,13 @@ vi.mock('../services/topicService', () => ({
   getHotspot: (...a: unknown[]) => getHotspot(...a),
   setHotspotState: vi.fn(),
 }));
+vi.mock('../components/Inspiration/ActivityPanel', () => ({
+  ActivityPanel: ({ onSelectDate }: { onSelectDate: (date: string) => void; selectedDate?: string | null; refreshKey?: number }) => (
+    <button data-testid="activity-panel-select-date" onClick={() => onSelectDate('2025-01-15')}>
+      Select new date
+    </button>
+  ),
+}));
 vi.mock('../components/AILibrary/MarkdownBody', () => ({ default: ({ source }: { source: string }) => <div>{source}</div> }));
 vi.mock('../contexts/AuthContext', () => ({ useAuth: () => ({ mediaToken: 'tok' }) }));
 vi.mock('react-i18next', () => ({
@@ -65,5 +72,58 @@ describe('InspirationPage P3 hotspots', () => {
     fireEvent.click(screen.getAllByLabelText('Save as note')[0]);
     // composer now shows the referenced hotspot title
     await waitFor(() => expect(screen.getAllByText('Hot 1').length).toBeGreaterThan(0));
+  });
+
+  it('save-as-note prefills hotspot tags into the composer', async () => {
+    getHotspots.mockResolvedValue([{ id: '1', title: 'Hot 1', tags: ['trend'], category: 'food', heat: 90, source_label: 'WEIBO' }]);
+    render(<InspirationPage />);
+    await waitFor(() => expect(screen.getByText('Hot 1')).toBeTruthy());
+    fireEvent.click(screen.getAllByLabelText('Save as note')[0]);
+    // Two textbox-role elements are on screen (the header search input plus
+    // the composer textarea) — disambiguate by tag, not just role.
+    const ta = await waitFor(() => {
+      const el = screen.getAllByRole('textbox').find((e) => e.tagName === 'TEXTAREA');
+      if (!el) throw new Error('composer textarea not found');
+      return el as HTMLTextAreaElement;
+    });
+    expect(ta.value).toContain('#food');
+    expect(ta.value).toContain('#trend');
+  });
+
+  it('resets category filter when the selected day changes', async () => {
+    getHotspots.mockResolvedValue([
+      { id: '1', title: 'Hot 1', tags: [], category: 'music', heat: 90, source_label: 'WEIBO' },
+      { id: '2', title: 'Hot 2', tags: [], category: 'music', heat: 80, source_label: 'WEIBO' },
+      { id: '3', title: 'Hot 3', tags: [], category: 'food', heat: 70, source_label: 'WEIBO' },
+    ]);
+    render(<InspirationPage />);
+
+    // Switch to Hotspots tab
+    fireEvent.click(screen.getByText('Hotspots'));
+
+    // Wait for category chips to appear and verify Music chip exists
+    await waitFor(() => {
+      expect(screen.getByText(/^#music \(/)).toBeTruthy();
+    });
+
+    // Click the Music category chip to activate the filter
+    const musicChip = screen.getByText(/^#music \(/) as HTMLElement;
+    fireEvent.click(musicChip);
+
+    // Verify Music chip is now active (indigo colored)
+    await waitFor(() => {
+      const activeChip = screen.getByText(/^#music \(/).closest('button');
+      expect(activeChip?.className).toContain('indigo');
+    });
+
+    // Trigger date change by clicking the mock ActivityPanel button
+    const dateSelectBtn = screen.getByTestId('activity-panel-select-date');
+    fireEvent.click(dateSelectBtn);
+
+    // After date change, the Music chip should no longer be active (not indigo)
+    await waitFor(() => {
+      const musicChipAfter = screen.getByText(/^#music \(/).closest('button');
+      expect(musicChipAfter?.className).not.toContain('indigo-500/25');
+    });
   });
 });

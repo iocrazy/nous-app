@@ -16,6 +16,14 @@ vi.mock('../services/inspirationService', () => ({
   uploadAttachment: vi.fn(),
   attachmentUrlWithToken: (id: string) => `http://api.test/att/${id}`,
 }));
+const getHotspots = vi.fn();
+const setHotspotState = vi.fn();
+const getHotspot = vi.fn();
+vi.mock('../services/topicService', () => ({
+  getHotspots: (...a: unknown[]) => getHotspots(...a),
+  setHotspotState: (...a: unknown[]) => setHotspotState(...a),
+  getHotspot: (...a: unknown[]) => getHotspot(...a),
+}));
 vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => ({ mediaToken: 'tok' }),
 }));
@@ -48,6 +56,14 @@ describe('InspirationPage', () => {
     listNotes.mockResolvedValue([NOTE]);
     getTagCounts.mockResolvedValue([{ tag: 'hooks', cnt: 3 }]);
     getActivity.mockResolvedValue([]);
+    getHotspots.mockReset();
+    getHotspots.mockResolvedValue([]);
+    setHotspotState.mockReset();
+    getHotspot.mockReset();
+    // HotspotDetail (nested under HotspotsWorkspace) fetches the full
+    // hotspot for whichever row is selected; stub it so selecting a row
+    // doesn't throw on an unmocked call.
+    getHotspot.mockImplementation((id: string) => Promise.resolve({ id, title: 'stub', tags: [] }));
   });
 
   it('loads and renders notes grouped by day', async () => {
@@ -129,5 +145,32 @@ describe('InspirationPage', () => {
       await new Promise((r) => setTimeout(r, 0));
     });
     expect(screen.queryByText('STALE ROW')).toBeNull();
+  });
+
+  it('clicking a category chip filters the workspace list', async () => {
+    getHotspots.mockResolvedValue([
+      { id: '1', title: 'Food topic', tags: [], category: 'food', heat: 90 },
+      { id: '2', title: 'Music topic', tags: [], category: 'music', heat: 80 },
+    ]);
+    render(<InspirationPage />);
+    fireEvent.click(screen.getByText('Hotspots'));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Music topic/ })).toBeTruthy());
+    fireEvent.click(screen.getByText('#food (1)'));
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Music topic/ })).toBeNull());
+    expect(screen.getByRole('button', { name: /Food topic/ })).toBeTruthy();
+  });
+
+  it('clicking the same category chip twice clears the filter', async () => {
+    getHotspots.mockResolvedValue([
+      { id: '1', title: 'Food topic', tags: [], category: 'food', heat: 90 },
+      { id: '2', title: 'Music topic', tags: [], category: 'music', heat: 80 },
+    ]);
+    render(<InspirationPage />);
+    fireEvent.click(screen.getByText('Hotspots'));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Music topic/ })).toBeTruthy());
+    fireEvent.click(screen.getByText('#food (1)'));
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Music topic/ })).toBeNull());
+    fireEvent.click(screen.getByText('#food (1)'));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Music topic/ })).toBeTruthy());
   });
 });

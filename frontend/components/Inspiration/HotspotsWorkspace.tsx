@@ -1,26 +1,44 @@
 // frontend/components/Inspiration/HotspotsWorkspace.tsx
 // Hotspots tab main area: ranked list (left) + inline detail (right).
-// Date comes from the page-wide selected date; Not-interested hides via applyState.
+// hotspots/loading/applyState are owned by the page (single useHotspots
+// instance, task-3); this component is a pure props consumer so hiding a
+// hotspot or filtering by category stays in sync with the Notes-tab side
+// panel and category chips, which read off the same data.
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Flame } from 'lucide-react';
-import { useHotspots } from './useHotspots';
 import { HotspotDetail } from './HotspotDetail';
 import { topHotspots } from '../TopicInspiration/hotspotRanking';
-import type { Hotspot } from '../../services/topicService';
+import type { Hotspot, HotspotStatePatch } from '../../services/topicService';
 
 interface Props {
-  day: string | null;
+  hotspots: Hotspot[];
+  loading: boolean;
+  applyState: (h: Hotspot, patch: HotspotStatePatch) => Promise<void>;
+  activeCategory: string | null;
   onSaveAsNote: (h: Hotspot) => void;
   onParse: (h: Hotspot) => void;
 }
 
-export const HotspotsWorkspace: React.FC<Props> = ({ day, onSaveAsNote, onParse }) => {
+export const HotspotsWorkspace: React.FC<Props> = ({
+  hotspots,
+  loading,
+  applyState,
+  activeCategory,
+  onSaveAsNote,
+  onParse,
+}) => {
   const { t } = useTranslation();
-  const { hotspots, loading, applyState } = useHotspots({ enabled: true, day: day ?? undefined });
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const ranked = useMemo(() => topHotspots(hotspots.filter((h) => !h.is_hidden), 50), [hotspots]);
+  const ranked = useMemo(
+    () =>
+      topHotspots(
+        hotspots.filter((h) => !h.is_hidden && (!activeCategory || h.category === activeCategory)),
+        50,
+      ),
+    [hotspots, activeCategory],
+  );
   // Opening the Hotspots tab should auto-select the top-ranked hotspot so the
   // detail pane shows content immediately (mockup v7 UX).
   const selected = ranked.find((h) => h.id === selectedId) ?? ranked[0] ?? null;

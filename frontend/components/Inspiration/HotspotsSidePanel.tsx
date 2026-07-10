@@ -1,20 +1,22 @@
 // frontend/components/Inspiration/HotspotsSidePanel.tsx
 // Notes-tab sidebar: top-3 hotspots for the selected day + save-as-note + open-all.
+// hotspots is owned by the page (single useHotspots instance, task-3); this
+// component is a pure props consumer so it stays in sync with the Workspace
+// and category chips off the same data (e.g. hides land here instantly).
 import React, { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useHotspots } from './useHotspots';
 import { topHotspots } from '../TopicInspiration/hotspotRanking';
 import type { Hotspot } from '../../services/topicService';
 
 interface Props {
+  hotspots: Hotspot[];
   day: string | null;
   onSaveAsNote: (h: Hotspot) => void;
   onOpenAll: () => void;
 }
 
-export const HotspotsSidePanel: React.FC<Props> = ({ day, onSaveAsNote, onOpenAll }) => {
+export const HotspotsSidePanel: React.FC<Props> = ({ hotspots, day, onSaveAsNote, onOpenAll }) => {
   const { t } = useTranslation();
-  const { hotspots } = useHotspots({ enabled: true, day: day ?? undefined });
   const top3 = useMemo(() => topHotspots(hotspots.filter((h) => !h.is_hidden), 3), [hotspots]);
 
   if (top3.length === 0) return null;

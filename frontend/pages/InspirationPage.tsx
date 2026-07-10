@@ -12,12 +12,14 @@ import { ActivityPanel } from '../components/Inspiration/ActivityPanel';
 import { TagsPanel } from '../components/Inspiration/TagsPanel';
 import { HotspotsWorkspace } from '../components/Inspiration/HotspotsWorkspace';
 import { HotspotsSidePanel } from '../components/Inspiration/HotspotsSidePanel';
+import { NotesSidePanel } from '../components/Inspiration/NotesSidePanel';
 import { useHotspots } from '../components/Inspiration/useHotspots';
-import { hotspotToRef } from '../components/Inspiration/hotspotToRef';
+import { buildPrefillContent, hotspotToRef } from '../components/Inspiration/hotspotToRef';
 import { toggleTaskItem } from '../components/Inspiration/toggleTaskItem';
 import { FloatingParse } from '../components/TopicInspiration/FloatingParse';
 import type { Hotspot } from '../services/topicService';
 import {
+  createNote,
   deleteNote,
   getTagCounts,
   listNotes,
@@ -47,15 +49,17 @@ export const InspirationPage: React.FC = () => {
   const [prefill, setPrefill] = useState<{ content: string; refHotspot: RefHotspot } | null>(null);
   const [prefillNonce, setPrefillNonce] = useState(0);
   const [parseOpen, setParseOpen] = useState(false);
+  const [parseUrl, setParseUrl] = useState<string | null>(null);
   const [tokensOpen, setTokensOpen] = useState(false);
-  // Read-only category chips for the Hotspots-tab sidebar (spec §2 #7,
-  // simplified to display-only for P3). The hook is always called — only its
-  // `enabled` flag toggles the underlying fetch — so hook order never
-  // depends on which tab is active.
-  const { hotspots: categoryHotspots } = useHotspots({
-    enabled: tab === 'hotspots',
+  // Single page-wide hotspots instance (task-3): the Hotspots-tab workspace,
+  // the Notes-tab side panel and the category chips all read off this one
+  // fetch, so hiding a hotspot (applyState) is instantly consistent
+  // everywhere instead of each component holding its own stale copy.
+  const { hotspots, loading: hotspotsLoading, applyState } = useHotspots({
+    enabled: true,
     day: date ?? undefined,
   });
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
   // Monotonic request version: guards both the main filter-driven fetch and
   // loadMore against applying a stale response after filters (date/tag/q)
   // change mid-flight (see task-7 review finding).
@@ -72,6 +76,12 @@ export const InspirationPage: React.FC = () => {
     return () => clearTimeout(id);
   }, [queryInput]);
 
+  // Category chips are per-day: switching the day resets the filter so a
+  // vanished chip can't leave an invisible, unclearable filter behind.
+  useEffect(() => {
+    setActiveCategory(null);
+  }, [date]);
+
   const filters = useMemo(
     () => ({ date: date ?? undefined, tag: tag ?? undefined, q: q || undefined }),
     [date, tag, q],
@@ -79,12 +89,17 @@ export const InspirationPage: React.FC = () => {
 
   const hotspotCategories = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const h of categoryHotspots) {
+    for (const h of hotspots) {
       if (!h.category) continue;
       counts.set(h.category, (counts.get(h.category) ?? 0) + 1);
     }
     return Array.from(counts.entries()).map(([category, cnt]) => ({ category, cnt }));
-  }, [categoryHotspots]);
+  }, [hotspots]);
+
+  // Clicking the active category again clears the filter.
+  const onCategoryClick = (category: string) => {
+    setActiveCategory((prev) => (prev === category ? null : category));
+  };
 
   useEffect(() => {
     let alive = true;
@@ -145,7 +160,7 @@ export const InspirationPage: React.FC = () => {
   // to the Composer as a prefill, and jump to the Notes tab. Shared by the
   // Hotspots-tab workspace and the Notes-tab sidebar Top3.
   const handleSaveAsNote = (h: Hotspot) => {
-    setPrefill({ content: '', refHotspot: hotspotToRef(h) });
+    setPrefill({ content: buildPrefillContent(h), refHotspot: hotspotToRef(h) });
     setPrefillNonce((n) => n + 1);
     setTab('notes');
   };
@@ -268,7 +283,10 @@ export const InspirationPage: React.FC = () => {
           />
         </div>
         <button
-          onClick={() => setParseOpen(true)}
+          onClick={() => {
+            setParseUrl(null);
+            setParseOpen(true);
+          }}
           className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-indigo-500/15 px-3 py-1.5 text-xs font-semibold text-indigo-300 hover:bg-indigo-500/25"
         >
           <Link2 size={13} />
@@ -291,6 +309,7 @@ export const InspirationPage: React.FC = () => {
               <Composer
                 key={prefillNonce}
                 prefill={prefill}
+                autoFocus={!!prefill}
                 onCreated={(note) => {
                   onCreated(note);
                   setPrefill(null);
@@ -308,42 +327,78 @@ export const InspirationPage: React.FC = () => {
                 hasMore={hasMore}
                 loading={loading}
                 loadMore={() => void loadMore()}
+                filtered={!!(date || tag || q)}
               />
             </>
           ) : (
-            <HotspotsWorkspace day={date} onSaveAsNote={handleSaveAsNote} onParse={() => setParseOpen(true)} />
+            <HotspotsWorkspace
+              hotspots={hotspots}
+              loading={hotspotsLoading}
+              applyState={applyState}
+              activeCategory={activeCategory}
+              onSaveAsNote={handleSaveAsNote}
+              onParse={(h) => {
+                setParseUrl(h.origin_url || h.url || null);
+                setParseOpen(true);
+              }}
+            />
           )}
         </div>
         <div className="hidden w-[292px] shrink-0 space-y-2.5 lg:block">
           <ActivityPanel selectedDate={date} onSelectDate={setDate} refreshKey={refreshKey} />
           {tab === 'notes' ? (
             <>
-              <HotspotsSidePanel day={date} onSaveAsNote={handleSaveAsNote} onOpenAll={() => setTab('hotspots')} />
+              <HotspotsSidePanel
+                hotspots={hotspots}
+                day={date}
+                onSaveAsNote={handleSaveAsNote}
+                onOpenAll={() => setTab('hotspots')}
+              />
               <TagsPanel tags={tags} activeTag={tag} onTagClick={setTag} />
             </>
           ) : (
-            hotspotCategories.length > 0 && (
-              <div className="rounded-xl bg-island px-4 py-3.5">
-                <h3 className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-content-3">
-                  {t('inspiration.hotspots', 'Hotspots')}
-                </h3>
-                <div className="flex flex-wrap gap-1.5">
-                  {hotspotCategories.map(({ category, cnt }) => (
-                    <span
-                      key={category}
-                      className="inline-flex items-center gap-1 rounded-full bg-island-2 px-2.5 py-1 text-xs text-content-2"
-                    >
-                      {`#${category} (${cnt})`}
-                    </span>
-                  ))}
+            <>
+              {hotspotCategories.length > 0 && (
+                <div className="rounded-xl bg-island px-4 py-3.5">
+                  <h3 className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-content-3">
+                    {t('inspiration.hotspots', 'Hotspots')}
+                  </h3>
+                  <div className="flex flex-wrap gap-1.5">
+                    {hotspotCategories.map(({ category, cnt }) => (
+                      <button
+                        key={category}
+                        onClick={() => onCategoryClick(category)}
+                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs transition-colors ${
+                          activeCategory === category
+                            ? 'bg-indigo-500/25 text-indigo-300'
+                            : 'bg-island-2 text-content-2 hover:bg-line'
+                        }`}
+                      >
+                        {`#${category} (${cnt})`}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )
+              )}
+              <NotesSidePanel
+                recentNotes={notes.slice(0, 3)}
+                onQuickSave={async (content) => {
+                  try {
+                    const note = await createNote(content);
+                    onCreated(note);
+                  } catch (err) {
+                    addToast((err as Error).message, 'error');
+                    throw err;
+                  }
+                }}
+                onOpenNotes={() => setTab('notes')}
+              />
+            </>
           )}
         </div>
       </div>
 
-      <FloatingParse open={parseOpen} onOpenChange={setParseOpen} />
+      <FloatingParse open={parseOpen} onOpenChange={setParseOpen} initialUrl={parseUrl ?? undefined} />
 
       {tokensOpen && (
         <div
