@@ -247,6 +247,10 @@ export function ProjectsPage() {
           project={selectedProject}
           teamId={teamId}
           onBack={handleBackToList}
+          onProjectUpdated={(updated) => {
+            setSelectedProject(updated);
+            refreshProjects();
+          }}
         />
       );
     }

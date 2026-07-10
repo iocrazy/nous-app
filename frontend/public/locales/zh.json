@@ -1382,6 +1382,50 @@
         "scriptScenes": "{{count}} 场",
         "shotsProgress": "镜头 {{done}}/{{total}}",
         "rendersCount": "成片 {{count}}"
+      },
+      "episodes": {
+        "title": "Episodes",
+        "newEpisode": "+ 新建剧集",
+        "open": "打开 →",
+        "start": "开始 →",
+        "empty": "空 — 开始写脚本或导入",
+        "scriptScenes": "脚本 ✓ {{count}} 场",
+        "shotsProgress": "镜头 {{done}}/{{total}}",
+        "rendersCount": "成片 {{count}}",
+        "rename": "重命名",
+        "moveUp": "上移",
+        "moveDown": "下移",
+        "delete": "删除",
+        "deleteConfirm": "删除这一集？",
+        "deleteConfirmYes": "删除",
+        "deleteConfirmCancel": "取消",
+        "notEmpty": "该集仍有脚本，无法删除",
+        "renameSave": "保存",
+        "renameCancel": "取消"
+      },
+      "entities": {
+        "derivedNote": "从脚本 cue 自动派生",
+        "filterAll": "所有剧集",
+        "cueCount": "{{count}} 条台词",
+        "sceneCount": "{{count}} 场",
+        "reusableNote": "@ 任意剧集均可复用",
+        "epChip": "Ep {{n}}",
+        "emptyCharacters": "暂无人物 — 脚本中的台词会自动出现在这里。",
+        "emptyLocations": "暂无场景 — 场景头会自动出现在这里。"
+      },
+      "files": {
+        "breadcrumbRoot": "文件",
+        "chipAll": "全部",
+        "chipMedia": "素材",
+        "chipRenders": "成片",
+        "chipDocs": "文档",
+        "upload": "上传",
+        "uploading": "上传中…",
+        "folder": "文件夹",
+        "render": "成片",
+        "currentEpOnly": "仅当前集",
+        "empty": "暂无文件",
+        "emptyRenders": "暂无成片"
       }
     }
   },

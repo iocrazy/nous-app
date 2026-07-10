@@ -1382,6 +1382,50 @@
         "scriptScenes": "{{count}} scenes",
         "shotsProgress": "Shots {{done}}/{{total}}",
         "rendersCount": "Renders {{count}}"
+      },
+      "episodes": {
+        "title": "Episodes",
+        "newEpisode": "+ New episode",
+        "open": "Open →",
+        "start": "Start →",
+        "empty": "empty — start script or import",
+        "scriptScenes": "Script ✓ {{count}} scenes",
+        "shotsProgress": "Shots {{done}}/{{total}}",
+        "rendersCount": "Renders {{count}}",
+        "rename": "Rename",
+        "moveUp": "Move up",
+        "moveDown": "Move down",
+        "delete": "Delete",
+        "deleteConfirm": "Delete this episode?",
+        "deleteConfirmYes": "Delete",
+        "deleteConfirmCancel": "Cancel",
+        "notEmpty": "Episode not empty",
+        "renameSave": "Save",
+        "renameCancel": "Cancel"
+      },
+      "entities": {
+        "derivedNote": "derived from script cues",
+        "filterAll": "All episodes",
+        "cueCount": "{{count}} cues",
+        "sceneCount": "{{count}} scenes",
+        "reusableNote": "@ reusable in any episode",
+        "epChip": "Ep {{n}}",
+        "emptyCharacters": "No characters yet — cues from scripts appear here automatically.",
+        "emptyLocations": "No locations yet — scene headers appear here automatically."
+      },
+      "files": {
+        "breadcrumbRoot": "Files",
+        "chipAll": "All",
+        "chipMedia": "Media",
+        "chipRenders": "Renders",
+        "chipDocs": "Docs",
+        "upload": "Upload",
+        "uploading": "Uploading…",
+        "folder": "Folder",
+        "render": "Render",
+        "currentEpOnly": "Current episode only",
+        "empty": "No files yet",
+        "emptyRenders": "No renders yet"
       }
     }
   },

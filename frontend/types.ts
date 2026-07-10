@@ -980,6 +980,50 @@ export interface EpisodeProgress {
   status: string;
 }
 
+/**
+ * Project-level ASSETS "main library" rows from
+ * `GET /api/v1/projects/{id}/entities` (PR-10b, spec G13) — characters and
+ * locations are derived from script cues/scene headers, never hand-authored,
+ * so there's no separate write path here.
+ */
+export interface ProjectEntityCharacter {
+  name: string;
+  cue_count: number;
+  episode_ids: string[];
+}
+
+export interface ProjectEntityLocation {
+  name: string;
+  scene_count: number;
+  episode_ids: string[];
+}
+
+export interface ProjectEntities {
+  characters: ProjectEntityCharacter[];
+  locations: ProjectEntityLocation[];
+}
+
+/**
+ * A single `generated_media` row from `GET /api/v1/projects/{id}/renders`
+ * (PR-10b, spec G12 Renders module) — image frames and shot videos produced
+ * for the project's episodes. No `cover`/`stream` URL field on the row
+ * itself; the frontend builds `/api/v1/generated-media/{id}/cover` (image)
+ * or `/api/v1/generated-media/{id}/stream` (video) from `id` + `media_kind`.
+ */
+export interface RenderItem {
+  id: string;
+  media_kind: 'image' | 'video' | string;
+  mime: string | null;
+  origin_kind: string;
+  node_id: string | null;
+  created_at: string;
+}
+
+export interface RenderItemPage {
+  items: RenderItem[];
+  next_cursor: string | null;
+}
+
 /** Aggregate shot-frame progress for the storyboard stage suggestion (Phase B B3). */
 export interface StoryboardProgress {
   total: number;

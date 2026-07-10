@@ -21,9 +21,14 @@ import {
 } from '../../services/projectsService';
 import { fetchScriptProjects } from '../../services/scriptService';
 import { useToast } from '../Toast';
+import { ProjectTrashView } from '../ProjectTrashView';
+import { ProjectSettingsPanel } from '../ProjectSettingsPanel';
 import { WorkspaceSidebar } from './WorkspaceSidebar';
 import { WorkspaceTopBar } from './WorkspaceTopBar';
 import { WorkspaceOverview } from './WorkspaceOverview';
+import { WorkspaceEpisodes } from './WorkspaceEpisodes';
+import { WorkspaceEntities } from './WorkspaceEntities';
+import { WorkspaceFiles, type FilesChip } from './WorkspaceFiles';
 import { WorkspacePlaceholder } from './WorkspacePlaceholder';
 import { episodeStorageKey, type WorkspaceModule } from './workspaceModules';
 import type {
@@ -39,6 +44,8 @@ interface ProjectWorkspaceProps {
   teamId?: string;
   onBack: () => void;
   canWrite?: boolean;
+  /** Settings module saved a project field — bubble the fresh row up so the caller can update its own state. */
+  onProjectUpdated?: (project: Project) => void;
 }
 
 // A suggestion action's `tab` targets the legacy ProjectTab set — the
@@ -51,7 +58,13 @@ function suggestionTabToModule(tab: ProjectTab | null | undefined): WorkspaceMod
   return 'files';
 }
 
-export function ProjectWorkspace({ project, teamId, onBack, canWrite = true }: ProjectWorkspaceProps) {
+export function ProjectWorkspace({
+  project,
+  teamId,
+  onBack,
+  canWrite = true,
+  onProjectUpdated,
+}: ProjectWorkspaceProps) {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { addToast } = useToast();
@@ -187,32 +200,68 @@ export function ProjectWorkspace({ project, teamId, onBack, canWrite = true }: P
     [project.id],
   );
 
-  // ── Script/Storyboard deep-link: resolve the current episode's most
-  // recently updated script and open its editor; no script → fall back to
-  // the Episodes management module so the user can start one. ───────────
-  const openCurrentEpisodeScript = useCallback(async () => {
-    if (!currentEpisode) {
-      setActiveModule('episodes');
-      return;
-    }
-    try {
-      const result = await fetchScriptProjects(project.id);
-      const candidates = (result.data ?? []).filter(
-        (s) => String(s.episode_id ?? '') === String(currentEpisode.episode_id),
-      );
-      if (candidates.length === 0) {
+  // Re-fetch the progress feed after a create/rename/reorder/delete in the
+  // Episodes management module. Keeps the current selection when it still
+  // exists; otherwise falls back to the lowest sort_order episode (mirrors
+  // the initial-load fallback below, without touching that pinned effect).
+  const refetchEpisodes = useCallback(() => {
+    return fetchEpisodesProgress(project.id)
+      .then((rows) => {
+        setEpisodes(rows);
+        setCurrentEpisodeId((cur) => {
+          if (cur && rows.some((r) => r.episode_id === cur)) return cur;
+          const sorted = [...rows].sort((a, b) => a.sort_order - b.sort_order);
+          return sorted[0]?.episode_id ?? null;
+        });
+      })
+      .catch((err) => console.error('[ProjectWorkspace] failed to refresh episodes progress:', err));
+  }, [project.id]);
+
+  // ── Script/Storyboard deep-link: resolve a given episode's most recently
+  // updated script and open its editor; no script → fall back to the
+  // Episodes management module so the user can start one. Parameterized
+  // (rather than always reading `currentEpisode`) so the Episodes module's
+  // Open/Start CTA can switch episode + open its script in one action. ───
+  const openEpisodeScript = useCallback(
+    async (episode: EpisodeProgress | null) => {
+      if (!episode) {
         setActiveModule('episodes');
         return;
       }
-      candidates.sort(
-        (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
-      );
-      navigate(`/team/${teamId}/projects/${project.id}/scripts/${candidates[0].id}`);
-    } catch (err) {
-      console.error('[ProjectWorkspace] failed to resolve current episode script:', err);
-      setActiveModule('episodes');
-    }
-  }, [currentEpisode, project.id, teamId, navigate]);
+      try {
+        const result = await fetchScriptProjects(project.id);
+        const candidates = (result.data ?? []).filter(
+          (s) => String(s.episode_id ?? '') === String(episode.episode_id),
+        );
+        if (candidates.length === 0) {
+          setActiveModule('episodes');
+          return;
+        }
+        candidates.sort(
+          (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+        );
+        navigate(`/team/${teamId}/projects/${project.id}/scripts/${candidates[0].id}`);
+      } catch (err) {
+        console.error('[ProjectWorkspace] failed to resolve current episode script:', err);
+        setActiveModule('episodes');
+      }
+    },
+    [project.id, teamId, navigate],
+  );
+
+  const openCurrentEpisodeScript = useCallback(
+    () => openEpisodeScript(currentEpisode),
+    [openEpisodeScript, currentEpisode],
+  );
+
+  const handleOpenEpisode = useCallback(
+    (episodeId: string) => {
+      handleEpisodeChange(episodeId);
+      const ep = episodes.find((e) => e.episode_id === episodeId) ?? null;
+      void openEpisodeScript(ep);
+    },
+    [handleEpisodeChange, episodes, openEpisodeScript],
+  );
 
   const handleSuggestionNavigate = useCallback(
     (tab: ProjectTab) => {
@@ -225,15 +274,40 @@ export function ProjectWorkspace({ project, teamId, onBack, canWrite = true }: P
     [openCurrentEpisodeScript],
   );
 
+  // ── Files module chip/episode-filter handoff (renders sidebar child) ──
+  const [filesInitialChip, setFilesInitialChip] = useState<FilesChip>('all');
+  const [filesEpFilterOn, setFilesEpFilterOn] = useState(false);
+  // Bumped on every entry into Files so `key`-ing WorkspaceFiles on it
+  // forces a remount (and re-applies the initial chip/filter props) even
+  // when the user re-clicks "Renders" while already in the Files module.
+  const [filesEntryToken, setFilesEntryToken] = useState(0);
+
+  const handleModuleChange = useCallback((module: WorkspaceModule) => {
+    if (module === 'files') {
+      setFilesInitialChip('all');
+      setFilesEpFilterOn(false);
+      setFilesEntryToken((n) => n + 1);
+    }
+    setActiveModule(module);
+  }, []);
+
+  const handleOpenRenders = useCallback(() => {
+    setFilesInitialChip('renders');
+    setFilesEpFilterOn(true);
+    setFilesEntryToken((n) => n + 1);
+    setActiveModule('files');
+  }, []);
+
   return (
     <div data-testid="project-workspace" className="flex h-full min-h-0">
       <WorkspaceSidebar
         activeModule={activeModule}
-        onModuleChange={setActiveModule}
+        onModuleChange={handleModuleChange}
         episodes={episodes}
         currentEpisode={currentEpisode}
         onEpisodeChange={handleEpisodeChange}
         onOpenScript={() => void openCurrentEpisodeScript()}
+        onOpenRenders={handleOpenRenders}
       />
       <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
         <WorkspaceTopBar
@@ -253,7 +327,7 @@ export function ProjectWorkspace({ project, teamId, onBack, canWrite = true }: P
           onSuggestionNavigate={handleSuggestionNavigate}
         />
         <div className="flex-1 overflow-y-auto px-6 pb-8">
-          {activeModule === 'overview' ? (
+          {activeModule === 'overview' && (
             <WorkspaceOverview
               project={project}
               projectId={project.id}
@@ -263,9 +337,41 @@ export function ProjectWorkspace({ project, teamId, onBack, canWrite = true }: P
               onOpenScript={() => void openCurrentEpisodeScript()}
               onSuggestionNavigate={handleSuggestionNavigate}
             />
-          ) : (
-            <WorkspacePlaceholder module={activeModule} />
           )}
+          {activeModule === 'episodes' && (
+            <WorkspaceEpisodes
+              projectId={project.id}
+              episodes={episodes}
+              onEpisodesChanged={() => void refetchEpisodes()}
+              onOpenEpisode={handleOpenEpisode}
+            />
+          )}
+          {(activeModule === 'characters' || activeModule === 'locations') && (
+            <WorkspaceEntities kind={activeModule} projectId={project.id} episodes={episodes} />
+          )}
+          {activeModule === 'files' && (
+            <WorkspaceFiles
+              key={filesEntryToken}
+              projectId={project.id}
+              currentEpisode={currentEpisode}
+              initialChip={filesInitialChip}
+              initialEpisodeFilterOn={filesEpFilterOn}
+            />
+          )}
+          {activeModule === 'trash' && <ProjectTrashView projectId={project.id} />}
+          {activeModule === 'settings' && (
+            <ProjectSettingsPanel
+              project={project}
+              isOpen
+              onClose={() => setActiveModule('overview')}
+              onUpdated={(updated) => {
+                onProjectUpdated?.(updated);
+                setActiveModule('overview');
+              }}
+              onDeleted={onBack}
+            />
+          )}
+          {activeModule === 'canvas' && <WorkspacePlaceholder module="canvas" />}
         </div>
       </div>
     </div>

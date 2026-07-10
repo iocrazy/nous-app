@@ -22,6 +22,8 @@ interface WorkspaceSidebarProps {
   onEpisodeChange: (episodeId: string) => void;
   /** Script or Storyboard child clicked — resolve + open the episode's script editor. */
   onOpenScript: () => void;
+  /** Renders child clicked — switch to Files with the Renders chip + current-episode filter preset. */
+  onOpenRenders: () => void;
 }
 
 function sideItemClass(active: boolean): string {
@@ -39,6 +41,7 @@ export function WorkspaceSidebar({
   currentEpisode,
   onEpisodeChange,
   onOpenScript,
+  onOpenRenders,
 }: WorkspaceSidebarProps) {
   const { t } = useTranslation();
   const [switcherOpen, setSwitcherOpen] = useState(false);
@@ -163,7 +166,7 @@ export function WorkspaceSidebar({
             </button>
             <button
               data-testid="ws-ep-renders"
-              onClick={() => onModuleChange('files')}
+              onClick={onOpenRenders}
               className="flex items-center justify-between gap-2 rounded-md pl-6 pr-2.5 py-1.5 text-[12.5px] text-ink-300 hover:text-ink-100 hover:bg-ink-800/50 transition-colors text-left"
             >
               <span className="flex items-center gap-2 min-w-0">

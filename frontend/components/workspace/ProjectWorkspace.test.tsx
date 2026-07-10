@@ -164,11 +164,24 @@ describe('ProjectWorkspace', () => {
     expect(localStorage.getItem('mediahub.project.p1.ep')).toBe('2');
   });
 
-  it('switches content to the shared placeholder for a non-overview module', async () => {
+  it('switches content to the shared placeholder for a module without real content yet (Canvas)', async () => {
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
 
-    fireEvent.click(await screen.findByTestId('ws-module-characters'));
-    expect(await screen.findByTestId('workspace-placeholder-characters')).toBeTruthy();
+    fireEvent.click(await screen.findByTestId('ws-module-canvas'));
+    expect(await screen.findByTestId('workspace-placeholder-canvas')).toBeTruthy();
+    expect(screen.queryByTestId('ws-overview')).toBeNull();
+  });
+
+  // PR-10b Wave 2 — Episodes/Characters/Locations/Files/Trash/Settings now
+  // render real module content instead of the shared placeholder; see
+  // WorkspaceEpisodes.test.tsx / WorkspaceEntities.test.tsx /
+  // WorkspaceFiles.test.tsx for their own coverage. This suite only pins
+  // the shell's module-switch wiring.
+  it('switches to the real Episodes module content', async () => {
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    fireEvent.click(await screen.findByTestId('ws-module-episodes'));
+    expect(await screen.findByTestId('ws-episodes')).toBeTruthy();
     expect(screen.queryByTestId('ws-overview')).toBeNull();
   });
 
@@ -192,7 +205,7 @@ describe('ProjectWorkspace', () => {
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
 
     fireEvent.click(await screen.findByTestId('ws-ep-script'));
-    expect(await screen.findByTestId('workspace-placeholder-episodes')).toBeTruthy();
+    expect(await screen.findByTestId('ws-episodes')).toBeTruthy();
     expect(navigate).not.toHaveBeenCalled();
   });
 });

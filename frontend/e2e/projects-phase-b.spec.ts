@@ -248,23 +248,34 @@ test.describe('Projects Phase B — Stage Ring alignment', () => {
     await page.screenshot({ path: 'e2e-artifacts/projects-list-phase-b-light.png', fullPage: true });
   });
 
-  test('storyboard suggestion card shows generate CTA', async ({ page }) => {
+  // PR-10b (Wave 2) — VITE_FEATURE_PROJECT_WORKSPACE_V2 is now baked true in
+  // playwright.config.ts's webServer build (needed for projects-workspace.spec.ts),
+  // so the detail pane at `${PROJECTS_URL}/1` is the new ProjectWorkspace shell,
+  // not the retired StageWorkbench surface this test originally drove
+  // (`stage-history-btn` / the pills-row `StageSelector`). Updated (not
+  // dropped) to assert the shell's equivalents instead: the MiniStepper is
+  // the exact same component reused verbatim in WorkspaceTopBar (same
+  // `stage-ministep`/`ministep-dot-*` test ids), and StageSuggestion is
+  // reused as-is inside the default Overview module (same `stage-suggestion`/
+  // `suggest-cta` test ids) since VITE_FEATURE_PROJECT_AI_SUGGEST is also on.
+  test('workspace shell top bar + suggestion CTA render for the storyboard stage', async ({ page }) => {
     await routeProjectsApi(page, { withWorkbench: true });
     // Deep-link straight into project 1's detail view — ProjectsPage
     // auto-selects the matching row from the (stubbed) list on mount once
     // `:projectId` is present, so this skips a fragile click-through.
     await page.goto(`${PROJECTS_URL}/1`);
 
-    // B2 — workbench header renders once the stage catalog + current stage
-    // resolve (flag on via playwright.config.ts webServer env).
-    await expect(page.getByTestId('stage-history-btn')).toBeVisible({ timeout: 10_000 });
+    // The workspace shell's top bar renders once the stage catalog +
+    // current stage resolve (flags on via playwright.config.ts webServer env).
+    await expect(page.getByTestId('workspace-topbar')).toBeVisible({ timeout: 10_000 });
 
-    // D2 — pills row is gone; the mini stepper (one dot per catalog stage)
-    // renders in its place, top-right of the stage card.
+    // D2 — the mini stepper (one dot per catalog stage) renders top-right
+    // of the top bar (WorkspaceTopBar reuses MiniStepper verbatim).
     await expect(page.getByTestId('stage-ministep')).toBeVisible();
     await expect(page.getByTestId(`ministep-dot-${CURRENT_STAGE_STORYBOARD.slug}`)).toBeVisible();
 
-    // B3 — data-aware suggestion card, CTA driven by `action.count`.
+    // B3 — data-aware suggestion card (reused inside the default Overview
+    // module), CTA driven by `action.count`.
     await expect(page.getByTestId('stage-suggestion')).toBeVisible();
     await expect(page.getByTestId('suggest-cta')).toHaveText('Generate 3 frames');
 
