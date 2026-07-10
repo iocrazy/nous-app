@@ -13,7 +13,7 @@
  * `mockRunner` to `runPrompts` and nothing else changes.
  */
 
-import type { PromptNodeData } from './types';
+import type { PromptGenSettings, PromptNodeData } from './types';
 
 export type PromptStatus = PromptNodeData['run_status'];
 
@@ -22,6 +22,8 @@ export interface RunnerContext {
   body: string;
   provider_slug: string;
   agent_id: string | null;
+  /** Image/video generation settings (G4-F1) — absent for text prompts. */
+  gen?: PromptGenSettings | null;
 }
 
 export interface RunnerResult {
@@ -31,6 +33,10 @@ export interface RunnerResult {
   text: string;
   /** When ok=false. */
   error: string | null;
+  /** Generation runs (G4-F1): durable result URLs, one per generated item. */
+  urls?: string[];
+  /** Generation runs: 'image' | 'video'. */
+  media_kind?: string;
 }
 
 export type PromptCaller = (ctx: RunnerContext) => Promise<RunnerResult>;

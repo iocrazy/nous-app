@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 
-import type { PromptNodeData, PromptResourceRef } from '../types';
+import type { PromptGenSettings, PromptNodeData, PromptResourceRef } from '../types';
 import { RUN_STATUS_TONE, SMART_NODE_DEFAULT_WIDTH } from '../types';
+import { useGenerationModels } from './useGenerationModels';
 import { useNodeDataPatch } from './useNodeDataPatch';
 import { useCanvasMentionPicker } from './useCanvasMentionPicker';
 import { CanvasMentionPicker } from './CanvasMentionPicker';
@@ -27,6 +28,9 @@ const PROVIDER_OPTIONS: ReadonlyArray<{ slug: string; label: string }> = [
 
 type ActiveKind = '' | 'video' | 'image' | 'doc' | 'audio' | 'pdf';
 
+/** Image aspect presets — the Infinite composer's core set. */
+const RATIO_OPTIONS = ['1:1', '16:9', '9:16', '4:3', '3:4'] as const;
+
 export function PromptNodeView({ id, data, selected }: NodeProps) {
   const {
     body,
@@ -34,8 +38,11 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     run_status,
     run_error,
     resource_refs = [],   // default [] for nodes persisted before this field
+    gen = null,           // absent = legacy text prompt
   } = data as unknown as PromptNodeData;
   const patch = useNodeDataPatch(id);
+  const genKind = gen?.kind ?? 'text';
+  const genModels = useGenerationModels(gen ? gen.kind : undefined);
 
   // Kind filter for the @-mention picker tabs (All / Video / Image / Doc …)
   const [activeKind, setActiveKind] = useState<ActiveKind>('');
@@ -97,8 +104,33 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
         <div className="text-xs font-semibold uppercase tracking-wide text-ink-500 dark:text-ink-400">
           Prompt
         </div>
-        <div className="text-[10px] uppercase tracking-wider text-ink-400">
-          {run_status}
+        <div className="flex items-center gap-1.5">
+          {/* Text stays the legacy LLM path; Image/Video route Run through
+              the G4-B1 generation tasks (Infinite composer's kind toggle). */}
+          <select
+            className="nodrag rounded border border-ink-200 bg-transparent px-1 py-0 text-[10px] uppercase tracking-wider text-ink-500 outline-none focus:ring-1 focus:ring-indigo-300 dark:border-ink-700 dark:text-ink-400"
+            value={genKind}
+            onChange={(e) => {
+              const next = e.target.value;
+              if (next === 'text') {
+                patch({ gen: null });
+              } else {
+                const settings: PromptGenSettings =
+                  next === 'image'
+                    ? { kind: 'image', model: gen?.model ?? '', ratio: gen?.ratio ?? '1:1', count: gen?.count ?? 1 }
+                    : { kind: 'video', model: gen?.model ?? '', aspect: gen?.aspect ?? '16:9' };
+                patch({ gen: settings });
+              }
+            }}
+            aria-label="Prompt kind"
+          >
+            <option value="text">Text</option>
+            <option value="image">Image</option>
+            <option value="video">Video</option>
+          </select>
+          <div className="text-[10px] uppercase tracking-wider text-ink-400">
+            {run_status}
+          </div>
         </div>
       </div>
       {/* relative so the CanvasMentionPicker's `bottom-full` positions above this section */}
@@ -130,18 +162,83 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
         )}
 
         <div className="mt-2 flex items-center justify-between gap-2 text-xs">
-          <select
-            className="nodrag flex-1 truncate rounded border border-ink-200 bg-transparent px-1 py-0.5 text-xs text-ink-700 outline-none focus:ring-1 focus:ring-indigo-300 dark:border-ink-700 dark:text-ink-200"
-            value={provider_slug}
-            onChange={(e) => patch({ provider_slug: e.target.value })}
-            aria-label="Prompt provider"
-          >
-            {PROVIDER_OPTIONS.map((opt) => (
-              <option key={opt.slug || '_default'} value={opt.slug}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
+          {!gen && (
+            <select
+              className="nodrag flex-1 truncate rounded border border-ink-200 bg-transparent px-1 py-0.5 text-xs text-ink-700 outline-none focus:ring-1 focus:ring-indigo-300 dark:border-ink-700 dark:text-ink-200"
+              value={provider_slug}
+              onChange={(e) => patch({ provider_slug: e.target.value })}
+              aria-label="Prompt provider"
+            >
+              {PROVIDER_OPTIONS.map((opt) => (
+                <option key={opt.slug || '_default'} value={opt.slug}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          )}
+          {gen && (
+            <div className="flex flex-1 items-center gap-1.5">
+              <select
+                className="nodrag min-w-0 flex-1 truncate rounded border border-ink-200 bg-transparent px-1 py-0.5 text-xs text-ink-700 outline-none focus:ring-1 focus:ring-indigo-300 dark:border-ink-700 dark:text-ink-200"
+                value={gen.model}
+                onChange={(e) => patch({ gen: { ...gen, model: e.target.value } })}
+                aria-label="Generation model"
+              >
+                <option value="">Catalog default</option>
+                {genModels.map((m) => (
+                  <option key={m.name} value={m.name}>
+                    {m.display_name || m.name}
+                  </option>
+                ))}
+              </select>
+              {gen.kind === 'image' && (
+                <>
+                  <select
+                    className="nodrag rounded border border-ink-200 bg-transparent px-1 py-0.5 text-xs text-ink-700 outline-none focus:ring-1 focus:ring-indigo-300 dark:border-ink-700 dark:text-ink-200"
+                    value={gen.ratio ?? '1:1'}
+                    onChange={(e) => patch({ gen: { ...gen, ratio: e.target.value } })}
+                    aria-label="Aspect ratio"
+                  >
+                    {RATIO_OPTIONS.map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    min={1}
+                    max={8}
+                    className="nodrag w-12 rounded border border-ink-200 bg-transparent px-1 py-0.5 text-xs text-ink-700 outline-none focus:ring-1 focus:ring-indigo-300 dark:border-ink-700 dark:text-ink-200"
+                    value={gen.count ?? 1}
+                    onChange={(e) =>
+                      patch({
+                        gen: {
+                          ...gen,
+                          count: Math.max(1, Math.min(8, Number(e.target.value) || 1)),
+                        },
+                      })
+                    }
+                    aria-label="Image count"
+                  />
+                </>
+              )}
+              {gen.kind === 'video' && (
+                <select
+                  className="nodrag rounded border border-ink-200 bg-transparent px-1 py-0.5 text-xs text-ink-700 outline-none focus:ring-1 focus:ring-indigo-300 dark:border-ink-700 dark:text-ink-200"
+                  value={gen.aspect ?? '16:9'}
+                  onChange={(e) => patch({ gen: { ...gen, aspect: e.target.value } })}
+                  aria-label="Video aspect"
+                >
+                  {RATIO_OPTIONS.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
           {run_error && (
             <span
               className="ml-2 truncate text-rose-600 dark:text-rose-400"

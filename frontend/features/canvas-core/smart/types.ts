@@ -65,6 +65,25 @@ export interface PromptNodeData {
    * attachments. Defaults to [] for nodes created before this field existed.
    */
   resource_refs: PromptResourceRef[];
+  /**
+   * Generation settings (Infinite parity G4-F1). Absent/null = a text
+   * prompt (legacy behaviour). kind image/video routes Run through the
+   * G4-B1 generation tasks instead of the text LLM.
+   */
+  gen?: PromptGenSettings | null;
+}
+
+/** Image/video generation settings on a prompt node. */
+export interface PromptGenSettings {
+  kind: 'image' | 'video';
+  /** mediahub_models catalog row name ('' = catalog default). */
+  model: string;
+  /** Image: aspect ratio preset (e.g. '16:9'). */
+  ratio?: string;
+  /** Image: batch count 1..8 (Infinite's cap). */
+  count?: number;
+  /** Video: aspect ratio (e.g. '16:9'). */
+  aspect?: string;
 }
 
 export type OutputKind = 'text' | 'image' | 'video' | 'audio';

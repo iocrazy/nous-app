@@ -24,6 +24,8 @@ import {
   createPromptNode,
   createShotNode,
 } from './factories';
+import { upsertGenerationSlots } from './genSlots';
+import { withGenerationRunner } from './generationRunner';
 import { createBackendRunner } from './runner.backend';
 import {
   mockRunner,
@@ -33,7 +35,7 @@ import {
   type RunnerContext,
 } from './runner';
 import { topoSortPrompts } from './topology';
-import type { PromptNodeData } from './types';
+import type { OutputKind, PromptNodeData } from './types';
 
 interface CanvasComposerOptions {
   /** When passed, new nodes are positioned at the centre of this DOM
@@ -63,9 +65,14 @@ export function CanvasComposer({
   const [running, setRunning] = useState(false);
 
   const runner = useMemo<PromptCaller>(() => {
-    if (runnerOverride) return runnerOverride;
-    if (canvasId) return createBackendRunner({ canvasId });
-    return mockRunner;
+    const base = runnerOverride
+      ? runnerOverride
+      : canvasId
+        ? createBackendRunner({ canvasId })
+        : mockRunner;
+    // Image/video prompts route through the G4-B1 generation tasks; text
+    // prompts pass straight through to the base caller.
+    return withGenerationRunner(base, { canvasId });
   }, [runnerOverride, canvasId]);
 
   const dropPosition = useCallback((): { x: number; y: number } => {
@@ -101,7 +108,7 @@ export function CanvasComposer({
         nodes.map((n) => [(n as Record<string, unknown>).id as string, n]),
       );
       return ids
-        .map((id) => {
+        .map((id): RunnerContext | null => {
           const n = byId.get(id);
           if (!n) return null;
           const data = (n as Record<string, unknown>).data as
@@ -113,6 +120,7 @@ export function CanvasComposer({
             body: data.body,
             provider_slug: data.provider_slug,
             agent_id: data.agent_id,
+            gen: data.gen ?? null,
           };
         })
         .filter((v): v is RunnerContext => v !== null);
@@ -123,6 +131,17 @@ export function CanvasComposer({
   const handlers: RunHandlers = {
     onStatusChange: (id, status, fields) => {
       patchNode(id, { data: { run_status: status, ...fields } });
+    },
+    onResult: (id, result) => {
+      // Generation results land in per-prompt output slots (G4-F1) —
+      // reused on re-runs; F2 upgrades to images[] + history archive.
+      if (result.ok && result.urls?.length) {
+        upsertGenerationSlots(
+          id,
+          result.urls,
+          (result.media_kind as OutputKind) ?? 'image',
+        );
+      }
     },
   };
 
