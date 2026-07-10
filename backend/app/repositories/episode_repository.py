@@ -66,13 +66,17 @@ def _episode_write_values(data: Dict[str, Any]) -> Dict[str, Any]:
 
 # ------------------------------------------------------------------ #
 # Episode progress aggregate (PR-10a, spec G12) — raw SQL, not ORM. The
-# episode -> script -> scene -> shot join chain needs two independently
-# FILTERed counts over the same leaf table (renders_count), which doesn't
-# map cleanly onto a single ORM group_by; this follows the app.db.engine
-# raw-SQL house idiom (see project_stages_repository.py) instead of
-# read_scope. A primary read like list_by_project — a query failure is
-# NOT swallowed here; it propagates so the router's generic except->500
-# fires, same as every sibling read endpoint.
+# episode -> script -> scene -> shot join chain needs multiple independently
+# FILTERed counts over the same leaf table (shots_done, renders_count),
+# which doesn't map cleanly onto a single ORM group_by; this follows the
+# app.db.engine raw-SQL house idiom (see project_stages_repository.py)
+# instead of read_scope. renders_count uses a single FILTER with an OR
+# (image_url IS NOT NULL OR video_url IS NOT NULL) rather than two summed
+# FILTERed counts — a shot can have both an image and a video (the
+# image-then-video generation flow), and summing two separate FILTERs
+# would double-count that shot. A primary read like list_by_project — a
+# query failure is NOT swallowed here; it propagates so the router's
+# generic except->500 fires, same as every sibling read endpoint.
 # ------------------------------------------------------------------ #
 
 _PROGRESS_SQL = """
@@ -84,8 +88,9 @@ _PROGRESS_SQL = """
       COUNT(DISTINCT sc.id) AS scene_count,
       COUNT(DISTINCT sh.id) AS shots_total,
       COUNT(DISTINCT sh.id) FILTER (WHERE sh.status = 'done') AS shots_done,
-      COUNT(DISTINCT sh.id) FILTER (WHERE sh.image_url IS NOT NULL)
-        + COUNT(DISTINCT sh.id) FILTER (WHERE sh.video_url IS NOT NULL) AS renders_count
+      COUNT(DISTINCT sh.id) FILTER (
+        WHERE sh.image_url IS NOT NULL OR sh.video_url IS NOT NULL
+      ) AS renders_count
     FROM public.episodes e
     LEFT JOIN public.script_projects sp
       ON sp.episode_id = e.id AND sp.status != 'deleted'

@@ -56,7 +56,7 @@ async def get_episodes_progress(
     single-segment `/episodes` list above, FastAPI matches by full path."""
     try:
         items = await get_episode_repository().progress_by_project(project_id)
-        return {"success": True, "data": {"items": items}}
+        return {"success": True, "data": items}
     except Exception as exc:
         logger.error(f"[Episodes] progress for project {project_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to load episode progress")

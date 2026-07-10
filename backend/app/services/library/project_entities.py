@@ -10,11 +10,19 @@ elements, locations from ``script_scenes.location_text`` — exactly the
 already uses (``frontend/editor/railDerive.ts``), mirrored server-side so a
 project-wide view doesn't need every editor mounted to read it.
 
-Dedup key: ``text.strip().upper()`` (case-insensitive); the first-seen
-casing is kept as the display name. Empty text is skipped. ``content_json``
-may arrive as a JSON string depending on the asyncpg codec setup — parsed
-defensively, the same trap ``project_stages_repository.py`` guards for
-``tools_recommended``.
+The DEDUP-KEY semantics mirror railDerive: ``text.strip().upper()``
+(case-insensitive), first-seen casing kept as the display name, empty text
+skipped. The COUNT semantics do NOT fully mirror railDerive, though:
+railDerive's ``sceneCount`` is a distinct-scene count (a character cued
+twice in the same scene, or a location's text repeated, still only counts
+that scene once). This module's ``locations[].scene_count`` matches that
+(one row per scene, at most one location per row), but
+``characters[].cue_count`` does not — it increments once per character
+``content_json`` element, so a character cued multiple times within a
+single scene is counted per-occurrence here, not capped at one per scene
+like the rail. ``content_json`` may arrive as a JSON string depending on
+the asyncpg codec setup — parsed defensively, the same trap
+``project_stages_repository.py`` guards for ``tools_recommended``.
 """
 
 from __future__ import annotations
