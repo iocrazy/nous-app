@@ -1,0 +1,403 @@
+<!--
+  Projects 重构定版终稿(v9.1 FINAL, 2026-07-10)。唯一执行基准,取代 2026-07-10-projects-ui-final.html 的 D 系决策。
+  artifact: https://claude.ai/code/artifact/fd133ec7-0348-45af-afaf-f3b28d9da27f
+  G1-G14:项目即工作区/剧集树/主库+出场/存储统一(独立epic)。执行:PR-8后端→PR-9主页→PR-10工作区壳→PR-11编辑器并入。
+-->
+<title>Projects 定版终稿 — 项目即工作区</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --card: #ffffff; --card-2: #f7f8fa;
+    --line: rgba(15,18,25,.08); --line-strong: rgba(15,18,25,.16);
+    --c1: #1b1d23; --c2: #565a66; --c3: #8a8e99; --c4: #b0b3bc;
+    --indigo: #6366f1; --indigo-ink: #4f46e5; --indigo-soft: rgba(99,102,241,.10);
+    --emerald: #10b981; --amber: #d97706; --amber-soft: rgba(217,119,6,.12);
+    --btn-ink: #ffffff; --shadow: 0 1px 3px rgba(15,18,25,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #050507; --panel: #15151a; --card: #1d1d22; --card-2: #17171b;
+      --line: rgba(255,255,255,.065); --line-strong: rgba(255,255,255,.12);
+      --c1: #e7e7ea; --c2: #a3a3ad; --c3: #74747e; --c4: #55555e;
+      --indigo: #6366f1; --indigo-ink: #818cf8; --indigo-soft: rgba(99,102,241,.16);
+      --emerald: #34d399; --amber: #fbbf24; --amber-soft: rgba(251,191,36,.12);
+      --btn-ink: #0b0b10; --shadow: none;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #050507; --panel: #15151a; --card: #1d1d22; --card-2: #17171b;
+    --line: rgba(255,255,255,.065); --line-strong: rgba(255,255,255,.12);
+    --c1: #e7e7ea; --c2: #a3a3ad; --c3: #74747e; --c4: #55555e;
+    --indigo: #6366f1; --indigo-ink: #818cf8; --indigo-soft: rgba(99,102,241,.16);
+    --emerald: #34d399; --amber: #fbbf24; --amber-soft: rgba(251,191,36,.12);
+    --btn-ink: #0b0b10; --shadow: none;
+  }
+  :root[data-theme="light"] {
+    --bg: #f4f5f7; --panel: #ffffff; --card: #ffffff; --card-2: #f7f8fa;
+    --line: rgba(15,18,25,.08); --line-strong: rgba(15,18,25,.16);
+    --c1: #1b1d23; --c2: #565a66; --c3: #8a8e99; --c4: #b0b3bc;
+    --indigo: #6366f1; --indigo-ink: #4f46e5; --indigo-soft: rgba(99,102,241,.10);
+    --emerald: #10b981; --amber: #d97706; --amber-soft: rgba(217,119,6,.12);
+    --btn-ink: #ffffff; --shadow: 0 1px 3px rgba(15,18,25,.06);
+  }
+  * { margin: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--c1); font: 14px/1.55 -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif; padding: 40px 24px 120px; }
+  .wrap { max-width: 1120px; margin: 0 auto; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums; }
+  .eyebrow { color: var(--c3); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; }
+  h1 { font-size: 26px; font-weight: 650; letter-spacing: -.02em; margin: 6px 0 8px; text-wrap: balance; }
+  h2 { font-size: 17px; font-weight: 650; letter-spacing: -.01em; }
+  .lede { color: var(--c2); max-width: 70ch; }
+  .final-chip { display:inline-block; font-size: 11px; color: var(--btn-ink); background: var(--indigo); border-radius: 999px; padding: 3px 10px; font-weight: 700; vertical-align: 3px; margin-left: 10px; letter-spacing: .04em; }
+  section { margin-top: 48px; }
+  .sec-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px; }
+  .sec-head .tag { font-size: 11px; letter-spacing: .1em; color: var(--c3); border: 1px solid var(--line-strong); border-radius: 4px; padding: 2px 8px; }
+  .sec-sub { color: var(--c2); max-width: 74ch; margin-bottom: 14px; font-size: 13px; }
+  .sec-sub b { color: var(--c1); font-weight: 600; }
+  .appframe { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; border-radius: 8px; padding: 7px 14px; border: 1px solid transparent; cursor: pointer; }
+  .btn.primary { background: var(--indigo); color: var(--btn-ink); }
+  .btn.ghost { background: transparent; color: var(--c2); border-color: var(--line-strong); }
+  .btn.sm { padding: 5px 11px; font-size: 12px; }
+  .stage-chip { font-size: 11px; color: var(--indigo-ink); background: var(--indigo-soft); border-radius: 999px; padding: 2px 9px; font-weight: 600; white-space: nowrap; }
+  .fchip { font-size: 12px; border: 1px solid var(--line-strong); border-radius: 999px; padding: 4px 12px; color: var(--c2); }
+  .fchip.on { background: var(--indigo-soft); color: var(--indigo-ink); border-color: transparent; font-weight: 600; }
+  .pcard { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; box-shadow: var(--shadow); }
+  .item { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; box-shadow: var(--shadow); cursor: pointer; }
+  .item .thumb { height: 56px; border-radius: 8px; background: var(--card-2); display: grid; place-items: center; font-size: 20px; margin-bottom: 8px; color: var(--c3); }
+  .item .nm { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item .sub { font-size: 10.5px; color: var(--c4); margin-top: 2px; }
+  .ministep { display: flex; align-items: center; }
+  .ministep i { width: 7px; height: 7px; border-radius: 50%; background: var(--c4); opacity: .45; flex: none; }
+  .ministep i.done { background: var(--indigo); opacity: 1; }
+  .ministep i.cur { background: var(--indigo); opacity: 1; outline: 3px solid var(--indigo-soft); }
+  .ministep s { width: 12px; height: 2px; background: var(--line-strong); flex: none; }
+  .ministep s.done { background: var(--indigo); }
+  .qrow { display: flex; align-items: center; gap: 14px; padding: 13px 16px; border-top: 1px solid var(--line); background: var(--card); }
+  .qrow:first-of-type { border-top: none; }
+  .qname { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .qnext { color: var(--c2); font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .qmeta { color: var(--c4); font-size: 11.5px; white-space: nowrap; }
+  .attn { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  .sideitem { display:flex; justify-content:space-between; align-items:center; padding:6px 10px; border-radius:8px; color:var(--c2); font-size:12.5px; }
+  .sideitem.on { background:var(--indigo-soft); color:var(--indigo-ink); font-weight:600; }
+  .sidehead { font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--c4); padding:10px 10px 4px; }
+  .shotcard { border:1px solid var(--line); border-radius:10px; background:var(--card); padding:10px; }
+  .shotcard .tags { display:flex; gap:4px; margin-bottom:6px; }
+  .shotcard .tg { font-size:9px; letter-spacing:.04em; border:1px solid var(--line-strong); border-radius:4px; padding:1px 6px; color:var(--c3); text-transform:uppercase; }
+  .shotcard .desc { font-size:11px; color:var(--c2); }
+  .shotimg { height:54px; border-radius:6px; margin-top:8px; }
+  .struct { display:grid; gap:8px; }
+  .srow { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12.5px; }
+  .sbox { border:1px solid var(--line-strong); border-radius:8px; padding:5px 12px; color:var(--c2); background:var(--card); white-space:nowrap; }
+  .sbox.hero { border-color:var(--indigo); color:var(--indigo-ink); font-weight:600; }
+  .sbox.x { text-decoration:line-through; color:var(--c4); border-style:dashed; }
+  .sbox.dim { color:var(--c4); }
+  .slabel { width:120px; flex:none; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--c4); }
+  .arr { color: var(--c4); }
+  table.dec { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.dec th { text-align: left; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--c4); font-weight: 600; padding: 0 12px 10px; }
+  table.dec td { padding: 9px 12px; border-top: 1px solid var(--line); vertical-align: top; }
+  table.dec td:first-child { white-space: nowrap; font-weight: 600; color: var(--indigo-ink); }
+  table.dec b { color: var(--c1); font-weight: 600; }
+  .board { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px 24px; box-shadow: var(--shadow); overflow-x: auto; }
+  footer { margin-top: 60px; color: var(--c4); font-size: 12px; border-top: 1px solid var(--line); padding-top: 18px; }
+  :focus-visible { outline: 2px solid var(--indigo); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <div class="eyebrow">MediaHub · Projects · 定版终稿</div>
+  <h1>项目即工作区 — 模块并列,零跳转<span class="final-chip">FINAL</span></h1>
+  <p class="lede">不再有 "Studio" 入口:<b>打开项目 = 直接身处创作环境</b>。编辑器的模块栏升为项目侧栏——剧集、脚本、分镜、人物、场景、素材、画布并列一屏,切模块不换页;顶部常驻项目条(Ep 切换 + 阶段 + 一键建议)承担管理职能。TapNow 的"零层级"+ 完整的项目管理层,一个界面全有。</p>
+
+  <!-- 结构 -->
+  <section>
+    <div class="sec-head"><span class="tag">结构</span><h2>层级:0 跳</h2></div>
+    <div class="pcard struct">
+      <div class="srow"><span class="slabel">TapNow</span><span class="sbox hero">画板即项目</span><span class="sbox dim">无管理层(阶段/素材/交付无处安放)</span></div>
+      <div class="srow"><span class="slabel">MediaHub 现状</span><span class="sbox">项目</span><span class="arr">→</span><span class="sbox">Scripts tab</span><span class="arr">→</span><span class="sbox">列表</span><span class="arr">→</span><span class="sbox">编辑器</span><span class="arr">→</span><span class="sbox">模块</span></div>
+      <div class="srow"><span class="slabel">定案</span><span class="sbox hero">项目 = 工作区(模块并列:剧集·脚本·分镜·人物·场景·素材·画布)</span><span class="sbox x">Studio 跳转</span><span class="sbox x">脚本列表</span></div>
+    </div>
+  </section>
+
+  <!-- 内部页终稿 -->
+  <section>
+    <div class="sec-head"><span class="tag">内部</span><h2>项目工作区(以分镜模块为例)</h2></div>
+    <p class="sec-sub"><b>顶部项目条</b>:项目名 · Ep 切换 · 阶段步进 + Advance · 一键建议(常驻,跨模块可见)。<b>侧栏</b>:Overview + 创作模块(编辑器原模块升级而来)+ 管理项。选中模块直接在内容区工作——下图即"分镜"选中态。</p>
+    <div class="appframe">
+      <div style="background:var(--panel); border-bottom:1px solid var(--line); padding:9px 14px; display:flex; align-items:center; gap:10px; flex-wrap:wrap">
+        <span style="width:22px;height:22px;border-radius:6px;background:var(--indigo);color:var(--btn-ink);display:grid;place-items:center;font-size:10px;font-weight:700">S</span>
+        <span style="font-weight:650; font-size:13px">Spring Campaign 2026</span>
+        <span style="flex:1"></span>
+        <div class="ministep"><i class="done"></i><s class="done"></s><i class="done"></i><s class="done"></s><i class="cur"></i><s></s><i></i><s></s><i></i><s></s><i></i></div>
+        <span class="stage-chip">Storyboard · 3/6</span>
+        <button class="btn primary sm">Generate 3 frames</button>
+        <button class="btn ghost sm">Advance →</button>
+      </div>
+      <div style="display:flex; min-height:330px">
+        <div style="width:164px; flex:none; background:var(--panel); border-right:1px solid var(--line); padding:8px 8px 12px">
+          <div style="display:grid; gap:1px">
+            <div class="sideitem"><span>◉ Overview</span></div>
+            <div class="sideitem"><span>◫ Canvas</span><span class="mono" style="font-size:10px; color:var(--c4)">2</span></div>
+            <div class="sideitem"><span>≣ Episodes</span><span class="mono" style="font-size:10px; color:var(--c4)">3</span></div>
+            <div class="sideitem" style="margin-top:8px; border:1px solid var(--line-strong); border-radius:9px; color:var(--c1); font-weight:600"><span>▾ Ep 1 — Pilot</span><span style="color:var(--c4)">⇄</span></div>
+            <div class="sideitem" style="padding-left:24px"><span>✎ Script</span></div>
+            <div class="sideitem on" style="padding-left:24px"><span>▦ Storyboard</span><span class="mono" style="font-size:10px">9/12</span></div>
+            <div class="sideitem" style="padding-left:24px"><span>🎞 Renders</span><span class="mono" style="font-size:10px; color:var(--c4)">10</span></div>
+            <div class="sidehead">Assets</div>
+            <div class="sideitem"><span>☺ Characters</span><span class="mono" style="font-size:10px; color:var(--c4)">3</span></div>
+            <div class="sideitem"><span>▲ Locations</span><span class="mono" style="font-size:10px; color:var(--c4)">3</span></div>
+            <div class="sideitem"><span>🗀 Files</span><span class="mono" style="font-size:10px; color:var(--c4)">128</span></div>
+            <div class="sidehead">Manage</div>
+            <div class="sideitem" style="color:var(--c3)"><span>▤ Trash</span></div>
+            <div class="sideitem" style="color:var(--c3)"><span>⚙ Settings</span></div>
+          </div>
+        </div>
+        <div style="flex:1; min-width:0; padding:14px 16px; overflow-x:auto">
+          <div style="display:flex; gap:12px; min-width:640px">
+            <div style="width:220px; flex:none; display:grid; gap:8px; align-content:start">
+              <div style="font-size:11px; color:var(--c3)"><b style="color:var(--c1)">2 · INT. Radio Booth</b> · 3 shots</div>
+              <div class="shotcard">
+                <div class="tags"><span class="tg" style="color:var(--indigo-ink); border-color:var(--indigo)">1A</span><span class="tg">wide</span><span class="tg">static</span></div>
+                <div class="desc">Establishing wide on the booth — ON AIR light burns…</div>
+                <div class="shotimg" style="background:linear-gradient(135deg,#7a4a2b,#2b1d14)"></div>
+              </div>
+              <div class="shotcard">
+                <div class="tags"><span class="tg" style="color:var(--indigo-ink); border-color:var(--indigo)">1B</span><span class="tg">med</span><span class="tg">handheld</span></div>
+                <div class="desc">Push into CLIENT mid-take, headphones half off…</div>
+                <div style="height:40px; border:1px dashed var(--line-strong); border-radius:6px; margin-top:8px; display:grid; place-items:center; font-size:10px; color:var(--c4)">Generating…</div>
+              </div>
+            </div>
+            <div style="width:220px; flex:none; display:grid; gap:8px; align-content:start">
+              <div style="font-size:11px; color:var(--c3)"><b style="color:var(--c1)">3 · EXT. Fire Escape</b> · 2 shots</div>
+              <div class="shotcard">
+                <div class="tags"><span class="tg" style="color:var(--indigo-ink); border-color:var(--indigo)">2A</span><span class="tg">wide</span><span class="tg">eye</span></div>
+                <div class="desc">CLIENT steps onto the fire escape, city haze behind…</div>
+                <div class="shotimg" style="background:linear-gradient(135deg,#1d2b3f,#0c1017)"></div>
+              </div>
+              <div class="shotcard">
+                <div class="tags"><span class="tg" style="color:var(--indigo-ink); border-color:var(--indigo)">2B</span><span class="tg">pan</span></div>
+                <div class="desc">Low pan following CLIENT along the rail…</div>
+                <div style="height:40px; border:1px dashed var(--line-strong); border-radius:6px; margin-top:8px; display:grid; place-items:center; font-size:10px; color:var(--c4)">+ Generate</div>
+              </div>
+            </div>
+            <div style="width:200px; flex:none; display:grid; gap:8px; align-content:start">
+              <div style="font-size:11px; color:var(--c3)"><b style="color:var(--c1)">4 · INT. Control Room</b> · 0 shots</div>
+              <div style="border:1px dashed var(--line-strong); border-radius:10px; padding:20px 12px; text-align:center; font-size:11px; color:var(--c4)">Break this scene into shots<br><button class="btn primary sm" style="margin-top:10px">Auto Storyboard</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <p class="sec-sub" style="margin-top:14px"><b>Episodes 模块 —— 剧集管理面</b>:侧栏只显<b>当前集块</b>(集头 + 其 Script/Storyboard 子项,字面层级);集头 ⇄ 弹<b>紧凑切换菜单</b>(集再多侧栏也不变长);<b>≣ Episodes 一级项 = 本管理面</b>(完整列表/进度/排序都在这):每集一行,集内创作进度(脚本·分镜·成片)一眼可见,拖拽排序 / 重命名 / 复制 / 删除;集状态由数据推导非手填。</p>
+    <div class="appframe">
+      <div style="display:flex; min-height:230px">
+        <div style="width:164px; flex:none; background:var(--panel); border-right:1px solid var(--line); padding:8px">
+          <div style="display:grid; gap:1px">
+            <div class="sideitem"><span>◉ Overview</span></div>
+            <div class="sideitem"><span>◫ Canvas</span></div>
+            <div class="sideitem on"><span>≣ Episodes</span><span class="mono" style="font-size:10px">3</span></div>
+            <div class="sideitem" style="margin-top:8px; border:1px solid var(--line-strong); border-radius:9px; color:var(--c1); font-weight:600"><span>▾ Ep 1 — Pilot</span><span style="color:var(--c4)">⇄</span></div>
+            <div class="sideitem" style="padding-left:24px"><span>✎ Script</span></div>
+            <div class="sideitem" style="padding-left:24px"><span>▦ Storyboard</span></div>
+            <div class="sideitem" style="padding-left:24px"><span>🎞 Renders</span></div>
+            <div class="sidehead">Assets</div>
+            <div class="sideitem"><span>☺ Characters</span></div>
+            <div class="sideitem"><span>▲ Locations</span></div>
+            <div class="sideitem"><span>🗀 Files</span></div>
+          </div>
+        </div>
+        <div style="flex:1; min-width:0; padding:14px 16px">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px">
+            <div style="font-weight:650; font-size:14px">Episodes</div>
+            <button class="btn primary sm">+ New episode</button>
+          </div>
+          <div style="border:1px solid var(--line); border-radius:12px; overflow:hidden">
+            <div class="qrow">
+              <span style="color:var(--c4); font-size:12px; cursor:grab">⠿</span>
+              <span class="mono" style="width:34px; flex:none; font-size:11px; color:var(--c3)">Ep 1</span>
+              <div style="min-width:0; width:170px; flex:none">
+                <div class="qname">Pilot</div>
+                <div class="qmeta">edited 2h ago</div>
+              </div>
+              <span class="stage-chip">Boarding</span>
+              <span class="qnext mono" style="font-size:11.5px">Script ✓ 4 scenes · Shots 9/12 · Renders 1</span>
+              <button class="btn ghost sm" style="flex:none">Open →</button>
+              <span style="color:var(--c4)">⋯</span>
+            </div>
+            <div class="qrow">
+              <span style="color:var(--c4); font-size:12px; cursor:grab">⠿</span>
+              <span class="mono" style="width:34px; flex:none; font-size:11px; color:var(--c3)">Ep 2</span>
+              <div style="min-width:0; width:170px; flex:none">
+                <div class="qname">Cutdown 15s</div>
+                <div class="qmeta">edited 1d ago</div>
+              </div>
+              <span class="stage-chip" style="color:var(--c3); background:var(--card-2)">Drafting</span>
+              <span class="qnext mono" style="font-size:11.5px">Script · 2 scenes · no shots yet</span>
+              <button class="btn ghost sm" style="flex:none">Open →</button>
+              <span style="color:var(--c4)">⋯</span>
+            </div>
+            <div class="qrow" style="opacity:.6">
+              <span style="color:var(--c4); font-size:12px; cursor:grab">⠿</span>
+              <span class="mono" style="width:34px; flex:none; font-size:11px; color:var(--c3)">Ep 3</span>
+              <div style="min-width:0; width:170px; flex:none">
+                <div class="qname">BTS teaser</div>
+                <div class="qmeta">placeholder</div>
+              </div>
+              <span class="stage-chip" style="color:var(--c3); background:var(--card-2)">Planned</span>
+              <span class="qnext mono" style="font-size:11.5px; color:var(--c4)">empty — start script or import</span>
+              <button class="btn ghost sm" style="flex:none">Start →</button>
+              <span style="color:var(--c4)">⋯</span>
+            </div>
+          </div>
+          <div style="font-size:11.5px; color:var(--c4); margin-top:8px">⋯ 菜单:Rename · Duplicate · Move up/down · Delete;集状态(Planned/Drafting/Boarding/Rendered)由集内数据推导;Open = 设为当前上下文并进入其 Script/Storyboard。</div>
+        </div>
+      </div>
+    </div>
+
+    <p class="sec-sub" style="margin-top:14px"><b>Overview(落地页)</b>—— 管理视角:工作台 + Continue(点击=切到对应模块,非跳页)+ 摘要 + 动态:</p>
+    <div class="appframe">
+      <div style="display:flex; min-height:210px">
+        <div style="width:164px; flex:none; background:var(--panel); border-right:1px solid var(--line); padding:8px">
+          <div style="display:grid; gap:1px">
+            <div class="sideitem on"><span>◉ Overview</span></div>
+            <div class="sideitem"><span>◫ Canvas</span></div>
+            <div class="sideitem"><span>≣ Episodes</span><span class="mono" style="font-size:10px; color:var(--c4)">3</span></div>
+            <div class="sideitem" style="margin-top:8px; border:1px solid var(--line-strong); border-radius:9px; color:var(--c1); font-weight:600"><span>▾ Ep 1 — Pilot</span><span style="color:var(--c4)">⇄</span></div>
+            <div class="sideitem" style="padding-left:24px"><span>✎ Script</span></div>
+            <div class="sideitem" style="padding-left:24px"><span>▦ Storyboard</span><span class="mono" style="font-size:10px; color:var(--c4)">9/12</span></div>
+            <div class="sideitem" style="padding-left:24px"><span>🎞 Renders</span><span class="mono" style="font-size:10px; color:var(--c4)">10</span></div>
+            <div class="sidehead">Assets</div>
+            <div class="sideitem"><span>☺ Characters</span></div>
+            <div class="sideitem"><span>▲ Locations</span></div>
+            <div class="sideitem"><span>🗀 Files</span></div>
+          </div>
+        </div>
+        <div style="flex:1; min-width:0; padding:12px 16px; display:grid; gap:8px; align-content:start">
+          <div style="border:1px solid color-mix(in srgb, var(--indigo) 45%, transparent); background:linear-gradient(180deg, var(--indigo-soft), transparent); border-radius:12px; padding:11px 14px; display:flex; justify-content:space-between; align-items:center; gap:10px">
+            <span style="font-size:12.5px"><b>Continue</b> · Ep 1 · Storyboard · Scene 3 · 2h ago</span><button class="btn primary sm">Resume →</button>
+          </div>
+          <div style="border:1px solid var(--line); border-radius:12px; padding:10px 14px; display:flex; justify-content:space-between; align-items:center; background:var(--card)">
+            <span style="font-size:12px; color:var(--c2)">9 of 12 shots have frames — generate the 3 missing frames.</span><button class="btn primary sm">Generate 3</button>
+          </div>
+          <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:8px">
+            <div class="pcard" style="padding:9px"><div style="font-size:11.5px; font-weight:650">≣ Episodes</div><div class="mono" style="font-size:10px; color:var(--c4)">3 · Ep1 boarding</div></div>
+            <div class="pcard" style="padding:9px"><div style="font-size:11.5px; font-weight:650">▦ Storyboard</div><div class="mono" style="font-size:10px; color:var(--c4)">9/12 frames</div></div>
+            <div class="pcard" style="padding:9px"><div style="font-size:11.5px; font-weight:650">🗀 Files</div><div class="mono" style="font-size:10px; color:var(--c4)">128 · 4 renders</div></div>
+            <div class="pcard" style="padding:9px"><div style="font-size:11.5px; font-weight:650">◫ Canvas</div><div class="mono" style="font-size:10px; color:var(--c4)">2 boards</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <p class="sec-sub" style="margin-top:14px"><b>Files 模块</b>—— 文件夹范式(上传素材+生成物+成片,类型 chips):</p>
+    <div class="appframe">
+      <div style="padding:12px 16px; display:grid; gap:10px">
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap">
+          <span style="font-size:12px; color:var(--c3)">Files /</span><span style="flex:1"></span>
+          <span class="fchip on">All</span><span class="fchip">Media</span><span class="fchip">Renders</span><span class="fchip">Docs</span>
+          <button class="btn primary sm">⤒ Upload ▾</button>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:10px">
+          <div class="item"><div class="thumb">📁</div><div class="nm">References</div><div class="sub">12 items</div></div>
+          <div class="item"><div class="thumb">📁</div><div class="nm">Cuts</div><div class="sub">4 items</div></div>
+          <div class="item"><div class="thumb">🎬</div><div class="nm">hero_v2_draft.mp4</div><div class="sub mono">Render · 5h</div></div>
+          <div class="item"><div class="thumb">🖼</div><div class="nm">shot_07_frame.png</div><div class="sub mono">Generated · 5h</div></div>
+        </div>
+      </div>
+    </div>
+
+    <p class="sec-sub" style="margin-top:14px"><b>Characters / Locations 主库(ASSETS)</b>—— <b>主库 + 出场</b>模型:实体从各集剧本 cue/场景头<b>自动派生</b>(零手填),每条带「出现于哪集」徽标;<b>任意集 @ 即可复用</b>(候选 = 项目级聚合,选中即记出场);集内新写 cue = 自动入主库。v2(backlog):实体化真表挂设定图/描述,供角色一致性 AI 生成。</p>
+    <div class="appframe">
+      <div style="padding:12px 16px; display:grid; gap:8px">
+        <div style="display:flex; justify-content:space-between; align-items:center">
+          <div style="font-weight:650; font-size:14px">Characters <span style="color:var(--c4); font-size:11px; font-weight:400">· derived from script cues</span></div>
+          <span class="fchip">All episodes ▾</span>
+        </div>
+        <div style="border:1px solid var(--line); border-radius:12px; overflow:hidden">
+          <div class="qrow">
+            <span style="width:26px;height:26px;border-radius:50%;background:#c05e5e;color:#fff;display:grid;place-items:center;font-size:10px;font-weight:700;flex:none">CL</span>
+            <div style="min-width:0; width:150px; flex:none"><div class="qname" style="font-size:13px">CLIENT</div><div class="qmeta">12 cues</div></div>
+            <span class="qnext"><span class="stage-chip" style="font-size:10px">Ep 1</span> <span class="stage-chip" style="font-size:10px">Ep 2</span></span>
+            <span class="qmeta">@ reusable in any episode</span>
+          </div>
+          <div class="qrow">
+            <span style="width:26px;height:26px;border-radius:50%;background:#4e9c6f;color:#fff;display:grid;place-items:center;font-size:10px;font-weight:700;flex:none">DV</span>
+            <div style="min-width:0; width:150px; flex:none"><div class="qname" style="font-size:13px">DEV</div><div class="qmeta">7 cues</div></div>
+            <span class="qnext"><span class="stage-chip" style="font-size:10px">Ep 1</span></span>
+            <span class="qmeta"></span>
+          </div>
+          <div class="qrow">
+            <span style="width:26px;height:26px;border-radius:50%;background:#7d6bd0;color:#fff;display:grid;place-items:center;font-size:10px;font-weight:700;flex:none">VO</span>
+            <div style="min-width:0; width:150px; flex:none"><div class="qname" style="font-size:13px">VOICE (V.O.)</div><div class="qmeta">3 cues</div></div>
+            <span class="qnext"><span class="stage-chip" style="font-size:10px">Ep 1</span> <span class="stage-chip" style="font-size:10px">Ep 3</span></span>
+            <span class="qmeta"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 主页(已定) -->
+  <section>
+    <div class="sec-head"><span class="tag">主页 · 已定</span><h2>A 队列默认 + C 网格次视图</h2></div>
+    <div class="appframe">
+      <div style="padding:14px 18px">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px">
+          <div style="font-size:16px; font-weight:650">Projects</div>
+          <div style="display:flex; gap:8px; align-items:center">
+            <span style="border:1px solid var(--line); border-radius:7px; padding:4px 8px; color:var(--indigo-ink); font-size:12px">☰ Queue</span><span style="border:1px solid var(--line); border-radius:7px; padding:4px 8px; color:var(--c4); font-size:12px">▦ Grid</span>
+            <button class="btn primary sm">+ New Project</button>
+          </div>
+        </div>
+        <div style="margin-top:10px; border:1px solid var(--line); border-radius:12px; overflow:hidden">
+          <div class="qrow">
+            <span class="attn" style="background:var(--amber)"></span>
+            <div style="min-width:0; width:180px; flex:none"><div class="qname">Client Reel — Northwind</div><div class="qmeta" style="color:var(--amber)">Waiting in Review · 4d</div></div>
+            <span class="stage-chip" style="color:var(--amber); background:var(--amber-soft)">Review</span>
+            <span class="qnext">Review deliverables and gather feedback.</span>
+            <button class="btn primary sm" style="flex:none">Open review →</button>
+          </div>
+          <div class="qrow">
+            <span class="attn" style="background:var(--indigo)"></span>
+            <div style="min-width:0; width:180px; flex:none"><div class="qname">Spring Campaign ★</div><div class="qmeta">Added files · 2h</div></div>
+            <span class="stage-chip">Storyboard</span>
+            <span class="qnext">9 of 12 shots have frames — generate the 3 missing.</span>
+            <button class="btn primary sm" style="flex:none">Generate 3 frames</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 决策表 -->
+  <section>
+    <div class="sec-head"><span class="tag">决策</span><h2>终版决策 G1–G10</h2></div>
+    <div class="board">
+      <table class="dec">
+        <thead><tr><th>#</th><th>内容</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>G1</td><td><b>项目即工作区</b>:编辑器模块升为项目侧栏(Overview / Episodes / Script / Storyboard / Canvas / Characters / Locations / Files),切模块不换页,0 跳</td><td>删除 Studio 跳转、Scripts tab、脚本列表三层;1 项目 = 1 创作环境</td></tr>
+          <tr><td>G2</td><td><b>顶部项目条常驻</b>:项目名 · 阶段步进+Advance · 一键建议(集切换在侧栏树,不重复)</td><td>管理职能(TapNow 缺的层)融进同一界面,跨模块可见</td></tr>
+          <tr><td>G3</td><td><b>项目 → 剧集(episodes 表,已在 project 级)→ 每集自己的 script</b>(script_projects.episode_id 归属,含各自 scenes/shots/renders)。新建剧集自动带空 script;存量 episode_id NULL 的脚本回填默认 Ep 1;一集多 script 时 UI 取最新为主稿</td><td><b>零数据迁移</b>——episodes/sort_order/episode_id 全部现成,只是 UI 升级为一等公民</td></tr>
+          <tr><td>G4</td><td><b>侧栏 = 当前集块 + Episodes 管理项</b>:≣ Episodes(一级项)= 管理面(完整列表:集内进度/排序/改名/复制/删除,状态推导);其下只渲染<b>当前集块</b>——集头(边框卡样式)+ 缩进的 Script/Storyboard 子项 = 字面父子层级;集头 ⇄ 点击弹<b>紧凑切换菜单</b>。<b>集数量不影响侧栏高度</b>;切换器全局唯一(顶栏无 Ep chip)。Canvas 顶级;ASSETS 跨集资产</td><td>层级字面可见 + 可扩展到任意集数;管理面回归一级显眼位</td></tr>
+          <tr><td>G5</td><td><b>Files 吸收 Output</b>:文件夹范式(All/Media/Renders/Docs chips)管文件与生成物展示</td><td>文件夹只管存与看,不管项目管理</td></tr>
+          <tr><td>G6</td><td>Overview 为落地页:Continue(切模块非跳页)+ 建议 + 模块摘要 + 动态</td><td>Characters/Locations 等资产随 G1 自然成为项目级</td></tr>
+          <tr><td>G7</td><td>主页 = A 队列默认(停滞置顶+行内一键)+ C 网格次视图;撤 Internal/External;视图栏 All/Starred/Archived</td><td>数据源 = 新端点 GET /projects/suggestions</td></tr>
+          <tr><td>G8</td><td>双主题一等公民;工作台视觉规范沿用(点式步进/实心 CTA/停滞 token)</td><td>已上线,不回退</td></tr>
+          <tr><td>G9</td><td>UI 英文,中文走 i18n</td><td>产品规范</td></tr>
+          <tr><td>G11</td><td><b>Canvas ↔ Ep Script = 平行互补 + 引用桥</b>:①Canvas=发散面(项目级草稿纸),Script=收敛面(集级流水线),共享 ASSETS 互不隶属(现状,canvases.project_id + canvas_resource_refs);②近期:画布节点可引用集内 scene/shot 帧拖排审阅(删实体→节点降级快照);③远期:画布 beat/大纲一键"落稿"到某集 Script(AI 辅助,backlog)</td><td>纸和流水线互不阻塞;誊写(③)与摊看(②)是桥不是绑定</td></tr>
+          <tr><td>G12</td><td><b>集内容 = Script + Storyboard + Renders</b>:Script 打开编辑器(内含 Outline/Beats/Cover 视图,不单列);Renders = 本集产出墙(帧/shot 视频/成片,从本集 shots 推导;与项目级 Files·Renders 同数据、集维度切片)。<b>Publish(发布到平台)为 D2 后预留子项</b>;配音/字幕未建模不画</td><td>集 = 完整产出链(脚本→分镜→产出→发布)的容器;只画有数据支撑的</td></tr>
+          <tr><td>G13</td><td><b>Characters/Locations = 主库 + 出场</b>:主库(ASSETS)= 项目级聚合视图,实体从各集剧本 cue/场景头自动派生(现状即派生制,零手填零迁移),每条带「出现于 Ep x」徽标;<b>@ 候选升级为项目级</b>(任意集可复用,选中即记出场);集内新写 cue 自动入主库。v2 backlog:实体化真表(设定图/描述),供角色一致性 AI 生成</td><td>用户模型:总体管理 + 哪集出现 + 集内可建可选,复用零摩擦</td></tr>
+          <tr><td>G14</td><td><b>存储统一到 Supabase Storage(自托管)</b>——用户 2026-07-10 拍板,<b>推翻 ADR #1092</b>(当时"主库不迁对象存储";自托管 Storage 数据仍落 NAS 盘,零云成本,统一运维/备份/权限一套系统)。落地 = <b>独立 storage-unification epic</b>(不并入本次 UI 重构):①写路径切换——新上传不分大小全走 Storage(TUS 断点续传+Range 流式);②三个功能适配:ffmpeg/转码 POSIX 直读改挂 Storage 卷、sideload O(1) rename 重设计、nginx 302 直出适配;③存量渐进迁移(迁一件改一件 durable URL,旧链服务到迁完)。generated_media object-store flag 即可常开。前端只见 durable URL 零改动,UI 重构零阻塞</td><td>一套系统;本次 UI 重构零阻塞</td></tr>
+          <tr><td>G10</td><td>SOP 阶段保持<b>项目级</b>(v1);集级进度由 Episodes 行内数据表达</td><td>避免双状态机;若日后需要集级阶段再演进</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    执行拆分:PR-8 后端(批量 suggestions + 项目自动带 studio 容器)→ PR-9 主页(队列+网格)→ PR-10 项目工作区壳(顶栏+新侧栏+Overview+Episodes 管理面,Files 吸收 Output)→ PR-11 编辑器模块并入(Script/Storyboard/Characters/Locations 挂载到项目侧栏,Ep 切换器上移)→ e2e 双主题。渐进迁移:PR-10 期间旧编辑器路由仍可用,PR-11 完成后下线 Scripts tab 与独立编辑器入口。
+  </footer>
+</div>

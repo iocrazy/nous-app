@@ -284,3 +284,20 @@ class StageSuggestionResponse(BaseModel):
 class GenerateMissingResponse(BaseModel):
     dispatched_count: int
     task_ids: list[str]
+
+
+class ProjectSuggestionItem(BaseModel):
+    """One row of the homepage suggestions queue (PR-8 Task A, G7)."""
+
+    project_id: str
+    name: Optional[str] = None
+    stage_slug: Optional[str] = None  # None when project has no current stage
+    kind: str  # see _suggestion_from's kind table; "" = render nothing
+    progress: Optional[StoryboardProgress] = None
+    action: Optional[SuggestionAction] = None
+    stalled: bool = False
+    latest_activity: Optional[dict] = None
+
+
+class ProjectSuggestionsResponse(BaseModel):
+    items: list[ProjectSuggestionItem]
