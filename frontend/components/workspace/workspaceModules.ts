@@ -12,6 +12,7 @@ export type WorkspaceModule =
   | 'overview'
   | 'canvas'
   | 'episodes'
+  | 'script'
   | 'characters'
   | 'locations'
   | 'files'
