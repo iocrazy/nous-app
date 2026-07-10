@@ -32,8 +32,21 @@ export function useResourceSearch(query: string, kinds: string, teamId?: string)
       try {
         const resp = await searchResources({ q: query, kinds, limit: 20, teamId, signal: ctrl.signal });
         if (ctrl.signal.aborted) return;
-        cacheRef.current.set(key, resp);
-        setData(resp);
+        // Shape guard: consumers read `data.results.length` unconditionally,
+        // so a malformed body (wrong envelope, proxy HTML) must degrade to
+        // the empty response instead of white-screening the canvas page.
+        const safe =
+          resp && Array.isArray((resp as { results?: unknown }).results)
+            ? resp
+            : EMPTY_RESPONSE;
+        if (safe === EMPTY_RESPONSE && resp) {
+          console.error('[useResourceSearch] malformed search response dropped:', resp);
+        } else {
+          // Only cache well-formed bodies — a transient bad response must not
+          // become sticky-empty results for this query until remount.
+          cacheRef.current.set(key, safe);
+        }
+        setData(safe);
       } catch (err) {
         if ((err as { name?: string }).name === 'AbortError') return;
         setError(err as Error);
