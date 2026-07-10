@@ -27,6 +27,7 @@ from app.services.library.media_storage import (
     chat_media_store,
     content_key,
     content_key_from_sha,
+    resolve_media_source,
     to_file_path,
 )
 
@@ -482,3 +483,45 @@ __all__ = [
     "register_uploaded_media",
     "_safe_filename",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Durable-URL → local-file bridge (shared by shot i2v + canvas video ops)
+# ---------------------------------------------------------------------------
+
+# Matches the same-origin serving endpoints (/cover image, /stream video,
+# /file auth-gated) so an already-generated asset can seed a new generation
+# (e.g. image2video) from its real file instead of a re-download.
+GENERATED_MEDIA_URL_RE = re.compile(r"/generated-media/(\d+)/(?:cover|stream|file)$")
+
+
+async def resolve_generated_media_local_path(
+    url: str, *, media_kind: str = "image"
+) -> Optional[str]:
+    """Bridge a durable generated-media URL back to its local file path.
+
+    Returns the real filesystem path only when the URL matches the serving
+    pattern AND the row is of ``media_kind`` AND filesystem-backed AND the
+    file exists inside DOWNLOAD_PATH (containment guard — a corrupt/hostile
+    file_path must never escape). Object-store rows, foreign URLs, or any
+    miss → None; callers fall back (e.g. image2video → text2video).
+    """
+    match = GENERATED_MEDIA_URL_RE.search(str(url or ""))
+    if not match:
+        return None
+    gen_id = int(match.group(1))
+
+    from app.repositories.generated_media_repository import GeneratedMediaRepository
+
+    row = await GeneratedMediaRepository().get_by_id(gen_id)
+    if not row or row.get("media_kind") != media_kind:
+        return None
+
+    loc = resolve_media_source(row["file_path"])
+    if loc.is_object_store:
+        return None
+    base = os.path.realpath(settings.DOWNLOAD_PATH)
+    real = os.path.realpath(os.path.join(settings.DOWNLOAD_PATH, loc.rel_path or ""))
+    if not (real == base or real.startswith(base + os.sep)):
+        return None
+    return real if os.path.isfile(real) else None

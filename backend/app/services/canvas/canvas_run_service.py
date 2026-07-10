@@ -500,6 +500,61 @@ class CanvasRunService:
 
         result = dict(raw) if isinstance(raw, Mapping) else {}
         video_url = result.get("video_url")
+        video_path = result.get("video_path")
+
+        # DB-catalog (jimeng-cli) products are LOCAL FILES — no URL exists
+        # until the generated-media store ingests them, so registration is
+        # REQUIRED here (unlike the remote-URL branch below where it stays
+        # best-effort). The durable /stream URL is token-free by design so a
+        # bare <video src> can load it.
+        if not video_url and video_path:
+            if not user_id:
+                return CanvasPromptRunResult(
+                    ok=False,
+                    text="",
+                    error="video generation produced a local file but the run "
+                    "has no user context to persist it under",
+                )
+            try:
+                scope_id = int(await _resolve_personal_team_id(str(user_id)))
+                row = await register_generated_media(
+                    user_id=str(user_id),
+                    scope_id=scope_id,
+                    source_path=str(video_path),
+                    mime="video/mp4",
+                    origin=GenerationOrigin(
+                        kind="canvas_run",
+                        run_id=None,
+                        canvas_id=canvas_id,
+                        node_id=node_id,
+                        prompt=params.get("prompt"),
+                        model=params.get("model"),
+                        provider=params.get("provider_name"),
+                        params=params,
+                        derivation_kind="video_gen",
+                    ),
+                )
+                gen_id = row.get("id")
+                if gen_id is None:
+                    raise RuntimeError("register_generated_media returned no id")
+                video_url = f"/api/v1/generated-media/{gen_id}/stream"
+                result["video_url"] = video_url
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "canvas video_gen local persist failed for node {}", node_id
+                )
+                return CanvasPromptRunResult(
+                    ok=False,
+                    text="",
+                    error=f"video generated but persist/registration failed: {exc}",
+                )
+            return CanvasPromptRunResult(
+                ok=True,
+                text=str(video_url),
+                error=None,
+                result=result,
+            )
+
         if not video_url:
             return CanvasPromptRunResult(
                 ok=False,

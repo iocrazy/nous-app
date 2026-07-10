@@ -39,14 +39,11 @@ degrading. The jimeng ``jimeng_`` scratch dir is reaped after ingest either way
 
 from __future__ import annotations
 
-import os
-import re
 from typing import Any, Optional
 
 from dbos import DBOS
 from loguru import logger
 
-from app.core.config import settings
 from app.workflows.script_shot_generate import (
     _compose_prompt,
     _reap_scratch_dir,
@@ -58,45 +55,20 @@ from app.workflows.script_shot_generate import (
 _DEFAULT_ASPECT = "16:9"
 _VIDEO_MIME = "video/mp4"
 
-# Bridges a durable same-origin generated-media URL back to its numeric id so an
-# already-generated image can seed image2video. Matches /cover (image serving),
-# /stream (video serving), and /file (auth-gated) suffixes.
-_GENERATED_MEDIA_URL_RE = re.compile(r"/generated-media/(\d+)/(?:cover|stream|file)$")
-
 
 async def _resolve_local_image_for_i2v(shot: dict[str, Any]) -> Optional[str]:
     """Resolve the shot's image to a local file path for image2video, or None.
 
-    ``shot.image_url`` is a same-origin ``/cover`` URL (see decision 1). Parse it
-    back to the ``generated_media`` row and return the real filesystem path only
-    when the row is an image AND filesystem-backed AND present. Object-store
-    images (no local path), a raw provider url, or any miss → None (the caller
-    falls back to text2video)."""
+    ``shot.image_url`` is a same-origin ``/cover`` URL (see decision 1).
+    Delegates to the shared generated-media bridge (G4-B0 extracted it so the
+    canvas video fallback shares one implementation, containment guard
+    included). Any miss → None (the caller falls back to text2video)."""
+    from app.services.library.generated_media_service import (
+        resolve_generated_media_local_path,
+    )
+
     image_url = str((shot or {}).get("image_url") or "")
-    match = _GENERATED_MEDIA_URL_RE.search(image_url)
-    if not match:
-        return None
-    gen_id = int(match.group(1))
-
-    from app.repositories.generated_media_repository import GeneratedMediaRepository
-
-    row = await GeneratedMediaRepository().get_by_id(gen_id)
-    if not row or row.get("media_kind") != "image":
-        return None
-
-    from app.services.library.media_storage import resolve_media_source
-
-    loc = resolve_media_source(row["file_path"])
-    if loc.is_object_store:
-        return None
-    # Containment guard (same posture as generated_media_router._serve_media_row):
-    # a corrupt/hostile file_path must never resolve to a path outside
-    # DOWNLOAD_PATH, even though the CLI would just be handed it as --image.
-    base = os.path.realpath(settings.DOWNLOAD_PATH)
-    real = os.path.realpath(os.path.join(settings.DOWNLOAD_PATH, loc.rel_path or ""))
-    if not (real == base or real.startswith(base + os.sep)):
-        return None
-    return real if os.path.isfile(real) else None
+    return await resolve_generated_media_local_path(image_url, media_kind="image")
 
 
 @DBOS.step(retries_allowed=True, max_attempts=3)
