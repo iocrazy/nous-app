@@ -113,6 +113,89 @@ def _merge_activity(stage_act, file_act, *, stage_slug, now=None):
     return None
 
 
+def _suggestion_from(stage_slug: str | None, progress: dict | None = None) -> dict:
+    """Pure decision table: SOP stage slug (+ optional storyboard progress)
+    -> suggestion dict. Extracted (PR-8 Task A) so ``build_stage_suggestion``
+    (single project) and ``get_project_suggestions`` (homepage batch, G7)
+    share exactly one kind table instead of two copies drifting apart.
+
+    ``progress`` is only consulted when ``stage_slug == "storyboard"``; when
+    it is ``None`` for a storyboard-stage project (e.g. the batch fetch
+    failed) this falls through to the generic navigate branch below, so a
+    broken progress query degrades that one row instead of raising.
+    """
+    if not stage_slug:
+        return {"stage_slug": None, "kind": "", "progress": None, "action": None}
+
+    if stage_slug == _STORYBOARD_STAGE and progress is not None:
+        p = progress
+        if p["script_count"] == 0:
+            return {
+                "stage_slug": stage_slug,
+                "kind": "storyboard_no_script",
+                "progress": p,
+                "action": {
+                    "type": "navigate",
+                    "tab": "scripts",
+                    "label_key": "projects.suggest.ctaScripts",
+                    "count": None,
+                },
+            }
+        if p["total"] == 0:
+            return {
+                "stage_slug": stage_slug,
+                "kind": "storyboard_no_shots",
+                "progress": p,
+                "action": {
+                    "type": "navigate",
+                    "tab": "scripts",
+                    "label_key": "projects.suggest.ctaBreakdown",
+                    "count": None,
+                },
+            }
+        if p["empty"] > 0:
+            return {
+                "stage_slug": stage_slug,
+                "kind": "storyboard_generate",
+                "progress": p,
+                "action": {
+                    "type": "generate_missing_frames",
+                    "tab": None,
+                    "label_key": "projects.suggest.ctaGenerate",
+                    "count": p["empty"],
+                },
+            }
+        return {
+            "stage_slug": stage_slug,
+            "kind": "storyboard_ready",
+            "progress": p,
+            "action": {
+                "type": "navigate",
+                "tab": "scripts",
+                "label_key": "projects.suggest.ctaReady",
+                "count": None,
+            },
+        }
+
+    tab = _STAGE_NAV_TAB.get(stage_slug, "files")
+    return {
+        "stage_slug": stage_slug,
+        "kind": f"{stage_slug}_nav",
+        "progress": None,
+        "action": {
+            "type": "navigate",
+            "tab": tab,
+            "label_key": f"projects.suggest.cta_{stage_slug}",
+            "count": None,
+        },
+    }
+
+
+# Batch suggestions (Task A): cap on concurrent per-project storyboard
+# progress lookups so a large queue can't fan out unbounded DB queries.
+_SUGGESTIONS_PROGRESS_CONCURRENCY = 8
+
+
 class ProjectsService:
     """MediaTrack projects business logic"""
 
@@ -986,75 +1069,101 @@ class ProjectsService:
 
         Storyboard stage is data-aware + one-click (generate_missing_frames);
         every other stage is data-aware + navigation. Unknown / no stage →
-        kind="" so the frontend renders nothing.
+        kind="" so the frontend renders nothing. Decision table lives in the
+        module-level ``_suggestion_from`` helper, shared with the batch
+        ``get_project_suggestions`` (Task A).
         """
         stage = await self._stages_repo().get_current(project_id)
         slug = (stage or {}).get("slug")
         if not slug:
-            return {"stage_slug": None, "kind": "", "progress": None, "action": None}
+            return _suggestion_from(None)
 
         if slug == _STORYBOARD_STAGE:
             p = await self._shots_repo().storyboard_progress_for_project(project_id)
-            if p["script_count"] == 0:
-                return {
-                    "stage_slug": slug,
-                    "kind": "storyboard_no_script",
-                    "progress": p,
-                    "action": {
-                        "type": "navigate",
-                        "tab": "scripts",
-                        "label_key": "projects.suggest.ctaScripts",
-                        "count": None,
-                    },
-                }
-            if p["total"] == 0:
-                return {
-                    "stage_slug": slug,
-                    "kind": "storyboard_no_shots",
-                    "progress": p,
-                    "action": {
-                        "type": "navigate",
-                        "tab": "scripts",
-                        "label_key": "projects.suggest.ctaBreakdown",
-                        "count": None,
-                    },
-                }
-            if p["empty"] > 0:
-                return {
-                    "stage_slug": slug,
-                    "kind": "storyboard_generate",
-                    "progress": p,
-                    "action": {
-                        "type": "generate_missing_frames",
-                        "tab": None,
-                        "label_key": "projects.suggest.ctaGenerate",
-                        "count": p["empty"],
-                    },
-                }
-            return {
-                "stage_slug": slug,
-                "kind": "storyboard_ready",
-                "progress": p,
-                "action": {
-                    "type": "navigate",
-                    "tab": "scripts",
-                    "label_key": "projects.suggest.ctaReady",
-                    "count": None,
-                },
-            }
+            return _suggestion_from(slug, p)
 
-        tab = _STAGE_NAV_TAB.get(slug, "files")
-        return {
-            "stage_slug": slug,
-            "kind": f"{slug}_nav",
-            "progress": None,
-            "action": {
-                "type": "navigate",
-                "tab": tab,
-                "label_key": f"projects.suggest.cta_{slug}",
-                "count": None,
-            },
-        }
+        return _suggestion_from(slug)
+
+    # ------------------------------------------------------------------ #
+    # Batch stage suggestions (B3 / G7 — homepage queue data source)
+    # ------------------------------------------------------------------ #
+
+    async def get_project_suggestions(
+        self, user_id: str, team_id: str | None = None
+    ) -> list[dict]:
+        """Batch 'one next step' queue rows for the homepage (PR-8 Task A).
+
+        Scope is the SAME visible-projects call the list endpoint uses
+        (``repo.get_user_projects``, non-archived) — this never reinvents
+        permissions. Stage / activity / stalled come from the existing
+        5-way ``_get_card_enrichment`` batch; only storyboard-stage
+        projects need one more query (per-project shot progress), fanned
+        out with a concurrency cap so a big queue can't unbounded-fan-out
+        DB queries. Each progress fetch is best-effort: a failure degrades
+        that single row to a plain navigate suggestion, never a 500.
+        """
+        projects = await self.repo.get_user_projects(
+            user_id, team_id=team_id, archived=False
+        )
+        if not projects:
+            return []
+
+        ids = [p["id"] for p in projects]
+        enrichment = await self._get_card_enrichment(ids)
+
+        def _slug_for(pid: str) -> str | None:
+            card = enrichment.get(pid, _EMPTY_ENRICHMENT)
+            return (card.get("current_stage") or {}).get("slug")
+
+        storyboard_pids = [
+            str(pid) for pid in ids if _slug_for(str(pid)) == _STORYBOARD_STAGE
+        ]
+
+        progress_map: dict[str, dict | None] = {}
+        if storyboard_pids:
+            sem = asyncio.Semaphore(_SUGGESTIONS_PROGRESS_CONCURRENCY)
+
+            async def _fetch_progress(pid: str):
+                async with sem:
+                    try:
+                        progress = (
+                            await self._shots_repo().storyboard_progress_for_project(
+                                pid
+                            )
+                        )
+                        return pid, progress
+                    except Exception as exc:  # noqa: BLE001 — degrade this row only
+                        logger.error(
+                            f"[projects] suggestions progress for {pid} failed: {exc}"
+                        )
+                        return pid, None
+
+            results = await asyncio.gather(
+                *(_fetch_progress(pid) for pid in storyboard_pids)
+            )
+            progress_map = dict(results)
+
+        items: list[dict] = []
+        for p in projects:
+            pid = str(p["id"])
+            card = enrichment.get(pid, _EMPTY_ENRICHMENT)
+            slug = (card.get("current_stage") or {}).get("slug")
+            progress = progress_map.get(pid) if slug == _STORYBOARD_STAGE else None
+            suggestion = _suggestion_from(slug, progress)
+            latest_activity = card.get("latest_activity")
+            items.append(
+                {
+                    "project_id": pid,
+                    "name": p.get("name"),
+                    "stage_slug": suggestion["stage_slug"],
+                    "kind": suggestion["kind"],
+                    "progress": suggestion["progress"],
+                    "action": suggestion["action"],
+                    "stalled": bool((latest_activity or {}).get("stalled")),
+                    "latest_activity": latest_activity,
+                }
+            )
+        return items
 
     # ------------------------------------------------------------------ #
     # Batch generate-missing-frames (B3 one-click action)

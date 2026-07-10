@@ -31,6 +31,7 @@ from app.schemas.projects import (
     MoveFileRequest,
     ProjectCreate,
     ProjectFileUpdate,
+    ProjectSuggestionsResponse,
     ProjectUpdate,
     RenameFolderRequest,
     ReviewStatusUpdate,
@@ -105,6 +106,24 @@ async def create_project(data: ProjectCreate, auth: AuthDep):
     except Exception as e:
         logger.error(f"Failed to create project: {e}")
         raise HTTPException(status_code=500, detail="Failed to create project")
+
+
+@router.get("/suggestions", response_model=ProjectSuggestionsResponse)
+async def get_project_suggestions(
+    auth: AuthDep,
+    team_id: Optional[str] = Query(
+        None, description="Filter by team ID (null = personal)"
+    ),
+) -> ProjectSuggestionsResponse:
+    """Batch 'one next step' queue data source for the homepage (PR-8 Task
+    A, G7). MUST stay declared before ``/{project_id}`` below — FastAPI /
+    Starlette match routes in registration order, and both are a single
+    path segment under this prefix, so a later declaration would be
+    swallowed as ``project_id="suggestions"``.
+    """
+    svc = ProjectsService()
+    items = await svc.get_project_suggestions(auth.user_id, team_id=team_id)
+    return ProjectSuggestionsResponse(items=items)
 
 
 @router.get("/{project_id}")
