@@ -2582,7 +2582,9 @@
       "loadFailed": "加载令牌失败",
       "createFailed": "创建令牌失败",
       "exampleTitle": "示例"
-    }
+    },
+    "pinned": "置顶",
+    "noMatching": "没有匹配的笔记。"
   },
   "editor": {
     "brand": "MediaHub Projects",

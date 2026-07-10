@@ -2582,7 +2582,9 @@
       "loadFailed": "Failed to load tokens",
       "createFailed": "Failed to create token",
       "exampleTitle": "Example"
-    }
+    },
+    "pinned": "Pinned",
+    "noMatching": "No matching notes."
   },
   "editor": {
     "brand": "MediaHub Projects",

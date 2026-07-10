@@ -327,6 +327,7 @@ export const InspirationPage: React.FC = () => {
                 hasMore={hasMore}
                 loading={loading}
                 loadMore={() => void loadMore()}
+                filtered={!!(date || tag || q)}
               />
             </>
           ) : (
