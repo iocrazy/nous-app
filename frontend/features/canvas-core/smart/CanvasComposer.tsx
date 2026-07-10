@@ -16,6 +16,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 
+import { arrangeLayout } from '../../../canvas-kit/arrangeLayout';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { screenToWorld } from '../utils/viewport';
 import {
@@ -171,6 +172,16 @@ export function CanvasComposer({
     void doRunIds(order);
   }, [nodes, connections, doRunIds]);
 
+  const onArrange = useCallback(() => {
+    // setNodes (not patchNode) so one layout pass = one undoable edit.
+    setNodes(
+      arrangeLayout(
+        nodes as Parameters<typeof arrangeLayout>[0],
+        connections as Parameters<typeof arrangeLayout>[1],
+      ),
+    );
+  }, [nodes, connections, setNodes]);
+
   return (
     <div
       role="toolbar"
@@ -181,6 +192,10 @@ export function CanvasComposer({
       <ComposerButton onClick={() => addNode('prompt')}>+ Prompt</ComposerButton>
       <ComposerButton onClick={() => addNode('output')}>+ Output</ComposerButton>
       <ComposerButton onClick={() => addNode('loop')}>+ Loop</ComposerButton>
+      <Divider />
+      <ComposerButton onClick={onArrange} disabled={nodes.length === 0}>
+        Arrange
+      </ComposerButton>
       <Divider />
       <ComposerButton
         onClick={onRunSelected}

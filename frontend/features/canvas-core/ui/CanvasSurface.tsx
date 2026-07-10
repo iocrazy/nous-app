@@ -20,11 +20,12 @@ import {
   applyEdgeChanges,
   applyNodeChanges,
 } from '@xyflow/react';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { CanvasConnection, CanvasNode } from '../types';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { SMART_NODE_TYPES } from '../smart/nodes/registry';
+import { SMART_EDGE_TYPES } from '../smart/edges/registry';
 import { CLASSIC_NODE_TYPES } from '../classic/ClassicNodeViews';
 import { toReactFlowEdges, validateCanvasConnection } from './connectionMapping';
 import { edgeRunStateClass } from '../smart/edgeRunState';
@@ -119,11 +120,20 @@ export function CanvasSurface() {
     return entries.length ? JSON.stringify(entries) : '';
   }, [kind, nodes]);
 
+  // Edge selection is VIEW-ONLY state (G6 scissors needs `selected` on the
+  // edge component). It lives here, not in the store: connections_json must
+  // never carry it, and a mere click must not dirty/persist the document.
+  const [selectedEdgeIds, setSelectedEdgeIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+
   // Run-state edge colouring (Infinite parity G2, smart only): edges carry
   // the adjacent prompt's run_status as a class so a cascade run visibly
   // flows wait → active → done along the wires (index.css § Canvas chrome).
   const rfEdges = useMemo(() => {
-    const edges = toReactFlowEdges(connections);
+    const edges = toReactFlowEdges(connections).map((edge) =>
+      selectedEdgeIds.has(edge.id) ? { ...edge, selected: true } : edge,
+    );
     if (kind !== 'smart' || !promptStatusSig) return edges;
     const statusById = new Map(JSON.parse(promptStatusSig) as Array<[string, string]>);
     return edges.map((edge) => {
@@ -133,7 +143,7 @@ export function CanvasSurface() {
       });
       return cls ? { ...edge, className: cls } : edge;
     });
-  }, [connections, kind, promptStatusSig]);
+  }, [connections, kind, promptStatusSig, selectedEdgeIds]);
 
   // Fix 3 (6e-2c) — O(1) node-type lookup for connection validation.
   // `nodeTypeById` is called twice per connection event (source + target).
@@ -180,11 +190,26 @@ export function CanvasSurface() {
 
   const onEdgesChange = useCallback(
     (changes: EdgeChange[]) => {
+      // `select` changes only touch the view-only selection set — they never
+      // reach the store, so clicking a wire cannot dirty the document.
+      const selects = changes.filter((c) => c.type === 'select');
+      if (selects.length) {
+        setSelectedEdgeIds((prev) => {
+          const next = new Set(prev);
+          for (const c of selects) {
+            if ((c as { selected: boolean }).selected) next.add(c.id);
+            else next.delete(c.id);
+          }
+          return next;
+        });
+      }
+      const docChanges = changes.filter((c) => c.type !== 'select');
+      if (docChanges.length === 0) return;
       // Strip view-only fields before the store: the run-state className
       // (and RF's selected flag) must never reach connections_json — stale
       // decoration in the DB row makes collaborators' saves diverge
       // byte-wise and trips the false-realtime-conflict path.
-      const next = applyEdgeChanges(changes, rfEdges).map((edge) => {
+      const next = applyEdgeChanges(docChanges, rfEdges).map((edge) => {
         const { className: _className, selected: _selected, ...rest } = edge as Edge & {
           className?: string;
         };
@@ -294,11 +319,15 @@ export function CanvasSurface() {
       : kind === 'classic'
         ? CLASSIC_NODE_TYPES
         : undefined;
+  // Smart mode swaps the default edge for the scissors edge (G6 conn-cut);
+  // classic keeps the stock bezier so nothing else changes.
+  const edgeTypes = kind === 'smart' ? SMART_EDGE_TYPES : undefined;
 
   return (
     <CanvasEngine
       themedChrome
       nodeTypes={nodeTypes}
+      edgeTypes={edgeTypes}
       nodes={rfNodes}
       edges={rfEdges}
       selectedIds={selection}

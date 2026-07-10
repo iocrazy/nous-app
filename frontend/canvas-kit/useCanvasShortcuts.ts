@@ -18,6 +18,9 @@ export interface CanvasShortcutHandlers {
   onFitView: () => void;
   onSelectAll: () => void;
   onClearSelection: () => void;
+  /** Bare `z` — toggle the zoomed-out overview (G6). Optional so classic
+   * surfaces without an overview keep their existing key map untouched. */
+  onToggleOverview?: () => void;
 }
 
 /** True when the event originated inside a text-editing field. */
@@ -51,6 +54,11 @@ export function handleCanvasKey(e: KeyboardEvent, h: CanvasShortcutHandlers): vo
         e.preventDefault();
         h.onSelectAll();
       }
+      break;
+    case 'z':
+    case 'Z':
+      // Bare z only — mod+z is undo and must stay with the editor.
+      if (!mod) h.onToggleOverview?.();
       break;
     case 'Escape':
       h.onClearSelection();

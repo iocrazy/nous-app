@@ -30,6 +30,7 @@ import {
   type Connection,
   type Edge,
   type EdgeChange,
+  type EdgeTypes,
   type IsValidConnection,
   type Node,
   type NodeChange,
@@ -144,6 +145,8 @@ export interface CanvasEngineProps {
   themedChrome?: boolean;
   /** Node component registry for the current consumer (classic / smart / scene). */
   nodeTypes?: NodeTypes;
+  /** Edge component registry (e.g. smart mode's scissors edge, G6). */
+  edgeTypes?: EdgeTypes;
   /** Controlled React Flow nodes (already carrying `selected`). */
   nodes: AnyNode[];
   /** Controlled React Flow edges. */
@@ -231,6 +234,7 @@ const NOOP = () => {};
 export function CanvasEngine({
   themedChrome = false,
   nodeTypes,
+  edgeTypes,
   nodes,
   edges,
   selectedIds,
@@ -437,12 +441,27 @@ export function CanvasEngine({
   // Select-all / clear default to no-ops — consumers whose window-scoped layer
   // already owns them (canvas-core's CanvasPage) leave these unset so we never
   // double-handle.
+  // Bare-z overview toggle (G6): first press remembers where you were and
+  // fits the whole graph; second press returns to the saved viewport.
+  const overviewReturnRef = useRef<Viewport | null>(null);
   useCanvasShortcuts(containerRef, {
     onZoomIn: () => instanceRef.current?.zoomIn(),
     onZoomOut: () => instanceRef.current?.zoomOut(),
     onFitView: () => instanceRef.current?.fitView(),
     onSelectAll,
     onClearSelection,
+    onToggleOverview: () => {
+      const instance = instanceRef.current;
+      if (!instance) return;
+      const saved = overviewReturnRef.current;
+      if (saved) {
+        overviewReturnRef.current = null;
+        void instance.setViewport(saved, { duration: 200 });
+      } else {
+        overviewReturnRef.current = instance.getViewport();
+        void instance.fitView({ duration: 200 });
+      }
+    },
   });
 
   const handleMove = useCallback(
@@ -550,6 +569,7 @@ export function CanvasEngine({
         nodes={displayNodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onInit={(instance) => {
           instanceRef.current = instance;
         }}
