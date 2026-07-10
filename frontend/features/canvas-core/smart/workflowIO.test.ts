@@ -65,3 +65,115 @@ describe('parseWorkflow', () => {
     expect(() => parseWorkflow(json)).toThrowError(/workflow/i);
   });
 });
+
+describe('parseWorkflow — hostile input hardening (review HIGH)', () => {
+  const wrap = (nodes: unknown[], connections: unknown[] = []) =>
+    JSON.stringify({ format: WORKFLOW_FORMAT, version: 1, kind: 'smart', nodes, connections });
+  const opts = { allowedTypes: new Set(['shot', 'prompt', 'output', 'loop']) };
+
+  it('rejects unknown node types (registry would render nothing / crash)', () => {
+    expect(() =>
+      parseWorkflow(wrap([{ id: 'x', type: 'evil', position: { x: 0, y: 0 } }]), opts),
+    ).toThrowError(/type/i);
+  });
+
+  it('rejects non-object data', () => {
+    expect(() =>
+      parseWorkflow(wrap([{ id: 'x', type: 'prompt', position: { x: 0, y: 0 }, data: 'str' }]), opts),
+    ).toThrowError(/data/i);
+  });
+
+  it('rejects a fake-array images object ({length:1} without map → renderer TypeError)', () => {
+    expect(() =>
+      parseWorkflow(
+        wrap([{ id: 'x', type: 'output', position: { x: 0, y: 0 }, data: { kind: 'image', images: { length: 1 } } }]),
+        opts,
+      ),
+    ).toThrowError(/images/i);
+  });
+
+  it('rejects non-string preview_text (objects crash React children)', () => {
+    expect(() =>
+      parseWorkflow(
+        wrap([{ id: 'x', type: 'output', position: { x: 0, y: 0 }, data: { preview_text: { a: 1 } } }]),
+        opts,
+      ),
+    ).toThrowError(/preview_text/i);
+  });
+
+  it('rejects javascript:/data: URLs in preview_url and images[].url', () => {
+    expect(() =>
+      parseWorkflow(
+        wrap([{ id: 'x', type: 'output', position: { x: 0, y: 0 }, data: { preview_url: 'javascript:alert(1)' } }]),
+        opts,
+      ),
+    ).toThrowError(/url/i);
+    expect(() =>
+      parseWorkflow(
+        wrap([
+          { id: 'x', type: 'output', position: { x: 0, y: 0 }, data: { images: [{ url: 'data:text/html,<script>1</script>' }] } },
+        ]),
+        opts,
+      ),
+    ).toThrowError(/url/i);
+  });
+
+  it('accepts http(s) and app-relative urls', () => {
+    const good = wrap([
+      { id: 'x', type: 'output', position: { x: 0, y: 0 }, data: { preview_url: '/api/v1/generated-media/1/cover', images: [{ url: 'https://cdn.example.com/a.png' }] } },
+    ]);
+    expect(() => parseWorkflow(good, opts)).not.toThrow();
+  });
+
+  it('rejects duplicate node ids (edge remap would silently mis-wire)', () => {
+    expect(() =>
+      parseWorkflow(
+        wrap([
+          { id: 'x', type: 'prompt', position: { x: 0, y: 0 } },
+          { id: 'x', type: 'prompt', position: { x: 1, y: 1 } },
+        ]),
+        opts,
+      ),
+    ).toThrowError(/duplicate/i);
+  });
+
+  it('rejects non-finite positions (Infinity round-trips to null in JSON)', () => {
+    expect(() =>
+      parseWorkflow(wrap([{ id: 'x', type: 'prompt', position: { x: 1e999, y: 0 } }]), opts),
+    ).toThrowError(/position/i);
+  });
+
+  it('rejects payloads above the node cap', () => {
+    const many = Array.from({ length: 501 }, (_, i) => ({
+      id: `n${i}`,
+      type: 'prompt',
+      position: { x: 0, y: 0 },
+    }));
+    expect(() => parseWorkflow(wrap(many), opts)).toThrowError(/too many|limit/i);
+  });
+});
+
+describe('serializeWorkflow — strips the full RF internal set', () => {
+  it('drops width/height/positionAbsolute too (store RF_INTERNAL_KEYS parity)', () => {
+    const payload = serializeWorkflow(
+      'smart',
+      [
+        {
+          id: 'n1',
+          type: 'prompt',
+          position: { x: 0, y: 0 },
+          width: 240,
+          height: 120,
+          positionAbsolute: { x: 0, y: 0 },
+          dragging: true,
+        } as unknown as CanvasNode,
+      ],
+      [],
+    );
+    const node = payload.nodes[0] as Record<string, unknown>;
+    expect(node.width).toBeUndefined();
+    expect(node.height).toBeUndefined();
+    expect(node.positionAbsolute).toBeUndefined();
+    expect(node.dragging).toBeUndefined();
+  });
+});

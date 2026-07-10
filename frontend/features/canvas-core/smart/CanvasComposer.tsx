@@ -38,7 +38,12 @@ import {
 } from './runner';
 import { topoSortPrompts } from './topology';
 import type { OutputKind, PromptNodeData } from './types';
+import { SMART_NODE_TYPES } from './nodes/registry';
 import { parseWorkflow, serializeWorkflow, workflowFilename } from './workflowIO';
+
+const SMART_NODE_TYPE_KEYS = new Set(Object.keys(SMART_NODE_TYPES));
+/** Refuse absurd files before reading them into memory. */
+const MAX_WORKFLOW_FILE_BYTES = 5 * 1024 * 1024;
 
 interface CanvasComposerOptions {
   /** When passed, new nodes are positioned at the centre of this DOM
@@ -215,13 +220,14 @@ export function CanvasComposer({
     async (file: File) => {
       setWorkflowError(null);
       try {
-        const payload = parseWorkflow(await file.text());
-        const store = useCanvasCoreStore.getState();
-        if (payload.kind && payload.kind !== store.kind) {
-          throw new Error(
-            `This workflow was exported from a ${payload.kind} canvas and cannot be imported here`,
-          );
+        if (file.size > MAX_WORKFLOW_FILE_BYTES) {
+          throw new Error('Workflow file is too large (5 MB limit)');
         }
+        const store = useCanvasCoreStore.getState();
+        const payload = parseWorkflow(await file.text(), {
+          allowedTypes: SMART_NODE_TYPE_KEYS,
+          expectedKind: store.kind,
+        });
         // Re-id + tag hygiene through the same machinery as paste/duplicate.
         const existing = new Set(
           store.nodes.map((n) => (n as Record<string, unknown>).id as string),
