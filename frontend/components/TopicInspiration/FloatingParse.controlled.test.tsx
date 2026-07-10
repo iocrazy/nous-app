@@ -38,4 +38,9 @@ describe('FloatingParse controlled open', () => {
     // floating pill).
     expect(screen.queryByRole('button', { name: /parse link/i })).toBeNull();
   });
+
+  it('prefills the input with initialUrl when opened controlled', () => {
+    render(<FloatingParse open onOpenChange={vi.fn()} initialUrl="https://douyin.com/x" />);
+    expect(screen.getByDisplayValue('https://douyin.com/x')).toBeTruthy();
+  });
 });

@@ -47,6 +47,7 @@ export const InspirationPage: React.FC = () => {
   const [prefill, setPrefill] = useState<{ content: string; refHotspot: RefHotspot } | null>(null);
   const [prefillNonce, setPrefillNonce] = useState(0);
   const [parseOpen, setParseOpen] = useState(false);
+  const [parseUrl, setParseUrl] = useState<string | null>(null);
   const [tokensOpen, setTokensOpen] = useState(false);
   // Read-only category chips for the Hotspots-tab sidebar (spec §2 #7,
   // simplified to display-only for P3). The hook is always called — only its
@@ -268,7 +269,10 @@ export const InspirationPage: React.FC = () => {
           />
         </div>
         <button
-          onClick={() => setParseOpen(true)}
+          onClick={() => {
+            setParseUrl(null);
+            setParseOpen(true);
+          }}
           className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-indigo-500/15 px-3 py-1.5 text-xs font-semibold text-indigo-300 hover:bg-indigo-500/25"
         >
           <Link2 size={13} />
@@ -312,7 +316,14 @@ export const InspirationPage: React.FC = () => {
               />
             </>
           ) : (
-            <HotspotsWorkspace day={date} onSaveAsNote={handleSaveAsNote} onParse={() => setParseOpen(true)} />
+            <HotspotsWorkspace
+              day={date}
+              onSaveAsNote={handleSaveAsNote}
+              onParse={(h) => {
+                setParseUrl(h.origin_url || h.url || null);
+                setParseOpen(true);
+              }}
+            />
           )}
         </div>
         <div className="hidden w-[292px] shrink-0 space-y-2.5 lg:block">
@@ -344,7 +355,7 @@ export const InspirationPage: React.FC = () => {
         </div>
       </div>
 
-      <FloatingParse open={parseOpen} onOpenChange={setParseOpen} />
+      <FloatingParse open={parseOpen} onOpenChange={setParseOpen} initialUrl={parseUrl ?? undefined} />
 
       {tokensOpen && (
         <div
