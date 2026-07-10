@@ -14,9 +14,10 @@
  * via the viewport math).
  */
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
 import { arrangeLayout } from '../../../canvas-kit/arrangeLayout';
+import { prepareDuplicate } from '../store/clipboard';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { screenToWorld } from '../utils/viewport';
 import {
@@ -37,6 +38,12 @@ import {
 } from './runner';
 import { topoSortPrompts } from './topology';
 import type { OutputKind, PromptNodeData } from './types';
+import { SMART_NODE_TYPES } from './nodes/registry';
+import { parseWorkflow, serializeWorkflow, workflowFilename } from './workflowIO';
+
+const SMART_NODE_TYPE_KEYS = new Set(Object.keys(SMART_NODE_TYPES));
+/** Refuse absurd files before reading them into memory. */
+const MAX_WORKFLOW_FILE_BYTES = 5 * 1024 * 1024;
 
 interface CanvasComposerOptions {
   /** When passed, new nodes are positioned at the centre of this DOM
@@ -182,6 +189,71 @@ export function CanvasComposer({
     );
   }, [nodes, connections, setNodes]);
 
+  // ---- Workflow export / import (G5) ------------------------------------
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const [workflowError, setWorkflowError] = useState<string | null>(null);
+
+  const onExport = useCallback(() => {
+    const selectedSet = new Set(selection);
+    const selected = nodes.filter((n) =>
+      selectedSet.has((n as Record<string, unknown>).id as string),
+    );
+    if (selected.length === 0) return;
+    const payload = serializeWorkflow('smart', selected, connections);
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: 'application/json',
+    });
+    const href = URL.createObjectURL(blob);
+    try {
+      const link = document.createElement('a');
+      link.href = href;
+      link.download = workflowFilename(payload.nodes.length);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } finally {
+      URL.revokeObjectURL(href);
+    }
+  }, [nodes, connections, selection]);
+
+  const onImportFile = useCallback(
+    async (file: File) => {
+      setWorkflowError(null);
+      try {
+        if (file.size > MAX_WORKFLOW_FILE_BYTES) {
+          throw new Error('Workflow file is too large (5 MB limit)');
+        }
+        const store = useCanvasCoreStore.getState();
+        const payload = parseWorkflow(await file.text(), {
+          allowedTypes: SMART_NODE_TYPE_KEYS,
+          expectedKind: store.kind,
+        });
+        // Re-id + tag hygiene through the same machinery as paste/duplicate.
+        const existing = new Set(
+          store.nodes.map((n) => (n as Record<string, unknown>).id as string),
+        );
+        const prepared = prepareDuplicate(
+          payload.nodes,
+          payload.connections,
+          existing,
+        );
+        if (!prepared) return;
+        store.setNodes([...store.nodes, ...prepared.nodes]);
+        if (prepared.connections.length > 0) {
+          store.setConnections([...store.connections, ...prepared.connections]);
+        }
+        store.setSelection(
+          prepared.nodes.map((n) => (n as Record<string, unknown>).id as string),
+        );
+      } catch (err) {
+        setWorkflowError(
+          err instanceof Error ? err.message : 'Failed to import workflow',
+        );
+      }
+    },
+    [],
+  );
+
   return (
     <div
       role="toolbar"
@@ -196,6 +268,32 @@ export function CanvasComposer({
       <ComposerButton onClick={onArrange} disabled={nodes.length === 0}>
         Arrange
       </ComposerButton>
+      <ComposerButton onClick={onExport} disabled={selection.length === 0}>
+        Export
+      </ComposerButton>
+      <ComposerButton onClick={() => importInputRef.current?.click()}>
+        Import
+      </ComposerButton>
+      <input
+        ref={importInputRef}
+        data-testid="workflow-import-input"
+        type="file"
+        accept="application/json,.json"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = ''; // allow re-importing the same file
+          if (file) void onImportFile(file);
+        }}
+      />
+      {workflowError && (
+        <div
+          role="alert"
+          className="absolute bottom-full left-1/2 mb-2 -translate-x-1/2 whitespace-nowrap rounded bg-rose-600 px-3 py-1.5 text-xs font-medium text-white shadow-lg"
+        >
+          {workflowError}
+        </div>
+      )}
       <Divider />
       <ComposerButton
         onClick={onRunSelected}
