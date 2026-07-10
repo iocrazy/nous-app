@@ -135,7 +135,8 @@ export function ProjectsQueueView({
           <div
             key={item.project_id}
             data-testid="queue-row"
-            className="flex items-center gap-3.5 px-4 py-3 border-t border-ink-700/50 first:border-t-0 bg-ink-800/40 hover:bg-ink-800/70 transition-colors"
+            onClick={() => project && onProjectSelect(project)}
+            className="flex items-center gap-3.5 px-4 py-3 border-t border-ink-700/50 first:border-t-0 bg-ink-800/40 hover:bg-ink-800/70 transition-colors cursor-pointer"
           >
             <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotClass(item)}`} data-testid="queue-attn-dot" />
             {project && <StageRing stage={project.current_stage} size={34} />}
@@ -168,7 +169,10 @@ export function ProjectsQueueView({
               <button
                 data-testid="queue-cta"
                 disabled={busy}
-                onClick={() => handleGenerate(item.project_id)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleGenerate(item.project_id);
+                }}
                 className="flex items-center gap-1.5 flex-shrink-0 rounded-lg font-medium text-xs px-3 py-1.5
                            transition-colors bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 text-ink-950"
               >
@@ -178,7 +182,10 @@ export function ProjectsQueueView({
             ) : (
               <button
                 data-testid="queue-cta"
-                onClick={() => project && onProjectSelect(project)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  project && onProjectSelect(project);
+                }}
                 className="flex-shrink-0 rounded-lg font-medium text-xs px-3 py-1.5 border border-ink-600
                            text-ink-200 hover:bg-ink-700 transition-colors"
               >

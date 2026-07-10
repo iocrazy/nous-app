@@ -172,6 +172,49 @@ describe('ProjectsQueueView', () => {
     expect(gen).not.toHaveBeenCalled();
   });
 
+  it('clicking anywhere on the row (not the CTA) also calls onProjectSelect', () => {
+    const onSelect = vi.fn();
+
+    render(
+      <ProjectsQueueView
+        projects={PROJECTS}
+        suggestions={SUGGESTIONS}
+        onProjectSelect={onSelect}
+        onRefetchSuggestions={vi.fn()}
+      />,
+    );
+
+    const rows = screen.getAllByTestId('queue-row');
+    // Row order: Stalled(0), Gen B(1), Gen A(2), Delivery(3).
+    fireEvent.click(rows[3]);
+
+    expect(onSelect).toHaveBeenCalledWith(pDelivery);
+  });
+
+  it('clicking the generate CTA does not also trigger row navigation', async () => {
+    const gen = vi.spyOn(svc, 'generateMissingFrames').mockResolvedValue({
+      dispatched_count: 2,
+      task_ids: ['t1'],
+    });
+    const onSelect = vi.fn();
+
+    render(
+      <ProjectsQueueView
+        projects={PROJECTS}
+        suggestions={SUGGESTIONS}
+        onProjectSelect={onSelect}
+        onRefetchSuggestions={vi.fn()}
+      />,
+    );
+
+    const ctas = screen.getAllByTestId('queue-cta');
+    // Row order: Stalled(0), Gen B(1) generate CTA, Gen A(2), Delivery(3).
+    fireEvent.click(ctas[1]);
+
+    await waitFor(() => expect(gen).toHaveBeenCalledWith('3'));
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
   it('renders the empty state when no rows survive filtering', () => {
     render(
       <ProjectsQueueView

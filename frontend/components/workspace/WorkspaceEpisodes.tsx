@@ -57,7 +57,12 @@ export function WorkspaceEpisodes({
     if (creating) return;
     setCreating(true);
     try {
-      await createEpisode(projectId);
+      // Sequential starting title so a fresh episode doesn't collide with
+      // the server default ("Ep 1") when "Episode 1" already exists —
+      // derived from the progress feed already in scope, not a uniqueness
+      // guarantee (a rename elsewhere can still create a duplicate).
+      const title = `Episode ${episodes.length + 1}`;
+      await createEpisode(projectId, title);
       onEpisodesChanged();
     } catch (err) {
       console.error('[WorkspaceEpisodes] create failed:', err);
@@ -65,7 +70,7 @@ export function WorkspaceEpisodes({
     } finally {
       setCreating(false);
     }
-  }, [creating, projectId, onEpisodesChanged, addToast, t]);
+  }, [creating, projectId, episodes.length, onEpisodesChanged, addToast, t]);
 
   const startRename = useCallback((ep: EpisodeProgress) => {
     setRenamingId(ep.episode_id);
