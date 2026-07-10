@@ -11,6 +11,7 @@ import {
   createProjectFolder,
   deleteFile,
   deleteProject,
+  fetchEpisodesProgress,
   fetchProjectFiles,
   fetchProjectFolders,
   fetchProjectMembers,
@@ -295,5 +296,46 @@ describe('folders, comments, members', () => {
       (spy.mock.calls[0][1] as RequestInit).body as string,
     );
     expect(body).toEqual({ review_status: null });
+  });
+});
+
+// PR-10b — workspace shell Episodes sidebar data source.
+describe('episode progress', () => {
+  it('fetchEpisodesProgress unwraps the {data} envelope', async () => {
+    stubResponse({
+      data: [
+        {
+          episode_id: '1',
+          title: 'Ep 1',
+          sort_order: 10,
+          script_count: 1,
+          scene_count: 4,
+          shots_total: 12,
+          shots_done: 9,
+          renders_count: 1,
+          status: 'boarding',
+        },
+      ],
+    });
+    const result = await fetchEpisodesProgress('p1');
+    expect(result).toEqual([
+      {
+        episode_id: '1',
+        title: 'Ep 1',
+        sort_order: 10,
+        script_count: 1,
+        scene_count: 4,
+        shots_total: 12,
+        shots_done: 9,
+        renders_count: 1,
+        status: 'boarding',
+      },
+    ]);
+  });
+
+  it('fetchEpisodesProgress returns [] on empty data', async () => {
+    stubResponse({});
+    const result = await fetchEpisodesProgress('p1');
+    expect(result).toEqual([]);
   });
 });

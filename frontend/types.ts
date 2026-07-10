@@ -929,6 +929,10 @@ export interface ScriptProjectSummary {
   created_at: string;
   updated_at: string;
   chapter_count?: number;
+  // Present at runtime (episodes_router / script_projects.episode_id) but
+  // was missing from this summary type — PR-10b workspace shell resolves
+  // "this episode's script" by filtering on it (see ProjectWorkspace).
+  episode_id?: string | null;
 }
 
 export type ProjectTab = 'files' | 'scripts' | 'storyboard' | 'output' | 'shares' | 'trash';
@@ -954,6 +958,70 @@ export interface StageHistoryEntry {
   entered_at: string;
   exited_at: string | null;
   transitioned_by?: string;
+}
+
+/**
+ * Per-episode progress row from `GET /api/v1/projects/{id}/episodes/progress`
+ * (PR-10b workspace shell, spec G12) — script/scene/shot counts plus a
+ * server-derived pipeline status. `status` is one of
+ * planned/drafting/boarding/boarded/rendered (see episode_repository.py
+ * `_derive_episode_status`); kept as `string` here so the frontend degrades
+ * gracefully instead of throwing on a future status value.
+ */
+export interface EpisodeProgress {
+  episode_id: string;
+  title: string;
+  sort_order: number;
+  script_count: number;
+  scene_count: number;
+  shots_total: number;
+  shots_done: number;
+  renders_count: number;
+  status: string;
+}
+
+/**
+ * Project-level ASSETS "main library" rows from
+ * `GET /api/v1/projects/{id}/entities` (PR-10b, spec G13) — characters and
+ * locations are derived from script cues/scene headers, never hand-authored,
+ * so there's no separate write path here.
+ */
+export interface ProjectEntityCharacter {
+  name: string;
+  cue_count: number;
+  episode_ids: string[];
+}
+
+export interface ProjectEntityLocation {
+  name: string;
+  scene_count: number;
+  episode_ids: string[];
+}
+
+export interface ProjectEntities {
+  characters: ProjectEntityCharacter[];
+  locations: ProjectEntityLocation[];
+}
+
+/**
+ * A single `generated_media` row from `GET /api/v1/projects/{id}/renders`
+ * (PR-10b, spec G12 Renders module) — image frames and shot videos produced
+ * for the project's episodes. No `cover`/`stream` URL field on the row
+ * itself; the frontend builds `/api/v1/generated-media/{id}/cover` (image)
+ * or `/api/v1/generated-media/{id}/stream` (video) from `id` + `media_kind`.
+ */
+export interface RenderItem {
+  id: string;
+  media_kind: 'image' | 'video' | string;
+  mime: string | null;
+  origin_kind: string;
+  node_id: string | null;
+  created_at: string;
+}
+
+export interface RenderItemPage {
+  items: RenderItem[];
+  next_cursor: string | null;
 }
 
 /** Aggregate shot-frame progress for the storyboard stage suggestion (Phase B B3). */

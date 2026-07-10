@@ -1321,6 +1321,7 @@
     },
     "workbench": {
       "currentStageOf": "Current stage · {{index}} of {{total}}",
+      "stageProgress": "Stage progress",
       "advanceTo": "Advance to {{stage}}",
       "finalStage": "Final stage",
       "recommendedTools": "Recommended tools",
@@ -1350,6 +1351,80 @@
       "review_nav": "Review deliverables and gather feedback.",
       "delivery_nav": "Package and hand off the finished work.",
       "generating": "Generating {{count}} frames…"
+    },
+    "workspace": {
+      "comingSoon": "Coming soon",
+      "assets": "Assets",
+      "manage": "Manage",
+      "modules": {
+        "overview": "Overview",
+        "canvas": "Canvas",
+        "episodes": "Episodes",
+        "script": "Script",
+        "storyboard": "Storyboard",
+        "renders": "Renders",
+        "characters": "Characters",
+        "locations": "Locations",
+        "files": "Files",
+        "trash": "Trash",
+        "settings": "Settings"
+      },
+      "episodeStatus": {
+        "planned": "Planned",
+        "drafting": "Drafting",
+        "boarding": "Boarding",
+        "boarded": "Boarded",
+        "rendered": "Rendered"
+      },
+      "overview": {
+        "continue": "Continue",
+        "openStudio": "Open studio",
+        "scriptScenes": "{{count}} scenes",
+        "shotsProgress": "Shots {{done}}/{{total}}",
+        "rendersCount": "Renders {{count}}"
+      },
+      "episodes": {
+        "title": "Episodes",
+        "epPrefix": "Ep {{n}}",
+        "newEpisode": "+ New episode",
+        "open": "Open →",
+        "start": "Start →",
+        "empty": "empty — start script or import",
+        "scriptScenes": "Script ✓ {{count}} scenes",
+        "shotsProgress": "Shots {{done}}/{{total}}",
+        "rendersCount": "Renders {{count}}",
+        "rename": "Rename",
+        "moveUp": "Move up",
+        "moveDown": "Move down",
+        "delete": "Delete",
+        "deleteConfirm": "Delete this episode?",
+        "deleteConfirmYes": "Delete",
+        "deleteConfirmCancel": "Cancel",
+        "notEmpty": "Episode not empty"
+      },
+      "entities": {
+        "derivedNote": "derived from script cues",
+        "filterAll": "All episodes",
+        "cueCount": "{{count}} cues",
+        "sceneCount": "{{count}} scenes",
+        "reusableNote": "@ reusable in any episode",
+        "epChip": "Ep {{n}}",
+        "emptyCharacters": "No characters yet — cues from scripts appear here automatically.",
+        "emptyLocations": "No locations yet — scene headers appear here automatically."
+      },
+      "files": {
+        "breadcrumbRoot": "Files",
+        "chipAll": "All",
+        "chipMedia": "Media",
+        "chipRenders": "Renders",
+        "chipDocs": "Docs",
+        "upload": "Upload",
+        "folder": "Folder",
+        "render": "Render",
+        "currentEpOnly": "Current episode only",
+        "empty": "No files yet",
+        "emptyRenders": "No renders yet"
+      }
     }
   },
   "storyboard": {

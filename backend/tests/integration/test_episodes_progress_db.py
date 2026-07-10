@@ -180,6 +180,39 @@ async def _seed_project_with_episodes(conn):
     return project_id, ep1_id, ep2_id
 
 
+async def test_create_without_sort_order_increments_against_real_db(
+    integration_db_url, patched_engine, cleanup_test_rows
+):
+    """EpisodeRepository.create's COALESCE(MAX(sort_order)+1, 1) subquery
+    (pre-ship review fix, PR-10b) resolves correctly against the live
+    schema: two consecutive creates on the SAME project, neither passing an
+    explicit sort_order, land at 1 then 2 — not both at the DB default of
+    0, which used to make the first Move up/Move down PATCH swap a
+    same-value 0<->0 no-op."""
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        owner_id, _team_id = await _real_owner_and_team(conn)
+        project_id = await conn.fetchval(
+            """
+            INSERT INTO projects (name, owner_id)
+            VALUES ($1, $2) RETURNING id
+            """,
+            f"{_PREFIX}Sort Order Project {uuid.uuid4().hex[:8]}",
+            owner_id,
+        )
+    finally:
+        await conn.close()
+
+    from app.repositories.episode_repository import get_episode_repository
+
+    repo = get_episode_repository()
+    ep1 = await repo.create({"project_id": project_id, "title": "Ep A"})
+    ep2 = await repo.create({"project_id": project_id, "title": "Ep B"})
+
+    assert ep1["sort_order"] == 1
+    assert ep2["sort_order"] == 2
+
+
 async def test_episodes_progress_real_join_counts_both_url_shot_once(
     integration_db_url, patched_engine, cleanup_test_rows
 ):

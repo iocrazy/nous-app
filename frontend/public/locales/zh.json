@@ -1321,6 +1321,7 @@
     },
     "workbench": {
       "currentStageOf": "当前阶段 · 第 {{index}}/{{total}} 步",
+      "stageProgress": "阶段进度",
       "advanceTo": "推进到 {{stage}}",
       "finalStage": "最后阶段",
       "recommendedTools": "推荐工具",
@@ -1350,6 +1351,80 @@
       "review_nav": "审阅交付物并收集反馈。",
       "delivery_nav": "打包并交接完成的作品。",
       "generating": "正在生成 {{count}} 帧…"
+    },
+    "workspace": {
+      "comingSoon": "即将上线",
+      "assets": "素材",
+      "manage": "管理",
+      "modules": {
+        "overview": "总览",
+        "canvas": "画布",
+        "episodes": "剧集",
+        "script": "脚本",
+        "storyboard": "分镜",
+        "renders": "成片",
+        "characters": "人物",
+        "locations": "场景",
+        "files": "文件",
+        "trash": "回收站",
+        "settings": "设置"
+      },
+      "episodeStatus": {
+        "planned": "待规划",
+        "drafting": "创作中",
+        "boarding": "分镜中",
+        "boarded": "分镜完成",
+        "rendered": "已产出"
+      },
+      "overview": {
+        "continue": "继续",
+        "openStudio": "打开工作室",
+        "scriptScenes": "{{count}} 场",
+        "shotsProgress": "镜头 {{done}}/{{total}}",
+        "rendersCount": "成片 {{count}}"
+      },
+      "episodes": {
+        "title": "剧集",
+        "epPrefix": "Ep {{n}}",
+        "newEpisode": "+ 新建剧集",
+        "open": "打开 →",
+        "start": "开始 →",
+        "empty": "空 — 开始写脚本或导入",
+        "scriptScenes": "脚本 ✓ {{count}} 场",
+        "shotsProgress": "镜头 {{done}}/{{total}}",
+        "rendersCount": "成片 {{count}}",
+        "rename": "重命名",
+        "moveUp": "上移",
+        "moveDown": "下移",
+        "delete": "删除",
+        "deleteConfirm": "删除这一集？",
+        "deleteConfirmYes": "删除",
+        "deleteConfirmCancel": "取消",
+        "notEmpty": "该集仍有脚本，无法删除"
+      },
+      "entities": {
+        "derivedNote": "从脚本 cue 自动派生",
+        "filterAll": "所有剧集",
+        "cueCount": "{{count}} 条台词",
+        "sceneCount": "{{count}} 场",
+        "reusableNote": "@ 任意剧集均可复用",
+        "epChip": "Ep {{n}}",
+        "emptyCharacters": "暂无人物 — 脚本中的台词会自动出现在这里。",
+        "emptyLocations": "暂无场景 — 场景头会自动出现在这里。"
+      },
+      "files": {
+        "breadcrumbRoot": "文件",
+        "chipAll": "全部",
+        "chipMedia": "素材",
+        "chipRenders": "成片",
+        "chipDocs": "文档",
+        "upload": "上传",
+        "folder": "文件夹",
+        "render": "成片",
+        "currentEpOnly": "仅当前集",
+        "empty": "暂无文件",
+        "emptyRenders": "暂无成片"
+      }
     }
   },
   "storyboard": {

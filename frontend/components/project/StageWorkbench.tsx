@@ -21,6 +21,7 @@ import { fetchStageCatalog, fetchStageSuggestion, setCurrentStage } from '../../
 import { TOOL_CATALOG } from '../../features/projects/stageTools';
 import { StageSuggestion } from './StageSuggestion';
 import { StageHistoryDrawer } from './StageHistoryDrawer';
+import { MiniStepper } from '../workspace/MiniStepper';
 import type { ProjectStage, ProjectTab, StoryboardProgress } from '../../types';
 
 // Phase B B3 — stage-aware "next step" suggestion card. Independent flag so
@@ -144,40 +145,13 @@ export function StageWorkbench({
               )}
             </div>
             <div className="flex flex-col items-end gap-2 shrink-0">
-              <div
-                data-testid="stage-ministep"
-                role="group"
-                aria-label={t('projects.workbench.stageProgress', 'Stage progress')}
-                className="flex items-center"
-              >
-                {catalog.map((stage, i) => (
-                  <div key={stage.id} className="flex items-center">
-                    {i > 0 && (
-                      <span
-                        style={{ width: 14 }}
-                        className={`h-[2px] shrink-0 ${
-                          i - 1 < currentIndex ? 'bg-indigo-500' : 'bg-ink-700'
-                        }`}
-                      />
-                    )}
-                    <button
-                      type="button"
-                      data-testid={`ministep-dot-${stage.slug}`}
-                      title={t(`projects.stages.${stage.slug}`, stage.name)}
-                      aria-label={t(`projects.stages.${stage.slug}`, stage.name)}
-                      disabled={!canWrite || i === currentIndex || advancing}
-                      onClick={() => jumpTo(stage)}
-                      className={`w-2 h-2 rounded-full transition-colors shrink-0 disabled:cursor-default ${
-                        i === currentIndex
-                          ? 'bg-indigo-500 ring-[3px] ring-indigo-500/25'
-                          : i < currentIndex
-                            ? 'bg-indigo-500'
-                            : 'bg-ink-600 opacity-50'
-                      }`}
-                    />
-                  </div>
-                ))}
-              </div>
+              <MiniStepper
+                catalog={catalog}
+                currentIndex={currentIndex}
+                canWrite={canWrite}
+                advancing={advancing}
+                onJump={jumpTo}
+              />
               <div className="flex items-center gap-2">
                 <button
                   data-testid="stage-history-btn"

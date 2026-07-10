@@ -11,6 +11,9 @@ import {
   StageHistoryEntry,
   StageSuggestion,
   ProjectSuggestionItem,
+  EpisodeProgress,
+  ProjectEntities,
+  RenderItemPage,
 } from '../types';
 import { apiClient, apiFetch } from './apiClient';
 
@@ -475,6 +478,84 @@ export const fetchStageHistory = async (
     `/api/v1/projects/${projectId}/stage_history`,
   );
   return response.data ?? [];
+};
+
+/**
+ * Per-episode progress feed for the workspace shell's Episodes sidebar
+ * (PR-10b, spec G12) — script/scene/shot counts + derived status, ordered
+ * by sort_order. Envelope-wrapped like the other stage endpoints above.
+ */
+export const fetchEpisodesProgress = async (
+  projectId: string,
+): Promise<EpisodeProgress[]> => {
+  const response = await apiClient.get<Envelope<EpisodeProgress[]>>(
+    `/api/v1/projects/${projectId}/episodes/progress`,
+  );
+  return response.data ?? [];
+};
+
+// ============================================
+// Episodes CRUD (PR-10b Wave 2 — Episodes management module)
+// ============================================
+
+/** Create an episode under a project. Title defaults server-side ('Ep N') when omitted. */
+export const createEpisode = async (
+  projectId: string,
+  title?: string,
+): Promise<void> => {
+  await apiClient.post(`/api/v1/projects/${projectId}/episodes`, title ? { title } : {});
+};
+
+/** Update an episode's title and/or sort_order. */
+export const updateEpisode = async (
+  episodeId: string,
+  data: { title?: string; sort_order?: number },
+): Promise<void> => {
+  await apiClient.patch(`/api/v1/episodes/${episodeId}`, data);
+};
+
+/**
+ * Delete an episode. Throws `ApiError` with `status === 409` when the
+ * episode still owns scripts (`script_projects.episode_id` is ON DELETE
+ * RESTRICT) — callers should catch that status and surface a friendly
+ * "episode not empty" message rather than a generic error.
+ */
+export const deleteEpisode = async (episodeId: string): Promise<void> => {
+  await apiClient.delete(`/api/v1/episodes/${episodeId}`);
+};
+
+// ============================================
+// Project entities — Characters/Locations main library (PR-10b, G13)
+// ============================================
+
+export const fetchProjectEntities = async (
+  projectId: string,
+): Promise<ProjectEntities> => {
+  const response = await apiClient.get<Envelope<ProjectEntities>>(
+    `/api/v1/projects/${projectId}/entities`,
+  );
+  return response.data ?? { characters: [], locations: [] };
+};
+
+// ============================================
+// Project renders — Files module "Renders" chip (PR-10b, G12)
+// ============================================
+
+export const fetchProjectRenders = async (
+  projectId: string,
+  params?: { episodeId?: string | null; cursor?: string | null; limit?: number },
+): Promise<RenderItemPage> => {
+  const response = await apiClient.get<Envelope<RenderItemPage>>(
+    `/api/v1/projects/${projectId}/renders`,
+    {
+      query: {
+        episode_id: params?.episodeId ?? undefined,
+        cursor: params?.cursor ?? undefined,
+        limit: params?.limit,
+      },
+    },
+  );
+  return response.data ?? { items: [], next_cursor: null };
 };
 
 // ============================================

@@ -20,6 +20,11 @@ export default defineConfig({
   // build-time-only flags (Phase B B2/B3) read via import.meta.env, so they
   // must be baked in here — projects-phase-b.spec.ts's workbench test
   // otherwise renders the legacy stepper instead of StageWorkbench.
+  // VITE_FEATURE_PROJECT_WORKSPACE_V2 (PR-10b) is baked true too — with it
+  // on, ProjectsPage's detail pane is the new ProjectWorkspace shell for
+  // BOTH projects-workspace.spec.ts (new) and projects-phase-b.spec.ts's
+  // "storyboard suggestion" test (updated to assert the shell instead of
+  // the retired StageWorkbench surface — see that spec's comment).
   //
   // ⚠️ reuseExistingServer reuses a server already on :4173 — that server MUST
   // have been built with these same pinned env vars, or the seeded session key
@@ -27,7 +32,7 @@ export default defineConfig({
   // dev server.
   webServer: {
     command:
-      'VITE_SUPABASE_URL=https://e2e.supabase.co VITE_SUPABASE_ANON_KEY=sb_e2e_anon_key VITE_API_URL=http://localhost:4173 VITE_FEATURE_PROJECT_WORKBENCH=true VITE_FEATURE_PROJECT_AI_SUGGEST=true VITE_FEATURE_CANVAS_NAV=true npm run build && npm run preview -- --port 4173 --strictPort',
+      'VITE_SUPABASE_URL=https://e2e.supabase.co VITE_SUPABASE_ANON_KEY=sb_e2e_anon_key VITE_API_URL=http://localhost:4173 VITE_FEATURE_PROJECT_WORKBENCH=true VITE_FEATURE_PROJECT_AI_SUGGEST=true VITE_FEATURE_CANVAS_NAV=true VITE_FEATURE_PROJECT_WORKSPACE_V2=true npm run build && npm run preview -- --port 4173 --strictPort',
     url: 'http://localhost:4173',
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
