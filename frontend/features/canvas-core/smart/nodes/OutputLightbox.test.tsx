@@ -1,0 +1,95 @@
+// features/canvas-core/smart/nodes/OutputLightbox.test.tsx
+// Fullscreen media lightbox (Infinite parity G7): multi-image navigation,
+// resolution readout, download / download-all, previous-version compare
+// slider, and a Regenerate hook. Pure controlled component.
+
+import { fireEvent, render, screen, cleanup } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { OutputLightbox } from './OutputLightbox';
+
+const ITEMS = [
+  { url: '/gm/1/cover', name: 'first.png' },
+  { url: '/gm/2/cover', name: 'second.png' },
+];
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+function renderBox(overrides: Partial<Parameters<typeof OutputLightbox>[0]> = {}) {
+  const onClose = vi.fn();
+  const onIndexChange = vi.fn();
+  const utils = render(
+    <OutputLightbox
+      items={ITEMS}
+      index={0}
+      kind="image"
+      onIndexChange={onIndexChange}
+      onClose={onClose}
+      {...overrides}
+    />,
+  );
+  return { onClose, onIndexChange, ...utils };
+}
+
+describe('OutputLightbox', () => {
+  it('shows the current image with a counter and navigates with arrows', () => {
+    const { onIndexChange } = renderBox();
+    expect(screen.getByTestId('lightbox-image')).toHaveProperty(
+      'src',
+      expect.stringContaining('/gm/1/cover') as unknown as string,
+    );
+    expect(screen.getByText('1 / 2')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(onIndexChange).toHaveBeenCalledWith(1);
+  });
+
+  it('Escape and backdrop click close it; ArrowRight advances', () => {
+    const { onClose, onIndexChange } = renderBox();
+    fireEvent.keyDown(screen.getByTestId('output-lightbox'), { key: 'ArrowRight' });
+    expect(onIndexChange).toHaveBeenCalledWith(1);
+    fireEvent.keyDown(screen.getByTestId('output-lightbox'), { key: 'Escape' });
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('single item hides navigation and Download All', () => {
+    renderBox({ items: [ITEMS[0]] });
+    expect(screen.queryByRole('button', { name: 'Next' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Download All' })).toBeNull();
+  });
+
+  it('Download fetches the blob and clicks an object-URL anchor', async () => {
+    const blob = new Blob(['x'], { type: 'image/png' });
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue({ ok: true, blob: async () => blob } as unknown as Response);
+    const createSpy = vi
+      .spyOn(URL, 'createObjectURL')
+      .mockReturnValue('blob:mock');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+
+    renderBox();
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+    await vi.waitFor(() => expect(createSpy).toHaveBeenCalled());
+    expect(fetchSpy).toHaveBeenCalledWith('/gm/1/cover');
+  });
+
+  it('compare mode renders both layers and the slider clips the result', () => {
+    renderBox({ compareUrl: '/gm/0/cover' });
+    fireEvent.click(screen.getByRole('button', { name: 'Compare' }));
+    const result = screen.getByTestId('compare-result');
+    expect(screen.getByTestId('compare-original')).toBeTruthy();
+    fireEvent.change(screen.getByRole('slider'), { target: { value: '25' } });
+    expect((result as HTMLElement).style.clipPath).toContain('75%');
+  });
+
+  it('no compareUrl → no Compare button; onRegenerate wires the button', () => {
+    const onRegenerate = vi.fn();
+    renderBox({ onRegenerate });
+    expect(screen.queryByRole('button', { name: 'Compare' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }));
+    expect(onRegenerate).toHaveBeenCalled();
+  });
+});

@@ -106,3 +106,19 @@ describe('replaceOutputImagesWithHistory', () => {
     expect(state().canUndo()).toBe(false);
   });
 });
+
+describe('latestHistoryImageUrl', () => {
+  it('returns the newest archived image for a slot (G7 compare source)', async () => {
+    const { latestHistoryImageUrl } = await import('./outputHistory');
+    seed({ kind: 'image', preview_url: '/gm/1/cover', images: [{ url: '/gm/1/cover', kind: 'image' }] });
+    replaceOutputImagesWithHistory('out1', ['/gm/2/cover'], 'image');
+    // /gm/1 was archived newest-first — it is the compare source now.
+    expect(latestHistoryImageUrl('out1')).toBe('/gm/1/cover');
+  });
+
+  it('returns null when the slot has no history node', async () => {
+    const { latestHistoryImageUrl } = await import('./outputHistory');
+    seed({ kind: 'image', preview_url: '/gm/1/cover' });
+    expect(latestHistoryImageUrl('out1')).toBeNull();
+  });
+});

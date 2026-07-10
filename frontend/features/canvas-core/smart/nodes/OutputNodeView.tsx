@@ -1,5 +1,5 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { getResourceFileUrl } from '../../../../services/resourceService';
 import { getSupabaseClient } from '../../../../supabaseClient';
@@ -20,9 +20,17 @@ import {
 } from '../../services/canvasService';
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { createOutputNode } from '../factories';
+import { latestHistoryImageUrl } from '../outputHistory';
+import { promptIdForOutput, regenerateForOutput } from '../regenerate';
+import { useRegenStore } from '../regenStore';
 import type { OutputNodeData } from '../types';
 import { SMART_NODE_DEFAULT_WIDTH } from '../types';
+import { OutputLightbox, type LightboxItem } from './OutputLightbox';
 import { useNodeDataPatch } from './useNodeDataPatch';
+
+/** Single-click waits this long for a possible double-click (crop) before
+ *  opening the lightbox — the two gestures share the same image. */
+const LIGHTBOX_CLICK_DELAY_MS = 250;
 
 const KIND_LABEL: Record<OutputNodeData['kind'], string> = {
   text: 'Text',
@@ -68,6 +76,48 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
   const [outpaintOpen, setOutpaintOpen] = useState(false);
   const [outpaintCommitting, setOutpaintCommitting] = useState(false);
   const [outpaintError, setOutpaintError] = useState<string | null>(null);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const lightboxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const regenerating = useRegenStore((s) => !!s.running[id]);
+
+  useEffect(
+    () => () => {
+      if (lightboxTimerRef.current) clearTimeout(lightboxTimerRef.current);
+    },
+    [],
+  );
+
+  const lightboxItems: LightboxItem[] =
+    images && images.length > 0
+      ? images.map((img) => ({ url: img.url, name: img.name }))
+      : kind !== 'text' && preview_url
+        ? [{ url: preview_url, name: preview_text || undefined }]
+        : [];
+
+  /** Deferred so a double-click (crop) can cancel the pending open. */
+  const queueLightbox = useCallback(
+    (index: number) => {
+      if (lightboxItems.length === 0) return;
+      if (lightboxTimerRef.current) clearTimeout(lightboxTimerRef.current);
+      lightboxTimerRef.current = setTimeout(() => {
+        lightboxTimerRef.current = null;
+        setLightboxIndex(index);
+      }, LIGHTBOX_CLICK_DELAY_MS);
+    },
+    [lightboxItems.length],
+  );
+
+  const cancelQueuedLightbox = useCallback(() => {
+    if (lightboxTimerRef.current) {
+      clearTimeout(lightboxTimerRef.current);
+      lightboxTimerRef.current = null;
+    }
+  }, []);
+
+  const canRegenerate = !!promptIdForOutput(id);
+  const onRegenerate = useCallback(() => {
+    void regenerateForOutput(id);
+  }, [id]);
 
   const canCrop = kind === 'image' && !!preview_url;
   // Grid split has no local fallback — every tile is derived
@@ -323,6 +373,18 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           Output · {KIND_LABEL[kind]}
         </div>
         <div className="flex items-center gap-2">
+          {canRegenerate && (
+            <button
+              type="button"
+              data-testid="regenerate-open"
+              onClick={onRegenerate}
+              disabled={regenerating}
+              title="Re-run the source prompt"
+              className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              {regenerating ? 'Rerunning…' : 'Rerun'}
+            </button>
+          )}
           {canSplit && (
             <button
               type="button"
@@ -374,7 +436,10 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
       </div>
       <div
         data-testid="smart-output-body"
-        onDoubleClick={openEditor}
+        onDoubleClick={() => {
+          cancelQueuedLightbox();
+          openEditor();
+        }}
         className={`p-3 ${canCrop ? 'cursor-zoom-in' : ''}`}
         title={canCrop ? 'Double-click to crop' : undefined}
       >
@@ -387,7 +452,8 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
                 src={img.url}
                 alt={img.name || `Generated ${i + 1}`}
                 draggable={false}
-                className="block w-full rounded object-contain"
+                onClick={() => queueLightbox(i)}
+                className="block w-full cursor-zoom-in rounded object-contain"
               />
             ))}
           </div>
@@ -396,6 +462,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
             src={preview_url || images?.[0]?.url}
             alt={preview_text || 'Output preview'}
             draggable={false}
+            onClick={() => queueLightbox(0)}
             className="block w-full rounded object-contain"
           />
         ) : preview_text ? (
@@ -485,6 +552,18 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         >
           {outpaintError}
         </div>
+      )}
+      {lightboxIndex !== null && lightboxItems.length > 0 && (
+        <OutputLightbox
+          items={lightboxItems}
+          index={Math.min(lightboxIndex, lightboxItems.length - 1)}
+          kind={kind === 'video' ? 'video' : 'image'}
+          onIndexChange={setLightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+          compareUrl={latestHistoryImageUrl(id)}
+          onRegenerate={canRegenerate ? onRegenerate : undefined}
+          regenerating={regenerating}
+        />
       )}
     </div>
   );
