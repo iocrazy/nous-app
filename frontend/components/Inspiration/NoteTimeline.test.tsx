@@ -9,6 +9,7 @@ vi.mock('./NoteCard', () => ({
 }));
 vi.mock('../../utils/formatDate', () => ({
   formatDateShort: (date: string) => date,
+  formatDateOnlyShort: (date: string) => date,
 }));
 
 import { NoteTimeline } from './NoteTimeline';

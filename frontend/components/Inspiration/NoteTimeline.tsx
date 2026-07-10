@@ -10,7 +10,7 @@ import React, { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { NoteCard } from './NoteCard';
 import type { InspirationNote } from '../../services/inspirationService';
-import { formatDateShort } from '../../utils/formatDate';
+import { formatDateOnlyShort } from '../../utils/formatDate';
 
 interface Props {
   notes: InspirationNote[];
@@ -64,7 +64,7 @@ export const NoteTimeline: React.FC<Props> = ({
       {groups.map(([day, dayNotes]) => (
         <React.Fragment key={day}>
           <div className="flex items-center gap-2.5 px-0.5 pt-1 text-[11px] font-semibold uppercase tracking-wide text-content-3 tabular-nums">
-            {day === '__pinned__' ? t('inspiration.pinned', 'Pinned') : formatDateShort(day)}
+            {day === '__pinned__' ? t('inspiration.pinned', 'Pinned') : formatDateOnlyShort(day)}
             <span className="font-normal text-content-4">
               · {t('inspiration.noteCount', '{{count}} notes', { count: dayNotes.length })}
             </span>
