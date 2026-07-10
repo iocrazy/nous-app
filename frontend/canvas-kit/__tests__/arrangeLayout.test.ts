@@ -40,6 +40,15 @@ describe('arrangeLayout', () => {
     expect(out[0]).not.toBe(input[0]);
   });
 
+  it('preserves the graph centroid (a graph living at (3000, 2000) stays there)', () => {
+    const input = [node('a', 2900, 1900), node('b', 3100, 2100)];
+    const out = arrangeLayout(input, [edge('a', 'b')]);
+    const cx = (out[0].position.x + out[1].position.x) / 2;
+    const cy = (out[0].position.y + out[1].position.y) / 2;
+    expect(cx).toBeCloseTo(3000, 0);
+    expect(cy).toBeCloseTo(2000, 0);
+  });
+
   it('uses measured sizes for spacing (bigger nodes push ranks further apart)', () => {
     const small = arrangeLayout([node('a', 0, 0, 100, 50), node('b')], [edge('a', 'b')]);
     const large = arrangeLayout([node('a', 0, 0, 500, 50), node('b')], [edge('a', 'b')]);

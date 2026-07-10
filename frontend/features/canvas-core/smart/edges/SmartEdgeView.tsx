@@ -38,9 +38,13 @@ export function SmartEdgeView(props: EdgeProps) {
 
   const cut = () => {
     const { connections } = useCanvasCoreStore.getState();
-    setConnections(
-      connections.filter((c) => (c as Record<string, unknown>).id !== id),
+    const next = connections.filter(
+      (c) => (c as Record<string, unknown>).id !== id,
     );
+    // Legacy connections without a stored id get a synthesized RF id that
+    // never matches — bail rather than commit a phantom undo step.
+    if (next.length === connections.length) return;
+    setConnections(next);
   };
 
   return (

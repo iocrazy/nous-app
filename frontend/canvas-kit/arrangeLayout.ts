@@ -49,7 +49,7 @@ export function arrangeLayout<N extends ArrangeNode>(
 
   dagre.layout(g);
 
-  return nodes.map((node) => {
+  const laidOut = nodes.map((node) => {
     const placed = g.node(node.id);
     if (!placed || !Number.isFinite(placed.x) || !Number.isFinite(placed.y)) {
       return { ...node };
@@ -62,4 +62,21 @@ export function arrangeLayout<N extends ArrangeNode>(
       position: { x: placed.x - width / 2, y: placed.y - height / 2 },
     };
   });
+
+  // dagre lays out from the origin; translate the result back onto the
+  // graph's original centroid so Arrange never teleports a graph built at
+  // (3000, 2000) out of the viewport.
+  if (laidOut.length === 0) return laidOut;
+  const centroid = (list: { position: { x: number; y: number } }[]) => ({
+    x: list.reduce((s, n) => s + n.position.x, 0) / list.length,
+    y: list.reduce((s, n) => s + n.position.y, 0) / list.length,
+  });
+  const before = centroid(nodes);
+  const after = centroid(laidOut);
+  const dx = before.x - after.x;
+  const dy = before.y - after.y;
+  return laidOut.map((node) => ({
+    ...node,
+    position: { x: node.position.x + dx, y: node.position.y + dy },
+  }));
 }
