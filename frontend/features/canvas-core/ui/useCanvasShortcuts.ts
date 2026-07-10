@@ -9,6 +9,7 @@
  *   Esc                       → clear selection
  *   Cmd/Ctrl + C              → copy selected nodes (in-memory clipboard)
  *   Cmd/Ctrl + V              → paste from in-memory clipboard
+ *   Cmd/Ctrl + D              → duplicate selected nodes in place (G6)
  *   Delete / Backspace        → delete selected nodes
  *
  * Bound at window scope while the hook is mounted. Skipped when the
@@ -24,6 +25,7 @@ import { useEffect, useRef } from 'react';
 
 import {
   copyToClipboard,
+  prepareDuplicate,
   preparePaste,
   readClipboard,
 } from '../store/clipboard';
@@ -114,6 +116,30 @@ export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
         store.setNodes([...store.nodes, ...prepared.nodes]);
         // Re-map internal edges onto the pasted nodes so the pasted subgraph
         // keeps its wiring instead of landing as orphaned nodes.
+        if (prepared.connections.length > 0) {
+          store.setConnections([...store.connections, ...prepared.connections]);
+        }
+        store.setSelection(
+          prepared.nodes
+            .map((n) => idOf(n))
+            .filter((v): v is string => v !== null),
+        );
+        return;
+      }
+      if (meta && (key === 'd' || key === 'D')) {
+        // Duplicate in place (G6 — Infinite's alt-drag-copy, keyboard form).
+        // Only preventDefault when we actually act: with nothing selected the
+        // browser keeps its bookmark shortcut.
+        if (store.selection.length === 0) return;
+        event.preventDefault();
+        const selected = collectSelectedNodes(store.nodes, store.selection);
+        const prepared = prepareDuplicate(
+          selected,
+          store.connections,
+          collectIds(store.nodes),
+        );
+        if (!prepared) return;
+        store.setNodes([...store.nodes, ...prepared.nodes]);
         if (prepared.connections.length > 0) {
           store.setConnections([...store.connections, ...prepared.connections]);
         }

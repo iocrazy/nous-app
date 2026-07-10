@@ -110,3 +110,25 @@ describe('preparePaste', () => {
     expect(typeof (out.nodes[0] as Record<string, unknown>).id).toBe('string');
   });
 });
+
+describe('smart data-tag hygiene on clone (G6)', () => {
+  it('preparePaste remaps gen_slot to the pasted prompt id', () => {
+    const prompt = { id: 'p1', type: 'prompt', position: { x: 0, y: 0 }, data: { body: 'x' } };
+    const slot = {
+      id: 'out1',
+      type: 'output',
+      position: { x: 320, y: 0 },
+      data: { kind: 'image', gen_slot: { node_id: 'p1', index: 0 } },
+    };
+    copyToClipboard('smart', [prompt, slot] as never, []);
+    const prepared = preparePaste(new Set(['p1', 'out1']))!;
+    const pastedPrompt = prepared.nodes.find(
+      (n) => (n as { type?: string }).type === 'prompt',
+    ) as { id: string };
+    const pastedSlot = prepared.nodes.find(
+      (n) => (n as { type?: string }).type === 'output',
+    ) as { data: { gen_slot: { node_id: string } } };
+    expect(pastedSlot.data.gen_slot.node_id).toBe(pastedPrompt.id);
+    expect(pastedPrompt.id).not.toBe('p1');
+  });
+});

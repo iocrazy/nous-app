@@ -242,3 +242,102 @@ describe('useCanvasShortcuts — Cmd+K palette (Phase 6c)', () => {
     expect(() => fireKey({ key: 'k', meta: true })).not.toThrow();
   });
 });
+
+describe('useCanvasShortcuts — duplicate (G6, Infinite alt-drag-copy)', () => {
+  it('Cmd+D clones the selection + internal edges, offset, and selects the copies', () => {
+    render(<Host />);
+    useCanvasCoreStore.setState({ selection: ['a', 'b'] });
+    const evt = fireKey({ key: 'd', meta: true });
+    expect(evt.defaultPrevented).toBe(true);
+
+    const s = useCanvasCoreStore.getState();
+    expect(s.nodes).toHaveLength(5);
+    // Copies are offset and selected; originals stay put.
+    const copies = s.nodes.filter(
+      (n) => !['a', 'b', 'c'].includes((n as { id: string }).id),
+    ) as Array<{ id: string; position: { x: number; y: number } }>;
+    expect(copies).toHaveLength(2);
+    expect(copies[0].position).toEqual({ x: 24, y: 24 });
+    expect(new Set(s.selection)).toEqual(new Set(copies.map((n) => n.id)));
+    // Internal edge a→b was cloned onto the copies.
+    expect(s.connections).toHaveLength(2);
+    const clone = s.connections.find((c) => c.id !== 'e1')!;
+    expect(copies.map((n) => n.id)).toContain(clone.source);
+    expect(copies.map((n) => n.id)).toContain(clone.target);
+  });
+
+  it('Cmd+D does not touch the copy/paste clipboard', () => {
+    render(<Host />);
+    useCanvasCoreStore.setState({ selection: ['a'] });
+    fireKey({ key: 'c', meta: true }); // user copies 'a'
+    useCanvasCoreStore.setState({ selection: ['b'] });
+    fireKey({ key: 'd', meta: true }); // duplicating 'b' must not clobber it
+    fireKey({ key: 'v', meta: true }); // paste still yields the copy of 'a'
+    const s = useCanvasCoreStore.getState();
+    // 3 originals + 1 duplicate of b + 1 paste of a
+    expect(s.nodes).toHaveLength(5);
+  });
+
+  it('Cmd+D with empty selection is a no-op (browser bookmark untouched)', () => {
+    render(<Host />);
+    const evt = fireKey({ key: 'd', meta: true });
+    expect(evt.defaultPrevented).toBe(false);
+    expect(useCanvasCoreStore.getState().nodes).toHaveLength(3);
+  });
+
+  it('remaps smart data tags to the cloned ids (gen_slot never points at the original)', () => {
+    render(<Host />);
+    useCanvasCoreStore.setState({
+      kind: 'smart',
+      nodes: [
+        { id: 'p1', type: 'prompt', position: { x: 0, y: 0 }, data: { body: 'x' } },
+        {
+          id: 'out1',
+          type: 'output',
+          position: { x: 320, y: 0 },
+          data: { kind: 'image', gen_slot: { node_id: 'p1', index: 0 } },
+        },
+      ],
+      connections: [],
+      selection: ['p1', 'out1'],
+    });
+    fireKey({ key: 'd', meta: true });
+    const s = useCanvasCoreStore.getState();
+    const dupSlot = s.nodes.find((n) => {
+      const o = n as { id: string; data?: { gen_slot?: { node_id: string } } };
+      return o.id !== 'out1' && o.data?.gen_slot;
+    }) as { data: { gen_slot: { node_id: string } } };
+    const dupPrompt = s.nodes.find((n) => {
+      const o = n as { id: string; type?: string };
+      return o.type === 'prompt' && o.id !== 'p1';
+    }) as { id: string };
+    expect(dupSlot.data.gen_slot.node_id).toBe(dupPrompt.id);
+  });
+
+  it('strips smart data tags whose referent was NOT duplicated', () => {
+    render(<Host />);
+    useCanvasCoreStore.setState({
+      kind: 'smart',
+      nodes: [
+        { id: 'p1', type: 'prompt', position: { x: 0, y: 0 }, data: { body: 'x' } },
+        {
+          id: 'out1',
+          type: 'output',
+          position: { x: 320, y: 0 },
+          data: { kind: 'image', gen_slot: { node_id: 'p1', index: 0 } },
+        },
+      ],
+      connections: [],
+      selection: ['out1'], // slot only — its prompt stays behind
+    });
+    fireKey({ key: 'd', meta: true });
+    const s = useCanvasCoreStore.getState();
+    const dup = s.nodes.find((n) => {
+      const o = n as { id: string; type?: string };
+      return o.type === 'output' && o.id !== 'out1';
+    }) as { data: { gen_slot?: unknown } };
+    // Without the strip, the copy would STEAL the original slot's updates
+    // (upsertGenerationSlots finds the first matching tag).
+    expect(dup.data.gen_slot).toBeUndefined();
+  });
+});
