@@ -255,6 +255,39 @@ describe('ProjectWorkspace', () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
+  it('re-resolves the mounted script for the newly selected episode when switching via the ⇄ popover (PR-11)', async () => {
+    mockScriptService.fetchScriptProjects.mockResolvedValue({
+      data: [
+        { id: 's1', name: 'Draft 1', status: 'active', created_at: '', updated_at: '2026-07-01T00:00:00Z', episode_id: '1' },
+        { id: 's2', name: 'Draft 2', status: 'active', created_at: '', updated_at: '2026-07-02T00:00:00Z', episode_id: '2' },
+      ],
+      total: 2,
+    });
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    // Open Script for the default episode (Ep 1, lowest sort_order) — resolves s1.
+    fireEvent.click(await screen.findByTestId('ws-ep-script'));
+    expect(await screen.findByTestId('mock-editor-shell')).toHaveAttribute('data-script-id', 's1');
+    expect(mockScriptService.fetchScriptProjects).toHaveBeenCalledTimes(1);
+
+    // Switch the current episode via the ⇄ popover while Script stays open.
+    // ProjectWorkspace.tsx:291-299 must re-resolve for the new episode rather
+    // than leaving Ep1's stale script mounted under Ep2's sidebar context.
+    fireEvent.click(screen.getByTestId('ws-ep-card'));
+    fireEvent.click(await screen.findByTestId('ws-ep-option-2'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('mock-editor-shell')).toHaveAttribute('data-script-id', 's2'),
+    );
+    expect(screen.getByTestId('mock-editor-shell')).toHaveAttribute('data-project-id', 'p1');
+    // The sidebar's episode switch stays mounted next to the inline editor —
+    // still no route jump.
+    expect(navigate).not.toHaveBeenCalled();
+    // Exactly one extra fetch for the re-resolve on top of the initial
+    // resolve — pins a bounded re-resolve, not an effect loop.
+    expect(mockScriptService.fetchScriptProjects).toHaveBeenCalledTimes(2);
+  });
+
   it('falls back to the Episodes module when the current episode has no script', async () => {
     mockScriptService.fetchScriptProjects.mockResolvedValue({ data: [], total: 0 });
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
