@@ -367,6 +367,30 @@ async def generate_missing_frames(
 
 
 # ============================================
+# Project entities — Characters/Locations ASSETS view (PR-10a, G13)
+# ============================================
+
+
+@router.get("/{project_id}/entities")
+async def get_project_entities(
+    project_id: str,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_read_access),
+):
+    """Project-wide Characters/Locations, derived from every non-deleted
+    script's scenes (character cues in content_json + scene location_text).
+    Not authored anywhere — same derived-not-synced model the editor rail
+    uses, rolled up project-wide with per-entity episode attribution."""
+    try:
+        svc = ProjectsService()
+        data = await svc.get_project_entities(project_id)
+        return {"success": True, "data": data}
+    except Exception as e:
+        logger.error(f"Failed to get entities for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get project entities")
+
+
+# ============================================
 # File endpoints (nested under project)
 # ============================================
 
