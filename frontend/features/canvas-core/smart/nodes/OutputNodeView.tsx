@@ -53,7 +53,7 @@ async function buildPreviewUrl(resourceId: string): Promise<string> {
 }
 
 export function OutputNodeView({ id, data, selected }: NodeProps) {
-  const { kind, resource_id, preview_text, preview_url, crop_region } =
+  const { kind, resource_id, preview_text, preview_url, crop_region, images, history_for } =
     data as unknown as OutputNodeData;
   const patchData = useNodeDataPatch(id);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -319,6 +319,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
       />
       <div className="flex items-center justify-between border-b border-slate-200 px-3 py-1.5 dark:border-slate-700">
         <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          {history_for ? 'History · ' : ''}
           Output · {KIND_LABEL[kind]}
         </div>
         <div className="flex items-center gap-2">
@@ -377,9 +378,22 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         className={`p-3 ${canCrop ? 'cursor-zoom-in' : ''}`}
         title={canCrop ? 'Double-click to crop' : undefined}
       >
-        {kind === 'image' && preview_url ? (
+        {images && images.length > 1 ? (
+          /* Multi-result grid (G4-F2): count N lands N images in ONE node. */
+          <div className="grid grid-cols-2 gap-1" data-testid="output-images-grid">
+            {images.map((img, i) => (
+              <img
+                key={`${img.url}-${i}`}
+                src={img.url}
+                alt={img.name || `Generated ${i + 1}`}
+                draggable={false}
+                className="block w-full rounded object-contain"
+              />
+            ))}
+          </div>
+        ) : kind === 'image' && (preview_url || images?.[0]?.url) ? (
           <img
-            src={preview_url}
+            src={preview_url || images?.[0]?.url}
             alt={preview_text || 'Output preview'}
             draggable={false}
             className="block w-full rounded object-contain"

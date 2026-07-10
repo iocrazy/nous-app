@@ -30,7 +30,7 @@ function seed(): void {
 afterEach(() => useCanvasCoreStore.getState().reset());
 
 describe('upsertGenerationSlots', () => {
-  it('creates one image slot per url, wired from the prompt', () => {
+  it('lands ALL urls in ONE slot as images[] (Infinite: count N = one node, N images)', () => {
     seed();
     upsertGenerationSlots('p1', ['/gm/1/cover', '/gm/2/cover'], 'image');
 
@@ -38,14 +38,19 @@ describe('upsertGenerationSlots', () => {
     const slots = state.nodes.filter(
       (n) => ((n as Record<string, unknown>).data as { gen_slot?: unknown })?.gen_slot,
     ) as Array<Record<string, unknown>>;
-    expect(slots).toHaveLength(2);
-    expect((slots[0].data as { kind: string }).kind).toBe('image');
-    expect((slots[0].data as { preview_url: string }).preview_url).toBe('/gm/1/cover');
+    expect(slots).toHaveLength(1);
+    const data = slots[0].data as Record<string, unknown>;
+    expect(data.kind).toBe('image');
+    expect(data.images).toEqual([
+      { url: '/gm/1/cover', kind: 'image' },
+      { url: '/gm/2/cover', kind: 'image' },
+    ]);
+    expect(data.preview_url).toBe('/gm/1/cover');
     const conns = state.connections as Array<Record<string, unknown>>;
-    expect(conns.filter((c) => c.source === 'p1')).toHaveLength(2);
+    expect(conns.filter((c) => c.source === 'p1')).toHaveLength(1);
   });
 
-  it('reuses slots by index on a re-run instead of duplicating', () => {
+  it('re-run reuses the slot and archives the previous images into history', () => {
     seed();
     upsertGenerationSlots('p1', ['/gm/1/cover'], 'image');
     upsertGenerationSlots('p1', ['/gm/9/cover'], 'image');
@@ -55,7 +60,16 @@ describe('upsertGenerationSlots', () => {
       (n) => ((n as Record<string, unknown>).data as { gen_slot?: unknown })?.gen_slot,
     ) as Array<Record<string, unknown>>;
     expect(slots).toHaveLength(1);
-    expect((slots[0].data as { preview_url: string }).preview_url).toBe('/gm/9/cover');
+    const data = slots[0].data as Record<string, unknown>;
+    expect((data.images as Array<{ url: string }>)[0].url).toBe('/gm/9/cover');
+
+    const history = state.nodes.filter(
+      (n) => ((n as Record<string, unknown>).data as { history_for?: string })?.history_for,
+    ) as Array<Record<string, unknown>>;
+    expect(history).toHaveLength(1);
+    expect((history[0].data as { images: Array<{ url: string }> }).images).toEqual([
+      { url: '/gm/1/cover', kind: 'image' },
+    ]);
   });
 
   it('does not touch undo history', () => {

@@ -160,6 +160,41 @@ describe('startLoopRun', () => {
     expect(useLoopRunStore.getState().running['loop1']).toBeUndefined();
   });
 
+  it('gen rounds land images[] in the round slot instead of text', async () => {
+    seed();
+    useCanvasCoreStore.setState({
+      nodes: [
+        { ...LOOP, data: { ...(LOOP.data as object), rounds: 1 } } as CanvasNode,
+        {
+          ...PROMPT,
+          data: { ...(PROMPT.data as object), gen: { kind: 'image', model: '', count: 2 } },
+        } as CanvasNode,
+      ],
+    });
+    useLoopRunStore.getState().setRunnerOverride(async () => ({
+      ok: true,
+      text: '/gm/1/cover\n/gm/2/cover',
+      error: null,
+      urls: ['/gm/1/cover', '/gm/2/cover'],
+      media_kind: 'image',
+    }));
+
+    await startLoopRun('loop1');
+
+    const slot = useCanvasCoreStore
+      .getState()
+      .nodes.find(
+        (n) => ((n as Record<string, unknown>).data as { loop_slot?: unknown })?.loop_slot,
+      ) as Record<string, unknown> | undefined;
+    expect(slot).toBeTruthy();
+    const data = slot!.data as Record<string, unknown>;
+    expect(data.kind).toBe('image');
+    expect(data.images).toEqual([
+      { url: '/gm/1/cover', kind: 'image' },
+      { url: '/gm/2/cover', kind: 'image' },
+    ]);
+  });
+
   it('requestStop halts after the in-flight round', async () => {
     seed();
     useCanvasCoreStore.setState({
