@@ -1532,7 +1532,20 @@
     "kind": {
       "smart": "智能",
       "classic": "经典"
-    }
+    },
+    "moveToTrash": "移入回收站",
+    "movedToTrash": "已移入回收站",
+    "deleteFailed": "删除画布失败",
+    "trash": "回收站",
+    "trashEmpty": "回收站为空",
+    "trashLoadFailed": "加载回收站失败",
+    "restore": "恢复",
+    "restored": "画布已恢复",
+    "restoreFailed": "恢复画布失败",
+    "deleteForever": "永久删除",
+    "confirmDelete": "确认删除",
+    "purged": "画布已永久删除",
+    "purgeFailed": "永久删除失败"
   },
   "canvas": {
     "addImage": "+ 添加图片",

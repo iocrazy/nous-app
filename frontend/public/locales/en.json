@@ -1532,7 +1532,20 @@
     "kind": {
       "smart": "Smart",
       "classic": "Classic"
-    }
+    },
+    "moveToTrash": "Move to trash",
+    "movedToTrash": "Moved to trash",
+    "deleteFailed": "Failed to delete canvas",
+    "trash": "Trash",
+    "trashEmpty": "Trash is empty",
+    "trashLoadFailed": "Failed to load trash",
+    "restore": "Restore",
+    "restored": "Canvas restored",
+    "restoreFailed": "Failed to restore canvas",
+    "deleteForever": "Delete Forever",
+    "confirmDelete": "Confirm delete",
+    "purged": "Canvas permanently deleted",
+    "purgeFailed": "Failed to delete canvas"
   },
   "canvas": {
     "addImage": "+ Add Image",

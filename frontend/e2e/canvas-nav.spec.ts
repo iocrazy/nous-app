@@ -157,3 +157,82 @@ test.describe('canvas nav entry + landing page (Phase 0 G11)', () => {
     ).toBeVisible();
   });
 });
+
+test.describe('canvas trash (G9)', () => {
+  test('delete → trash → restore round trip', async ({ page }) => {
+    await page.addInitScript(() => {
+      try {
+        localStorage.setItem('language', 'en');
+        localStorage.setItem('mediahub.theme', 'dark');
+      } catch {
+        /* localStorage unavailable */
+      }
+    });
+    await setupStubbedSession(page);
+    await setupCanvasListStubs(page);
+
+    let trashed: string[] = [];
+    await page.route('**/api/v1/canvases/c1', (route) => {
+      if (route.request().method() === 'DELETE') {
+        trashed.push('c1');
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true }),
+        });
+      }
+      return route.fallback();
+    });
+    await page.route(`**/api/v1/canvases/team/${TEAM_ID}/trash`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: trashed.map((id) => ({
+            id,
+            name: 'Hero Canvas',
+            kind: 'smart',
+            updated_at: '2020-01-02T00:00:00Z',
+            deleted_at: '2020-01-04T00:00:00Z',
+            project_id: 'p1',
+            project_name: 'Demo Project',
+          })),
+        }),
+      }),
+    );
+    await page.route('**/api/v1/canvases/c1/restore', (route) => {
+      trashed = [];
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true }),
+      });
+    });
+
+    await page.goto(`/team/${TEAM_ID}/canvas`);
+    await expect(page.getByText('Hero Canvas')).toBeVisible();
+
+    // Soft-delete from the card (hover affordance) — two cards on the
+    // page, scope to the one holding Hero Canvas.
+    const heroCard = page
+      .locator('div.group')
+      .filter({ hasText: 'Hero Canvas' })
+      .first();
+    await heroCard.hover();
+    await heroCard.getByRole('button', { name: 'Move to trash' }).click();
+    await expect(page.getByText('Hero Canvas')).toHaveCount(0);
+
+    // Expand the trash — the row is there with Restore + Delete Forever.
+    await page.getByRole('button', { name: /Trash/ }).click();
+    await expect(page.getByText('Hero Canvas')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Delete Forever' })).toBeVisible();
+
+    // Restore refetches the live tree (stub returns the full list again).
+    await page.getByRole('button', { name: 'Restore' }).click();
+    await expect(
+      page.locator('section').filter({ hasText: 'Demo Project' }).getByText('Hero Canvas'),
+    ).toBeVisible();
+    await page.screenshot({ path: 'e2e-artifacts/canvas-trash.png', fullPage: true });
+  });
+});

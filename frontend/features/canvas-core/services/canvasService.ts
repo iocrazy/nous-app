@@ -352,3 +352,31 @@ export async function listTeamCanvases(teamId: string): Promise<TeamCanvasProjec
   const response = await apiFetch(`/api/v1/canvases/team/${teamId}`);
   return readEnvelope<TeamCanvasProject[]>(response);
 }
+
+// ---- Trash (Infinite parity G9) ------------------------------------------
+
+export interface TrashedCanvas {
+  id: string;
+  name: string;
+  kind: string;
+  updated_at: string | null;
+  deleted_at: string | null;
+  project_id: string;
+  project_name: string;
+}
+
+/** A team's trashed canvases, newest-trashed first. */
+export async function listTeamCanvasTrash(teamId: string): Promise<TrashedCanvas[]> {
+  const response = await apiFetch(`/api/v1/canvases/team/${teamId}/trash`);
+  return readEnvelope<TrashedCanvas[]>(response);
+}
+
+/** Bring a trashed canvas back to life. */
+export async function restoreCanvas(canvasId: string): Promise<void> {
+  await apiFetch(`/api/v1/canvases/${canvasId}/restore`, { method: 'POST' });
+}
+
+/** Permanently delete — only valid for canvases already in the trash. */
+export async function purgeCanvas(canvasId: string): Promise<void> {
+  await apiFetch(`/api/v1/canvases/${canvasId}/purge`, { method: 'DELETE' });
+}

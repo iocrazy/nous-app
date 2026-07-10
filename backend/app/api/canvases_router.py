@@ -185,6 +185,28 @@ async def list_team_canvases(team_id: str, auth: AuthDep) -> dict:
     return {"success": True, "data": data}
 
 
+@router.get("/canvases/team/{team_id}/trash")
+async def list_team_canvas_trash(team_id: str, auth: AuthDep) -> dict:
+    """A team's trashed canvases (G9), newest-trashed first. Registered
+    BEFORE /canvases/{canvas_id} — static segments must win the match."""
+    if not await _is_team_member(team_id, auth.user_id):
+        raise HTTPException(status_code=403, detail="You are not a member of this team")
+    rows = await CanvasRepository().list_trashed_for_team(team_id)
+    data = [
+        {
+            "id": str(r.get("id")),
+            "name": r.get("name") or "",
+            "kind": r.get("kind") or "smart",
+            "updated_at": r.get("updated_at"),
+            "deleted_at": r.get("deleted_at"),
+            "project_id": str(r.get("project_id")),
+            "project_name": (r.get("projects") or {}).get("name") or "",
+        }
+        for r in rows
+    ]
+    return {"success": True, "data": data}
+
+
 # ============================================================
 # Canvas-scoped routes
 # ============================================================
@@ -231,11 +253,40 @@ async def delete_canvas(
     auth: AuthDep,
     canvas_id: str = Path(..., description="Snowflake canvas ID"),
 ) -> dict:
+    """Soft delete (G9): the canvas moves to the team trash; restore or
+    purge from there."""
     await _gate_canvas_write(canvas_id, auth)
     svc = CanvasService()
-    ok = await svc.delete(canvas_id)
+    ok = await svc.soft_delete(canvas_id)
     if not ok:
         raise HTTPException(status_code=404, detail="canvas not found")
+    return {"success": True}
+
+
+@router.post("/canvases/{canvas_id}/restore")
+async def restore_canvas(
+    auth: AuthDep,
+    canvas_id: str = Path(..., description="Snowflake canvas ID"),
+) -> dict:
+    await _gate_canvas_write(canvas_id, auth)
+    svc = CanvasService()
+    ok = await svc.restore(canvas_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="canvas not found in trash")
+    return {"success": True}
+
+
+@router.delete("/canvases/{canvas_id}/purge")
+async def purge_canvas(
+    auth: AuthDep,
+    canvas_id: str = Path(..., description="Snowflake canvas ID"),
+) -> dict:
+    """Permanent delete — only valid for canvases already in the trash."""
+    await _gate_canvas_write(canvas_id, auth)
+    svc = CanvasService()
+    ok = await svc.purge(canvas_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="canvas not found in trash")
     return {"success": True}
 
 
