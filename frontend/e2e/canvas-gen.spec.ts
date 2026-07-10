@@ -116,10 +116,11 @@ test('image prompt Run lands both results in output slots', async ({ page }) => 
   // Cascade Run needs no selection and drives the same generation pipeline.
   await page.getByRole('button', { name: 'Cascade Run', exact: true }).click();
 
-  // Two output slots appear, wired from the prompt, each showing the image.
-  await expect(page.locator('.react-flow__node')).toHaveCount(3);
-  await expect(page.locator('.react-flow__edge')).toHaveCount(2);
-  await expect(page.locator('.react-flow__node img')).toHaveCount(2);
+  // ONE output slot appears (Infinite: count N = one node, N images),
+  // wired from the prompt, rendering both images as a grid.
+  await expect(page.locator('.react-flow__node')).toHaveCount(2);
+  await expect(page.locator('.react-flow__edge')).toHaveCount(1);
+  await expect(page.locator('[data-testid="output-images-grid"] img')).toHaveCount(2);
 
   await page.screenshot({ path: 'e2e-artifacts/canvas-gen.png', fullPage: true });
 });
