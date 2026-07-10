@@ -875,6 +875,36 @@ body {
   border-radius: var(--canvas-r-island);
 }
 
+/* Run-state edge colouring (Phase 1 G2) — Infinite's runPath wait/active/
+   done wire states, aligned with the node halo tones (RUN_STATUS_TONE):
+   amber queued, indigo running (dash-flow animation), emerald succeeded,
+   rose failed, dimmed blocked. Classes are set per-edge by CanvasSurface. */
+.mh-canvas .mh-edge-wait .react-flow__edge-path {
+  stroke: #fbbf24;
+  stroke-dasharray: 6 6;
+  opacity: 0.7;
+}
+
+.mh-canvas .mh-edge-active .react-flow__edge-path {
+  stroke: var(--canvas-accent);
+  stroke-width: 2.5px;
+  stroke-dasharray: 6 6;
+  animation: canvas-edge-flow 0.6s linear infinite;
+}
+
+.mh-canvas .mh-edge-done .react-flow__edge-path {
+  stroke: #34d399;
+}
+
+.mh-canvas .mh-edge-failed .react-flow__edge-path {
+  stroke: #fb7185;
+}
+
+.mh-canvas .mh-edge-blocked .react-flow__edge-path {
+  stroke: var(--canvas-line);
+  opacity: 0.5;
+}
+
 /* Downloads grid: mobile 2 cols (Tailwind), desktop auto-fill fixed-width cards */
 @media (min-width: 768px) {
   .downloads-grid {

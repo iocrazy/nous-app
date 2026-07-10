@@ -11,6 +11,7 @@
 
 import {
   type Connection,
+  type Edge,
   type EdgeChange,
   type IsValidConnection,
   type Node,
@@ -26,6 +27,7 @@ import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { SMART_NODE_TYPES } from '../smart/nodes/registry';
 import { CLASSIC_NODE_TYPES } from '../classic/ClassicNodeViews';
 import { toReactFlowEdges, validateCanvasConnection } from './connectionMapping';
+import { edgeRunStateClass } from '../smart/edgeRunState';
 import { CanvasEngine } from '../../../canvas-kit/CanvasEngine';
 import { DragCreateMenu } from './DragCreateMenu';
 
@@ -98,7 +100,40 @@ export function CanvasSurface() {
       })),
     [nodes, selectionSet],
   );
-  const rfEdges = useMemo(() => toReactFlowEdges(connections), [connections]);
+  // Stable signature of non-idle prompt run statuses. Drag ticks swap the
+  // nodes array identity every frame; folding the statuses into a string
+  // means the edge-decoration memo below only re-runs when a status truly
+  // changes — edge identities stay stable mid-drag (RF re-renders every
+  // EdgeWrapper when they churn). Empty string = nothing to decorate.
+  const promptStatusSig = useMemo(() => {
+    if (kind !== 'smart') return '';
+    const entries: Array<[string, string]> = [];
+    for (const n of nodes) {
+      const obj = n as Record<string, unknown>;
+      if (obj.type !== 'prompt') continue;
+      const data = (obj.data ?? {}) as { run_status?: string };
+      if (data.run_status && data.run_status !== 'idle') {
+        entries.push([String(obj.id), data.run_status]);
+      }
+    }
+    return entries.length ? JSON.stringify(entries) : '';
+  }, [kind, nodes]);
+
+  // Run-state edge colouring (Infinite parity G2, smart only): edges carry
+  // the adjacent prompt's run_status as a class so a cascade run visibly
+  // flows wait → active → done along the wires (index.css § Canvas chrome).
+  const rfEdges = useMemo(() => {
+    const edges = toReactFlowEdges(connections);
+    if (kind !== 'smart' || !promptStatusSig) return edges;
+    const statusById = new Map(JSON.parse(promptStatusSig) as Array<[string, string]>);
+    return edges.map((edge) => {
+      const cls = edgeRunStateClass(edge, (id) => {
+        const runStatus = statusById.get(id);
+        return runStatus ? { type: 'prompt', runStatus } : undefined;
+      });
+      return cls ? { ...edge, className: cls } : edge;
+    });
+  }, [connections, kind, promptStatusSig]);
 
   // Fix 3 (6e-2c) — O(1) node-type lookup for connection validation.
   // `nodeTypeById` is called twice per connection event (source + target).
@@ -145,7 +180,16 @@ export function CanvasSurface() {
 
   const onEdgesChange = useCallback(
     (changes: EdgeChange[]) => {
-      const next = applyEdgeChanges(changes, rfEdges);
+      // Strip view-only fields before the store: the run-state className
+      // (and RF's selected flag) must never reach connections_json — stale
+      // decoration in the DB row makes collaborators' saves diverge
+      // byte-wise and trips the false-realtime-conflict path.
+      const next = applyEdgeChanges(changes, rfEdges).map((edge) => {
+        const { className: _className, selected: _selected, ...rest } = edge as Edge & {
+          className?: string;
+        };
+        return rest;
+      });
       setConnections(next as unknown as CanvasConnection[]);
     },
     [rfEdges, setConnections],
