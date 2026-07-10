@@ -22,6 +22,16 @@ function heatClass(cnt: number): string {
   return 'bg-indigo-500';
 }
 
+// Soft background tint for month cells that carry notes — strong enough to
+// scan at a glance (go-live feedback: the 4px dot was invisible), soft enough
+// to keep the day number readable in both themes.
+function cellTint(cnt: number): string {
+  if (cnt <= 0) return '';
+  if (cnt === 1) return 'bg-indigo-500/10';
+  if (cnt <= 3) return 'bg-indigo-500/20';
+  return 'bg-indigo-500/30';
+}
+
 interface Props {
   selectedDate: string | null;
   onSelectDate: (date: string | null) => void;
@@ -88,12 +98,36 @@ export const ActivityPanel: React.FC<Props> = ({ selectedDate, onSelectDate, ref
 
   const todayStr = ymd(new Date());
 
+  // Notes in the displayed month (footer stat, go-live feedback: "richer").
+  const monthTotal = useMemo(() => {
+    const prefix = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, '0')}-`;
+    return Object.entries(counts).reduce(
+      (sum, [day, cnt]) => (day.startsWith(prefix) ? sum + cnt : sum),
+      0,
+    );
+  }, [counts, month]);
+
+  const goToday = () => {
+    const now = new Date();
+    setMonth(new Date(now.getFullYear(), now.getMonth(), 1));
+    onSelectDate(todayStr);
+  };
+
   return (
     <div className="rounded-xl bg-island px-4 py-3.5">
       <div className="mb-2.5 flex items-center">
         <h3 className="text-[11px] font-semibold uppercase tracking-wider text-content-3">
           {t('inspiration.activity', 'Activity')}
         </h3>
+        {selectedDate && (
+          <button
+            aria-label="Clear selected day"
+            onClick={() => onSelectDate(null)}
+            className="ml-2 inline-flex items-center gap-1 rounded-full bg-indigo-500/15 px-2 py-0.5 text-[10px] tabular-nums text-indigo-300 hover:bg-indigo-500/25"
+          >
+            {selectedDate} ×
+          </button>
+        )}
         <div className="ml-auto flex rounded-md bg-island-2 p-0.5">
           <button
             aria-label="Heatmap view"
@@ -148,8 +182,14 @@ export const ActivityPanel: React.FC<Props> = ({ selectedDate, onSelectDate, ref
             >
               <ChevronRight size={11} />
             </button>
+            <button
+              onClick={goToday}
+              className="rounded bg-island-2 px-1.5 py-0.5 text-[10px] font-semibold text-content-3 hover:text-indigo-300"
+            >
+              {t('inspiration.today', 'Today')}
+            </button>
           </div>
-          <div className="grid grid-cols-7 gap-0.5">
+          <div className="grid grid-cols-7 gap-1">
             {['M', 'T', 'W', 'T2', 'F', 'S', 'S2'].map((d) => (
               <div key={d} className="pb-0.5 text-center text-[9px] font-semibold uppercase text-content-4">
                 {d.charAt(0)}
@@ -158,26 +198,45 @@ export const ActivityPanel: React.FC<Props> = ({ selectedDate, onSelectDate, ref
             {monthCells.map(({ date, inMonth, dayNum }) => {
               const cnt = counts[date] ?? 0;
               const sel = selectedDate === date;
+              const isToday = date === todayStr;
               return (
                 <button
                   key={date}
                   aria-label={`${date}: ${cnt} notes`}
+                  title={cnt > 0 ? t('inspiration.dayNotes', '{{count}} notes', { count: cnt }) : undefined}
                   onClick={() => pick(date)}
-                  className={`flex h-8 flex-col items-center justify-center gap-0.5 rounded-md text-[11px] tabular-nums ${
+                  className={`flex h-10 flex-col items-center justify-center rounded-lg text-[11.5px] tabular-nums transition-colors ${
                     sel
                       ? 'bg-indigo-500 font-bold text-white'
-                      : date === todayStr
-                        ? 'font-bold text-indigo-300 shadow-[inset_0_0_0_1.5px] shadow-indigo-500'
-                        : inMonth
-                          ? 'text-content-2 hover:bg-island-2'
-                          : 'text-content-4 opacity-50'
+                      : `${cellTint(cnt)} ${
+                          isToday
+                            ? 'font-bold text-indigo-300 shadow-[inset_0_0_0_1.5px] shadow-indigo-500'
+                            : inMonth
+                              ? 'text-content-2'
+                              : 'text-content-4 opacity-50'
+                        } hover:bg-indigo-500/15 hover:shadow-[inset_0_0_0_1px] hover:shadow-indigo-500/40`
                   }`}
                 >
-                  {dayNum}
-                  {cnt > 0 && <i className={`h-1 w-1 rounded-full ${sel ? 'bg-white/80' : heatClass(cnt)}`} />}
+                  <span className="leading-none">{dayNum}</span>
+                  {cnt > 0 && (
+                    <span
+                      className={`mt-0.5 rounded-full px-1 text-[9px] font-bold leading-[13px] ${
+                        sel ? 'bg-white/25 text-white' : 'bg-indigo-500/80 text-white'
+                      }`}
+                    >
+                      {cnt}
+                    </span>
+                  )}
                 </button>
               );
             })}
+          </div>
+          <div className="mt-2 flex items-center justify-between border-t border-line pt-2 text-[10.5px] text-content-4 tabular-nums">
+            <span>{t('inspiration.monthNotes', '{{count}} notes this month', { count: monthTotal })}</span>
+            <span className="inline-flex items-center gap-1">
+              <i className="h-2 w-2 rounded-sm bg-indigo-500/30" />
+              {t('inspiration.hasNotes', 'has notes')}
+            </span>
           </div>
         </div>
       )}
