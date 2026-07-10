@@ -1,7 +1,7 @@
 <!--
-  Projects UI 定版设计稿(FINAL, 2026-07-10)。唯一执行基准,取代 2026-07-08 三版对比稿的 A 稿。
+  Projects UI 定版设计稿(FINAL v2, 2026-07-10)。唯一执行基准。
   artifact: https://claude.ai/code/artifact/fd133ec7-0348-45af-afaf-f3b28d9da27f
-  决策 D1-D8 见文内表格;起因:2026-07-09 真机反馈(宽屏稀疏/亮色气质/项目间不一致)。
+  v2: 补第 0 节主页整页布局 + D9(主页维持现有 IA)。决策 D1-D9 见文内表格。
 -->
 <title>Projects UI — 定版设计稿 (Final)</title>
 <style>
@@ -132,6 +132,91 @@
   <div class="eyebrow">MediaHub · Projects · 定版 UI 设计稿</div>
   <h1>项目列表 + 阶段工作台 — 定版<span class="final-chip">FINAL</span></h1>
   <p class="lede">基于已选定的 A · Stage Ring 稿(artifact f1d342c2),修正为产品真实形态后的<b>唯一执行基准</b>。与旧稿的差异全部来自八项锁定决策(见文末 D1–D8)。本稿为双主题:切换你的系统/站内主题即可看到亮/暗两版,<b>所见即两个主题各自的验收标准</b>。UI 文案为英文(产品规范),中文经 i18n。</p>
+
+  <!-- ═══════ 0 · 项目主页整页 ═══════ -->
+  <section>
+    <div class="sec-head"><span class="tag">0</span><h2>项目主页 — 整页布局(视图侧栏 · 标签页 · 工具条)</h2></div>
+    <p class="sec-sub">主页面维持现有信息架构(D9):左侧<b>视图栏</b>(All/Starred/Recent/Active/Archived + 计数)· 顶部<b>类型标签页</b>(All/Internal/External)+ 搜索 + New Project · 工具条(计数 + 排序 + 网格/表格切换)· 下方卡片网格。D4 生效后<b>每张卡都有阶段环</b>——不再出现无环裸卡。</p>
+    <div class="appframe" style="padding:0; overflow:hidden">
+      <div style="display:flex; min-height:380px">
+        <div style="width:184px; flex:none; background:var(--panel); border-right:1px solid var(--line); padding:16px 10px">
+          <div style="font-weight:650; font-size:14px; padding:0 8px 12px">Projects</div>
+          <div class="eyebrow" style="padding:0 8px 8px; font-size:10px">Views</div>
+          <div style="display:grid; gap:2px; font-size:13px">
+            <div style="display:flex; justify-content:space-between; padding:7px 10px; border-radius:8px; background:var(--indigo-soft); color:var(--indigo-ink); font-weight:600"><span>▦ All</span><span class="mono">2</span></div>
+            <div style="display:flex; justify-content:space-between; padding:7px 10px; border-radius:8px; color:var(--c2)"><span>☆ Starred</span><span class="mono" style="color:var(--c4)">1</span></div>
+            <div style="display:flex; justify-content:space-between; padding:7px 10px; border-radius:8px; color:var(--c2)"><span>◷ Recent</span><span class="mono" style="color:var(--c4)">2</span></div>
+            <div style="display:flex; justify-content:space-between; padding:7px 10px; border-radius:8px; color:var(--c2)"><span>⚡ Active</span><span class="mono" style="color:var(--c4)">2</span></div>
+            <div style="display:flex; justify-content:space-between; padding:7px 10px; border-radius:8px; color:var(--c2)"><span>▤ Archived</span><span class="mono" style="color:var(--c4)">1</span></div>
+          </div>
+        </div>
+        <div style="flex:1; min-width:0; padding:18px 22px">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap">
+            <div style="font-size:18px; font-weight:650">All Projects</div>
+            <div style="display:flex; gap:8px; align-items:center">
+              <span style="border:1px solid var(--line); border-radius:8px; padding:6px 12px; color:var(--c4); font-size:12.5px">⌕ Search projects</span>
+              <button class="btn primary">+ New Project</button>
+            </div>
+          </div>
+          <div style="display:flex; gap:18px; border-bottom:1px solid var(--line); margin-top:12px; font-size:13.5px">
+            <span style="padding:8px 2px; border-bottom:2px solid var(--indigo); font-weight:600">All</span>
+            <span style="padding:8px 2px; color:var(--c3)">Internal</span>
+            <span style="padding:8px 2px; color:var(--c3)">External</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin:12px 0; font-size:12px; color:var(--c3)">
+            <span>2 projects</span>
+            <span style="display:flex; gap:8px; align-items:center">
+              <span style="border:1px solid var(--line); border-radius:7px; padding:4px 10px">Last active ▾</span>
+              <span style="border:1px solid var(--line); border-radius:7px; padding:4px 8px; color:var(--indigo-ink)">▦</span><span style="border:1px solid var(--line); border-radius:7px; padding:4px 8px">☰</span>
+            </span>
+          </div>
+          <div class="cards" style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr))">
+            <div class="pcard">
+              <div class="ringrow">
+                <svg width="40" height="40" viewBox="0 0 44 44" aria-label="Stage 1 of 6">
+                  <g fill="none" stroke-width="4" stroke-linecap="round">
+                    <path d="M22 4 A18 18 0 0 1 37.6 13" stroke="#6366f1"></path>
+                    <path d="M39.5 17.5 A18 18 0 0 1 39.5 26.5" stroke="var(--c4)" opacity=".4"></path>
+                    <path d="M37.6 31 A18 18 0 0 1 30 39" stroke="var(--c4)" opacity=".4"></path>
+                    <path d="M25 39.9 A18 18 0 0 1 14 38" stroke="var(--c4)" opacity=".4"></path>
+                    <path d="M10 35 A18 18 0 0 1 4.6 26.5" stroke="var(--c4)" opacity=".4"></path>
+                    <path d="M4.5 17.5 A18 18 0 0 1 14 6" stroke="var(--c4)" opacity=".4"></path>
+                  </g>
+                  <text x="22" y="26" text-anchor="middle" font-size="11" font-weight="700" fill="var(--c1)">1/6</text>
+                </svg>
+                <div style="min-width:0"><div class="pname">Personal Test Project</div></div>
+              </div>
+              <div class="activity"><span class="dot"></span>Entered Planning · 1d ago</div>
+              <div class="meta"><span class="stage-chip">Planning</span><span class="mono">0 files</span></div>
+            </div>
+            <div class="pcard">
+              <div class="ringrow">
+                <svg width="40" height="40" viewBox="0 0 44 44" aria-label="Stage 1 of 6">
+                  <g fill="none" stroke-width="4" stroke-linecap="round">
+                    <path d="M22 4 A18 18 0 0 1 37.6 13" stroke="#6366f1"></path>
+                    <path d="M39.5 17.5 A18 18 0 0 1 39.5 26.5" stroke="var(--c4)" opacity=".4"></path>
+                    <path d="M37.6 31 A18 18 0 0 1 30 39" stroke="var(--c4)" opacity=".4"></path>
+                    <path d="M25 39.9 A18 18 0 0 1 14 38" stroke="var(--c4)" opacity=".4"></path>
+                    <path d="M10 35 A18 18 0 0 1 4.6 26.5" stroke="var(--c4)" opacity=".4"></path>
+                    <path d="M4.5 17.5 A18 18 0 0 1 14 6" stroke="var(--c4)" opacity=".4"></path>
+                  </g>
+                  <text x="22" y="26" text-anchor="middle" font-size="11" font-weight="700" fill="var(--c1)">1/6</text>
+                </svg>
+                <div style="min-width:0"><div class="pname">21321</div></div>
+              </div>
+              <div class="activity"><span class="dot"></span>Entered Planning · just now</div>
+              <div class="meta"><span class="stage-chip">Planning</span><span class="mono">0 files</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <ul class="notes">
+      <li><b>右下卡即今日截图里的"21321"修复后形态</b>:D4 回填后它有 1/6 环 + Planning chip + 动态行,与左卡完全一致。</li>
+      <li>类型 badge(Internal/External/Personal)在有阶段 chip 时退位(chip 优先);color_label 左边条保留。</li>
+      <li>空态(0 projects):居中插画 + "Create your first project" + New Project 按钮(现有形态,不改)。</li>
+    </ul>
+  </section>
 
   <!-- ═══════ 1 · 列表卡片 ═══════ -->
   <section>
@@ -307,6 +392,7 @@
           <tr><td>D6</td><td>列表卡维持已上线形态(环/混合动态行/停滞琥珀/归档✓环)</td><td>已对齐旧稿并验证;仅按本稿校两主题对比度</td></tr>
           <tr><td>D7</td><td>工具卡副标题仅上真实数据(storyboard 9/12);不造 "v4 locked"</td><td>无 lock/board-count 数据模型,拒绝空承诺</td></tr>
           <tr><td>D8</td><td>UI 英文、中文走 i18n;截图验收以英文为准</td><td>产品规范(CLAUDE.md)</td></tr>
+          <tr><td>D9</td><td><b>主页面维持现有信息架构</b>(视图栏/类型标签/工具条),本稿第 0 节为其双主题视觉基准;不重排布局</td><td>IA 已稳定可用;偏差在质感与卡片一致性,不在结构</td></tr>
         </tbody>
       </table>
     </div>
