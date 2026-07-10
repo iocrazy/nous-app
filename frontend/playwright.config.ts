@@ -16,6 +16,10 @@ export default defineConfig({
   // key (`sb-e2e-auth-token`) that the stub harness seeds the session under.
   // VITE_API_URL is pinned same-origin so every backend call is a relative
   // /api/v1 path the stub intercepts — nothing can reach a real backend.
+  // VITE_FEATURE_PROJECT_WORKBENCH / VITE_FEATURE_PROJECT_AI_SUGGEST are
+  // build-time-only flags (Phase B B2/B3) read via import.meta.env, so they
+  // must be baked in here — projects-phase-b.spec.ts's workbench test
+  // otherwise renders the legacy stepper instead of StageWorkbench.
   //
   // ⚠️ reuseExistingServer reuses a server already on :4173 — that server MUST
   // have been built with these same pinned env vars, or the seeded session key
@@ -23,7 +27,7 @@ export default defineConfig({
   // dev server.
   webServer: {
     command:
-      'VITE_SUPABASE_URL=https://e2e.supabase.co VITE_SUPABASE_ANON_KEY=sb_e2e_anon_key VITE_API_URL=http://localhost:4173 npm run build && npm run preview -- --port 4173 --strictPort',
+      'VITE_SUPABASE_URL=https://e2e.supabase.co VITE_SUPABASE_ANON_KEY=sb_e2e_anon_key VITE_API_URL=http://localhost:4173 VITE_FEATURE_PROJECT_WORKBENCH=true VITE_FEATURE_PROJECT_AI_SUGGEST=true npm run build && npm run preview -- --port 4173 --strictPort',
     url: 'http://localhost:4173',
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
