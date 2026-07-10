@@ -138,6 +138,26 @@ test('mod+A then mod+D duplicates the whole graph with its wiring', async ({ pag
   await expect(page.locator('.react-flow__edge')).toHaveCount(4);
 });
 
+test('Export downloads the selection; Import appends it back re-id (G5)', async ({ page }) => {
+  await openCanvas(page);
+
+  await page.locator('.react-flow').click({ position: { x: 30, y: 200 } });
+  await page.keyboard.press('ControlOrMeta+a');
+
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export' }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/^workflow-3nodes-.*\.json$/);
+  const path = await download.path();
+
+  // Round-trip: import the very file we just exported.
+  await page
+    .getByTestId('workflow-import-input')
+    .setInputFiles(path!);
+  await expect(page.locator('.react-flow__node')).toHaveCount(6);
+  await expect(page.locator('.react-flow__edge')).toHaveCount(4);
+});
+
 test('bare z toggles the overview and returns', async ({ page }) => {
   await openCanvas(page);
 
