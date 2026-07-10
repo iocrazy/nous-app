@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeftRight, ChevronDown, FileText, Clapperboard, Film } from 'lucide-react';
+import { ArrowLeftRight, ChevronDown, FileText, Clapperboard, Film, ExternalLink } from 'lucide-react';
 import type { EpisodeProgress } from '../../types';
 import { TOP_MODULES, ASSET_MODULES, MANAGE_MODULES, type WorkspaceModule } from './workspaceModules';
 
@@ -20,8 +20,10 @@ interface WorkspaceSidebarProps {
   episodes: EpisodeProgress[];
   currentEpisode: EpisodeProgress | null;
   onEpisodeChange: (episodeId: string) => void;
-  /** Script or Storyboard child clicked — resolve + open the episode's script editor. */
+  /** Script child clicked — resolve + open the episode's script editor (script view). */
   onOpenScript: () => void;
+  /** Storyboard child clicked — resolve + open the episode's script editor, preset to the storyboard view. */
+  onOpenStoryboard: () => void;
   /** Renders child clicked — switch to Files with the Renders chip + current-episode filter preset. */
   onOpenRenders: () => void;
 }
@@ -41,6 +43,7 @@ export function WorkspaceSidebar({
   currentEpisode,
   onEpisodeChange,
   onOpenScript,
+  onOpenStoryboard,
   onOpenRenders,
 }: WorkspaceSidebarProps) {
   const { t } = useTranslation();
@@ -153,7 +156,7 @@ export function WorkspaceSidebar({
             </button>
             <button
               data-testid="ws-ep-storyboard"
-              onClick={onOpenScript}
+              onClick={onOpenStoryboard}
               className="flex items-center justify-between gap-2 rounded-md pl-6 pr-2.5 py-1.5 text-[12.5px] text-ink-300 hover:text-ink-100 hover:bg-ink-800/50 transition-colors text-left"
             >
               <span className="flex items-center gap-2 min-w-0">
@@ -176,6 +179,18 @@ export function WorkspaceSidebar({
               <span className="text-[10px] text-ink-500 font-mono shrink-0">
                 {currentEpisode.renders_count}
               </span>
+            </button>
+            {/* Publish placeholder (PR-11, G12) — arrives with Distribution D2;
+                disabled here so the product surface is legible ahead of time. */}
+            <button
+              type="button"
+              data-testid="ws-ep-publish"
+              disabled
+              title={t('projects.workspace.publish.comingSoon')}
+              className="flex items-center gap-2 rounded-md pl-6 pr-2.5 py-1.5 text-[12.5px] text-ink-600 cursor-not-allowed text-left"
+            >
+              <ExternalLink size={13} className="shrink-0" />
+              <span className="truncate">{t('projects.workspace.modules.publish')}</span>
             </button>
           </div>
         </div>

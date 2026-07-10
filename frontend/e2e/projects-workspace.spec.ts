@@ -95,6 +95,21 @@ const RENDERS = {
 const PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEUlEQVR4nGP8z8Dwn4EIwAhUBADtgwXqWkAdRgAAAABJRU5ErkJggg==';
 
+// One script on Ep 1 (the default current episode) — resolved by
+// ProjectWorkspace's Script/Storyboard sidebar children (fetchScriptProjects
+// list) and then loaded by the inline-mounted EditorShell (fetchScriptProject
+// detail). See routeScriptsApi below for the depth-choice rationale.
+const SCRIPTS = [
+  {
+    id: 's1',
+    name: 'Pilot Draft',
+    status: 'active',
+    created_at: '2026-07-01T00:00:00Z',
+    updated_at: '2026-07-08T00:00:00Z',
+    episode_id: '1',
+  },
+];
+
 /**
  * Installs the single `**\/api/v1/projects*` handler that dispatches on
  * pathname to the fixtures above. A RegExp on the pathname (rather than a
@@ -120,6 +135,43 @@ async function routeWorkspaceApi(page: Page): Promise<void> {
   await page.route('**/api/v1/generated-media/*/cover', (route) =>
     route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from(PNG_BASE64, 'base64') }),
   );
+}
+
+/**
+ * Stubs the `/api/v1/scripts*` surface the inline-mounted editor touches on
+ * boot (PR-11): the list endpoint ProjectWorkspace uses to resolve the
+ * current episode's script, and the detail endpoint EditorShell uses to
+ * load its owning project/episode id. Everything else the shell fetches on
+ * mount (scenes, episodes-for-project, commit history) is left to
+ * `setupStubbedSession`'s `**\/api/v1/**` catch-all, which returns
+ * `{success:true,data:[]}` — an empty-but-valid response every one of those
+ * call sites already tolerates (empty scene list → the shell's own
+ * ColdStart empty state, not a crash). Depth choice: this proves the
+ * INLINE MOUNT (no route jump, shell renders, storyboard view presets
+ * correctly) without re-implementing the full scene-editing e2e surface
+ * that EditorShell.test.tsx and the editor's own e2e specs already cover.
+ */
+async function routeScriptsApi(page: Page): Promise<void> {
+  await page.route(/\/api\/v1\/scripts(\/|\?|$)/, (route: Route) => {
+    const { pathname } = new URL(route.request().url());
+
+    if (pathname === '/api/v1/scripts/projects') {
+      return route.fulfill({ json: { success: true, data: { items: SCRIPTS, total: SCRIPTS.length } } });
+    }
+    const detail = pathname.match(/^\/api\/v1\/scripts\/projects\/([^/]+)$/);
+    if (detail) {
+      return route.fulfill({
+        json: {
+          success: true,
+          data: {
+            project: { id: detail[1], project_id: PROJECT.id, episode_id: '1', name: 'Pilot Draft' },
+            chapters: [],
+          },
+        },
+      });
+    }
+    return route.fallback();
+  });
 }
 
 test.describe('Projects workspace shell — PR-10b Wave 2 modules', () => {
@@ -205,5 +257,40 @@ test.describe('Projects workspace shell — PR-10b Wave 2 modules', () => {
     await expect(page.getByTestId('ws-files-item-render-r1')).toBeVisible();
 
     await page.screenshot({ path: 'e2e-artifacts/projects-workspace-light.png', fullPage: true });
+  });
+
+  test('mounts the editor inline for Script/Storyboard and shows the disabled Publish child (PR-11)', async ({
+    page,
+  }) => {
+    await routeWorkspaceApi(page);
+    await routeScriptsApi(page);
+    await page.goto(`${PROJECTS_URL}/1`);
+
+    await expect(page.getByTestId('workspace-topbar')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId('ws-ep-card')).toHaveText(/Ep 1 — Pilot/);
+
+    // Script child — inline mount, no route jump (URL stays on the project).
+    await page.getByTestId('ws-ep-script').click();
+    await expect(page.locator('[data-editor-shell]')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('main', { name: 'Script Page' })).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe(`${PROJECTS_URL}/1`);
+    // The workspace sidebar (project-level nav) stays mounted alongside the
+    // editor's own rail (script-level nav) — Studio-frame convergence.
+    await expect(page.getByTestId('workspace-sidebar')).toBeVisible();
+    await expect(page.getByTestId('ws-overview')).toHaveCount(0);
+
+    // Storyboard child — same shell, preset to the storyboard rail view
+    // (scoped to the editor's own RailModules nav, not the sidebar child
+    // button or the top-bar stage stepper's storyboard dot, which share
+    // the same accessible name).
+    await page.getByTestId('ws-ep-storyboard').click();
+    await expect(page.locator('[data-editor-shell]')).toBeVisible();
+    await expect(
+      page.getByTestId('ws-script-editor').getByRole('button', { name: 'Storyboard' }),
+    ).toHaveAttribute('aria-current', 'page');
+
+    // Publish placeholder (G12) — visible, disabled, no module content.
+    await expect(page.getByTestId('ws-ep-publish')).toBeVisible();
+    await expect(page.getByTestId('ws-ep-publish')).toBeDisabled();
   });
 });

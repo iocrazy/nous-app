@@ -28,7 +28,9 @@ import {
   type ScriptCommit,
 } from '../sceneService';
 import { fetchScriptProject } from '../../services/scriptService';
+import { fetchProjectEntities } from '../../services/projectsService';
 import { useToast } from '../../components/Toast';
+import { mergeProjectMentionCandidates } from '../mentionCandidates';
 import type { CursorState } from '../editorMachine';
 import type { ElementOp, ElementType, ScriptElement, SceneDoc } from '../types';
 import type { ScriptChapter } from '../../types';
@@ -86,11 +88,34 @@ export function EditorShell({
   scriptId,
   currentUserId = null,
   currentUserName,
+  projectId: workspaceProjectId,
+  initialRailView,
 }: {
   scriptId: string;
   /** Local user identity for collaboration presence (supplied by the route). */
   currentUserId?: string | null;
   currentUserName?: string;
+  /**
+   * Owning project id, known up front by callers that already have it (the
+   * workspace shell's current project / the standalone route's `:projectId`
+   * param) — PR-11, G13. Aliased on destructure to `workspaceProjectId`
+   * because the component already has an internal `projectId` state (below)
+   * resolved asynchronously from `fetchScriptProject` for the Episode panel
+   * / import modal; this prop exists purely so the @-mention project-entity
+   * fetch doesn't have to wait on that resolution. Optional + best-effort:
+   * omitted or failing leaves @-mention candidates at script-only (Phase 1
+   * behavior), never blocking or erroring the editor.
+   */
+  projectId?: string;
+  /**
+   * Preset which centre-pane view (RailModules) this mount opens on — e.g.
+   * the workspace's "Storyboard" sidebar child opens straight onto the
+   * storyboard view instead of the script sheet (PR-11). Re-applied whenever
+   * the prop changes (so re-clicking a different sidebar child while the
+   * shell is already mounted for the same script still switches the view).
+   * Omitted preserves the existing per-script localStorage preference.
+   */
+  initialRailView?: RailView;
 }) {
   const { t } = useTranslation();
   // Restore the per-script layout engine synchronously so the first paint uses
@@ -234,6 +259,15 @@ export function EditorShell({
   useEffect(() => {
     persistRailView(scriptId, railView);
   }, [scriptId, railView]);
+
+  // PR-11: the caller's preset view (e.g. the workspace's Storyboard sidebar
+  // child) wins over the stored preference. A one-way input — it only reacts
+  // to the PROP changing, never to the writer's own RailModules clicks, so
+  // switching views inside an already-open shell isn't fought back to the
+  // preset on every render.
+  useEffect(() => {
+    if (initialRailView) setRailView(initialRailView);
+  }, [initialRailView]);
 
   const selectMode = useCallback(
     (m: EditorMode) => {
@@ -528,8 +562,36 @@ export function EditorShell({
     [scenes, liveElements],
   );
 
-  // Script-wide CAST names feed the @-mention / character-cue picker.
-  const mentionCandidates = useMemo(() => deriveStatistics(statsScenes).cast, [statsScenes]);
+  // Project-level @-mention extras (PR-11, G13): the owning project's other
+  // episodes' character names, fetched once per project id. Best-effort —
+  // a failed fetch just leaves this empty and @-mention falls back to
+  // script-only candidates (Phase 1 behavior), never blocking the editor.
+  const [projectEntityCharacters, setProjectEntityCharacters] = useState<string[]>([]);
+  useEffect(() => {
+    if (!workspaceProjectId) {
+      setProjectEntityCharacters([]);
+      return;
+    }
+    let cancelled = false;
+    fetchProjectEntities(workspaceProjectId)
+      .then((data) => {
+        if (!cancelled) setProjectEntityCharacters(data.characters.map((c) => c.name));
+      })
+      .catch((err) => {
+        console.error('[EditorShell] failed to load project entities for @-mention:', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceProjectId]);
+
+  // Script-wide CAST names feed the @-mention / character-cue picker, unioned
+  // with the project-level extras above (script names always take priority —
+  // see mergeProjectMentionCandidates).
+  const mentionCandidates = useMemo(
+    () => mergeProjectMentionCandidates(deriveStatistics(statsScenes).cast, projectEntityCharacters),
+    [statsScenes, projectEntityCharacters],
+  );
 
   // Rail entity sections (laper info architecture) — Characters + Locations.
   const railCharacters = useMemo(() => deriveRailCharacters(statsScenes), [statsScenes]);

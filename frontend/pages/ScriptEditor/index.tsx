@@ -20,7 +20,7 @@ import { EditorShell } from '../../editor/components/EditorShell';
  * It only depends on AuthContext, which is provided at the root.
  */
 export function ScriptEditor() {
-  const { scriptId } = useParams<{ scriptId: string }>();
+  const { scriptId, projectId } = useParams<{ scriptId: string; projectId: string }>();
   const { currentUserId, userProfile } = useAuth();
   if (!scriptId) return null;
   return (
@@ -30,6 +30,7 @@ export function ScriptEditor() {
           scriptId={scriptId}
           currentUserId={currentUserId}
           currentUserName={userProfile.name}
+          projectId={projectId}
         />
       </TaskManagerProvider>
     </ToastProvider>
