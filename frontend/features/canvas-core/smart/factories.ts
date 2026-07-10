@@ -109,6 +109,10 @@ export function createOutputNode(
       preview_text: data.preview_text ?? '',
       preview_url: data.preview_url ?? null,
       crop_region: data.crop_region ?? null,
+      // G4-F2 optional fields — only present when provided (persisting
+      // `undefined` keys into nodes_json would be noise).
+      ...(data.images ? { images: data.images } : {}),
+      ...(data.history_for ? { history_for: data.history_for } : {}),
     },
   };
 }

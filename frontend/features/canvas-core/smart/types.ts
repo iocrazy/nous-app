@@ -88,6 +88,13 @@ export interface PromptGenSettings {
 
 export type OutputKind = 'text' | 'image' | 'video' | 'audio';
 
+/** One generated media item on an output node (Infinite's node.images[]). */
+export interface GeneratedImageRef {
+  url: string;
+  kind: OutputKind;
+  name?: string;
+}
+
 /** Tag on loop-produced output slots — reused by (loop, round) on re-runs. */
 export interface LoopSlotTag {
   loop_id: string;
@@ -96,6 +103,14 @@ export interface LoopSlotTag {
 
 export interface OutputNodeData {
   kind: OutputKind;
+  /**
+   * Generated media items (Infinite parity G4-F2) — count N lands N images
+   * in ONE node. `preview_url` mirrors images[0] for the editor tooling.
+   * Absent on legacy nodes (single preview_url behaviour).
+   */
+  images?: GeneratedImageRef[];
+  /** Set on history-archive nodes: the output node this archives for. */
+  history_for?: string;
   /** Snowflake resource id that owns the rendered artifact, when one
    *  was persisted. Null for in-flight or text-only outputs. */
   resource_id: string | null;
