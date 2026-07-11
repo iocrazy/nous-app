@@ -366,3 +366,24 @@ describe('useCanvasShortcuts — knife mode (②-1)', () => {
     expect(useKnifeStore.getState().active).toBe(false);
   });
 });
+
+describe('useCanvasShortcuts — deleting a group frees its children (②-3)', () => {
+  it('children of a deleted group return to absolute coords instead of dangling', () => {
+    render(<Host />);
+    useCanvasCoreStore.setState({
+      nodes: [
+        { id: 'g1', type: 'group', position: { x: 76, y: 76 }, style: { width: 300, height: 200 }, data: {} },
+        { id: 'a', type: 'shot', position: { x: 24, y: 24 }, parentId: 'g1', data: {} },
+      ] as never,
+      connections: [],
+      selection: ['g1'],
+    });
+    fireKey({ key: 'Delete' });
+    const s = useCanvasCoreStore.getState();
+    expect(s.nodes).toHaveLength(1);
+    const a = s.nodes[0] as unknown as Record<string, unknown>;
+    expect(a.id).toBe('a');
+    expect(a.parentId).toBeUndefined();
+    expect(a.position).toEqual({ x: 100, y: 100 });
+  });
+});

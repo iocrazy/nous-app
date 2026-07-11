@@ -189,6 +189,35 @@ test('knife mode: x → drag across a wire cuts it; Escape exits (②-1)', async
   await expect(page.getByTestId('knife-overlay')).toHaveCount(0);
 });
 
+test('Group wraps selection; dragging the group moves members (②-3)', async ({ page }) => {
+  await openCanvas(page);
+
+  await page.locator('.react-flow').click({ position: { x: 30, y: 200 } });
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.getByRole('button', { name: 'Group' }).click();
+
+  const group = page.getByTestId('smart-group-node');
+  await expect(group).toBeVisible();
+
+  // Drag the group by its top edge — members must ride along (RF parentId).
+  const before = await page
+    .locator('.react-flow__node[data-id="p1"]')
+    .evaluate((el) => (el as HTMLElement).getBoundingClientRect().x);
+  const box = (await group.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + 6);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 120, box.y + 6, { steps: 6 });
+  await page.mouse.up();
+  const after = await page
+    .locator('.react-flow__node[data-id="p1"]')
+    .evaluate((el) => (el as HTMLElement).getBoundingClientRect().x);
+  expect(after - before).toBeGreaterThan(80);
+
+  // The drag left the group selected — Ungroup is live.
+  await page.getByRole('button', { name: 'Ungroup' }).click();
+  await expect(page.getByTestId('smart-group-node')).toHaveCount(0);
+});
+
 test('bare z toggles the overview and returns', async ({ page }) => {
   await openCanvas(page);
 

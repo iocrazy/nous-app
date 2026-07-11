@@ -30,6 +30,7 @@ import {
   preparePaste,
   readClipboard,
 } from '../store/clipboard';
+import { releaseChildrenOf } from '../smart/grouping';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import type { CanvasNode } from '../types';
 
@@ -167,7 +168,10 @@ export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
         if (store.selection.length === 0) return;
         event.preventDefault();
         const selected = new Set(store.selection);
-        const remaining = store.nodes.filter((n) => {
+        // Children of deleted groups return to absolute coords instead of
+        // dangling on a missing parentId (React Flow would drop them).
+        const freed = releaseChildrenOf(store.nodes, selected);
+        const remaining = freed.filter((n) => {
           const id = idOf(n);
           return id !== null && !selected.has(id);
         });
