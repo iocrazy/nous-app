@@ -170,13 +170,31 @@ export function CanvasSurface() {
       // patch back (found by the G8 timeline e2e; Retry chips had the same
       // exposure). rfNodes only adds view-only selected/className derivations
       // on top of the store, so the change math is identical.
+      // Node `select` changes route into the store's selection ARRAY —
+      // rfNodes derives `selected` from it, so writing a selected field
+      // onto store nodes (the old path) never fed back to React Flow and
+      // clicking a node could never select it (the long-standing
+      // "composer Run stays disabled" backlog bug).
+      const selects = changes.filter((c) => c.type === 'select');
+      if (selects.length > 0) {
+        const store = useCanvasCoreStore.getState();
+        const sel = new Set(store.selection);
+        for (const c of selects) {
+          const change = c as { id: string; selected: boolean };
+          if (change.selected) sel.add(change.id);
+          else sel.delete(change.id);
+        }
+        store.setSelection([...sel]);
+      }
+      const rest = changes.filter((c) => c.type !== 'select');
+      if (rest.length === 0) return;
       const current = useCanvasCoreStore.getState()
         .nodes as unknown as typeof rfNodes;
-      const next = applyNodeChanges(changes, current);
+      const next = applyNodeChanges(rest, current);
       // Fix 1 — mid-drag ticks: ALL changes are position-type with dragging:true.
       // Route these through setNodesDragTick which skips the historyTimer reset,
       // cutting timer-reset churn from O(drag_ticks) to O(1) per drag gesture.
-      const isMidDragOnly = changes.every(
+      const isMidDragOnly = rest.every(
         (c) => c.type === 'position' && (c as { dragging?: boolean }).dragging === true,
       );
       if (isMidDragOnly) {
@@ -188,9 +206,7 @@ export function CanvasSurface() {
       // NOT create undo history or dirty/persist the document — otherwise a
       // mere click or the load-time measure pass saves the canvas and drops a
       // phantom undo step. Route those through the render-only transient path.
-      const hasDocEdit = changes.some(
-        (c) => c.type !== 'select' && c.type !== 'dimensions',
-      );
+      const hasDocEdit = rest.some((c) => c.type !== 'dimensions');
       if (hasDocEdit) {
         setNodes(next as unknown as CanvasNode[]);
       } else {
