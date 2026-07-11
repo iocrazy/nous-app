@@ -10,7 +10,12 @@
 // document after the user switches canvases.
 
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
-import { upsertGenerationSlots } from './genSlots';
+import {
+  clearPendingGenTasks,
+  persistPendingGenTasks,
+  prunePendingGenTask,
+} from './genResume';
+import { markGenerationRecover, upsertGenerationSlots } from './genSlots';
 import { resolveSourceUrl } from './promptInputs';
 import { regenKey, useRegenStore } from './regenStore';
 import { withGenerationRunner } from './generationRunner';
@@ -40,7 +45,20 @@ function resolveCaller(canvasId: string | null): PromptCaller {
   const override = useRegenStore.getState().runnerOverride;
   if (override) return override;
   if (canvasId) {
-    return withGenerationRunner(createBackendRunner({ canvasId }), { canvasId });
+    return withGenerationRunner(createBackendRunner({ canvasId }), {
+      canvasId,
+      // Reruns survive a reload too (P1-13): persist the batch, prune per
+      // settled item, mark broken polls recoverable. Results still land via
+      // the end-of-run upsert below — resume only takes over after refresh.
+      onDispatched: (id, _count, kind, taskIds) =>
+        persistPendingGenTasks(id, taskIds, kind),
+      onItemSettled: (id, item) => {
+        if (!item.url && item.recoverable) {
+          markGenerationRecover(id, item.taskId, item.kind);
+        }
+        prunePendingGenTask(id, item.taskId);
+      },
+    });
   }
   return mockRunner;
 }
@@ -86,6 +104,7 @@ export async function rerunPrompt(
         patchNode(id, { data: { run_status: status, ...fields } });
       },
     });
+    if (sameCanvas() && result.media_kind) clearPendingGenTasks(promptId);
     if (!result.ok || !sameCanvas()) return false;
     if (result.urls?.length) {
       upsertGenerationSlots(

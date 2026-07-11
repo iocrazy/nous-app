@@ -20,6 +20,7 @@ import {
 } from '../../services/canvasService';
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { createOutputNode } from '../factories';
+import { requeryRecoverTask } from '../genResume';
 import { latestHistoryImageUrl } from '../outputHistory';
 import { resolveSourceUrls } from '../promptInputs';
 import { promptIdForOutput, regenerateForOutput } from '../regenerate';
@@ -72,6 +73,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
     history_for,
     gen_pending = 0,
     gen_failed = 0,
+    gen_recover = [],
   } = data as unknown as OutputNodeData;
   const patchData = useNodeDataPatch(id);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -501,6 +503,16 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
             {kind === 'text' ? 'No text yet' : `No ${kind} rendered yet`}
           </div>
         )}
+        {gen_recover.length > 0 && (
+          <RecoverCell
+            // The slot tag travels in the node data — no store lookup, so
+            // the overlay works the moment the node renders.
+            promptId={
+              (data as { gen_slot?: { node_id?: string } }).gen_slot?.node_id ?? null
+            }
+            taskIds={gen_recover}
+          />
+        )}
         {gen_failed > 0 && (
           <div
             data-testid="output-failed-chip"
@@ -612,6 +624,60 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           regenerating={regenerating}
         />
       )}
+    </div>
+  );
+}
+
+/** Recover overlay (P1-13 — Infinite's imageTaskRecoverBodyHtml): the poll
+ *  broke but the backend task survived — offer a one-shot re-query. */
+function RecoverCell({
+  promptId,
+  taskIds,
+}: {
+  promptId: string | null;
+  taskIds: string[];
+}) {
+  const [querying, setQuerying] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const first = taskIds[0];
+
+  const onQuery = useCallback(async () => {
+    if (!promptId || !first || querying) return;
+    setQuerying(true);
+    setNote(null);
+    try {
+      const outcome = await requeryRecoverTask(promptId, first);
+      if (outcome === 'pending') setNote('Still running — check again shortly');
+    } finally {
+      setQuerying(false);
+    }
+  }, [promptId, first, querying]);
+
+  if (!first) return null;
+  return (
+    <div
+      data-testid="output-recover-cell"
+      className="mt-1.5 rounded-lg border border-amber-400/50 bg-amber-400/10 p-2"
+    >
+      <div className="text-[11px] font-bold text-amber-500">Task not lost</div>
+      <div className="text-[10px] text-canvas-muted">
+        {taskIds.length > 1
+          ? `${taskIds.length} tasks recoverable · next …${first.slice(-6)}`
+          : `Task …${first.slice(-6)}`}
+      </div>
+      {note && (
+        <div data-testid="output-recover-note" className="text-[10px] text-canvas-muted">
+          {note}
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={() => void onQuery()}
+        disabled={querying || !promptId}
+        className="nodrag mh-chip mt-1.5 !border-amber-400/60 !text-amber-500 disabled:opacity-50"
+      >
+        {querying ? 'Checking…' : 'Check Result'}
+      </button>
     </div>
   );
 }

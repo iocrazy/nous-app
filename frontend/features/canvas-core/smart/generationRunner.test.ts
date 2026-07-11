@@ -216,6 +216,95 @@ describe('withGenerationRunner — fan-out partial failure (P0-2)', () => {
   });
 });
 
+describe('withGenerationRunner — recover semantics (P1-13)', () => {
+  const GEN2: RunnerContext = {
+    ...TEXT_CTX,
+    gen: { kind: 'image', model: '', count: 2 },
+  };
+
+  it('onDispatched carries the task ids (persistence hook for resume)', async () => {
+    dispatchGenerations.mockResolvedValue(['t1', 't2']);
+    pollGeneration.mockResolvedValue({
+      phase: 'completed',
+      metadata: { result_url: '/u' },
+    });
+    const dispatched: unknown[] = [];
+    const runner = withGenerationRunner(baseCaller, {
+      canvasId: '9',
+      onDispatched: (...a) => dispatched.push(a),
+    });
+    await runner(GEN2);
+    expect(dispatched).toEqual([['p1', 2, 'image', ['t1', 't2']]]);
+  });
+
+  it('onItemSettled carries each task id', async () => {
+    dispatchGenerations.mockResolvedValue(['t1']);
+    pollGeneration.mockResolvedValue({
+      phase: 'completed',
+      metadata: { result_url: '/u' },
+    });
+    const settled: Array<{ taskId?: string }> = [];
+    const runner = withGenerationRunner(baseCaller, {
+      canvasId: '9',
+      onItemSettled: (_id, item) => settled.push(item),
+    });
+    await runner({ ...TEXT_CTX, gen: { kind: 'image', model: '', count: 1 } });
+    expect(settled[0].taskId).toBe('t1');
+  });
+
+  it('a poll exception marks THAT item recoverable and keeps siblings', async () => {
+    dispatchGenerations.mockResolvedValue(['t1', 't2']);
+    pollGeneration
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockResolvedValueOnce({
+        phase: 'completed',
+        metadata: { result_url: '/gm/2/cover' },
+      });
+    const settled: Array<{ taskId?: string; url: string | null; recoverable?: boolean }> = [];
+    const runner = withGenerationRunner(baseCaller, {
+      canvasId: '9',
+      onItemSettled: (_id, item) => settled.push(item),
+    });
+    const result = await runner(GEN2);
+    // The broken poll must NOT reject the whole batch (latent Promise.all
+    // bug): the sibling's completed url still lands.
+    expect(result.ok).toBe(true);
+    expect(result.urls).toEqual(['/gm/2/cover']);
+    const recover = settled.find((s) => s.taskId === 't1');
+    expect(recover?.recoverable).toBe(true);
+    expect(recover?.url).toBeNull();
+  });
+
+  it('all polls broken → in-band failure that says the tasks are not lost', async () => {
+    dispatchGenerations.mockResolvedValue(['t1']);
+    pollGeneration.mockRejectedValue(new Error('network down'));
+    const runner = withGenerationRunner(baseCaller, { canvasId: '9' });
+    const result = await runner({
+      ...TEXT_CTX,
+      gen: { kind: 'image', model: '', count: 1 },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/not lost/i);
+  });
+
+  it('PollStopped still stops the whole run (no recover state)', async () => {
+    const { PollStopped } = await import('../services/canvasGenerationService');
+    dispatchGenerations.mockResolvedValue(['t1']);
+    pollGeneration.mockRejectedValue(new PollStopped('t1'));
+    const settled: Array<{ recoverable?: boolean }> = [];
+    const runner = withGenerationRunner(baseCaller, {
+      canvasId: '9',
+      onItemSettled: (_id, item) => settled.push(item),
+    });
+    const result = await runner({
+      ...TEXT_CTX,
+      gen: { kind: 'image', model: '', count: 1 },
+    });
+    expect(result.stopped).toBe(true);
+    expect(settled.some((s) => s.recoverable)).toBe(false);
+  });
+});
+
 describe('withGenerationRunner — placeholder lifecycle (P0-3)', () => {
   it('fires onDispatched with the fan-out size and onItemSettled per item', async () => {
     dispatchGenerations.mockResolvedValue(['t1', 't2']);

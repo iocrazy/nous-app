@@ -158,3 +158,42 @@ describe('progressive generation placeholders (P0-3)', () => {
     expect(data?.gen_failed).toBe(1);
   });
 });
+
+// ── Recover marks (P1-13) ───────────────────────────────────────────────────
+
+import { markGenerationRecover, resolveGenerationRecover } from './genSlots';
+
+describe('generation recover marks (P1-13)', () => {
+  it('markGenerationRecover swaps a pending cell for a recover entry', () => {
+    seed();
+    beginGenerationSlot('p1', 2, 'image');
+    markGenerationRecover('p1', 't1');
+    const data = slotOf() as Record<string, unknown> | undefined;
+    expect(data?.gen_pending).toBe(1);
+    expect(data?.gen_recover).toEqual(['t1']);
+  });
+
+  it('resolve with a url appends the image WITHOUT eating sibling pending cells', () => {
+    seed();
+    beginGenerationSlot('p1', 3, 'image');
+    markGenerationRecover('p1', 't1');
+    resolveGenerationRecover('p1', 't1', { url: '/gm/9/cover', kind: 'image' });
+    const data = slotOf() as
+      | { gen_pending?: number; gen_recover?: string[]; images?: Array<{ url: string }> }
+      | undefined;
+    expect(data?.gen_recover).toEqual([]);
+    expect(data?.images?.map((i) => i.url)).toEqual(['/gm/9/cover']);
+    // 3 dispatched − 1 recovered = 2 siblings still pending, untouched.
+    expect(data?.gen_pending).toBe(2);
+  });
+
+  it('resolve as failed burns the mark into the failed count', () => {
+    seed();
+    beginGenerationSlot('p1', 1, 'image');
+    markGenerationRecover('p1', 't1');
+    resolveGenerationRecover('p1', 't1', { url: null, kind: 'image' });
+    const data = slotOf() as Record<string, unknown> | undefined;
+    expect(data?.gen_recover).toEqual([]);
+    expect(data?.gen_failed).toBe(1);
+  });
+});

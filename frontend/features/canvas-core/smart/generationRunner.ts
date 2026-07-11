@@ -26,15 +26,32 @@ export interface GenerationRunnerDeps {
    *  returns a `stopped` result so the node goes back to idle. */
   shouldStop?: () => boolean;
   /** Placeholder lifecycle (P0-3): fired right after dispatch with the
-   *  fan-out size — the caller shows N shimmer cells. */
-  onDispatched?: (promptId: string, count: number, kind: 'image' | 'video') => void;
+   *  fan-out size — the caller shows N shimmer cells. taskIds (P1-13) let
+   *  the caller persist the in-flight batch for reload resume. */
+  onDispatched?: (
+    promptId: string,
+    count: number,
+    kind: 'image' | 'video',
+    taskIds: string[],
+  ) => void;
   /** First-done-first-shown (P0-3): fired as EACH task completes with a
-   *  url — the caller replaces one shimmer cell. Errors fire with url=null. */
+   *  url — the caller replaces one shimmer cell. Errors fire with url=null;
+   *  recoverable=true (P1-13) means the POLL broke, not the task — it may
+   *  still finish server-side and can be re-queried by taskId. */
   onItemSettled?: (
     promptId: string,
-    item: { url: string | null; kind: 'image' | 'video' },
+    item: {
+      url: string | null;
+      kind: 'image' | 'video';
+      taskId: string;
+      recoverable?: boolean;
+    },
   ) => void;
 }
+
+/** Sentinel phase for tasks whose poll broke (network/timeout) — the task
+ *  itself is NOT lost; it keeps running server-side (P1-13). */
+const RECOVER_PHASE = '__recover__';
 
 export function withGenerationRunner(
   base: PromptCaller,
@@ -65,7 +82,7 @@ export function withGenerationRunner(
         params,
         ...(ctx.source_url ? { source_url: ctx.source_url } : {}),
       });
-      deps.onDispatched?.(ctx.promptId, taskIds.length, gen.kind);
+      deps.onDispatched?.(ctx.promptId, taskIds.length, gen.kind, taskIds);
 
       // Fold N tasks' phases into one prompt-level signal: queued while
       // EVERYTHING is still in line, running once anything starts.
@@ -83,14 +100,34 @@ export function withGenerationRunner(
             timeoutMs: deps.pollTimeoutMs,
             onTick: (t) => emit(t.phase === 'queued' ? 'queued' : 'running'),
             shouldStop: deps.shouldStop,
-          }).then((task) => {
-            // First-done-first-shown (P0-3): surface each item the moment
-            // its own poll settles instead of waiting for the whole batch.
-            const url =
-              task.phase === 'completed' ? task.metadata?.result_url ?? null : null;
-            deps.onItemSettled?.(ctx.promptId, { url, kind: gen.kind });
-            return task;
-          }),
+          }).then(
+            (task) => {
+              // First-done-first-shown (P0-3): surface each item the moment
+              // its own poll settles instead of waiting for the whole batch.
+              const url =
+                task.phase === 'completed' ? task.metadata?.result_url ?? null : null;
+              deps.onItemSettled?.(ctx.promptId, { url, kind: gen.kind, taskId: id });
+              return task;
+            },
+            (err: unknown) => {
+              // Cooperative stop aborts the whole run — rethrow.
+              if (err instanceof PollStopped) throw err;
+              // A broken POLL is not a failed TASK (P1-13): the backend keeps
+              // running it. Mark the item recoverable and — crucially — do
+              // NOT reject the shared Promise.all, which would throw away
+              // every sibling's completed result.
+              deps.onItemSettled?.(ctx.promptId, {
+                url: null,
+                kind: gen.kind,
+                taskId: id,
+                recoverable: true,
+              });
+              return {
+                phase: RECOVER_PHASE,
+                error_msg: err instanceof Error ? err.message : String(err),
+              };
+            },
+          ),
         ),
       );
 
@@ -98,14 +135,19 @@ export function withGenerationRunner(
       // always land; failed siblings are reported alongside, never allowed
       // to throw away good results. The prompt only fails when NOTHING
       // completed with a url.
-      const failed = tasks.filter((t) => t.phase !== 'completed');
+      const recovers = tasks.filter((t) => t.phase === RECOVER_PHASE);
+      const failed = tasks.filter(
+        (t) => t.phase !== 'completed' && t.phase !== RECOVER_PHASE,
+      );
       const urls = tasks
         .filter((t) => t.phase === 'completed')
         .map((t) => t.metadata?.result_url)
         .filter((u): u is string => Boolean(u));
       const firstError = failed[0]
         ? failed[0].error_msg || `generation ${failed[0].phase}`
-        : null;
+        : recovers[0]
+          ? `lost track of ${recovers.length} task${recovers.length > 1 ? 's' : ''} — not lost, re-query from the output node`
+          : null;
       if (urls.length === 0) {
         return {
           ok: false,
@@ -114,11 +156,12 @@ export function withGenerationRunner(
           media_kind: gen.kind,
         };
       }
+      const lostCount = failed.length + recovers.length;
       return {
         ok: true,
         text: urls.join('\n'),
-        error: failed.length
-          ? `${failed.length} of ${tasks.length} items failed: ${firstError}`
+        error: lostCount
+          ? `${lostCount} of ${tasks.length} items failed: ${firstError}`
           : null,
         urls,
         media_kind: gen.kind,
