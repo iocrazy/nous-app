@@ -1428,7 +1428,8 @@
         "currentEpOnly": "Current episode only",
         "empty": "No files yet",
         "emptyRenders": "No renders yet"
-      }
+      },
+      "canvasEmpty": "No canvases yet — create one to start sketching this project."
     }
   },
   "storyboard": {
