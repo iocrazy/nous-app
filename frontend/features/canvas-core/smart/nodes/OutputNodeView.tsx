@@ -362,7 +362,6 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
       <Handle
         type="target"
         position={Position.Left}
-        className="!h-2 !w-2 !bg-slate-400"
       />
       <div className="mh-node-head">
         <div className="mh-node-title">
@@ -377,7 +376,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
               onClick={onRegenerate}
               disabled={regenerating}
               title="Re-run the source prompt"
-              className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="mh-chip"
             >
               {regenerating ? 'Rerunning…' : 'Rerun'}
             </button>
@@ -388,7 +387,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
               data-testid="outpaint-open"
               onClick={openOutpaintEditor}
               title="Extend the canvas beyond the image"
-              className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-slate-600 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="mh-chip"
             >
               Expand
             </button>
@@ -399,7 +398,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
               data-testid="mask-cutout-open"
               onClick={openMaskEditor}
               title="Paint a region to cut out"
-              className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-slate-600 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="mh-chip"
             >
               Mask
             </button>
@@ -410,7 +409,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
               data-testid="grid-split-open"
               onClick={openGridEditor}
               title="Split into a grid of tiles"
-              className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-slate-600 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="mh-chip"
             >
               Split
             </button>
@@ -418,14 +417,14 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           {crop_region && (
             <div
               data-testid="crop-region-badge"
-              className="text-[10px] uppercase tracking-wider text-indigo-600"
+              className="text-[10px] uppercase tracking-wider text-canvas-strong"
               title="Crop applied"
             >
               Cropped
             </div>
           )}
           {resource_id && (
-            <div className="text-[10px] uppercase tracking-wider text-emerald-600">
+            <div className="text-[10px] uppercase tracking-wider text-emerald-500">
               Saved
             </div>
           )}
@@ -474,11 +473,11 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
             className="block w-full cursor-zoom-in rounded"
           />
         ) : preview_text ? (
-          <div className="line-clamp-4 whitespace-pre-wrap text-sm text-slate-800 dark:text-slate-200">
+          <div className="line-clamp-4 whitespace-pre-wrap text-sm text-canvas-text">
             {preview_text}
           </div>
         ) : (
-          <div className="text-xs italic text-slate-400">
+          <div className="text-xs italic text-canvas-muted">
             {kind === 'text' ? 'No text yet' : `No ${kind} rendered yet`}
           </div>
         )}

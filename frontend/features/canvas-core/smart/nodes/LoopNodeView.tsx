@@ -38,15 +38,14 @@ export function LoopNodeView({ id, data, selected }: NodeProps) {
       <Handle
         type="target"
         position={Position.Left}
-        className="!h-2 !w-2 !bg-slate-400"
       />
-      <div className="flex items-center justify-between border-b border-slate-200 px-3 py-1.5 dark:border-slate-700">
+      <div className="flex items-center justify-between border-b border-canvas-line px-3 py-1.5 ">
         <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
           Loop
         </div>
         <div className="flex items-center gap-1">
           <select
-            className="nodrag rounded border border-slate-200 bg-transparent px-1 py-0 text-[10px] uppercase tracking-wider text-slate-500 outline-none focus:ring-1 focus:ring-indigo-300 dark:border-slate-700 dark:text-slate-400"
+            className="nodrag mh-chip outline-none focus:ring-1 focus:ring-canvas-strong/40"
             value={mode}
             onChange={(e) => patch({ mode: e.target.value as LoopMode })}
             aria-label="Loop mode"
@@ -84,7 +83,7 @@ export function LoopNodeView({ id, data, selected }: NodeProps) {
       </div>
       <div className="space-y-2 p-3">
         <input
-          className="nodrag w-full bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400 focus:ring-1 focus:ring-indigo-300 dark:text-slate-200"
+          className="nodrag w-full bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400 focus:ring-1 focus:ring-canvas-strong/40 dark:text-slate-200"
           placeholder="Loop label (optional)"
           value={label}
           onChange={(e) => patch({ label: e.target.value })}
@@ -115,7 +114,7 @@ export function LoopNodeView({ id, data, selected }: NodeProps) {
             <div key={i} className="flex items-start gap-1">
               <span className="pt-1.5 text-[10px] text-slate-400">{i + 1}</span>
               <textarea
-                className="nodrag min-h-[34px] w-full resize-y rounded border border-slate-200 bg-transparent px-1.5 py-1 text-xs text-slate-700 outline-none placeholder:text-slate-400 focus:ring-1 focus:ring-indigo-300 dark:border-slate-700 dark:text-slate-200"
+                className="nodrag min-h-[34px] w-full resize-y rounded-full border border-canvas-line bg-transparent px-1.5 py-1 text-xs text-slate-700 outline-none placeholder:text-slate-400 focus:ring-1 focus:ring-canvas-strong/40  dark:text-slate-200"
                 placeholder="Prompt for this round — 《计数》 = round index"
                 value={prompt}
                 rows={1}
@@ -147,7 +146,6 @@ export function LoopNodeView({ id, data, selected }: NodeProps) {
       <Handle
         type="source"
         position={Position.Right}
-        className="!h-2 !w-2 !bg-slate-400"
       />
     </div>
   );
@@ -171,7 +169,7 @@ function NumberField({
       <span>{label}</span>
       <input
         type="number"
-        className="nodrag w-16 rounded border border-slate-200 bg-transparent px-1 py-0.5 text-xs text-slate-700 outline-none focus:ring-1 focus:ring-indigo-300 dark:border-slate-700 dark:text-slate-200"
+        className="nodrag w-16 rounded-full border border-canvas-line bg-transparent px-1 py-0.5 text-xs text-slate-700 outline-none focus:ring-1 focus:ring-canvas-strong/40  dark:text-slate-200"
         min={1}
         max={max}
         value={value}

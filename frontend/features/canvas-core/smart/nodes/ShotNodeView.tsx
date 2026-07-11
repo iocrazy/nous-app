@@ -46,7 +46,6 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
       <Handle
         type="source"
         position={Position.Right}
-        className="!h-2 !w-2 !bg-slate-400"
       />
     </div>
   );
