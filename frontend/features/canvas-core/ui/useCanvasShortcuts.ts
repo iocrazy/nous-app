@@ -31,6 +31,7 @@ import {
   readClipboard,
 } from '../store/clipboard';
 import { releaseChildrenOf } from '../smart/grouping';
+import { groupSelection, ungroupNode } from '../smart/grouping';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import type { CanvasNode } from '../types';
 
@@ -140,6 +141,29 @@ export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
         );
         return;
       }
+      if (meta && (key === 'g' || key === 'G')) {
+        // Group / Ungroup (P1-10, Infinite's Ctrl+G / Ctrl+Shift+G). The
+        // data model shipped with ②-3; this is the missing keyboard entry.
+        event.preventDefault();
+        if (event.shiftKey) {
+          const sel = new Set(store.selection);
+          const g = store.nodes.find(
+            (n) =>
+              sel.has((n as { id?: string }).id as string) &&
+              (n as { type?: string }).type === 'group',
+          );
+          if (!g) return;
+          store.setNodes(ungroupNode(store.nodes, String((g as { id?: string }).id)));
+          store.setSelection([]);
+        } else {
+          const result = groupSelection(store.nodes, store.selection);
+          if (!result) return;
+          store.setNodes(result.nodes);
+          store.setSelection([result.groupId]);
+        }
+        return;
+      }
+
       if (meta && (key === 'd' || key === 'D')) {
         // Duplicate in place (G6 — Infinite's alt-drag-copy, keyboard form).
         // Only preventDefault when we actually act: with nothing selected the

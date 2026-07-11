@@ -81,11 +81,61 @@ test.describe('canvas token base (Phase 0 G10)', () => {
   });
 });
 
+<<<<<<< HEAD
 test('minimap is a bottom-right glass island (P1-11)', async ({ page }) => {
+=======
+const SEARCH_STUB = {
+  results: [],
+  counts: { all: 0, video: 0, image: 0, doc: 0, audio: 0, pdf: 0 },
+  next_cursor: null,
+};
+
+test('ports fade in on node hover (P1-9)', async ({ page }) => {
+  await seedTheme(page, 'dark');
+  await setupStubbedSession(page);
+  await page.route('**/api/v1/canvases/c-ports', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        success: true,
+        data: {
+          ...CANVAS,
+          id: 'c-ports',
+          nodes_json: [
+            {
+              id: 'p1',
+              type: 'prompt',
+              position: { x: 120, y: 120 },
+              data: { body: 'x', provider_slug: '', agent_id: null, run_status: 'idle', resource_refs: [] },
+            },
+          ],
+        },
+      }),
+    }),
+  );
+  await page.route('**/api/v1/resources/search*', (r) =>
+    r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(SEARCH_STUB) }),
+  );
+  await page.goto(`/team/${TEAM_ID}/canvas/c-ports`);
+  const node = page.locator('.react-flow__node').first();
+  await expect(node).toBeVisible();
+  const handle = node.locator('.react-flow__handle').first();
+  const opacityOf = () =>
+    handle.evaluate((el) => getComputedStyle(el as HTMLElement).opacity);
+  // Idle: invisible (hit area stays live — visual only).
+  await expect.poll(opacityOf).toBe('0');
+  await node.hover();
+  await expect.poll(opacityOf).toBe('1');
+});
+
+test('composer buttons lift 1px on hover (P1-6)', async ({ page }) => {
+>>>>>>> origin/master
   await seedTheme(page, 'dark');
   await setupStubbedSession(page);
   await setupCanvasStubs(page);
   await page.route('**/api/v1/resources/search*', (r) =>
+<<<<<<< HEAD
     r.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -107,4 +157,17 @@ test('minimap is a bottom-right glass island (P1-11)', async ({ page }) => {
   // Controls swapped to the freed bottom-left corner.
   const controlsCls = await page.locator('.react-flow__controls').getAttribute('class');
   expect(controlsCls).toContain('left');
+=======
+    r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(SEARCH_STUB) }),
+  );
+  await page.goto(`/team/${TEAM_ID}/canvas/c-visual`);
+  const btn = page
+    .getByLabel('Smart canvas composer')
+    .getByRole('button', { name: '+ Prompt' });
+  await expect(btn).toBeVisible();
+  await btn.hover();
+  await expect
+    .poll(() => btn.evaluate((el) => getComputedStyle(el as HTMLElement).transform))
+    .toBe('matrix(1, 0, 0, 1, 0, -1)');
+>>>>>>> origin/master
 });
