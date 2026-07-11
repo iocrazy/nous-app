@@ -226,6 +226,19 @@ class EpisodeRepository:
         try:
             values = _episode_write_values(data)
             if "sort_order" not in values and values.get("project_id") is not None:
+                # Concurrency note: MAX(sort_order)+1 is read inside the INSERT
+                # but is NOT collision-proof under concurrent creates — two
+                # near-simultaneous inserts for the same project can both read
+                # the same MAX and land on an identical sort_order. This is
+                # acceptable for the single-writer case that dominates here
+                # (one user managing their project's episodes): the resulting
+                # tie is benign — the list sorts stably and the first Move
+                # up/down swaps the two rows' sort_order, self-healing the
+                # duplicate. If this ever needs to be collision-free under
+                # multiple concurrent writers, take a per-project advisory lock
+                # (``pg_advisory_xact_lock(hashtext(project_id))``) around the
+                # read+insert, or add a UNIQUE(project_id, sort_order) and
+                # retry on conflict. Not worth that cost today.
                 values["sort_order"] = (
                     select(func.coalesce(func.max(Episodes.sort_order) + 1, 1))
                     .where(Episodes.project_id == values["project_id"])
