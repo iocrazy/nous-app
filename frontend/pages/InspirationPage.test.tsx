@@ -41,6 +41,11 @@ vi.mock('react-i18next', () => ({
 }));
 const addToast = vi.fn();
 vi.mock('../components/Toast', () => ({ useToast: () => ({ addToast }) }));
+// Both the composer and the edit modal mount TipTap-backed NoteEditor; swap
+// in the shared textarea shim so textbox queries in the edit-modal test
+// below keep working without driving real contenteditable DOM (see
+// InspirationPage.hotspots.test.tsx for the same pattern).
+vi.mock('../components/Inspiration/NoteEditor', () => import('../components/Inspiration/testing/noteEditorShim'));
 
 import { InspirationPage } from './InspirationPage';
 
@@ -158,6 +163,33 @@ describe('InspirationPage', () => {
     fireEvent.click(screen.getByText('#food (1)'));
     await waitFor(() => expect(screen.queryByRole('button', { name: /Music topic/ })).toBeNull());
     expect(screen.getByRole('button', { name: /Food topic/ })).toBeTruthy();
+  });
+
+  it('edits a note through the modal (NoteEditor) and saves the new content', async () => {
+    updateNote.mockResolvedValue({ ...NOTE, content_md: 'updated content #hooks' });
+    render(<InspirationPage />);
+    await screen.findByText('first idea #hooks');
+    fireEvent.click(screen.getByLabelText('Note actions'));
+    fireEvent.click(screen.getByText('Edit'));
+
+    // The composer's NoteEditor is always mounted too, so disambiguate by
+    // taking the last-rendered instance (the modal one).
+    const editors = await screen.findAllByLabelText('note-editor');
+    const modalEditor = editors[editors.length - 1] as HTMLTextAreaElement;
+    expect(modalEditor.value).toBe('first idea #hooks');
+
+    fireEvent.change(modalEditor, { target: { value: 'updated content #hooks' } });
+    // The composer's own submit button is also labeled "Save" — the modal's
+    // is the last one rendered (it mounts after the always-present composer).
+    const saveButtons = screen.getAllByText('Save');
+    fireEvent.click(saveButtons[saveButtons.length - 1]);
+
+    await waitFor(() =>
+      expect(updateNote).toHaveBeenCalledWith('1', { content_md: 'updated content #hooks' }),
+    );
+    await waitFor(() => expect(screen.getByText('updated content #hooks')).toBeTruthy());
+    // Modal closes after a successful save.
+    expect(screen.queryByText('Edit note')).toBeNull();
   });
 
   it('clicking the same category chip twice clears the filter', async () => {

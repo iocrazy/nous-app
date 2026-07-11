@@ -8,6 +8,7 @@ vi.mock('../../services/inspirationService', () => ({
 }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (_k: string, f: string) => f }) }));
 vi.mock('../Toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
+vi.mock('./NoteEditor', () => import('./testing/noteEditorShim'));
 
 import { Composer } from './Composer';
 
