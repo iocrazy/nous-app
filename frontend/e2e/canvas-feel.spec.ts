@@ -279,3 +279,25 @@ test('bare z toggles the overview and returns', async ({ page }) => {
     .poll(viewportTransform, { message: 'second z should restore the viewport' })
     .toBe(before);
 });
+
+test('wheel zoom-out passes the old React Flow 0.5 floor (P0-6)', async ({ page }) => {
+  await openCanvas(page);
+
+  const zoomOf = () =>
+    page.locator('.react-flow__viewport').evaluate((el) => {
+      const m = /scale\(([\d.]+)\)/.exec((el as HTMLElement).style.transform);
+      return m ? Number(m[1]) : 1;
+    });
+
+  // Wheel-out repeatedly over the pane; RF default minZoom=0.5 clamps here,
+  // the Infinite-parity engine must keep going well past it.
+  const pane = page.locator('.react-flow__pane');
+  const box = (await pane.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  for (let i = 0; i < 25; i++) {
+    await page.mouse.wheel(0, 400);
+  }
+  await expect
+    .poll(zoomOf, { message: 'zoom should go below the 0.5 RF default floor' })
+    .toBeLessThan(0.45);
+});
