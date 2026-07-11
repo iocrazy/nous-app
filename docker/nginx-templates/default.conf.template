@@ -83,7 +83,19 @@ server {
     client_max_body_size 512m;
 
     location / {
-        proxy_pass http://mediahub:8080;
+        # Runtime DNS resolution (2026-07-11 outage fix): a literal
+        # proxy_pass hostname is resolved ONCE at nginx startup and cached
+        # forever. When Watchtower recreates the backend, its old IP can be
+        # re-assigned to the worker container, silently routing /api into a
+        # container that only serves probe routes — business routes 404 for
+        # hours while every healthcheck stays green. The variable form of
+        # proxy_pass forces per-request resolution against Docker's embedded
+        # DNS (127.0.0.11), re-capped every 10s. No URI part in the variable,
+        # so the original request URI is passed through unchanged (same
+        # semantics as the literal form had).
+        resolver 127.0.0.11 valid=10s ipv6=off;
+        set $mediahub_upstream http://mediahub:8080;
+        proxy_pass $mediahub_upstream;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
