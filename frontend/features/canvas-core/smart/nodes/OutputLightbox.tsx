@@ -78,6 +78,83 @@ export function OutputLightbox({
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
+  // ── Wheel zoom + drag pan (P0-5, Infinite parity) ─────────────────────────
+  // Cursor-anchored wheel zoom over the stage; drag pans; double-click and
+  // item switches reset. Disabled in compare mode (the divider math needs a
+  // stable box) and for video (controls own the wheel there some day).
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const panDrag = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
+  const zoomEnabled = kind === 'image' && !compareOn;
+  const zoomActive = zoom !== 1 || pan.x !== 0 || pan.y !== 0;
+
+  const resetZoom = useCallback(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }, []);
+
+  // A different item (or compare toggle) always starts at fit.
+  useEffect(() => {
+    resetZoom();
+  }, [index, compareOn, resetZoom]);
+
+  const applyWheelZoom = useCallback(
+    (e: WheelEvent) => {
+      if (!zoomEnabled) return;
+      e.preventDefault();
+      const stage = stageRef.current;
+      if (!stage) return;
+      const rect = stage.getBoundingClientRect();
+      // Cursor relative to the stage centre (the flex-centered origin).
+      const cx = e.clientX - (rect.left + rect.width / 2);
+      const cy = e.clientY - (rect.top + rect.height / 2);
+      setZoom((prevZoom) => {
+        const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+        // Same envelope as Infinite: floor 0.05, generous ceiling.
+        const nextZoom = Math.min(32, Math.max(0.05, prevZoom * factor));
+        setPan((prevPan) => {
+          // Keep the content point under the cursor stationary.
+          const px = (cx - prevPan.x) / prevZoom;
+          const py = (cy - prevPan.y) / prevZoom;
+          return { x: cx - px * nextZoom, y: cy - py * nextZoom };
+        });
+        return nextZoom;
+      });
+    },
+    [zoomEnabled],
+  );
+
+  // React marks onWheel passive on some roots — bind non-passive by hand so
+  // preventDefault reliably stops page scroll while zooming.
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return undefined;
+    stage.addEventListener('wheel', applyWheelZoom, { passive: false });
+    return () => stage.removeEventListener('wheel', applyWheelZoom);
+  }, [applyWheelZoom]);
+
+  const onPanStart = useCallback(
+    (e: React.MouseEvent) => {
+      if (!zoomEnabled || e.button !== 0) return;
+      e.preventDefault();
+      panDrag.current = { startX: e.clientX, startY: e.clientY, baseX: pan.x, baseY: pan.y };
+      const onMove = (ev: MouseEvent) => {
+        const d = panDrag.current;
+        if (!d) return;
+        setPan({ x: d.baseX + (ev.clientX - d.startX), y: d.baseY + (ev.clientY - d.startY) });
+      };
+      const onUp = () => {
+        panDrag.current = null;
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    },
+    [zoomEnabled, pan.x, pan.y],
+  );
+
   const goto = useCallback(
     (next: number) => {
       if (items.length < 2) return;
@@ -188,7 +265,11 @@ export function OutputLightbox({
       </div>
 
       {/* Stage */}
-      <div className="relative flex min-h-0 flex-1 items-center justify-center px-14 pb-6">
+      <div
+        ref={stageRef}
+        data-testid="lightbox-stage"
+        className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden px-14 pb-6"
+      >
         {items.length > 1 && (
           <button
             type="button"
@@ -203,8 +284,18 @@ export function OutputLightbox({
           </button>
         )}
         <div
-          className="relative max-h-full max-w-full"
+          data-testid="lightbox-zoom-layer"
+          className={`relative max-h-full max-w-full ${
+            zoomEnabled ? (panDrag.current ? 'cursor-grabbing' : 'cursor-grab') : ''
+          }`}
+          style={
+            zoomActive
+              ? { transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }
+              : undefined
+          }
           onClick={(e) => e.stopPropagation()}
+          onMouseDown={onPanStart}
+          onDoubleClick={zoomEnabled ? resetZoom : undefined}
         >
           {kind === 'video' ? (
             <video
@@ -282,6 +373,16 @@ export function OutputLightbox({
           >
             <ChevronRight size={18} />
           </button>
+        )}
+        {zoomActive && (
+          <span
+            data-testid="lightbox-zoom-readout"
+            className="absolute bottom-3 left-4 rounded bg-white/10 px-2 py-0.5 text-[11px] tabular-nums text-slate-200"
+            onClick={(e) => e.stopPropagation()}
+            title="Double-click the image to reset"
+          >
+            {`${Math.round(zoom * 100)}%`}
+          </span>
         )}
       </div>
     </div>,
