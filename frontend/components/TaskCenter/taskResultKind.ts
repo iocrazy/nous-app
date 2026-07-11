@@ -19,6 +19,7 @@ export function taskResultKind(
     case 'agent':
       return 'agent';
     case 'canvas_gen':
+    case 'canvas_timeline':
       // Result lives in task metadata (durable result_url), no resource row.
       return 'canvasGen';
     case 'ai_transcription':
