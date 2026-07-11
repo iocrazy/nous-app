@@ -97,11 +97,11 @@ test('selecting an edge shows the scissors; clicking cuts the wire', async ({ pa
       if (!ctm) throw new Error('no screen CTM for edge path');
       return { x: ctm.a * p.x + ctm.c * p.y + ctm.e, y: ctm.b * p.x + ctm.d * p.y + ctm.f };
     });
+  // P1-8: every edge carries a dimmed always-on scissors at its midpoint —
+  // one click at the midpoint cuts the wire directly (no select-first step;
+  // this is exactly Infinite's conn-cut flow).
+  await expect(page.getByRole('button', { name: 'Cut connection' })).toHaveCount(2);
   await page.mouse.click(mid.x, mid.y);
-  const scissors = page.getByRole('button', { name: 'Cut connection' });
-  await expect(scissors).toBeVisible();
-
-  await scissors.click();
   await expect(page.locator('.react-flow__edge')).toHaveCount(1);
   await expect(page.locator('.react-flow__edge[data-id="e1"]')).toHaveCount(0);
 });
