@@ -7,9 +7,12 @@
  * scene highlight. It deliberately does NOT own scene content or the op queue —
  * that is useSceneSync's job, one instance per scene.
  *
- * Theme is the only slice that persists: the initial value is read from
- * localStorage('editor.theme') so a writer's night-draft preference survives a
- * reload, and toggleTheme writes it back. Everything else is session state.
+ * Theme follows the app theme (`<html data-theme>`, owned by ThemeContext):
+ * the initial value is read from the document at mount, and EditorShell keeps
+ * it in sync via `setTheme` when the app theme changes. The ☾/☼ toggle is a
+ * session-only override — it deliberately does NOT persist, so the editor can
+ * never come up light inside a dark app again (the old localStorage
+ * 'editor.theme' default did exactly that). Everything else is session state.
  */
 import { useMemo, useReducer } from 'react';
 import type { CursorState } from './editorMachine';
@@ -33,27 +36,15 @@ export type EditorAction =
   | { type: 'setMode'; mode: EditorMode }
   | { type: 'setFormat'; format: EditorFormat }
   | { type: 'toggleTheme' }
+  | { type: 'setTheme'; theme: EditorTheme }
   | { type: 'setCursor'; cursor: CursorState | null }
   | { type: 'setActiveScene'; sceneId: string | null }
   | { type: 'setNextInsertType'; elementType: ElementType };
 
-const THEME_STORAGE_KEY = 'editor.theme';
-
-function readStoredTheme(): EditorTheme {
-  try {
-    return localStorage.getItem(THEME_STORAGE_KEY) === 'dark' ? 'dark' : 'light';
-  } catch {
-    return 'light';
-  }
-}
-
-function persistTheme(theme: EditorTheme): void {
-  try {
-    localStorage.setItem(THEME_STORAGE_KEY, theme);
-  } catch (err) {
-    // Non-fatal: a writer in private mode just loses theme memory, not the editor.
-    console.error('[useEditorState] failed to persist theme', err);
-  }
+/** The app theme ThemeContext stamped on <html> (also set pre-React by the
+ * index.html anti-flash script), so no context wiring is needed here. */
+export function readAppTheme(): EditorTheme {
+  return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
 }
 
 function reducer(state: EditorState, action: EditorAction): EditorState {
@@ -62,11 +53,11 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
       return { ...state, mode: action.mode };
     case 'setFormat':
       return { ...state, format: action.format };
-    case 'toggleTheme': {
-      const theme: EditorTheme = state.theme === 'light' ? 'dark' : 'light';
-      persistTheme(theme);
-      return { ...state, theme };
-    }
+    case 'toggleTheme':
+      return { ...state, theme: state.theme === 'light' ? 'dark' : 'light' };
+    case 'setTheme':
+      if (state.theme === action.theme) return state;
+      return { ...state, theme: action.theme };
     case 'setCursor':
       return { ...state, cursor: action.cursor };
     case 'setActiveScene':
@@ -86,7 +77,7 @@ function init(initialFormat: EditorFormat): EditorState {
   return {
     mode: 'script',
     format: initialFormat,
-    theme: readStoredTheme(),
+    theme: readAppTheme(),
     cursor: null,
     activeSceneId: null,
     nextInsertType: 'action',
@@ -98,6 +89,7 @@ export interface EditorStateApi {
   setMode: (mode: EditorMode) => void;
   setFormat: (format: EditorFormat) => void;
   toggleTheme: () => void;
+  setTheme: (theme: EditorTheme) => void;
   setCursor: (cursor: CursorState | null) => void;
   setActiveScene: (sceneId: string | null) => void;
   setNextInsertType: (elementType: ElementType) => void;
@@ -119,6 +111,7 @@ export function useEditorState(options?: UseEditorStateOptions): EditorStateApi 
       setMode: (mode: EditorMode) => dispatch({ type: 'setMode', mode }),
       setFormat: (format: EditorFormat) => dispatch({ type: 'setFormat', format }),
       toggleTheme: () => dispatch({ type: 'toggleTheme' }),
+      setTheme: (theme: EditorTheme) => dispatch({ type: 'setTheme', theme }),
       setCursor: (cursor: CursorState | null) => dispatch({ type: 'setCursor', cursor }),
       setActiveScene: (sceneId: string | null) => dispatch({ type: 'setActiveScene', sceneId }),
       setNextInsertType: (elementType: ElementType) =>

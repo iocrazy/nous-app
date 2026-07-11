@@ -121,9 +121,20 @@ export function EditorShell({
   // Restore the per-script layout engine synchronously so the first paint uses
   // it (no engine flash on remount).
   const initialFormat = useMemo(() => readStoredFormat(scriptId) ?? undefined, [scriptId]);
-  const { state, setMode, setFormat, toggleTheme, setActiveScene, setCursor, setNextInsertType } =
+  const { state, setMode, setFormat, toggleTheme, setTheme, setActiveScene, setCursor, setNextInsertType } =
     useEditorState({ initialFormat });
   const { addToast } = useToast();
+  // Follow the app theme while mounted: ThemeContext stamps <html data-theme>,
+  // so a MutationObserver keeps the shell in sync without context plumbing
+  // (the shell renders in unit tests without a ThemeProvider). A later ☾/☼
+  // click still overrides for the session; the next app-theme change re-syncs.
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setTheme(document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => observer.disconnect();
+  }, [setTheme]);
   const [scenes, setScenes] = useState<SceneDoc[]>([]);
   const [chapters, setChapters] = useState<ScriptChapter[]>([]);
   // Episode dimension (Task 5): the owning project, this script's episode, and

@@ -82,15 +82,15 @@ export function StageSuggestion({
 
   return (
     <div
-      className="rounded-xl border border-indigo-500/35 bg-gradient-to-b from-indigo-500/[0.08] to-transparent p-4
+      className="rounded-xl border border-[var(--accent-border)] bg-island p-4
                  flex items-start gap-3"
       data-testid="stage-suggestion"
     >
-      <span className="grid place-items-center w-7 h-7 rounded-lg bg-indigo-500/15 text-indigo-400 shrink-0 mt-0.5">
+      <span className="grid place-items-center w-7 h-7 rounded-lg bg-[var(--accent-soft)] text-[var(--accent-text)] shrink-0 mt-0.5">
         <Lightbulb className="w-3.5 h-3.5" />
       </span>
       <div className="flex-1 min-w-0">
-        <div className="text-[11px] uppercase tracking-wider text-indigo-400 font-semibold">
+        <div className="text-[11px] uppercase tracking-wider text-[var(--accent-text)] font-semibold">
           {t('projects.suggest.eyebrow')}
         </div>
         <p className="text-sm text-ink-200 mt-1">{message}</p>
@@ -100,7 +100,7 @@ export function StageSuggestion({
         disabled={busy}
         onClick={() => (isGenerate ? onGenerate() : setActiveTab(data.action!.tab as ProjectTab))}
         className="flex items-center gap-1.5 shrink-0 rounded-lg font-medium text-sm px-3 py-1.5 transition-colors
-                   bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 text-ink-950"
+                   bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 text-white"
       >
         {busy ? <Loader2 size={14} className="animate-spin" /> : null}
         {t(data.action.label_key, { count: data.action.count })}

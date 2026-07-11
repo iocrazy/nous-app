@@ -54,6 +54,14 @@
 
   /* Stalled-activity semantic token (PR-7 D5) — amber that reads on dark. */
   --stall: #fbbf24;
+
+  /* Accent trio (workspace light-palette rework) — indigo emphasis that flips
+     with the theme: dark keeps the airy indigo-300-on-tint look, light swaps
+     to saturated indigo-600 on indigo-50 so active states stay readable
+     instead of washing out to pale lavender. */
+  --accent-text: #a5b4fc;
+  --accent-soft: rgba(99, 102, 241, 0.10);
+  --accent-border: rgba(99, 102, 241, 0.35);
 }
 
 @theme inline {
@@ -118,6 +126,11 @@
 
   /* Stalled-activity semantic token (PR-7 D5) — darker amber for light bg. */
   --stall: #d97706;
+
+  /* Accent trio — light theme: saturated text on a solid soft fill. */
+  --accent-text: #4f46e5;
+  --accent-soft: #eef2ff;
+  --accent-border: #c7d2fe;
 }
 
 /* ── Tinted button system — island redesign D6

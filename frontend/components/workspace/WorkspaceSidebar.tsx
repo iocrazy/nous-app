@@ -31,7 +31,7 @@ interface WorkspaceSidebarProps {
 function sideItemClass(active: boolean): string {
   return `flex items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-[12.5px] transition-colors w-full text-left ${
     active
-      ? 'bg-indigo-500/10 text-indigo-300 font-medium'
+      ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] font-medium'
       : 'text-ink-300 hover:text-ink-100 hover:bg-ink-800/50'
   }`;
 }
@@ -48,9 +48,26 @@ export function WorkspaceSidebar({
 }: WorkspaceSidebarProps) {
   const { t } = useTranslation();
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  // Popover position in viewport coordinates. The popover is `fixed` (anchored
+  // to the ep-card's rect) instead of `absolute`, for two reasons: the old
+  // `top-full` resolved against the whole episode block (card + child rows),
+  // dropping the menu below 发布 instead of below the card; and the sidebar is
+  // an overflow-y-auto scroller, which would clip a 224px-wide absolute child.
+  const [popoverPos, setPopoverPos] = useState<{ top: number; left: number } | null>(null);
   const switcherRef = useRef<HTMLDivElement>(null);
+  const epCardRef = useRef<HTMLButtonElement>(null);
 
   const closeSwitcher = useCallback(() => setSwitcherOpen(false), []);
+
+  const toggleSwitcher = useCallback(() => {
+    setSwitcherOpen((open) => {
+      if (open) return false;
+      const rect = epCardRef.current?.getBoundingClientRect();
+      if (!rect) return false;
+      setPopoverPos({ top: rect.bottom + 4, left: rect.left });
+      return true;
+    });
+  }, []);
 
   useEffect(() => {
     if (!switcherOpen) return;
@@ -59,14 +76,28 @@ export function WorkspaceSidebar({
         closeSwitcher();
       }
     };
+    // A fixed-position popover detaches from its anchor the moment anything
+    // scrolls or the window resizes — close instead of chasing the rect.
+    const handleScroll = () => closeSwitcher();
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeSwitcher();
+    };
     document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
+    document.addEventListener('keydown', handleKey);
+    window.addEventListener('scroll', handleScroll, true);
+    window.addEventListener('resize', handleScroll);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleKey);
+      window.removeEventListener('scroll', handleScroll, true);
+      window.removeEventListener('resize', handleScroll);
+    };
   }, [switcherOpen, closeSwitcher]);
 
   return (
     <div
       data-testid="workspace-sidebar"
-      className="w-[168px] shrink-0 border-r border-ink-800/40 py-2 px-2 flex flex-col gap-0.5 overflow-y-auto"
+      className="w-[168px] shrink-0 border-r border-line py-2 px-2 flex flex-col gap-0.5 overflow-y-auto"
     >
       {TOP_MODULES.map((mod) => {
         const Icon = mod.icon;
@@ -99,12 +130,13 @@ export function WorkspaceSidebar({
       })}
 
       {currentEpisode && (
-        <div className="mt-2 relative" ref={switcherRef}>
+        <div className="mt-2" ref={switcherRef}>
           <button
             type="button"
+            ref={epCardRef}
             data-testid="ws-ep-card"
-            onClick={() => setSwitcherOpen((v) => !v)}
-            className="flex items-center justify-between gap-2 w-full rounded-lg border border-ink-700 px-2.5 py-1.5 text-[12.5px] font-medium text-ink-100 hover:border-ink-500 transition-colors"
+            onClick={toggleSwitcher}
+            className="flex items-center justify-between gap-2 w-full rounded-lg border border-line-strong px-2.5 py-1.5 text-[12.5px] font-medium text-ink-100 hover:border-ink-500 transition-colors"
           >
             <span className="flex items-center gap-1.5 min-w-0">
               <ChevronDown size={12} className="shrink-0 text-ink-500" />
@@ -117,10 +149,11 @@ export function WorkspaceSidebar({
             />
           </button>
 
-          {switcherOpen && (
+          {switcherOpen && popoverPos && (
             <div
               data-testid="ws-ep-popover"
-              className="absolute left-0 top-full mt-1 z-50 w-56 rounded-lg border border-ink-700 bg-ink-900 shadow-2xl py-1 max-h-64 overflow-y-auto"
+              style={{ top: popoverPos.top, left: popoverPos.left }}
+              className="fixed z-50 w-56 rounded-lg border border-line-strong bg-island shadow-2xl py-1 max-h-64 overflow-y-auto"
             >
               {episodes.map((ep) => (
                 <button
@@ -132,7 +165,7 @@ export function WorkspaceSidebar({
                   }}
                   className={`flex items-center justify-between gap-2 w-full px-3 py-1.5 text-[12.5px] text-left transition-colors ${
                     ep.episode_id === currentEpisode.episode_id
-                      ? 'text-indigo-300 bg-indigo-500/10'
+                      ? 'text-[var(--accent-text)] bg-[var(--accent-soft)]'
                       : 'text-ink-300 hover:text-ink-100 hover:bg-ink-800'
                   }`}
                 >
