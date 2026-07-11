@@ -1428,7 +1428,9 @@
         "render": "Render",
         "currentEpOnly": "Current episode only",
         "empty": "No files yet",
-        "emptyRenders": "No renders yet"
+        "emptyRenders": "No renders yet",
+        "loadMore": "Load more",
+        "loadingMore": "Loading…"
       },
       "canvasEmpty": "No canvases yet — create one to start sketching this project."
     }

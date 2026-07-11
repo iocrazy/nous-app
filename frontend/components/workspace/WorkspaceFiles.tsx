@@ -7,10 +7,12 @@
  *   - "All" merges the current folder's subfolders + files with the
  *     project's renders (renders aren't folder-scoped, so they're always
  *     appended regardless of which folder you're in).
- *   - Double-clicking a file is a no-op beyond the title tooltip — wiring
- *     the existing FileInfoPanel/preview flow in is a fit-and-finish
- *     follow-up, not attempted here to stay in scope.
- *   - Renders pagination: first page only (limit 60), no "load more" yet.
+ *
+ * PR-19 fit-and-finish:
+ *   - Double-clicking a file opens the existing FileInfoPanel as a
+ *     right-side drawer.
+ *   - Renders pagination: cursor-based "Load more" appends the next page
+ *     (the endpoint returns `next_cursor`).
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -24,6 +26,7 @@ import {
 } from '../../services/projectsService';
 import { getApiUrl } from '../../utils/apiConfig';
 import { formatRelativeTime } from '../../utils/relativeTime';
+import { FileInfoPanel } from '../FileInfoPanel';
 import { useToast } from '../Toast';
 import type { EpisodeProgress, ProjectFile, ProjectFolder, RenderItem } from '../../types';
 
@@ -68,8 +71,13 @@ export function WorkspaceFiles({
   const [folders, setFolders] = useState<ProjectFolder[]>([]);
   const [files, setFiles] = useState<ProjectFile[]>([]);
   const [renders, setRenders] = useState<RenderItem[]>([]);
+  const [renderCursor, setRenderCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+
+  // File preview drawer (double-click a file card → FileInfoPanel).
+  const [selectedFile, setSelectedFile] = useState<ProjectFile | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -92,20 +100,40 @@ export function WorkspaceFiles({
     };
   }, [projectId, currentFolderId]);
 
+  const renderEpisodeId = epFilterOn ? currentEpisode?.episode_id ?? null : null;
+
   useEffect(() => {
     let cancelled = false;
-    fetchProjectRenders(projectId, {
-      episodeId: epFilterOn ? currentEpisode?.episode_id ?? null : null,
-      limit: 60,
-    })
+    fetchProjectRenders(projectId, { episodeId: renderEpisodeId, limit: 60 })
       .then((page) => {
-        if (!cancelled) setRenders(page.items);
+        if (cancelled) return;
+        setRenders(page.items);
+        setRenderCursor(page.next_cursor);
       })
       .catch((err) => console.error('[WorkspaceFiles] failed to load renders:', err));
     return () => {
       cancelled = true;
     };
-  }, [projectId, epFilterOn, currentEpisode?.episode_id]);
+  }, [projectId, renderEpisodeId]);
+
+  const handleLoadMoreRenders = async () => {
+    if (!renderCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await fetchProjectRenders(projectId, {
+        episodeId: renderEpisodeId,
+        cursor: renderCursor,
+        limit: 60,
+      });
+      setRenders((prev) => [...prev, ...page.items]);
+      setRenderCursor(page.next_cursor);
+    } catch (err) {
+      console.error('[WorkspaceFiles] failed to load more renders:', err);
+      addToast(t('common.error'), 'error');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const mediaFiles = useMemo(() => files.filter(isMediaFile), [files]);
   const docFiles = useMemo(() => files.filter((f) => !isMediaFile(f)), [files]);
@@ -281,8 +309,9 @@ export function WorkspaceFiles({
               <div
                 key={`file-${f.id}`}
                 data-testid={`ws-files-item-file-${f.id}`}
+                onDoubleClick={() => setSelectedFile(f)}
                 title={f.filename}
-                className="rounded-xl border border-ink-800 bg-ink-900/40 p-2.5 hover:border-ink-600 transition-colors"
+                className="rounded-xl border border-ink-800 bg-ink-900/40 p-2.5 cursor-pointer hover:border-ink-600 transition-colors"
               >
                 <div className="h-12 rounded-lg bg-ink-800/60 grid place-items-center mb-2 text-ink-400">
                   <Icon size={18} />
@@ -326,6 +355,40 @@ export function WorkspaceFiles({
           );
         })}
       </div>
+
+      {/* Renders are only surfaced under the "All" and "Renders" chips, so
+          the cursor-based pager only shows there (and only when the endpoint
+          returned a next cursor). */}
+      {(chip === 'all' || chip === 'renders') && renderCursor && (
+        <div className="flex justify-center mt-4">
+          <button
+            data-testid="ws-files-load-more"
+            onClick={handleLoadMoreRenders}
+            disabled={loadingMore}
+            className="flex items-center gap-1.5 text-[12px] rounded-full px-4 py-1.5 border border-ink-700 text-ink-300 hover:border-ink-500 disabled:opacity-50 transition-colors"
+          >
+            {loadingMore && <Loader2 size={13} className="animate-spin" />}
+            {t(
+              loadingMore
+                ? 'projects.workspace.files.loadingMore'
+                : 'projects.workspace.files.loadMore',
+            )}
+          </button>
+        </div>
+      )}
+
+      {selectedFile && (
+        <>
+          <div
+            data-testid="ws-files-preview-backdrop"
+            className="fixed inset-0 z-40 bg-black/40"
+            onClick={() => setSelectedFile(null)}
+          />
+          <div data-testid="ws-files-preview" className="fixed inset-y-0 right-0 z-50">
+            <FileInfoPanel file={selectedFile} onClose={() => setSelectedFile(null)} />
+          </div>
+        </>
+      )}
     </div>
   );
 }

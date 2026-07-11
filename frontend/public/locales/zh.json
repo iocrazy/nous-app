@@ -1428,7 +1428,9 @@
         "render": "成片",
         "currentEpOnly": "仅当前集",
         "empty": "暂无文件",
-        "emptyRenders": "暂无成片"
+        "emptyRenders": "暂无成片",
+        "loadMore": "加载更多",
+        "loadingMore": "加载中…"
       },
       "canvasEmpty": "还没有画布——创建一个开始为这个项目构思。"
     }
