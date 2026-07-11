@@ -12,6 +12,7 @@ import {
   type RefHotspot,
 } from '../../services/inspirationService';
 import { findActiveTag } from './noteTags';
+import { continueListOnEnter, todoShortcutOnSpace } from './editorErgonomics';
 
 interface Props {
   onCreated: (note: InspirationNote) => void;
@@ -70,6 +71,18 @@ export const Composer: React.FC<Props> = ({
     if (!active) return [];
     return tagSuggestions.filter((s) => s.startsWith(active.prefix) && s !== active.prefix).slice(0, 6);
   }, [active, tagSuggestions]);
+
+  // memos-parity auto-grow: the box tracks its content height up to the same
+  // 50vh cap memos uses (EDITOR_HEIGHT.normal), then scrolls internally.
+  const autoGrow = (ta: HTMLTextAreaElement) => {
+    ta.style.height = 'auto';
+    ta.style.height = `${ta.scrollHeight}px`;
+  };
+
+  useEffect(() => {
+    if (taRef.current) autoGrow(taRef.current);
+    // grow once on mount for prefilled content (key-remount per prefill)
+  }, []);
 
   const completeTag = (tag: string) => {
     if (!active) return;
@@ -198,11 +211,31 @@ export const Composer: React.FC<Props> = ({
         onChange={(e) => {
           setText(e.target.value);
           setCaret(e.target.selectionStart ?? e.target.value.length);
+          autoGrow(e.target);
         }}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
             e.preventDefault();
             void submit();
+            return;
+          }
+          const ta = e.currentTarget;
+          const pos = ta.selectionStart ?? text.length;
+          if (ta.selectionEnd !== pos) return; // leave range selections alone
+          const edit =
+            e.key === 'Enter'
+              ? continueListOnEnter(text, pos)
+              : e.key === ' '
+                ? todoShortcutOnSpace(text, pos)
+                : null;
+          if (edit) {
+            e.preventDefault();
+            setText(edit.text);
+            setCaret(edit.caret);
+            requestAnimationFrame(() => {
+              ta.setSelectionRange(edit.caret, edit.caret);
+              autoGrow(ta);
+            });
           }
         }}
         onPaste={(e) => {
@@ -217,7 +250,7 @@ export const Composer: React.FC<Props> = ({
           if (e.dataTransfer.files.length) stageFiles(e.dataTransfer.files);
         }}
         onDragOver={(e) => e.preventDefault()}
-        className="w-full resize-none bg-transparent text-[13.5px] text-content placeholder:text-content-4 focus:outline-none"
+        className="max-h-[50vh] w-full resize-none overflow-y-auto bg-transparent text-[13.5px] text-content placeholder:text-content-4 focus:outline-none"
       />
 
       {/* memos-parity layout: the insert-icon row sits directly under the
