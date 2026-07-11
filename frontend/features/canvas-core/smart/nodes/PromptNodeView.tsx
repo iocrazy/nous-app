@@ -6,6 +6,11 @@ import { RUN_STATUS_TONE, SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { useGenerationModels } from './useGenerationModels';
 import { useNodeDataPatch } from './useNodeDataPatch';
 import { rerunPrompt } from '../regenerate';
+import {
+  elapsedSeconds,
+  formatElapsed,
+  useElapsedSeconds,
+} from '../../classic/nodes/elapsed';
 import { useCanvasMentionPicker } from './useCanvasMentionPicker';
 import { CanvasMentionPicker } from './CanvasMentionPicker';
 import { useResourceSearch } from '../../../../hooks/useResourceSearch';
@@ -38,6 +43,8 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     provider_slug,
     run_status,
     run_error,
+    run_started_at = null,
+    run_finished_at = null,
     resource_refs = [],   // default [] for nodes persisted before this field
     gen = null,           // absent = legacy text prompt
   } = data as unknown as PromptNodeData;
@@ -49,6 +56,21 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   const [activeKind, setActiveKind] = useState<ActiveKind>('');
 
   const haloTone = RUN_STATUS_TONE[run_status];
+
+  // Run-time pill (P1-2, Infinite's .run-time-pill): live seconds while
+  // running, final duration pinned in green once succeeded. The elapsed
+  // helpers are mode-agnostic despite living under classic/ (Phase 5a B4).
+  const running = run_status === 'running';
+  const liveElapsed = useElapsedSeconds(running ? run_started_at : null, running);
+  const finalElapsed =
+    run_status === 'succeeded' && run_started_at && run_finished_at
+      ? elapsedSeconds(run_started_at, new Date(run_finished_at).getTime())
+      : null;
+  const pillText = running
+    ? formatElapsed(liveElapsed)
+    : finalElapsed !== null
+      ? formatElapsed(finalElapsed)
+      : null;
 
   // ── @-mention handler ────────────────────────────────────────────────────
   // Builds a PromptResourceRef from the picked SearchResult and appends it
@@ -138,6 +160,18 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             <option value="image">Image</option>
             <option value="video">Video</option>
           </select>
+          {pillText && (
+            <span
+              data-testid="prompt-elapsed"
+              className={`rounded-full px-1.5 py-0.5 font-mono text-[10px] tabular-nums ${
+                running
+                  ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-300'
+                  : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+              }`}
+            >
+              {pillText}
+            </span>
+          )}
           <div className="text-[10px] uppercase tracking-wider text-ink-400">
             {run_status}
           </div>
