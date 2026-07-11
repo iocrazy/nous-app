@@ -75,6 +75,29 @@ class CanvasConflictResponse(BaseModel):
     current: CanvasResponse
 
 
+class TimelineSegment(BaseModel):
+    """One block on the timeline director (G8)."""
+
+    prompt: str = Field(..., min_length=1)
+    seconds: int = Field(default=5, ge=1, le=10)
+
+    @field_validator("prompt")
+    @classmethod
+    def _seg_prompt_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("segment prompt must not be blank")
+        return v
+
+
+class CanvasTimelineRequest(BaseModel):
+    """POST /canvases/{id}/timeline-runs — one multi-segment film (G8)."""
+
+    node_id: str = Field(..., min_length=1)
+    segments: List[TimelineSegment] = Field(..., min_length=1, max_length=12)
+    model: str = ""
+    aspect: str = ""
+
+
 class CanvasGenerationRequest(BaseModel):
     """POST /canvases/{id}/generations — dispatch image/video generation
     tasks for a smart-canvas node (G4-B1). ``count`` fans out to N
