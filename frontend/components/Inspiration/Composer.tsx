@@ -1,6 +1,7 @@
-// Quick-capture box: inline #tag autocomplete, staged multi-format
-// attachments (paste / drop / picker), Cmd+Enter submit.
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+// Quick-capture box: TipTap-backed NoteEditor (inline #tag autocomplete,
+// markdown input rules, paste/drop file interception all live there),
+// staged multi-format attachments (paste / drop / picker), Cmd+Enter submit.
+import React, { useCallback, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown, Hash, Link as LinkIcon, Lock, Paperclip, Send, SquareCode, X } from 'lucide-react';
 import { useToast } from '../Toast';
@@ -11,8 +12,7 @@ import {
   type NoteAttachment,
   type RefHotspot,
 } from '../../services/inspirationService';
-import { findActiveTag } from './noteTags';
-import { continueListOnEnter, todoShortcutOnSpace } from './editorErgonomics';
+import { NoteEditor, type NoteEditorHandle } from './NoteEditor';
 
 interface Props {
   onCreated: (note: InspirationNote) => void;
@@ -21,10 +21,10 @@ interface Props {
   onAttachmentUploaded?: (noteId: string, attachment: NoteAttachment) => void;
   tagSuggestions: string[];
   prefill?: { content: string; refHotspot?: RefHotspot } | null;
-  /** Focus the textarea (caret at start, before any prefilled tag line) on
-   * mount — used when a save-as-note prefill just landed. Composer remounts
-   * (keyed by prefillNonce) on every new prefill, so this only needs to run
-   * once per mount, not react to later changes. */
+  /** Focus the editor (caret at document start, before any prefilled tag
+   * line) on mount — used when a save-as-note prefill just landed. Composer
+   * remounts (keyed by prefillNonce) on every new prefill, so this only
+   * needs to run once per mount, not react to later changes. */
   autoFocus?: boolean;
 }
 
@@ -49,87 +49,9 @@ export const Composer: React.FC<Props> = ({
   const [ref, setRef] = useState(prefill?.refHotspot ?? null);
   const [staged, setStaged] = useState<StagedFile[]>([]);
   const [saving, setSaving] = useState(false);
-  const [caret, setCaret] = useState(0);
-  const taRef = useRef<HTMLTextAreaElement>(null);
+  const editorRef = useRef<NoteEditorHandle>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const nextKey = useRef(0);
-
-  // Mount-level focus: Composer remounts (keyed by prefillNonce) on every new
-  // prefill, so this effect naturally runs exactly once per prefill — no
-  // dependency-driven re-focus needed.
-  useEffect(() => {
-    if (!autoFocus) return;
-    const ta = taRef.current;
-    if (ta) {
-      ta.focus();
-      ta.setSelectionRange(0, 0);
-    }
-  }, [autoFocus]);
-
-  const active = useMemo(() => findActiveTag(text, caret), [text, caret]);
-  const suggestions = useMemo(() => {
-    if (!active) return [];
-    return tagSuggestions.filter((s) => s.startsWith(active.prefix) && s !== active.prefix).slice(0, 6);
-  }, [active, tagSuggestions]);
-
-  // memos-parity auto-grow: the box tracks its content height up to the same
-  // 50vh cap memos uses (EDITOR_HEIGHT.normal), then scrolls internally.
-  const autoGrow = (ta: HTMLTextAreaElement) => {
-    ta.style.height = 'auto';
-    ta.style.height = `${ta.scrollHeight}px`;
-  };
-
-  useEffect(() => {
-    if (taRef.current) autoGrow(taRef.current);
-    // grow once on mount for prefilled content (key-remount per prefill)
-  }, []);
-
-  const completeTag = (tag: string) => {
-    if (!active) return;
-    const next = `${text.slice(0, active.start)}#${tag} `;
-    setText(next);
-    setCaret(next.length);
-    taRef.current?.focus();
-  };
-
-  // Toolbar quick-inserts (memos-parity): splice a snippet at the live caret
-  // (or around the selection) and put the cursor where typing continues.
-  const insertSnippet = (build: (selected: string, atLineStart: boolean, needsSpace: boolean) => { snippet: string; cursor: number }) => {
-    const ta = taRef.current;
-    const start = ta?.selectionStart ?? text.length;
-    const end = ta?.selectionEnd ?? start;
-    const selected = text.slice(start, end);
-    const atLineStart = start === 0 || text[start - 1] === '\n';
-    const needsSpace = start > 0 && !/[\s(（]/.test(text[start - 1]);
-    const { snippet, cursor } = build(selected, atLineStart, needsSpace);
-    const next = text.slice(0, start) + snippet + text.slice(end);
-    const pos = start + cursor;
-    setText(next);
-    setCaret(pos);
-    requestAnimationFrame(() => {
-      ta?.focus();
-      ta?.setSelectionRange(pos, pos);
-    });
-  };
-
-  const insertTag = () =>
-    insertSnippet((_sel, _ls, needsSpace) => ({
-      snippet: needsSpace ? ' #' : '#',
-      cursor: needsSpace ? 2 : 1,
-    }));
-
-  const insertCodeBlock = () =>
-    insertSnippet((sel, atLineStart) => {
-      const lead = atLineStart ? '' : '\n';
-      return { snippet: `${lead}\`\`\`\n${sel}\n\`\`\`\n`, cursor: lead.length + 4 + sel.length };
-    });
-
-  const insertLink = () =>
-    insertSnippet((sel) =>
-      sel
-        ? { snippet: `[${sel}]()`, cursor: sel.length + 3 } // cursor inside the ()
-        : { snippet: '[]()', cursor: 1 }, // cursor inside the []
-    );
 
   const stageFiles = useCallback((files: FileList | File[]) => {
     setStaged((prev) => [
@@ -203,54 +125,15 @@ export const Composer: React.FC<Props> = ({
           </button>
         </div>
       )}
-      <textarea
-        ref={taRef}
+      <NoteEditor
+        ref={editorRef}
         value={text}
-        rows={2}
+        onChange={setText}
         placeholder={t('inspiration.placeholder', 'Capture an idea… #tag inline, paste an image, or drop any file')}
-        onChange={(e) => {
-          setText(e.target.value);
-          setCaret(e.target.selectionStart ?? e.target.value.length);
-          autoGrow(e.target);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault();
-            void submit();
-            return;
-          }
-          const ta = e.currentTarget;
-          const pos = ta.selectionStart ?? text.length;
-          if (ta.selectionEnd !== pos) return; // leave range selections alone
-          const edit =
-            e.key === 'Enter'
-              ? continueListOnEnter(text, pos)
-              : e.key === ' '
-                ? todoShortcutOnSpace(text, pos)
-                : null;
-          if (edit) {
-            e.preventDefault();
-            setText(edit.text);
-            setCaret(edit.caret);
-            requestAnimationFrame(() => {
-              ta.setSelectionRange(edit.caret, edit.caret);
-              autoGrow(ta);
-            });
-          }
-        }}
-        onPaste={(e) => {
-          const files = Array.from(e.clipboardData.files);
-          if (files.length) {
-            e.preventDefault();
-            stageFiles(files);
-          }
-        }}
-        onDrop={(e) => {
-          e.preventDefault();
-          if (e.dataTransfer.files.length) stageFiles(e.dataTransfer.files);
-        }}
-        onDragOver={(e) => e.preventDefault()}
-        className="max-h-[50vh] w-full resize-none overflow-y-auto bg-transparent text-[13.5px] text-content placeholder:text-content-4 focus:outline-none"
+        autoFocus={autoFocus}
+        onSubmit={() => void submit()}
+        onFiles={stageFiles}
+        tagSuggestions={tagSuggestions}
       />
 
       {/* memos-parity layout: the insert-icon row sits directly under the
@@ -260,7 +143,7 @@ export const Composer: React.FC<Props> = ({
         <button
           aria-label="Insert tag"
           title={t('inspiration.insertTag', 'Insert #tag')}
-          onClick={insertTag}
+          onClick={() => editorRef.current?.insertTag()}
           className="rounded-md p-1.5 text-content-3 hover:bg-island-2 hover:text-indigo-300"
         >
           <Hash size={16} />
@@ -268,7 +151,7 @@ export const Composer: React.FC<Props> = ({
         <button
           aria-label="Insert code block"
           title={t('inspiration.insertCode', 'Insert code block')}
-          onClick={insertCodeBlock}
+          onClick={() => editorRef.current?.insertCodeBlock()}
           className="rounded-md p-1.5 text-content-3 hover:bg-island-2 hover:text-indigo-300"
         >
           <SquareCode size={16} />
@@ -284,7 +167,7 @@ export const Composer: React.FC<Props> = ({
         <button
           aria-label="Insert link"
           title={t('inspiration.insertLink', 'Insert link')}
-          onClick={insertLink}
+          onClick={() => editorRef.current?.insertLink()}
           className="rounded-md p-1.5 text-content-3 hover:bg-island-2 hover:text-indigo-300"
         >
           <LinkIcon size={16} />
@@ -301,20 +184,6 @@ export const Composer: React.FC<Props> = ({
           }}
         />
       </div>
-
-      {suggestions.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 pt-1">
-          {suggestions.map((s) => (
-            <button
-              key={s}
-              onClick={() => completeTag(s)}
-              className="rounded bg-indigo-500/15 px-2 py-0.5 text-xs text-indigo-300 hover:bg-indigo-500/25"
-            >
-              #{s}
-            </button>
-          ))}
-        </div>
-      )}
 
       {staged.length > 0 && (
         <div className="flex flex-wrap gap-1.5 pt-2">

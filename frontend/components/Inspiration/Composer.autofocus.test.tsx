@@ -8,11 +8,12 @@ vi.mock('../../services/inspirationService', () => ({
 }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (_k: string, f: string) => f }) }));
 vi.mock('../Toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
+vi.mock('./NoteEditor', () => import('./testing/noteEditorShim'));
 
 import { Composer } from './Composer';
 
 describe('Composer autoFocus', () => {
-  it('autoFocus focuses the textarea with caret at start', () => {
+  it('autoFocus focuses the editor', () => {
     render(
       <Composer
         onCreated={vi.fn()}
@@ -23,7 +24,9 @@ describe('Composer autoFocus', () => {
     );
     const ta = screen.getByRole('textbox') as HTMLTextAreaElement;
     expect(document.activeElement).toBe(ta);
-    expect(ta.selectionStart).toBe(0);
+    // caret-at-document-start on autoFocus is real ProseMirror selection
+    // behavior, not Composer's — covered by NoteEditor.test.tsx
+    // ("autoFocus puts the caret at the document start").
     expect(ta.value).toContain('#food #shortform');
   });
 });

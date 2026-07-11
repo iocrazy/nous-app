@@ -12,6 +12,9 @@ vi.mock('react-i18next', () => ({
 }));
 const addToast = vi.fn();
 vi.mock('../Toast', () => ({ useToast: () => ({ addToast }) }));
+// Composer's own tests exercise wiring (state/submit/staged files), not
+// TipTap editing — swap in the shared textarea shim. See noteEditorShim.tsx.
+vi.mock('./NoteEditor', () => import('./testing/noteEditorShim'));
 
 import { Composer } from './Composer';
 
@@ -38,13 +41,9 @@ describe('Composer', () => {
     expect(createNote).not.toHaveBeenCalled();
   });
 
-  it('typing # shows prefix-matched suggestions and click completes token', () => {
-    render(<Composer onCreated={vi.fn()} tagSuggestions={['hooks', 'formats']} />);
-    const ta = screen.getByRole('textbox') as HTMLTextAreaElement;
-    fireEvent.change(ta, { target: { value: 'idea #ho', selectionStart: 8 } });
-    fireEvent.click(screen.getByText('#hooks'));
-    expect(ta.value).toBe('idea #hooks ');
-  });
+  // '#tag' autocomplete (typing '#', prefix-matched chips, click-to-complete)
+  // now lives entirely inside NoteEditor — see
+  // NoteEditor.tags.test.tsx ("inline #tag autocomplete").
 
   it('staged files upload after note creation and onCreated gets merged note', async () => {
     createNote.mockResolvedValue({ id: '9', attachments: [], tags: [] });
