@@ -48,6 +48,11 @@ export const ActivityPanel: React.FC<Props> = ({ selectedDate, onSelectDate, ref
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
+  // Year/month quick picker (user ask: jump straight to a year+month instead
+  // of paging one month at a time). pickerYear is the year being browsed
+  // inside the picker; it re-anchors to the shown month each time it opens.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerYear, setPickerYear] = useState(() => new Date().getFullYear());
 
   useEffect(() => {
     let alive = true;
@@ -110,6 +115,7 @@ export const ActivityPanel: React.FC<Props> = ({ selectedDate, onSelectDate, ref
   const goToday = () => {
     const now = new Date();
     setMonth(new Date(now.getFullYear(), now.getMonth(), 1));
+    setPickerOpen(false);
     onSelectDate(todayStr);
   };
 
@@ -165,9 +171,16 @@ export const ActivityPanel: React.FC<Props> = ({ selectedDate, onSelectDate, ref
       ) : (
         <div>
           <div className="mb-1.5 flex items-center gap-1.5">
-            <span className="text-xs font-semibold tabular-nums text-content">
+            <button
+              aria-label="Choose year and month"
+              onClick={() => {
+                setPickerYear(month.getFullYear());
+                setPickerOpen((v) => !v);
+              }}
+              className="rounded px-1 text-xs font-semibold tabular-nums text-content hover:bg-island-2 hover:text-indigo-300"
+            >
               {month.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-            </span>
+            </button>
             <button
               aria-label="Previous month"
               onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}
@@ -189,6 +202,48 @@ export const ActivityPanel: React.FC<Props> = ({ selectedDate, onSelectDate, ref
               {t('inspiration.today', 'Today')}
             </button>
           </div>
+          {pickerOpen && (
+            <div className="mb-1.5 rounded-lg bg-island-2 p-2">
+              <div className="mb-1.5 flex items-center justify-center gap-3">
+                <button
+                  aria-label="Previous year"
+                  onClick={() => setPickerYear((y) => y - 1)}
+                  className="rounded bg-island p-1 text-content-3"
+                >
+                  <ChevronLeft size={11} />
+                </button>
+                <span className="text-xs font-bold tabular-nums text-content">{pickerYear}</span>
+                <button
+                  aria-label="Next year"
+                  onClick={() => setPickerYear((y) => y + 1)}
+                  className="rounded bg-island p-1 text-content-3"
+                >
+                  <ChevronRight size={11} />
+                </button>
+              </div>
+              <div className="grid grid-cols-4 gap-1">
+                {Array.from({ length: 12 }, (_, i) => {
+                  const isCurrent = pickerYear === month.getFullYear() && i === month.getMonth();
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => {
+                        setMonth(new Date(pickerYear, i, 1));
+                        setPickerOpen(false);
+                      }}
+                      className={`rounded-md py-1 text-[10.5px] tabular-nums ${
+                        isCurrent
+                          ? 'bg-indigo-500 font-bold text-white'
+                          : 'text-content-2 hover:bg-indigo-500/15 hover:text-indigo-300'
+                      }`}
+                    >
+                      {new Date(2000, i, 1).toLocaleDateString('en-US', { month: 'short' })}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-7 gap-1">
             {['M', 'T', 'W', 'T2', 'F', 'S', 'S2'].map((d) => (
               <div key={d} className="pb-0.5 text-center text-[9px] font-semibold uppercase text-content-4">

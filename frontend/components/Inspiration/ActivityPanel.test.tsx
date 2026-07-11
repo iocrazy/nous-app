@@ -93,3 +93,38 @@ describe('ActivityPanel calendar enrichment (go-live feedback)', () => {
     expect(onSelectDate).toHaveBeenCalledWith(null);
   });
 });
+
+describe('ActivityPanel year/month picker', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem('inspiration.activityMode', 'calendar');
+    getActivity.mockResolvedValue([]);
+  });
+
+  it('clicking the month label opens a 12-month picker with year nav', async () => {
+    render(<ActivityPanel selectedDate={null} onSelectDate={vi.fn()} refreshKey={0} />);
+    fireEvent.click(await screen.findByLabelText('Choose year and month'));
+    expect(screen.getByLabelText('Previous year')).toBeTruthy();
+    expect(screen.getByText('Jan')).toBeTruthy();
+    expect(screen.getByText('Dec')).toBeTruthy();
+  });
+
+  it('picking a month in another year jumps the calendar there', async () => {
+    render(<ActivityPanel selectedDate={null} onSelectDate={vi.fn()} refreshKey={0} />);
+    fireEvent.click(await screen.findByLabelText('Choose year and month'));
+    fireEvent.click(screen.getByLabelText('Previous year'));
+    fireEvent.click(screen.getByText('Mar'));
+    const year = new Date().getFullYear() - 1;
+    expect(screen.getByLabelText('Choose year and month').textContent).toContain(`March ${year}`);
+    expect(screen.queryByText('Jan')).toBeNull(); // picker closed
+  });
+
+  it('Today closes the picker and returns to the current month', async () => {
+    render(<ActivityPanel selectedDate={null} onSelectDate={vi.fn()} refreshKey={0} />);
+    fireEvent.click(await screen.findByLabelText('Choose year and month'));
+    fireEvent.click(screen.getByText('Today'));
+    expect(screen.queryByText('Jan')).toBeNull();
+    const now = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    expect(screen.getByLabelText('Choose year and month').textContent).toContain(now);
+  });
+});
