@@ -38,6 +38,11 @@ vi.mock('react-i18next', () => ({
 vi.mock('../components/Toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
 // FloatingParse 常驻,mock 掉避免它的 service 依赖
 vi.mock('../components/TopicInspiration/FloatingParse', () => ({ FloatingParse: () => <div data-testid="floating-parse" /> }));
+// The composer renders TipTap-backed NoteEditor (no textarea); swap in the
+// shared textarea shim so the textbox queries below keep working. Same shim
+// as the Composer.*.test.tsx files — the specifier resolves to the same
+// module ID as Composer's own `./NoteEditor` import, so vitest intercepts it.
+vi.mock('../components/Inspiration/NoteEditor', () => import('../components/Inspiration/testing/noteEditorShim'));
 
 import { InspirationPage } from './InspirationPage';
 
