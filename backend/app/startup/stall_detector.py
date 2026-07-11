@@ -27,6 +27,8 @@ from dataclasses import dataclass
 import httpx
 from loguru import logger
 
+from app.startup.env_utils import env_int
+
 
 @dataclass(frozen=True)
 class StallState:
@@ -100,9 +102,9 @@ async def _send_discord(content: str) -> None:
 
 async def _bg_stall_detector() -> None:
     """Poll for the worker-stall signature and alert on transitions."""
-    interval = int(os.environ.get("STALL_CHECK_INTERVAL_SECONDS", "120"))
-    queue_min = int(os.environ.get("STALL_QUEUE_MIN", "5"))
-    stall_ticks = int(os.environ.get("STALL_TICKS", "3"))
+    interval = env_int("STALL_CHECK_INTERVAL_SECONDS", 120)
+    queue_min = env_int("STALL_QUEUE_MIN", 5)
+    stall_ticks = env_int("STALL_TICKS", 3)
     state = StallState()
     logger.info(
         f"[stall-detector] armed (interval={interval}s queue_min={queue_min} "

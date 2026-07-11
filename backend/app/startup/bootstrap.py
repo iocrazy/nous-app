@@ -214,9 +214,10 @@ async def _bg_reap_internal_queue() -> None:
     asyncio.to_thread so a slow DB never stalls the async runtime.
     """
     import asyncio
-    import os
 
-    interval = int(os.environ.get("DBOS_REAP_INTERVAL_SECONDS", "120"))
+    from app.startup.env_utils import env_int
+
+    interval = env_int("DBOS_REAP_INTERVAL_SECONDS", 120)
 
     while True:
         try:
