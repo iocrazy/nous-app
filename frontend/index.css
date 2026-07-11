@@ -794,6 +794,30 @@ body {
   border-bottom: 1px solid var(--canvas-line);
   border-radius: calc(var(--canvas-r-node) - 1px) calc(var(--canvas-r-node) - 1px) 0 0;
 }
+/* In-node capsule controls (Infinite's select-lite / tool-btn): 999px
+   pill, hairline border, bold uppercase micro-label. Shared by node-header
+   action buttons and inline selects. */
+.mh-chip {
+  border: 1px solid var(--canvas-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--canvas-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 10px;
+  transition: color 0.14s var(--canvas-ease), border-color 0.14s var(--canvas-ease);
+}
+.mh-chip:hover:not(:disabled) {
+  color: var(--canvas-text);
+  border-color: var(--canvas-line-strong);
+}
+.mh-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .mh-node-title {
   font-size: 11px;
   font-weight: 800;
@@ -923,7 +947,31 @@ body {
 }
 
 .mh-canvas .react-flow__handle {
+  /* Infinite's port: a 24px invisible hit area carrying a 12px dot
+     (strong core, card ring + hairline halo) that grows on hover —
+     canvas.css .port/.port::after translated onto RF handles. */
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+}
+.mh-canvas .react-flow__handle::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--canvas-strong);
   border: 2px solid var(--canvas-card);
+  box-shadow: 0 0 0 1px var(--canvas-line-strong);
+  transition: transform 0.14s var(--canvas-ease);
+}
+.mh-canvas .react-flow__handle:hover::after {
+  transform: translate(-50%, -50%) scale(1.25);
 }
 
 .mh-canvas .react-flow__minimap {

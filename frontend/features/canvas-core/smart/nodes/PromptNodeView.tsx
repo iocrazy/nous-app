@@ -98,7 +98,6 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
       <Handle
         type="target"
         position={Position.Left}
-        className="!h-2 !w-2 !bg-ink-400"
       />
       <div className="mh-node-head">
         <div className="mh-node-title">Prompt</div>
@@ -106,7 +105,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
           {/* Text stays the legacy LLM path; Image/Video route Run through
               the G4-B1 generation tasks (Infinite composer's kind toggle). */}
           <select
-            className="nodrag rounded border border-ink-200 bg-transparent px-1 py-0 text-[10px] uppercase tracking-wider text-ink-500 outline-none focus:ring-1 focus:ring-indigo-300 dark:border-ink-700 dark:text-ink-400"
+            className="nodrag mh-chip outline-none focus:ring-1 focus:ring-canvas-strong/40"
             value={genKind}
             onChange={(e) => {
               const next = e.target.value;
@@ -136,7 +135,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
         <textarea
           // nodrag → React Flow doesn't start a drag from this input
           // nowheel → wheel events scroll the textarea instead of zooming canvas
-          className="nodrag nowheel min-h-[3.5rem] w-full resize-y bg-transparent text-sm text-ink-800 outline-none placeholder:text-ink-400 focus:ring-1 focus:ring-indigo-300 dark:text-ink-200"
+          className="nodrag nowheel min-h-[3.5rem] w-full resize-y bg-transparent text-sm text-ink-800 outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40 dark:text-ink-200"
           placeholder="What should the model generate? Type @ to reference an asset"
           value={body}
           onChange={mention.handleChange}
@@ -162,7 +161,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
         <div className="mt-2 flex items-center justify-between gap-2 text-xs">
           {!gen && (
             <select
-              className="nodrag flex-1 truncate rounded border border-ink-200 bg-transparent px-1 py-0.5 text-xs text-ink-700 outline-none focus:ring-1 focus:ring-indigo-300 dark:border-ink-700 dark:text-ink-200"
+              className="nodrag flex-1 truncate rounded-full border border-canvas-line bg-transparent px-2.5 py-0.5 text-xs text-canvas-text outline-none focus:ring-1 focus:ring-canvas-strong/40"
               value={provider_slug}
               onChange={(e) => patch({ provider_slug: e.target.value })}
               aria-label="Prompt provider"
@@ -177,7 +176,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
           {gen && (
             <div className="flex flex-1 items-center gap-1.5">
               <select
-                className="nodrag min-w-0 flex-1 truncate rounded border border-ink-200 bg-transparent px-1 py-0.5 text-xs text-ink-700 outline-none focus:ring-1 focus:ring-indigo-300 dark:border-ink-700 dark:text-ink-200"
+                className="nodrag min-w-0 flex-1 truncate rounded-full border border-canvas-line bg-transparent px-2.5 py-0.5 text-xs text-canvas-text outline-none focus:ring-1 focus:ring-canvas-strong/40"
                 value={gen.model}
                 onChange={(e) => patch({ gen: { ...gen, model: e.target.value } })}
                 aria-label="Generation model"
@@ -192,7 +191,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
               {gen.kind === 'image' && (
                 <>
                   <select
-                    className="nodrag rounded border border-ink-200 bg-transparent px-1 py-0.5 text-xs text-ink-700 outline-none focus:ring-1 focus:ring-indigo-300 dark:border-ink-700 dark:text-ink-200"
+                    className="nodrag rounded-full border border-canvas-line bg-transparent px-2.5 py-0.5 text-xs text-canvas-text outline-none focus:ring-1 focus:ring-canvas-strong/40"
                     value={gen.ratio ?? '1:1'}
                     onChange={(e) => patch({ gen: { ...gen, ratio: e.target.value } })}
                     aria-label="Aspect ratio"
@@ -207,7 +206,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                     type="number"
                     min={1}
                     max={8}
-                    className="nodrag w-12 rounded border border-ink-200 bg-transparent px-1 py-0.5 text-xs text-ink-700 outline-none focus:ring-1 focus:ring-indigo-300 dark:border-ink-700 dark:text-ink-200"
+                    className="nodrag w-12 rounded-full border border-canvas-line bg-transparent px-2.5 py-0.5 text-xs text-canvas-text outline-none focus:ring-1 focus:ring-canvas-strong/40"
                     value={gen.count ?? 1}
                     onChange={(e) =>
                       patch({
@@ -223,7 +222,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
               )}
               {gen.kind === 'video' && (
                 <select
-                  className="nodrag rounded border border-ink-200 bg-transparent px-1 py-0.5 text-xs text-ink-700 outline-none focus:ring-1 focus:ring-indigo-300 dark:border-ink-700 dark:text-ink-200"
+                  className="nodrag rounded-full border border-canvas-line bg-transparent px-2.5 py-0.5 text-xs text-canvas-text outline-none focus:ring-1 focus:ring-canvas-strong/40"
                   value={gen.aspect ?? '16:9'}
                   onChange={(e) => patch({ gen: { ...gen, aspect: e.target.value } })}
                   aria-label="Video aspect"
@@ -281,7 +280,6 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
       <Handle
         type="source"
         position={Position.Right}
-        className="!h-2 !w-2 !bg-ink-400"
       />
     </div>
   );
