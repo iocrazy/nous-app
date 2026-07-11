@@ -73,6 +73,35 @@ _GET_STAGE_BY_ID_SQL = (
     f"SELECT {_CATALOG_COLUMNS} FROM public.project_stages WHERE id = :sid"
 )
 
+# Stage auto-derivation (合一终稿: the stage chip is read-only and the manual
+# advance buttons are gone — the SOP stage follows real output instead).
+# Three EXISTS probes over the project's script tree; soft-deleted rows are
+# excluded the same way the episodes-progress aggregate does it.
+_DERIVE_ACTIVITY_SQL = """
+    SELECT
+      EXISTS(
+        SELECT 1 FROM public.script_scenes sc
+        JOIN public.script_projects sp
+          ON sc.script_id = sp.id AND sp.status != 'deleted'
+        WHERE sp.project_id = :pid
+      ) AS has_scenes,
+      EXISTS(
+        SELECT 1 FROM public.script_shots sh
+        JOIN public.script_scenes sc ON sh.scene_id = sc.id
+        JOIN public.script_projects sp
+          ON sc.script_id = sp.id AND sp.status != 'deleted'
+        WHERE sp.project_id = :pid
+      ) AS has_shots,
+      EXISTS(
+        SELECT 1 FROM public.script_shots sh
+        JOIN public.script_scenes sc ON sh.scene_id = sc.id
+        JOIN public.script_projects sp
+          ON sc.script_id = sp.id AND sp.status != 'deleted'
+        WHERE sp.project_id = :pid
+          AND (sh.image_url IS NOT NULL OR sh.video_url IS NOT NULL)
+      ) AS has_renders
+"""
+
 # Batch lookups for the project LIST page (Phase B B1) — one query for N
 # projects, mirroring get_project_file_counts' no-N+1 contract.
 _STAGES_FOR_PROJECTS_SQL = """
@@ -159,6 +188,18 @@ class ProjectStagesRepository:
 
         row = await db_engine.fetch_one(_GET_CURRENT_SQL, {"pid": int(project_id)})
         return _serialize(row) if row else None
+
+    async def derive_activity_flags(self, project_id: int) -> dict[str, bool]:
+        """Output probes for stage auto-derivation: does the project have any
+        scenes / shots / rendered shots (soft-deleted scripts excluded)."""
+        from app.db import engine as db_engine
+
+        row = await db_engine.fetch_one(_DERIVE_ACTIVITY_SQL, {"pid": int(project_id)})
+        return {
+            "has_scenes": bool(row and row["has_scenes"]),
+            "has_shots": bool(row and row["has_shots"]),
+            "has_renders": bool(row and row["has_renders"]),
+        }
 
     async def history(self, project_id: int) -> list[dict[str, Any]]:
         """Append-only transition history for the project, newest first."""

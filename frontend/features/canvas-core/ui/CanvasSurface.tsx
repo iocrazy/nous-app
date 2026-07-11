@@ -385,6 +385,11 @@ export function CanvasSurface() {
   return (
     <CanvasEngine
       themedChrome
+      // Infinite-parity zoom range (P0-6): RF's default 0.5–2 clamp feels
+      // "stuck" next to Infinite's effectively unbounded zoom, and capped
+      // the `z` overview on large graphs.
+      minZoom={0.1}
+      maxZoom={4}
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       nodes={rfNodes}
