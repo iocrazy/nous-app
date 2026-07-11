@@ -17,6 +17,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 
 import { arrangeLayout } from '../../../canvas-kit/arrangeLayout';
+import { useKnifeStore } from '../../../canvas-kit/knifeStore';
 import { prepareDuplicate } from '../store/clipboard';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { screenToWorld } from '../utils/viewport';
@@ -72,6 +73,8 @@ export function CanvasComposer({
   const patchNode = useCanvasCoreStore((s) => s.patchNode);
 
   const [running, setRunning] = useState(false);
+  const knifeActive = useKnifeStore((s) => s.active);
+  const toggleKnife = useKnifeStore((s) => s.toggle);
 
   const runner = useMemo<PromptCaller>(() => {
     const base = runnerOverride
@@ -277,6 +280,9 @@ export function CanvasComposer({
       <Divider />
       <ComposerButton onClick={onArrange} disabled={nodes.length === 0}>
         Arrange
+      </ComposerButton>
+      <ComposerButton onClick={toggleKnife} emphasis={knifeActive ? 'primary' : undefined}>
+        {knifeActive ? 'Knife ✕' : 'Knife'}
       </ComposerButton>
       <ComposerButton onClick={onExport} disabled={selection.length === 0}>
         Export

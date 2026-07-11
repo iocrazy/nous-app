@@ -158,6 +158,37 @@ test('Export downloads the selection; Import appends it back re-id (G5)', async 
   await expect(page.locator('.react-flow__edge')).toHaveCount(4);
 });
 
+test('knife mode: x → drag across a wire cuts it; Escape exits (②-1)', async ({ page }) => {
+  await openCanvas(page);
+  await expect(page.locator('.react-flow__edge')).toHaveCount(2);
+
+  await page.locator('.react-flow').click({ position: { x: 30, y: 200 } });
+  await page.keyboard.press('x');
+  const overlay = page.getByTestId('knife-overlay');
+  await expect(overlay).toBeVisible();
+
+  // Slice across e2 (p1 at 60,60 → out1 at 320,420): drag through the
+  // midpoint region between the two nodes.
+  const mid = await page
+    .locator('.react-flow__edge[data-id="e2"] .react-flow__edge-path')
+    .evaluate((el) => {
+      const path = el as SVGGeometryElement;
+      const p = path.getPointAtLength(path.getTotalLength() / 2);
+      const ctm = path.getScreenCTM()!;
+      return { x: ctm.a * p.x + ctm.c * p.y + ctm.e, y: ctm.b * p.x + ctm.d * p.y + ctm.f };
+    });
+  await page.mouse.move(mid.x - 40, mid.y - 40);
+  await page.mouse.down();
+  await page.mouse.move(mid.x + 40, mid.y + 40, { steps: 8 });
+  await page.mouse.up();
+
+  await expect(page.locator('.react-flow__edge')).toHaveCount(1);
+  await expect(page.locator('.react-flow__edge[data-id="e2"]')).toHaveCount(0);
+
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('knife-overlay')).toHaveCount(0);
+});
+
 test('bare z toggles the overview and returns', async ({ page }) => {
   await openCanvas(page);
 
