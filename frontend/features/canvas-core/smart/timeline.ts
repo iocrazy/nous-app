@@ -23,8 +23,9 @@ export interface TimelineNodeData {
    *  `segments_done` from the task metadata IS the failing index. */
   failed_index?: number | null;
   /** Per-segment tail-frame thumbnails (P2-1) — durable /cover URLs,
-   *  index-aligned with segments (the last segment has no tail). */
-  segment_thumbs?: string[];
+   *  index-aligned with segments (the last segment has no tail; reorder
+   *  pads with nulls to keep alignment). */
+  segment_thumbs?: Array<string | null>;
 }
 
 export const DEFAULT_SEGMENT_SECONDS = 5;
@@ -72,20 +73,38 @@ export function totalSeconds(segments: TimelineSegment[]): number {
 
 // ── Minimal-set upgrades (P2-1) ─────────────────────────────────────────────
 
-/** Move a segment to a new position (drag reorder). Out-of-range targets
- *  clamp; invalid/same-index moves return the input untouched. */
+/** Move one item to a new position. Out-of-range sources and same-index
+ *  moves return the input untouched; targets clamp into range. */
+export function reorderItems<T>(items: T[], fromIndex: number, toIndex: number): T[] {
+  if (fromIndex < 0 || fromIndex >= items.length) return items;
+  const target = Math.max(0, Math.min(items.length - 1, toIndex));
+  if (target === fromIndex) return items;
+  const next = [...items];
+  const [moved] = next.splice(fromIndex, 1);
+  next.splice(target, 0, moved);
+  return next;
+}
+
+/** Move a segment to a new position (drag reorder). */
 export function reorderSegments(
   segments: TimelineSegment[],
   fromIndex: number,
   toIndex: number,
 ): TimelineSegment[] {
-  if (fromIndex < 0 || fromIndex >= segments.length) return segments;
-  const target = Math.max(0, Math.min(segments.length - 1, toIndex));
-  if (target === fromIndex) return segments;
-  const next = [...segments];
-  const [moved] = next.splice(fromIndex, 1);
-  next.splice(target, 0, moved);
-  return next;
+  return reorderItems(segments, fromIndex, toIndex);
+}
+
+/** Tail-frame thumbnails travel WITH their segment on reorder — they show
+ *  the segment's content, not its position. The sparse tail (last segment
+ *  has no frame) pads to nulls so indices stay aligned. */
+export function reorderThumbs(
+  thumbs: Array<string | null>,
+  segmentCount: number,
+  fromIndex: number,
+  toIndex: number,
+): Array<string | null> {
+  const padded = Array.from({ length: segmentCount }, (_, i) => thumbs[i] ?? null);
+  return reorderItems(padded, fromIndex, toIndex);
 }
 
 /** Edge-drag seconds: whole-second steps at the strip's px-per-second

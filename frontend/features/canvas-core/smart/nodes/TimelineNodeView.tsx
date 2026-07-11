@@ -19,6 +19,7 @@ import {
   dragSeconds,
   removeSegment,
   reorderSegments,
+  reorderThumbs,
   segmentIndexAtX,
   totalSeconds,
   updateSegment,
@@ -123,7 +124,13 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
     const from = segments.findIndex((s) => s.id === seg.id);
     const to = segmentIndexAtX(segments, e.clientX - rect.left, rect.width);
     const next = reorderSegments(segments, from, to);
-    if (next !== segments) patch({ segments: next });
+    if (next !== segments) {
+      patch({
+        segments: next,
+        // Thumbnails show a segment's CONTENT — they travel with it.
+        segment_thumbs: reorderThumbs(segment_thumbs, segments.length, from, to),
+      });
+    }
   };
   // Border colour only — the badge's dot carries the motion (P1-5).
   const tone = (RUN_STATUS_TONE[run_status] ?? 'border-canvas-line')

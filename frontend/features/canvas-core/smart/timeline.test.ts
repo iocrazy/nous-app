@@ -53,7 +53,7 @@ describe('timeline segment helpers', () => {
 
 // ── Minimal-set upgrades (P2-1) ─────────────────────────────────────────────
 
-import { dragSeconds, reorderSegments, segmentIndexAtX } from './timeline';
+import { dragSeconds, reorderSegments, reorderThumbs, segmentIndexAtX } from './timeline';
 
 const P21_SEGS = [
   { id: 'a', prompt: 'one', seconds: 5 },
@@ -100,5 +100,13 @@ describe('segmentIndexAtX (P2-1)', () => {
     expect(segmentIndexAtX(P21_SEGS, -10, 200)).toBe(0);
     expect(segmentIndexAtX(P21_SEGS, 500, 200)).toBe(2);
     expect(segmentIndexAtX([], 50, 200)).toBe(0);
+  });
+});
+
+describe('reorderThumbs (P2-1)', () => {
+  it('thumbnails travel with their segment, padding the sparse tail', () => {
+    // 3 segments, tails exist for 0 and 1 only.
+    expect(reorderThumbs(['t0', 't1'], 3, 0, 2)).toEqual(['t1', null, 't0']);
+    expect(reorderThumbs(['t0', 't1'], 3, 2, 0)).toEqual([null, 't0', 't1']);
   });
 });
