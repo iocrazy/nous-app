@@ -174,7 +174,7 @@ export const Composer: React.FC<Props> = ({
   };
 
   return (
-    <div className="rounded-xl bg-island px-4 pb-3 pt-4">
+    <div className="rounded-xl border border-line-strong bg-island px-4 pb-3 pt-4 shadow-sm">
       {ref && (
         <div className="mb-2 flex items-center gap-2 rounded-lg border border-line border-l-2 border-l-indigo-500 bg-island-2 px-3 py-2">
           <div className="min-w-0 flex-1">
