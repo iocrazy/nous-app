@@ -160,6 +160,15 @@ export interface CanvasEngineProps {
   viewport?: Viewport;
   /** Fit the graph into view on mount. */
   fitView?: boolean;
+  /**
+   * Zoom bounds. Omitted → React Flow defaults (0.5 / 2). Opt-in like
+   * `themedChrome` so legacy surfaces (editor NodesView) keep their feel;
+   * the Infinite-parity canvas passes a much wider range (P0-6) — Infinite
+   * itself has effectively unbounded zoom. Also lifts the 0.5 clamp that
+   * capped `z` overview / `f` fitView on large graphs.
+   */
+  minZoom?: number;
+  maxZoom?: number;
   /** Node box for guide + snap math; defaults to measured-size-or-200×120. */
   nodeMeasure?: (node: AnyNode) => { width: number; height: number };
 
@@ -244,6 +253,8 @@ export function CanvasEngine({
   selectedIds,
   viewport,
   fitView = false,
+  minZoom,
+  maxZoom,
   nodeMeasure,
   onNodesChange,
   onEdgesChange,
@@ -592,6 +603,8 @@ export function CanvasEngine({
         isValidConnection={allowConnect ? isValidConnection : undefined}
         viewport={viewport}
         fitView={fitView}
+        minZoom={minZoom}
+        maxZoom={maxZoom}
         proOptions={{ hideAttribution: true }}
         // 6b.1 — skip rendering nodes/edges whose bounding box lies outside
         // the current viewport.  React Flow re-checks on every pan/zoom so
