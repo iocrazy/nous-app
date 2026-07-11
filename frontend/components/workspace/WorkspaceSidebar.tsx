@@ -53,6 +53,11 @@ export function WorkspaceSidebar({
   // `top-full` resolved against the whole episode block (card + child rows),
   // dropping the menu below 发布 instead of below the card; and the sidebar is
   // an overflow-y-auto scroller, which would clip a 224px-wide absolute child.
+  //
+  // It flies out to the RIGHT of the card, not below it: dropping down covers
+  // the Script/Storyboard/Renders rows, and because outside-mousedown closes
+  // the menu without delivering the click, every control under it needed two
+  // clicks — in practice "点不动" (prod feedback 2026-07-11).
   const [popoverPos, setPopoverPos] = useState<{ top: number; left: number } | null>(null);
   const switcherRef = useRef<HTMLDivElement>(null);
   const epCardRef = useRef<HTMLButtonElement>(null);
@@ -64,7 +69,7 @@ export function WorkspaceSidebar({
       if (open) return false;
       const rect = epCardRef.current?.getBoundingClientRect();
       if (!rect) return false;
-      setPopoverPos({ top: rect.bottom + 4, left: rect.left });
+      setPopoverPos({ top: rect.top, left: rect.right + 6 });
       return true;
     });
   }, []);

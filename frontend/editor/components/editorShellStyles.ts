@@ -1154,24 +1154,24 @@ export const EDITOR_SHELL_STYLES = `
   border:1px solid var(--hairline); border-radius:999px; padding:3px 8px; cursor:pointer;
 }
 
-/* ===== EMBEDDED — workspace fusion =====
-   Mounted inside the project workspace the shell must read as the SAME
-   surface, not an app nested in a box: the radial page background, the outer
-   padding and the floating island cards all go; the three zones become flat
-   columns separated by hairlines on the workspace's own background. Only the
-   paper sheet keeps elevation (it's the writing artifact, not chrome). */
-.mh-editor-shell.mh-embedded{
-  background:transparent;
-  padding:0;
-  gap:0;
+/* ===== EMBEDDED — studio mode inside the workspace =====
+   The workspace hides its own sidebar while the studio is open, so the shell
+   keeps its full R2-A island look (the previous flatten pass is gone — the
+   double-sidebar was the real "app in an app" problem, per 2026-07-11
+   feedback + the single-rail mockup). Only the embedded episode SWITCH menu
+   below is studio-specific. */
+.mh-ep-switch-menu{
+  position:absolute; left:0; right:0; top:calc(100% + 6px); z-index:30;
+  display:flex; flex-direction:column; gap:2px; padding:6px;
+  background:var(--surface); border:1px solid var(--surface-border);
+  border-radius:var(--radius-md); box-shadow:var(--shadow-float);
+  max-height:240px; overflow-y:auto;
 }
-.mh-embedded .mh-island{
-  background:transparent;
-  border:none;
-  border-radius:0;
-  box-shadow:none;
+.mh-ep-switch-item{
+  font-family:var(--sans); font-size:12.5px; text-align:left; cursor:pointer;
+  color:var(--ink-soft); background:transparent; border:none;
+  border-radius:var(--radius-sm); padding:7px 10px;
 }
-.mh-embedded .mh-rail{ border-right:1px solid var(--surface-border); padding-top:8px; }
-.mh-embedded .mh-right-col{ border-left:1px solid var(--surface-border); }
-.mh-embedded .mh-center-col{ padding:10px 14px 0; }
+.mh-ep-switch-item:hover{ background:var(--surface-2); color:var(--ink); }
+.mh-ep-switch-item.current{ color:var(--indigo-deep); background:var(--indigo-soft); font-weight:600; }
 `;
