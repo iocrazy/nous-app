@@ -44,6 +44,9 @@ vi.mock('../../editor/components/EditorShell', () => ({
     initialRailView?: string;
     currentUserId?: string | null;
     currentUserName?: string;
+    embedded?: boolean;
+    episodesForSwitcher?: Array<{ episode_id: string; title: string }>;
+    onSwitchEpisode?: (episodeId: string) => void;
   }) => {
     mockEditorShell(props);
     return (
@@ -52,7 +55,17 @@ vi.mock('../../editor/components/EditorShell', () => ({
         data-script-id={props.scriptId}
         data-project-id={props.projectId ?? ''}
         data-initial-rail-view={props.initialRailView ?? ''}
-      />
+      >
+        {(props.episodesForSwitcher ?? []).map((ep) => (
+          <button
+            key={ep.episode_id}
+            data-testid={`mock-editor-switch-${ep.episode_id}`}
+            onClick={() => props.onSwitchEpisode?.(ep.episode_id)}
+          >
+            {ep.title}
+          </button>
+        ))}
+      </div>
     );
   },
 }));
@@ -87,6 +100,8 @@ vi.mock('../../services/projectsService', () => mockProjectsService);
 
 const mockScriptService = vi.hoisted(() => ({
   fetchScriptProjects: vi.fn(),
+  createScriptProject: vi.fn(),
+  updateScriptProject: vi.fn(),
 }));
 vi.mock('../../services/scriptService', () => mockScriptService);
 
@@ -157,6 +172,10 @@ beforeEach(() => {
   mockProjectsService.generateMissingFrames.mockReset();
   mockProjectsService.fetchEpisodesProgress.mockReset().mockResolvedValue(EPISODES);
   mockScriptService.fetchScriptProjects.mockReset().mockResolvedValue({ data: [], total: 0 });
+  mockScriptService.createScriptProject
+    .mockReset()
+    .mockResolvedValue({ id: 'created-1', name: 'Episode 1' });
+  mockScriptService.updateScriptProject.mockReset().mockResolvedValue({ id: 'created-1' });
   localStorage.clear();
 });
 
@@ -242,9 +261,10 @@ describe('ProjectWorkspace', () => {
     // own stored/'script' default.
     expect(shell).toHaveAttribute('data-initial-rail-view', '');
     expect(navigate).not.toHaveBeenCalled();
-    // The workspace sidebar stays mounted alongside the inline editor — no
-    // deep-link route jump (Overview's module content is what's replaced).
-    expect(screen.getByTestId('workspace-sidebar')).toBeTruthy();
+    // Studio mode is single-rail (2026-07-11): the workspace sidebar hides
+    // while the editor is mounted — its rail is the only side navigation.
+    // Still no deep-link route jump.
+    expect(screen.queryByTestId('workspace-sidebar')).toBeNull();
     expect(screen.queryByTestId('ws-overview')).toBeNull();
   });
 
@@ -280,26 +300,48 @@ describe('ProjectWorkspace', () => {
     expect(await screen.findByTestId('mock-editor-shell')).toHaveAttribute('data-script-id', 's1');
     expect(mockScriptService.fetchScriptProjects).toHaveBeenCalledTimes(1);
 
-    // Switch the current episode via the ⇄ popover while Script stays open.
-    // ProjectWorkspace.tsx:291-299 must re-resolve for the new episode rather
-    // than leaving Ep1's stale script mounted under Ep2's sidebar context.
-    fireEvent.click(screen.getByTestId('ws-ep-card'));
-    fireEvent.click(await screen.findByTestId('ws-ep-option-2'));
+    // Studio mode hides the workspace sidebar (single-rail, 2026-07-11) — the
+    // switch now goes through the editor rail's embedded switcher, which
+    // delegates back via onSwitchEpisode. Same re-resolve requirement: the
+    // new episode's script must replace Ep1's stale mount.
+    expect(screen.queryByTestId('ws-ep-card')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('mock-editor-switch-2'));
 
     await waitFor(() =>
       expect(screen.getByTestId('mock-editor-shell')).toHaveAttribute('data-script-id', 's2'),
     );
     expect(screen.getByTestId('mock-editor-shell')).toHaveAttribute('data-project-id', 'p1');
-    // The sidebar's episode switch stays mounted next to the inline editor —
-    // still no route jump.
+    // Still no route jump.
     expect(navigate).not.toHaveBeenCalled();
     // Exactly one extra fetch for the re-resolve on top of the initial
     // resolve — pins a bounded re-resolve, not an effect loop.
     expect(mockScriptService.fetchScriptProjects).toHaveBeenCalledTimes(2);
   });
 
-  it('falls back to the Episodes module when the current episode has no script', async () => {
+  it('auto-provisions an empty script when the episode has none, then mounts it (2026-07-11)', async () => {
+    // Pre-epic projects: episode exists, script does not — the old silent
+    // fall-back to Episodes read as a dead click on prod.
     mockScriptService.fetchScriptProjects.mockResolvedValue({ data: [], total: 0 });
+    mockScriptService.createScriptProject.mockResolvedValue({ id: 'fresh-1', name: 'Episode 1' });
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    fireEvent.click(await screen.findByTestId('ws-ep-script'));
+    const shell = await screen.findByTestId('mock-editor-shell');
+    expect(shell).toHaveAttribute('data-script-id', 'fresh-1');
+    expect(mockScriptService.createScriptProject).toHaveBeenCalledWith({
+      project_id: 'p1',
+      name: 'Ep 1 — Pilot',
+    });
+    // Attached to the clicked episode so the next open resolves it directly.
+    expect(mockScriptService.updateScriptProject).toHaveBeenCalledWith('fresh-1', {
+      episode_id: '1',
+    });
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the Episodes module (with an error toast) when provisioning fails', async () => {
+    mockScriptService.fetchScriptProjects.mockResolvedValue({ data: [], total: 0 });
+    mockScriptService.createScriptProject.mockRejectedValue(new Error('boom'));
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
 
     fireEvent.click(await screen.findByTestId('ws-ep-script'));

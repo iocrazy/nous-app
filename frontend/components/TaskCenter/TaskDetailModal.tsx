@@ -9,6 +9,7 @@ import { MediaResultBody } from './bodies/MediaResultBody';
 import { AgentResultBody } from './bodies/AgentResultBody';
 import { TextResultBody } from './bodies/TextResultBody';
 import { VisionResultBody } from './bodies/VisionResultBody';
+import { CanvasGenResultBody } from './bodies/CanvasGenResultBody';
 
 interface TaskDetailModalProps {
   task: UnifiedTask | null;
@@ -83,6 +84,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                 <TextResultBody kind={result.kind} data={result.data} />
               )}
               {result.kind === 'vision' && <VisionResultBody task={task} data={result.data} />}
+              {result.kind === 'canvasGen' && <CanvasGenResultBody task={task} />}
               {result.kind === 'generic' && <GenericResultBody task={task} />}
             </>
           )}

@@ -21,7 +21,11 @@ import {
   generateMissingFrames,
   setCurrentStage,
 } from '../../services/projectsService';
-import { fetchScriptProjects } from '../../services/scriptService';
+import {
+  createScriptProject,
+  fetchScriptProjects,
+  updateScriptProject,
+} from '../../services/scriptService';
 import { useToast } from '../Toast';
 import { useAuth } from '../../contexts/AuthContext';
 import { ProjectTrashView } from '../ProjectTrashView';
@@ -250,7 +254,19 @@ export function ProjectWorkspace({
           (s) => String(s.episode_id ?? '') === String(episode.episode_id),
         );
         if (candidates.length === 0) {
-          setActiveModule('episodes');
+          // Pre-epic projects have episodes with no script (mig353 backfilled
+          // Episode 1 but only attached scripts that already existed) — the
+          // old silent fall-back to the Episodes pane read as "点了没反应"
+          // (prod feedback 2026-07-11). Provision an empty script the same
+          // way project-create does, then mount it.
+          const created = await createScriptProject({
+            project_id: project.id,
+            name: episode.title,
+          });
+          await updateScriptProject(created.id, { episode_id: episode.episode_id });
+          setResolvedScriptId(created.id);
+          setScriptInitialRailView(railView);
+          setActiveModule('script');
           return;
         }
         candidates.sort(
@@ -261,10 +277,12 @@ export function ProjectWorkspace({
         setActiveModule('script');
       } catch (err) {
         console.error('[ProjectWorkspace] failed to resolve current episode script:', err);
+        // Loud failure (was silent): the click otherwise appears to do nothing.
+        addToast(t('common.error'), 'error');
         setActiveModule('episodes');
       }
     },
-    [project.id],
+    [project.id, addToast, t],
   );
 
   const openCurrentEpisodeScript = useCallback(
@@ -338,22 +356,32 @@ export function ProjectWorkspace({
     setActiveModule('files');
   }, []);
 
+  // Studio mode (activeModule 'script'): the editor's own rail is the ONLY
+  // side navigation — rendering the workspace sidebar next to it produced two
+  // parallel nav columns that read as an app nested inside an app ("还是内嵌
+  // 式样", prod feedback 2026-07-11; target look = the R2-A single-rail
+  // mockup). The top bar stays (identity + stage progress), and its back
+  // button first pops back to Overview instead of leaving the project.
+  const studioMode = activeModule === 'script' && resolvedScriptId != null;
+
   return (
     <div data-testid="project-workspace" className="flex h-full min-h-0">
-      <WorkspaceSidebar
-        activeModule={activeModule}
-        onModuleChange={handleModuleChange}
-        episodes={episodes}
-        currentEpisode={currentEpisode}
-        onEpisodeChange={handleEpisodeChange}
-        onOpenScript={() => void openCurrentEpisodeScript()}
-        onOpenStoryboard={() => void openCurrentEpisodeStoryboard()}
-        onOpenRenders={handleOpenRenders}
-      />
+      {!studioMode && (
+        <WorkspaceSidebar
+          activeModule={activeModule}
+          onModuleChange={handleModuleChange}
+          episodes={episodes}
+          currentEpisode={currentEpisode}
+          onEpisodeChange={handleEpisodeChange}
+          onOpenScript={() => void openCurrentEpisodeScript()}
+          onOpenStoryboard={() => void openCurrentEpisodeStoryboard()}
+          onOpenRenders={handleOpenRenders}
+        />
+      )}
       <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
         <WorkspaceTopBar
           projectName={project.name}
-          onBack={onBack}
+          onBack={studioMode ? () => setActiveModule('overview') : onBack}
           catalog={catalog}
           currentStage={currentStage}
           currentIndex={currentIndex}
@@ -367,7 +395,7 @@ export function ProjectWorkspace({
           onSuggestionGenerate={handleSuggestionGenerate}
           onSuggestionNavigate={handleSuggestionNavigate}
         />
-        {activeModule === 'script' && resolvedScriptId ? (
+        {studioMode && resolvedScriptId ? (
           // Full-bleed: EditorShell manages its own internal layout/scroll
           // (`.mh-editor-shell { position:absolute; inset:0 }`), so this
           // wrapper only needs to be a sized, positioned box — no padding,
@@ -381,6 +409,11 @@ export function ProjectWorkspace({
               projectId={project.id}
               initialRailView={scriptInitialRailView}
               embedded
+              episodesForSwitcher={episodes.map((e) => ({
+                episode_id: e.episode_id,
+                title: e.title,
+              }))}
+              onSwitchEpisode={handleEpisodeChange}
             />
           </div>
         ) : (

@@ -84,6 +84,12 @@ const COLLAB_ENABLED = import.meta.env.VITE_FEATURE_COLLAB === 'true';
 
 const DOC_MODES: EditorMode[] = ['script', 'outline', 'cover'];
 
+// Episode ids are native numbers at runtime though typed string (#1006) —
+// compare through String() like the rest of the editor.
+function sameEpisodeId(a: unknown, b: unknown): boolean {
+  return a != null && b != null && String(a) === String(b);
+}
+
 export function EditorShell({
   scriptId,
   currentUserId = null,
@@ -91,6 +97,8 @@ export function EditorShell({
   projectId: workspaceProjectId,
   initialRailView,
   embedded = false,
+  episodesForSwitcher,
+  onSwitchEpisode,
 }: {
   scriptId: string;
   /** Local user identity for collaboration presence (supplied by the route). */
@@ -118,14 +126,18 @@ export function EditorShell({
    */
   initialRailView?: RailView;
   /**
-   * Workspace-fusion mode (PR "融合而不是内嵌"): the shell is mounted inside
-   * the project workspace, which already owns the brand, episode switcher and
-   * episode management. Hides the rail's brand row + episode selector and
-   * flattens the island chrome (transparent shell, hairline column dividers)
-   * so the editor reads as part of the workspace surface instead of an app
-   * nested inside it. Standalone (fullscreen route) stays unchanged.
+   * Studio mode: the shell is mounted inside the project workspace, which
+   * hides its own sidebar while the studio is open — the editor rail is then
+   * the single side navigation (R2-A single-rail look). Embedded hides the
+   * rail's brand row (the workspace top bar carries project identity) and
+   * turns the episode selector into a switcher that delegates to
+   * `onSwitchEpisode`. Standalone (fullscreen route) stays unchanged.
    */
   embedded?: boolean;
+  /** Episode list for the embedded switcher (workspace-owned). */
+  episodesForSwitcher?: Array<{ episode_id: string; title: string }>;
+  /** Embedded switcher selection — the workspace re-resolves + remounts. */
+  onSwitchEpisode?: (episodeId: string) => void;
 }) {
   const { t } = useTranslation();
   // Restore the per-script layout engine synchronously so the first paint uses
@@ -153,6 +165,10 @@ export function EditorShell({
   const [currentEpisodeId, setCurrentEpisodeId] = useState<string | null>(null);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [episodePanelOpen, setEpisodePanelOpen] = useState(false);
+  // Embedded-only: the lightweight episode SWITCH menu (vs. the standalone
+  // EpisodePanel, which manages episodes — that job belongs to the
+  // workspace's Episodes module when embedded).
+  const [epSwitchOpen, setEpSwitchOpen] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   // Live (optimistic) elements lifted from each SceneBlock so Statistics + rail
   // entities reflect in-flight edits, not just the last loaded snapshot (Task 6 ⑥).
@@ -854,12 +870,12 @@ export function EditorShell({
           </div>
         ) : (
           <>
-            {/* Embedded (workspace fusion): the workspace shell already shows
-                the project brand, the current episode and episode management —
-                repeating them here is what made the mount read as an app
-                nested inside an app. Standalone keeps the full header. */}
-            {!embedded && (
-              <div className="mh-rail-top">
+            <div className="mh-rail-top">
+              {/* Studio mode (embedded in the workspace): the rail is the ONLY
+                  side navigation, so the episode selector stays — but the
+                  brand row goes (the workspace top bar already carries the
+                  project identity + back affordance). */}
+              {!embedded && (
                 <div className="mh-brand-row">
                   <span className="mh-brand-dot" aria-hidden="true" />
                   {t('editor.brand')}
@@ -873,32 +889,64 @@ export function EditorShell({
                     ‹
                   </button>
                 </div>
-                <div className="mh-ep-selector-wrap">
-                  <button
-                    type="button"
-                    className="mh-ep-selector"
-                    aria-expanded={episodePanelOpen}
-                    aria-label={t('editor.manageEpisodes')}
-                    onClick={() => setEpisodePanelOpen((v) => !v)}
-                  >
-                    <div className="mh-ep-name">{currentEpisodeTitle}</div>
-                    <div className="mh-ep-sub">
-                      {t('editor.sceneCount', { count: scenes.length })}
-                    </div>
-                  </button>
-                  {episodePanelOpen && projectId && (
-                    <EpisodePanel
-                      scriptId={scriptId}
-                      projectId={projectId}
-                      episodes={episodes}
-                      currentEpisodeId={currentEpisodeId}
-                      onChanged={reloadEpisodes}
-                      onClose={() => setEpisodePanelOpen(false)}
-                    />
-                  )}
-                </div>
+              )}
+              <div className="mh-ep-selector-wrap">
+                <button
+                  type="button"
+                  className="mh-ep-selector"
+                  aria-expanded={embedded ? epSwitchOpen : episodePanelOpen}
+                  aria-label={
+                    embedded ? t('editor.switchEpisode') : t('editor.manageEpisodes')
+                  }
+                  onClick={() =>
+                    embedded
+                      ? setEpSwitchOpen((v) => !v)
+                      : setEpisodePanelOpen((v) => !v)
+                  }
+                >
+                  <div className="mh-ep-name">{currentEpisodeTitle}</div>
+                  <div className="mh-ep-sub">
+                    {t('editor.sceneCount', { count: scenes.length })}
+                  </div>
+                </button>
+                {/* Embedded switcher: a plain episode list that hands the
+                    switch to the workspace (it re-resolves the episode's
+                    script and remounts the shell) — management lives in the
+                    workspace's Episodes module, not here. */}
+                {embedded && epSwitchOpen && (
+                  <div className="mh-ep-switch-menu" data-testid="editor-ep-switch-menu">
+                    {(episodesForSwitcher ?? []).map((ep) => (
+                      <button
+                        key={ep.episode_id}
+                        type="button"
+                        data-testid={`editor-ep-switch-${ep.episode_id}`}
+                        className={`mh-ep-switch-item${
+                          sameEpisodeId(ep.episode_id, currentEpisodeId) ? ' current' : ''
+                        }`}
+                        onClick={() => {
+                          setEpSwitchOpen(false);
+                          if (!sameEpisodeId(ep.episode_id, currentEpisodeId)) {
+                            onSwitchEpisode?.(ep.episode_id);
+                          }
+                        }}
+                      >
+                        {ep.title}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {!embedded && episodePanelOpen && projectId && (
+                  <EpisodePanel
+                    scriptId={scriptId}
+                    projectId={projectId}
+                    episodes={episodes}
+                    currentEpisodeId={currentEpisodeId}
+                    onChanged={reloadEpisodes}
+                    onClose={() => setEpisodePanelOpen(false)}
+                  />
+                )}
               </div>
-            )}
+            </div>
             <RailModules activeView={railView} onSelect={selectRailView} />
             <div className="mh-rail-scroll">
               <RailEntities

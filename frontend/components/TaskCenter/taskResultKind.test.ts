@@ -43,3 +43,9 @@ describe('taskResultKind', () => {
     expect(taskResultKind(t({ task_type: 'download', resource_id: undefined }))).toBe('generic');
   });
 });
+
+describe('canvas generation tasks (②-5 Task Center integration)', () => {
+  it('canvas_gen maps to the canvasGen result body', () => {
+    expect(taskResultKind({ task_type: 'canvas_gen', resource_id: null } as never)).toBe('canvasGen');
+  });
+});
