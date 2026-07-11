@@ -53,6 +53,15 @@ export const EDITOR_SHELL_STYLES = `
 
 .mh-editor-shell{
   --mono:"JetBrains Mono","Fira Code",ui-monospace,"SF Mono","Cascadia Mono",Consolas,monospace;
+  /* Screenplay typeface — Hollywood standard Courier for Latin, then a CJK
+     manuscript fallback (仿宋/楷体) so mixed EN+ZH scripts both sit on the
+     fixed monospace column grid. All system fonts, no web-font download. */
+  --script-mono:"Courier Prime","Courier New",Courier,"STFangsong","FangSong","仿宋","STKaiti","KaiTi","SimSun","宋体",ui-monospace,monospace;
+  /* Asian (华语) manuscript typefaces — labels/cues in 黑体 (bold sans CJK),
+     body (action / dialogue / paren) in 宋体 (serif CJK), per the 国内分景剧本
+     convention (标注/角色名用黑体, 正文用宋体). All system fonts, no download. */
+  --script-hei:"PingFang SC","Microsoft YaHei","Hiragino Sans GB","Heiti SC","Noto Sans CJK SC","SimHei","黑体",sans-serif;
+  --script-song:"Songti SC","STSong","SimSun","宋体","Noto Serif CJK SC","Source Han Serif SC",serif;
   --sans:-apple-system,"Inter","Segoe UI",Helvetica,Arial,sans-serif;
   position:absolute; inset:0;
   background:radial-gradient(circle at 15% 0%, var(--bg-2) 0%, var(--bg) 55%);
@@ -339,12 +348,12 @@ export const EDITOR_SHELL_STYLES = `
 .mh-scene-heading-display{
   flex:1; min-width:0; text-align:left; background:none; border:1px solid transparent;
   border-radius:6px; padding:4px 8px; cursor:text;
-  font-family:var(--mono); font-size:13.5px; font-weight:700; letter-spacing:0.04em;
+  font-family:var(--script-mono); font-size:13.5px; font-weight:700; letter-spacing:0.04em;
   text-transform:uppercase; color:var(--sheet-ink);
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
 .mh-scene-heading-display.asian{
-  font-family:var(--sans); font-size:14px; letter-spacing:0.02em; text-transform:none;
+  font-family:var(--script-hei); font-size:14px; letter-spacing:0.02em; text-transform:none;
 }
 .mh-scene-heading-display:hover{ background:var(--surface-2); }
 .mh-scene-heading-display:focus-visible{ outline:2px solid var(--indigo); outline-offset:-2px; }
@@ -372,16 +381,32 @@ export const EDITOR_SHELL_STYLES = `
   box-shadow:0 0 0 2px color-mix(in srgb, var(--indigo) 32%, transparent);
   border-radius:4px;
 }
-/* Hollywood metrics — spec D8 column 1 */
+/* Hollywood metrics — FIXED industry column grid (Courier / 10 chars-per-inch).
+   The screenplay text area is locked to 60ch (= 6" at 10 cpi), so every element
+   sits on a fixed character column that never drifts with window width — the old
+   percentage margins (38% / 22% / 30%) drifted and read as "centred", which is
+   Asian style, not Hollywood. Columns measured from the text-area left edge:
+     action 0–60 · dialogue 10–45 · paren 16–43 · character 22 · transition →60.
+   box-sizing:border-box (set globally on the shell) makes the ch padding eat
+   into the 60ch box, keeping the grid exact. Font = --script-mono (Courier). */
+.hw-action, .hw-character, .hw-dialogue, .hw-paren, .hw-transition, .hw-subtitle{
+  font-family:var(--script-mono);
+  flex:0 0 auto; width:60ch; max-width:100%;
+}
 .hw-action{ text-align:left; }
-.hw-character{ margin-left:38%; text-transform:uppercase; font-weight:700; letter-spacing:0.03em; color:var(--tick-character); }
-.hw-dialogue{ margin:0 22%; }
-.hw-paren{ margin:0 30%; font-style:italic; color:var(--sheet-ink-soft); }
+.hw-character{ padding-left:22ch; text-transform:uppercase; font-weight:700; letter-spacing:0.03em; color:var(--tick-character); }
+.hw-dialogue{ padding-left:10ch; padding-right:15ch; }
+.hw-paren{ padding-left:16ch; padding-right:17ch; font-style:italic; color:var(--sheet-ink-soft); }
 .hw-transition{ text-align:right; text-transform:uppercase; font-weight:700; letter-spacing:0.04em; color:var(--sheet-ink-soft); }
-.hw-comment{ border-left:3px solid var(--tick-comment); padding-left:8px; color:var(--sheet-ink-soft); font-style:italic; }
-.hw-subtitle{ text-align:center; font-style:italic; color:var(--sheet-ink-soft); }
-.mh-el-row.transition-row{ justify-content:flex-end; }
-.mh-el-row.transition-row .mh-el-tick{ display:none; }
+/* Superimpose is a flush-left action line (SUPER: …) per industry standard —
+   NOT centred. The gutter tick colour is what distinguishes it. */
+.hw-subtitle{ text-align:left; }
+.hw-comment{ font-family:var(--script-mono); border-left:3px solid var(--tick-comment); padding-left:8px; color:var(--sheet-ink-soft); font-style:italic; }
+/* Transition keeps the SAME col-0 origin as every other row: the tick space is
+   preserved (visibility, not display) so its 60ch box starts where the others
+   do, then text-align:right pushes the text to column 60. No flex-end reflow. */
+.mh-el-row.transition-row{ justify-content:flex-start; }
+.mh-el-row.transition-row .mh-el-tick{ visibility:hidden; }
 
 /* ===== ELEMENT ROWS (Asian layout engine) — spec D8 column 2 ===== */
 /* A numbered-manuscript typeset: △ action prefix, Name: character label,
@@ -392,7 +417,7 @@ export const EDITOR_SHELL_STYLES = `
 .as-row .mh-el-tick{ display:none; }
 .as-row .mh-el-row{ flex:1 1 auto; margin:0; }
 .as-mark{
-  font-family:var(--mono); font-size:13.5px; line-height:1.7;
+  font-family:var(--script-hei); font-size:13.5px; line-height:1.7;
   color:var(--sheet-ink-soft); flex-shrink:0; user-select:none;
 }
 .as-prefix{ color:var(--tick-transition); font-weight:700; }
@@ -405,13 +430,16 @@ export const EDITOR_SHELL_STYLES = `
 .as-row-dialogue{ padding-left:2.4em; }
 .as-row-transition{ justify-content:flex-end; }
 .as-row-subtitle{ justify-content:center; }
-.as-action{ text-align:left; }
-.as-character{ font-weight:700; letter-spacing:0.03em; color:var(--tick-character); text-align:left; }
-.as-dialogue{ text-align:left; }
-.as-paren{ font-style:italic; color:var(--sheet-ink-soft); }
-.as-transition{ text-transform:uppercase; font-weight:700; letter-spacing:0.04em; color:var(--sheet-ink-soft); }
-.as-comment{ border-left:3px solid var(--tick-comment); padding-left:8px; color:var(--sheet-ink-soft); font-style:italic; }
-.as-subtitle{ text-align:center; font-style:italic; color:var(--sheet-ink-soft); }
+/* Font split per 分景剧本 convention: 正文(action/dialogue/paren) = 宋体,
+   标注/角色名/字幕/转场 = 黑体. Latin chars in these fall through the CJK
+   stacks to the sans/serif tail, so mixed EN+ZH stays coherent. */
+.as-action{ font-family:var(--script-song); text-align:left; }
+.as-character{ font-family:var(--script-hei); font-weight:700; letter-spacing:0.03em; color:var(--tick-character); text-align:left; }
+.as-dialogue{ font-family:var(--script-song); text-align:left; }
+.as-paren{ font-family:var(--script-song); font-style:italic; color:var(--sheet-ink-soft); }
+.as-transition{ font-family:var(--script-hei); text-transform:uppercase; font-weight:700; letter-spacing:0.04em; color:var(--sheet-ink-soft); }
+.as-comment{ font-family:var(--script-song); border-left:3px solid var(--tick-comment); padding-left:8px; color:var(--sheet-ink-soft); font-style:italic; }
+.as-subtitle{ font-family:var(--script-hei); text-align:center; font-style:italic; color:var(--sheet-ink-soft); }
 
 /* Asian scene head = a flat numbered line (N. …) rather than a chip badge. */
 .mh-scene-headrow.asian .mh-scene-num-badge{
