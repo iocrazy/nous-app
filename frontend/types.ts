@@ -944,20 +944,10 @@ export interface ProjectStage {
   slug: string;
   name: string;
   sort_order: number;
-  /** Tool slugs recommended for this stage (maps to TOOL_CATALOG in stageTools.ts). */
+  /** Tool slugs recommended for this stage (advisory metadata from the catalog). */
   tools_recommended: string[];
   created_at?: string;
   updated_at?: string;
-}
-
-/** A single row from ``project_stage_history`` — one stage occupancy interval. */
-export interface StageHistoryEntry {
-  id: string;
-  stage_slug: string;
-  stage_name: string;
-  entered_at: string;
-  exited_at: string | null;
-  transitioned_by?: string;
 }
 
 /**
