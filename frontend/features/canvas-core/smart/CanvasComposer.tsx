@@ -14,7 +14,7 @@
  * via the viewport math).
  */
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { arrangeLayout } from '../../../canvas-kit/arrangeLayout';
 import { useKnifeStore } from '../../../canvas-kit/knifeStore';
@@ -311,6 +311,15 @@ export function CanvasComposer({
   const [savingToLibrary, setSavingToLibrary] = useState(false);
   const [libraryNotice, setLibraryNotice] = useState<string | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
+
+  // Auto-dismiss the save notice: it renders at the same bottom-full anchor
+  // as the library picker, so a persistent notice covers the picker panel
+  // (open Library right after Save and the green bar sits on the list).
+  useEffect(() => {
+    if (!libraryNotice) return undefined;
+    const timer = setTimeout(() => setLibraryNotice(null), 2500);
+    return () => clearTimeout(timer);
+  }, [libraryNotice]);
 
   const onSaveToLibrary = useCallback(async () => {
     if (!teamId || savingToLibrary) return;
