@@ -90,7 +90,12 @@ export async function getGeneration(taskId: string): Promise<GenerationTask> {
 /** Poll one task until it reaches a terminal phase (default 2s / 30min). */
 export async function pollGeneration(
   taskId: string,
-  opts: { intervalMs?: number; timeoutMs?: number } = {},
+  opts: {
+    intervalMs?: number;
+    timeoutMs?: number;
+    /** Fired on every non-terminal poll — carries the live task row. */
+    onTick?: (task: GenerationTask) => void;
+  } = {},
 ): Promise<GenerationTask> {
   const intervalMs = opts.intervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_POLL_TIMEOUT_MS;
@@ -98,6 +103,7 @@ export async function pollGeneration(
   for (;;) {
     const task = await getGeneration(taskId);
     if (TERMINAL_PHASES.has(task.phase)) return task;
+    opts.onTick?.(task);
     if (Date.now() - startedAt >= timeoutMs) {
       throw new Error(`generation task ${taskId} timed out after ${timeoutMs}ms`);
     }

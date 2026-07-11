@@ -5,6 +5,7 @@ import type { PromptGenSettings, PromptNodeData, PromptResourceRef } from '../ty
 import { RUN_STATUS_TONE, SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { useGenerationModels } from './useGenerationModels';
 import { useNodeDataPatch } from './useNodeDataPatch';
+import { rerunPrompt } from '../regenerate';
 import { useCanvasMentionPicker } from './useCanvasMentionPicker';
 import { CanvasMentionPicker } from './CanvasMentionPicker';
 import { useResourceSearch } from '../../../../hooks/useResourceSearch';
@@ -102,6 +103,18 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
       <div className="mh-node-head">
         <div className="mh-node-title">Prompt</div>
         <div className="flex items-center gap-1.5">
+          {run_status === 'failed' && (
+            /* Failed-run retry (G4-F3) — re-dispatch with CURRENT settings
+               and the upstream image input intact. */
+            <button
+              type="button"
+              className="mh-chip !border-rose-400/60 !text-rose-400"
+              onClick={() => void rerunPrompt(id)}
+              title="Re-run this prompt"
+            >
+              Retry
+            </button>
+          )}
           {/* Text stays the legacy LLM path; Image/Video route Run through
               the G4-B1 generation tasks (Infinite composer's kind toggle). */}
           <select

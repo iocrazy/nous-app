@@ -18,6 +18,9 @@ export interface GenerationRunnerDeps {
   /** Poll tuning — tests tighten these. */
   pollIntervalMs?: number;
   pollTimeoutMs?: number;
+  /** Mid-poll lifecycle (G4-F3): 'queued' while the engine still has the
+   *  task in line (jimeng queue), 'running' once it starts. */
+  onPhase?: (promptId: string, phase: 'queued' | 'running') => void;
 }
 
 export function withGenerationRunner(
@@ -47,13 +50,24 @@ export function withGenerationRunner(
         model: gen.model ?? '',
         count: gen.kind === 'video' ? 1 : Math.max(1, Math.min(gen.count ?? 1, 8)),
         params,
+        ...(ctx.source_url ? { source_url: ctx.source_url } : {}),
       });
 
+      // Fold N tasks' phases into one prompt-level signal: queued while
+      // EVERYTHING is still in line, running once anything starts.
+      let lastPhase: 'queued' | 'running' | null = null;
+      const emit = (phase: 'queued' | 'running') => {
+        if (phase !== lastPhase) {
+          lastPhase = phase;
+          deps.onPhase?.(ctx.promptId, phase);
+        }
+      };
       const tasks = await Promise.all(
         taskIds.map((id) =>
           pollGeneration(id, {
             intervalMs: deps.pollIntervalMs,
             timeoutMs: deps.pollTimeoutMs,
+            onTick: (t) => emit(t.phase === 'queued' ? 'queued' : 'running'),
           }),
         ),
       );

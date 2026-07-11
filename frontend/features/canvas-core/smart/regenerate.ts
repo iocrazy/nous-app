@@ -11,6 +11,7 @@
 
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { upsertGenerationSlots } from './genSlots';
+import { resolveSourceUrl } from './promptInputs';
 import { regenKey, useRegenStore } from './regenStore';
 import { withGenerationRunner } from './generationRunner';
 import { createBackendRunner } from './runner.backend';
@@ -45,16 +46,20 @@ function resolveCaller(canvasId: string | null): PromptCaller {
 }
 
 /**
- * Re-run the source prompt of an output slot. Resolves true only when the
- * run succeeded AND its results were written into this canvas.
+ * Re-run a prompt by id (G4-F3 failed-retry + the G7 slot Rerun). Results
+ * land through the normal slot channel; true only when the run succeeded
+ * AND its results were written into THIS canvas. `lockId` keys the
+ * re-entrancy guard (the output node id for slot reruns, the prompt id
+ * for direct retries).
  */
-export async function regenerateForOutput(outputNodeId: string): Promise<boolean> {
-  const { nodes, patchNode, canvasId } = useCanvasCoreStore.getState();
+export async function rerunPrompt(
+  promptId: string,
+  lockId: string = promptId,
+): Promise<boolean> {
+  const { nodes, connections, patchNode, canvasId } = useCanvasCoreStore.getState();
   const regen = useRegenStore.getState();
-  const key = regenKey(canvasId, outputNodeId);
+  const key = regenKey(canvasId, lockId);
   if (regen.running[key]) return false;
-  const promptId = promptIdForOutput(outputNodeId);
-  if (!promptId) return false;
   const prompt = nodes.find((n) => asObj(n).id === promptId);
   const data = asObj(prompt ?? {}).data as PromptNodeData | undefined;
   if (!data) return false;
@@ -68,6 +73,9 @@ export async function regenerateForOutput(outputNodeId: string): Promise<boolean
     provider_slug: data.provider_slug,
     agent_id: data.agent_id,
     gen: data.gen ?? null,
+    // Upstream durable image (G4-F3) — makes a retried/rerun prompt keep
+    // its i2i / i2v input.
+    source_url: resolveSourceUrl(promptId, nodes, connections),
   };
 
   regen.start(key);
@@ -90,4 +98,11 @@ export async function regenerateForOutput(outputNodeId: string): Promise<boolean
   } finally {
     useRegenStore.getState().finish(key);
   }
+}
+
+/** Re-run the source prompt of an output slot (G7 Rerun affordance). */
+export async function regenerateForOutput(outputNodeId: string): Promise<boolean> {
+  const promptId = promptIdForOutput(outputNodeId);
+  if (!promptId) return false;
+  return rerunPrompt(promptId, outputNodeId);
 }

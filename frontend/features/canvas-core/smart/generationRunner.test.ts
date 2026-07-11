@@ -107,3 +107,43 @@ describe('withGenerationRunner', () => {
     expect(result.error).toContain('canvas');
   });
 });
+
+describe('withGenerationRunner — G4-F3 additions', () => {
+  const GEN_CTX: RunnerContext = {
+    promptId: 'p1',
+    body: 'a cat',
+    provider_slug: '',
+    agent_id: null,
+    gen: { kind: 'image', model: 'm', count: 1 },
+  };
+
+  it('forwards ctx.source_url to the dispatch (i2i / i2v input)', async () => {
+    dispatchGenerations.mockResolvedValue(['t1']);
+    pollGeneration.mockResolvedValue({
+      phase: 'completed',
+      metadata: { result_url: '/gm/1/cover' },
+    });
+    const runner = withGenerationRunner(baseCaller, { canvasId: '9' });
+    await runner({ ...GEN_CTX, source_url: '/api/v1/generated-media/7/cover' });
+    expect(dispatchGenerations).toHaveBeenCalledWith(
+      '9',
+      expect.objectContaining({ source_url: '/api/v1/generated-media/7/cover' }),
+    );
+  });
+
+  it('reports queued → running through onPhase while polling', async () => {
+    dispatchGenerations.mockResolvedValue(['t1']);
+    pollGeneration.mockImplementation(async (_id: string, opts: { onTick?: (t: unknown) => void }) => {
+      opts.onTick?.({ phase: 'queued' });
+      opts.onTick?.({ phase: 'in_progress' });
+      return { phase: 'completed', metadata: { result_url: '/gm/1/cover' } };
+    });
+    const phases: string[] = [];
+    const runner = withGenerationRunner(baseCaller, {
+      canvasId: '9',
+      onPhase: (id, phase) => phases.push(`${id}:${phase}`),
+    });
+    await runner(GEN_CTX);
+    expect(phases).toEqual(['p1:queued', 'p1:running']);
+  });
+});

@@ -20,6 +20,7 @@
 // Pure orchestration: caller/handlers/stop are injected, no store access.
 
 import type { CanvasConnection, CanvasNode } from '../types';
+import { resolveSourceUrl } from './promptInputs';
 import {
   injectLoopVariables,
   loopRoundIndexes,
@@ -88,7 +89,12 @@ export async function runLoopCascade(opts: LoopRunOptions): Promise<LoopRunSumma
   const baseContexts: RunnerContext[] = [];
   for (const id of order) {
     const d = asObj(byId.get(id) ?? {}).data as
-      | { body?: string; provider_slug?: string; agent_id?: string | null }
+      | {
+          body?: string;
+          provider_slug?: string;
+          agent_id?: string | null;
+          gen?: RunnerContext['gen'];
+        }
       | undefined;
     if (!d) continue;
     baseContexts.push({
@@ -96,6 +102,10 @@ export async function runLoopCascade(opts: LoopRunOptions): Promise<LoopRunSumma
       body: d.body ?? '',
       provider_slug: d.provider_slug ?? '',
       agent_id: d.agent_id ?? null,
+      // Without gen the generation runner passes the prompt to the TEXT
+      // path — loop-driven image prompts silently ran as LLM calls (F3 fix).
+      gen: d.gen ?? null,
+      source_url: resolveSourceUrl(id, opts.nodes, opts.connections),
     });
   }
   if (baseContexts.length === 0) {

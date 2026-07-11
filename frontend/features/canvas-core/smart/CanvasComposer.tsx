@@ -27,6 +27,7 @@ import {
   createShotNode,
 } from './factories';
 import { upsertGenerationSlots } from './genSlots';
+import { resolveSourceUrl } from './promptInputs';
 import { withGenerationRunner } from './generationRunner';
 import { createBackendRunner } from './runner.backend';
 import {
@@ -79,8 +80,16 @@ export function CanvasComposer({
         ? createBackendRunner({ canvasId })
         : mockRunner;
     // Image/video prompts route through the G4-B1 generation tasks; text
-    // prompts pass straight through to the base caller.
-    return withGenerationRunner(base, { canvasId });
+    // prompts pass straight through to the base caller. onPhase surfaces
+    // the engine queue (jimeng) as a 'queued' halo mid-poll (G4-F3).
+    return withGenerationRunner(base, {
+      canvasId,
+      onPhase: (id, phase) => {
+        useCanvasCoreStore.getState().patchNode(id, {
+          data: { run_status: phase === 'queued' ? 'queued' : 'running' },
+        });
+      },
+    });
   }, [runnerOverride, canvasId]);
 
   const dropPosition = useCallback((): { x: number; y: number } => {
@@ -129,11 +138,12 @@ export function CanvasComposer({
             provider_slug: data.provider_slug,
             agent_id: data.agent_id,
             gen: data.gen ?? null,
+            source_url: resolveSourceUrl(id, nodes, connections),
           };
         })
         .filter((v): v is RunnerContext => v !== null);
     },
-    [nodes],
+    [nodes, connections],
   );
 
   const handlers: RunHandlers = {
