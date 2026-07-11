@@ -50,3 +50,55 @@ describe('timeline segment helpers', () => {
     expect(totalSeconds(SEGS)).toBe(8);
   });
 });
+
+// ── Minimal-set upgrades (P2-1) ─────────────────────────────────────────────
+
+import { dragSeconds, reorderSegments, segmentIndexAtX } from './timeline';
+
+const P21_SEGS = [
+  { id: 'a', prompt: 'one', seconds: 5 },
+  { id: 'b', prompt: 'two', seconds: 3 },
+  { id: 'c', prompt: 'three', seconds: 2 },
+];
+
+describe('reorderSegments (P2-1)', () => {
+  it('moves a segment forward and backward', () => {
+    expect(reorderSegments(P21_SEGS, 0, 2).map((s) => s.id)).toEqual(['b', 'c', 'a']);
+    expect(reorderSegments(P21_SEGS, 2, 0).map((s) => s.id)).toEqual(['c', 'a', 'b']);
+  });
+
+  it('clamps out-of-range targets and no-ops same-index moves', () => {
+    expect(reorderSegments(P21_SEGS, 0, 99).map((s) => s.id)).toEqual(['b', 'c', 'a']);
+    expect(reorderSegments(P21_SEGS, 1, 1)).toBe(P21_SEGS);
+    expect(reorderSegments(P21_SEGS, -1, 0)).toBe(P21_SEGS);
+  });
+});
+
+describe('dragSeconds (P2-1)', () => {
+  it('converts drag distance to whole seconds at the given scale', () => {
+    // 40px per second: +85px ≈ +2s.
+    expect(dragSeconds(5, 85, 40)).toBe(7);
+    expect(dragSeconds(5, -85, 40)).toBe(3);
+  });
+
+  it('clamps to the 1..10 envelope and survives degenerate scales', () => {
+    expect(dragSeconds(9, 400, 40)).toBe(10);
+    expect(dragSeconds(2, -400, 40)).toBe(1);
+    expect(dragSeconds(5, 100, 0)).toBe(5);
+  });
+});
+
+describe('segmentIndexAtX (P2-1)', () => {
+  it('maps a strip x-coordinate to the segment under it (width ∝ seconds)', () => {
+    // Total 10s over 200px: a=[0,100), b=[100,160), c=[160,200).
+    expect(segmentIndexAtX(P21_SEGS, 50, 200)).toBe(0);
+    expect(segmentIndexAtX(P21_SEGS, 130, 200)).toBe(1);
+    expect(segmentIndexAtX(P21_SEGS, 190, 200)).toBe(2);
+  });
+
+  it('clamps outside the strip', () => {
+    expect(segmentIndexAtX(P21_SEGS, -10, 200)).toBe(0);
+    expect(segmentIndexAtX(P21_SEGS, 500, 200)).toBe(2);
+    expect(segmentIndexAtX([], 50, 200)).toBe(0);
+  });
+});

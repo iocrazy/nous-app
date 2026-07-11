@@ -148,3 +148,71 @@ describe('startTimelineRun', () => {
     expect(dispatchTimelineRun).toHaveBeenCalledTimes(1);
   });
 });
+
+// ── Minimal-set upgrades (P2-1): live progress / thumbs / failed mark ──────
+
+describe('startTimelineRun — progress decoration (P2-1)', () => {
+  const tlData = () => {
+    const node = useCanvasCoreStore
+      .getState()
+      .nodes.find((n) => (n as Record<string, unknown>).id === 'tl1');
+    return ((node as Record<string, unknown>).data ?? {}) as Record<string, unknown>;
+  };
+
+  it('onTick metadata drives run_progress and segment thumbnails', async () => {
+    seed();
+    dispatchTimelineRun.mockResolvedValue('task-1');
+    pollGeneration.mockImplementation(
+      async (_id: string, opts: { onTick?: (t: unknown) => void }) => {
+        opts.onTick?.({
+          phase: 'in_progress',
+          metadata: { segments_done: 1, segments_total: 2, segment_frames: ['/gm/f1/cover'] },
+        });
+        return {
+          phase: 'completed',
+          metadata: {
+            result_url: '/api/v1/generated-media/9/stream',
+            segment_frames: ['/gm/f1/cover'],
+          },
+        };
+      },
+    );
+
+    const ok = await startTimelineRun('tl1');
+    expect(ok).toBe(true);
+    expect(tlData().segment_thumbs).toEqual(['/gm/f1/cover']);
+    expect(tlData().run_progress).toBeNull();
+    expect(tlData().failed_index).toBeNull();
+  });
+
+  it('a failed run marks the segment that broke (done count = failing index)', async () => {
+    seed();
+    dispatchTimelineRun.mockResolvedValue('task-1');
+    pollGeneration.mockResolvedValue({
+      phase: 'failed',
+      error_msg: 'segment 2 provider error',
+      metadata: { segments_done: 1, segments_total: 2 },
+    });
+
+    const ok = await startTimelineRun('tl1');
+    expect(ok).toBe(false);
+    expect(tlData().run_status).toBe('failed');
+    expect(tlData().failed_index).toBe(1);
+  });
+
+  it('a fresh run clears the previous failed mark and progress', async () => {
+    seed();
+    useCanvasCoreStore.getState().patchNode('tl1', {
+      data: { failed_index: 1, run_progress: { done: 1, total: 2 } },
+    });
+    dispatchTimelineRun.mockResolvedValue('task-2');
+    pollGeneration.mockResolvedValue({
+      phase: 'completed',
+      metadata: { result_url: '/api/v1/generated-media/9/stream' },
+    });
+
+    await startTimelineRun('tl1');
+    expect(tlData().failed_index).toBeNull();
+    expect(tlData().run_progress).toBeNull();
+  });
+});
