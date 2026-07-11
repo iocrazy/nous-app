@@ -2,7 +2,7 @@
 // attachments (paste / drop / picker), Cmd+Enter submit.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Hash, Link as LinkIcon, Paperclip, SquareCode, X } from 'lucide-react';
+import { ChevronDown, Hash, Link as LinkIcon, Lock, Paperclip, Send, SquareCode, X } from 'lucide-react';
 import { useToast } from '../Toast';
 import {
   createNote,
@@ -220,8 +220,57 @@ export const Composer: React.FC<Props> = ({
         className="w-full resize-none bg-transparent text-[13.5px] text-content placeholder:text-content-4 focus:outline-none"
       />
 
+      {/* memos-parity layout: the insert-icon row sits directly under the
+          text (no divider), then attachments, then a divider with the
+          visibility hint on the left and a solid Save on the right. */}
+      <div className="flex items-center gap-0.5">
+        <button
+          aria-label="Insert tag"
+          title={t('inspiration.insertTag', 'Insert #tag')}
+          onClick={insertTag}
+          className="rounded-md p-1.5 text-content-3 hover:bg-island-2 hover:text-indigo-300"
+        >
+          <Hash size={16} />
+        </button>
+        <button
+          aria-label="Insert code block"
+          title={t('inspiration.insertCode', 'Insert code block')}
+          onClick={insertCodeBlock}
+          className="rounded-md p-1.5 text-content-3 hover:bg-island-2 hover:text-indigo-300"
+        >
+          <SquareCode size={16} />
+        </button>
+        <button
+          aria-label="Attach file"
+          title={t('inspiration.attachFile', 'Attach files')}
+          onClick={() => fileRef.current?.click()}
+          className="rounded-md p-1.5 text-content-3 hover:bg-island-2 hover:text-indigo-300"
+        >
+          <Paperclip size={16} />
+        </button>
+        <button
+          aria-label="Insert link"
+          title={t('inspiration.insertLink', 'Insert link')}
+          onClick={insertLink}
+          className="rounded-md p-1.5 text-content-3 hover:bg-island-2 hover:text-indigo-300"
+        >
+          <LinkIcon size={16} />
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          multiple
+          aria-label="Attach files"
+          className="hidden"
+          onChange={(e) => {
+            if (e.target.files?.length) stageFiles(e.target.files);
+            e.target.value = '';
+          }}
+        />
+      </div>
+
       {suggestions.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 border-t border-line pt-2">
+        <div className="flex flex-wrap gap-1.5 pt-1">
           {suggestions.map((s) => (
             <button
               key={s}
@@ -265,56 +314,22 @@ export const Composer: React.FC<Props> = ({
         </div>
       )}
 
-      <div className="mt-2 flex items-center gap-1 border-t border-line pt-2">
-        <button
-          aria-label="Insert tag"
-          title={t('inspiration.insertTag', 'Insert #tag')}
-          onClick={insertTag}
-          className="rounded-lg p-1.5 text-content-3 hover:bg-island-2 hover:text-indigo-300"
+      <div className="mt-2 flex items-center justify-between border-t border-line pt-2">
+        <span
+          title={t('inspiration.privateHint', 'Notes are private to your account')}
+          className="inline-flex cursor-default items-center gap-1.5 rounded-md px-2 py-1 text-xs text-content-3"
         >
-          <Hash size={15} />
-        </button>
-        <button
-          aria-label="Insert code block"
-          title={t('inspiration.insertCode', 'Insert code block')}
-          onClick={insertCodeBlock}
-          className="rounded-lg p-1.5 text-content-3 hover:bg-island-2 hover:text-indigo-300"
-        >
-          <SquareCode size={15} />
-        </button>
-        <button
-          aria-label="Attach file"
-          title={t('inspiration.attachFile', 'Attach files')}
-          onClick={() => fileRef.current?.click()}
-          className="rounded-lg p-1.5 text-content-3 hover:bg-island-2 hover:text-indigo-300"
-        >
-          <Paperclip size={15} />
-        </button>
-        <button
-          aria-label="Insert link"
-          title={t('inspiration.insertLink', 'Insert link')}
-          onClick={insertLink}
-          className="rounded-lg p-1.5 text-content-3 hover:bg-island-2 hover:text-indigo-300"
-        >
-          <LinkIcon size={15} />
-        </button>
-        <input
-          ref={fileRef}
-          type="file"
-          multiple
-          aria-label="Attach files"
-          className="hidden"
-          onChange={(e) => {
-            if (e.target.files?.length) stageFiles(e.target.files);
-            e.target.value = '';
-          }}
-        />
+          <Lock size={12} className="opacity-70" />
+          {t('inspiration.private', 'Private')}
+          <ChevronDown size={12} className="opacity-50" />
+        </span>
         <button
           onClick={() => void submit()}
           disabled={saving || !text.trim()}
-          className="ml-auto rounded-lg bg-indigo-500 px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-500 px-4 py-1.5 text-xs font-semibold text-white hover:bg-indigo-400 disabled:opacity-40"
         >
           {saving ? t('inspiration.saving', 'Saving…') : t('inspiration.save', 'Save')}
+          <Send size={12} />
         </button>
       </div>
     </div>
