@@ -19,7 +19,7 @@ export function LoopNodeView({ id, data, selected }: NodeProps) {
   const patch = useNodeDataPatch(id);
   const running = useLoopRunStore((s) => Boolean(s.running[id]));
   const stopping = useLoopRunStore((s) => s.running[id]?.stopRequested ?? false);
-  const tone = selected ? 'border-indigo-500' : LOOP_MODE_TONE[mode];
+  const tone = LOOP_MODE_TONE[mode];
   // Canvases persisted before G3a lack the batch fields — default in view.
   const safeRounds = clampRounds(rounds ?? 1);
   const safeStart = clampRoundStart(round_start ?? 1);
@@ -32,7 +32,7 @@ export function LoopNodeView({ id, data, selected }: NodeProps) {
   return (
     <div
       data-testid="smart-loop-node"
-      className={`rounded-md border-2 bg-white shadow dark:bg-slate-900 ${tone}`}
+      className={`mh-node ${tone} ${selected ? 'mh-node-selected' : ''}`}
       style={{ width: SMART_NODE_DEFAULT_WIDTH.loop }}
     >
       <Handle

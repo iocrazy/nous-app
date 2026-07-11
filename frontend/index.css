@@ -91,6 +91,7 @@
   --color-canvas-page: var(--canvas-page);
   --color-canvas-card: var(--canvas-card);
   --color-canvas-line: var(--canvas-line);
+  --color-canvas-line-strong: var(--canvas-line-strong);
   --color-canvas-text: var(--canvas-text);
   --color-canvas-muted: var(--canvas-muted);
   --color-canvas-strong: var(--canvas-strong);
@@ -742,6 +743,63 @@ body {
   --canvas-strong: #111827;
   --canvas-mask: rgba(248, 250, 252, 0.6);
   --canvas-shadow-island: 0 16px 42px rgba(15, 23, 42, 0.16);
+}
+
+/* Node shell (Infinite parity — canvas.css .node/.node-head/.node-title):
+   22px radius card, hairline border, wide soft shadow. Border COLOR is
+   deliberately not set here — the run-status halo classes (RUN_STATUS_TONE)
+   own it, with border-canvas-line as the idle tone. Selection is Infinite's
+   neutral outline, so it never swallows the halo. */
+/* React Flow ships default skins for its built-in node type names
+   (input/output/default/group) — our smart/classic "output" node collides
+   with .react-flow__node-output (white card, 150px width, padding). The
+   collision was invisible while nodes painted an opaque bg-white shell;
+   the token reskin exposed it. Neutralise the built-ins under .mh-canvas. */
+.mh-canvas .react-flow__node-input,
+.mh-canvas .react-flow__node-output,
+.mh-canvas .react-flow__node-default,
+.mh-canvas .react-flow__node-group {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  width: auto;
+  box-shadow: none;
+  color: inherit;
+  text-align: initial;
+  font-size: inherit;
+}
+
+.mh-node {
+  border-width: 1px;
+  border-radius: var(--canvas-r-node);
+  background: var(--canvas-card);
+  color: var(--canvas-text);
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.22);
+}
+[data-theme="light"] .mh-node {
+  box-shadow: 0 16px 42px rgba(15, 23, 42, 0.1);
+}
+.mh-node-selected {
+  outline: 2px solid var(--canvas-strong);
+  outline-offset: 2px;
+}
+.mh-node-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 42px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--canvas-line);
+  border-radius: calc(var(--canvas-r-node) - 1px) calc(var(--canvas-r-node) - 1px) 0 0;
+}
+.mh-node-title {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--canvas-muted);
 }
 
 /* Floating canvas chrome: the Infinite glass island (panel glass + blur +

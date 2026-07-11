@@ -198,14 +198,14 @@ export const SMART_NODE_DEFAULT_WIDTH: Record<SmartNodeType, number> = {
 };
 
 export const LOOP_MODE_TONE: Record<LoopMode, string> = {
-  serial: 'border-slate-400 dark:border-slate-600',
+  serial: 'border-canvas-line-strong/50',
   parallel: 'border-violet-500',
   batch: 'border-cyan-500',
 };
 
 /** Run-status colour token for the prompt node halo + the output badge. */
 export const RUN_STATUS_TONE: Record<PromptNodeData['run_status'], string> = {
-  idle: 'border-slate-300 dark:border-slate-700',
+  idle: 'border-canvas-line',
   queued: 'border-amber-400',
   running: 'border-indigo-500 animate-pulse',
   succeeded: 'border-emerald-500',
