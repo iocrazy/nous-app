@@ -101,3 +101,46 @@ describe('OutputLightbox zoom & pan (P0-5)', () => {
     expect(scaleOf()).toBe(1);
   });
 });
+
+describe('lightbox shell (P1-12)', () => {
+  it('uses the theme-aware glass backdrop instead of flat black', () => {
+    renderBox();
+    const root = screen.getByTestId('output-lightbox');
+    expect(root.className).toContain('mh-lightbox-backdrop');
+    expect(root.className).not.toContain('bg-black');
+  });
+});
+
+describe('progressive load (P1-3)', () => {
+  it('shows a shimmer skeleton until the image loads', () => {
+    renderBox();
+    expect(screen.getByTestId('lightbox-skeleton')).toBeTruthy();
+    fireEvent.load(screen.getByTestId('lightbox-image'));
+    expect(screen.queryByTestId('lightbox-skeleton')).toBeNull();
+  });
+
+  it('broken image shows a recovery card whose Retry re-attempts the load', () => {
+    renderBox();
+    fireEvent.error(screen.getByTestId('lightbox-image'));
+    expect(screen.getByTestId('lightbox-load-error')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    // Back to the skeleton + a fresh <img> attempt.
+    expect(screen.getByTestId('lightbox-skeleton')).toBeTruthy();
+    expect(screen.getByTestId('lightbox-image')).toBeTruthy();
+  });
+
+  it('switching items returns to the skeleton', () => {
+    const { rerender } = renderBox();
+    fireEvent.load(screen.getByTestId('lightbox-image'));
+    rerender(
+      <OutputLightbox
+        items={ITEMS}
+        index={1}
+        kind="image"
+        onIndexChange={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('lightbox-skeleton')).toBeTruthy();
+  });
+});
