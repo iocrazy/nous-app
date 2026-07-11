@@ -29,7 +29,11 @@ import {
   createTimelineNode,
 } from './factories';
 import { groupSelection, ungroupNode } from './grouping';
-import { upsertGenerationSlots } from './genSlots';
+import {
+  appendGenerationResults,
+  beginGenerationSlot,
+  settleGenerationSlot,
+} from './genSlots';
 import { resolveSourceUrl } from './promptInputs';
 import { withGenerationRunner } from './generationRunner';
 import { createBackendRunner } from './runner.backend';
@@ -41,7 +45,7 @@ import {
   type RunnerContext,
 } from './runner';
 import { topoSortPrompts } from './topology';
-import type { OutputKind, PromptNodeData } from './types';
+import type { PromptNodeData } from './types';
 import { SMART_NODE_TYPES } from './nodes/registry';
 import { parseWorkflow, serializeWorkflow, workflowFilename } from './workflowIO';
 import { fetchWorkflowText, saveWorkflowToLibrary } from './workflowLibrary';
@@ -105,6 +109,14 @@ export function CanvasComposer({
         });
       },
       shouldStop: () => stopRequestedRef.current,
+      // Placeholder lifecycle (P0-3): shimmer cells appear at dispatch,
+      // each finished item replaces one (first-done-first-shown), failures
+      // burn a cell into the failed count.
+      onDispatched: (id, count, kind) => beginGenerationSlot(id, count, kind),
+      onItemSettled: (id, item) => {
+        if (item.url) appendGenerationResults(id, [item.url], item.kind);
+        else settleGenerationSlot(id, { failed: 1 });
+      },
     });
   }, [runnerOverride, canvasId]);
 
@@ -169,14 +181,12 @@ export function CanvasComposer({
       patchNode(id, { data: { run_status: status, ...fields } });
     },
     onResult: (id, result) => {
-      // Generation results land in per-prompt output slots (G4-F1) —
-      // reused on re-runs; F2 upgrades to images[] + history archive.
-      if (result.ok && result.urls?.length) {
-        upsertGenerationSlots(
-          id,
-          result.urls,
-          (result.media_kind as OutputKind) ?? 'image',
-        );
+      // Generation results now land progressively via onItemSettled (P0-3)
+      // — re-upserting here would archive the batch we just filled. This
+      // hook only sweeps leftovers: a stopped/failed run clears remaining
+      // shimmer cells; text results have no slot at all.
+      if (result.media_kind && (!result.ok || result.stopped)) {
+        settleGenerationSlot(id, { clearPending: true });
       }
     },
   };

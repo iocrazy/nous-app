@@ -66,3 +66,122 @@ export function upsertGenerationSlots(
   };
   useCanvasCoreStore.getState().appendElementsNoHistory([slot], [edge]);
 }
+
+// ── Progressive placeholders (P0-3) ─────────────────────────────────────────
+// Infinite's pendingBoxSize + loading-cell pattern: the slot appears the
+// moment a run is DISPATCHED (shimmer cells sized by count), each finished
+// item replaces a cell as it lands (first-done-first-shown), failures keep
+// their count on the node. All writes history-free, matching the slot's
+// operational-state contract.
+
+/** Find the slot node id for a prompt, if one exists. */
+function slotIdFor(promptId: string): string | null {
+  const store = useCanvasCoreStore.getState();
+  const existing = store.nodes.find((n) => genSlotTagOf(n)?.node_id === promptId);
+  return existing ? String(asObj(existing).id) : null;
+}
+
+/** Dispatch time: create the slot (or archive the previous batch) and show
+ *  `count` shimmer placeholders. */
+export function beginGenerationSlot(
+  promptId: string,
+  count: number,
+  mediaKind: OutputKind,
+): void {
+  const store = useCanvasCoreStore.getState();
+  const prompt = store.nodes.find((n) => asObj(n).id === promptId);
+  if (!prompt) return;
+
+  const existingId = slotIdFor(promptId);
+  if (existingId) {
+    // Archive the previous batch ONCE per run; the fresh batch then fills
+    // progressively via appendGenerationResults.
+    replaceOutputImagesWithHistory(existingId, [], mediaKind);
+    store.patchNode(existingId, {
+      data: { gen_pending: count, gen_failed: 0 },
+    });
+    return;
+  }
+
+  const promptPos =
+    (asObj(prompt).position as { x: number; y: number }) ?? { x: 0, y: 0 };
+  const base = createOutputNode(
+    { kind: mediaKind, preview_url: null, preview_text: '' },
+    { position: { x: promptPos.x + SLOT_OFFSET_X, y: promptPos.y } },
+  );
+  const slot = {
+    ...base,
+    data: {
+      ...(base.data as unknown as Record<string, unknown>),
+      images: [],
+      gen_pending: count,
+      gen_failed: 0,
+      gen_slot: { node_id: promptId, index: 0 } satisfies GenSlotTag,
+    },
+  } as CanvasNode;
+  const edge: CanvasConnection = {
+    id: `edge-${crypto.randomUUID()}`,
+    source: promptId,
+    target: String(asObj(slot).id),
+    sourceHandle: null,
+    targetHandle: null,
+  };
+  useCanvasCoreStore.getState().appendElementsNoHistory([slot], [edge]);
+}
+
+/** One item finished: replace a shimmer cell with the real image. */
+export function appendGenerationResults(
+  promptId: string,
+  urls: string[],
+  mediaKind: OutputKind,
+): void {
+  if (urls.length === 0) return;
+  const slotId = slotIdFor(promptId);
+  if (!slotId) {
+    // No begin ran (legacy path) — fall back to the batch upsert.
+    upsertGenerationSlots(promptId, urls, mediaKind);
+    return;
+  }
+  const store = useCanvasCoreStore.getState();
+  const node = store.nodes.find((n) => asObj(n).id === slotId);
+  const data = (asObj(node).data ?? {}) as {
+    images?: GeneratedImageRef[];
+    gen_pending?: number;
+  };
+  const images = [
+    ...(data.images ?? []),
+    ...urls.map((url): GeneratedImageRef => ({ url, kind: mediaKind })),
+  ];
+  store.patchNode(slotId, {
+    data: {
+      kind: mediaKind,
+      images,
+      preview_url: images[0]?.url ?? null,
+      gen_pending: Math.max(0, (data.gen_pending ?? 0) - urls.length),
+    },
+  });
+}
+
+/** Item(s) failed or the run was stopped: burn pending cells down. */
+export function settleGenerationSlot(
+  promptId: string,
+  opts: { failed?: number; clearPending?: boolean },
+): void {
+  const slotId = slotIdFor(promptId);
+  if (!slotId) return;
+  const store = useCanvasCoreStore.getState();
+  const node = store.nodes.find((n) => asObj(n).id === slotId);
+  const data = (asObj(node).data ?? {}) as {
+    gen_pending?: number;
+    gen_failed?: number;
+  };
+  const failed = opts.failed ?? 0;
+  store.patchNode(slotId, {
+    data: {
+      gen_pending: opts.clearPending
+        ? 0
+        : Math.max(0, (data.gen_pending ?? 0) - failed),
+      gen_failed: (data.gen_failed ?? 0) + failed,
+    },
+  });
+}

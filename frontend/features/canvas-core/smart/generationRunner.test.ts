@@ -215,3 +215,42 @@ describe('withGenerationRunner — fan-out partial failure (P0-2)', () => {
     expect(result.error).toBeNull();
   });
 });
+
+describe('withGenerationRunner — placeholder lifecycle (P0-3)', () => {
+  it('fires onDispatched with the fan-out size and onItemSettled per item', async () => {
+    dispatchGenerations.mockResolvedValue(['t1', 't2']);
+    let resolveSlow!: (v: unknown) => void;
+    pollGeneration
+      .mockImplementationOnce(
+        () => new Promise((res) => { resolveSlow = res; }),
+      )
+      .mockResolvedValueOnce({
+        phase: 'completed',
+        metadata: { result_url: '/gm/2/cover' },
+      });
+
+    const dispatched: Array<[string, number, string]> = [];
+    const settled: Array<{ url: string | null }> = [];
+    const runner = withGenerationRunner(baseCaller, {
+      canvasId: '9',
+      onDispatched: (id, count, kind) => dispatched.push([id, count, kind]),
+      onItemSettled: (_id, item) => settled.push(item),
+    });
+    const done = runner({
+      ...TEXT_CTX,
+      gen: { kind: 'image', model: '', count: 2 },
+    });
+
+    // The FAST task settles before the slow sibling resolves: first-done-
+    // first-shown, no batch barrier.
+    await vi.waitFor(() => expect(settled).toHaveLength(1));
+    expect(settled[0].url).toBe('/gm/2/cover');
+    expect(dispatched).toEqual([['p1', 2, 'image']]);
+
+    resolveSlow({ phase: 'failed', error_msg: 'boom' });
+    const result = await done;
+    expect(settled).toHaveLength(2);
+    expect(settled[1].url).toBeNull();
+    expect(result.ok).toBe(true); // P0-2: the good item still lands
+  });
+});

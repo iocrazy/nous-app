@@ -114,6 +114,12 @@ export interface OutputNodeData {
    * Absent on legacy nodes (single preview_url behaviour).
    */
   images?: GeneratedImageRef[];
+  /** In-flight generation placeholders (P0-3): cells still waiting for a
+   *  result — rendered as shimmer skeletons so the canvas shows WHERE the
+   *  images will land the moment the run is dispatched. */
+  gen_pending?: number;
+  /** Items of the current batch that failed (P0-3) — surfaced as a chip. */
+  gen_failed?: number;
   /** Set on history-archive nodes: the output node this archives for. */
   history_for?: string;
   /** Snowflake resource id that owns the rendered artifact, when one

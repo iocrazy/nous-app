@@ -888,6 +888,23 @@ body {
   animation: canvas-edge-flow 0.6s linear infinite;
 }
 
+/* Generation placeholder shimmer (P0-3) — Infinite's .loading-cell:
+   a soft sweep across the skeleton while the item renders. */
+@keyframes mh-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.mh-loading-cell {
+  background: linear-gradient(
+    100deg,
+    color-mix(in srgb, var(--canvas-line) 45%, transparent) 40%,
+    color-mix(in srgb, var(--canvas-text) 14%, transparent) 50%,
+    color-mix(in srgb, var(--canvas-line) 45%, transparent) 60%
+  );
+  background-size: 200% 100%;
+  animation: mh-shimmer 1.5s ease-in-out infinite;
+}
+
 /* ===== Infinite Canvas Vignette ===== */
 .canvas-vignette {
   pointer-events: none;
