@@ -147,6 +147,9 @@ export interface CanvasEngineProps {
   nodeTypes?: NodeTypes;
   /** Edge component registry (e.g. smart mode's scissors edge, G6). */
   edgeTypes?: EdgeTypes;
+  /** Extra chrome rendered inside the engine container, above React Flow
+   *  (e.g. the knife overlay). Receives the container element. */
+  renderOverlay?: (container: HTMLElement | null) => ReactNode;
   /** Controlled React Flow nodes (already carrying `selected`). */
   nodes: AnyNode[];
   /** Controlled React Flow edges. */
@@ -235,6 +238,7 @@ export function CanvasEngine({
   themedChrome = false,
   nodeTypes,
   edgeTypes,
+  renderOverlay,
   nodes,
   edges,
   selectedIds,
@@ -632,6 +636,7 @@ export function CanvasEngine({
         <GuideOverlay guides={guides} />
       </ReactFlow>
       {createMenu && renderCreateMenu?.(createMenu, () => setCreateMenu(null))}
+      {renderOverlay?.(containerRef.current)}
     </div>
   );
 }

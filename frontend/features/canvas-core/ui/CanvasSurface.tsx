@@ -30,6 +30,9 @@ import { CLASSIC_NODE_TYPES } from '../classic/ClassicNodeViews';
 import { toReactFlowEdges, validateCanvasConnection } from './connectionMapping';
 import { edgeRunStateClass } from '../smart/edgeRunState';
 import { CanvasEngine } from '../../../canvas-kit/CanvasEngine';
+import { KnifeOverlay } from '../../../canvas-kit/KnifeOverlay';
+import { sampleEdgesFromDom, sampleNodesFromDom } from '../../../canvas-kit/knifeDomSampling';
+import { useKnifeStore } from '../../../canvas-kit/knifeStore';
 import { DragCreateMenu } from './DragCreateMenu';
 
 type AnyNode = Node;
@@ -313,6 +316,27 @@ export function CanvasSurface() {
     [onConnect, setNodes],
   );
 
+  const knifeActive = useKnifeStore((s) => s.active);
+  const exitKnife = useKnifeStore((s) => s.exit);
+  const onKnifeCut = useCallback(
+    (edgeIds: string[]) => {
+      const cut = new Set(edgeIds);
+      const store = useCanvasCoreStore.getState();
+      store.setConnections(
+        store.connections.filter(
+          (c) => !cut.has(String((c as Record<string, unknown>).id)),
+        ),
+      );
+      // The cut edges may have been selected — drop their view-only flags.
+      setSelectedEdgeIds((prev) => {
+        const next = new Set(prev);
+        for (const id of cut) next.delete(id);
+        return next;
+      });
+    },
+    [],
+  );
+
   const nodeTypes =
     kind === 'smart'
       ? SMART_NODE_TYPES
@@ -354,6 +378,27 @@ export function CanvasSurface() {
           onClose={onClose}
         />
       )}
+      renderOverlay={(container) =>
+        knifeActive && container ? (
+          <KnifeOverlay
+            sampleEdges={() => sampleEdgesFromDom(container)}
+            sampleNodes={() => sampleNodesFromDom(container)}
+            edgeEndpoints={() => {
+              const map: Record<string, { source: string; target: string }> = {};
+              for (const c of useCanvasCoreStore.getState().connections) {
+                const obj = c as Record<string, unknown>;
+                map[String(obj.id)] = {
+                  source: String(obj.source),
+                  target: String(obj.target),
+                };
+              }
+              return map;
+            }}
+            onCut={onKnifeCut}
+            onExit={exitKnife}
+          />
+        ) : null
+      }
     />
   );
 }

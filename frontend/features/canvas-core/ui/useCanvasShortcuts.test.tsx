@@ -341,3 +341,28 @@ describe('useCanvasShortcuts — duplicate (G6, Infinite alt-drag-copy)', () => 
     expect(dup.data.gen_slot).toBeUndefined();
   });
 });
+
+describe('useCanvasShortcuts — knife mode (②-1)', () => {
+  it('bare x toggles knife mode; Escape exits it before touching selection', async () => {
+    const { useKnifeStore } = await import('../../../canvas-kit/knifeStore');
+    useKnifeStore.setState({ active: false });
+    render(<Host />);
+
+    fireKey({ key: 'x' });
+    expect(useKnifeStore.getState().active).toBe(true);
+
+    // Escape leaves knife mode and does NOT clear the selection this press.
+    useCanvasCoreStore.setState({ selection: ['a'] });
+    fireKey({ key: 'Escape' });
+    expect(useKnifeStore.getState().active).toBe(false);
+    expect(useCanvasCoreStore.getState().selection).toEqual(['a']);
+  });
+
+  it('mod+x is left alone (browser cut)', async () => {
+    const { useKnifeStore } = await import('../../../canvas-kit/knifeStore');
+    useKnifeStore.setState({ active: false });
+    render(<Host />);
+    fireKey({ key: 'x', meta: true });
+    expect(useKnifeStore.getState().active).toBe(false);
+  });
+});

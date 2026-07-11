@@ -23,6 +23,7 @@
 
 import { useEffect, useRef } from 'react';
 
+import { useKnifeStore } from '../../../canvas-kit/knifeStore';
 import {
   copyToClipboard,
   prepareDuplicate,
@@ -86,7 +87,19 @@ export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
         store.selectAll();
         return;
       }
+      if (!meta && (key === 'x' || key === 'X')) {
+        // Knife mode toggle (Infinite parity ②-1). Bare x only — mod+x
+        // stays the browser's cut.
+        useKnifeStore.getState().toggle();
+        return;
+      }
       if (key === 'Escape') {
+        // Knife mode swallows the first Escape — the selection survives.
+        if (useKnifeStore.getState().active) {
+          event.preventDefault();
+          useKnifeStore.getState().exit();
+          return;
+        }
         // Only meaningful when there IS a selection — let other Esc
         // handlers (e.g. dialog dismiss) take precedence by default,
         // but if we own the focus *and* have a selection, eat it.
