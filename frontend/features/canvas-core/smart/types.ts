@@ -101,6 +101,11 @@ export interface LoopSlotTag {
   round_index: number;
 }
 
+export interface GroupNodeData {
+  /** User-editable caption shown in the container corner (②-3). */
+  label?: string;
+}
+
 export interface OutputNodeData {
   kind: OutputKind;
   /**

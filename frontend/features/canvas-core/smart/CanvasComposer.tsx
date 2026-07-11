@@ -27,6 +27,7 @@ import {
   createPromptNode,
   createShotNode,
 } from './factories';
+import { groupSelection, ungroupNode } from './grouping';
 import { upsertGenerationSlots } from './genSlots';
 import { resolveSourceUrl } from './promptInputs';
 import { withGenerationRunner } from './generationRunner';
@@ -193,14 +194,45 @@ export function CanvasComposer({
   }, [nodes, connections, doRunIds]);
 
   const onArrange = useCallback(() => {
+    // Group children carry parent-RELATIVE positions — dagre must not touch
+    // them (they'd teleport); lay out only the top-level nodes and splice
+    // the children back untouched (they follow their parent).
+    const isChild = (n: unknown) =>
+      typeof (n as Record<string, unknown>).parentId === 'string';
+    const topLevel = nodes.filter((n) => !isChild(n));
+    const children = nodes.filter(isChild);
     // setNodes (not patchNode) so one layout pass = one undoable edit.
-    setNodes(
-      arrangeLayout(
-        nodes as Parameters<typeof arrangeLayout>[0],
+    setNodes([
+      ...arrangeLayout(
+        topLevel as Parameters<typeof arrangeLayout>[0],
         connections as Parameters<typeof arrangeLayout>[1],
       ),
-    );
+      ...children,
+    ]);
   }, [nodes, connections, setNodes]);
+
+  const selectedGroupId = useMemo(() => {
+    const sel = new Set(selection);
+    const g = nodes.find(
+      (n) =>
+        sel.has((n as Record<string, unknown>).id as string) &&
+        (n as Record<string, unknown>).type === 'group',
+    );
+    return g ? String((g as Record<string, unknown>).id) : null;
+  }, [nodes, selection]);
+
+  const onGroup = useCallback(() => {
+    const result = groupSelection(nodes, selection);
+    if (!result) return;
+    setNodes(result.nodes);
+    setSelection([result.groupId]);
+  }, [nodes, selection, setNodes, setSelection]);
+
+  const onUngroup = useCallback(() => {
+    if (!selectedGroupId) return;
+    setNodes(ungroupNode(nodes, selectedGroupId));
+    setSelection([]);
+  }, [nodes, selectedGroupId, setNodes, setSelection]);
 
   // ---- Workflow export / import (G5) ------------------------------------
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -284,6 +316,13 @@ export function CanvasComposer({
       <ComposerButton onClick={toggleKnife} emphasis={knifeActive ? 'primary' : undefined}>
         {knifeActive ? 'Knife ✕' : 'Knife'}
       </ComposerButton>
+      {selectedGroupId ? (
+        <ComposerButton onClick={onUngroup}>Ungroup</ComposerButton>
+      ) : (
+        <ComposerButton onClick={onGroup} disabled={selection.length < 2}>
+          Group
+        </ComposerButton>
+      )}
       <ComposerButton onClick={onExport} disabled={selection.length === 0}>
         Export
       </ComposerButton>

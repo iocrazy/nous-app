@@ -5,6 +5,7 @@
  * RF docs).
  */
 
+import { GroupNodeView } from './GroupNodeView';
 import { LoopNodeView } from './LoopNodeView';
 import { OutputNodeView } from './OutputNodeView';
 import { PromptNodeView } from './PromptNodeView';
@@ -13,6 +14,7 @@ import { ShotNodeView } from './ShotNodeView';
 export const SMART_NODE_TYPES = {
   shot: ShotNodeView,
   prompt: PromptNodeView,
+  group: GroupNodeView,
   output: OutputNodeView,
   loop: LoopNodeView,
 } as const;

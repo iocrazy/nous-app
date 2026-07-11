@@ -100,9 +100,16 @@ export function cloneSubgraph(
   // Second pass (idMap is complete now): smart data tags reference OTHER
   // node ids — left untouched, a cloned gen slot would STEAL the original
   // prompt's future results (upsertGenerationSlots matches the first tag).
-  // Re-point tags whose referent came along; strip the rest.
+  // Re-point tags whose referent came along; strip the rest. parentId
+  // (group membership, ②-3) gets the same treatment at the top level.
   for (const node of nodes) {
-    remapSmartTags(node as Record<string, unknown>, idMap);
+    const obj = node as Record<string, unknown>;
+    if (typeof obj.parentId === 'string') {
+      const mapped = idMap.get(obj.parentId);
+      if (mapped) obj.parentId = mapped;
+      else delete obj.parentId;
+    }
+    remapSmartTags(obj, idMap);
   }
 
   const connections: CanvasConnection[] = [];

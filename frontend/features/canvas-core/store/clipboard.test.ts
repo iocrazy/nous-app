@@ -132,3 +132,20 @@ describe('smart data-tag hygiene on clone (G6)', () => {
     expect(pastedPrompt.id).not.toBe('p1');
   });
 });
+
+describe('parentId hygiene on clone (②-3 groups)', () => {
+  it('remaps parentId when the group came along, strips it otherwise', () => {
+    const group = { id: 'g1', type: 'group', position: { x: 0, y: 0 }, style: { width: 200, height: 100 }, data: {} };
+    const child = { id: 'a', type: 'shot', position: { x: 24, y: 24 }, parentId: 'g1', data: {} };
+    copyToClipboard('smart', [group, child] as never, []);
+    const withGroup = preparePaste(new Set(['g1', 'a']))!;
+    const pastedChild = withGroup.nodes.find((n) => (n as { type?: string }).type === 'shot') as Record<string, unknown>;
+    const pastedGroup = withGroup.nodes.find((n) => (n as { type?: string }).type === 'group') as Record<string, unknown>;
+    expect(pastedChild.parentId).toBe(pastedGroup.id);
+
+    copyToClipboard('smart', [child] as never, []);
+    const alone = preparePaste(new Set(['a']))!;
+    const orphan = alone.nodes[0] as Record<string, unknown>;
+    expect(orphan.parentId).toBeUndefined();
+  });
+});
