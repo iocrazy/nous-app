@@ -76,16 +76,16 @@ describe('OutputLightbox', () => {
     expect(fetchSpy).toHaveBeenCalledWith('/gm/1/cover');
   });
 
-  it('compare mode renders both layers and the slider clips the result', () => {
-    renderBox({ compareUrl: '/gm/0/cover' });
+  it('compare mode renders both layers and the divider clips the result', () => {
+    renderBox({ compareSources: [{ url: '/gm/0/cover' }] });
     fireEvent.click(screen.getByRole('button', { name: 'Compare' }));
     const result = screen.getByTestId('compare-result');
     expect(screen.getByTestId('compare-original')).toBeTruthy();
-    fireEvent.change(screen.getByRole('slider'), { target: { value: '25' } });
-    expect((result as HTMLElement).style.clipPath).toContain('75%');
+    fireEvent.keyDown(screen.getByRole('slider'), { key: 'ArrowLeft' });
+    expect((result as HTMLElement).style.clipPath).toContain('52%');
   });
 
-  it('no compareUrl → no Compare button; onRegenerate wires the button', () => {
+  it('no compare sources → no Compare button; onRegenerate wires the button', () => {
     const onRegenerate = vi.fn();
     renderBox({ onRegenerate });
     expect(screen.queryByRole('button', { name: 'Compare' })).toBeNull();
@@ -103,8 +103,8 @@ describe('OutputLightbox portal + key isolation', () => {
     expect(box.parentElement).toBe(document.body);
   });
 
-  it('arrow keys on the compare slider do not switch images', () => {
-    const { onIndexChange } = renderBox({ compareUrl: '/gm/0/cover' });
+  it('arrow keys on the compare divider do not switch images', () => {
+    const { onIndexChange } = renderBox({ compareSources: [{ url: '/gm/0/cover' }] });
     fireEvent.click(screen.getByRole('button', { name: 'Compare' }));
     fireEvent.keyDown(screen.getByRole('slider'), { key: 'ArrowRight' });
     expect(onIndexChange).not.toHaveBeenCalled();

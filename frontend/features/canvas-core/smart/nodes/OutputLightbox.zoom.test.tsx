@@ -94,7 +94,7 @@ describe('OutputLightbox zoom & pan (P0-5)', () => {
   });
 
   it('does not zoom in compare mode', () => {
-    renderBox({ compareUrl: '/gm/0/cover' });
+    renderBox({ compareSources: [{ url: '/gm/0/cover' }] });
     fireEvent.click(screen.getByRole('button', { name: 'Compare' }));
     const stage = screen.getByTestId('lightbox-stage');
     fireEvent.wheel(stage, { deltaY: -120, clientX: 40, clientY: 40 });
