@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { KeyRound, Link2, Search, X } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { Composer } from '../components/Inspiration/Composer';
+import { NoteEditor } from '../components/Inspiration/NoteEditor';
 import { ApiTokensPanel } from '../components/Inspiration/ApiTokensPanel';
 import { NoteTimeline } from '../components/Inspiration/NoteTimeline';
 import { ActivityPanel } from '../components/Inspiration/ActivityPanel';
@@ -433,12 +434,7 @@ export const InspirationPage: React.FC = () => {
             <h4 className="mb-2 text-sm font-semibold text-content">
               {t('inspiration.editNote', 'Edit note')}
             </h4>
-            <textarea
-              value={editText}
-              onChange={(e) => setEditText(e.target.value)}
-              rows={6}
-              className="w-full resize-y rounded-lg bg-island-2 p-3 text-[13.5px] text-content focus:outline-none"
-            />
+            <NoteEditor value={editText} onChange={setEditText} minRows={6} onSubmit={() => void saveEdit()} />
             <div className="mt-3 flex justify-end gap-2">
               <button onClick={() => setEditing(null)} className="rounded-lg bg-island-2 px-4 py-1.5 text-xs text-content-2">
                 {t('inspiration.cancel', 'Cancel')}
