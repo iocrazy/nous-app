@@ -7,7 +7,8 @@
  * content area. Script/Storyboard mount `EditorShell` INLINE (PR-11) — no
  * more deep-link route jump — with the editor's own left rail acting as the
  * script-level nav underneath this project-level sidebar; every other
- * sidebar item without real content yet renders `WorkspacePlaceholder`.
+ * sidebar item routes to its real module content (Canvas was the last
+ * placeholder — wired to WorkspaceCanvas now).
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -33,7 +34,7 @@ import { WorkspaceOverview } from './WorkspaceOverview';
 import { WorkspaceEpisodes } from './WorkspaceEpisodes';
 import { WorkspaceEntities } from './WorkspaceEntities';
 import { WorkspaceFiles, type FilesChip } from './WorkspaceFiles';
-import { WorkspacePlaceholder } from './WorkspacePlaceholder';
+import { WorkspaceCanvas } from './WorkspaceCanvas';
 import { episodeStorageKey, type WorkspaceModule } from './workspaceModules';
 import type {
   EpisodeProgress,
@@ -427,7 +428,9 @@ export function ProjectWorkspace({
                 onDeleted={onBack}
               />
             )}
-            {activeModule === 'canvas' && <WorkspacePlaceholder module="canvas" />}
+            {activeModule === 'canvas' && (
+              <WorkspaceCanvas projectId={project.id} teamId={teamId} />
+            )}
           </div>
         )}
       </div>

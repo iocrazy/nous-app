@@ -90,6 +90,13 @@ const mockScriptService = vi.hoisted(() => ({
 }));
 vi.mock('../../services/scriptService', () => mockScriptService);
 
+// WorkspaceCanvas (real Canvas module) fetches the project's canvases on
+// mount — stub the service so the shell test stays network-free.
+vi.mock('../../features/canvas-core/services/canvasService', () => ({
+  listCanvases: vi.fn().mockResolvedValue([]),
+  createCanvas: vi.fn(),
+}));
+
 const PROJECT: Project = {
   id: 'p1',
   name: 'Spring Campaign',
@@ -194,11 +201,14 @@ describe('ProjectWorkspace', () => {
     expect(localStorage.getItem('mediahub.project.p1.ep')).toBe('2');
   });
 
-  it('switches content to the shared placeholder for a module without real content yet (Canvas)', async () => {
+  it('switches content to the real Canvas module (the last placeholder is gone)', async () => {
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
 
     fireEvent.click(await screen.findByTestId('ws-module-canvas'));
-    expect(await screen.findByTestId('workspace-placeholder-canvas')).toBeTruthy();
+    // WorkspaceCanvas fetches then renders the project's canvases; the
+    // empty state proves the real module (not the placeholder) mounted.
+    expect(await screen.findByTestId('workspace-canvas-empty')).toBeTruthy();
+    expect(screen.queryByTestId('workspace-placeholder-canvas')).toBeNull();
     expect(screen.queryByTestId('ws-overview')).toBeNull();
   });
 

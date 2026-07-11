@@ -1353,7 +1353,6 @@
       "generating": "Generating {{count}} frames…"
     },
     "workspace": {
-      "comingSoon": "Coming soon",
       "assets": "Assets",
       "manage": "Manage",
       "modules": {
@@ -1428,7 +1427,8 @@
         "currentEpOnly": "Current episode only",
         "empty": "No files yet",
         "emptyRenders": "No renders yet"
-      }
+      },
+      "canvasEmpty": "No canvases yet — create one to start sketching this project."
     }
   },
   "storyboard": {
