@@ -412,6 +412,7 @@ export function CanvasSurface() {
       snapProbeFor={snapProbeFor}
       onSnapConnect={onSnapConnect}
       allowDragCreate
+      paneCreateMenu
       renderCreateMenu={(ctx, onClose) => (
         <DragCreateMenu
           screenPosition={ctx.screenPosition}
