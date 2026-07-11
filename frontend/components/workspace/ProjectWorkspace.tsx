@@ -380,6 +380,7 @@ export function ProjectWorkspace({
               currentUserName={userProfile.name}
               projectId={project.id}
               initialRailView={scriptInitialRailView}
+              embedded
             />
           </div>
         ) : (

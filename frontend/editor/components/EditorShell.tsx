@@ -90,6 +90,7 @@ export function EditorShell({
   currentUserName,
   projectId: workspaceProjectId,
   initialRailView,
+  embedded = false,
 }: {
   scriptId: string;
   /** Local user identity for collaboration presence (supplied by the route). */
@@ -116,6 +117,15 @@ export function EditorShell({
    * Omitted preserves the existing per-script localStorage preference.
    */
   initialRailView?: RailView;
+  /**
+   * Workspace-fusion mode (PR "融合而不是内嵌"): the shell is mounted inside
+   * the project workspace, which already owns the brand, episode switcher and
+   * episode management. Hides the rail's brand row + episode selector and
+   * flattens the island chrome (transparent shell, hairline column dividers)
+   * so the editor reads as part of the workspace surface instead of an app
+   * nested inside it. Standalone (fullscreen route) stays unchanged.
+   */
+  embedded?: boolean;
 }) {
   const { t } = useTranslation();
   // Restore the per-script layout engine synchronously so the first paint uses
@@ -804,7 +814,7 @@ export function EditorShell({
 
   return (
     <div
-      className="mh-editor-shell"
+      className={`mh-editor-shell${embedded ? ' mh-embedded' : ''}`}
       data-theme={state.theme}
       // Styling hook consumed by editorShellStyles: "true" while a script line
       // is focused lights up the element toolbar. Not a focus/a11y signal.
@@ -844,45 +854,51 @@ export function EditorShell({
           </div>
         ) : (
           <>
-            <div className="mh-rail-top">
-              <div className="mh-brand-row">
-                <span className="mh-brand-dot" aria-hidden="true" />
-                {t('editor.brand')}
-                <button
-                  type="button"
-                  className="mh-icon-btn"
-                  style={{ marginLeft: 'auto' }}
-                  aria-label={t('editor.collapseLeft')}
-                  onClick={() => setRailCollapsed(true)}
-                >
-                  ‹
-                </button>
+            {/* Embedded (workspace fusion): the workspace shell already shows
+                the project brand, the current episode and episode management —
+                repeating them here is what made the mount read as an app
+                nested inside an app. Standalone keeps the full header. */}
+            {!embedded && (
+              <div className="mh-rail-top">
+                <div className="mh-brand-row">
+                  <span className="mh-brand-dot" aria-hidden="true" />
+                  {t('editor.brand')}
+                  <button
+                    type="button"
+                    className="mh-icon-btn"
+                    style={{ marginLeft: 'auto' }}
+                    aria-label={t('editor.collapseLeft')}
+                    onClick={() => setRailCollapsed(true)}
+                  >
+                    ‹
+                  </button>
+                </div>
+                <div className="mh-ep-selector-wrap">
+                  <button
+                    type="button"
+                    className="mh-ep-selector"
+                    aria-expanded={episodePanelOpen}
+                    aria-label={t('editor.manageEpisodes')}
+                    onClick={() => setEpisodePanelOpen((v) => !v)}
+                  >
+                    <div className="mh-ep-name">{currentEpisodeTitle}</div>
+                    <div className="mh-ep-sub">
+                      {t('editor.sceneCount', { count: scenes.length })}
+                    </div>
+                  </button>
+                  {episodePanelOpen && projectId && (
+                    <EpisodePanel
+                      scriptId={scriptId}
+                      projectId={projectId}
+                      episodes={episodes}
+                      currentEpisodeId={currentEpisodeId}
+                      onChanged={reloadEpisodes}
+                      onClose={() => setEpisodePanelOpen(false)}
+                    />
+                  )}
+                </div>
               </div>
-              <div className="mh-ep-selector-wrap">
-                <button
-                  type="button"
-                  className="mh-ep-selector"
-                  aria-expanded={episodePanelOpen}
-                  aria-label={t('editor.manageEpisodes')}
-                  onClick={() => setEpisodePanelOpen((v) => !v)}
-                >
-                  <div className="mh-ep-name">{currentEpisodeTitle}</div>
-                  <div className="mh-ep-sub">
-                    {t('editor.sceneCount', { count: scenes.length })}
-                  </div>
-                </button>
-                {episodePanelOpen && projectId && (
-                  <EpisodePanel
-                    scriptId={scriptId}
-                    projectId={projectId}
-                    episodes={episodes}
-                    currentEpisodeId={currentEpisodeId}
-                    onChanged={reloadEpisodes}
-                    onClose={() => setEpisodePanelOpen(false)}
-                  />
-                )}
-              </div>
-            </div>
+            )}
             <RailModules activeView={railView} onSelect={selectRailView} />
             <div className="mh-rail-scroll">
               <RailEntities

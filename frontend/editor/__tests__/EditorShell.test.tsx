@@ -108,6 +108,29 @@ describe('EditorShell', () => {
     expect(within(sceneRail).getByText('Rooftop Access')).toBeInTheDocument();
   });
 
+  it('embedded mode hides the rail brand row + episode selector (workspace fusion)', async () => {
+    svc.listScenes.mockResolvedValue(twoScenes);
+    const { container } = render(<EditorShell scriptId="1" embedded />);
+    await waitFor(() => expect(screen.getByRole('navigation')).toBeInTheDocument());
+
+    // Duplicated chrome gone: the workspace shell already owns brand +
+    // episode switching/management.
+    expect(screen.queryByLabelText('editor.manageEpisodes')).not.toBeInTheDocument();
+    expect(container.querySelector('.mh-brand-row')).not.toBeInTheDocument();
+    // Fusion class drives the flattened chrome; the working zones stay.
+    expect(container.querySelector('.mh-editor-shell.mh-embedded')).toBeInTheDocument();
+    expect(screen.getByRole('main')).toBeInTheDocument();
+    expect(screen.getByTestId('scene-rail')).toBeInTheDocument();
+  });
+
+  it('standalone keeps the rail brand row + episode selector', async () => {
+    svc.listScenes.mockResolvedValue(twoScenes);
+    const { container } = render(<EditorShell scriptId="1" />);
+    await waitFor(() => expect(screen.getByRole('navigation')).toBeInTheDocument());
+    expect(screen.getByLabelText('editor.manageEpisodes')).toBeInTheDocument();
+    expect(container.querySelector('.mh-editor-shell.mh-embedded')).not.toBeInTheDocument();
+  });
+
   it('exposes the save indicator (saved when all scenes are clean)', async () => {
     svc.listScenes.mockResolvedValue(twoScenes);
     render(<EditorShell scriptId="1" />);

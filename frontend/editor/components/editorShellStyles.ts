@@ -1153,4 +1153,25 @@ export const EDITOR_SHELL_STYLES = `
   font-family:var(--sans); font-size:11.5px; color:var(--ink-faint); background:var(--surface-2);
   border:1px solid var(--hairline); border-radius:999px; padding:3px 8px; cursor:pointer;
 }
+
+/* ===== EMBEDDED — workspace fusion =====
+   Mounted inside the project workspace the shell must read as the SAME
+   surface, not an app nested in a box: the radial page background, the outer
+   padding and the floating island cards all go; the three zones become flat
+   columns separated by hairlines on the workspace's own background. Only the
+   paper sheet keeps elevation (it's the writing artifact, not chrome). */
+.mh-editor-shell.mh-embedded{
+  background:transparent;
+  padding:0;
+  gap:0;
+}
+.mh-embedded .mh-island{
+  background:transparent;
+  border:none;
+  border-radius:0;
+  box-shadow:none;
+}
+.mh-embedded .mh-rail{ border-right:1px solid var(--surface-border); padding-top:8px; }
+.mh-embedded .mh-right-col{ border-left:1px solid var(--surface-border); }
+.mh-embedded .mh-center-col{ padding:10px 14px 0; }
 `;
