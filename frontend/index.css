@@ -888,6 +888,26 @@ body {
   animation: canvas-edge-flow 0.6s linear infinite;
 }
 
+/* Hover lift (P1-6) — Infinite's signature micro-motion: every clickable
+   chip/toolbar button nudges up 1px on hover. Scoped to the canvas chrome
+   (chips, glass-island buttons) so the rest of the app is untouched. */
+.mh-chip,
+.canvas-island button {
+  transition:
+    transform 0.14s var(--canvas-ease),
+    color 0.14s var(--canvas-ease),
+    border-color 0.14s var(--canvas-ease),
+    background-color 0.14s var(--canvas-ease);
+}
+.mh-chip:hover:not(:disabled),
+.canvas-island button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+.mh-chip:active:not(:disabled),
+.canvas-island button:active:not(:disabled) {
+  transform: translateY(0) scale(0.97);
+}
+
 /* Generation placeholder shimmer (P0-3) — Infinite's .loading-cell:
    a soft sweep across the skeleton while the item renders. */
 @keyframes mh-shimmer {
