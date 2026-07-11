@@ -2853,6 +2853,7 @@
     "diffKindRemoved": "删除",
     "diffKindChanged": "修改",
     "diffKindMoved": "移动",
-    "diffEmptyLine": "（空行）"
+    "diffEmptyLine": "（空行）",
+    "switchEpisode": "切换剧集"
   }
 }
