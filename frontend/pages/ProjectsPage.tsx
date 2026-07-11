@@ -1,54 +1,21 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Project, ProjectFile, ProjectTab, ProjectStage } from '../types';
+import { Project, ProjectFile } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useTeamContext } from '../contexts/TeamContext';
-import { fetchProjects, fetchCurrentStage } from '../services/projectsService';
+import { fetchProjects } from '../services/projectsService';
 import { ProjectsListView } from '../components/ProjectsListView';
 import { ProjectFilterSidebar } from '../components/project/ProjectFilterSidebar';
-import { ProjectNavSidebar } from '../components/project/ProjectNavSidebar';
-import { ProjectFilesView } from '../components/ProjectFilesView';
 import { VideoReviewPage } from '../components/VideoReviewPage';
 import { CreateProjectModal } from '../components/CreateProjectModal';
-import { ProjectSettingsPanel } from '../components/ProjectSettingsPanel';
-import { ProjectTrashView } from '../components/ProjectTrashView';
-import { ProjectSharesView } from '../components/ProjectSharesView';
-import { ProjectStoryboardTab } from '../components/project/ProjectStoryboardTab';
-import { ProjectScriptsTab } from '../components/project/ProjectScriptsTab';
-import { ProjectOutputTab } from '../components/project/ProjectOutputTab';
-import { StageSelector } from '../components/project/StageSelector';
-import { StageToolGrid } from '../components/project/StageToolGrid';
-import { StageWorkbench } from '../components/project/StageWorkbench';
 import { ProjectWorkspace } from '../components/workspace/ProjectWorkspace';
-
-// Phase B B2 — stage-driven workbench header. Off = legacy stepper + tool
-// strip; on = the workbench card. Dark by default until prod-verified.
-const WORKBENCH_ENABLED =
-  import.meta.env.VITE_FEATURE_PROJECT_WORKBENCH === 'true';
-
-// PR-10b — the workspace shell (top project bar + scoped sidebar +
-// Overview + episode switching) replaces the entire detail pane (nav
-// sidebar + stage strip + tab content) below. Off = today's JSX, byte for
-// byte. Dark by default until the Wave 2 module content lands.
-const WORKSPACE_V2_ENABLED =
-  import.meta.env.VITE_FEATURE_PROJECT_WORKSPACE_V2 === 'true';
-
-// Map URL tab param → ProjectNavSidebar section key
-const TAB_TO_SECTION: Record<string, string> = {
-  files: 'files',
-  scripts: 'scripts',
-  storyboard: 'storyboard',
-  output: 'output',
-  shares: 'shares',
-  trash: 'trash',
-};
 
 export function ProjectsPage() {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { teamId, projectId } = useParams();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [, setSearchParams] = useSearchParams();
   const { currentUserId } = useAuth();
   const { selectedTeamId, personalTeamId } = useTeamContext();
 
@@ -57,26 +24,7 @@ export function ProjectsPage() {
   const [isCreateProjectModalOpen, setIsCreateProjectModalOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [shareCount, setShareCount] = useState(0);
-  const [trashCount, setTrashCount] = useState(0);
   const [activeFilter, setActiveFilter] = useState('all');
-  const [currentStage, setCurrentStage] = useState<ProjectStage | null>(null);
-  const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
-
-  // Active tab from URL
-  const activeTab: ProjectTab = (searchParams.get('tab') as ProjectTab) || 'files';
-
-  const setActiveTab = useCallback((tab: ProjectTab) => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      if (tab === 'files') {
-        next.delete('tab');
-      } else {
-        next.set('tab', tab);
-      }
-      return next;
-    });
-  }, [setSearchParams]);
 
   // Load projects + auto-select from URL
   useEffect(() => {
@@ -99,34 +47,8 @@ export function ProjectsPage() {
     load();
   }, [projectId, selectedTeamId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load the current SOP stage once per selected project (shared by
-  // StageSelector + StageToolGrid — previously each fetched it separately).
-  useEffect(() => {
-    if (!selectedProject) {
-      setCurrentStage(null);
-      return;
-    }
-    let cancelled = false;
-    const loadStage = async () => {
-      try {
-        const stage = await fetchCurrentStage(selectedProject.id);
-        if (!cancelled) setCurrentStage(stage);
-      } catch (err) {
-        console.error('Failed to load current stage:', err);
-      }
-    };
-    loadStage();
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedProject?.id]);
-
   // Derive filter counts and folders
   const starredProjects = useMemo(() => projects.filter(p => p.is_starred), [projects]);
-  const recentProjects = useMemo(() =>
-    [...projects].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()).slice(0, 8),
-    [projects]
-  );
 
   const folders = useMemo(() => {
     const groups = new Set<string>();
@@ -205,21 +127,6 @@ export function ProjectsPage() {
     }
   }, [selectedTeamId, personalTeamId]);
 
-  const handleSectionChange = useCallback((section: string) => {
-    // ProjectSettingsPanel is a slide-over modal (fixed inset-0), not a
-    // detail-pane section — 'settings' isn't a valid ProjectTab. Open it
-    // instead of switching the active tab, which would render a blank pane.
-    if (section === 'settings') {
-      setIsSettingsPanelOpen(true);
-      return;
-    }
-    setActiveTab(section as ProjectTab);
-  }, [setActiveTab]);
-
-  const handleStageChange = useCallback((stage: ProjectStage) => {
-    setCurrentStage(stage);
-  }, []);
-
   // ─── File Review ─────────────────────────────────────────────
   if (reviewFile && selectedProject) {
     return (
@@ -236,104 +143,20 @@ export function ProjectsPage() {
   }
 
   // ─── Project Detail View ────────────────────────────────────
+  // The workspace shell owns the entire detail pane (its own sidebar + top
+  // bar + module content). It is now the only detail implementation — the
+  // legacy nav sidebar + stage strip + tab content was retired in PR-18.
   if (selectedProject) {
-    // PR-10b (Wave 1) — the workspace shell owns the entire detail pane
-    // (its own sidebar + top bar + module content) once the flag is on;
-    // the legacy nav sidebar + stage strip + tab content below is
-    // byte-for-byte untouched when it's off.
-    if (WORKSPACE_V2_ENABLED) {
-      return (
-        <ProjectWorkspace
-          project={selectedProject}
-          teamId={teamId}
-          onBack={handleBackToList}
-          onProjectUpdated={(updated) => {
-            setSelectedProject(updated);
-            refreshProjects();
-          }}
-        />
-      );
-    }
-
-    const sectionCounts: Record<string, number> = {};
-    if (shareCount > 0) sectionCounts.shares = shareCount;
-    if (trashCount > 0) sectionCounts.trash = trashCount;
-
     return (
-      <div
-        className={'flex h-full min-h-0'}
-      >
-        <ProjectNavSidebar
-          project={selectedProject}
-          activeSection={TAB_TO_SECTION[activeTab] || 'files'}
-          onSectionChange={handleSectionChange}
-          onBackToList={handleBackToList}
-          recentProjects={recentProjects}
-          starredProjects={starredProjects}
-          onProjectSwitch={handleProjectSelect}
-          sectionCounts={sectionCounts}
-          collapsed={sidebarCollapsed}
-          onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-        />
-        <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
-          {/* SOP stage header: workbench card (B2) or legacy stepper + tool strip. */}
-          {WORKBENCH_ENABLED ? (
-            <StageWorkbench
-              projectId={selectedProject.id}
-              canWrite={true}
-              currentStage={currentStage}
-              onStageChange={handleStageChange}
-              setActiveTab={setActiveTab}
-            />
-          ) : (
-            <div className="flex flex-col gap-1 px-8 pt-3 pb-1 border-b border-ink-200">
-              <StageSelector
-                projectId={selectedProject.id}
-                canWrite={true}
-                currentStage={currentStage}
-                onStageChange={handleStageChange}
-              />
-              <StageToolGrid
-                projectId={selectedProject.id}
-                setActiveTab={setActiveTab}
-                currentStage={currentStage}
-              />
-            </div>
-          )}
-          <div className={'flex-1 overflow-y-auto px-8 pb-8'}>
-            {activeTab === 'files' && (
-              <ProjectFilesView
-                project={selectedProject}
-                onBack={handleBackToList}
-                onFileReview={(file) => {
-                  setReviewFile(file);
-                  navigate(teamId ? `/team/${teamId}/projects/${selectedProject.id}/review/${file.id}` : `/projects/${selectedProject.id}/review/${file.id}`);
-                }}
-              />
-            )}
-            {activeTab === 'scripts' && <ProjectScriptsTab projectId={selectedProject.id} />}
-            {activeTab === 'storyboard' && <ProjectStoryboardTab projectId={selectedProject.id} />}
-            {activeTab === 'output' && <ProjectOutputTab projectId={selectedProject.id} />}
-            {activeTab === 'shares' && <ProjectSharesView projectId={selectedProject.id} onCountChange={setShareCount} />}
-            {activeTab === 'trash' && <ProjectTrashView projectId={selectedProject.id} onCountChange={setTrashCount} />}
-          </div>
-        </div>
-        <ProjectSettingsPanel
-          project={selectedProject}
-          isOpen={isSettingsPanelOpen}
-          onClose={() => setIsSettingsPanelOpen(false)}
-          onUpdated={(updated) => {
-            setSelectedProject(updated);
-            setIsSettingsPanelOpen(false);
-            refreshProjects();
-          }}
-          onDeleted={() => {
-            setIsSettingsPanelOpen(false);
-            handleBackToList();
-            refreshProjects();
-          }}
-        />
-      </div>
+      <ProjectWorkspace
+        project={selectedProject}
+        teamId={teamId}
+        onBack={handleBackToList}
+        onProjectUpdated={(updated) => {
+          setSelectedProject(updated);
+          refreshProjects();
+        }}
+      />
     );
   }
 

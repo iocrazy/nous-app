@@ -92,7 +92,6 @@ const mockProjectsService = vi.hoisted(() => ({
   fetchStageCatalog: vi.fn(),
   fetchCurrentStage: vi.fn(),
   setCurrentStage: vi.fn(),
-  fetchStageSuggestion: vi.fn(),
   generateMissingFrames: vi.fn(),
   fetchEpisodesProgress: vi.fn(),
 }));
@@ -164,12 +163,6 @@ beforeEach(() => {
   mockProjectsService.fetchStageCatalog.mockReset().mockResolvedValue([]);
   mockProjectsService.fetchCurrentStage.mockReset().mockResolvedValue(null);
   mockProjectsService.setCurrentStage.mockReset();
-  mockProjectsService.fetchStageSuggestion.mockReset().mockResolvedValue({
-    stage_slug: null,
-    kind: '',
-    progress: null,
-    action: null,
-  });
   mockProjectsService.generateMissingFrames.mockReset();
   mockProjectsService.fetchEpisodesProgress.mockReset().mockResolvedValue(EPISODES);
   mockScriptService.fetchScriptProjects.mockReset().mockResolvedValue({ data: [], total: 0 });

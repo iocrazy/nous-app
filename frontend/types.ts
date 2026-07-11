@@ -1043,18 +1043,10 @@ export interface SuggestionAction {
   count?: number | null;
 }
 
-/** The single most-relevant "next step" suggestion for a project's current SOP stage. */
-export interface StageSuggestion {
-  stage_slug: string | null;
-  kind: string;
-  progress?: StoryboardProgress | null;
-  action?: SuggestionAction | null;
-}
-
 /**
  * One row of the batch "what's next" feed for the homepage work queue
- * (PR-9, G7) — `GET /api/v1/projects/suggestions`. Same `kind`/`progress`/
- * `action` shape as `StageSuggestion`, plus the project identity + stall
+ * (PR-9, G7) — `GET /api/v1/projects/suggestions`. Carries the per-project
+ * `kind`/`progress`/`action` next-step hint plus the project identity + stall
  * flag + latest activity needed to render a queue row without a second
  * per-project fetch.
  */
