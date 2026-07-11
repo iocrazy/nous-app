@@ -315,6 +315,23 @@ test('wheel zoom-out passes the old React Flow 0.5 floor (P0-6)', async ({ page 
     .toBeLessThan(0.45);
 });
 
+test('node drag is free of the 8px lattice (P2-6)', async ({ page }) => {
+  await openCanvas(page);
+  const node = page.locator('.react-flow__node[data-id="p1"]');
+  const box = (await node.boundingBox())!;
+  // Drag by a deliberately non-multiple-of-8 delta, well away from other
+  // nodes so the drop-time alignment snap has nothing to bite on.
+  await page.mouse.move(box.x + box.width / 2, box.y + 8);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 13, box.y + 8 + 5, { steps: 4 });
+  await page.mouse.up();
+  const transform = await node.evaluate((el) => (el as HTMLElement).style.transform);
+  const m = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(transform)!;
+  const x = Number(m[1]);
+  // 60 + 13 = 73 — an 8px lattice would have clamped this to 72.
+  expect(x % 8).not.toBe(0);
+});
+
 test('double-click empty canvas opens the create menu; picking adds an unwired node (P1-1)', async ({ page }) => {
   await openCanvas(page);
   await expect(page.locator('.react-flow__edge')).toHaveCount(2);

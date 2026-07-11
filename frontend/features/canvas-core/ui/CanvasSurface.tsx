@@ -390,6 +390,9 @@ export function CanvasSurface() {
       // the `z` overview on large graphs.
       minZoom={0.1}
       maxZoom={4}
+      // Free placement (P2-6): Infinite has no drag lattice — the one-shot
+      // alignment snap on drop keeps things tidy without the "sticky" feel.
+      snapToGrid={false}
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       nodes={rfNodes}

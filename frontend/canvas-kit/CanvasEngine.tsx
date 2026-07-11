@@ -171,6 +171,13 @@ export interface CanvasEngineProps {
    */
   minZoom?: number;
   maxZoom?: number;
+  /**
+   * 8px lattice snapping while dragging nodes. Default ON (legacy feel for
+   * the editor NodesView); the Infinite-parity canvas turns it OFF (P2-6) —
+   * Infinite positions nodes freely and the drop-time alignment guides
+   * already cover tidiness.
+   */
+  snapToGrid?: boolean;
   /** Node box for guide + snap math; defaults to measured-size-or-200×120. */
   nodeMeasure?: (node: AnyNode) => { width: number; height: number };
 
@@ -261,6 +268,7 @@ export function CanvasEngine({
   fitView = false,
   minZoom,
   maxZoom,
+  snapToGrid = true,
   nodeMeasure,
   onNodesChange,
   onEdgesChange,
@@ -658,7 +666,7 @@ export function CanvasEngine({
         onlyRenderVisibleElements
         // Gentle 8px snap lattice + one-time alignment snap on solo drop.
         snapGrid={SNAP_GRID}
-        snapToGrid
+        snapToGrid={snapToGrid}
         // Shift-drag for box select; Cmd/Ctrl adds to the selection; click-drag
         // pans the viewport, matching Figma / Miro / Excalidraw.
         selectionMode={SelectionMode.Partial}
