@@ -299,14 +299,20 @@ def install_background_bootstrap(app: FastAPI) -> None:
     app.state.bg_tasks.spawn("seed_loader", _bg_seed_loader())
     app.state.bg_tasks.spawn("deployment_log", _bg_deployment_log())
     app.state.bg_tasks.spawn("liveness_reconcile", _bg_liveness_reconcile())
-    app.state.bg_tasks.spawn("reap_internal_queue", _bg_reap_internal_queue())
+    # long_running: while-True sweep loop — exempt from the /readyz gate or
+    # readiness would report 503 "starting" for the whole process lifetime.
+    app.state.bg_tasks.spawn(
+        "reap_internal_queue", _bg_reap_internal_queue(), long_running=True
+    )
     # Worker-stall detector: only on the HTTP-serving process (gateway /
     # combined), which stays healthy during a worker dequeue stall and can
     # observe the backlog + alert. Plain asyncio (not @DBOS.scheduled) so it
     # can't be stalled by the same queue it watches. Single observer avoids
     # double alerts in the gateway/worker split.
     if role_from_env().serves_http_api:
-        app.state.bg_tasks.spawn("stall_detector", _bg_stall_detector())
+        app.state.bg_tasks.spawn(
+            "stall_detector", _bg_stall_detector(), long_running=True
+        )
         # Memory recall runs on the chat hot path, served by this process —
         # warm its pools here so the first turn after a restart isn't cold.
         app.state.bg_tasks.spawn("memory_warmup", _bg_memory_warmup())

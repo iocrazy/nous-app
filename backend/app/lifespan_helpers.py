@@ -42,6 +42,7 @@ class _Entry:
     started_at: float
     finished_at: Optional[float] = None
     exception: Optional[BaseException] = None
+    long_running: bool = False
 
 
 @dataclass
@@ -63,13 +64,21 @@ class BackgroundTaskRegistry:
 
     _entries: Dict[str, _Entry] = field(default_factory=dict)
 
-    def spawn(self, name: str, coro: Awaitable[Any]) -> asyncio.Task:
+    def spawn(
+        self, name: str, coro: Awaitable[Any], *, long_running: bool = False
+    ) -> asyncio.Task:
         """Wrap `coro` in a tracked Task and start it.
 
         If `name` already exists the previous entry is replaced — caller
         is responsible for not double-spawning the same logical task.
         Records exceptions on the entry so `/readyz` can surface them
         without scraping logs.
+
+        `long_running=True` marks a daemon-style loop that lives for the
+        process lifetime (reap sweeps, stall detector). Those tasks never
+        finish by design, so they are exempt from the `all_done()` readiness
+        gate — otherwise `/readyz` reports 503 "starting" forever. They still
+        show up in `status_snapshot()` and are cancelled on `shutdown()`.
         """
         loop = asyncio.get_event_loop()
         started_at = loop.time()
@@ -92,13 +101,19 @@ class BackgroundTaskRegistry:
                     entry.finished_at = loop.time()
 
         task = loop.create_task(_runner(), name=f"bg:{name}")
-        self._entries[name] = _Entry(name=name, task=task, started_at=started_at)
+        self._entries[name] = _Entry(
+            name=name, task=task, started_at=started_at, long_running=long_running
+        )
         logger.info(f"[bg-task:{name}] spawned")
         return task
 
     def all_done(self) -> bool:
-        """True if every spawned task has finished (success OR failure)."""
-        return all(e.task.done() for e in self._entries.values())
+        """True if every finite task has finished (success OR failure).
+
+        `long_running` daemons are exempt — they never finish by design and
+        must not hold `/readyz` at 503 for the process lifetime.
+        """
+        return all(e.task.done() for e in self._entries.values() if not e.long_running)
 
     def status_snapshot(self) -> List[Dict[str, Any]]:
         """Per-task status for `/readyz` payload. Cheap, no I/O."""
@@ -113,6 +128,7 @@ class BackgroundTaskRegistry:
                 {
                     "name": entry.name,
                     "done": entry.task.done(),
+                    "long_running": entry.long_running,
                     "duration_seconds": duration,
                     "error": (
                         f"{type(entry.exception).__name__}: {entry.exception}"
