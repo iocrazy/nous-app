@@ -68,20 +68,19 @@ export function ClassicNodeShell({
   selected: boolean;
   children?: ReactNode;
 }) {
-  // Reuse the SmartMode halo rule: selected wins, else the run-state tone.
-  const haloTone = selected ? 'border-indigo-500' : RUN_STATUS_TONE[runStatus];
+  // Reuse the SmartMode halo rule; selection is the neutral Infinite
+  // outline (mh-node-selected) so it never swallows the run-state tone.
+  const haloTone = RUN_STATUS_TONE[runStatus];
   const portRows = Math.max(def.inputs.length, def.outputs.length);
   const portRegionHeight = portRows > 0 ? PORT_HEADER_OFFSET + portRows * PORT_ROW_GAP : 8;
 
   return (
     <div
       data-testid={`classic-node-${def.type}`}
-      className={`relative min-w-[170px] rounded-md border-2 bg-ink-900 text-ink-100 shadow ${haloTone}`}
+      className={`mh-node relative min-w-[170px] ${haloTone} ${selected ? 'mh-node-selected' : ''}`}
     >
-      <div className="flex items-center justify-between border-b border-ink-700 px-3 py-1.5">
-        <div className="text-xs font-semibold uppercase tracking-wide text-ink-300">
-          {def.label}
-        </div>
+      <div className="mh-node-head">
+        <div className="mh-node-title">{def.label}</div>
         <div
           className="text-[10px] uppercase tracking-wider text-ink-400"
           data-testid={`classic-node-${def.type}-status`}

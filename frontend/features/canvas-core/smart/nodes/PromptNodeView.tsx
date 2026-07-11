@@ -47,7 +47,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   // Kind filter for the @-mention picker tabs (All / Video / Image / Doc …)
   const [activeKind, setActiveKind] = useState<ActiveKind>('');
 
-  const haloTone = selected ? 'border-indigo-500' : RUN_STATUS_TONE[run_status];
+  const haloTone = RUN_STATUS_TONE[run_status];
 
   // ── @-mention handler ────────────────────────────────────────────────────
   // Builds a PromptResourceRef from the picked SearchResult and appends it
@@ -92,7 +92,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   return (
     <div
       data-testid="smart-prompt-node"
-      className={`rounded-md border-2 bg-white shadow dark:bg-ink-900 ${haloTone}`}
+      className={`mh-node ${haloTone} ${selected ? 'mh-node-selected' : ''}`}
       style={{ width: SMART_NODE_DEFAULT_WIDTH.prompt }}
     >
       <Handle
@@ -100,10 +100,8 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
         position={Position.Left}
         className="!h-2 !w-2 !bg-ink-400"
       />
-      <div className="flex items-center justify-between border-b border-ink-200 px-3 py-1.5 dark:border-ink-700">
-        <div className="text-xs font-semibold uppercase tracking-wide text-ink-500 dark:text-ink-400">
-          Prompt
-        </div>
+      <div className="mh-node-head">
+        <div className="mh-node-title">Prompt</div>
         <div className="flex items-center gap-1.5">
           {/* Text stays the legacy LLM path; Image/Video route Run through
               the G4-B1 generation tasks (Infinite composer's kind toggle). */}

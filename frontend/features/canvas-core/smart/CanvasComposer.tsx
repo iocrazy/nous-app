@@ -258,7 +258,7 @@ export function CanvasComposer({
     <div
       role="toolbar"
       aria-label="Smart canvas composer"
-      className="pointer-events-auto absolute inset-x-0 bottom-4 mx-auto flex w-fit gap-1 rounded-md border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900"
+      className="canvas-island pointer-events-auto absolute inset-x-0 bottom-4 mx-auto flex w-fit gap-1 p-1.5"
     >
       <ComposerButton onClick={() => addNode('shot')}>+ Shot</ComposerButton>
       <ComposerButton onClick={() => addNode('prompt')}>+ Prompt</ComposerButton>
@@ -313,9 +313,7 @@ export function CanvasComposer({
 }
 
 function Divider() {
-  return (
-    <div className="mx-1 my-1 w-px bg-slate-200 dark:bg-slate-700" />
-  );
+  return <div className="mx-1 my-1 w-px bg-canvas-line" />;
 }
 
 function ComposerButton({
@@ -330,9 +328,9 @@ function ComposerButton({
   emphasis?: 'primary';
 }) {
   const primary =
-    'bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-indigo-300';
+    'bg-canvas-strong text-canvas-card hover:opacity-90 disabled:opacity-40';
   const neutral =
-    'text-slate-700 hover:bg-slate-100 disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-800 dark:disabled:text-slate-600';
+    'text-canvas-text hover:bg-canvas-line/40 disabled:text-canvas-muted/50';
   return (
     <button
       type="button"

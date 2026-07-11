@@ -210,11 +210,13 @@ describe('CLASSIC_NODE_TYPES — run-state halo', () => {
     expect(node.className).toContain('animate-pulse');
   });
 
-  it('selected halo wins over run_status', () => {
+  it('selection is a neutral outline that coexists with the run tone', () => {
+    // Infinite parity: selection no longer swallows the run-state halo —
+    // a selected FAILED node shows both the outline and the rose border.
     renderNode('image', { run_status: 'failed', run_error: 'x' }, true);
     const node = screen.getByTestId('classic-node-image');
-    expect(node.className).toContain('border-indigo-500');
-    expect(node.className).not.toContain('border-rose-500');
+    expect(node.className).toContain('mh-node-selected');
+    expect(node.className).toContain('border-rose-500');
   });
 });
 
