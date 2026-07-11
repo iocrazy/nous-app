@@ -393,6 +393,10 @@ export function CanvasSurface() {
       // Free placement (P2-6): Infinite has no drag lattice — the one-shot
       // alignment snap on drop keeps things tidy without the "sticky" feel.
       snapToGrid={false}
+      // Infinite chrome corners (P1-11): glass minimap bottom-RIGHT, zoom
+      // controls swap to bottom-left so the two clusters don't stack.
+      minimap={{ position: 'bottom-right' }}
+      controls={{ position: 'bottom-left' }}
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       nodes={rfNodes}
