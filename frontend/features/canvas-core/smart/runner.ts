@@ -115,7 +115,9 @@ export async function runSinglePrompt(
   if (result.ok) {
     handlers.onStatusChange(ctx.promptId, 'succeeded', {
       run_finished_at: now(),
-      run_error: null,
+      // Partial fan-out failures (P0-2) succeed WITH a warning — keep the
+      // note ("1 of 3 items failed: …") on the node instead of wiping it.
+      run_error: result.error ?? null,
     });
   } else if (result.stopped) {
     // Stop ≠ failure: the wait was abandoned, the node returns to idle
