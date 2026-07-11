@@ -113,6 +113,57 @@ def _merge_activity(stage_act, file_act, *, stage_slug, now=None):
     return None
 
 
+def _auto_stage_slug(flags: dict) -> str:
+    """Pure output→stage decision table (合一终稿: stage follows real output).
+
+    Highest milestone wins: rendered shots → generation, any shots →
+    storyboard, any scenes → script, nothing yet → planning. review/delivery
+    are deliberately NOT derivable — they stay human decisions via the PUT
+    endpoint (the read path only ever advances up to generation).
+    """
+    if flags.get("has_renders"):
+        return "generation"
+    if flags.get("has_shots"):
+        return "storyboard"
+    if flags.get("has_scenes"):
+        return "script"
+    return "planning"
+
+
+async def resolve_current_stage(project_id: int, user_id: str) -> Optional[dict]:
+    """Current stage with forward-only auto-derivation.
+
+    Reads the manual stage, probes the project's real output, and when the
+    derived stage is AHEAD of the stored one, persists the transition (same
+    ``set_current_stage`` path as the manual PUT — history rows included) so
+    list pages / suggestions stay consistent. Derivation failures degrade to
+    the stored stage; this never raises past the stored-stage read.
+    """
+    from app.repositories.project_stages_repository import (
+        get_project_stages_repository,
+    )
+
+    repo = get_project_stages_repository()
+    current = await repo.get_current(int(project_id))
+    try:
+        flags = await repo.derive_activity_flags(int(project_id))
+        auto_slug = _auto_stage_slug(flags)
+        catalog = await repo.list_catalog()
+        auto = next((s for s in catalog if s["slug"] == auto_slug), None)
+        if auto is None:
+            return current
+        current_sort = current["sort_order"] if current else -1
+        if auto["sort_order"] > current_sort:
+            promoted = await repo.set_current_stage(
+                int(project_id), auto["id"], user_id
+            )
+            return promoted or await repo.get_current(int(project_id))
+        return current
+    except Exception as exc:
+        logger.warning(f"[Projects] stage auto-derive failed for {project_id}: {exc}")
+        return current
+
+
 def _suggestion_from(stage_slug: str | None, progress: dict | None = None) -> dict:
     """Pure decision table: SOP stage slug (+ optional storyboard progress)
     -> suggestion dict. Extracted (PR-8 Task A) so ``build_stage_suggestion``
