@@ -32,6 +32,7 @@ from app.schemas.canvas import (
     CanvasCreate,
     CanvasGenerationRequest,
     CanvasResponse,
+    CanvasTimelineRequest,
     CanvasUpdate,
 )
 from app.schemas.canvas_run import (
@@ -318,6 +319,54 @@ async def create_project_canvas(
     if row is None:
         raise HTTPException(status_code=500, detail="canvas create failed")
     return {"success": True, "data": _to_response(row)}
+
+
+@router.post("/canvases/{canvas_id}/timeline-runs")
+async def dispatch_timeline_run(
+    auth: AuthDep,
+    payload: CanvasTimelineRequest,
+    canvas_id: str = Path(..., description="Snowflake canvas ID"),
+) -> dict:
+    """Dispatch a timeline-director film (G8): one DBOS task chains the
+    segments (t2v → tail-frame-guided i2v), concats, and registers the
+    durable film. Single task row — per-segment progress decorates its
+    metadata."""
+    import uuid as _uuid
+
+    from app.services.infra import dbos_orchestrator
+    from app.workflows.canvas_timeline import canvas_timeline_workflow
+
+    await _gate_canvas_write(canvas_id, auth)
+
+    wf_id = str(_uuid.uuid4())
+    summary = payload.segments[0].prompt[:60]
+    await get_task_manager().create(
+        user_id=auth.user_id,
+        task_type="canvas_timeline",  # ≤20 chars (VARCHAR(20))
+        title=f"Timeline film ({len(payload.segments)} segments)",
+        subtitle=summary,
+        dbos_workflow_id=wf_id,
+        metadata={
+            "canvas_id": canvas_id,
+            "node_id": payload.node_id,
+            "kind": "video",
+            "segments_total": len(payload.segments),
+        },
+    )
+    await dbos_orchestrator.start_workflow_routed(
+        "canvas_timeline",
+        dbos_workflow_callable=canvas_timeline_workflow,
+        dbos_workflow_kwargs={
+            "segments": [seg.model_dump() for seg in payload.segments],
+            "model": payload.model,
+            "aspect": payload.aspect,
+            "canvas_id": int(canvas_id),
+            "node_id": payload.node_id,
+            "user_id": auth.user_id,
+        },
+        workflow_id=wf_id,
+    )
+    return {"success": True, "data": {"task_id": wf_id}}
 
 
 @router.post("/canvases/{canvas_id}/generations")
