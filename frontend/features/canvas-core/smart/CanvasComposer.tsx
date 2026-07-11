@@ -512,16 +512,19 @@ function ComposerButton({
   disabled?: boolean;
   emphasis?: 'primary';
 }) {
+  // Infinite's .tool-btn (P1-7): bordered pill, 38px tall, 11px/700 label —
+  // the borderless 14px/500 text buttons read as a different product next
+  // to it (the visual diff's top structural gap).
   const primary =
-    'bg-canvas-strong text-canvas-card hover:opacity-90 disabled:opacity-40';
+    'border-transparent bg-canvas-strong text-canvas-card hover:opacity-90 disabled:opacity-40';
   const neutral =
-    'text-canvas-text hover:bg-canvas-line/40 disabled:text-canvas-muted/50';
+    'border-canvas-line bg-canvas-card/60 text-canvas-text hover:bg-canvas-card disabled:text-canvas-muted/50';
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`rounded px-3 py-1.5 text-sm font-medium ${
+      className={`inline-flex h-[38px] min-w-[38px] items-center justify-center whitespace-nowrap rounded-full border px-3 text-[11px] font-bold ${
         emphasis === 'primary' ? primary : neutral
       } disabled:cursor-not-allowed`}
     >
