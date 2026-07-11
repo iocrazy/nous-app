@@ -816,6 +816,7 @@ body {
 .mh-chip:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
 
 /* Knife trail (Infinite's .link.knife-trail). */
 .mh-knife-trail {
