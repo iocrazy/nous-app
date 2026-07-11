@@ -135,6 +135,16 @@ export const NoteMarkdown: React.FC<Props> = ({ source, onToggleTask }) => {
           ul: ({ children }) => <ul className="my-1 list-disc pl-5">{children}</ul>,
           ol: ({ children }) => <ol className="my-1 list-decimal pl-5">{children}</ol>,
           p: ({ children }) => <p className="my-1">{children}</p>,
+          // Tailwind preflight strips default heading sizes — without these,
+          // `#`/`##`/`###` render as body text (user report).
+          h1: ({ children }) => <h1 className="mb-1 mt-3 text-[18px] font-bold leading-snug first:mt-0">{children}</h1>,
+          h2: ({ children }) => <h2 className="mb-1 mt-3 text-[16px] font-bold leading-snug first:mt-0">{children}</h2>,
+          h3: ({ children }) => <h3 className="mb-1 mt-2.5 text-[14.5px] font-semibold leading-snug first:mt-0">{children}</h3>,
+          h4: ({ children }) => <h4 className="mb-0.5 mt-2 text-[13.5px] font-semibold">{children}</h4>,
+          blockquote: ({ children }) => (
+            <blockquote className="my-1.5 border-l-2 border-indigo-500/50 pl-3 text-content-2">{children}</blockquote>
+          ),
+          hr: () => <hr className="my-2 border-line" />,
         }}
       >
         {source}
