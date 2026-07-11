@@ -234,7 +234,7 @@ export const InspirationPage: React.FC = () => {
   };
 
   return (
-    <div className="mx-auto max-w-[1180px] px-6 py-6">
+    <div className="mx-auto w-full max-w-[1800px] px-6 py-6 2xl:px-10">
       <div className="mb-3 flex items-center gap-3 rounded-xl bg-island px-4 py-2.5">
         <h2 className="text-[15px] font-semibold text-content">
           {t('inspiration.title', 'Inspiration')}
@@ -344,7 +344,7 @@ export const InspirationPage: React.FC = () => {
             />
           )}
         </div>
-        <div className="hidden w-[292px] shrink-0 space-y-2.5 lg:block">
+        <div className="hidden w-[292px] shrink-0 space-y-2.5 lg:block 2xl:w-[340px]">
           <ActivityPanel selectedDate={date} onSelectDate={setDate} refreshKey={refreshKey} />
           {tab === 'notes' ? (
             <>

@@ -61,7 +61,7 @@ export const HotspotsWorkspace: React.FC<Props> = ({
 
   return (
     <div className="flex gap-2.5" style={{ minHeight: 420 }}>
-      <div className="w-[240px] shrink-0 space-y-1.5 overflow-y-auto rounded-xl bg-island p-2">
+      <div className="w-[260px] shrink-0 space-y-1.5 overflow-y-auto rounded-xl bg-island p-2 xl:w-[340px] 2xl:w-[400px]">
         {ranked.map((h) => (
           <button
             key={h.id}
