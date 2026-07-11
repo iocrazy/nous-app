@@ -108,37 +108,28 @@ describe('EditorShell', () => {
     expect(within(sceneRail).getByText('Rooftop Access')).toBeInTheDocument();
   });
 
-  it('embedded (studio) mode: brand row gone, ep selector switches via onSwitchEpisode', async () => {
+  it('embedded (studio) mode: the whole left rail is gone, scenes lift out via onScenesChange', async () => {
     svc.listScenes.mockResolvedValue(twoScenes);
-    const onSwitchEpisode = vi.fn();
+    const onScenesChange = vi.fn();
     const { container } = render(
-      <EditorShell
-        scriptId="1"
-        embedded
-        episodesForSwitcher={[
-          { episode_id: '1', title: 'Episode 1' },
-          { episode_id: '2', title: 'Episode 2' },
-        ]}
-        onSwitchEpisode={onSwitchEpisode}
-      />,
+      <EditorShell scriptId="1" embedded onScenesChange={onScenesChange} />,
     );
-    await waitFor(() => expect(screen.getByRole('navigation')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('main')).toBeInTheDocument());
 
-    // Brand row gone (the workspace top bar owns project identity); the
-    // episode selector STAYS — with the workspace sidebar hidden in studio
-    // mode, this rail is the only side navigation.
+    // The centre + right zones are present, but the entire left rail (the
+    // navigation landmark, its brand row AND the scene list) is dropped — the
+    // workspace tree is the single side navigation now (合一终稿, 2026-07-11).
+    expect(screen.getByRole('complementary')).toBeInTheDocument();
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('scene-rail')).not.toBeInTheDocument();
     expect(container.querySelector('.mh-brand-row')).not.toBeInTheDocument();
-    const selector = screen.getByLabelText('editor.switchEpisode');
-    expect(selector).toBeInTheDocument();
+    expect(container.querySelector('.mh-editor-shell.mh-embedded')).toBeInTheDocument();
 
-    // The selector opens a switch menu (not the management EpisodePanel) and
-    // selecting another episode delegates to the workspace.
-    fireEvent.click(selector);
-    fireEvent.click(await screen.findByTestId('editor-ep-switch-2'));
-    expect(onSwitchEpisode).toHaveBeenCalledWith('2');
-    expect(screen.queryByTestId('editor-ep-switch-menu')).not.toBeInTheDocument();
-    expect(screen.getByRole('main')).toBeInTheDocument();
-    expect(screen.getByTestId('scene-rail')).toBeInTheDocument();
+    // The scene list is reported up to the workspace instead.
+    await waitFor(() => {
+      const last = onScenesChange.mock.calls.at(-1)?.[0];
+      expect(last).toHaveLength(2);
+    });
   });
 
   it('standalone keeps the rail brand row + episode management selector', async () => {

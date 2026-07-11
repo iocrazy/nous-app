@@ -1,38 +1,31 @@
 /**
  * WorkspaceOverview — the workspace shell's landing module (spec frame:
- * "Overview(落地页)", decision G6). Continue card (deep-link back into the
- * current episode's studio) + the existing StageSuggestion card rendered
- * as-is + summary tiles per module + a recent-activity line reusing the
- * same copy as ProjectCard's activity row.
+ * "Overview(落地页)", decision G6). A film-styled Continue card (slate stripe +
+ * mono read-out, deep-links into the current episode's studio) + summary tiles
+ * per module + a recent-activity line reusing the same copy as ProjectCard's
+ * activity row.
  */
 
 import { useTranslation } from 'react-i18next';
 import { ArrowRight, Clock } from 'lucide-react';
-import { StageSuggestion } from '../project/StageSuggestion';
 import { formatRelativeTime } from '../../utils/relativeTime';
-import type { EpisodeProgress, Project, ProjectStage, ProjectTab } from '../../types';
-
-const AI_SUGGEST_ENABLED =
-  import.meta.env.VITE_FEATURE_PROJECT_AI_SUGGEST === 'true';
+import type { EpisodeProgress, Project } from '../../types';
 
 interface WorkspaceOverviewProps {
   project: Project;
-  projectId: string;
-  currentStage: ProjectStage | null;
-  episodes: EpisodeProgress[];
   currentEpisode: EpisodeProgress | null;
+  /** 1-based index of the current episode (for the CONTINUE · EP read-out). */
+  epNumber: number | null;
+  episodes: EpisodeProgress[];
   onOpenScript: () => void;
-  onSuggestionNavigate: (tab: ProjectTab) => void;
 }
 
 export function WorkspaceOverview({
   project,
-  projectId,
-  currentStage,
-  episodes,
   currentEpisode,
+  epNumber,
+  episodes,
   onOpenScript,
-  onSuggestionNavigate,
 }: WorkspaceOverviewProps) {
   const { t } = useTranslation();
 
@@ -48,22 +41,26 @@ export function WorkspaceOverview({
           data-testid="ws-continue-card"
           className="rounded-xl border border-[var(--accent-border)] bg-island p-4 flex items-center justify-between gap-4"
         >
-          <div className="min-w-0">
-            <div className="text-[11px] uppercase tracking-wider text-[var(--accent-text)] font-semibold">
-              {t('projects.workspace.overview.continue')}
-            </div>
-            <div className="text-sm font-medium text-ink-100 mt-0.5 truncate">
-              {currentEpisode.title}
-            </div>
-            <div className="font-mono text-[11px] text-ink-400 mt-1">
-              {t('projects.workspace.overview.scriptScenes', { count: currentEpisode.scene_count })}
-              {' · '}
-              {t('projects.workspace.overview.shotsProgress', {
-                done: currentEpisode.shots_done,
-                total: currentEpisode.shots_total,
-              })}
-              {' · '}
-              {t('projects.workspace.overview.rendersCount', { count: currentEpisode.renders_count })}
+          <div className="flex items-center gap-3 min-w-0">
+            <span
+              aria-hidden
+              className="w-9 h-5 rounded-[4px] shrink-0"
+              style={{
+                background: 'repeating-linear-gradient(-45deg,#f4f1fb 0 5px,#16121f 5px 10px)',
+                border: '1px solid var(--line-strong)',
+              }}
+            />
+            <div className="min-w-0">
+              <div className="font-mono text-[9px] font-bold tracking-[0.14em] text-[var(--accent-text)]">
+                CONTINUE{epNumber ? ` · EP${epNumber}` : ''}
+              </div>
+              <div className="text-sm font-medium text-ink-100 mt-0.5 truncate">
+                {currentEpisode.title}
+              </div>
+              <div className="font-mono text-[11px] text-ink-400 mt-1">
+                {currentEpisode.scene_count} SC · SHOTS {currentEpisode.shots_done}/
+                {currentEpisode.shots_total} · CUTS {currentEpisode.renders_count}
+              </div>
             </div>
           </div>
           <button
@@ -75,14 +72,6 @@ export function WorkspaceOverview({
             <ArrowRight size={15} />
           </button>
         </div>
-      )}
-
-      {AI_SUGGEST_ENABLED && (
-        <StageSuggestion
-          projectId={projectId}
-          currentStage={currentStage}
-          setActiveTab={onSuggestionNavigate}
-        />
       )}
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2" data-testid="ws-overview-summary">
@@ -145,9 +134,9 @@ function SummaryTile({
   return (
     <div data-testid={testId} className="rounded-xl border border-line bg-island p-2.5">
       <div className="text-[11.5px] font-semibold text-ink-200">{t(labelKey)}</div>
-      <div className="font-mono text-[10px] text-ink-400 mt-0.5">
+      <div className="font-mono text-[12px] font-bold text-[var(--accent-text)] mt-0.5">
         {value}
-        {sub ? ` · ${sub}` : ''}
+        {sub ? <span className="text-[10px] font-normal text-ink-400"> · {sub}</span> : ''}
       </div>
     </div>
   );
