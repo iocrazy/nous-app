@@ -15,15 +15,20 @@ The fix is to split lifespan work into three buckets:
 * **BACKGROUND** — fire-and-forget tasks that may finish after yield.
   Examples: schema sanity probe, seed loader, deployment-log writer,
   bounds self-registration.
-* **LONGRUNNING** — daemon coroutines that live for the process lifetime
-  and have their own start/stop protocol (WorkforceScheduler, SsrfProxy,
-  PrometheusPusher, bounds heartbeat). These already manage themselves;
-  this module doesn't touch them.
+* **LONGRUNNING** — daemon coroutines that live for the process lifetime.
+  Two sub-kinds: components with their own start/stop protocol
+  (WorkforceScheduler, SsrfProxy, PrometheusPusher, bounds heartbeat)
+  manage themselves and stay outside this module; bare daemon loops
+  (reap sweep, stall detector) are registry-owned via
+  `spawn(..., long_running=True)` so they get snapshot visibility and
+  shutdown cancellation without gating `/readyz`.
 
-`BackgroundTaskRegistry` owns the BACKGROUND bucket: it spawns each task
-with a name, exposes a `done()` query for `/readyz`, and on shutdown
-cancels what's still running with `asyncio.gather(return_exceptions=True)`
-so a hung task can't block the rest of the shutdown chain.
+`BackgroundTaskRegistry` owns the BACKGROUND bucket plus the registry-owned
+daemons: it spawns each task with a name, exposes the `/readyz` gate
+(`all_done()` — finite tasks finished AND daemons still alive), and on
+shutdown cancels what's still running with
+`asyncio.gather(return_exceptions=True)` so a hung task can't block the
+rest of the shutdown chain.
 """
 
 from __future__ import annotations
@@ -42,6 +47,7 @@ class _Entry:
     started_at: float
     finished_at: Optional[float] = None
     exception: Optional[BaseException] = None
+    long_running: bool = False
 
 
 @dataclass
@@ -63,18 +69,39 @@ class BackgroundTaskRegistry:
 
     _entries: Dict[str, _Entry] = field(default_factory=dict)
 
-    def spawn(self, name: str, coro: Awaitable[Any]) -> asyncio.Task:
+    def spawn(
+        self, name: str, coro: Awaitable[Any], *, long_running: bool = False
+    ) -> asyncio.Task:
         """Wrap `coro` in a tracked Task and start it.
 
         If `name` already exists the previous entry is replaced — caller
         is responsible for not double-spawning the same logical task.
         Records exceptions on the entry so `/readyz` can surface them
         without scraping logs.
+
+        `long_running=True` marks a daemon-style loop that lives for the
+        process lifetime (reap sweeps, stall detector). Those tasks never
+        finish by design, so `all_done()` gates on them being ALIVE instead
+        of done — a pending daemon doesn't hold `/readyz` at 503 "starting"
+        forever, and a crashed one flips readiness to "degraded". They still
+        show up in `status_snapshot()` and are cancelled on `shutdown()`.
         """
         loop = asyncio.get_event_loop()
         started_at = loop.time()
 
+        previous = self._entries.get(name)
+        if previous is not None and not previous.task.done():
+            # Re-spawn: cancel the evicted task, or it keeps running
+            # untracked — it would skip shutdown() cancellation and (before
+            # entries were closure-bound) stamp its exception/finished_at
+            # onto the NEW entry via a by-name lookup.
+            previous.task.cancel()
+            logger.warning(f"[bg-task:{name}] re-spawn cancelled previous task")
+
         async def _runner() -> None:
+            # `entry` is bound below before the loop first runs this
+            # coroutine, and stays pinned to THIS spawn — a later re-spawn
+            # under the same name can't have its status corrupted by us.
             try:
                 await coro
             except asyncio.CancelledError:
@@ -82,23 +109,40 @@ class BackgroundTaskRegistry:
                 raise
             except Exception as exc:
                 logger.exception(f"[bg-task:{name}] failed: {exc!r}")
-                entry = self._entries.get(name)
-                if entry is not None:
-                    entry.exception = exc
+                entry.exception = exc
                 raise
             finally:
-                entry = self._entries.get(name)
-                if entry is not None:
-                    entry.finished_at = loop.time()
+                entry.finished_at = loop.time()
 
         task = loop.create_task(_runner(), name=f"bg:{name}")
-        self._entries[name] = _Entry(name=name, task=task, started_at=started_at)
+        entry = _Entry(
+            name=name, task=task, started_at=started_at, long_running=long_running
+        )
+        self._entries[name] = entry
         logger.info(f"[bg-task:{name}] spawned")
         return task
 
     def all_done(self) -> bool:
-        """True if every spawned task has finished (success OR failure)."""
-        return all(e.task.done() for e in self._entries.values())
+        """Readiness gate: every finite task finished AND no daemon died.
+
+        Finite tasks must be done (success OR failure). `long_running`
+        daemons must be NOT done — a daemon loop never returns by design,
+        so a finished daemon task means it crashed (or exited unexpectedly)
+        and the process is degraded, which must not read as \"ready\".
+        """
+        finite_done = all(
+            e.task.done() for e in self._entries.values() if not e.long_running
+        )
+        return finite_done and not self.dead_daemons()
+
+    def dead_daemons(self) -> List[str]:
+        """Names of `long_running` daemons whose task finished (= crashed).
+
+        A live daemon never completes, so `task.done()` on one is always a
+        failure signal — surfaced by `/readyz` as status \"degraded\"."""
+        return [
+            e.name for e in self._entries.values() if e.long_running and e.task.done()
+        ]
 
     def status_snapshot(self) -> List[Dict[str, Any]]:
         """Per-task status for `/readyz` payload. Cheap, no I/O."""
@@ -113,6 +157,7 @@ class BackgroundTaskRegistry:
                 {
                     "name": entry.name,
                     "done": entry.task.done(),
+                    "long_running": entry.long_running,
                     "duration_seconds": duration,
                     "error": (
                         f"{type(entry.exception).__name__}: {entry.exception}"
