@@ -888,6 +888,18 @@ body {
   animation: canvas-edge-flow 0.6s linear infinite;
 }
 
+/* Edge scissors (P1-8) — Infinite's conn-cut: always present, dimmed to
+   .55 until the edge is hovered or selected. */
+.mh-edge-cut {
+  opacity: 0.55;
+  transition: opacity 0.14s var(--canvas-ease);
+}
+.react-flow__edge:hover .mh-edge-cut,
+.mh-edge-cut--active,
+.mh-edge-cut:hover {
+  opacity: 1;
+}
+
 /* Generation placeholder shimmer (P0-3) — Infinite's .loading-cell:
    a soft sweep across the skeleton while the item renders. */
 @keyframes mh-shimmer {
