@@ -1,10 +1,10 @@
 /**
  * ProjectWorkspace — the unified workspace shell (合一终稿, 2026-07-11; spec
  * `2026-07-10-projects-workspace-final.html`, decisions G1/G2/G4/G6/G12/G13).
- * Flag-gated by VITE_FEATURE_PROJECT_WORKSPACE_V2 at the ProjectsPage call
- * site; this component owns everything inside the detail pane once the flag is
- * on: the top project bar, the single left-tree sidebar, and the module
- * content area.
+ * This is the only project detail implementation (the legacy nav sidebar +
+ * stage strip + tab surface, and its VITE_FEATURE_PROJECT_WORKSPACE_V2 flag,
+ * were retired in PR-18). It owns everything inside the detail pane: the top
+ * project bar, the single left-tree sidebar, and the module content area.
  *
  * The sidebar stays mounted at ALL times — including while Script/Storyboard
  * mount `EditorShell` INLINE. The embedded editor drops its own left rail
