@@ -888,6 +888,16 @@ body {
   animation: canvas-edge-flow 0.6s linear infinite;
 }
 
+/* Run-status dot breathing (P1-5) — Infinite's nodeStatusPulse: only the
+   dot animates while a run is live; the card itself stays still. */
+@keyframes mh-status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.mh-status-dot--pulse {
+  animation: mh-status-pulse 1s ease-in-out infinite;
+}
+
 /* Hover lift (P1-6) — Infinite's signature micro-motion: every clickable
    chip/toolbar button nudges up 1px on hover. Scoped to the canvas chrome
    (chips, glass-island buttons) so the rest of the app is untouched. */

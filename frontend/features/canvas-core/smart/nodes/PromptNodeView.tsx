@@ -6,6 +6,7 @@ import { RUN_STATUS_TONE, SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { useGenerationModels } from './useGenerationModels';
 import { useNodeDataPatch } from './useNodeDataPatch';
 import { rerunPrompt } from '../regenerate';
+import { RunStatusBadge } from './RunStatusBadge';
 import {
   elapsedSeconds,
   formatElapsed,
@@ -55,7 +56,10 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   // Kind filter for the @-mention picker tabs (All / Video / Image / Doc …)
   const [activeKind, setActiveKind] = useState<ActiveKind>('');
 
-  const haloTone = RUN_STATUS_TONE[run_status];
+  // Smart nodes keep the tone's border colour but drop the whole-card
+  // animate-pulse — the status badge's dot carries the motion (P1-5;
+  // classic mode still uses the full tone string).
+  const haloTone = RUN_STATUS_TONE[run_status].replace('animate-pulse', '').trim();
 
   // Run-time pill (P1-2, Infinite's .run-time-pill): live seconds while
   // running, final duration pinned in green once succeeded. The elapsed
@@ -172,9 +176,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
               {pillText}
             </span>
           )}
-          <div className="text-[10px] uppercase tracking-wider text-ink-400">
-            {run_status}
-          </div>
+          <RunStatusBadge status={run_status} />
         </div>
       </div>
       {/* relative so the CanvasMentionPicker's `bottom-full` positions above this section */}
