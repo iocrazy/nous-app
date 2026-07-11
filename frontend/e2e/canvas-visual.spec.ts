@@ -80,3 +80,46 @@ test.describe('canvas token base (Phase 0 G10)', () => {
     await page.screenshot({ path: 'e2e-artifacts/canvas-visual-light.png', fullPage: true });
   });
 });
+
+test('ports fade in on node hover (P1-9)', async ({ page }) => {
+  await seedTheme(page, 'dark');
+  await setupStubbedSession(page);
+  await page.route('**/api/v1/canvases/c-ports', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        success: true,
+        data: {
+          ...CANVAS,
+          id: 'c-ports',
+          nodes_json: [
+            {
+              id: 'p1',
+              type: 'prompt',
+              position: { x: 120, y: 120 },
+              data: { body: 'x', provider_slug: '', agent_id: null, run_status: 'idle', resource_refs: [] },
+            },
+          ],
+        },
+      }),
+    }),
+  );
+  await page.route('**/api/v1/resources/search*', (r) =>
+    r.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ results: [], counts: { all: 0, video: 0, image: 0, doc: 0, audio: 0, pdf: 0 }, next_cursor: null }),
+    }),
+  );
+  await page.goto(`/team/${TEAM_ID}/canvas/c-ports`);
+  const node = page.locator('.react-flow__node').first();
+  await expect(node).toBeVisible();
+  const handle = node.locator('.react-flow__handle').first();
+  const opacityOf = () =>
+    handle.evaluate((el) => getComputedStyle(el as HTMLElement).opacity);
+  // Idle: invisible (hit area stays live — visual only).
+  await expect.poll(opacityOf).toBe('0');
+  await node.hover();
+  await expect.poll(opacityOf).toBe('1');
+});
