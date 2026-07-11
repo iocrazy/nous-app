@@ -19,6 +19,7 @@ import {
   createOutputNode,
   createPromptNode,
   createShotNode,
+  createTimelineNode,
 } from '../smart/factories';
 
 export interface DragCreateMenuProps {
@@ -26,7 +27,7 @@ export interface DragCreateMenuProps {
   screenPosition: { x: number; y: number };
   /** Flow-space position where the new node is created. */
   flowPosition: { x: number; y: number };
-  fromNodeId: string;
+  fromNodeId: string | null;
   fromHandle: string | null;
   onClose: () => void;
 }
@@ -44,6 +45,7 @@ const SMART_ITEMS: MenuItem[] = [
   { type: 'prompt', label: 'Prompt', targetHandle: null, make: (p) => createPromptNode({}, { position: p }) as CanvasNode },
   { type: 'output', label: 'Output', targetHandle: null, make: (p) => createOutputNode({}, { position: p }) as CanvasNode },
   { type: 'loop', label: 'Loop', targetHandle: null, make: (p) => createLoopNode({}, { position: p }) as CanvasNode },
+  { type: 'timeline', label: 'Timeline', targetHandle: null, make: (p) => createTimelineNode({}, { position: p }) as CanvasNode },
 ];
 
 /**
@@ -53,18 +55,18 @@ const SMART_ITEMS: MenuItem[] = [
  * type-incompatible nodes are dropped so drag-create can't produce an edge the
  * connection validator would reject.
  */
-function classicItems(srcOutType: string | undefined): MenuItem[] {
+function classicItems(srcOutType: string | undefined, all = false): MenuItem[] {
   const items: MenuItem[] = [];
   for (const def of CLASSIC_NODE_DEFINITIONS) {
     if (def.type === 'group') continue;
     const input = srcOutType
       ? def.inputs.find((i) => i.type === srcOutType)
       : undefined;
-    if (!input) continue;
+    if (!input && !all) continue;
     items.push({
       type: def.type,
       label: def.label,
-      targetHandle: input.id,
+      targetHandle: input?.id ?? null,
       make: (p) => ({
         id: `${def.type}-${crypto.randomUUID()}`,
         type: def.type,
@@ -97,11 +99,14 @@ export function DragCreateMenu({
     ) as { type?: string } | undefined;
     const srcType = srcNode?.type;
     if (kind === 'smart') {
+      // No origin (pane double-click / right-click, P1-1): every node type.
+      if (!fromNodeId) return SMART_ITEMS;
       // Only node types the source may legally feed (excludes e.g. Shot as a
       // target and anything when the source is an Output).
       return SMART_ITEMS.filter((item) => canConnectSmart(srcType, item.type));
     }
     if (kind === 'classic') {
+      if (!fromNodeId) return classicItems(undefined, true);
       const srcDef = getClassicNodeDefinition(srcType);
       const srcOutType = srcDef?.outputs.find((o) => o.id === fromHandle)?.type;
       return classicItems(srcOutType);
@@ -126,14 +131,18 @@ export function DragCreateMenu({
       const node = item.make(flowPosition);
       const id = (node as Record<string, unknown>).id as string;
       setNodes([...nodes, node]);
-      const edge: CanvasConnection = {
-        id: `edge-${crypto.randomUUID()}`,
-        source: fromNodeId,
-        target: id,
-        sourceHandle: fromHandle,
-        targetHandle: item.targetHandle,
-      };
-      setConnections([...connections, edge]);
+      // Wire back to the origin only when the menu came from a wire drop —
+      // the pane double-click create (P1-1) drops a free-standing node.
+      if (fromNodeId) {
+        const edge: CanvasConnection = {
+          id: `edge-${crypto.randomUUID()}`,
+          source: fromNodeId,
+          target: id,
+          sourceHandle: fromHandle,
+          targetHandle: item.targetHandle,
+        };
+        setConnections([...connections, edge]);
+      }
       setSelection([id]);
       onClose();
     },
