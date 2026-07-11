@@ -2605,7 +2605,11 @@
     "today": "今天",
     "dayNotes": "{{count}} 条",
     "monthNotes": "本月 {{count}} 条",
-    "hasNotes": "有笔记"
+    "hasNotes": "有笔记",
+    "insertTag": "插入 #标签",
+    "insertCode": "插入代码块",
+    "attachFile": "添加附件",
+    "insertLink": "插入链接"
   },
   "editor": {
     "brand": "MediaHub Projects",
