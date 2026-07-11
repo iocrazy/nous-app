@@ -72,24 +72,31 @@ export function withGenerationRunner(
         ),
       );
 
-      const failed = tasks.find((t) => t.phase !== 'completed');
-      if (failed) {
+      // Per-item independence (Infinite semantics, P0-2): completed items
+      // always land; failed siblings are reported alongside, never allowed
+      // to throw away good results. The prompt only fails when NOTHING
+      // completed with a url.
+      const failed = tasks.filter((t) => t.phase !== 'completed');
+      const urls = tasks
+        .filter((t) => t.phase === 'completed')
+        .map((t) => t.metadata?.result_url)
+        .filter((u): u is string => Boolean(u));
+      const firstError = failed[0]
+        ? failed[0].error_msg || `generation ${failed[0].phase}`
+        : null;
+      if (urls.length === 0) {
         return {
           ok: false,
           text: '',
-          error: failed.error_msg || `generation ${failed.phase}`,
+          error: firstError ?? 'generation completed without results',
         };
-      }
-      const urls = tasks
-        .map((t) => t.metadata?.result_url)
-        .filter((u): u is string => Boolean(u));
-      if (urls.length === 0) {
-        return { ok: false, text: '', error: 'generation completed without results' };
       }
       return {
         ok: true,
         text: urls.join('\n'),
-        error: null,
+        error: failed.length
+          ? `${failed.length} of ${tasks.length} items failed: ${firstError}`
+          : null,
         urls,
         media_kind: gen.kind,
       };
