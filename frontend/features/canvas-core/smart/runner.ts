@@ -24,6 +24,8 @@ export interface RunnerContext {
   agent_id: string | null;
   /** Image/video generation settings (G4-F1) — absent for text prompts. */
   gen?: PromptGenSettings | null;
+  /** Durable upstream image (G4-F3) — the i2i/i2v generation source. */
+  source_url?: string | null;
 }
 
 export interface RunnerResult {
