@@ -1016,6 +1016,16 @@ body {
   border-radius: var(--canvas-r-island) !important;
   background: var(--canvas-panel) !important;
   box-shadow: var(--canvas-shadow-island);
+  /* Infinite's minimap island (P1-11): 188×126 glass card with a hairline
+     ring — the bare RF default read as loose grey blocks floating on the
+     page. Sizing goes on the inner svg so the viewBox rescales content. */
+  border: 1px solid var(--canvas-line);
+  backdrop-filter: blur(16px);
+  padding: 6px;
+}
+.mh-canvas .react-flow__minimap svg {
+  width: 176px;
+  height: 114px;
 }
 
 .mh-canvas .react-flow__controls {

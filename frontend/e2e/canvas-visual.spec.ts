@@ -80,3 +80,31 @@ test.describe('canvas token base (Phase 0 G10)', () => {
     await page.screenshot({ path: 'e2e-artifacts/canvas-visual-light.png', fullPage: true });
   });
 });
+
+test('minimap is a bottom-right glass island (P1-11)', async ({ page }) => {
+  await seedTheme(page, 'dark');
+  await setupStubbedSession(page);
+  await setupCanvasStubs(page);
+  await page.route('**/api/v1/resources/search*', (r) =>
+    r.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ results: [], counts: { all: 0, video: 0, image: 0, doc: 0, audio: 0, pdf: 0 }, next_cursor: null }),
+    }),
+  );
+  await page.goto(`/team/${TEAM_ID}/canvas/c-visual`);
+  const minimap = page.locator('.react-flow__minimap');
+  await expect(minimap).toBeVisible();
+  const cls = await minimap.getAttribute('class');
+  expect(cls).toContain('bottom');
+  expect(cls).toContain('right');
+  const style = await minimap.evaluate((el) => {
+    const c = getComputedStyle(el as HTMLElement);
+    return { border: c.borderTopWidth, radius: c.borderTopLeftRadius };
+  });
+  expect(style.border).toBe('1px');
+  expect(Number.parseFloat(style.radius)).toBeGreaterThan(10);
+  // Controls swapped to the freed bottom-left corner.
+  const controlsCls = await page.locator('.react-flow__controls').getAttribute('class');
+  expect(controlsCls).toContain('left');
+});
