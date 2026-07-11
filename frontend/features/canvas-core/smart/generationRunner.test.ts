@@ -147,3 +147,65 @@ describe('withGenerationRunner — G4-F3 additions', () => {
     expect(phases).toEqual(['p1:queued', 'p1:running']);
   });
 });
+
+describe('withGenerationRunner — fan-out partial failure (P0-2)', () => {
+  it('keeps the successful urls when only some tasks fail', async () => {
+    dispatchGenerations.mockResolvedValue(['t1', 't2', 't3']);
+    pollGeneration
+      .mockResolvedValueOnce({
+        phase: 'completed',
+        metadata: { result_url: '/api/v1/generated-media/1/cover' },
+      })
+      .mockResolvedValueOnce({ phase: 'failed', error_msg: 'no credit' })
+      .mockResolvedValueOnce({
+        phase: 'completed',
+        metadata: { result_url: '/api/v1/generated-media/3/cover' },
+      });
+
+    const runner = withGenerationRunner(baseCaller, { canvasId: '9' });
+    const result = await runner({
+      ...TEXT_CTX,
+      gen: { kind: 'image', model: '', count: 3 },
+    });
+
+    // Infinite semantics: good items land, bad ones are reported — never
+    // throw away completed results because a sibling task failed.
+    expect(result.ok).toBe(true);
+    expect(result.urls).toEqual([
+      '/api/v1/generated-media/1/cover',
+      '/api/v1/generated-media/3/cover',
+    ]);
+    expect(result.error).toContain('1 of 3');
+    expect(result.error).toContain('no credit');
+  });
+
+  it('still fails the prompt when every task fails', async () => {
+    dispatchGenerations.mockResolvedValue(['t1', 't2']);
+    pollGeneration
+      .mockResolvedValueOnce({ phase: 'failed', error_msg: 'no credit' })
+      .mockResolvedValueOnce({ phase: 'timeout' });
+
+    const runner = withGenerationRunner(baseCaller, { canvasId: '9' });
+    const result = await runner({
+      ...TEXT_CTX,
+      gen: { kind: 'image', model: '', count: 2 },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('no credit');
+  });
+
+  it('keeps error null when everything succeeds', async () => {
+    dispatchGenerations.mockResolvedValue(['t1']);
+    pollGeneration.mockResolvedValueOnce({
+      phase: 'completed',
+      metadata: { result_url: '/u1' },
+    });
+    const runner = withGenerationRunner(baseCaller, { canvasId: '9' });
+    const result = await runner({
+      ...TEXT_CTX,
+      gen: { kind: 'image', model: '', count: 1 },
+    });
+    expect(result.ok).toBe(true);
+    expect(result.error).toBeNull();
+  });
+});
