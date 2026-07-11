@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   Bot,
+  Frame,
   Circle,
   Download,
   Eye,
@@ -50,6 +51,9 @@ export const TaskTypeIcon: React.FC<{ type: TaskType; size?: number }> = ({
     case 'agent':
     case 'agent_routine':
       return <Bot size={size} />;
+    case 'canvas_gen':
+    case 'canvas_graph_run':
+      return <Frame size={size} />;
     default:
       return <Circle size={size} />;
   }
