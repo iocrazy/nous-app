@@ -87,6 +87,12 @@ export function OutputLightbox({
   const stageRef = useRef<HTMLDivElement | null>(null);
   const panDrag = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
   const zoomEnabled = kind === 'image' && !compareOn;
+  // Progressive load (P1-3, adapted): no thumbnail variants exist on the
+  // durable endpoints, so "progressive" here means an immediate shimmer
+  // skeleton instead of a white void, plus a broken-image recovery state
+  // (Infinite: fast thumb → swap; ours: skeleton → swap).
+  const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [retryNonce, setRetryNonce] = useState(0);
   const zoomActive = zoom !== 1 || pan.x !== 0 || pan.y !== 0;
 
   const resetZoom = useCallback(() => {
@@ -98,6 +104,11 @@ export function OutputLightbox({
   useEffect(() => {
     resetZoom();
   }, [index, compareOn, resetZoom]);
+
+  // New media → back to the skeleton until its own load settles.
+  useEffect(() => {
+    setLoadState('loading');
+  }, [current?.url, retryNonce]);
 
   const applyWheelZoom = useCallback(
     (e: WheelEvent) => {
@@ -346,19 +357,49 @@ export function OutputLightbox({
               />
             </div>
           ) : (
-            <img
-              data-testid="lightbox-image"
-              src={current.url}
-              alt={current.name || 'Output'}
-              draggable={false}
-              className="block max-h-[80vh] max-w-full object-contain"
-              onLoad={(e) => {
-                const img = e.currentTarget;
-                if (img.naturalWidth) {
-                  setResolution(`${img.naturalWidth} × ${img.naturalHeight}`);
-                }
-              }}
-            />
+            <>
+              {loadState === 'loading' && (
+                <div
+                  data-testid="lightbox-skeleton"
+                  aria-label="Loading image"
+                  className="mh-loading-cell h-[min(60vh,60vw)] w-[min(60vh,60vw)] rounded-lg"
+                />
+              )}
+              {loadState === 'error' ? (
+                <div
+                  data-testid="lightbox-load-error"
+                  className="flex h-[min(40vh,40vw)] w-[min(60vh,60vw)] flex-col items-center justify-center gap-3 rounded-lg border border-canvas-line bg-canvas-card/60 text-canvas-muted"
+                >
+                  <span className="text-sm">Failed to load image</span>
+                  <button
+                    type="button"
+                    className="rounded-full border border-canvas-line px-3 py-1 text-xs text-canvas-text hover:bg-canvas-card"
+                    onClick={() => setRetryNonce((n) => n + 1)}
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : (
+                <img
+                  key={`${current.url}#${retryNonce}`}
+                  data-testid="lightbox-image"
+                  src={current.url}
+                  alt={current.name || 'Output'}
+                  draggable={false}
+                  className={`block max-h-[80vh] max-w-full object-contain ${
+                    loadState === 'ready' ? '' : 'hidden'
+                  }`}
+                  onLoad={(e) => {
+                    setLoadState('ready');
+                    const img = e.currentTarget;
+                    if (img.naturalWidth) {
+                      setResolution(`${img.naturalWidth} × ${img.naturalHeight}`);
+                    }
+                  }}
+                  onError={() => setLoadState('error')}
+                />
+              )}
+            </>
           )}
         </div>
         {items.length > 1 && (
