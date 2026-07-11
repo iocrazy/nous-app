@@ -2,7 +2,7 @@
 // attachments (paste / drop / picker), Cmd+Enter submit.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Image as ImageIcon, Mic, Paperclip, X } from 'lucide-react';
+import { Hash, Link as LinkIcon, Paperclip, SquareCode, X } from 'lucide-react';
 import { useToast } from '../Toast';
 import {
   createNote,
@@ -78,6 +78,45 @@ export const Composer: React.FC<Props> = ({
     setCaret(next.length);
     taRef.current?.focus();
   };
+
+  // Toolbar quick-inserts (memos-parity): splice a snippet at the live caret
+  // (or around the selection) and put the cursor where typing continues.
+  const insertSnippet = (build: (selected: string, atLineStart: boolean, needsSpace: boolean) => { snippet: string; cursor: number }) => {
+    const ta = taRef.current;
+    const start = ta?.selectionStart ?? text.length;
+    const end = ta?.selectionEnd ?? start;
+    const selected = text.slice(start, end);
+    const atLineStart = start === 0 || text[start - 1] === '\n';
+    const needsSpace = start > 0 && !/[\s(（]/.test(text[start - 1]);
+    const { snippet, cursor } = build(selected, atLineStart, needsSpace);
+    const next = text.slice(0, start) + snippet + text.slice(end);
+    const pos = start + cursor;
+    setText(next);
+    setCaret(pos);
+    requestAnimationFrame(() => {
+      ta?.focus();
+      ta?.setSelectionRange(pos, pos);
+    });
+  };
+
+  const insertTag = () =>
+    insertSnippet((_sel, _ls, needsSpace) => ({
+      snippet: needsSpace ? ' #' : '#',
+      cursor: needsSpace ? 2 : 1,
+    }));
+
+  const insertCodeBlock = () =>
+    insertSnippet((sel, atLineStart) => {
+      const lead = atLineStart ? '' : '\n';
+      return { snippet: `${lead}\`\`\`\n${sel}\n\`\`\`\n`, cursor: lead.length + 4 + sel.length };
+    });
+
+  const insertLink = () =>
+    insertSnippet((sel) =>
+      sel
+        ? { snippet: `[${sel}]()`, cursor: sel.length + 3 } // cursor inside the ()
+        : { snippet: '[]()', cursor: 1 }, // cursor inside the []
+    );
 
   const stageFiles = useCallback((files: FileList | File[]) => {
     setStaged((prev) => [
@@ -228,21 +267,36 @@ export const Composer: React.FC<Props> = ({
 
       <div className="mt-2 flex items-center gap-1 border-t border-line pt-2">
         <button
-          aria-label="Attach image"
-          onClick={() => fileRef.current?.click()}
-          className="rounded-lg p-1.5 text-content-3 hover:bg-island-2"
+          aria-label="Insert tag"
+          title={t('inspiration.insertTag', 'Insert #tag')}
+          onClick={insertTag}
+          className="rounded-lg p-1.5 text-content-3 hover:bg-island-2 hover:text-indigo-300"
         >
-          <ImageIcon size={15} />
+          <Hash size={15} />
+        </button>
+        <button
+          aria-label="Insert code block"
+          title={t('inspiration.insertCode', 'Insert code block')}
+          onClick={insertCodeBlock}
+          className="rounded-lg p-1.5 text-content-3 hover:bg-island-2 hover:text-indigo-300"
+        >
+          <SquareCode size={15} />
         </button>
         <button
           aria-label="Attach file"
+          title={t('inspiration.attachFile', 'Attach files')}
           onClick={() => fileRef.current?.click()}
-          className="rounded-lg p-1.5 text-content-3 hover:bg-island-2"
+          className="rounded-lg p-1.5 text-content-3 hover:bg-island-2 hover:text-indigo-300"
         >
           <Paperclip size={15} />
         </button>
-        <button aria-label="Attach audio" onClick={() => fileRef.current?.click()} className="rounded-lg p-1.5 text-content-3 hover:bg-island-2">
-          <Mic size={15} />
+        <button
+          aria-label="Insert link"
+          title={t('inspiration.insertLink', 'Insert link')}
+          onClick={insertLink}
+          className="rounded-lg p-1.5 text-content-3 hover:bg-island-2 hover:text-indigo-300"
+        >
+          <LinkIcon size={15} />
         </button>
         <input
           ref={fileRef}

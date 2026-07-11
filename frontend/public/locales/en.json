@@ -2605,7 +2605,11 @@
     "today": "Today",
     "dayNotes": "{{count}} notes",
     "monthNotes": "{{count}} notes this month",
-    "hasNotes": "has notes"
+    "hasNotes": "has notes",
+    "insertTag": "Insert #tag",
+    "insertCode": "Insert code block",
+    "attachFile": "Attach files",
+    "insertLink": "Insert link"
   },
   "editor": {
     "brand": "MediaHub Projects",
