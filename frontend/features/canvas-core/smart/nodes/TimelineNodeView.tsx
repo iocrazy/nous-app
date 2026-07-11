@@ -4,23 +4,34 @@
 // a horizontal strip of segment blocks (width ∝ seconds), click a block to
 // edit its prompt/length below, Run hands the whole timeline to the
 // backend film workflow (t2v → tail-frame i2v chain → concat).
+// Minimal set (P2-1): drag a block's right edge to resize its seconds,
+// drag a block to reorder, tail-frame thumbnails, live "Segment i/N"
+// progress and the failed-segment mark.
 
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Plus, X } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { RUN_STATUS_TONE, SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { RunStatusBadge } from './RunStatusBadge';
 import {
   addSegment,
+  dragSeconds,
   removeSegment,
+  reorderSegments,
+  reorderThumbs,
+  segmentIndexAtX,
   totalSeconds,
   updateSegment,
   MAX_TIMELINE_SEGMENTS,
   type TimelineNodeData,
+  type TimelineSegment,
 } from '../timeline';
 import { startTimelineRun, useTimelineRunStore } from '../timelineRun';
 import { useNodeDataPatch } from './useNodeDataPatch';
+
+/** Movement below this many px stays a click (select-to-edit). */
+const REORDER_THRESHOLD_PX = 6;
 
 export function TimelineNodeView({ id, data, selected }: NodeProps) {
   const {
@@ -28,12 +39,99 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
     aspect = '',
     run_status = 'idle',
     run_error = null,
+    run_progress = null,
+    failed_index = null,
+    segment_thumbs = [],
   } = data as unknown as TimelineNodeData;
   const patch = useNodeDataPatch(id);
   const running = useTimelineRunStore((s) => !!s.running[id]) || run_status === 'running' || run_status === 'queued';
   const [activeId, setActiveId] = useState<string | null>(segments[0]?.id ?? null);
   const active = segments.find((s) => s.id === activeId) ?? null;
   const total = totalSeconds(segments);
+  const stripRef = useRef<HTMLDivElement | null>(null);
+
+  // ── Edge resize (P2-1): px-per-second is frozen at drag start so the
+  // live width feedback doesn't make the scale chase itself. ──────────────
+  const resizeDrag = useRef<{
+    segId: string;
+    startX: number;
+    startSeconds: number;
+    pxPerSecond: number;
+  } | null>(null);
+
+  const onResizeDown = (seg: TimelineSegment) => (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    const stripWidth = stripRef.current?.getBoundingClientRect().width ?? 0;
+    resizeDrag.current = {
+      segId: seg.id,
+      startX: e.clientX,
+      startSeconds: seg.seconds,
+      pxPerSecond: total > 0 ? stripWidth / total : 0,
+    };
+  };
+
+  const onResizeMove = (e: React.PointerEvent) => {
+    const d = resizeDrag.current;
+    if (!d) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const next = dragSeconds(d.startSeconds, e.clientX - d.startX, d.pxPerSecond);
+    const current = segments.find((s) => s.id === d.segId)?.seconds;
+    if (next !== current) {
+      patch({ segments: updateSegment(segments, d.segId, { seconds: next }) });
+    }
+  };
+
+  const onResizeEnd = (e: React.PointerEvent) => {
+    if (resizeDrag.current) e.stopPropagation();
+    resizeDrag.current = null;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+  };
+
+  // ── Drag reorder (P2-1): a horizontal pull past the threshold turns the
+  // press into a reorder; releasing over a sibling moves the segment there.
+  // A no-move press stays a click (select-to-edit). ────────────────────────
+  const reorderDrag = useRef<{ segId: string; startX: number; moved: boolean } | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
+
+  const onBlockDown = (seg: TimelineSegment) => (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    reorderDrag.current = { segId: seg.id, startX: e.clientX, moved: false };
+  };
+
+  const onBlockMove = (e: React.PointerEvent) => {
+    const d = reorderDrag.current;
+    if (!d) return;
+    if (!d.moved && Math.abs(e.clientX - d.startX) < REORDER_THRESHOLD_PX) return;
+    d.moved = true;
+    const rect = stripRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0) return;
+    setDropIndex(segmentIndexAtX(segments, e.clientX - rect.left, rect.width));
+  };
+
+  const onBlockUp = (seg: TimelineSegment) => (e: React.PointerEvent) => {
+    const d = reorderDrag.current;
+    reorderDrag.current = null;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+    setDropIndex(null);
+    if (!d || !d.moved) return;
+    const rect = stripRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0) return;
+    const from = segments.findIndex((s) => s.id === seg.id);
+    const to = segmentIndexAtX(segments, e.clientX - rect.left, rect.width);
+    const next = reorderSegments(segments, from, to);
+    if (next !== segments) {
+      patch({
+        segments: next,
+        // Thumbnails show a segment's CONTENT — they travel with it.
+        segment_thumbs: reorderThumbs(segment_thumbs, segments.length, from, to),
+      });
+    }
+  };
   // Border colour only — the badge's dot carries the motion (P1-5).
   const tone = (RUN_STATUS_TONE[run_status] ?? 'border-canvas-line')
     .replace('animate-pulse', '')
@@ -66,27 +164,65 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
 
       <div className="p-3">
         {/* Segment strip — block width ∝ seconds. */}
-        <div className="flex h-14 w-full gap-1" data-testid="timeline-strip">
+        <div className="flex h-14 w-full gap-1" data-testid="timeline-strip" ref={stripRef}>
           {segments.map((seg, i) => (
             <button
               key={seg.id}
               type="button"
               data-testid={`timeline-seg-${seg.id}`}
+              data-failed={failed_index === i ? 'true' : undefined}
               onClick={() => setActiveId(seg.id)}
+              onPointerDown={onBlockDown(seg)}
+              onPointerMove={onBlockMove}
+              onPointerUp={onBlockUp(seg)}
+              onPointerCancel={onBlockUp(seg)}
               style={{ flexGrow: seg.seconds, flexBasis: 0 }}
-              className={`nodrag min-w-6 overflow-hidden rounded-lg border px-1.5 py-1 text-left transition-colors ${
-                seg.id === activeId
-                  ? 'border-canvas-strong bg-canvas-line/40'
-                  : 'border-canvas-line bg-canvas-line/15 hover:bg-canvas-line/30'
+              className={`nodrag relative min-w-6 touch-none overflow-hidden rounded-lg border px-1.5 py-1 text-left transition-colors ${
+                failed_index === i
+                  ? 'border-rose-400/80 bg-rose-400/15'
+                  : seg.id === activeId
+                    ? 'border-canvas-strong bg-canvas-line/40'
+                    : dropIndex === i
+                      ? 'border-canvas-strong/60 bg-canvas-line/30'
+                      : 'border-canvas-line bg-canvas-line/15 hover:bg-canvas-line/30'
               }`}
-              title={`${seg.seconds}s — ${seg.prompt || 'empty'}`}
+              title={
+                failed_index === i
+                  ? `Segment ${i + 1} failed — ${seg.prompt || 'empty'}`
+                  : `${seg.seconds}s — ${seg.prompt || 'empty'}`
+              }
             >
-              <div className="text-[9px] font-bold uppercase tracking-wider text-canvas-muted">
-                {i + 1} · {seg.seconds}s
+              {/* Tail-frame thumbnail underlay (P2-1). */}
+              {segment_thumbs[i] && (
+                <img
+                  data-testid={`timeline-thumb-${i}`}
+                  src={segment_thumbs[i]}
+                  alt=""
+                  draggable={false}
+                  className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-40"
+                  onError={(e) => {
+                    // A purged/stale durable URL must not leave a broken
+                    // glyph under the label.
+                    e.currentTarget.style.display = 'none';
+                  }}
+                />
+              )}
+              <div className="relative text-[9px] font-bold uppercase tracking-wider text-canvas-muted">
+                {i + 1} · {seg.seconds}s{failed_index === i ? ' · ✕' : ''}
               </div>
-              <div className="truncate text-[10px] text-canvas-text">
+              <div className="relative truncate text-[10px] text-canvas-text">
                 {seg.prompt || '—'}
               </div>
+              {/* Right-edge resize grip (P2-1): drag to change seconds. */}
+              <span
+                data-testid={`timeline-resize-${seg.id}`}
+                role="presentation"
+                onPointerDown={onResizeDown(seg)}
+                onPointerMove={onResizeMove}
+                onPointerUp={onResizeEnd}
+                onPointerCancel={onResizeEnd}
+                className="absolute inset-y-0 right-0 w-2 cursor-ew-resize touch-none rounded-r-lg hover:bg-canvas-strong/30"
+              />
             </button>
           ))}
           {segments.length < MAX_TIMELINE_SEGMENTS && (
@@ -151,6 +287,19 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
               }
               aria-label="Segment prompt"
             />
+          </div>
+        )}
+
+        {/* Live per-segment progress (P2-1) — mirrored from the film
+            task's metadata (segments_done / segments_total). */}
+        {running && run_progress && run_progress.total > 0 && (
+          <div
+            data-testid="timeline-progress"
+            className="mt-2 text-[10px] font-bold uppercase tracking-wider text-canvas-muted"
+          >
+            {run_progress.done >= run_progress.total
+              ? 'Stitching film…'
+              : `Segment ${run_progress.done + 1}/${run_progress.total}`}
           </div>
         )}
 

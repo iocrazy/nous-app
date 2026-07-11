@@ -83,3 +83,58 @@ test('segments edit + Run lands the film in a video slot', async ({ page }) => {
   expect((dispatched as { segments: unknown[] }).segments).toHaveLength(3);
   await page.screenshot({ path: 'e2e-artifacts/canvas-timeline.png', fullPage: true });
 });
+
+// ── Minimal-set upgrades (P2-1) ─────────────────────────────────────────────
+
+test('run surfaces per-segment progress and lands tail-frame thumbnails', async ({ page }) => {
+  await openCanvas(page);
+
+  await page.route('**/api/v1/canvases/c-tl/timeline-runs', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { task_id: 'wf-2' } }) }),
+  );
+  // First polls report segment progress + an incremental tail frame; a
+  // later poll completes the film.
+  let polls = 0;
+  await page.route('**/api/v1/canvases/generations/wf-2', (r) => {
+    polls += 1;
+    const body =
+      polls < 3
+        ? { phase: 'in_progress', metadata: { segments_done: 1, segments_total: 2, segment_frames: ['/api/v1/generated-media/71/cover'] } }
+        : { phase: 'completed', metadata: { result_url: '/api/v1/generated-media/9/stream', segment_frames: ['/api/v1/generated-media/71/cover'] } };
+    return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: body }) });
+  });
+
+  await page.getByTestId('smart-timeline-node').getByRole('button', { name: 'Run' }).click();
+  await expect(page.getByTestId('timeline-progress')).toHaveText(/Segment 2\/2/);
+  await expect(page.locator('video')).toHaveAttribute('src', /generated-media\/9\/stream/);
+  // The first segment keeps its tail-frame thumbnail after the run.
+  await expect(page.getByTestId('timeline-thumb-0')).toHaveAttribute('src', /generated-media\/71\/cover/);
+  await page.screenshot({ path: 'e2e-artifacts/canvas-timeline-progress.png', fullPage: true });
+});
+
+test('segment edge drag resizes; block drag reorders (P2-1)', async ({ page }) => {
+  await openCanvas(page);
+
+  const strip = page.getByTestId('timeline-strip');
+  const stripBox = (await strip.boundingBox())!;
+  const pxPerSecond = stripBox.width / 8; // fixture: 5s + 3s
+
+  // Resize: pull s1's right edge one second to the left (5s → 4s).
+  const handle = page.getByTestId('timeline-resize-s1');
+  const hb = (await handle.boundingBox())!;
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(hb.x + hb.width / 2 - pxPerSecond, hb.y + hb.height / 2, { steps: 4 });
+  await page.mouse.up();
+  await expect(page.getByText(/7s total · 2 segments/)).toBeVisible();
+
+  // Reorder: drag s1 over s2's territory → order flips.
+  const s1 = (await page.getByTestId('timeline-seg-s1').boundingBox())!;
+  await page.mouse.move(s1.x + s1.width / 2, s1.y + s1.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(stripBox.x + stripBox.width - 12, s1.y + s1.height / 2, { steps: 6 });
+  await page.mouse.up();
+  const firstBlock = strip.locator('button[data-testid^="timeline-seg-"]').first();
+  await expect(firstBlock).toHaveAttribute('data-testid', 'timeline-seg-s2');
+  await page.screenshot({ path: 'e2e-artifacts/canvas-timeline-reorder.png', fullPage: true });
+});

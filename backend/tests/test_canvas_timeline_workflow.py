@@ -153,3 +153,19 @@ async def test_concat_step_single_segment_short_circuits(tmp_path):
     p.write_bytes(b"fake")
     out = await concat_segments_step(segment_paths=[str(p)])
     assert out == str(p)
+
+
+def test_progress_payload_carries_segment_frames_incrementally():
+    """P2-1: tail frames reach task metadata as they are produced, so the
+    frontend shows per-segment thumbnails mid-run and on failure — not only
+    after a fully successful film."""
+    from app.workflows.canvas_timeline import _progress_payload
+
+    assert _progress_payload(1, 3) == {"segments_done": 1, "segments_total": 3}
+    assert _progress_payload(2, 3, ["u1"]) == {
+        "segments_done": 2,
+        "segments_total": 3,
+        "segment_frames": ["u1"],
+    }
+    # Empty frame lists stay out of the payload (no pointless jsonb churn).
+    assert _progress_payload(1, 3, []) == {"segments_done": 1, "segments_total": 3}

@@ -252,16 +252,29 @@ async def record_timeline_result_step(result: Dict[str, Any]) -> None:
     await get_task_manager().patch_metadata(task_id, result)
 
 
+def _progress_payload(
+    done: int, total: int, segment_frames: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    """Progress metadata (P2-1): tail frames ride along incrementally so the
+    frontend shows per-segment thumbnails mid-run and on failure."""
+    payload: Dict[str, Any] = {"segments_done": done, "segments_total": total}
+    if segment_frames:
+        payload["segment_frames"] = list(segment_frames)
+    return payload
+
+
 @DBOS.step()
-async def note_timeline_progress_step(done: int, total: int) -> None:
-    """Business progress decoration (segments finished / total)."""
+async def note_timeline_progress_step(
+    done: int, total: int, segment_frames: Optional[List[str]] = None
+) -> None:
+    """Business progress decoration (segments finished / total / frames)."""
     from app.services.infra.unified_task_manager import get_task_manager
 
     task_id = DBOS.workflow_id
     if not task_id:
         return
     await get_task_manager().patch_metadata(
-        task_id, {"segments_done": done, "segments_total": total}
+        task_id, _progress_payload(done, total, segment_frames)
     )
 
 
@@ -304,7 +317,7 @@ async def canvas_timeline_workflow(
                 index=index,
             )
             segment_frames.append(guide_url)
-        await note_timeline_progress_step(index + 1, total)
+        await note_timeline_progress_step(index + 1, total, segment_frames)
 
     film_path = await concat_segments_step(segment_paths)
     prompt_summary = " / ".join(str(s.get("prompt") or "")[:40] for s in segments[:3])

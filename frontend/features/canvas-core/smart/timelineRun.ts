@@ -100,9 +100,32 @@ export async function startTimelineRun(timelineId: string): Promise<boolean> {
     if (sameCanvas()) patchNode(timelineId, { data: fields });
   };
 
+  // Segment-level decoration (P2-1): the workflow patches segments_done /
+  // segments_total / segment_frames into the task metadata as it walks the
+  // chain — mirror them onto the node for the "Segment i/N" readout, the
+  // per-block tail-frame thumbnails, and the failed-segment mark.
+  const decorate = (metadata: Record<string, unknown> | undefined) => {
+    if (!metadata) return;
+    const fields: Record<string, unknown> = {};
+    const done = Number(metadata.segments_done);
+    const total = Number(metadata.segments_total);
+    if (Number.isFinite(done) && Number.isFinite(total) && total > 0) {
+      fields.run_progress = { done, total };
+    }
+    if (Array.isArray(metadata.segment_frames)) {
+      fields.segment_thumbs = metadata.segment_frames;
+    }
+    if (Object.keys(fields).length > 0) patchStatus(fields);
+  };
+
   runStore.start(timelineId);
   try {
-    patchStatus({ run_status: 'queued', run_error: null });
+    patchStatus({
+      run_status: 'queued',
+      run_error: null,
+      run_progress: null,
+      failed_index: null,
+    });
     const taskId = await dispatchTimelineRun(startCanvasId, {
       node_id: timelineId,
       segments: segments.map((s) => ({ prompt: s.prompt, seconds: s.seconds })),
@@ -115,29 +138,47 @@ export async function startTimelineRun(timelineId: string): Promise<boolean> {
     const task = await pollGeneration(taskId, {
       intervalMs: state.pollIntervalMs,
       timeoutMs: state.pollTimeoutMs,
+      onTick: (live) => decorate(live.metadata),
     });
 
     if (task.phase !== 'completed') {
+      decorate(task.metadata);
+      const doneCount = Number(task.metadata?.segments_done);
       patchStatus({
         run_status: 'failed',
         run_error: task.error_msg || `timeline run ${task.phase}`,
+        run_progress: null,
+        // segments_done completed segments → the (done)th 0-based segment
+        // is the one that broke.
+        failed_index: Number.isFinite(doneCount) ? doneCount : null,
       });
       return false;
     }
+    decorate(task.metadata);
     const resultUrl = task.metadata?.result_url;
     if (!resultUrl || !sameCanvas()) {
       if (!resultUrl) {
-        patchStatus({ run_status: 'failed', run_error: 'film completed without a result url' });
+        patchStatus({
+          run_status: 'failed',
+          run_error: 'film completed without a result url',
+          run_progress: null,
+        });
       }
       return false;
     }
     upsertFilmSlot(timelineId, String(resultUrl));
-    patchStatus({ run_status: 'succeeded', run_error: null });
+    patchStatus({
+      run_status: 'succeeded',
+      run_error: null,
+      run_progress: null,
+      failed_index: null,
+    });
     return true;
   } catch (err) {
     patchStatus({
       run_status: 'failed',
       run_error: err instanceof Error ? err.message : String(err),
+      run_progress: null,
     });
     return false;
   } finally {
