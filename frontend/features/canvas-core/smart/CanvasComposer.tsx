@@ -43,6 +43,8 @@ import { topoSortPrompts } from './topology';
 import type { OutputKind, PromptNodeData } from './types';
 import { SMART_NODE_TYPES } from './nodes/registry';
 import { parseWorkflow, serializeWorkflow, workflowFilename } from './workflowIO';
+import { fetchWorkflowText, saveWorkflowToLibrary } from './workflowLibrary';
+import { WorkflowLibraryPicker } from './WorkflowLibraryPicker';
 
 const SMART_NODE_TYPE_KEYS = new Set(Object.keys(SMART_NODE_TYPES));
 /** Refuse absurd files before reading them into memory. */
@@ -58,11 +60,15 @@ interface CanvasComposerOptions {
    *  canvas is loaded yet, falls back to the mock so the UX is still
    *  exercisable in isolation. */
   runner?: PromptCaller;
+  /** Team scope for the workflow library glue (②-4) — save/import needs
+   *  the resource-library scope id. Library buttons hide without it. */
+  teamId?: string;
 }
 
 export function CanvasComposer({
   surfaceRef,
   runner: runnerOverride,
+  teamId,
 }: CanvasComposerOptions = {}) {
   const viewport = useCanvasCoreStore((s) => s.viewport);
   const nodes = useCanvasCoreStore((s) => s.nodes);
@@ -261,42 +267,84 @@ export function CanvasComposer({
     }
   }, [nodes, connections, selection]);
 
+  const importWorkflowText = useCallback((text: string) => {
+    setWorkflowError(null);
+    try {
+      const store = useCanvasCoreStore.getState();
+      const payload = parseWorkflow(text, {
+        allowedTypes: SMART_NODE_TYPE_KEYS,
+        expectedKind: store.kind,
+      });
+      const existing = new Set(
+        store.nodes.map((n) => (n as Record<string, unknown>).id as string),
+      );
+      const prepared = prepareDuplicate(payload.nodes, payload.connections, existing);
+      if (!prepared) return;
+      store.setNodes([...store.nodes, ...prepared.nodes]);
+      if (prepared.connections.length > 0) {
+        store.setConnections([...store.connections, ...prepared.connections]);
+      }
+      store.setSelection(
+        prepared.nodes.map((n) => (n as Record<string, unknown>).id as string),
+      );
+    } catch (err) {
+      setWorkflowError(err instanceof Error ? err.message : 'Failed to import workflow');
+    }
+  }, []);
+
   const onImportFile = useCallback(
     async (file: File) => {
       setWorkflowError(null);
+      if (file.size > MAX_WORKFLOW_FILE_BYTES) {
+        setWorkflowError('Workflow file is too large (5 MB limit)');
+        return;
+      }
+      importWorkflowText(await file.text());
+    },
+    [importWorkflowText],
+  );
+
+  // ---- Library glue (②-4): save into / import from the resource library.
+  const [savingToLibrary, setSavingToLibrary] = useState(false);
+  const [libraryNotice, setLibraryNotice] = useState<string | null>(null);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+
+  const onSaveToLibrary = useCallback(async () => {
+    if (!teamId || savingToLibrary) return;
+    const selectedSet = new Set(selection);
+    const selected = nodes.filter((n) =>
+      selectedSet.has((n as Record<string, unknown>).id as string),
+    );
+    if (selected.length === 0) return;
+    setSavingToLibrary(true);
+    setWorkflowError(null);
+    setLibraryNotice(null);
+    try {
+      const payload = serializeWorkflow('smart', selected, connections);
+      const resource = await saveWorkflowToLibrary(payload, teamId);
+      setLibraryNotice(`Saved to library: ${String((resource as { filename?: string }).filename ?? 'workflow')}`);
+    } catch (err) {
+      console.error('[CanvasComposer] save workflow to library failed:', err);
+      setWorkflowError('Failed to save workflow to the library');
+    } finally {
+      setSavingToLibrary(false);
+    }
+  }, [teamId, savingToLibrary, selection, nodes, connections]);
+
+  const onImportFromLibrary = useCallback(
+    async (resourceId: string) => {
+      setWorkflowError(null);
+      setLibraryNotice(null);
       try {
-        if (file.size > MAX_WORKFLOW_FILE_BYTES) {
-          throw new Error('Workflow file is too large (5 MB limit)');
-        }
-        const store = useCanvasCoreStore.getState();
-        const payload = parseWorkflow(await file.text(), {
-          allowedTypes: SMART_NODE_TYPE_KEYS,
-          expectedKind: store.kind,
-        });
-        // Re-id + tag hygiene through the same machinery as paste/duplicate.
-        const existing = new Set(
-          store.nodes.map((n) => (n as Record<string, unknown>).id as string),
-        );
-        const prepared = prepareDuplicate(
-          payload.nodes,
-          payload.connections,
-          existing,
-        );
-        if (!prepared) return;
-        store.setNodes([...store.nodes, ...prepared.nodes]);
-        if (prepared.connections.length > 0) {
-          store.setConnections([...store.connections, ...prepared.connections]);
-        }
-        store.setSelection(
-          prepared.nodes.map((n) => (n as Record<string, unknown>).id as string),
-        );
+        importWorkflowText(await fetchWorkflowText(resourceId));
       } catch (err) {
+        console.error('[CanvasComposer] library import failed:', err);
         setWorkflowError(
-          err instanceof Error ? err.message : 'Failed to import workflow',
+          err instanceof Error ? err.message : 'Failed to import from the library',
         );
       }
     },
-    [],
+    [importWorkflowText],
   );
 
   return (
@@ -329,6 +377,37 @@ export function CanvasComposer({
       <ComposerButton onClick={() => importInputRef.current?.click()}>
         Import
       </ComposerButton>
+      {teamId && (
+        <>
+          <ComposerButton
+            onClick={() => void onSaveToLibrary()}
+            disabled={selection.length === 0 || savingToLibrary}
+          >
+            {savingToLibrary ? 'Saving…' : 'Save'}
+          </ComposerButton>
+          <ComposerButton onClick={() => setLibraryOpen((v) => !v)}>
+            Library
+          </ComposerButton>
+        </>
+      )}
+      {libraryOpen && teamId && (
+        <WorkflowLibraryPicker
+          teamId={teamId}
+          onPick={(id) => {
+            setLibraryOpen(false);
+            void onImportFromLibrary(id);
+          }}
+          onClose={() => setLibraryOpen(false)}
+        />
+      )}
+      {libraryNotice && (
+        <div
+          role="status"
+          className="absolute bottom-full left-1/2 mb-2 -translate-x-1/2 whitespace-nowrap rounded bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white shadow-lg"
+        >
+          {libraryNotice}
+        </div>
+      )}
       <input
         ref={importInputRef}
         data-testid="workflow-import-input"

@@ -218,6 +218,47 @@ test('Group wraps selection; dragging the group moves members (②-3)', async ({
   await expect(page.getByTestId('smart-group-node')).toHaveCount(0);
 });
 
+test('workflow Save → Library import round trip (②-4)', async ({ page }) => {
+  await openCanvas(page);
+
+  let savedBody: string | null = null;
+  await page.route('**/api/v1/resources/upload**', async (route) => {
+    const req = route.request();
+    savedBody = req.postData();
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, data: { id: '501', filename: 'workflow-3nodes.json' } }),
+    });
+  });
+  await page.route('**/api/v1/resources/search*', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        results: [{ id: '501', name: 'workflow-3nodes.json', kind: 'doc' }],
+        counts: { all: 1, video: 0, image: 0, doc: 1, audio: 0, pdf: 0 },
+        next_cursor: null,
+      }),
+    }),
+  );
+  await page.route('**/api/v1/resources/501/file*', (route) => {
+    // Serve back what Save uploaded — a true round trip.
+    const idx = savedBody?.indexOf('{');
+    const json = idx != null && idx >= 0 ? savedBody!.slice(idx, savedBody!.lastIndexOf('}') + 1) : '{}';
+    return route.fulfill({ status: 200, contentType: 'application/json', body: json });
+  });
+
+  await page.locator('.react-flow').click({ position: { x: 30, y: 200 } });
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByRole('status')).toContainText('Saved to library');
+
+  await page.getByRole('button', { name: 'Library', exact: true }).click();
+  await page.getByText('workflow-3nodes.json').click();
+  await expect(page.locator('.react-flow__node')).toHaveCount(6);
+});
+
 test('bare z toggles the overview and returns', async ({ page }) => {
   await openCanvas(page);
 

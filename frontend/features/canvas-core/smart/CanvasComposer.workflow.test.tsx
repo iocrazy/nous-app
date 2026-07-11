@@ -9,6 +9,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string, d?: string) => d ?? k }),
 }));
+vi.mock('./workflowLibrary', () => ({
+  saveWorkflowToLibrary: vi.fn(),
+  fetchWorkflowText: vi.fn(),
+}));
+vi.mock('../../../hooks/useResourceSearch', () => ({
+  useResourceSearch: () => ({
+    data: { results: [{ id: '88', name: 'wf-a.json', kind: 'doc' }] },
+    loading: false,
+  }),
+}));
 
 import { CanvasComposer } from './CanvasComposer';
 import { WORKFLOW_FORMAT } from './workflowIO';
@@ -116,5 +126,53 @@ describe('CanvasComposer — workflow export/import', () => {
     await waitFor(() => {
       expect(screen.getByRole('alert')).toBeTruthy();
     });
+  });
+});
+
+describe('CanvasComposer — library glue (②-4)', () => {
+  it('Save uploads the selected subgraph into the team scope', async () => {
+    const { saveWorkflowToLibrary } = await import('./workflowLibrary');
+    (saveWorkflowToLibrary as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: '77',
+      filename: 'workflow-1nodes.json',
+    });
+    seed(['p1']);
+    render(<CanvasComposer teamId="team-1" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => {
+      expect(saveWorkflowToLibrary).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'smart' }),
+        'team-1',
+      );
+      expect(screen.getByRole('status').textContent).toMatch(/Saved to library/);
+    });
+  });
+
+  it('Library pick fetches the file and imports it', async () => {
+    const { fetchWorkflowText } = await import('./workflowLibrary');
+    (fetchWorkflowText as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+      JSON.stringify({
+        format: WORKFLOW_FORMAT,
+        version: 1,
+        kind: 'smart',
+        nodes: [{ id: 'n1', type: 'prompt', position: { x: 0, y: 0 }, data: { body: 'lib' } }],
+        connections: [],
+      }),
+    );
+    seed([]);
+    render(<CanvasComposer teamId="team-1" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Library' }));
+    fireEvent.click(await screen.findByText('wf-a.json'));
+    await waitFor(() => {
+      expect(fetchWorkflowText).toHaveBeenCalledWith('88');
+      expect(useCanvasCoreStore.getState().nodes).toHaveLength(2);
+    });
+  });
+
+  it('no teamId → no library buttons', () => {
+    seed([]);
+    render(<CanvasComposer />);
+    expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Library' })).toBeNull();
   });
 });
