@@ -30,6 +30,9 @@ import { CLASSIC_NODE_TYPES } from '../classic/ClassicNodeViews';
 import { toReactFlowEdges, validateCanvasConnection } from './connectionMapping';
 import { edgeRunStateClass } from '../smart/edgeRunState';
 import { CanvasEngine } from '../../../canvas-kit/CanvasEngine';
+import { KnifeOverlay } from '../../../canvas-kit/KnifeOverlay';
+import { sampleEdgesFromDom, sampleNodesFromDom } from '../../../canvas-kit/knifeDomSampling';
+import { useKnifeStore } from '../../../canvas-kit/knifeStore';
 import { DragCreateMenu } from './DragCreateMenu';
 
 type AnyNode = Node;
@@ -55,7 +58,17 @@ function toReactFlowNodes(nodes: CanvasNode[]): AnyNode[] {
       obj.measured && typeof obj.measured === 'object'
         ? { measured: obj.measured as { width?: number; height?: number } }
         : {};
-    return { id, position, type, data, ...measured } as AnyNode;
+    // Group container contract (②-3): the group's box lives in `style`
+    // ({width,height} from grouping.ts) and members carry `parentId`.
+    // Both must reach React Flow or the group renders as a 2×2 speck and
+    // members stop riding along on drag — the whitelist silently dropped
+    // them since #1216 (masked in e2e by the pre-#1223 selection dead-lock).
+    const parentId = typeof obj.parentId === 'string' ? { parentId: obj.parentId } : {};
+    const style =
+      obj.style && typeof obj.style === 'object'
+        ? { style: obj.style as Record<string, unknown> }
+        : {};
+    return { id, position, type, data, ...measured, ...parentId, ...style } as AnyNode;
   });
 }
 
@@ -160,11 +173,38 @@ export function CanvasSurface() {
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
-      const next = applyNodeChanges(changes, rfNodes);
+      // Apply against the store's CURRENT nodes, not the render-closure
+      // rfNodes snapshot: a click on a button inside an unselected node
+      // fires patchNode and RF's select change in the SAME tick — merging
+      // the select change into the stale snapshot would silently roll the
+      // patch back (found by the G8 timeline e2e; Retry chips had the same
+      // exposure). rfNodes only adds view-only selected/className derivations
+      // on top of the store, so the change math is identical.
+      // Node `select` changes route into the store's selection ARRAY —
+      // rfNodes derives `selected` from it, so writing a selected field
+      // onto store nodes (the old path) never fed back to React Flow and
+      // clicking a node could never select it (the long-standing
+      // "composer Run stays disabled" backlog bug).
+      const selects = changes.filter((c) => c.type === 'select');
+      if (selects.length > 0) {
+        const store = useCanvasCoreStore.getState();
+        const sel = new Set(store.selection);
+        for (const c of selects) {
+          const change = c as { id: string; selected: boolean };
+          if (change.selected) sel.add(change.id);
+          else sel.delete(change.id);
+        }
+        store.setSelection([...sel]);
+      }
+      const rest = changes.filter((c) => c.type !== 'select');
+      if (rest.length === 0) return;
+      const current = useCanvasCoreStore.getState()
+        .nodes as unknown as typeof rfNodes;
+      const next = applyNodeChanges(rest, current);
       // Fix 1 — mid-drag ticks: ALL changes are position-type with dragging:true.
       // Route these through setNodesDragTick which skips the historyTimer reset,
       // cutting timer-reset churn from O(drag_ticks) to O(1) per drag gesture.
-      const isMidDragOnly = changes.every(
+      const isMidDragOnly = rest.every(
         (c) => c.type === 'position' && (c as { dragging?: boolean }).dragging === true,
       );
       if (isMidDragOnly) {
@@ -176,9 +216,7 @@ export function CanvasSurface() {
       // NOT create undo history or dirty/persist the document — otherwise a
       // mere click or the load-time measure pass saves the canvas and drops a
       // phantom undo step. Route those through the render-only transient path.
-      const hasDocEdit = changes.some(
-        (c) => c.type !== 'select' && c.type !== 'dimensions',
-      );
+      const hasDocEdit = rest.some((c) => c.type !== 'dimensions');
       if (hasDocEdit) {
         setNodes(next as unknown as CanvasNode[]);
       } else {
@@ -313,6 +351,27 @@ export function CanvasSurface() {
     [onConnect, setNodes],
   );
 
+  const knifeActive = useKnifeStore((s) => s.active);
+  const exitKnife = useKnifeStore((s) => s.exit);
+  const onKnifeCut = useCallback(
+    (edgeIds: string[]) => {
+      const cut = new Set(edgeIds);
+      const store = useCanvasCoreStore.getState();
+      store.setConnections(
+        store.connections.filter(
+          (c) => !cut.has(String((c as Record<string, unknown>).id)),
+        ),
+      );
+      // The cut edges may have been selected — drop their view-only flags.
+      setSelectedEdgeIds((prev) => {
+        const next = new Set(prev);
+        for (const id of cut) next.delete(id);
+        return next;
+      });
+    },
+    [],
+  );
+
   const nodeTypes =
     kind === 'smart'
       ? SMART_NODE_TYPES
@@ -326,6 +385,18 @@ export function CanvasSurface() {
   return (
     <CanvasEngine
       themedChrome
+      // Infinite-parity zoom range (P0-6): RF's default 0.5–2 clamp feels
+      // "stuck" next to Infinite's effectively unbounded zoom, and capped
+      // the `z` overview on large graphs.
+      minZoom={0.1}
+      maxZoom={4}
+      // Free placement (P2-6): Infinite has no drag lattice — the one-shot
+      // alignment snap on drop keeps things tidy without the "sticky" feel.
+      snapToGrid={false}
+      // Infinite chrome corners (P1-11): glass minimap bottom-RIGHT, zoom
+      // controls swap to bottom-left so the two clusters don't stack.
+      minimap={{ position: 'bottom-right' }}
+      controls={{ position: 'bottom-left' }}
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       nodes={rfNodes}
@@ -345,6 +416,7 @@ export function CanvasSurface() {
       snapProbeFor={snapProbeFor}
       onSnapConnect={onSnapConnect}
       allowDragCreate
+      paneCreateMenu
       renderCreateMenu={(ctx, onClose) => (
         <DragCreateMenu
           screenPosition={ctx.screenPosition}
@@ -354,6 +426,27 @@ export function CanvasSurface() {
           onClose={onClose}
         />
       )}
+      renderOverlay={(container) =>
+        knifeActive && container ? (
+          <KnifeOverlay
+            sampleEdges={() => sampleEdgesFromDom(container)}
+            sampleNodes={() => sampleNodesFromDom(container)}
+            edgeEndpoints={() => {
+              const map: Record<string, { source: string; target: string }> = {};
+              for (const c of useCanvasCoreStore.getState().connections) {
+                const obj = c as Record<string, unknown>;
+                map[String(obj.id)] = {
+                  source: String(obj.source),
+                  target: String(obj.target),
+                };
+              }
+              return map;
+            }}
+            onCut={onKnifeCut}
+            onExit={exitKnife}
+          />
+        ) : null
+      }
     />
   );
 }

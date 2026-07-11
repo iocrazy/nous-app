@@ -198,4 +198,48 @@ describe('WorkspaceFiles', () => {
       expect(mockService.fetchProjectFiles).toHaveBeenCalledWith('p1', false, 'f1'),
     );
   });
+
+  it('renders pager appends the next page and hides once the cursor is exhausted', async () => {
+    const MORE: RenderItem[] = [
+      { id: 'r3', media_kind: 'image', mime: 'image/png', origin_kind: 'shot_generate', node_id: 's3', created_at: '2026-07-09T00:00:00Z' },
+    ];
+    mockService.fetchProjectRenders
+      .mockReset()
+      .mockResolvedValueOnce({ items: RENDERS, next_cursor: 'cursor-1' })
+      .mockResolvedValueOnce({ items: MORE, next_cursor: null });
+
+    render(<WorkspaceFiles projectId="p1" currentEpisode={null} />);
+    await screen.findByTestId('ws-files-item-render-r1');
+
+    fireEvent.click(await screen.findByTestId('ws-files-load-more'));
+
+    // Next page is appended (r1 stays, r3 arrives) and the pager carried the cursor.
+    expect(await screen.findByTestId('ws-files-item-render-r3')).toBeTruthy();
+    expect(screen.getByTestId('ws-files-item-render-r1')).toBeTruthy();
+    expect(mockService.fetchProjectRenders).toHaveBeenLastCalledWith(
+      'p1',
+      expect.objectContaining({ cursor: 'cursor-1' }),
+    );
+    // Exhausted cursor → pager disappears.
+    await waitFor(() => expect(screen.queryByTestId('ws-files-load-more')).toBeNull());
+  });
+
+  it('does not show the pager when the first page has no next cursor', async () => {
+    render(<WorkspaceFiles projectId="p1" currentEpisode={null} />);
+    await screen.findByTestId('ws-files-item-render-r1');
+    expect(screen.queryByTestId('ws-files-load-more')).toBeNull();
+  });
+
+  it('double-clicking a file opens the FileInfoPanel preview drawer, backdrop closes it', async () => {
+    render(<WorkspaceFiles projectId="p1" currentEpisode={null} />);
+    const fileItem = await screen.findByTestId('ws-files-item-file-file1');
+
+    expect(screen.queryByTestId('ws-files-preview')).toBeNull();
+    fireEvent.doubleClick(fileItem);
+
+    expect(await screen.findByTestId('ws-files-preview')).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('ws-files-preview-backdrop'));
+    await waitFor(() => expect(screen.queryByTestId('ws-files-preview')).toBeNull());
+  });
 });

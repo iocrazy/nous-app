@@ -24,6 +24,11 @@ export type TaskType =
   | 'prompt_caption'
   // 12-dimension bilingual auto-tagging (classify_asset workflow).
   | 'asset_classify'
+  // Smart-canvas image/video generation (canvas_generation_workflow, G4-B1)
+  // and the classic canvas DBOS graph run.
+  | 'canvas_gen'
+  | 'canvas_graph_run'
+  | 'canvas_timeline'
   // Agent execution (chat / issue turns) — sourced from agent_runs, not
   // task_tracking; merged into the Task Center view client-side.
   | 'agent'
@@ -100,6 +105,9 @@ export function getTaskCategory(type: TaskType): TaskCategory {
     case 'prompt_caption':
     case 'asset_classify':
     case 'agent':
+    case 'canvas_gen':
+    case 'canvas_graph_run':
+    case 'canvas_timeline':
       return 'ai';
     default:
       return 'processing';
@@ -789,6 +797,9 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
     asset_classify: 0,
     agent: 0,
     agent_routine: 0,
+    canvas_gen: 0,
+    canvas_graph_run: 0,
+    canvas_timeline: 0,
   };
   for (const [type, n] of Object.entries(state.activeData.byType)) {
     if (type in activeCounts) {
@@ -878,6 +889,9 @@ export function taskTypeLabel(type: TaskType): string {
     case 'prompt_caption': return 'Prompt';
     case 'asset_classify': return 'Auto Tag';
     case 'agent': return 'Agent';
+    case 'canvas_gen': return 'Canvas Generate';
+    case 'canvas_graph_run': return 'Canvas Run';
+    case 'canvas_timeline': return 'Timeline Film';
     default: return type;
   }
 }

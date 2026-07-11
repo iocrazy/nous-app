@@ -40,9 +40,18 @@ describe('SmartEdgeView scissors', () => {
     expect(screen.getByLabelText('Cut connection')).toBeTruthy();
   });
 
-  it('hides the cut button when not selected', () => {
+  it('keeps the cut button present but dimmed when not selected (P1-8)', () => {
     renderEdge(false);
-    expect(screen.queryByLabelText('Cut connection')).toBeNull();
+    const btn = screen.getByLabelText('Cut connection');
+    // Always rendered (Infinite's conn-cut); CSS dims it to .55 until
+    // hover/selection — the active class only rides on selected edges.
+    expect(btn.className).toContain('mh-edge-cut');
+    expect(btn.className).not.toContain('mh-edge-cut--active');
+  });
+
+  it('marks the selected edge scissors active', () => {
+    renderEdge(true);
+    expect(screen.getByLabelText('Cut connection').className).toContain('mh-edge-cut--active');
   });
 
   it('clicking the scissors removes the connection from the store', () => {

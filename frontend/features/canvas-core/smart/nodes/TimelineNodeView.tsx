@@ -1,0 +1,180 @@
+// features/canvas-core/smart/nodes/TimelineNodeView.tsx
+//
+// Timeline director node (G8-F1 — Infinite's LTX director UX, adapted):
+// a horizontal strip of segment blocks (width ∝ seconds), click a block to
+// edit its prompt/length below, Run hands the whole timeline to the
+// backend film workflow (t2v → tail-frame i2v chain → concat).
+
+import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Plus, X } from 'lucide-react';
+import { useState } from 'react';
+
+import { RUN_STATUS_TONE, SMART_NODE_DEFAULT_WIDTH } from '../types';
+import { RunStatusBadge } from './RunStatusBadge';
+import {
+  addSegment,
+  removeSegment,
+  totalSeconds,
+  updateSegment,
+  MAX_TIMELINE_SEGMENTS,
+  type TimelineNodeData,
+} from '../timeline';
+import { startTimelineRun, useTimelineRunStore } from '../timelineRun';
+import { useNodeDataPatch } from './useNodeDataPatch';
+
+export function TimelineNodeView({ id, data, selected }: NodeProps) {
+  const {
+    segments = [],
+    aspect = '',
+    run_status = 'idle',
+    run_error = null,
+  } = data as unknown as TimelineNodeData;
+  const patch = useNodeDataPatch(id);
+  const running = useTimelineRunStore((s) => !!s.running[id]) || run_status === 'running' || run_status === 'queued';
+  const [activeId, setActiveId] = useState<string | null>(segments[0]?.id ?? null);
+  const active = segments.find((s) => s.id === activeId) ?? null;
+  const total = totalSeconds(segments);
+  // Border colour only — the badge's dot carries the motion (P1-5).
+  const tone = (RUN_STATUS_TONE[run_status] ?? 'border-canvas-line')
+    .replace('animate-pulse', '')
+    .trim();
+
+  return (
+    <div
+      data-testid="smart-timeline-node"
+      className={`mh-node ${tone} ${selected ? 'mh-node-selected' : ''}`}
+      style={{ width: SMART_NODE_DEFAULT_WIDTH.timeline ?? 420 }}
+    >
+      <Handle type="target" position={Position.Left} />
+      <div className="mh-node-head">
+        <div className="mh-node-title">Timeline</div>
+        <div className="flex items-center gap-1.5">
+          <RunStatusBadge status={run_status} />
+          <select
+            className="nodrag mh-chip outline-none focus:ring-1 focus:ring-canvas-strong/40"
+            value={aspect}
+            onChange={(e) => patch({ aspect: e.target.value })}
+            aria-label="Aspect ratio"
+          >
+            <option value="">Auto</option>
+            <option value="16:9">16:9</option>
+            <option value="9:16">9:16</option>
+            <option value="1:1">1:1</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="p-3">
+        {/* Segment strip — block width ∝ seconds. */}
+        <div className="flex h-14 w-full gap-1" data-testid="timeline-strip">
+          {segments.map((seg, i) => (
+            <button
+              key={seg.id}
+              type="button"
+              data-testid={`timeline-seg-${seg.id}`}
+              onClick={() => setActiveId(seg.id)}
+              style={{ flexGrow: seg.seconds, flexBasis: 0 }}
+              className={`nodrag min-w-6 overflow-hidden rounded-lg border px-1.5 py-1 text-left transition-colors ${
+                seg.id === activeId
+                  ? 'border-canvas-strong bg-canvas-line/40'
+                  : 'border-canvas-line bg-canvas-line/15 hover:bg-canvas-line/30'
+              }`}
+              title={`${seg.seconds}s — ${seg.prompt || 'empty'}`}
+            >
+              <div className="text-[9px] font-bold uppercase tracking-wider text-canvas-muted">
+                {i + 1} · {seg.seconds}s
+              </div>
+              <div className="truncate text-[10px] text-canvas-text">
+                {seg.prompt || '—'}
+              </div>
+            </button>
+          ))}
+          {segments.length < MAX_TIMELINE_SEGMENTS && (
+            <button
+              type="button"
+              aria-label="Add segment"
+              onClick={() => patch({ segments: addSegment(segments) })}
+              className="nodrag flex w-7 shrink-0 items-center justify-center rounded-lg border border-dashed border-canvas-line text-canvas-muted hover:border-canvas-line-strong hover:text-canvas-text"
+            >
+              <Plus size={12} />
+            </button>
+          )}
+        </div>
+
+        {/* Active segment editor. */}
+        {active && (
+          <div className="mt-2 rounded-lg border border-canvas-line p-2">
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-canvas-muted">
+                Segment {segments.findIndex((s) => s.id === active.id) + 1}
+              </span>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={active.seconds}
+                  aria-label="Segment seconds"
+                  onChange={(e) =>
+                    patch({
+                      segments: updateSegment(segments, active.id, {
+                        seconds: Number(e.target.value),
+                      }),
+                    })
+                  }
+                  className="nodrag w-12 rounded-full border border-canvas-line bg-transparent px-2 py-0.5 text-xs text-canvas-text outline-none focus:ring-1 focus:ring-canvas-strong/40"
+                />
+                <span className="text-[10px] text-canvas-muted">s</span>
+                {segments.length > 1 && (
+                  <button
+                    type="button"
+                    aria-label="Remove segment"
+                    onClick={() => {
+                      const next = removeSegment(segments, active.id);
+                      patch({ segments: next });
+                      setActiveId(next[0]?.id ?? null);
+                    }}
+                    className="text-canvas-muted hover:text-rose-400"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+            </div>
+            <textarea
+              className="nodrag nowheel w-full resize-none bg-transparent text-xs text-canvas-text outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40"
+              rows={2}
+              placeholder="Segment prompt…"
+              value={active.prompt}
+              onChange={(e) =>
+                patch({ segments: updateSegment(segments, active.id, { prompt: e.target.value }) })
+              }
+              aria-label="Segment prompt"
+            />
+          </div>
+        )}
+
+        {run_error && (
+          <div role="alert" className="mt-2 text-[11px] text-rose-400">
+            {run_error}
+          </div>
+        )}
+
+        <div className="mt-2 flex items-center justify-between">
+          <span className="text-[10px] uppercase tracking-wider text-canvas-muted">
+            {total}s total · {segments.length} segment{segments.length === 1 ? '' : 's'}
+          </span>
+          <button
+            type="button"
+            onClick={() => void startTimelineRun(id)}
+            disabled={running || segments.every((s) => !s.prompt.trim())}
+            className="mh-chip !border-canvas-line-strong !text-canvas-text disabled:opacity-50"
+          >
+            {running ? 'Running…' : 'Run'}
+          </button>
+        </div>
+      </div>
+      <Handle type="source" position={Position.Right} />
+    </div>
+  );
+}

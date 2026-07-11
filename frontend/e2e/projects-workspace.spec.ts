@@ -10,9 +10,8 @@ import { setupStubbedSession, TEAM_ID } from './helpers/stubs';
  * Same network-stub approach as projects-phase-b.spec.ts: MediaHub has no
  * runnable dev backend for e2e, so `/api/v1/projects*` is intercepted with
  * deterministic fixtures on top of `setupStubbedSession`'s catch-alls.
- * VITE_FEATURE_PROJECT_WORKSPACE_V2 is baked true in playwright.config.ts's
- * webServer build, so the detail pane is always the new ProjectWorkspace
- * shell for these tests (no per-test flag toggle needed).
+ * The detail pane is always the ProjectWorkspace shell — it is the only
+ * project detail implementation (the legacy surface was retired in PR-18).
  */
 
 const PROJECTS_URL = `/team/${TEAM_ID}/projects`;

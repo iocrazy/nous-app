@@ -2,9 +2,9 @@ import { test, expect, type Page, type Route } from '@playwright/test';
 import { setupStubbedSession, TEAM_ID } from './helpers/stubs';
 
 /**
- * Visual regression stub spec for Projects Phase B (B1 Stage Ring cards +
- * B2 Stage Workbench + B3 data-aware Stage Suggestion) and PR-9 (G7 homepage
- * work queue + grid secondary view), checked against the approved mockups
+ * Visual regression stub spec for Projects Phase B (B1 Stage Ring cards) and
+ * PR-9 (G7 homepage work queue + grid secondary view), plus a smoke of the
+ * ProjectWorkspace detail shell's top bar, checked against the approved mockups
  * (docs/superpowers/specs/2026-07-08-projects-phase-b-mockups.html for the
  * card states, 2026-07-10-projects-workspace-final.html "主页" section for
  * the queue rows).
@@ -92,13 +92,6 @@ const PROJECTS = [
   },
 ];
 
-const STORYBOARD_SUGGESTION = {
-  stage_slug: 'storyboard',
-  kind: 'storyboard_generate',
-  progress: { total: 12, done: 9, empty: 3, generating: 0, failed: 0, script_count: 2, scene_count: 5 },
-  action: { type: 'generate_missing_frames', label_key: 'projects.suggest.ctaGenerate', count: 3 },
-};
-
 /**
  * PR-9 (G7) homepage work-queue batch fixture — deliberately ordered
  * generate-then-stalled here to prove the queue view sorts (stalled first),
@@ -129,10 +122,9 @@ const PROJECT_SUGGESTIONS = [
 
 /**
  * Installs the single `**\/api/v1/projects*` handler that dispatches on
- * pathname to the list / suggestions / stage-catalog / current-stage /
- * stage-suggestion fixtures. Registered after `setupStubbedSession`'s
- * catch-alls, so it wins (Playwright resolves the most-recently-registered
- * matching route first).
+ * pathname to the list / suggestions / stage-catalog / current-stage
+ * fixtures. Registered after `setupStubbedSession`'s catch-alls, so it wins
+ * (Playwright resolves the most-recently-registered matching route first).
  */
 async function routeProjectsApi(
   page: Page,
@@ -157,9 +149,6 @@ async function routeProjectsApi(
     }
     if (opts.withWorkbench && pathname.endsWith('/current_stage')) {
       return route.fulfill({ json: { data: CURRENT_STAGE_STORYBOARD } });
-    }
-    if (opts.withWorkbench && pathname.endsWith('/stage-suggestion')) {
-      return route.fulfill({ json: STORYBOARD_SUGGESTION });
     }
     return route.fallback();
   });
@@ -248,17 +237,12 @@ test.describe('Projects Phase B — Stage Ring alignment', () => {
     await page.screenshot({ path: 'e2e-artifacts/projects-list-phase-b-light.png', fullPage: true });
   });
 
-  // PR-10b (Wave 2) — VITE_FEATURE_PROJECT_WORKSPACE_V2 is now baked true in
-  // playwright.config.ts's webServer build (needed for projects-workspace.spec.ts),
-  // so the detail pane at `${PROJECTS_URL}/1` is the new ProjectWorkspace shell,
-  // not the retired StageWorkbench surface this test originally drove
-  // (`stage-history-btn` / the pills-row `StageSelector`). Updated (not
-  // dropped) to assert the shell's equivalents instead: the MiniStepper is
-  // the exact same component reused verbatim in WorkspaceTopBar (same
-  // `stage-ministep`/`ministep-dot-*` test ids), and StageSuggestion is
-  // reused as-is inside the default Overview module (same `stage-suggestion`/
-  // `suggest-cta` test ids) since VITE_FEATURE_PROJECT_AI_SUGGEST is also on.
-  test('workspace shell top bar + suggestion CTA render for the storyboard stage', async ({ page }) => {
+  // The detail pane at `${PROJECTS_URL}/1` is the ProjectWorkspace shell — now
+  // the only project detail implementation (the legacy StageWorkbench surface
+  // this test originally drove, and its VITE_FEATURE_PROJECT_WORKSPACE_V2 flag,
+  // were retired in PR-18). This smoke asserts the shell's top bar + mini
+  // stepper; the richer Wave 2 module coverage lives in projects-workspace.spec.ts.
+  test('workspace shell top bar renders for the storyboard stage', async ({ page }) => {
     await routeProjectsApi(page, { withWorkbench: true });
     // Deep-link straight into project 1's detail view — ProjectsPage
     // auto-selects the matching row from the (stubbed) list on mount once
@@ -266,18 +250,13 @@ test.describe('Projects Phase B — Stage Ring alignment', () => {
     await page.goto(`${PROJECTS_URL}/1`);
 
     // The workspace shell's top bar renders once the stage catalog +
-    // current stage resolve (flags on via playwright.config.ts webServer env).
+    // current stage resolve.
     await expect(page.getByTestId('workspace-topbar')).toBeVisible({ timeout: 10_000 });
 
     // D2 — the mini stepper (one dot per catalog stage) renders top-right
     // of the top bar (WorkspaceTopBar reuses MiniStepper verbatim).
     await expect(page.getByTestId('stage-ministep')).toBeVisible();
     await expect(page.getByTestId(`ministep-dot-${CURRENT_STAGE_STORYBOARD.slug}`)).toBeVisible();
-
-    // B3 — data-aware suggestion card (reused inside the default Overview
-    // module), CTA driven by `action.count`.
-    await expect(page.getByTestId('stage-suggestion')).toBeVisible();
-    await expect(page.getByTestId('suggest-cta')).toHaveText('Generate 3 frames');
 
     await page.screenshot({
       path: 'e2e-artifacts/projects-workbench-phase-b.png',

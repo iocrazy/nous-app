@@ -21,6 +21,7 @@ import {
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { createOutputNode } from '../factories';
 import { latestHistoryImageUrl } from '../outputHistory';
+import { resolveSourceUrls } from '../promptInputs';
 import { promptIdForOutput, regenerateForOutput } from '../regenerate';
 import { regenKey, useRegenStore } from '../regenStore';
 import type { OutputNodeData } from '../types';
@@ -61,8 +62,17 @@ async function buildPreviewUrl(resourceId: string): Promise<string> {
 }
 
 export function OutputNodeView({ id, data, selected }: NodeProps) {
-  const { kind, resource_id, preview_text, preview_url, crop_region, images, history_for } =
-    data as unknown as OutputNodeData;
+  const {
+    kind,
+    resource_id,
+    preview_text,
+    preview_url,
+    crop_region,
+    images,
+    history_for,
+    gen_pending = 0,
+    gen_failed = 0,
+  } = data as unknown as OutputNodeData;
   const patchData = useNodeDataPatch(id);
   const [editorOpen, setEditorOpen] = useState(false);
   const [committing, setCommitting] = useState(false);
@@ -362,7 +372,6 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
       <Handle
         type="target"
         position={Position.Left}
-        className="!h-2 !w-2 !bg-slate-400"
       />
       <div className="mh-node-head">
         <div className="mh-node-title">
@@ -377,7 +386,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
               onClick={onRegenerate}
               disabled={regenerating}
               title="Re-run the source prompt"
-              className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="mh-chip"
             >
               {regenerating ? 'Rerunning…' : 'Rerun'}
             </button>
@@ -388,7 +397,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
               data-testid="outpaint-open"
               onClick={openOutpaintEditor}
               title="Extend the canvas beyond the image"
-              className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-slate-600 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="mh-chip"
             >
               Expand
             </button>
@@ -399,7 +408,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
               data-testid="mask-cutout-open"
               onClick={openMaskEditor}
               title="Paint a region to cut out"
-              className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-slate-600 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="mh-chip"
             >
               Mask
             </button>
@@ -410,7 +419,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
               data-testid="grid-split-open"
               onClick={openGridEditor}
               title="Split into a grid of tiles"
-              className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-slate-600 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="mh-chip"
             >
               Split
             </button>
@@ -418,14 +427,14 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           {crop_region && (
             <div
               data-testid="crop-region-badge"
-              className="text-[10px] uppercase tracking-wider text-indigo-600"
+              className="text-[10px] uppercase tracking-wider text-canvas-strong"
               title="Crop applied"
             >
               Cropped
             </div>
           )}
           {resource_id && (
-            <div className="text-[10px] uppercase tracking-wider text-emerald-600">
+            <div className="text-[10px] uppercase tracking-wider text-emerald-500">
               Saved
             </div>
           )}
@@ -440,10 +449,12 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         className={`p-3 ${canCrop ? 'cursor-zoom-in' : ''}`}
         title={canCrop ? 'Double-click to crop' : undefined}
       >
-        {images && images.length > 1 ? (
-          /* Multi-result grid (G4-F2): count N lands N images in ONE node. */
+        {gen_pending > 0 || (images?.length ?? 0) + gen_pending > 1 ? (
+          /* Multi-result grid (G4-F2) + in-flight shimmer cells (P0-3):
+             the slot shows WHERE results land the moment the run is
+             dispatched; each finished item replaces a cell as it arrives. */
           <div className="grid grid-cols-2 gap-1" data-testid="output-images-grid">
-            {images.map((img, i) => (
+            {(images ?? []).map((img, i) => (
               <img
                 key={`${img.url}-${i}`}
                 src={img.url}
@@ -451,6 +462,14 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
                 draggable={false}
                 onClick={() => queueLightbox(i)}
                 className="block w-full cursor-zoom-in rounded object-contain"
+              />
+            ))}
+            {Array.from({ length: gen_pending }, (_, i) => (
+              <div
+                key={`pending-${i}`}
+                data-testid="output-pending-cell"
+                aria-label="Generating"
+                className="mh-loading-cell aspect-square w-full rounded"
               />
             ))}
           </div>
@@ -474,12 +493,20 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
             className="block w-full cursor-zoom-in rounded"
           />
         ) : preview_text ? (
-          <div className="line-clamp-4 whitespace-pre-wrap text-sm text-slate-800 dark:text-slate-200">
+          <div className="line-clamp-4 whitespace-pre-wrap text-sm text-canvas-text">
             {preview_text}
           </div>
         ) : (
-          <div className="text-xs italic text-slate-400">
+          <div className="text-xs italic text-canvas-muted">
             {kind === 'text' ? 'No text yet' : `No ${kind} rendered yet`}
+          </div>
+        )}
+        {gen_failed > 0 && (
+          <div
+            data-testid="output-failed-chip"
+            className="mt-1.5 inline-flex items-center rounded-full border border-rose-400/60 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-400"
+          >
+            {`${gen_failed} item${gen_failed > 1 ? 's' : ''} failed`}
           </div>
         )}
       </div>
@@ -568,7 +595,19 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           kind={kind === 'video' ? 'video' : 'image'}
           onIndexChange={setLightboxIndex}
           onClose={() => setLightboxIndex(null)}
-          compareUrl={latestHistoryImageUrl(id)}
+          compareSources={(() => {
+            // Infinite compares result vs the run's INPUT images (thumbnail
+            // picker when several qualify); fall back to the newest archived
+            // version when there was no image input.
+            const promptId = promptIdForOutput(id);
+            if (promptId) {
+              const store = useCanvasCoreStore.getState();
+              const inputs = resolveSourceUrls(promptId, store.nodes, store.connections);
+              if (inputs.length > 0) return inputs.map((url) => ({ url }));
+            }
+            const prev = latestHistoryImageUrl(id);
+            return prev ? [{ url: prev }] : [];
+          })()}
           onRegenerate={canRegenerate ? onRegenerate : undefined}
           regenerating={regenerating}
         />

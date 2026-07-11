@@ -1,16 +1,15 @@
 /**
- * WorkspaceTopBar — the project-condition strip that replaces the old
- * StageWorkbench card once the workspace shell is on (spec frame: 顶部项目
- * 条). Project identity on the left; stage progress + one-click suggestion +
- * Advance on the right, all on one row so they stay visible across every
- * module (not just the stage-tool grid the legacy strip only showed on
- * "Files").
+ * WorkspaceTopBar — the project-condition strip (spec frame: 顶部项目条). Project
+ * identity on the left; a read-only stage read-out on the right (the SOP stage
+ * is informational here — advancing/jumping stages happens elsewhere, not from
+ * this bar). When the studio editor is open it also carries a film "场记板"
+ * (slate) read-out — EP·S — so the writer always knows where they are.
  */
 
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, ArrowRight, Loader2 } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import { MiniStepper } from './MiniStepper';
-import type { ProjectStage, ProjectTab, StageSuggestion } from '../../types';
+import type { ProjectStage } from '../../types';
 
 interface WorkspaceTopBarProps {
   projectName: string;
@@ -19,15 +18,11 @@ interface WorkspaceTopBarProps {
   currentStage: ProjectStage | null;
   currentIndex: number;
   canWrite?: boolean;
-  advancing: boolean;
-  onJumpStage: (stage: ProjectStage) => void;
-  nextStage: ProjectStage | null;
-  onAdvance: () => void;
-  suggestion: StageSuggestion | null;
-  suggestionBusy: boolean;
-  onSuggestionGenerate: () => void;
-  onSuggestionNavigate: (tab: ProjectTab) => void;
+  /** Film slate read-out (studio only): the current episode + scene numbers. */
+  slate?: { ep: number; scene?: number | null } | null;
 }
+
+const noopJump = () => {};
 
 export function WorkspaceTopBar({
   projectName,
@@ -35,19 +30,9 @@ export function WorkspaceTopBar({
   catalog,
   currentStage,
   currentIndex,
-  canWrite = true,
-  advancing,
-  onJumpStage,
-  nextStage,
-  onAdvance,
-  suggestion,
-  suggestionBusy,
-  onSuggestionGenerate,
-  onSuggestionNavigate,
+  slate,
 }: WorkspaceTopBarProps) {
   const { t } = useTranslation();
-  const action = suggestion?.action ?? null;
-  const isGenerate = action?.type === 'generate_missing_frames';
 
   return (
     <div
@@ -67,56 +52,41 @@ export function WorkspaceTopBar({
       </span>
       <span className="text-[13px] font-semibold text-ink-100 truncate">{projectName}</span>
 
+      {slate && (
+        <span
+          data-testid="ws-slate"
+          className="flex items-center gap-1.5 rounded-lg bg-[#16121f] pl-1.5 pr-2.5 py-1 shrink-0"
+        >
+          <span
+            aria-hidden
+            className="w-[22px] h-3 rounded-[3px]"
+            style={{ background: 'repeating-linear-gradient(-45deg,#f4f1fb 0 4px,#16121f 4px 8px)' }}
+          />
+          <span className="font-mono text-[10px] font-semibold tracking-wide text-[#f4f1fb]">
+            EP{slate.ep}
+            {slate.scene ? ` · S${slate.scene}` : ''}
+          </span>
+        </span>
+      )}
+
       <div className="flex-1" />
 
       {catalog.length > 0 && currentStage && (
         <>
+          {/* Read-only: the dots show progress but cannot be jumped from here. */}
           <MiniStepper
             catalog={catalog}
             currentIndex={currentIndex}
-            canWrite={canWrite}
-            advancing={advancing}
-            onJump={onJumpStage}
+            canWrite={false}
+            onJump={noopJump}
           />
           <span
             data-testid="workspace-stage-chip"
-            className="text-[11px] text-[var(--accent-text)] bg-[var(--accent-soft)] rounded-full px-2.5 py-1 font-medium whitespace-nowrap"
+            className="font-mono text-[10px] uppercase tracking-wider text-[var(--stall)] bg-[color-mix(in_srgb,var(--stall)_12%,transparent)] rounded-full px-2.5 py-1 font-semibold whitespace-nowrap"
           >
-            {t(`projects.stages.${currentStage.slug}`, currentStage.name)} · {currentIndex + 1}/{catalog.length}
+            {(currentStage.slug || currentStage.name).toUpperCase()} {currentIndex + 1}/{catalog.length}
           </span>
         </>
-      )}
-
-      {action && (
-        <button
-          data-testid="workspace-suggestion-cta"
-          disabled={suggestionBusy}
-          onClick={() =>
-            isGenerate ? onSuggestionGenerate() : onSuggestionNavigate((action.tab ?? 'files') as ProjectTab)
-          }
-          className={`flex items-center gap-1.5 shrink-0 rounded-lg font-medium text-[12.5px] px-3 py-1.5 transition-colors ${
-            isGenerate
-              ? 'bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 text-white'
-              : 'border border-ink-700 hover:border-ink-500 text-ink-300'
-          }`}
-        >
-          {suggestionBusy ? <Loader2 size={13} className="animate-spin" /> : null}
-          {t(action.label_key, { count: action.count })}
-        </button>
-      )}
-
-      {canWrite && nextStage && (
-        <button
-          data-testid="workspace-advance-btn"
-          onClick={onAdvance}
-          disabled={advancing}
-          className="flex items-center gap-1.5 shrink-0 rounded-lg border border-ink-700 hover:border-ink-500 disabled:opacity-50 text-ink-300 font-medium text-[12.5px] px-3 py-1.5 transition-colors"
-        >
-          {t('projects.workbench.advanceTo', {
-            stage: t(`projects.stages.${nextStage.slug}`, nextStage.name),
-          })}
-          <ArrowRight size={13} />
-        </button>
       )}
     </div>
   );

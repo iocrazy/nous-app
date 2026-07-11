@@ -43,6 +43,8 @@ export interface ShotCardProps {
   shot: Shot;
   /** 1-based fallback number when the shot has no explicit shot_number. */
   index: number;
+  /** Film shot code (e.g. "1A" — scene 1, shot A). Overrides the plain number. */
+  label?: string;
   onUpdate: (shotId: string, data: Partial<Shot>) => void;
   onDelete: (shotId: string) => void;
   /** Generate dispatch. Undefined → the button renders disabled. */
@@ -72,6 +74,7 @@ function edgeFromPointer(el: HTMLElement, clientY: number): 'before' | 'after' {
 function ShotCardImpl({
   shot,
   index,
+  label,
   onUpdate,
   onDelete,
   onGenerate,
@@ -221,8 +224,8 @@ function ShotCardImpl({
         }}
       >
         <header className="mh-shot-head">
-          <span className="mh-scene-num-badge mh-shot-num" aria-label={t('editor.shotNumber')}>
-            {number}
+          <span className="mh-shot-no" aria-label={t('editor.shotNumber')}>
+            {label ?? number}
           </span>
           <div className="mh-shot-status-corner" data-testid="shot-status">
             {shot.status === 'empty' && (

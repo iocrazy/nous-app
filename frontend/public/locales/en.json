@@ -1360,6 +1360,8 @@
         "canvas": "Canvas",
         "episodes": "Episodes",
         "script": "Script",
+        "beats": "Beats",
+        "scenes": "Scenes",
         "storyboard": "Storyboard",
         "renders": "Renders",
         "publish": "Publish",
@@ -1426,7 +1428,9 @@
         "render": "Render",
         "currentEpOnly": "Current episode only",
         "empty": "No files yet",
-        "emptyRenders": "No renders yet"
+        "emptyRenders": "No renders yet",
+        "loadMore": "Load more",
+        "loadingMore": "Loading…"
       },
       "canvasEmpty": "No canvases yet — create one to start sketching this project."
     }
@@ -2609,7 +2613,9 @@
     "insertTag": "Insert #tag",
     "insertCode": "Insert code block",
     "attachFile": "Attach files",
-    "insertLink": "Insert link"
+    "insertLink": "Insert link",
+    "private": "Private",
+    "privateHint": "Notes are private to your account"
   },
   "editor": {
     "brand": "MediaHub Projects",
@@ -2851,6 +2857,7 @@
     "diffKindRemoved": "Removed",
     "diffKindChanged": "Changed",
     "diffKindMoved": "Moved",
-    "diffEmptyLine": "(empty line)"
+    "diffEmptyLine": "(empty line)",
+    "switchEpisode": "Switch episode"
   }
 }

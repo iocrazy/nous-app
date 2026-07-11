@@ -36,3 +36,17 @@ describe('NoteMarkdown', () => {
     expect(screen.getByRole('table')).toBeTruthy();
   });
 });
+
+describe('NoteMarkdown headings/blockquote styling', () => {
+  it('## renders a styled h2, not body text', () => {
+    const { container } = render(<NoteMarkdown source={'## Section title'} />);
+    const h2 = container.querySelector('h2');
+    expect(h2?.textContent).toBe('Section title');
+    expect(h2?.className).toContain('font-bold');
+  });
+
+  it('> renders a styled blockquote', () => {
+    const { container } = render(<NoteMarkdown source={'> quoted'} />);
+    expect(container.querySelector('blockquote')?.className).toContain('border-l-2');
+  });
+});

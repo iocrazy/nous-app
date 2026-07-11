@@ -10,6 +10,7 @@
 import {
   dispatchGenerations,
   pollGeneration,
+  PollStopped,
 } from '../services/canvasGenerationService';
 import type { PromptCaller, RunnerResult } from './runner';
 
@@ -18,6 +19,21 @@ export interface GenerationRunnerDeps {
   /** Poll tuning — tests tighten these. */
   pollIntervalMs?: number;
   pollTimeoutMs?: number;
+  /** Mid-poll lifecycle (G4-F3): 'queued' while the engine still has the
+   *  task in line (jimeng queue), 'running' once it starts. */
+  onPhase?: (promptId: string, phase: 'queued' | 'running') => void;
+  /** Cooperative stop (P0-4) — abandons in-flight polling; the runner
+   *  returns a `stopped` result so the node goes back to idle. */
+  shouldStop?: () => boolean;
+  /** Placeholder lifecycle (P0-3): fired right after dispatch with the
+   *  fan-out size — the caller shows N shimmer cells. */
+  onDispatched?: (promptId: string, count: number, kind: 'image' | 'video') => void;
+  /** First-done-first-shown (P0-3): fired as EACH task completes with a
+   *  url — the caller replaces one shimmer cell. Errors fire with url=null. */
+  onItemSettled?: (
+    promptId: string,
+    item: { url: string | null; kind: 'image' | 'video' },
+  ) => void;
 }
 
 export function withGenerationRunner(
@@ -47,43 +63,81 @@ export function withGenerationRunner(
         model: gen.model ?? '',
         count: gen.kind === 'video' ? 1 : Math.max(1, Math.min(gen.count ?? 1, 8)),
         params,
+        ...(ctx.source_url ? { source_url: ctx.source_url } : {}),
       });
+      deps.onDispatched?.(ctx.promptId, taskIds.length, gen.kind);
 
+      // Fold N tasks' phases into one prompt-level signal: queued while
+      // EVERYTHING is still in line, running once anything starts.
+      let lastPhase: 'queued' | 'running' | null = null;
+      const emit = (phase: 'queued' | 'running') => {
+        if (phase !== lastPhase) {
+          lastPhase = phase;
+          deps.onPhase?.(ctx.promptId, phase);
+        }
+      };
       const tasks = await Promise.all(
         taskIds.map((id) =>
           pollGeneration(id, {
             intervalMs: deps.pollIntervalMs,
             timeoutMs: deps.pollTimeoutMs,
+            onTick: (t) => emit(t.phase === 'queued' ? 'queued' : 'running'),
+            shouldStop: deps.shouldStop,
+          }).then((task) => {
+            // First-done-first-shown (P0-3): surface each item the moment
+            // its own poll settles instead of waiting for the whole batch.
+            const url =
+              task.phase === 'completed' ? task.metadata?.result_url ?? null : null;
+            deps.onItemSettled?.(ctx.promptId, { url, kind: gen.kind });
+            return task;
           }),
         ),
       );
 
-      const failed = tasks.find((t) => t.phase !== 'completed');
-      if (failed) {
+      // Per-item independence (Infinite semantics, P0-2): completed items
+      // always land; failed siblings are reported alongside, never allowed
+      // to throw away good results. The prompt only fails when NOTHING
+      // completed with a url.
+      const failed = tasks.filter((t) => t.phase !== 'completed');
+      const urls = tasks
+        .filter((t) => t.phase === 'completed')
+        .map((t) => t.metadata?.result_url)
+        .filter((u): u is string => Boolean(u));
+      const firstError = failed[0]
+        ? failed[0].error_msg || `generation ${failed[0].phase}`
+        : null;
+      if (urls.length === 0) {
         return {
           ok: false,
           text: '',
-          error: failed.error_msg || `generation ${failed.phase}`,
+          error: firstError ?? 'generation completed without results',
+          media_kind: gen.kind,
         };
-      }
-      const urls = tasks
-        .map((t) => t.metadata?.result_url)
-        .filter((u): u is string => Boolean(u));
-      if (urls.length === 0) {
-        return { ok: false, text: '', error: 'generation completed without results' };
       }
       return {
         ok: true,
         text: urls.join('\n'),
-        error: null,
+        error: failed.length
+          ? `${failed.length} of ${tasks.length} items failed: ${firstError}`
+          : null,
         urls,
         media_kind: gen.kind,
       };
     } catch (err) {
+      if (err instanceof PollStopped) {
+        return {
+          ok: false,
+          stopped: true,
+          text: '',
+          error: 'stopped by user',
+          media_kind: gen.kind,
+        };
+      }
       return {
         ok: false,
         text: '',
         error: err instanceof Error ? err.message : String(err),
+        media_kind: gen.kind,
       };
     }
   };

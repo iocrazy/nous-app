@@ -60,7 +60,9 @@ describe('CanvasSurface — adopted interaction props', () => {
     seed('classic', [{ id: 'a', type: 'output', position: { x: 0, y: 0 }, data: {} }]);
     render(<CanvasSurface />);
     expect(capturedProps.snapGrid).toEqual([8, 8]);
-    expect(capturedProps.snapToGrid).toBe(true);
+    // P2-6: the smart canvas opts OUT of the drag lattice (Infinite's free
+    // placement); the drop-time alignment snap covers tidiness instead.
+    expect(capturedProps.snapToGrid).toBe(false);
     expect(capturedProps.selectionMode).toBe('partial');
     expect(capturedProps.selectionKeyCode).toBe('Shift');
     expect(['Meta', 'Control']).toContain(capturedProps.multiSelectionKeyCode);

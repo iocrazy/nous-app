@@ -28,7 +28,7 @@ export interface PromptResourceRef {
   scope: { type: 'personal' | 'team'; id: string };
 }
 
-export type SmartNodeType = 'shot' | 'prompt' | 'output' | 'loop';
+export type SmartNodeType = 'shot' | 'prompt' | 'output' | 'loop' | 'timeline' | 'group';
 
 export type LoopMode = 'serial' | 'parallel' | 'batch';
 
@@ -101,6 +101,11 @@ export interface LoopSlotTag {
   round_index: number;
 }
 
+export interface GroupNodeData {
+  /** User-editable caption shown in the container corner (②-3). */
+  label?: string;
+}
+
 export interface OutputNodeData {
   kind: OutputKind;
   /**
@@ -109,6 +114,12 @@ export interface OutputNodeData {
    * Absent on legacy nodes (single preview_url behaviour).
    */
   images?: GeneratedImageRef[];
+  /** In-flight generation placeholders (P0-3): cells still waiting for a
+   *  result — rendered as shimmer skeletons so the canvas shows WHERE the
+   *  images will land the moment the run is dispatched. */
+  gen_pending?: number;
+  /** Items of the current batch that failed (P0-3) — surfaced as a chip. */
+  gen_failed?: number;
   /** Set on history-archive nodes: the output node this archives for. */
   history_for?: string;
   /** Snowflake resource id that owns the rendered artifact, when one
@@ -195,6 +206,8 @@ export const SMART_NODE_DEFAULT_WIDTH: Record<SmartNodeType, number> = {
   prompt: 280,
   output: 260,
   loop: 200,
+  timeline: 420,
+  group: 300,
 };
 
 export const LOOP_MODE_TONE: Record<LoopMode, string> = {

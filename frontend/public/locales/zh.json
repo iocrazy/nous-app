@@ -1359,12 +1359,14 @@
         "overview": "总览",
         "canvas": "画布",
         "episodes": "剧集",
-        "script": "脚本",
+        "script": "剧本",
+        "beats": "节拍",
+        "scenes": "场景",
         "storyboard": "分镜",
         "renders": "成片",
         "publish": "发布",
         "characters": "人物",
-        "locations": "场景",
+        "locations": "场景库",
         "files": "文件",
         "trash": "回收站",
         "settings": "设置"
@@ -1426,7 +1428,9 @@
         "render": "成片",
         "currentEpOnly": "仅当前集",
         "empty": "暂无文件",
-        "emptyRenders": "暂无成片"
+        "emptyRenders": "暂无成片",
+        "loadMore": "加载更多",
+        "loadingMore": "加载中…"
       },
       "canvasEmpty": "还没有画布——创建一个开始为这个项目构思。"
     }
@@ -2609,7 +2613,9 @@
     "insertTag": "插入 #标签",
     "insertCode": "插入代码块",
     "attachFile": "添加附件",
-    "insertLink": "插入链接"
+    "insertLink": "插入链接",
+    "private": "私密",
+    "privateHint": "笔记仅自己可见"
   },
   "editor": {
     "brand": "MediaHub Projects",
@@ -2851,6 +2857,7 @@
     "diffKindRemoved": "删除",
     "diffKindChanged": "修改",
     "diffKindMoved": "移动",
-    "diffEmptyLine": "（空行）"
+    "diffEmptyLine": "（空行）",
+    "switchEpisode": "切换剧集"
   }
 }

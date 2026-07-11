@@ -14,7 +14,14 @@
  * here the rail and paper column render a minimal-but-real view of the loaded
  * scenes so the shell is exercised end to end.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MutableRefObject,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   applyOps,
@@ -91,6 +98,9 @@ export function EditorShell({
   projectId: workspaceProjectId,
   initialRailView,
   embedded = false,
+  onScenesChange,
+  onActiveSceneChange,
+  selectSceneRef,
 }: {
   scriptId: string;
   /** Local user identity for collaboration presence (supplied by the route). */
@@ -118,14 +128,20 @@ export function EditorShell({
    */
   initialRailView?: RailView;
   /**
-   * Workspace-fusion mode (PR "融合而不是内嵌"): the shell is mounted inside
-   * the project workspace, which already owns the brand, episode switcher and
-   * episode management. Hides the rail's brand row + episode selector and
-   * flattens the island chrome (transparent shell, hairline column dividers)
-   * so the editor reads as part of the workspace surface instead of an app
-   * nested inside it. Standalone (fullscreen route) stays unchanged.
+   * Studio mode: the shell is mounted inside the project workspace (合一终稿,
+   * 2026-07-11). The workspace tree is the single side navigation, so embedded
+   * drops the editor's OWN left rail entirely — scene navigation is lifted up
+   * to the workspace sidebar via the callbacks below. Standalone (fullscreen
+   * route) keeps its full three-zone rail unchanged.
    */
   embedded?: boolean;
+  /** Studio lift: report the scene list up to the workspace sidebar (embedded). */
+  onScenesChange?: (scenes: SceneDoc[]) => void;
+  /** Studio lift: report the currently highlighted scene up to the sidebar. */
+  onActiveSceneChange?: (sceneId: string | null) => void;
+  /** Studio lift: the workspace writes the internal scene-select fn here so a
+   * sidebar scene click can scroll the matching block into view. */
+  selectSceneRef?: MutableRefObject<((sceneId: string) => void) | null>;
 }) {
   const { t } = useTranslation();
   // Restore the per-script layout engine synchronously so the first paint uses
@@ -358,6 +374,24 @@ export function EditorShell({
     },
     [setActiveScene],
   );
+
+  // ── Studio lift (embedded, 合一终稿 2026-07-11) ─────────────────────────────
+  // Report the scene list + active scene up to the workspace sidebar, and
+  // publish handleSelectScene so a sidebar scene click can reach back in. The
+  // callbacks are undefined for the standalone route (no-op).
+  useEffect(() => {
+    onScenesChange?.(scenes);
+  }, [scenes, onScenesChange]);
+  useEffect(() => {
+    onActiveSceneChange?.(state.activeSceneId);
+  }, [state.activeSceneId, onActiveSceneChange]);
+  useEffect(() => {
+    if (!selectSceneRef) return;
+    selectSceneRef.current = handleSelectScene;
+    return () => {
+      selectSceneRef.current = null;
+    };
+  }, [selectSceneRef, handleSelectScene]);
 
   // Jump from a scene node (double-click) or an outline row (click) back to the
   // script sheet, landing on that scene: switch BOTH axes to Script (the
@@ -835,30 +869,30 @@ export function EditorShell({
         </div>
       )}
 
-      {/* ===== LEFT RAIL ===== */}
-      <nav
-        className={`mh-island mh-rail${railCollapsed ? ' collapsed' : ''}`}
-        aria-label={t('editor.scenesNav')}
-      >
-        {railCollapsed ? (
-          <div className="mh-rail-collapsed-strip">
-            <button
-              type="button"
-              className="mh-icon-btn"
-              aria-label={t('editor.expandLeft')}
-              onClick={() => setRailCollapsed(false)}
-            >
-              ›
-            </button>
-            <span className="mh-brand-dot" aria-hidden="true" />
-          </div>
-        ) : (
-          <>
-            {/* Embedded (workspace fusion): the workspace shell already shows
-                the project brand, the current episode and episode management —
-                repeating them here is what made the mount read as an app
-                nested inside an app. Standalone keeps the full header. */}
-            {!embedded && (
+      {/* ===== LEFT RAIL (standalone only) =====
+          Embedded (studio) mode drops the rail entirely — the workspace tree
+          is the single side navigation and the scene list is lifted up to it
+          (合一终稿, 2026-07-11). The grid is `auto 1fr auto`, so with the nav
+          gone the shell reflows to the two remaining columns. */}
+      {!embedded && (
+        <nav
+          className={`mh-island mh-rail${railCollapsed ? ' collapsed' : ''}`}
+          aria-label={t('editor.scenesNav')}
+        >
+          {railCollapsed ? (
+            <div className="mh-rail-collapsed-strip">
+              <button
+                type="button"
+                className="mh-icon-btn"
+                aria-label={t('editor.expandLeft')}
+                onClick={() => setRailCollapsed(false)}
+              >
+                ›
+              </button>
+              <span className="mh-brand-dot" aria-hidden="true" />
+            </div>
+          ) : (
+            <>
               <div className="mh-rail-top">
                 <div className="mh-brand-row">
                   <span className="mh-brand-dot" aria-hidden="true" />
@@ -898,31 +932,31 @@ export function EditorShell({
                   )}
                 </div>
               </div>
-            )}
-            <RailModules activeView={railView} onSelect={selectRailView} />
-            <div className="mh-rail-scroll">
-              <RailEntities
-                characters={railCharacters}
-                locations={railLocations}
-                onSelect={handleSelectScene}
-              />
-              <section className="mh-rail-section" aria-label={t('editor.scenesLabel')}>
-                <div className="mh-rail-section-head">
-                  <span className="mh-rail-section-label">{t('editor.scenesLabel')}</span>
-                  {scenes.length > 0 && (
-                    <span className="mh-rail-count-badge">{scenes.length}</span>
-                  )}
-                </div>
-                <SceneRail
-                  scenes={scenes}
-                  activeSceneId={state.activeSceneId}
+              <RailModules activeView={railView} onSelect={selectRailView} />
+              <div className="mh-rail-scroll">
+                <RailEntities
+                  characters={railCharacters}
+                  locations={railLocations}
                   onSelect={handleSelectScene}
                 />
-              </section>
-            </div>
-          </>
-        )}
-      </nav>
+                <section className="mh-rail-section" aria-label={t('editor.scenesLabel')}>
+                  <div className="mh-rail-section-head">
+                    <span className="mh-rail-section-label">{t('editor.scenesLabel')}</span>
+                    {scenes.length > 0 && (
+                      <span className="mh-rail-count-badge">{scenes.length}</span>
+                    )}
+                  </div>
+                  <SceneRail
+                    scenes={scenes}
+                    activeSceneId={state.activeSceneId}
+                    onSelect={handleSelectScene}
+                  />
+                </section>
+              </div>
+            </>
+          )}
+        </nav>
+      )}
 
       {/* ===== CENTER PAPER COLUMN ===== */}
       <main className="mh-center-col" aria-label={t('editor.paperColumn')}>

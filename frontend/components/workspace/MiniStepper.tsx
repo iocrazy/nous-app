@@ -1,8 +1,7 @@
 /**
  * MiniStepper — the compact dot-per-stage progress indicator (Phase B B2,
- * design D2). Extracted out of `project/StageWorkbench.tsx` so the PR-10b
- * workspace top bar can reuse the exact same stage-progress affordance
- * without duplicating markup — StageWorkbench now imports this too.
+ * design D2). Originally extracted from the legacy StageWorkbench (retired in
+ * PR-18); the workspace top bar (WorkspaceTopBar) is now its only consumer.
  *
  * Pure rendering + a single "jump to this stage" callback; the caller owns
  * the busy guard and the actual `setCurrentStage` request.

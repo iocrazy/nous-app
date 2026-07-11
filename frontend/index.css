@@ -794,6 +794,39 @@ body {
   border-bottom: 1px solid var(--canvas-line);
   border-radius: calc(var(--canvas-r-node) - 1px) calc(var(--canvas-r-node) - 1px) 0 0;
 }
+/* In-node capsule controls (Infinite's select-lite / tool-btn): 999px
+   pill, hairline border, bold uppercase micro-label. Shared by node-header
+   action buttons and inline selects. */
+.mh-chip {
+  border: 1px solid var(--canvas-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--canvas-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 10px;
+  transition: color 0.14s var(--canvas-ease), border-color 0.14s var(--canvas-ease);
+}
+.mh-chip:hover:not(:disabled) {
+  color: var(--canvas-text);
+  border-color: var(--canvas-line-strong);
+}
+.mh-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Knife trail (Infinite's .link.knife-trail). */
+.mh-knife-trail {
+  stroke: #ef4444;
+  stroke-width: 2.4;
+  stroke-dasharray: 7 6;
+  opacity: 0.88;
+  filter: drop-shadow(0 0 6px rgba(239, 68, 68, 0.35));
+}
+
 .mh-node-title {
   font-size: 11px;
   font-weight: 800;
@@ -853,6 +886,84 @@ body {
 
 .canvas-processing-edge__flow {
   animation: canvas-edge-flow 0.6s linear infinite;
+}
+
+/* Run-status dot breathing (P1-5) — Infinite's nodeStatusPulse: only the
+   dot animates while a run is live; the card itself stays still. */
+@keyframes mh-status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.mh-status-dot--pulse {
+  animation: mh-status-pulse 1s ease-in-out infinite;
+}
+
+/* Hover lift (P1-6) — Infinite's signature micro-motion: every clickable
+   chip/toolbar button nudges up 1px on hover. Scoped to the canvas chrome
+   (chips, glass-island buttons) so the rest of the app is untouched. */
+.mh-chip,
+.canvas-island button {
+  transition:
+    transform 0.14s var(--canvas-ease),
+    color 0.14s var(--canvas-ease),
+    border-color 0.14s var(--canvas-ease),
+    background-color 0.14s var(--canvas-ease);
+}
+.mh-chip:hover:not(:disabled),
+.canvas-island button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+.mh-chip:active:not(:disabled),
+.canvas-island button:active:not(:disabled) {
+  transform: translateY(0) scale(0.97);
+}
+
+/* Edge scissors (P1-8) — Infinite's conn-cut: always present, dimmed to
+   .55 until the edge is hovered or selected. */
+.mh-edge-cut {
+  opacity: 0.55;
+  transition: opacity 0.14s var(--canvas-ease);
+}
+.react-flow__edge:hover .mh-edge-cut,
+.mh-edge-cut--active,
+.mh-edge-cut:hover {
+  opacity: 1;
+}
+
+/* Lightbox shell (P1-12) — Infinite's imageEditModal glass: theme-aware
+   frosted backdrop (dark rgba(2,6,23,.66) / light rgba(248,250,252,.55),
+   both blur-18) + a .16s entrance so the modal stops popping in. */
+/* Opacity-only on the fixed root: a transform here would (a) shrink the
+   fullscreen bounding box mid-entrance (trips the G7 anti-collapse guard)
+   and (b) turn the root into a containing block — the very bug G7 fixed. */
+@keyframes mh-lightbox-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.mh-lightbox-backdrop {
+  background: rgba(2, 6, 23, 0.66);
+  backdrop-filter: blur(18px);
+  animation: mh-lightbox-in 0.16s var(--canvas-ease, ease);
+}
+[data-theme="light"] .mh-lightbox-backdrop {
+  background: rgba(248, 250, 252, 0.55);
+}
+
+/* Generation placeholder shimmer (P0-3) — Infinite's .loading-cell:
+   a soft sweep across the skeleton while the item renders. */
+@keyframes mh-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.mh-loading-cell {
+  background: linear-gradient(
+    100deg,
+    color-mix(in srgb, var(--canvas-line) 45%, transparent) 40%,
+    color-mix(in srgb, var(--canvas-text) 14%, transparent) 50%,
+    color-mix(in srgb, var(--canvas-line) 45%, transparent) 60%
+  );
+  background-size: 200% 100%;
+  animation: mh-shimmer 1.5s ease-in-out infinite;
 }
 
 /* ===== Infinite Canvas Vignette ===== */
@@ -923,13 +1034,59 @@ body {
 }
 
 .mh-canvas .react-flow__handle {
+  /* Infinite's port: a 24px invisible hit area carrying a 12px dot
+     (strong core, card ring + hairline halo) that grows on hover —
+     canvas.css .port/.port::after translated onto RF handles. */
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+}
+.mh-canvas .react-flow__handle::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--canvas-strong);
   border: 2px solid var(--canvas-card);
+  box-shadow: 0 0 0 1px var(--canvas-line-strong);
+  transition: transform 0.14s var(--canvas-ease);
+}
+.mh-canvas .react-flow__handle:hover::after {
+  transform: translate(-50%, -50%) scale(1.25);
+}
+/* Port fade (P1-9) — Infinite's smart ports are invisible until the node is
+   hovered/selected or a wire is being dragged (then EVERY port lights up as
+   a target). Hit areas stay live; only the visual fades. */
+.mh-canvas .react-flow__handle {
+  opacity: 0;
+  transition: opacity 0.14s var(--canvas-ease);
+}
+.mh-canvas .react-flow__node:hover .react-flow__handle,
+.mh-canvas .react-flow__node.selected .react-flow__handle,
+.mh-canvas:has(.react-flow__connection) .react-flow__handle {
+  opacity: 1;
 }
 
 .mh-canvas .react-flow__minimap {
   border-radius: var(--canvas-r-island) !important;
   background: var(--canvas-panel) !important;
   box-shadow: var(--canvas-shadow-island);
+  /* Infinite's minimap island (P1-11): 188×126 glass card with a hairline
+     ring — the bare RF default read as loose grey blocks floating on the
+     page. Sizing goes on the inner svg so the viewBox rescales content. */
+  border: 1px solid var(--canvas-line);
+  backdrop-filter: blur(16px);
+  padding: 6px;
+}
+.mh-canvas .react-flow__minimap svg {
+  width: 176px;
+  height: 114px;
 }
 
 .mh-canvas .react-flow__controls {

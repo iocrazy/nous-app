@@ -5,6 +5,13 @@ import type { PromptGenSettings, PromptNodeData, PromptResourceRef } from '../ty
 import { RUN_STATUS_TONE, SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { useGenerationModels } from './useGenerationModels';
 import { useNodeDataPatch } from './useNodeDataPatch';
+import { rerunPrompt } from '../regenerate';
+import { RunStatusBadge } from './RunStatusBadge';
+import {
+  elapsedSeconds,
+  formatElapsed,
+  useElapsedSeconds,
+} from '../../classic/nodes/elapsed';
 import { useCanvasMentionPicker } from './useCanvasMentionPicker';
 import { CanvasMentionPicker } from './CanvasMentionPicker';
 import { useResourceSearch } from '../../../../hooks/useResourceSearch';
@@ -37,6 +44,8 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     provider_slug,
     run_status,
     run_error,
+    run_started_at = null,
+    run_finished_at = null,
     resource_refs = [],   // default [] for nodes persisted before this field
     gen = null,           // absent = legacy text prompt
   } = data as unknown as PromptNodeData;
@@ -47,7 +56,25 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   // Kind filter for the @-mention picker tabs (All / Video / Image / Doc …)
   const [activeKind, setActiveKind] = useState<ActiveKind>('');
 
-  const haloTone = RUN_STATUS_TONE[run_status];
+  // Smart nodes keep the tone's border colour but drop the whole-card
+  // animate-pulse — the status badge's dot carries the motion (P1-5;
+  // classic mode still uses the full tone string).
+  const haloTone = RUN_STATUS_TONE[run_status].replace('animate-pulse', '').trim();
+
+  // Run-time pill (P1-2, Infinite's .run-time-pill): live seconds while
+  // running, final duration pinned in green once succeeded. The elapsed
+  // helpers are mode-agnostic despite living under classic/ (Phase 5a B4).
+  const running = run_status === 'running';
+  const liveElapsed = useElapsedSeconds(running ? run_started_at : null, running);
+  const finalElapsed =
+    run_status === 'succeeded' && run_started_at && run_finished_at
+      ? elapsedSeconds(run_started_at, new Date(run_finished_at).getTime())
+      : null;
+  const pillText = running
+    ? formatElapsed(liveElapsed)
+    : finalElapsed !== null
+      ? formatElapsed(finalElapsed)
+      : null;
 
   // ── @-mention handler ────────────────────────────────────────────────────
   // Builds a PromptResourceRef from the picked SearchResult and appends it
@@ -98,15 +125,26 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
       <Handle
         type="target"
         position={Position.Left}
-        className="!h-2 !w-2 !bg-ink-400"
       />
       <div className="mh-node-head">
         <div className="mh-node-title">Prompt</div>
         <div className="flex items-center gap-1.5">
+          {run_status === 'failed' && (
+            /* Failed-run retry (G4-F3) — re-dispatch with CURRENT settings
+               and the upstream image input intact. */
+            <button
+              type="button"
+              className="mh-chip !border-rose-400/60 !text-rose-400"
+              onClick={() => void rerunPrompt(id)}
+              title="Re-run this prompt"
+            >
+              Retry
+            </button>
+          )}
           {/* Text stays the legacy LLM path; Image/Video route Run through
               the G4-B1 generation tasks (Infinite composer's kind toggle). */}
           <select
-            className="nodrag rounded border border-ink-200 bg-transparent px-1 py-0 text-[10px] uppercase tracking-wider text-ink-500 outline-none focus:ring-1 focus:ring-indigo-300 dark:border-ink-700 dark:text-ink-400"
+            className="nodrag mh-chip outline-none focus:ring-1 focus:ring-canvas-strong/40"
             value={genKind}
             onChange={(e) => {
               const next = e.target.value;
@@ -126,9 +164,19 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             <option value="image">Image</option>
             <option value="video">Video</option>
           </select>
-          <div className="text-[10px] uppercase tracking-wider text-ink-400">
-            {run_status}
-          </div>
+          {pillText && (
+            <span
+              data-testid="prompt-elapsed"
+              className={`rounded-full px-1.5 py-0.5 font-mono text-[10px] tabular-nums ${
+                running
+                  ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-300'
+                  : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+              }`}
+            >
+              {pillText}
+            </span>
+          )}
+          <RunStatusBadge status={run_status} />
         </div>
       </div>
       {/* relative so the CanvasMentionPicker's `bottom-full` positions above this section */}
@@ -136,7 +184,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
         <textarea
           // nodrag → React Flow doesn't start a drag from this input
           // nowheel → wheel events scroll the textarea instead of zooming canvas
-          className="nodrag nowheel min-h-[3.5rem] w-full resize-y bg-transparent text-sm text-ink-800 outline-none placeholder:text-ink-400 focus:ring-1 focus:ring-indigo-300 dark:text-ink-200"
+          className="nodrag nowheel min-h-[3.5rem] w-full resize-y bg-transparent text-sm text-ink-200 outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40"
           placeholder="What should the model generate? Type @ to reference an asset"
           value={body}
           onChange={mention.handleChange}
@@ -162,7 +210,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
         <div className="mt-2 flex items-center justify-between gap-2 text-xs">
           {!gen && (
             <select
-              className="nodrag flex-1 truncate rounded border border-ink-200 bg-transparent px-1 py-0.5 text-xs text-ink-700 outline-none focus:ring-1 focus:ring-indigo-300 dark:border-ink-700 dark:text-ink-200"
+              className="nodrag flex-1 truncate rounded-full border border-canvas-line bg-transparent px-2.5 py-0.5 text-xs text-canvas-text outline-none focus:ring-1 focus:ring-canvas-strong/40"
               value={provider_slug}
               onChange={(e) => patch({ provider_slug: e.target.value })}
               aria-label="Prompt provider"
@@ -177,7 +225,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
           {gen && (
             <div className="flex flex-1 items-center gap-1.5">
               <select
-                className="nodrag min-w-0 flex-1 truncate rounded border border-ink-200 bg-transparent px-1 py-0.5 text-xs text-ink-700 outline-none focus:ring-1 focus:ring-indigo-300 dark:border-ink-700 dark:text-ink-200"
+                className="nodrag min-w-0 flex-1 truncate rounded-full border border-canvas-line bg-transparent px-2.5 py-0.5 text-xs text-canvas-text outline-none focus:ring-1 focus:ring-canvas-strong/40"
                 value={gen.model}
                 onChange={(e) => patch({ gen: { ...gen, model: e.target.value } })}
                 aria-label="Generation model"
@@ -192,7 +240,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
               {gen.kind === 'image' && (
                 <>
                   <select
-                    className="nodrag rounded border border-ink-200 bg-transparent px-1 py-0.5 text-xs text-ink-700 outline-none focus:ring-1 focus:ring-indigo-300 dark:border-ink-700 dark:text-ink-200"
+                    className="nodrag rounded-full border border-canvas-line bg-transparent px-2.5 py-0.5 text-xs text-canvas-text outline-none focus:ring-1 focus:ring-canvas-strong/40"
                     value={gen.ratio ?? '1:1'}
                     onChange={(e) => patch({ gen: { ...gen, ratio: e.target.value } })}
                     aria-label="Aspect ratio"
@@ -207,7 +255,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                     type="number"
                     min={1}
                     max={8}
-                    className="nodrag w-12 rounded border border-ink-200 bg-transparent px-1 py-0.5 text-xs text-ink-700 outline-none focus:ring-1 focus:ring-indigo-300 dark:border-ink-700 dark:text-ink-200"
+                    className="nodrag w-12 rounded-full border border-canvas-line bg-transparent px-2.5 py-0.5 text-xs text-canvas-text outline-none focus:ring-1 focus:ring-canvas-strong/40"
                     value={gen.count ?? 1}
                     onChange={(e) =>
                       patch({
@@ -223,7 +271,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
               )}
               {gen.kind === 'video' && (
                 <select
-                  className="nodrag rounded border border-ink-200 bg-transparent px-1 py-0.5 text-xs text-ink-700 outline-none focus:ring-1 focus:ring-indigo-300 dark:border-ink-700 dark:text-ink-200"
+                  className="nodrag rounded-full border border-canvas-line bg-transparent px-2.5 py-0.5 text-xs text-canvas-text outline-none focus:ring-1 focus:ring-canvas-strong/40"
                   value={gen.aspect ?? '16:9'}
                   onChange={(e) => patch({ gen: { ...gen, aspect: e.target.value } })}
                   aria-label="Video aspect"
@@ -281,7 +329,6 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
       <Handle
         type="source"
         position={Position.Right}
-        className="!h-2 !w-2 !bg-ink-400"
       />
     </div>
   );

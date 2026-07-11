@@ -104,7 +104,9 @@ const MULTI_SELECT_KEY = detectMultiSelectKey();
 export interface CreateMenuContext {
   screenPosition: { x: number; y: number };
   flowPosition: { x: number; y: number };
-  fromNodeId: string;
+  /** Origin node when the menu came from a wire drop; null for the
+   *  pane double-click / right-click create (P1-1) — no auto-wiring. */
+  fromNodeId: string | null;
   fromHandle: string | null;
 }
 
@@ -147,6 +149,9 @@ export interface CanvasEngineProps {
   nodeTypes?: NodeTypes;
   /** Edge component registry (e.g. smart mode's scissors edge, G6). */
   edgeTypes?: EdgeTypes;
+  /** Extra chrome rendered inside the engine container, above React Flow
+   *  (e.g. the knife overlay). Receives the container element. */
+  renderOverlay?: (container: HTMLElement | null) => ReactNode;
   /** Controlled React Flow nodes (already carrying `selected`). */
   nodes: AnyNode[];
   /** Controlled React Flow edges. */
@@ -157,6 +162,22 @@ export interface CanvasEngineProps {
   viewport?: Viewport;
   /** Fit the graph into view on mount. */
   fitView?: boolean;
+  /**
+   * Zoom bounds. Omitted → React Flow defaults (0.5 / 2). Opt-in like
+   * `themedChrome` so legacy surfaces (editor NodesView) keep their feel;
+   * the Infinite-parity canvas passes a much wider range (P0-6) — Infinite
+   * itself has effectively unbounded zoom. Also lifts the 0.5 clamp that
+   * capped `z` overview / `f` fitView on large graphs.
+   */
+  minZoom?: number;
+  maxZoom?: number;
+  /**
+   * 8px lattice snapping while dragging nodes. Default ON (legacy feel for
+   * the editor NodesView); the Infinite-parity canvas turns it OFF (P2-6) —
+   * Infinite positions nodes freely and the drop-time alignment guides
+   * already cover tidiness.
+   */
+  snapToGrid?: boolean;
   /** Node box for guide + snap math; defaults to measured-size-or-200×120. */
   nodeMeasure?: (node: AnyNode) => { width: number; height: number };
 
@@ -222,6 +243,10 @@ export interface CanvasEngineProps {
   getPorts?: () => SnapPort[];
   /** Render the caller's node picker when a wire drops into empty canvas. */
   renderCreateMenu?: (ctx: CreateMenuContext, onClose: () => void) => ReactNode;
+  /** Open the create menu on pane double-click / right-click (Infinite's
+   *  快捷菜单, P1-1). Disables React Flow's double-click zoom — the two
+   *  gestures can't coexist. Opt-in like themedChrome. */
+  paneCreateMenu?: boolean;
 
   /** MiniMap chrome overrides. */
   minimap?: MinimapConfig;
@@ -235,11 +260,15 @@ export function CanvasEngine({
   themedChrome = false,
   nodeTypes,
   edgeTypes,
+  renderOverlay,
   nodes,
   edges,
   selectedIds,
   viewport,
   fitView = false,
+  minZoom,
+  maxZoom,
+  snapToGrid = true,
   nodeMeasure,
   onNodesChange,
   onEdgesChange,
@@ -261,6 +290,7 @@ export function CanvasEngine({
   allowDragCreate = false,
   getPorts,
   renderCreateMenu,
+  paneCreateMenu = false,
   minimap,
   controls,
 }: CanvasEngineProps) {
@@ -504,6 +534,42 @@ export function CanvasEngine({
     return ports;
   }, []);
 
+  // Pane double-click / right-click → create menu with no origin (P1-1).
+  const openPaneCreateMenu = useCallback(
+    (clientX: number, clientY: number) => {
+      const inst = instanceRef.current;
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!inst || !rect) return;
+      const flowPosition = inst.screenToFlowPosition({ x: clientX, y: clientY });
+      setCreateMenu({
+        screenPosition: { x: clientX - rect.left, y: clientY - rect.top },
+        flowPosition,
+        fromNodeId: null,
+        fromHandle: null,
+      });
+    },
+    [],
+  );
+  const onContainerDoubleClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (!paneCreateMenu) return;
+      // Only the empty pane — nodes/edges/controls keep their own dblclick.
+      if (!(e.target as Element).classList?.contains('react-flow__pane')) return;
+      openPaneCreateMenu(e.clientX, e.clientY);
+    },
+    [paneCreateMenu, openPaneCreateMenu],
+  );
+  const onPaneContextMenu = useCallback(
+    (e: React.MouseEvent | MouseEvent) => {
+      e.preventDefault();
+      openPaneCreateMenu(
+        (e as MouseEvent).clientX,
+        (e as MouseEvent).clientY,
+      );
+    },
+    [openPaneCreateMenu],
+  );
+
   // Drag a wire off a source handle → magnetic snap to a nearby port (routed
   // through the caller's onConnect), or open the create menu on empty canvas.
   const dragToCreate = useDragToCreate({
@@ -564,6 +630,7 @@ export function CanvasEngine({
       ref={containerRef}
       tabIndex={0}
       className={`${themedChrome ? 'mh-canvas ' : ''}relative h-full w-full outline-none`}
+      onDoubleClick={onContainerDoubleClick}
     >
       <ReactFlow
         nodes={displayNodes}
@@ -588,6 +655,10 @@ export function CanvasEngine({
         isValidConnection={allowConnect ? isValidConnection : undefined}
         viewport={viewport}
         fitView={fitView}
+        minZoom={minZoom}
+        maxZoom={maxZoom}
+        zoomOnDoubleClick={!paneCreateMenu}
+        onPaneContextMenu={paneCreateMenu ? onPaneContextMenu : undefined}
         proOptions={{ hideAttribution: true }}
         // 6b.1 — skip rendering nodes/edges whose bounding box lies outside
         // the current viewport.  React Flow re-checks on every pan/zoom so
@@ -595,7 +666,7 @@ export function CanvasEngine({
         onlyRenderVisibleElements
         // Gentle 8px snap lattice + one-time alignment snap on solo drop.
         snapGrid={SNAP_GRID}
-        snapToGrid
+        snapToGrid={snapToGrid}
         // Shift-drag for box select; Cmd/Ctrl adds to the selection; click-drag
         // pans the viewport, matching Figma / Miro / Excalidraw.
         selectionMode={SelectionMode.Partial}
@@ -632,6 +703,7 @@ export function CanvasEngine({
         <GuideOverlay guides={guides} />
       </ReactFlow>
       {createMenu && renderCreateMenu?.(createMenu, () => setCreateMenu(null))}
+      {renderOverlay?.(containerRef.current)}
     </div>
   );
 }

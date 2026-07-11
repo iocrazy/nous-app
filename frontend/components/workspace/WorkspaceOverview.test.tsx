@@ -1,12 +1,11 @@
 /**
- * WorkspaceOverview (PR-10b Wave 1) — the workspace landing module.
+ * WorkspaceOverview (合一终稿, 2026-07-11) — the workspace landing module.
  *
- * Pins: the Continue card surfaces the current episode's title + progress
- * line and its CTA fires the deep-link callback; the summary tiles
- * aggregate episode counts (Episodes/Storyboard) and read straight off the
- * project record (Files/Canvas). StageSuggestion is left disabled here
- * (VITE_FEATURE_PROJECT_AI_SUGGEST is unset in the test env), matching its
- * existing StageWorkbench gating — this suite doesn't need to mock it.
+ * Pins: the film-styled Continue card surfaces the current episode's title +
+ * mono read-out (SC · SHOTS · CUTS) and its CTA fires the deep-link callback;
+ * the summary tiles aggregate episode counts (Episodes/Storyboard) and read
+ * straight off the project record (Files/Canvas). The old StageSuggestion card
+ * is gone (advancing stages happens elsewhere now).
  */
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { describe, expect, it, vi, afterEach } from 'vitest';
@@ -22,10 +21,7 @@ vi.mock('../../utils/relativeTime', () => ({
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string, opts?: Record<string, unknown>) => {
-      if (key === 'projects.workspace.overview.scriptScenes') return `${opts?.count} scenes`;
-      if (key === 'projects.workspace.overview.shotsProgress') return `Shots ${opts?.done}/${opts?.total}`;
-      if (key === 'projects.workspace.overview.rendersCount') return `Renders ${opts?.count}`;
+    t: (key: string) => {
       if (key.startsWith('projects.workspace.modules.')) return key.split('.').pop()!;
       if (key.startsWith('projects.workspace.episodeStatus.')) return key.split('.').pop()!;
       if (key === 'projects.card.activityFile') return 'Added files';
@@ -82,25 +78,23 @@ afterEach(() => cleanup());
 const noop = () => {};
 
 describe('WorkspaceOverview', () => {
-  it('shows the continue card for the current episode and fires the deep-link on click', () => {
+  it('shows the film-styled continue card and fires the deep-link on click', () => {
     const onOpenScript = vi.fn();
     render(
       <WorkspaceOverview
         project={PROJECT}
-        projectId="p1"
-        currentStage={null}
         episodes={EPISODES}
         currentEpisode={EPISODES[0]}
+        epNumber={1}
         onOpenScript={onOpenScript}
-        onSuggestionNavigate={noop}
       />,
     );
 
     const card = screen.getByTestId('ws-continue-card');
     expect(card).toHaveTextContent('Ep 1 — Pilot');
-    expect(card).toHaveTextContent('4 scenes');
-    expect(card).toHaveTextContent('Shots 9/12');
-    expect(card).toHaveTextContent('Renders 1');
+    expect(card).toHaveTextContent('CONTINUE · EP1');
+    // Mono read-out: {scene_count} SC · SHOTS {done}/{total} · CUTS {renders}.
+    expect(card).toHaveTextContent('4 SC · SHOTS 9/12 · CUTS 1');
 
     fireEvent.click(screen.getByTestId('ws-open-studio-btn'));
     expect(onOpenScript).toHaveBeenCalledTimes(1);
@@ -110,12 +104,10 @@ describe('WorkspaceOverview', () => {
     render(
       <WorkspaceOverview
         project={PROJECT}
-        projectId="p1"
-        currentStage={null}
         episodes={EPISODES}
         currentEpisode={EPISODES[0]}
+        epNumber={1}
         onOpenScript={noop}
-        onSuggestionNavigate={noop}
       />,
     );
 
@@ -131,12 +123,10 @@ describe('WorkspaceOverview', () => {
     render(
       <WorkspaceOverview
         project={PROJECT}
-        projectId="p1"
-        currentStage={null}
         episodes={EPISODES}
         currentEpisode={EPISODES[0]}
+        epNumber={1}
         onOpenScript={noop}
-        onSuggestionNavigate={noop}
       />,
     );
     expect(screen.getByTestId('ws-overview-activity')).toHaveTextContent('Added files');
@@ -147,12 +137,10 @@ describe('WorkspaceOverview', () => {
     render(
       <WorkspaceOverview
         project={PROJECT}
-        projectId="p1"
-        currentStage={null}
         episodes={[]}
         currentEpisode={null}
+        epNumber={null}
         onOpenScript={noop}
-        onSuggestionNavigate={noop}
       />,
     );
     expect(screen.queryByTestId('ws-continue-card')).toBeNull();

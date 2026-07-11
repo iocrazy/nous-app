@@ -84,3 +84,77 @@ describe('upsertGenerationSlots', () => {
     expect(useCanvasCoreStore.getState().nodes).toHaveLength(1);
   });
 });
+
+// ── Progressive placeholders (P0-3) ─────────────────────────────────────────
+
+import {
+  appendGenerationResults,
+  beginGenerationSlot,
+  settleGenerationSlot,
+} from './genSlots';
+
+const slotOf = () => {
+  const state = useCanvasCoreStore.getState();
+  const slot = state.nodes.find(
+    (n) => ((n as Record<string, unknown>).data as { gen_slot?: unknown })?.gen_slot,
+  ) as Record<string, unknown> | undefined;
+  return slot?.data as
+    | { images?: Array<{ url: string }>; gen_pending?: number; gen_failed?: number }
+    | undefined;
+};
+
+describe('progressive generation placeholders (P0-3)', () => {
+  it('beginGenerationSlot creates the slot with N pending cells at dispatch', () => {
+    seed();
+    beginGenerationSlot('p1', 3, 'image');
+    const data = slotOf();
+    expect(data?.gen_pending).toBe(3);
+    expect(data?.images ?? []).toHaveLength(0);
+  });
+
+  it('appendGenerationResults fills cells first-done-first-shown', () => {
+    seed();
+    beginGenerationSlot('p1', 2, 'image');
+    appendGenerationResults('p1', ['/gm/2/cover'], 'image');
+    let data = slotOf();
+    expect(data?.images?.map((i) => i.url)).toEqual(['/gm/2/cover']);
+    expect(data?.gen_pending).toBe(1);
+    appendGenerationResults('p1', ['/gm/1/cover'], 'image');
+    data = slotOf();
+    expect(data?.images?.map((i) => i.url)).toEqual(['/gm/2/cover', '/gm/1/cover']);
+    expect(data?.gen_pending).toBe(0);
+  });
+
+  it('re-running archives the previous batch exactly once', () => {
+    seed();
+    beginGenerationSlot('p1', 1, 'image');
+    appendGenerationResults('p1', ['/gm/old/cover'], 'image');
+    beginGenerationSlot('p1', 2, 'image');
+    const data = slotOf();
+    expect(data?.images ?? []).toHaveLength(0);
+    expect(data?.gen_pending).toBe(2);
+    const history = useCanvasCoreStore
+      .getState()
+      .nodes.find(
+        (n) =>
+          ((n as Record<string, unknown>).data as { history_for?: string })
+            ?.history_for,
+      ) as Record<string, unknown> | undefined;
+    expect(history).toBeTruthy();
+    const hImages = (history!.data as { images: Array<{ url: string }> }).images;
+    expect(hImages.map((i) => i.url)).toContain('/gm/old/cover');
+  });
+
+  it('settleGenerationSlot burns pending into failed; clearPending sweeps the rest', () => {
+    seed();
+    beginGenerationSlot('p1', 3, 'image');
+    settleGenerationSlot('p1', { failed: 1 });
+    let data = slotOf();
+    expect(data?.gen_pending).toBe(2);
+    expect(data?.gen_failed).toBe(1);
+    settleGenerationSlot('p1', { clearPending: true });
+    data = slotOf();
+    expect(data?.gen_pending).toBe(0);
+    expect(data?.gen_failed).toBe(1);
+  });
+});

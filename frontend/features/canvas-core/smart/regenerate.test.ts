@@ -158,3 +158,19 @@ describe('regenerateForOutput', () => {
     expect(promptData.run_error).toBe('quota exceeded');
   });
 });
+
+describe('rerunPrompt (G4-F3 failed-retry)', () => {
+  it('re-runs a prompt by id and lands results through the slot channel', async () => {
+    seed();
+    useRegenStore.setState({
+      runnerOverride: async (): Promise<RunnerResult> => ({
+        ok: true, text: '', error: null, urls: ['/gm/3/cover'], media_kind: 'image',
+      }),
+    });
+    const { rerunPrompt } = await import('./regenerate');
+    const ok = await rerunPrompt('p1');
+    expect(ok).toBe(true);
+    const slot = nodeById('out1');
+    expect((slot?.data as { images?: Array<{ url: string }> }).images?.[0].url).toBe('/gm/3/cover');
+  });
+});

@@ -8,8 +8,6 @@ import {
   ReviewComment,
   ReviewStatus,
   ProjectStage,
-  StageHistoryEntry,
-  StageSuggestion,
   ProjectSuggestionItem,
   EpisodeProgress,
   ProjectEntities,
@@ -470,16 +468,6 @@ export const setCurrentStage = async (
   return response.data ?? null;
 };
 
-/** Fetch the project's stage-transition history, newest first (server-ordered DESC). */
-export const fetchStageHistory = async (
-  projectId: string,
-): Promise<StageHistoryEntry[]> => {
-  const response = await apiClient.get<Envelope<StageHistoryEntry[]>>(
-    `/api/v1/projects/${projectId}/stage_history`,
-  );
-  return response.data ?? [];
-};
-
 /**
  * Per-episode progress feed for the workspace shell's Episodes sidebar
  * (PR-10b, spec G12) — script/scene/shot counts + derived status, ordered
@@ -559,19 +547,13 @@ export const fetchProjectRenders = async (
 };
 
 // ============================================
-// Stage suggestion (Phase B B3)
+// Storyboard batch (Phase B B3)
 // ============================================
 
 // NOTE: unlike the stage-catalog / current-stage endpoints above (which the backend
-// wraps as `{data: ...}` and we unwrap via `.data`), PR-1's stage-suggestion and
-// generate-missing endpoints return their response model DIRECTLY (no envelope), so
-// these consume the body as-is. Do not add a `.data` unwrap here — it would be undefined.
-
-/** Fetch the single most-relevant "next step" suggestion for the project's current stage. */
-export const fetchStageSuggestion = async (
-  projectId: string,
-): Promise<StageSuggestion> =>
-  apiClient.get<StageSuggestion>(`/api/v1/projects/${projectId}/stage-suggestion`);
+// wraps as `{data: ...}` and we unwrap via `.data`), the generate-missing endpoint
+// returns its response model DIRECTLY (no envelope), so this consumes the body as-is.
+// Do not add a `.data` unwrap here — it would be undefined.
 
 /** Fire the storyboard one-click batch: dispatch generation for every shot missing a frame. */
 export const generateMissingFrames = async (
@@ -585,7 +567,7 @@ export const generateMissingFrames = async (
 // Homepage work-queue suggestions batch (PR-9, G7)
 // ============================================
 
-// NOTE: same convention as fetchStageSuggestion/generateMissingFrames above —
+// NOTE: same convention as generateMissingFrames above —
 // this endpoint returns its response model DIRECTLY (no `{data}` envelope),
 // so we consume `{items: [...]}` as-is. Do not add a `.data` unwrap here.
 

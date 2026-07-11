@@ -23,12 +23,15 @@
 
 import { useEffect, useRef } from 'react';
 
+import { useKnifeStore } from '../../../canvas-kit/knifeStore';
 import {
   copyToClipboard,
   prepareDuplicate,
   preparePaste,
   readClipboard,
 } from '../store/clipboard';
+import { releaseChildrenOf } from '../smart/grouping';
+import { groupSelection, ungroupNode } from '../smart/grouping';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import type { CanvasNode } from '../types';
 
@@ -86,7 +89,19 @@ export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
         store.selectAll();
         return;
       }
+      if (!meta && (key === 'x' || key === 'X')) {
+        // Knife mode toggle (Infinite parity ②-1). Bare x only — mod+x
+        // stays the browser's cut.
+        useKnifeStore.getState().toggle();
+        return;
+      }
       if (key === 'Escape') {
+        // Knife mode swallows the first Escape — the selection survives.
+        if (useKnifeStore.getState().active) {
+          event.preventDefault();
+          useKnifeStore.getState().exit();
+          return;
+        }
         // Only meaningful when there IS a selection — let other Esc
         // handlers (e.g. dialog dismiss) take precedence by default,
         // but if we own the focus *and* have a selection, eat it.
@@ -126,6 +141,29 @@ export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
         );
         return;
       }
+      if (meta && (key === 'g' || key === 'G')) {
+        // Group / Ungroup (P1-10, Infinite's Ctrl+G / Ctrl+Shift+G). The
+        // data model shipped with ②-3; this is the missing keyboard entry.
+        event.preventDefault();
+        if (event.shiftKey) {
+          const sel = new Set(store.selection);
+          const g = store.nodes.find(
+            (n) =>
+              sel.has((n as { id?: string }).id as string) &&
+              (n as { type?: string }).type === 'group',
+          );
+          if (!g) return;
+          store.setNodes(ungroupNode(store.nodes, String((g as { id?: string }).id)));
+          store.setSelection([]);
+        } else {
+          const result = groupSelection(store.nodes, store.selection);
+          if (!result) return;
+          store.setNodes(result.nodes);
+          store.setSelection([result.groupId]);
+        }
+        return;
+      }
+
       if (meta && (key === 'd' || key === 'D')) {
         // Duplicate in place (G6 — Infinite's alt-drag-copy, keyboard form).
         // Only preventDefault when we actually act: with nothing selected the
@@ -154,7 +192,10 @@ export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
         if (store.selection.length === 0) return;
         event.preventDefault();
         const selected = new Set(store.selection);
-        const remaining = store.nodes.filter((n) => {
+        // Children of deleted groups return to absolute coords instead of
+        // dangling on a missing parentId (React Flow would drop them).
+        const freed = releaseChildrenOf(store.nodes, selected);
+        const remaining = freed.filter((n) => {
           const id = idOf(n);
           return id !== null && !selected.has(id);
         });

@@ -87,20 +87,63 @@ export async function getGeneration(taskId: string): Promise<GenerationTask> {
   return body.data;
 }
 
+/** Thrown by pollGeneration when the caller's shouldStop trips — the
+ *  backend task keeps running (no cancel endpoint yet, G4 挂账); only the
+ *  frontend wait is abandoned. */
+export class PollStopped extends Error {
+  constructor(taskId: string) {
+    super(`polling for generation task ${taskId} stopped by user`);
+    this.name = 'PollStopped';
+  }
+}
+
 /** Poll one task until it reaches a terminal phase (default 2s / 30min). */
 export async function pollGeneration(
   taskId: string,
-  opts: { intervalMs?: number; timeoutMs?: number } = {},
+  opts: {
+    intervalMs?: number;
+    timeoutMs?: number;
+    /** Fired on every non-terminal poll — carries the live task row. */
+    onTick?: (task: GenerationTask) => void;
+    /** Cooperative stop (P0-4) — checked once per poll cycle. */
+    shouldStop?: () => boolean;
+  } = {},
 ): Promise<GenerationTask> {
   const intervalMs = opts.intervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_POLL_TIMEOUT_MS;
   const startedAt = Date.now();
   for (;;) {
+    if (opts.shouldStop?.()) throw new PollStopped(taskId);
     const task = await getGeneration(taskId);
     if (TERMINAL_PHASES.has(task.phase)) return task;
+    opts.onTick?.(task);
     if (Date.now() - startedAt >= timeoutMs) {
       throw new Error(`generation task ${taskId} timed out after ${timeoutMs}ms`);
     }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
+}
+
+// ---- Timeline director (G8) ----------------------------------------------
+
+export interface TimelineRunRequest {
+  node_id: string;
+  segments: Array<{ prompt: string; seconds: number }>;
+  model: string;
+  aspect: string;
+}
+
+/** Dispatch one multi-segment film task; returns its task id. */
+export async function dispatchTimelineRun(
+  canvasId: string,
+  req: TimelineRunRequest,
+): Promise<string> {
+  const response = await apiFetch(`/api/v1/canvases/${canvasId}/timeline-runs`, {
+    method: 'POST',
+    json: req,
+  });
+  const body = (await response.json()) as { data?: { task_id?: string } };
+  const taskId = body.data?.task_id;
+  if (!taskId) throw new Error('timeline dispatch returned no task id');
+  return taskId;
 }

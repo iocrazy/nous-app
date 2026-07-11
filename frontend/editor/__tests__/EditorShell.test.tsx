@@ -108,26 +108,36 @@ describe('EditorShell', () => {
     expect(within(sceneRail).getByText('Rooftop Access')).toBeInTheDocument();
   });
 
-  it('embedded mode hides the rail brand row + episode selector (workspace fusion)', async () => {
+  it('embedded (studio) mode: the whole left rail is gone, scenes lift out via onScenesChange', async () => {
     svc.listScenes.mockResolvedValue(twoScenes);
-    const { container } = render(<EditorShell scriptId="1" embedded />);
-    await waitFor(() => expect(screen.getByRole('navigation')).toBeInTheDocument());
+    const onScenesChange = vi.fn();
+    const { container } = render(
+      <EditorShell scriptId="1" embedded onScenesChange={onScenesChange} />,
+    );
+    await waitFor(() => expect(screen.getByRole('main')).toBeInTheDocument());
 
-    // Duplicated chrome gone: the workspace shell already owns brand +
-    // episode switching/management.
-    expect(screen.queryByLabelText('editor.manageEpisodes')).not.toBeInTheDocument();
+    // The centre + right zones are present, but the entire left rail (the
+    // navigation landmark, its brand row AND the scene list) is dropped — the
+    // workspace tree is the single side navigation now (合一终稿, 2026-07-11).
+    expect(screen.getByRole('complementary')).toBeInTheDocument();
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('scene-rail')).not.toBeInTheDocument();
     expect(container.querySelector('.mh-brand-row')).not.toBeInTheDocument();
-    // Fusion class drives the flattened chrome; the working zones stay.
     expect(container.querySelector('.mh-editor-shell.mh-embedded')).toBeInTheDocument();
-    expect(screen.getByRole('main')).toBeInTheDocument();
-    expect(screen.getByTestId('scene-rail')).toBeInTheDocument();
+
+    // The scene list is reported up to the workspace instead.
+    await waitFor(() => {
+      const last = onScenesChange.mock.calls.at(-1)?.[0];
+      expect(last).toHaveLength(2);
+    });
   });
 
-  it('standalone keeps the rail brand row + episode selector', async () => {
+  it('standalone keeps the rail brand row + episode management selector', async () => {
     svc.listScenes.mockResolvedValue(twoScenes);
     const { container } = render(<EditorShell scriptId="1" />);
     await waitFor(() => expect(screen.getByRole('navigation')).toBeInTheDocument());
     expect(screen.getByLabelText('editor.manageEpisodes')).toBeInTheDocument();
+    expect(container.querySelector('.mh-brand-row')).toBeInTheDocument();
     expect(container.querySelector('.mh-editor-shell.mh-embedded')).not.toBeInTheDocument();
   });
 

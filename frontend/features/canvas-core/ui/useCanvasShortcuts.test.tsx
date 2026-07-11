@@ -341,3 +341,101 @@ describe('useCanvasShortcuts — duplicate (G6, Infinite alt-drag-copy)', () => 
     expect(dup.data.gen_slot).toBeUndefined();
   });
 });
+
+describe('useCanvasShortcuts — knife mode (②-1)', () => {
+  it('bare x toggles knife mode; Escape exits it before touching selection', async () => {
+    const { useKnifeStore } = await import('../../../canvas-kit/knifeStore');
+    useKnifeStore.setState({ active: false });
+    render(<Host />);
+
+    fireKey({ key: 'x' });
+    expect(useKnifeStore.getState().active).toBe(true);
+
+    // Escape leaves knife mode and does NOT clear the selection this press.
+    useCanvasCoreStore.setState({ selection: ['a'] });
+    fireKey({ key: 'Escape' });
+    expect(useKnifeStore.getState().active).toBe(false);
+    expect(useCanvasCoreStore.getState().selection).toEqual(['a']);
+  });
+
+  it('mod+x is left alone (browser cut)', async () => {
+    const { useKnifeStore } = await import('../../../canvas-kit/knifeStore');
+    useKnifeStore.setState({ active: false });
+    render(<Host />);
+    fireKey({ key: 'x', meta: true });
+    expect(useKnifeStore.getState().active).toBe(false);
+  });
+});
+
+describe('useCanvasShortcuts — deleting a group frees its children (②-3)', () => {
+  it('children of a deleted group return to absolute coords instead of dangling', () => {
+    render(<Host />);
+    useCanvasCoreStore.setState({
+      nodes: [
+        { id: 'g1', type: 'group', position: { x: 76, y: 76 }, style: { width: 300, height: 200 }, data: {} },
+        { id: 'a', type: 'shot', position: { x: 24, y: 24 }, parentId: 'g1', data: {} },
+      ] as never,
+      connections: [],
+      selection: ['g1'],
+    });
+    fireKey({ key: 'Delete' });
+    const s = useCanvasCoreStore.getState();
+    expect(s.nodes).toHaveLength(1);
+    const a = s.nodes[0] as unknown as Record<string, unknown>;
+    expect(a.id).toBe('a');
+    expect(a.parentId).toBeUndefined();
+    expect(a.position).toEqual({ x: 100, y: 100 });
+  });
+});
+
+describe('useCanvasShortcuts — group / ungroup (P1-10)', () => {
+  it('mod+G wraps the multi-selection into a group and selects it', () => {
+    useCanvasCoreStore.setState({
+      kind: 'smart',
+      nodes: [
+        { id: 'a', type: 'prompt', position: { x: 0, y: 0 }, measured: { width: 100, height: 60 } },
+        { id: 'b', type: 'output', position: { x: 200, y: 0 }, measured: { width: 100, height: 60 } },
+      ],
+      selection: ['a', 'b'],
+    });
+    render(<Host />);
+    const e = fireKey({ key: 'g', meta: true });
+    expect(e.defaultPrevented).toBe(true);
+    const state = useCanvasCoreStore.getState();
+    const group = state.nodes.find((n) => (n as { type?: string }).type === 'group');
+    expect(group).toBeTruthy();
+    expect(state.selection).toEqual([(group as { id: string }).id]);
+    const a = state.nodes.find((n) => (n as { id?: string }).id === 'a');
+    expect((a as { parentId?: string }).parentId).toBe((group as { id: string }).id);
+  });
+
+  it('mod+Shift+G releases the selected group', () => {
+    useCanvasCoreStore.setState({
+      kind: 'smart',
+      nodes: [
+        { id: 'g1', type: 'group', position: { x: 0, y: 0 }, style: { width: 300, height: 200 }, data: { label: 'G' } },
+        { id: 'a', type: 'prompt', position: { x: 24, y: 24 }, parentId: 'g1' },
+      ],
+      selection: ['g1'],
+    });
+    render(<Host />);
+    fireKey({ key: 'g', meta: true, shift: true });
+    const state = useCanvasCoreStore.getState();
+    expect(state.nodes.some((n) => (n as { type?: string }).type === 'group')).toBe(false);
+    const a = state.nodes.find((n) => (n as { id?: string }).id === 'a');
+    expect((a as { parentId?: string }).parentId).toBeUndefined();
+  });
+
+  it('mod+G with a single node selected is a no-op', () => {
+    useCanvasCoreStore.setState({
+      kind: 'smart',
+      nodes: [{ id: 'a', type: 'prompt', position: { x: 0, y: 0 } }],
+      selection: ['a'],
+    });
+    render(<Host />);
+    fireKey({ key: 'g', meta: true });
+    expect(
+      useCanvasCoreStore.getState().nodes.some((n) => (n as { type?: string }).type === 'group'),
+    ).toBe(false);
+  });
+});

@@ -7,10 +7,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const dispatchGenerations = vi.fn();
 const pollGeneration = vi.fn();
-vi.mock('../services/canvasGenerationService', () => ({
-  dispatchGenerations: (...a: unknown[]) => dispatchGenerations(...a),
-  pollGeneration: (...a: unknown[]) => pollGeneration(...a),
-}));
+vi.mock('../services/canvasGenerationService', async () => {
+  const actual = await vi.importActual<
+    typeof import('../services/canvasGenerationService')
+  >('../services/canvasGenerationService');
+  return {
+    PollStopped: actual.PollStopped,
+    dispatchGenerations: (...a: unknown[]) => dispatchGenerations(...a),
+    pollGeneration: (...a: unknown[]) => pollGeneration(...a),
+  };
+});
 
 import { withGenerationRunner } from './generationRunner';
 import type { RunnerContext, RunnerResult } from './runner';
@@ -105,5 +111,146 @@ describe('withGenerationRunner', () => {
     });
     expect(result.ok).toBe(false);
     expect(result.error).toContain('canvas');
+  });
+});
+
+describe('withGenerationRunner — G4-F3 additions', () => {
+  const GEN_CTX: RunnerContext = {
+    promptId: 'p1',
+    body: 'a cat',
+    provider_slug: '',
+    agent_id: null,
+    gen: { kind: 'image', model: 'm', count: 1 },
+  };
+
+  it('forwards ctx.source_url to the dispatch (i2i / i2v input)', async () => {
+    dispatchGenerations.mockResolvedValue(['t1']);
+    pollGeneration.mockResolvedValue({
+      phase: 'completed',
+      metadata: { result_url: '/gm/1/cover' },
+    });
+    const runner = withGenerationRunner(baseCaller, { canvasId: '9' });
+    await runner({ ...GEN_CTX, source_url: '/api/v1/generated-media/7/cover' });
+    expect(dispatchGenerations).toHaveBeenCalledWith(
+      '9',
+      expect.objectContaining({ source_url: '/api/v1/generated-media/7/cover' }),
+    );
+  });
+
+  it('reports queued → running through onPhase while polling', async () => {
+    dispatchGenerations.mockResolvedValue(['t1']);
+    pollGeneration.mockImplementation(async (_id: string, opts: { onTick?: (t: unknown) => void }) => {
+      opts.onTick?.({ phase: 'queued' });
+      opts.onTick?.({ phase: 'in_progress' });
+      return { phase: 'completed', metadata: { result_url: '/gm/1/cover' } };
+    });
+    const phases: string[] = [];
+    const runner = withGenerationRunner(baseCaller, {
+      canvasId: '9',
+      onPhase: (id, phase) => phases.push(`${id}:${phase}`),
+    });
+    await runner(GEN_CTX);
+    expect(phases).toEqual(['p1:queued', 'p1:running']);
+  });
+});
+
+describe('withGenerationRunner — fan-out partial failure (P0-2)', () => {
+  it('keeps the successful urls when only some tasks fail', async () => {
+    dispatchGenerations.mockResolvedValue(['t1', 't2', 't3']);
+    pollGeneration
+      .mockResolvedValueOnce({
+        phase: 'completed',
+        metadata: { result_url: '/api/v1/generated-media/1/cover' },
+      })
+      .mockResolvedValueOnce({ phase: 'failed', error_msg: 'no credit' })
+      .mockResolvedValueOnce({
+        phase: 'completed',
+        metadata: { result_url: '/api/v1/generated-media/3/cover' },
+      });
+
+    const runner = withGenerationRunner(baseCaller, { canvasId: '9' });
+    const result = await runner({
+      ...TEXT_CTX,
+      gen: { kind: 'image', model: '', count: 3 },
+    });
+
+    // Infinite semantics: good items land, bad ones are reported — never
+    // throw away completed results because a sibling task failed.
+    expect(result.ok).toBe(true);
+    expect(result.urls).toEqual([
+      '/api/v1/generated-media/1/cover',
+      '/api/v1/generated-media/3/cover',
+    ]);
+    expect(result.error).toContain('1 of 3');
+    expect(result.error).toContain('no credit');
+  });
+
+  it('still fails the prompt when every task fails', async () => {
+    dispatchGenerations.mockResolvedValue(['t1', 't2']);
+    pollGeneration
+      .mockResolvedValueOnce({ phase: 'failed', error_msg: 'no credit' })
+      .mockResolvedValueOnce({ phase: 'timeout' });
+
+    const runner = withGenerationRunner(baseCaller, { canvasId: '9' });
+    const result = await runner({
+      ...TEXT_CTX,
+      gen: { kind: 'image', model: '', count: 2 },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('no credit');
+  });
+
+  it('keeps error null when everything succeeds', async () => {
+    dispatchGenerations.mockResolvedValue(['t1']);
+    pollGeneration.mockResolvedValueOnce({
+      phase: 'completed',
+      metadata: { result_url: '/u1' },
+    });
+    const runner = withGenerationRunner(baseCaller, { canvasId: '9' });
+    const result = await runner({
+      ...TEXT_CTX,
+      gen: { kind: 'image', model: '', count: 1 },
+    });
+    expect(result.ok).toBe(true);
+    expect(result.error).toBeNull();
+  });
+});
+
+describe('withGenerationRunner — placeholder lifecycle (P0-3)', () => {
+  it('fires onDispatched with the fan-out size and onItemSettled per item', async () => {
+    dispatchGenerations.mockResolvedValue(['t1', 't2']);
+    let resolveSlow!: (v: unknown) => void;
+    pollGeneration
+      .mockImplementationOnce(
+        () => new Promise((res) => { resolveSlow = res; }),
+      )
+      .mockResolvedValueOnce({
+        phase: 'completed',
+        metadata: { result_url: '/gm/2/cover' },
+      });
+
+    const dispatched: Array<[string, number, string]> = [];
+    const settled: Array<{ url: string | null }> = [];
+    const runner = withGenerationRunner(baseCaller, {
+      canvasId: '9',
+      onDispatched: (id, count, kind) => dispatched.push([id, count, kind]),
+      onItemSettled: (_id, item) => settled.push(item),
+    });
+    const done = runner({
+      ...TEXT_CTX,
+      gen: { kind: 'image', model: '', count: 2 },
+    });
+
+    // The FAST task settles before the slow sibling resolves: first-done-
+    // first-shown, no batch barrier.
+    await vi.waitFor(() => expect(settled).toHaveLength(1));
+    expect(settled[0].url).toBe('/gm/2/cover');
+    expect(dispatched).toEqual([['p1', 2, 'image']]);
+
+    resolveSlow({ phase: 'failed', error_msg: 'boom' });
+    const result = await done;
+    expect(settled).toHaveLength(2);
+    expect(settled[1].url).toBeNull();
+    expect(result.ok).toBe(true); // P0-2: the good item still lands
   });
 });

@@ -928,7 +928,6 @@ export const EDITOR_SHELL_STYLES = `
 .mh-shot-card:active{ cursor:grabbing; }
 .mh-shot-card.dragging{ opacity:0.55; }
 .mh-shot-head{ display:flex; align-items:center; gap:8px; }
-.mh-shot-num{ flex-shrink:0; }
 .mh-shot-status-corner{ flex:1; min-width:0; display:flex; align-items:center; }
 .mh-shot-status{ font-family:var(--mono); font-size:10.5px; font-weight:600; }
 .mh-shot-status.empty{ color:var(--ink-faint); }
@@ -1182,24 +1181,18 @@ export const EDITOR_SHELL_STYLES = `
   border:1px solid var(--hairline); border-radius:999px; padding:3px 8px; cursor:pointer;
 }
 
-/* ===== EMBEDDED — workspace fusion =====
-   Mounted inside the project workspace the shell must read as the SAME
-   surface, not an app nested in a box: the radial page background, the outer
-   padding and the floating island cards all go; the three zones become flat
-   columns separated by hairlines on the workspace's own background. Only the
-   paper sheet keeps elevation (it's the writing artifact, not chrome). */
-.mh-editor-shell.mh-embedded{
-  background:transparent;
-  padding:0;
-  gap:0;
+/* ===== FILM NUMBERING (合一终稿, 2026-07-11) =====
+   Storyboard scene heads read S1/S2 (mono, indigo) and shot codes read 1A/1B
+   (scene number + shot letter) instead of the old plain black number squares —
+   the industry slate convention. Embedded (studio) mode now drops the editor's
+   own rail entirely, so the old episode SWITCH menu that lived here is gone. */
+.mh-sc-mark{
+  font-family:var(--mono); font-size:11px; font-weight:700;
+  color:var(--indigo); letter-spacing:.02em;
 }
-.mh-embedded .mh-island{
-  background:transparent;
-  border:none;
-  border-radius:0;
-  box-shadow:none;
+.mh-shot-no{
+  font-family:var(--mono); font-size:9.5px; font-weight:700; color:var(--indigo);
+  background:var(--indigo-soft); border:1px solid var(--surface-border); border-radius:6px;
+  padding:1.5px 6px; letter-spacing:.03em; flex-shrink:0;
 }
-.mh-embedded .mh-rail{ border-right:1px solid var(--surface-border); padding-top:8px; }
-.mh-embedded .mh-right-col{ border-left:1px solid var(--surface-border); }
-.mh-embedded .mh-center-col{ padding:10px 14px 0; }
 `;

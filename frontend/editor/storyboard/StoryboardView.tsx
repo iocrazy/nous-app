@@ -358,7 +358,7 @@ export function StoryboardView({ scenes, scriptId }: StoryboardViewProps) {
         return (
           <section key={key} className="mh-sb-column" data-testid="storyboard-column" data-scene-id={key}>
             <header className="mh-sb-col-head">
-              <span className="mh-scene-num-badge">{sceneIdx + 1}</span>
+              <span className="mh-sc-mark">S{sceneIdx + 1}</span>
               <span className="mh-sb-col-heading">{heading || t('editor.untitledScene')}</span>
               <button
                 type="button"
@@ -389,6 +389,7 @@ export function StoryboardView({ scenes, scriptId }: StoryboardViewProps) {
                     key={key + ':' + String(shot.id)}
                     shot={shot}
                     index={shotIdx + 1}
+                    label={`${sceneIdx + 1}${String.fromCharCode(65 + shotIdx)}`}
                     onUpdate={(shotId, data) => handleUpdateShot(scene.id, shotId, data)}
                     onDelete={(shotId) => handleDeleteShot(scene.id, shotId)}
                     onGenerate={() => handleGenerate(scene.id, shot)}
