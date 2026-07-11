@@ -199,6 +199,13 @@ test('Group wraps selection; dragging the group moves members (②-3)', async ({
   const group = page.getByTestId('smart-group-node');
   await expect(group).toBeVisible();
 
+  // The group's box comes from `style` (grouping.ts) — if the RF adapter
+  // strips it the region collapses to a speck and this drag would grab a
+  // member instead (the silent ②-3 break this test failed to catch).
+  const groupBox = (await group.boundingBox())!;
+  expect(groupBox.width).toBeGreaterThan(200);
+  expect(groupBox.height).toBeGreaterThan(200);
+
   // Drag the group by its top edge — members must ride along (RF parentId).
   const before = await page
     .locator('.react-flow__node[data-id="p1"]')
@@ -255,7 +262,13 @@ test('workflow Save → Library import round trip (②-4)', async ({ page }) => 
   await expect(page.getByRole('status')).toContainText('Saved to library');
 
   await page.getByRole('button', { name: 'Library', exact: true }).click();
-  await page.getByText('workflow-3nodes.json').click();
+  // Scope to the picker: the save notice carries the same filename text and
+  // sits on the same anchor — an unscoped getByText can hit the toast and
+  // "import" nothing (how this test shipped red).
+  await page
+    .getByTestId('workflow-library-picker')
+    .getByText('workflow-3nodes.json')
+    .click();
   await expect(page.locator('.react-flow__node')).toHaveCount(6);
 });
 
