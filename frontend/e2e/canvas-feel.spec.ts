@@ -330,6 +330,8 @@ test('node drag is free of the 8px lattice (P2-6)', async ({ page }) => {
   const x = Number(m[1]);
   // 60 + 13 = 73 — an 8px lattice would have clamped this to 72.
   expect(x % 8).not.toBe(0);
+});
+
 test('double-click empty canvas opens the create menu; picking adds an unwired node (P1-1)', async ({ page }) => {
   await openCanvas(page);
   await expect(page.locator('.react-flow__edge')).toHaveCount(2);
