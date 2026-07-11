@@ -130,7 +130,7 @@ test('image click opens the lightbox; arrows navigate; Escape closes', async ({ 
   await expect(lightbox).toHaveCount(0);
 });
 
-test('history-backed slot offers Compare with a working slider', async ({ page }) => {
+test('history-backed slot offers Compare with a draggable divider', async ({ page }) => {
   await openCanvas(page);
 
   await page.locator('[data-testid="output-images-grid"] img').first().click();
@@ -138,8 +138,19 @@ test('history-backed slot offers Compare with a working slider', async ({ page }
 
   const result = page.getByTestId('compare-result');
   await expect(result).toBeVisible();
-  await page.getByRole('slider').fill('20');
-  await expect(result).toHaveCSS('clip-path', /80%/);
+
+  // P1-4: the divider itself is the drag target — grab its grip and pull
+  // it to 20% of the compare stage; the result layer clips to match.
+  const stage = await page.getByTestId('compare-stage').boundingBox();
+  const divider = await page.getByTestId('compare-divider').boundingBox();
+  expect(stage && divider).toBeTruthy();
+  await page.mouse.move(divider!.x + divider!.width / 2, divider!.y + divider!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(stage!.x + stage!.width * 0.2, divider!.y + divider!.height / 2, {
+    steps: 5,
+  });
+  await page.mouse.up();
+  await expect(result).toHaveCSS('clip-path', /80/);
   await page.screenshot({ path: 'e2e-artifacts/canvas-media-compare.png', fullPage: true });
 });
 

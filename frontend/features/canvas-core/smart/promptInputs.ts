@@ -14,19 +14,44 @@ const DURABLE_PREFIX = '/api/v1/generated-media/';
 
 const asObj = (n: unknown) => n as Record<string, unknown>;
 
-function durableImageOf(node: CanvasNode): string | null {
-  if (asObj(node).type !== 'output') return null;
+function durableImagesOf(node: CanvasNode): string[] {
+  if (asObj(node).type !== 'output') return [];
   const data = (asObj(node).data ?? {}) as OutputNodeData;
+  const refs: GeneratedImageRef[] = Array.isArray(data.images)
+    ? (data.images as GeneratedImageRef[])
+    : [];
   const candidates: Array<string | null | undefined> = [
-    ...(Array.isArray(data.images)
-      ? (data.images as GeneratedImageRef[]).map((i) => i.url)
-      : []),
+    // Video refs are excluded: they are neither i2i sources nor <img>-able
+    // compare underlays.
+    ...refs.filter((i) => i.kind !== 'video').map((i) => i.url),
     data.preview_url,
   ];
-  for (const url of candidates) {
-    if (typeof url === 'string' && url.startsWith(DURABLE_PREFIX)) return url;
+  return candidates.filter(
+    (url): url is string => typeof url === 'string' && url.startsWith(DURABLE_PREFIX),
+  );
+}
+
+/** Every durable generated image feeding into a prompt, in connection
+ *  order, deduped — the multi-source compare list (P1-4). */
+export function resolveSourceUrls(
+  promptId: string,
+  nodes: CanvasNode[],
+  connections: CanvasConnection[],
+): string[] {
+  const byId = new Map(nodes.map((n) => [String(asObj(n).id), n]));
+  const seen = new Set<string>();
+  const urls: string[] = [];
+  for (const c of connections) {
+    if (String(c.target) !== promptId) continue;
+    const upstream = byId.get(String(c.source));
+    if (!upstream) continue;
+    for (const url of durableImagesOf(upstream)) {
+      if (seen.has(url)) continue;
+      seen.add(url);
+      urls.push(url);
+    }
   }
-  return null;
+  return urls;
 }
 
 /** First durable generated image feeding into a prompt, or null. */
@@ -35,13 +60,5 @@ export function resolveSourceUrl(
   nodes: CanvasNode[],
   connections: CanvasConnection[],
 ): string | null {
-  const byId = new Map(nodes.map((n) => [String(asObj(n).id), n]));
-  for (const c of connections) {
-    if (String(c.target) !== promptId) continue;
-    const upstream = byId.get(String(c.source));
-    if (!upstream) continue;
-    const url = durableImageOf(upstream);
-    if (url) return url;
-  }
-  return null;
+  return resolveSourceUrls(promptId, nodes, connections)[0] ?? null;
 }

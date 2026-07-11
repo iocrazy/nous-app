@@ -21,7 +21,7 @@ import {
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { createOutputNode } from '../factories';
 import { latestHistoryImageUrl } from '../outputHistory';
-import { resolveSourceUrl } from '../promptInputs';
+import { resolveSourceUrls } from '../promptInputs';
 import { promptIdForOutput, regenerateForOutput } from '../regenerate';
 import { regenKey, useRegenStore } from '../regenStore';
 import type { OutputNodeData } from '../types';
@@ -595,16 +595,18 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           kind={kind === 'video' ? 'video' : 'image'}
           onIndexChange={setLightboxIndex}
           onClose={() => setLightboxIndex(null)}
-          compareUrl={(() => {
-            // Infinite compares result vs the run's INPUT image; fall back
-            // to the newest archived version when there was no image input.
+          compareSources={(() => {
+            // Infinite compares result vs the run's INPUT images (thumbnail
+            // picker when several qualify); fall back to the newest archived
+            // version when there was no image input.
             const promptId = promptIdForOutput(id);
             if (promptId) {
               const store = useCanvasCoreStore.getState();
-              const input = resolveSourceUrl(promptId, store.nodes, store.connections);
-              if (input) return input;
+              const inputs = resolveSourceUrls(promptId, store.nodes, store.connections);
+              if (inputs.length > 0) return inputs.map((url) => ({ url }));
             }
-            return latestHistoryImageUrl(id);
+            const prev = latestHistoryImageUrl(id);
+            return prev ? [{ url: prev }] : [];
           })()}
           onRegenerate={canRegenerate ? onRegenerate : undefined}
           regenerating={regenerating}
