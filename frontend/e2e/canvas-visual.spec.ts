@@ -81,6 +81,12 @@ test.describe('canvas token base (Phase 0 G10)', () => {
   });
 });
 
+const SEARCH_STUB = {
+  results: [],
+  counts: { all: 0, video: 0, image: 0, doc: 0, audio: 0, pdf: 0 },
+  next_cursor: null,
+};
+
 test('ports fade in on node hover (P1-9)', async ({ page }) => {
   await seedTheme(page, 'dark');
   await setupStubbedSession(page);
@@ -106,11 +112,7 @@ test('ports fade in on node hover (P1-9)', async ({ page }) => {
     }),
   );
   await page.route('**/api/v1/resources/search*', (r) =>
-    r.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ results: [], counts: { all: 0, video: 0, image: 0, doc: 0, audio: 0, pdf: 0 }, next_cursor: null }),
-    }),
+    r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(SEARCH_STUB) }),
   );
   await page.goto(`/team/${TEAM_ID}/canvas/c-ports`);
   const node = page.locator('.react-flow__node').first();
@@ -122,4 +124,22 @@ test('ports fade in on node hover (P1-9)', async ({ page }) => {
   await expect.poll(opacityOf).toBe('0');
   await node.hover();
   await expect.poll(opacityOf).toBe('1');
+});
+
+test('composer buttons lift 1px on hover (P1-6)', async ({ page }) => {
+  await seedTheme(page, 'dark');
+  await setupStubbedSession(page);
+  await setupCanvasStubs(page);
+  await page.route('**/api/v1/resources/search*', (r) =>
+    r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(SEARCH_STUB) }),
+  );
+  await page.goto(`/team/${TEAM_ID}/canvas/c-visual`);
+  const btn = page
+    .getByLabel('Smart canvas composer')
+    .getByRole('button', { name: '+ Prompt' });
+  await expect(btn).toBeVisible();
+  await btn.hover();
+  await expect
+    .poll(() => btn.evaluate((el) => getComputedStyle(el as HTMLElement).transform))
+    .toBe('matrix(1, 0, 0, 1, 0, -1)');
 });

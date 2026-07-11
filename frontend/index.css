@@ -888,6 +888,26 @@ body {
   animation: canvas-edge-flow 0.6s linear infinite;
 }
 
+/* Hover lift (P1-6) — Infinite's signature micro-motion: every clickable
+   chip/toolbar button nudges up 1px on hover. Scoped to the canvas chrome
+   (chips, glass-island buttons) so the rest of the app is untouched. */
+.mh-chip,
+.canvas-island button {
+  transition:
+    transform 0.14s var(--canvas-ease),
+    color 0.14s var(--canvas-ease),
+    border-color 0.14s var(--canvas-ease),
+    background-color 0.14s var(--canvas-ease);
+}
+.mh-chip:hover:not(:disabled),
+.canvas-island button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+.mh-chip:active:not(:disabled),
+.canvas-island button:active:not(:disabled) {
+  transform: translateY(0) scale(0.97);
+}
+
 /* Edge scissors (P1-8) — Infinite's conn-cut: always present, dimmed to
    .55 until the edge is hovered or selected. */
 .mh-edge-cut {
