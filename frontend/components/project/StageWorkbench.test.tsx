@@ -211,8 +211,9 @@ describe('StageWorkbench', () => {
     expect(currentDot.className).toContain('ring-indigo-500/25');
     // planning/script (indexes 0/1) are done — no ring, but indigo fill.
     expect(screen.getByTestId(`ministep-dot-${CATALOG[0].slug}`).className).not.toContain('ring-indigo-500/25');
-    // delivery (index 3) is future.
-    expect(screen.getByTestId(`ministep-dot-${CATALOG[3].slug}`).className).toContain('bg-ink-600');
+    // delivery (index 3) is future. #1206 swapped the future-dot fill from
+    // bg-ink-600 to the theme-flipping bg-line-strong token.
+    expect(screen.getByTestId(`ministep-dot-${CATALOG[3].slug}`).className).toContain('bg-line-strong');
   });
 
   it('jumps to any stage when a non-current dot is clicked and canWrite is true', async () => {
