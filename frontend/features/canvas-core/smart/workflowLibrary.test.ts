@@ -8,8 +8,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const uploadResource = vi.fn();
 const getResourceFileUrl = vi.fn(() => 'https://api/file/77?token=t');
 vi.mock('../../../services/resourceService', () => ({
-  uploadResource: (...a: unknown[]) => uploadResource(...a),
-  getResourceFileUrl: (...a: unknown[]) => getResourceFileUrl(...a),
+  uploadResource: (...a: unknown[]) => (uploadResource as (...x: unknown[]) => unknown)(...a),
+  getResourceFileUrl: (...a: unknown[]) => (getResourceFileUrl as (...x: unknown[]) => unknown)(...a),
 }));
 vi.mock('../../../supabaseClient', () => ({
   getSupabaseClient: () => ({
@@ -32,7 +32,7 @@ describe('saveWorkflowToLibrary', () => {
       nodes: [{ id: 'a', type: 'prompt', position: { x: 0, y: 0 } }],
       connections: [],
     };
-    const resource = await saveWorkflowToLibrary(payload, 'team-1');
+    const resource = await saveWorkflowToLibrary(payload as never, 'team-1');
     expect(resource.id).toBe('77');
     const [file, scopeId] = uploadResource.mock.calls[0];
     expect(scopeId).toBe('team-1');

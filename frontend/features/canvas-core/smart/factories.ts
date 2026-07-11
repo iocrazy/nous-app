@@ -12,6 +12,7 @@
  */
 
 import type {
+  SmartNode,
   OutputKind,
   OutputNode,
   PromptNode,
@@ -113,6 +114,27 @@ export function createOutputNode(
       // `undefined` keys into nodes_json would be noise).
       ...(data.images ? { images: data.images } : {}),
       ...(data.history_for ? { history_for: data.history_for } : {}),
+    },
+  };
+}
+
+export function createTimelineNode(
+  data: Partial<import('./timeline').TimelineNodeData> = {},
+  opts: FactoryOptions = {},
+): SmartNode<import('./timeline').TimelineNodeData> {
+  const random = opts.randomSuffix ?? DEFAULT_RANDOM_SUFFIX;
+  return {
+    id: makeId('timeline', random),
+    type: 'timeline',
+    position: opts.position ?? DEFAULT_POSITION,
+    data: {
+      segments: data.segments ?? [
+        { id: `seg-${crypto.randomUUID()}`, prompt: '', seconds: 5 },
+      ],
+      model: data.model ?? '',
+      aspect: data.aspect ?? '',
+      run_status: data.run_status ?? 'idle',
+      run_error: null,
     },
   };
 }

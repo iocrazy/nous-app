@@ -28,7 +28,7 @@ export interface PromptResourceRef {
   scope: { type: 'personal' | 'team'; id: string };
 }
 
-export type SmartNodeType = 'shot' | 'prompt' | 'output' | 'loop';
+export type SmartNodeType = 'shot' | 'prompt' | 'output' | 'loop' | 'timeline' | 'group';
 
 export type LoopMode = 'serial' | 'parallel' | 'batch';
 
@@ -200,6 +200,8 @@ export const SMART_NODE_DEFAULT_WIDTH: Record<SmartNodeType, number> = {
   prompt: 280,
   output: 260,
   loop: 200,
+  timeline: 420,
+  group: 300,
 };
 
 export const LOOP_MODE_TONE: Record<LoopMode, string> = {

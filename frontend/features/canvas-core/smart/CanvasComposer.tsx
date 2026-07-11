@@ -26,6 +26,7 @@ import {
   createOutputNode,
   createPromptNode,
   createShotNode,
+  createTimelineNode,
 } from './factories';
 import { groupSelection, ungroupNode } from './grouping';
 import { upsertGenerationSlots } from './genSlots';
@@ -113,7 +114,7 @@ export function CanvasComposer({
   }, [surfaceRef, viewport]);
 
   const addNode = useCallback(
-    (kind: 'shot' | 'prompt' | 'output' | 'loop') => {
+    (kind: 'shot' | 'prompt' | 'output' | 'loop' | 'timeline') => {
       const position = dropPosition();
       const node =
         kind === 'shot'
@@ -122,7 +123,9 @@ export function CanvasComposer({
             ? createPromptNode({}, { position })
             : kind === 'output'
               ? createOutputNode({}, { position })
-              : createLoopNode({}, { position });
+              : kind === 'loop'
+                ? createLoopNode({}, { position })
+                : createTimelineNode({}, { position });
       setNodes([...nodes, node]);
       setSelection([node.id]);
     },
@@ -357,6 +360,7 @@ export function CanvasComposer({
       <ComposerButton onClick={() => addNode('prompt')}>+ Prompt</ComposerButton>
       <ComposerButton onClick={() => addNode('output')}>+ Output</ComposerButton>
       <ComposerButton onClick={() => addNode('loop')}>+ Loop</ComposerButton>
+      <ComposerButton onClick={() => addNode('timeline')}>+ Timeline</ComposerButton>
       <Divider />
       <ComposerButton onClick={onArrange} disabled={nodes.length === 0}>
         Arrange

@@ -110,3 +110,27 @@ export async function pollGeneration(
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
 }
+
+// ---- Timeline director (G8) ----------------------------------------------
+
+export interface TimelineRunRequest {
+  node_id: string;
+  segments: Array<{ prompt: string; seconds: number }>;
+  model: string;
+  aspect: string;
+}
+
+/** Dispatch one multi-segment film task; returns its task id. */
+export async function dispatchTimelineRun(
+  canvasId: string,
+  req: TimelineRunRequest,
+): Promise<string> {
+  const response = await apiFetch(`/api/v1/canvases/${canvasId}/timeline-runs`, {
+    method: 'POST',
+    json: req,
+  });
+  const body = (await response.json()) as { data?: { task_id?: string } };
+  const taskId = body.data?.task_id;
+  if (!taskId) throw new Error('timeline dispatch returned no task id');
+  return taskId;
+}

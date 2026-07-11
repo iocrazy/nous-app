@@ -163,7 +163,16 @@ export function CanvasSurface() {
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
-      const next = applyNodeChanges(changes, rfNodes);
+      // Apply against the store's CURRENT nodes, not the render-closure
+      // rfNodes snapshot: a click on a button inside an unselected node
+      // fires patchNode and RF's select change in the SAME tick — merging
+      // the select change into the stale snapshot would silently roll the
+      // patch back (found by the G8 timeline e2e; Retry chips had the same
+      // exposure). rfNodes only adds view-only selected/className derivations
+      // on top of the store, so the change math is identical.
+      const current = useCanvasCoreStore.getState()
+        .nodes as unknown as typeof rfNodes;
+      const next = applyNodeChanges(changes, current);
       // Fix 1 — mid-drag ticks: ALL changes are position-type with dragging:true.
       // Route these through setNodesDragTick which skips the historyTimer reset,
       // cutting timer-reset churn from O(drag_ticks) to O(1) per drag gesture.
