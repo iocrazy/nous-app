@@ -61,6 +61,15 @@ export function WorkspaceEpisodes({
       // the server default ("Ep 1") when "Episode 1" already exists —
       // derived from the progress feed already in scope, not a uniqueness
       // guarantee (a rename elsewhere can still create a duplicate).
+      //
+      // sort_order is assigned server-side (max(sort_order)+1), NOT sent from
+      // here, so two near-simultaneous creates (two tabs / two members) can
+      // land on the same sort_order. That tie is benign: the list renders
+      // through `[...episodes].sort((a,b) => a.sort_order - b.sort_order)`
+      // (stable, so tied rows keep fetch order) and the ▲▼ reorder swaps the
+      // two rows' sort_order values, which resolves any duplicate on first
+      // move. Not worth a transaction/unique-constraint for a low-frequency,
+      // self-healing collision.
       const title = `Episode ${episodes.length + 1}`;
       await createEpisode(projectId, title);
       onEpisodesChanged();
