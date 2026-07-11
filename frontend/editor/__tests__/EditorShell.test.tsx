@@ -89,6 +89,9 @@ afterEach(() => {
   cleanup();
   svc.listScenes.mockReset();
   svc.listEpisodes.mockReset();
+  // The shell inherits the app theme from <html data-theme> — reset so a
+  // theme set inside one test never leaks into the next.
+  delete document.documentElement.dataset.theme;
 });
 
 describe('EditorShell', () => {
@@ -112,7 +115,8 @@ describe('EditorShell', () => {
     expect(screen.getByTestId('save-indicator')).toHaveAttribute('data-state', 'saved');
   });
 
-  it('toggles data-theme and persists to localStorage', async () => {
+  it('follows the app theme (<html data-theme>) and toggles session-only', async () => {
+    document.documentElement.dataset.theme = 'light';
     svc.listScenes.mockResolvedValue(twoScenes);
     const { container } = render(<EditorShell scriptId="1" />);
     await waitFor(() => expect(screen.getByRole('main')).toBeInTheDocument());
@@ -123,7 +127,25 @@ describe('EditorShell', () => {
     fireEvent.click(screen.getByRole('button', { name: 'editor.toggleTheme' }));
 
     expect(root.getAttribute('data-theme')).toBe('dark');
-    expect(localStorage.getItem('editor.theme')).toBe('dark');
+    // Session-only override: nothing is persisted anymore (the old
+    // localStorage default made the editor come up light inside a dark app).
+    expect(localStorage.getItem('editor.theme')).toBeNull();
+
+    // App theme change re-syncs the shell (MutationObserver on <html>).
+    document.documentElement.dataset.theme = 'dark';
+    await waitFor(() => expect(root.getAttribute('data-theme')).toBe('dark'));
+    document.documentElement.dataset.theme = 'light';
+    await waitFor(() => expect(root.getAttribute('data-theme')).toBe('light'));
+  });
+
+  it('mounts dark when the app theme is dark', async () => {
+    document.documentElement.dataset.theme = 'dark';
+    svc.listScenes.mockResolvedValue(twoScenes);
+    const { container } = render(<EditorShell scriptId="1" />);
+    await waitFor(() => expect(screen.getByRole('main')).toBeInTheDocument());
+    const root = container.querySelector('.mh-editor-shell') as HTMLElement;
+    expect(root.getAttribute('data-theme')).toBe('dark');
+    delete document.documentElement.dataset.theme;
   });
 
   it('switches the active tab and panel content on click', async () => {

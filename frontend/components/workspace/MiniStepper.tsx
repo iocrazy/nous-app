@@ -44,7 +44,7 @@ export function MiniStepper({
             <span
               style={{ width: 14 }}
               className={`h-[2px] shrink-0 ${
-                i - 1 < currentIndex ? 'bg-indigo-500' : 'bg-ink-700'
+                i - 1 < currentIndex ? 'bg-indigo-500' : 'bg-line-strong'
               }`}
             />
           )}
@@ -60,7 +60,7 @@ export function MiniStepper({
                 ? 'bg-indigo-500 ring-[3px] ring-indigo-500/25'
                 : i < currentIndex
                   ? 'bg-indigo-500'
-                  : 'bg-ink-600 opacity-50'
+                  : 'bg-line-strong'
             }`}
           />
         </div>

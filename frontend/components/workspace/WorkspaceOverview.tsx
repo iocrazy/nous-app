@@ -46,10 +46,10 @@ export function WorkspaceOverview({
       {currentEpisode && (
         <div
           data-testid="ws-continue-card"
-          className="rounded-xl border border-indigo-500/35 bg-gradient-to-b from-indigo-500/[0.08] to-transparent p-4 flex items-center justify-between gap-4"
+          className="rounded-xl border border-[var(--accent-border)] bg-island p-4 flex items-center justify-between gap-4"
         >
           <div className="min-w-0">
-            <div className="text-[11px] uppercase tracking-wider text-indigo-400 font-semibold">
+            <div className="text-[11px] uppercase tracking-wider text-[var(--accent-text)] font-semibold">
               {t('projects.workspace.overview.continue')}
             </div>
             <div className="text-sm font-medium text-ink-100 mt-0.5 truncate">
@@ -69,7 +69,7 @@ export function WorkspaceOverview({
           <button
             data-testid="ws-open-studio-btn"
             onClick={onOpenScript}
-            className="flex items-center gap-1.5 shrink-0 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-ink-950 font-semibold text-sm px-4 py-2 transition-colors"
+            className="flex items-center gap-1.5 shrink-0 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white font-semibold text-sm px-4 py-2 transition-colors"
           >
             {t('projects.workspace.overview.openStudio')}
             <ArrowRight size={15} />
@@ -143,9 +143,9 @@ function SummaryTile({
 }) {
   const { t } = useTranslation();
   return (
-    <div data-testid={testId} className="rounded-xl border border-ink-800 bg-ink-900/40 p-2.5">
+    <div data-testid={testId} className="rounded-xl border border-line bg-island p-2.5">
       <div className="text-[11.5px] font-semibold text-ink-200">{t(labelKey)}</div>
-      <div className="font-mono text-[10px] text-ink-500 mt-0.5">
+      <div className="font-mono text-[10px] text-ink-400 mt-0.5">
         {value}
         {sub ? ` · ${sub}` : ''}
       </div>

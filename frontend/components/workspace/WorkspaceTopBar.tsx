@@ -52,7 +52,7 @@ export function WorkspaceTopBar({
   return (
     <div
       data-testid="workspace-topbar"
-      className="flex items-center gap-3 px-4 py-2 border-b border-ink-800/60 flex-wrap"
+      className="flex items-center gap-3 px-4 py-2 border-b border-line flex-wrap"
     >
       <button
         data-testid="workspace-back-btn"
@@ -62,7 +62,7 @@ export function WorkspaceTopBar({
       >
         <ArrowLeft size={15} />
       </button>
-      <span className="w-6 h-6 rounded-md bg-indigo-500 text-ink-950 grid place-items-center text-[10px] font-bold shrink-0">
+      <span className="w-6 h-6 rounded-md bg-indigo-500 text-white grid place-items-center text-[10px] font-bold shrink-0">
         {(projectName[0] || '?').toUpperCase()}
       </span>
       <span className="text-[13px] font-semibold text-ink-100 truncate">{projectName}</span>
@@ -80,7 +80,7 @@ export function WorkspaceTopBar({
           />
           <span
             data-testid="workspace-stage-chip"
-            className="text-[11px] text-indigo-300 bg-indigo-500/10 rounded-full px-2.5 py-1 font-medium whitespace-nowrap"
+            className="text-[11px] text-[var(--accent-text)] bg-[var(--accent-soft)] rounded-full px-2.5 py-1 font-medium whitespace-nowrap"
           >
             {t(`projects.stages.${currentStage.slug}`, currentStage.name)} · {currentIndex + 1}/{catalog.length}
           </span>
@@ -96,7 +96,7 @@ export function WorkspaceTopBar({
           }
           className={`flex items-center gap-1.5 shrink-0 rounded-lg font-medium text-[12.5px] px-3 py-1.5 transition-colors ${
             isGenerate
-              ? 'bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 text-ink-950'
+              ? 'bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 text-white'
               : 'border border-ink-700 hover:border-ink-500 text-ink-300'
           }`}
         >
