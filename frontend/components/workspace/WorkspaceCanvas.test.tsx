@@ -19,6 +19,9 @@ vi.mock('react-router-dom', () => ({
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string, d?: string) => d ?? k }),
 }));
+vi.mock('../Toast', () => ({
+  useToast: () => ({ addToast: vi.fn() }),
+}));
 
 const mockService = vi.hoisted(() => ({
   listCanvases: vi.fn(),

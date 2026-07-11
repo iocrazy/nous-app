@@ -13,6 +13,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Frame, Loader2, Plus } from 'lucide-react';
+import { useToast } from '../Toast';
 import {
   createCanvas,
   listCanvases,
@@ -29,6 +30,7 @@ interface WorkspaceCanvasProps {
 export function WorkspaceCanvas({ projectId, teamId }: WorkspaceCanvasProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { addToast } = useToast();
   const [canvases, setCanvases] = useState<Canvas[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -62,8 +64,9 @@ export function WorkspaceCanvas({ projectId, teamId }: WorkspaceCanvasProps) {
       });
       navigate(editorPath(String(canvas.id)));
     } catch (err) {
+      // A create hiccup must not blow away the already-loaded list.
       console.error('[WorkspaceCanvas] create failed:', err);
-      setLoadFailed(true);
+      addToast(t('canvasList.createFailed', 'Failed to create canvas'), 'error');
     } finally {
       setCreating(false);
     }

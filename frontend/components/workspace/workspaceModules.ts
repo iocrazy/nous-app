@@ -1,7 +1,7 @@
 /**
  * Sidebar module registry for the PR-10b workspace shell (spec
  * `2026-07-10-projects-workspace-final.html`, decisions G1/G4/G6). Wave 1
- * gives every module except `overview` a shared `WorkspacePlaceholder` —
+ * routes every module to real content (Canvas was the last placeholder) —
  * the real Episodes/Entities/Files panels land in Wave 2.
  */
 

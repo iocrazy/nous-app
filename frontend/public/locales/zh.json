@@ -1353,7 +1353,6 @@
       "generating": "正在生成 {{count}} 帧…"
     },
     "workspace": {
-      "comingSoon": "即将上线",
       "assets": "素材",
       "manage": "管理",
       "modules": {

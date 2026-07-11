@@ -55,12 +55,16 @@ class CanvasRepository:
             return None
 
     async def list_for_project(self, project_id: str) -> List[Dict[str, Any]]:
-        """All canvases belonging to a project, newest-edited first."""
+        """All canvases belonging to a project, newest-edited first.
+
+        SUMMARY columns only — every consumer renders cards, and dragging
+        nodes_json/ops back for a list was exactly the payload problem the
+        team-tree endpoint was built to kill (G4 review follow-up)."""
         try:
             client = await self._client()
             result = (
                 await client.table(self.TABLE)
-                .select("*")
+                .select("id, project_id, name, kind, created_at, updated_at")
                 .eq("project_id", _bigint(project_id))
                 .is_("deleted_at", "null")
                 .order("updated_at", desc=True)
