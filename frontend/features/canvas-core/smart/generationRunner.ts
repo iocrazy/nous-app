@@ -10,6 +10,7 @@
 import {
   dispatchGenerations,
   pollGeneration,
+  PollStopped,
 } from '../services/canvasGenerationService';
 import type { PromptCaller, RunnerResult } from './runner';
 
@@ -21,6 +22,9 @@ export interface GenerationRunnerDeps {
   /** Mid-poll lifecycle (G4-F3): 'queued' while the engine still has the
    *  task in line (jimeng queue), 'running' once it starts. */
   onPhase?: (promptId: string, phase: 'queued' | 'running') => void;
+  /** Cooperative stop (P0-4) — abandons in-flight polling; the runner
+   *  returns a `stopped` result so the node goes back to idle. */
+  shouldStop?: () => boolean;
 }
 
 export function withGenerationRunner(
@@ -68,6 +72,7 @@ export function withGenerationRunner(
             intervalMs: deps.pollIntervalMs,
             timeoutMs: deps.pollTimeoutMs,
             onTick: (t) => emit(t.phase === 'queued' ? 'queued' : 'running'),
+            shouldStop: deps.shouldStop,
           }),
         ),
       );
@@ -94,6 +99,9 @@ export function withGenerationRunner(
         media_kind: gen.kind,
       };
     } catch (err) {
+      if (err instanceof PollStopped) {
+        return { ok: false, stopped: true, text: '', error: 'stopped by user' };
+      }
       return {
         ok: false,
         text: '',

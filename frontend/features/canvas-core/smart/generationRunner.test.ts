@@ -7,10 +7,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const dispatchGenerations = vi.fn();
 const pollGeneration = vi.fn();
-vi.mock('../services/canvasGenerationService', () => ({
-  dispatchGenerations: (...a: unknown[]) => dispatchGenerations(...a),
-  pollGeneration: (...a: unknown[]) => pollGeneration(...a),
-}));
+vi.mock('../services/canvasGenerationService', async () => {
+  const actual = await vi.importActual<
+    typeof import('../services/canvasGenerationService')
+  >('../services/canvasGenerationService');
+  return {
+    PollStopped: actual.PollStopped,
+    dispatchGenerations: (...a: unknown[]) => dispatchGenerations(...a),
+    pollGeneration: (...a: unknown[]) => pollGeneration(...a),
+  };
+});
 
 import { withGenerationRunner } from './generationRunner';
 import type { RunnerContext, RunnerResult } from './runner';

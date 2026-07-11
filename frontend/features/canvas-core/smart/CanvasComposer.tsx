@@ -81,6 +81,10 @@ export function CanvasComposer({
   const patchNode = useCanvasCoreStore((s) => s.patchNode);
 
   const [running, setRunning] = useState(false);
+  // Cooperative stop (P0-4): ref (stable identity for the memoized runner)
+  // + state mirror for the Stopping… label.
+  const stopRequestedRef = useRef(false);
+  const [stopRequested, setStopRequested] = useState(false);
   const knifeActive = useKnifeStore((s) => s.active);
   const toggleKnife = useKnifeStore((s) => s.toggle);
 
@@ -100,6 +104,7 @@ export function CanvasComposer({
           data: { run_status: phase === 'queued' ? 'queued' : 'running' },
         });
       },
+      shouldStop: () => stopRequestedRef.current,
     });
   }, [runnerOverride, canvasId]);
 
@@ -179,15 +184,26 @@ export function CanvasComposer({
   const doRunIds = useCallback(
     async (ids: string[]) => {
       if (ids.length === 0 || running) return;
+      stopRequestedRef.current = false;
+      setStopRequested(false);
       setRunning(true);
       try {
-        await runPrompts(buildContexts(ids), runner, handlers);
+        await runPrompts(buildContexts(ids), runner, handlers, {
+          shouldStop: () => stopRequestedRef.current,
+        });
       } finally {
         setRunning(false);
+        stopRequestedRef.current = false;
+        setStopRequested(false);
       }
     },
     [buildContexts, handlers, runner, running],
   );
+
+  const onStopRun = useCallback(() => {
+    stopRequestedRef.current = true;
+    setStopRequested(true);
+  }, []);
 
   const onRunSelected = useCallback(() => {
     const promptIds = nodes
@@ -442,19 +458,31 @@ export function CanvasComposer({
         </div>
       )}
       <Divider />
-      <ComposerButton
-        onClick={onRunSelected}
-        disabled={running || selection.length === 0}
-      >
-        {running ? 'Running…' : 'Run'}
-      </ComposerButton>
-      <ComposerButton
-        onClick={onCascadeRun}
-        disabled={running}
-        emphasis="primary"
-      >
-        {running ? 'Running…' : 'Cascade Run'}
-      </ComposerButton>
+      {running ? (
+        // Cooperative stop (P0-4, Infinite's Run↔Stop swap): unstarted
+        // prompts are never dispatched; the in-flight poll is abandoned and
+        // its node returns to idle. The backend task itself keeps running
+        // (no cancel endpoint yet).
+        <ComposerButton
+          onClick={onStopRun}
+          disabled={stopRequested}
+          emphasis="primary"
+        >
+          {stopRequested ? 'Stopping…' : 'Stop'}
+        </ComposerButton>
+      ) : (
+        <>
+          <ComposerButton
+            onClick={onRunSelected}
+            disabled={selection.length === 0}
+          >
+            Run
+          </ComposerButton>
+          <ComposerButton onClick={onCascadeRun} emphasis="primary">
+            Cascade Run
+          </ComposerButton>
+        </>
+      )}
     </div>
   );
 }
