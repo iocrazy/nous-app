@@ -356,11 +356,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
   return (
     <div
       data-testid="smart-output-node"
-      className={`rounded-md border-2 bg-white shadow dark:bg-slate-900 ${
-        selected
-          ? 'border-indigo-500'
-          : 'border-slate-300 dark:border-slate-700'
-      }`}
+      className={`mh-node border-canvas-line ${selected ? 'mh-node-selected' : ''}`}
       style={{ width: SMART_NODE_DEFAULT_WIDTH.output }}
     >
       <Handle
@@ -368,8 +364,8 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         position={Position.Left}
         className="!h-2 !w-2 !bg-slate-400"
       />
-      <div className="flex items-center justify-between border-b border-slate-200 px-3 py-1.5 dark:border-slate-700">
-        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+      <div className="mh-node-head">
+        <div className="mh-node-title">
           {history_for ? 'History · ' : ''}
           Output · {KIND_LABEL[kind]}
         </div>

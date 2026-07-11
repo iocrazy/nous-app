@@ -12,34 +12,30 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
   return (
     <div
       data-testid="smart-shot-node"
-      className={`rounded-md border-2 bg-white shadow dark:bg-slate-900 ${
-        selected
-          ? 'border-indigo-500'
-          : 'border-slate-300 dark:border-slate-700'
-      }`}
+      className={`mh-node border-canvas-line ${selected ? 'mh-node-selected' : ''}`}
       style={{ width: SMART_NODE_DEFAULT_WIDTH.shot }}
     >
-      <div className="border-b border-slate-200 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-700 dark:text-slate-400">
-        Shot
+      <div className="mh-node-head">
+        <div className="mh-node-title">Shot</div>
       </div>
       <div className="p-3">
         <input
           // nodrag = React Flow does not start a node drag from this input
-          className="nodrag w-full bg-transparent text-sm font-medium text-slate-900 outline-none placeholder:text-slate-400 focus:ring-1 focus:ring-indigo-300 dark:text-slate-100"
+          className="nodrag w-full bg-transparent text-sm font-medium text-canvas-text outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40"
           placeholder="Shot title"
           value={title}
           onChange={(e) => patch({ title: e.target.value })}
           aria-label="Shot title"
         />
         {reference_resource_ids.length > 0 && (
-          <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+          <div className="mt-1 text-xs text-canvas-muted">
             {reference_resource_ids.length} reference
             {reference_resource_ids.length === 1 ? '' : 's'}
           </div>
         )}
         <textarea
           // nowheel = wheel events don't pan the canvas while scrolling the textarea
-          className="nodrag nowheel mt-2 w-full resize-none bg-transparent text-xs text-slate-600 outline-none placeholder:text-slate-400 focus:ring-1 focus:ring-indigo-300 dark:text-slate-300"
+          className="nodrag nowheel mt-2 w-full resize-none bg-transparent text-xs text-canvas-muted outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40"
           placeholder="Notes (optional)"
           rows={3}
           value={notes}
