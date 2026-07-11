@@ -87,6 +87,16 @@ export async function getGeneration(taskId: string): Promise<GenerationTask> {
   return body.data;
 }
 
+/** Thrown by pollGeneration when the caller's shouldStop trips — the
+ *  backend task keeps running (no cancel endpoint yet, G4 挂账); only the
+ *  frontend wait is abandoned. */
+export class PollStopped extends Error {
+  constructor(taskId: string) {
+    super(`polling for generation task ${taskId} stopped by user`);
+    this.name = 'PollStopped';
+  }
+}
+
 /** Poll one task until it reaches a terminal phase (default 2s / 30min). */
 export async function pollGeneration(
   taskId: string,
@@ -95,12 +105,15 @@ export async function pollGeneration(
     timeoutMs?: number;
     /** Fired on every non-terminal poll — carries the live task row. */
     onTick?: (task: GenerationTask) => void;
+    /** Cooperative stop (P0-4) — checked once per poll cycle. */
+    shouldStop?: () => boolean;
   } = {},
 ): Promise<GenerationTask> {
   const intervalMs = opts.intervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_POLL_TIMEOUT_MS;
   const startedAt = Date.now();
   for (;;) {
+    if (opts.shouldStop?.()) throw new PollStopped(taskId);
     const task = await getGeneration(taskId);
     if (TERMINAL_PHASES.has(task.phase)) return task;
     opts.onTick?.(task);

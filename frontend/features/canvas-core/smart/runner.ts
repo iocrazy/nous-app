@@ -39,6 +39,9 @@ export interface RunnerResult {
   urls?: string[];
   /** Generation runs: 'image' | 'video'. */
   media_kind?: string;
+  /** Cooperative stop (P0-4): the user abandoned the wait — the node goes
+   *  back to idle instead of failed (the backend task may still finish). */
+  stopped?: boolean;
 }
 
 export type PromptCaller = (ctx: RunnerContext) => Promise<RunnerResult>;
@@ -116,6 +119,13 @@ export async function runSinglePrompt(
       // note ("1 of 3 items failed: …") on the node instead of wiping it.
       run_error: result.error ?? null,
     });
+  } else if (result.stopped) {
+    // Stop ≠ failure: the wait was abandoned, the node returns to idle
+    // (Infinite's cooperative stopRequested semantics).
+    handlers.onStatusChange(ctx.promptId, 'idle', {
+      run_finished_at: now(),
+      run_error: null,
+    });
   } else {
     handlers.onStatusChange(ctx.promptId, 'failed', {
       run_finished_at: now(),
@@ -136,10 +146,13 @@ export async function runPrompts(
   orderedContexts: RunnerContext[],
   caller: PromptCaller,
   handlers: RunHandlers,
-  options: { continueOnFailure?: boolean } = {},
+  options: { continueOnFailure?: boolean; shouldStop?: () => boolean } = {},
 ): Promise<RunnerResult[]> {
   const out: RunnerResult[] = [];
   for (const ctx of orderedContexts) {
+    // Cooperative stop (P0-4): checked between prompts — unstarted prompts
+    // are simply never dispatched (their status is untouched).
+    if (options.shouldStop?.()) break;
     const result = await runSinglePrompt(ctx, caller, handlers);
     out.push(result);
     if (!result.ok && !options.continueOnFailure) break;
