@@ -14,8 +14,9 @@
  * a read-only read-out in the top bar; advancing stages happens elsewhere.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Loader2 } from 'lucide-react';
 import {
   fetchCurrentStage,
   fetchEpisodesProgress,
@@ -28,20 +29,43 @@ import {
 } from '../../services/scriptService';
 import { useToast } from '../Toast';
 import { useAuth } from '../../contexts/AuthContext';
-import { ProjectTrashView } from '../ProjectTrashView';
+// Kept eager: ProjectsListView statically imports it too, so it lives in the
+// ProjectsPage chunk regardless — a dynamic import here buys nothing and just
+// trips Rollup's "dynamically + statically imported" warning.
 import { ProjectSettingsPanel } from '../ProjectSettingsPanel';
-import { EditorShell } from '../../editor/components/EditorShell';
 import type { RailView } from '../../editor/components/RailModules';
 import type { SceneDoc } from '../../editor/types';
 import { WorkspaceSidebar, type WorkView } from './WorkspaceSidebar';
 import { WorkspaceTopBar } from './WorkspaceTopBar';
 import { WorkspaceOverview } from './WorkspaceOverview';
-import { WorkspaceEpisodes } from './WorkspaceEpisodes';
-import { WorkspaceEntities } from './WorkspaceEntities';
-import { WorkspaceFiles, type FilesChip } from './WorkspaceFiles';
-import { WorkspaceCanvas } from './WorkspaceCanvas';
 import { episodeStorageKey, type WorkspaceModule } from './workspaceModules';
+import type { FilesChip } from './WorkspaceFiles';
 import type { EpisodeProgress, Project, ProjectStage } from '../../types';
+
+// Code-split the heavier / non-default modules out of the ProjectsPage chunk
+// (PR-19). Overview is the landing module so it stays eager, as do the
+// always-mounted sidebar + top bar. Everything below only mounts when its
+// module (or the inline studio editor) is opened, so it loads on demand under
+// the Suspense boundary in the content area — the editor in particular drags
+// in the tiptap bundle, which no longer weighs on first paint of the shell.
+const EditorShell = lazy(() =>
+  import('../../editor/components/EditorShell').then((m) => ({ default: m.EditorShell })),
+);
+const WorkspaceEpisodes = lazy(() =>
+  import('./WorkspaceEpisodes').then((m) => ({ default: m.WorkspaceEpisodes })),
+);
+const WorkspaceEntities = lazy(() =>
+  import('./WorkspaceEntities').then((m) => ({ default: m.WorkspaceEntities })),
+);
+const WorkspaceFiles = lazy(() =>
+  import('./WorkspaceFiles').then((m) => ({ default: m.WorkspaceFiles })),
+);
+const WorkspaceCanvas = lazy(() =>
+  import('./WorkspaceCanvas').then((m) => ({ default: m.WorkspaceCanvas })),
+);
+const ProjectTrashView = lazy(() =>
+  import('../ProjectTrashView').then((m) => ({ default: m.ProjectTrashView })),
+);
 
 /** Minimal scene shape lifted from the embedded editor for the SCENES sidebar. */
 interface SceneLift {
@@ -347,6 +371,13 @@ export function ProjectWorkspace({
           canWrite={canWrite}
           slate={activeModule === 'script' && epNumber ? { ep: epNumber, scene: sceneNumber } : null}
         />
+        <Suspense
+          fallback={
+            <div className="flex-1 grid place-items-center text-ink-500">
+              <Loader2 className="animate-spin" size={20} />
+            </div>
+          }
+        >
         {studioMode && resolvedScriptId ? (
           // Full-bleed: EditorShell manages its own internal layout/scroll
           // (`.mh-editor-shell { position:absolute; inset:0 }`), so this
@@ -415,6 +446,7 @@ export function ProjectWorkspace({
             )}
           </div>
         )}
+        </Suspense>
       </div>
     </div>
   );
