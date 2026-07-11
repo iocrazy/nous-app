@@ -888,6 +888,16 @@ body {
   animation: canvas-edge-flow 0.6s linear infinite;
 }
 
+/* Run-status dot breathing (P1-5) — Infinite's nodeStatusPulse: only the
+   dot animates while a run is live; the card itself stays still. */
+@keyframes mh-status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.mh-status-dot--pulse {
+  animation: mh-status-pulse 1s ease-in-out infinite;
+}
+
 /* Generation placeholder shimmer (P0-3) — Infinite's .loading-cell:
    a soft sweep across the skeleton while the item renders. */
 @keyframes mh-shimmer {
