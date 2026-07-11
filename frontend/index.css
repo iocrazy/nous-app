@@ -888,6 +888,36 @@ body {
   animation: canvas-edge-flow 0.6s linear infinite;
 }
 
+/* Run-status dot breathing (P1-5) — Infinite's nodeStatusPulse: only the
+   dot animates while a run is live; the card itself stays still. */
+@keyframes mh-status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.mh-status-dot--pulse {
+  animation: mh-status-pulse 1s ease-in-out infinite;
+}
+
+/* Hover lift (P1-6) — Infinite's signature micro-motion: every clickable
+   chip/toolbar button nudges up 1px on hover. Scoped to the canvas chrome
+   (chips, glass-island buttons) so the rest of the app is untouched. */
+.mh-chip,
+.canvas-island button {
+  transition:
+    transform 0.14s var(--canvas-ease),
+    color 0.14s var(--canvas-ease),
+    border-color 0.14s var(--canvas-ease),
+    background-color 0.14s var(--canvas-ease);
+}
+.mh-chip:hover:not(:disabled),
+.canvas-island button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+.mh-chip:active:not(:disabled),
+.canvas-island button:active:not(:disabled) {
+  transform: translateY(0) scale(0.97);
+}
+
 /* Edge scissors (P1-8) — Infinite's conn-cut: always present, dimmed to
    .55 until the edge is hovered or selected. */
 .mh-edge-cut {
@@ -898,6 +928,25 @@ body {
 .mh-edge-cut--active,
 .mh-edge-cut:hover {
   opacity: 1;
+}
+
+/* Lightbox shell (P1-12) — Infinite's imageEditModal glass: theme-aware
+   frosted backdrop (dark rgba(2,6,23,.66) / light rgba(248,250,252,.55),
+   both blur-18) + a .16s entrance so the modal stops popping in. */
+/* Opacity-only on the fixed root: a transform here would (a) shrink the
+   fullscreen bounding box mid-entrance (trips the G7 anti-collapse guard)
+   and (b) turn the root into a containing block — the very bug G7 fixed. */
+@keyframes mh-lightbox-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.mh-lightbox-backdrop {
+  background: rgba(2, 6, 23, 0.66);
+  backdrop-filter: blur(18px);
+  animation: mh-lightbox-in 0.16s var(--canvas-ease, ease);
+}
+[data-theme="light"] .mh-lightbox-backdrop {
+  background: rgba(248, 250, 252, 0.55);
 }
 
 /* Generation placeholder shimmer (P0-3) — Infinite's .loading-cell:
@@ -1028,6 +1077,16 @@ body {
   border-radius: var(--canvas-r-island) !important;
   background: var(--canvas-panel) !important;
   box-shadow: var(--canvas-shadow-island);
+  /* Infinite's minimap island (P1-11): 188×126 glass card with a hairline
+     ring — the bare RF default read as loose grey blocks floating on the
+     page. Sizing goes on the inner svg so the viewBox rescales content. */
+  border: 1px solid var(--canvas-line);
+  backdrop-filter: blur(16px);
+  padding: 6px;
+}
+.mh-canvas .react-flow__minimap svg {
+  width: 176px;
+  height: 114px;
 }
 
 .mh-canvas .react-flow__controls {

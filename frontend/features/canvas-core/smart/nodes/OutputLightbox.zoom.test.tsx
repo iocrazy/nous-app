@@ -102,6 +102,15 @@ describe('OutputLightbox zoom & pan (P0-5)', () => {
   });
 });
 
+describe('lightbox shell (P1-12)', () => {
+  it('uses the theme-aware glass backdrop instead of flat black', () => {
+    renderBox();
+    const root = screen.getByTestId('output-lightbox');
+    expect(root.className).toContain('mh-lightbox-backdrop');
+    expect(root.className).not.toContain('bg-black');
+  });
+});
+
 describe('progressive load (P1-3)', () => {
   it('shows a shimmer skeleton until the image loads', () => {
     renderBox();

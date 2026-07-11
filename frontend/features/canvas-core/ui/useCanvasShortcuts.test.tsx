@@ -387,3 +387,55 @@ describe('useCanvasShortcuts — deleting a group frees its children (②-3)', (
     expect(a.position).toEqual({ x: 100, y: 100 });
   });
 });
+
+describe('useCanvasShortcuts — group / ungroup (P1-10)', () => {
+  it('mod+G wraps the multi-selection into a group and selects it', () => {
+    useCanvasCoreStore.setState({
+      kind: 'smart',
+      nodes: [
+        { id: 'a', type: 'prompt', position: { x: 0, y: 0 }, measured: { width: 100, height: 60 } },
+        { id: 'b', type: 'output', position: { x: 200, y: 0 }, measured: { width: 100, height: 60 } },
+      ],
+      selection: ['a', 'b'],
+    });
+    render(<Host />);
+    const e = fireKey({ key: 'g', meta: true });
+    expect(e.defaultPrevented).toBe(true);
+    const state = useCanvasCoreStore.getState();
+    const group = state.nodes.find((n) => (n as { type?: string }).type === 'group');
+    expect(group).toBeTruthy();
+    expect(state.selection).toEqual([(group as { id: string }).id]);
+    const a = state.nodes.find((n) => (n as { id?: string }).id === 'a');
+    expect((a as { parentId?: string }).parentId).toBe((group as { id: string }).id);
+  });
+
+  it('mod+Shift+G releases the selected group', () => {
+    useCanvasCoreStore.setState({
+      kind: 'smart',
+      nodes: [
+        { id: 'g1', type: 'group', position: { x: 0, y: 0 }, style: { width: 300, height: 200 }, data: { label: 'G' } },
+        { id: 'a', type: 'prompt', position: { x: 24, y: 24 }, parentId: 'g1' },
+      ],
+      selection: ['g1'],
+    });
+    render(<Host />);
+    fireKey({ key: 'g', meta: true, shift: true });
+    const state = useCanvasCoreStore.getState();
+    expect(state.nodes.some((n) => (n as { type?: string }).type === 'group')).toBe(false);
+    const a = state.nodes.find((n) => (n as { id?: string }).id === 'a');
+    expect((a as { parentId?: string }).parentId).toBeUndefined();
+  });
+
+  it('mod+G with a single node selected is a no-op', () => {
+    useCanvasCoreStore.setState({
+      kind: 'smart',
+      nodes: [{ id: 'a', type: 'prompt', position: { x: 0, y: 0 } }],
+      selection: ['a'],
+    });
+    render(<Host />);
+    fireKey({ key: 'g', meta: true });
+    expect(
+      useCanvasCoreStore.getState().nodes.some((n) => (n as { type?: string }).type === 'group'),
+    ).toBe(false);
+  });
+});

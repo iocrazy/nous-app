@@ -91,11 +91,11 @@ describe('6b.2 — MiniMap presence and props', () => {
     expect(findChild(MiniMap)).toBeDefined();
   });
 
-  it('MiniMap is positioned bottom-left', () => {
+  it('MiniMap is positioned bottom-right (P1-11, Infinite corner)', () => {
     setupStore();
     render(<CanvasSurface />);
     const el = findChild(MiniMap) as React.ReactElement<{ position?: string }>;
-    expect(el.props.position).toBe('bottom-left');
+    expect(el.props.position).toBe('bottom-right');
   });
 
   it('MiniMap is pannable', () => {

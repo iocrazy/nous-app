@@ -10,6 +10,7 @@ import { Plus, X } from 'lucide-react';
 import { useState } from 'react';
 
 import { RUN_STATUS_TONE, SMART_NODE_DEFAULT_WIDTH } from '../types';
+import { RunStatusBadge } from './RunStatusBadge';
 import {
   addSegment,
   removeSegment,
@@ -33,7 +34,10 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
   const [activeId, setActiveId] = useState<string | null>(segments[0]?.id ?? null);
   const active = segments.find((s) => s.id === activeId) ?? null;
   const total = totalSeconds(segments);
-  const tone = RUN_STATUS_TONE[run_status] ?? 'border-canvas-line';
+  // Border colour only — the badge's dot carries the motion (P1-5).
+  const tone = (RUN_STATUS_TONE[run_status] ?? 'border-canvas-line')
+    .replace('animate-pulse', '')
+    .trim();
 
   return (
     <div
@@ -45,9 +49,7 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
       <div className="mh-node-head">
         <div className="mh-node-title">Timeline</div>
         <div className="flex items-center gap-1.5">
-          <span className="text-[10px] uppercase tracking-wider text-canvas-muted">
-            {run_status !== 'idle' ? run_status : ''}
-          </span>
+          <RunStatusBadge status={run_status} />
           <select
             className="nodrag mh-chip outline-none focus:ring-1 focus:ring-canvas-strong/40"
             value={aspect}
