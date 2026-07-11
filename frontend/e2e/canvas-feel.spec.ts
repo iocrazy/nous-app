@@ -97,11 +97,11 @@ test('selecting an edge shows the scissors; clicking cuts the wire', async ({ pa
       if (!ctm) throw new Error('no screen CTM for edge path');
       return { x: ctm.a * p.x + ctm.c * p.y + ctm.e, y: ctm.b * p.x + ctm.d * p.y + ctm.f };
     });
+  // P1-8: every edge carries a dimmed always-on scissors at its midpoint —
+  // one click at the midpoint cuts the wire directly (no select-first step;
+  // this is exactly Infinite's conn-cut flow).
+  await expect(page.getByRole('button', { name: 'Cut connection' })).toHaveCount(2);
   await page.mouse.click(mid.x, mid.y);
-  const scissors = page.getByRole('button', { name: 'Cut connection' });
-  await expect(scissors).toBeVisible();
-
-  await scissors.click();
   await expect(page.locator('.react-flow__edge')).toHaveCount(1);
   await expect(page.locator('.react-flow__edge[data-id="e1"]')).toHaveCount(0);
 });
@@ -313,4 +313,48 @@ test('wheel zoom-out passes the old React Flow 0.5 floor (P0-6)', async ({ page 
   await expect
     .poll(zoomOf, { message: 'zoom should go below the 0.5 RF default floor' })
     .toBeLessThan(0.45);
+});
+
+test('node drag is free of the 8px lattice (P2-6)', async ({ page }) => {
+  await openCanvas(page);
+  const node = page.locator('.react-flow__node[data-id="p1"]');
+  const box = (await node.boundingBox())!;
+  // Drag by a deliberately non-multiple-of-8 delta, well away from other
+  // nodes so the drop-time alignment snap has nothing to bite on.
+  await page.mouse.move(box.x + box.width / 2, box.y + 8);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 13, box.y + 8 + 5, { steps: 4 });
+  await page.mouse.up();
+  const transform = await node.evaluate((el) => (el as HTMLElement).style.transform);
+  const m = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(transform)!;
+  const x = Number(m[1]);
+  // 60 + 13 = 73 — an 8px lattice would have clamped this to 72.
+  expect(x % 8).not.toBe(0);
+});
+
+test('double-click empty canvas opens the create menu; picking adds an unwired node (P1-1)', async ({ page }) => {
+  await openCanvas(page);
+  await expect(page.locator('.react-flow__edge')).toHaveCount(2);
+
+  await page.locator('.react-flow__pane').dblclick({ position: { x: 700, y: 200 } });
+  const menu = page.getByRole('menu', { name: 'Add node' });
+  await expect(menu).toBeVisible();
+  await menu.getByRole('menuitem', { name: 'Prompt' }).click();
+
+  await expect(page.locator('.react-flow__node')).toHaveCount(4);
+  // No origin — the node arrives unwired.
+  await expect(page.locator('.react-flow__edge')).toHaveCount(2);
+  // And the double-click did NOT zoom (RF default off when the menu owns it).
+  const transform = await page
+    .locator('.react-flow__viewport')
+    .evaluate((el) => (el as HTMLElement).style.transform);
+  expect(transform).toContain('scale(1)');
+});
+
+test('right-click empty canvas opens the same create menu (P1-1)', async ({ page }) => {
+  await openCanvas(page);
+  await page.locator('.react-flow__pane').click({ button: 'right', position: { x: 700, y: 300 } });
+  await expect(page.getByRole('menu', { name: 'Add node' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu', { name: 'Add node' })).toHaveCount(0);
 });
