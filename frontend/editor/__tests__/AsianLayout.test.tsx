@@ -60,7 +60,7 @@ describe('AsianLayout', () => {
     expect(mark).toHaveAttribute('aria-hidden', 'true');
   });
 
-  it('gives character rows a trailing colon label marker (left-aligned, not centered)', () => {
+  it('gives character rows a trailing fullwidth colon label marker (left-aligned, not centered)', () => {
     const { container } = render(
       <AsianLayout
         elements={[allTypes[1]]}
@@ -70,7 +70,9 @@ describe('AsianLayout', () => {
     );
     const colon = container.querySelector('.as-suffix')!;
     expect(colon).toBeInTheDocument();
-    expect(colon.textContent).toBe(':');
+    // Fullwidth colon `：` per the 国内剧本 "角色名：对白" convention (halfwidth
+    // `:` reads as a Latin colon and looks wrong beside CJK cues).
+    expect(colon.textContent).toBe('：');
     expect(colon).toHaveAttribute('aria-hidden', 'true');
     // The character cue itself is left-aligned label styling, distinct from
     // Hollywood's centered cue — asserted via the as-character class.
