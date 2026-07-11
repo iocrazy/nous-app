@@ -26,7 +26,7 @@ import { CanvasSurface } from './CanvasSurface';
 import { useCanvasShortcuts } from './useCanvasShortcuts';
 
 export default function CanvasPage() {
-  const { canvasId } = useParams<{ canvasId: string }>();
+  const { canvasId, teamId } = useParams<{ canvasId: string; teamId?: string }>();
   const surfaceRef = useRef<HTMLDivElement>(null);
   const loadStatus = useCanvasCoreStore((s) => s.loadStatus);
   const loadError = useCanvasCoreStore((s) => s.loadError);
@@ -103,7 +103,7 @@ export default function CanvasPage() {
           </div>
         </div>
       )}
-      {kind === 'smart' && <CanvasComposer surfaceRef={surfaceRef} />}
+      {kind === 'smart' && <CanvasComposer surfaceRef={surfaceRef} teamId={teamId} />}
       {kind === 'classic' && (
         <>
           <ClassicPalette surfaceRef={surfaceRef} />
