@@ -15,4 +15,11 @@
 .note-editor-content code { background: var(--island-2); border-radius: 0.25rem; padding: 0.1em 0.3em; font-size: 12px; }
 .note-editor-content pre code { background: transparent; padding: 0; }
 .note-editor-content blockquote { border-left: 2px solid rgb(99 102 241 / 0.5); padding-left: 0.75rem; color: var(--content-2); margin: 0.35em 0; }
+/* Table: mirrors NoteMarkdown's table/th/td classes so editing == reading. */
+.note-editor-content table { width: 100%; border-collapse: collapse; margin: 0.4em 0; font-size: 12.5px; }
+.note-editor-content th,
+.note-editor-content td { border: 1px solid var(--line); padding: 0.25rem 0.5rem; text-align: left; vertical-align: top; }
+.note-editor-content th { font-weight: 600; }
+.note-editor-content th p,
+.note-editor-content td p { margin: 0; }
 .note-editor-content p.is-editor-empty:first-child::before { content: attr(data-placeholder); color: var(--content-4); float: left; height: 0; pointer-events: none; }

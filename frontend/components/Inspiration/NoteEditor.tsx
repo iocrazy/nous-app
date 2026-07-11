@@ -16,6 +16,7 @@ import Placeholder from '@tiptap/extension-placeholder';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
+import { TableKit } from '@tiptap/extension-table/kit';
 import { Markdown } from '@tiptap/markdown';
 import { common, createLowlight } from 'lowlight';
 import { Extension } from '@tiptap/core';
@@ -94,7 +95,21 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
       CodeBlockLowlight.configure({ lowlight }),
       TaskList,
       TaskItem.configure({ nested: true }),
+      // GFM table roundtrip: Table/TableRow/TableCell/TableHeader each ship a
+      // parseMarkdown/renderMarkdown pair (verified in
+      // node_modules/@tiptap/extension-table/dist/index.js) that the Markdown
+      // extension below auto-discovers via getExtensionField. No resizing —
+      // matches NoteMarkdown's plain read-only table look.
+      TableKit.configure({ table: { resizable: false } }),
       Placeholder.configure({ placeholder: placeholder ?? '' }),
+      // KNOWN LIMITATION: GFM footnotes (`[^1]` / `[^1]: text`) do not
+      // roundtrip. @tiptap/markdown parses via `marked`, which has no
+      // footnote token at all (verified empirically — `[^1]` lexes as plain
+      // text, not a Tokens.Footnote), and there is no official
+      // @tiptap/extension-footnote package. Hand-rolling a custom node +
+      // marked extension was considered and rejected as out of scope; a
+      // pre-existing note containing footnotes will still mangle them on
+      // edit-save. Tracked as a known issue, not silently swallowed.
       Markdown,
       Extension.create({
         name: 'submitKeymap',

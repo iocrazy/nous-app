@@ -116,4 +116,30 @@ describe('NoteEditor markdown contract', () => {
     });
     expect(lastMd(onChange)).toBe('');
   });
+
+  it('GFM table survives an edit roundtrip (regression: used to flatten to one line)', async () => {
+    const onChange = vi.fn();
+    const ref = createRef<NoteEditorHandle>();
+    const md = '| Name | Age |\n| --- | --- |\n| Rick | 130 |';
+    render(<NoteEditor ref={ref} value={md} onChange={onChange} />);
+    await waitFor(() => expect(document.querySelector('.ProseMirror')).toBeTruthy());
+    // parses into a real table node, not a flattened paragraph
+    expect(document.querySelector('.ProseMirror table')).toBeTruthy();
+    expect(document.querySelectorAll('.ProseMirror table th').length).toBe(2);
+    expect(document.querySelectorAll('.ProseMirror table td').length).toBe(2);
+    // trigger a serialize (same pattern as the other roundtrip test above):
+    // move past the table, then make a no-op-ish edit via the command handle.
+    act(() => {
+      const ed = (window as unknown as Record<string, unknown>).__noteEditorInstance as {
+        commands: { focus: (pos: 'end') => boolean };
+      };
+      ed.commands.focus('end');
+    });
+    act(() => ref.current!.insertTag());
+    const out = lastMd(onChange);
+    const lines = out.split('\n');
+    expect(lines).toContain('| Name | Age |');
+    expect(lines.some((l) => l.trim().startsWith('| ---'))).toBe(true);
+    expect(lines).toContain('| Rick | 130 |');
+  });
 });
