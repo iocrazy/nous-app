@@ -58,7 +58,17 @@ function toReactFlowNodes(nodes: CanvasNode[]): AnyNode[] {
       obj.measured && typeof obj.measured === 'object'
         ? { measured: obj.measured as { width?: number; height?: number } }
         : {};
-    return { id, position, type, data, ...measured } as AnyNode;
+    // Group container contract (②-3): the group's box lives in `style`
+    // ({width,height} from grouping.ts) and members carry `parentId`.
+    // Both must reach React Flow or the group renders as a 2×2 speck and
+    // members stop riding along on drag — the whitelist silently dropped
+    // them since #1216 (masked in e2e by the pre-#1223 selection dead-lock).
+    const parentId = typeof obj.parentId === 'string' ? { parentId: obj.parentId } : {};
+    const style =
+      obj.style && typeof obj.style === 'object'
+        ? { style: obj.style as Record<string, unknown> }
+        : {};
+    return { id, position, type, data, ...measured, ...parentId, ...style } as AnyNode;
   });
 }
 
