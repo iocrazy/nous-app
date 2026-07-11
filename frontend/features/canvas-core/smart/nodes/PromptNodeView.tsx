@@ -148,7 +148,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
         <textarea
           // nodrag → React Flow doesn't start a drag from this input
           // nowheel → wheel events scroll the textarea instead of zooming canvas
-          className="nodrag nowheel min-h-[3.5rem] w-full resize-y bg-transparent text-sm text-ink-800 outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40 dark:text-ink-200"
+          className="nodrag nowheel min-h-[3.5rem] w-full resize-y bg-transparent text-sm text-ink-200 outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40"
           placeholder="What should the model generate? Type @ to reference an asset"
           value={body}
           onChange={mention.handleChange}
