@@ -270,15 +270,19 @@ async def get_current_stage(
     auth: AuthDep,
     _project_guard: None = Depends(verify_project_read_access),
 ):
-    """The project's current SOP stage, or null when none has been set."""
-    from app.repositories.project_stages_repository import (
-        get_project_stages_repository,
-    )
+    """The project's current SOP stage, or null when none has been set.
+
+    Forward-only auto-derivation (合一终稿): the stage chip is read-only in
+    the workspace, so reading the stage also advances it when the project's
+    real output (scenes/shots/renders) is ahead of the stored value.
+    review/delivery still require the manual PUT below.
+    """
+    from app.services.library.projects_service import resolve_current_stage
 
     try:
         return {
             "success": True,
-            "data": await get_project_stages_repository().get_current(int(project_id)),
+            "data": await resolve_current_stage(int(project_id), auth.user_id),
         }
     except ValueError:
         raise HTTPException(status_code=422, detail="Invalid project id")
