@@ -14,7 +14,14 @@
  * here the rail and paper column render a minimal-but-real view of the loaded
  * scenes so the shell is exercised end to end.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MutableRefObject,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   applyOps,
@@ -84,12 +91,6 @@ const COLLAB_ENABLED = import.meta.env.VITE_FEATURE_COLLAB === 'true';
 
 const DOC_MODES: EditorMode[] = ['script', 'outline', 'cover'];
 
-// Episode ids are native numbers at runtime though typed string (#1006) —
-// compare through String() like the rest of the editor.
-function sameEpisodeId(a: unknown, b: unknown): boolean {
-  return a != null && b != null && String(a) === String(b);
-}
-
 export function EditorShell({
   scriptId,
   currentUserId = null,
@@ -97,8 +98,9 @@ export function EditorShell({
   projectId: workspaceProjectId,
   initialRailView,
   embedded = false,
-  episodesForSwitcher,
-  onSwitchEpisode,
+  onScenesChange,
+  onActiveSceneChange,
+  selectSceneRef,
 }: {
   scriptId: string;
   /** Local user identity for collaboration presence (supplied by the route). */
@@ -126,18 +128,20 @@ export function EditorShell({
    */
   initialRailView?: RailView;
   /**
-   * Studio mode: the shell is mounted inside the project workspace, which
-   * hides its own sidebar while the studio is open — the editor rail is then
-   * the single side navigation (R2-A single-rail look). Embedded hides the
-   * rail's brand row (the workspace top bar carries project identity) and
-   * turns the episode selector into a switcher that delegates to
-   * `onSwitchEpisode`. Standalone (fullscreen route) stays unchanged.
+   * Studio mode: the shell is mounted inside the project workspace (合一终稿,
+   * 2026-07-11). The workspace tree is the single side navigation, so embedded
+   * drops the editor's OWN left rail entirely — scene navigation is lifted up
+   * to the workspace sidebar via the callbacks below. Standalone (fullscreen
+   * route) keeps its full three-zone rail unchanged.
    */
   embedded?: boolean;
-  /** Episode list for the embedded switcher (workspace-owned). */
-  episodesForSwitcher?: Array<{ episode_id: string; title: string }>;
-  /** Embedded switcher selection — the workspace re-resolves + remounts. */
-  onSwitchEpisode?: (episodeId: string) => void;
+  /** Studio lift: report the scene list up to the workspace sidebar (embedded). */
+  onScenesChange?: (scenes: SceneDoc[]) => void;
+  /** Studio lift: report the currently highlighted scene up to the sidebar. */
+  onActiveSceneChange?: (sceneId: string | null) => void;
+  /** Studio lift: the workspace writes the internal scene-select fn here so a
+   * sidebar scene click can scroll the matching block into view. */
+  selectSceneRef?: MutableRefObject<((sceneId: string) => void) | null>;
 }) {
   const { t } = useTranslation();
   // Restore the per-script layout engine synchronously so the first paint uses
@@ -165,10 +169,6 @@ export function EditorShell({
   const [currentEpisodeId, setCurrentEpisodeId] = useState<string | null>(null);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [episodePanelOpen, setEpisodePanelOpen] = useState(false);
-  // Embedded-only: the lightweight episode SWITCH menu (vs. the standalone
-  // EpisodePanel, which manages episodes — that job belongs to the
-  // workspace's Episodes module when embedded).
-  const [epSwitchOpen, setEpSwitchOpen] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   // Live (optimistic) elements lifted from each SceneBlock so Statistics + rail
   // entities reflect in-flight edits, not just the last loaded snapshot (Task 6 ⑥).
@@ -374,6 +374,24 @@ export function EditorShell({
     },
     [setActiveScene],
   );
+
+  // ── Studio lift (embedded, 合一终稿 2026-07-11) ─────────────────────────────
+  // Report the scene list + active scene up to the workspace sidebar, and
+  // publish handleSelectScene so a sidebar scene click can reach back in. The
+  // callbacks are undefined for the standalone route (no-op).
+  useEffect(() => {
+    onScenesChange?.(scenes);
+  }, [scenes, onScenesChange]);
+  useEffect(() => {
+    onActiveSceneChange?.(state.activeSceneId);
+  }, [state.activeSceneId, onActiveSceneChange]);
+  useEffect(() => {
+    if (!selectSceneRef) return;
+    selectSceneRef.current = handleSelectScene;
+    return () => {
+      selectSceneRef.current = null;
+    };
+  }, [selectSceneRef, handleSelectScene]);
 
   // Jump from a scene node (double-click) or an outline row (click) back to the
   // script sheet, landing on that scene: switch BOTH axes to Script (the
@@ -851,31 +869,31 @@ export function EditorShell({
         </div>
       )}
 
-      {/* ===== LEFT RAIL ===== */}
-      <nav
-        className={`mh-island mh-rail${railCollapsed ? ' collapsed' : ''}`}
-        aria-label={t('editor.scenesNav')}
-      >
-        {railCollapsed ? (
-          <div className="mh-rail-collapsed-strip">
-            <button
-              type="button"
-              className="mh-icon-btn"
-              aria-label={t('editor.expandLeft')}
-              onClick={() => setRailCollapsed(false)}
-            >
-              ›
-            </button>
-            <span className="mh-brand-dot" aria-hidden="true" />
-          </div>
-        ) : (
-          <>
-            <div className="mh-rail-top">
-              {/* Studio mode (embedded in the workspace): the rail is the ONLY
-                  side navigation, so the episode selector stays — but the
-                  brand row goes (the workspace top bar already carries the
-                  project identity + back affordance). */}
-              {!embedded && (
+      {/* ===== LEFT RAIL (standalone only) =====
+          Embedded (studio) mode drops the rail entirely — the workspace tree
+          is the single side navigation and the scene list is lifted up to it
+          (合一终稿, 2026-07-11). The grid is `auto 1fr auto`, so with the nav
+          gone the shell reflows to the two remaining columns. */}
+      {!embedded && (
+        <nav
+          className={`mh-island mh-rail${railCollapsed ? ' collapsed' : ''}`}
+          aria-label={t('editor.scenesNav')}
+        >
+          {railCollapsed ? (
+            <div className="mh-rail-collapsed-strip">
+              <button
+                type="button"
+                className="mh-icon-btn"
+                aria-label={t('editor.expandLeft')}
+                onClick={() => setRailCollapsed(false)}
+              >
+                ›
+              </button>
+              <span className="mh-brand-dot" aria-hidden="true" />
+            </div>
+          ) : (
+            <>
+              <div className="mh-rail-top">
                 <div className="mh-brand-row">
                   <span className="mh-brand-dot" aria-hidden="true" />
                   {t('editor.brand')}
@@ -889,88 +907,56 @@ export function EditorShell({
                     ‹
                   </button>
                 </div>
-              )}
-              <div className="mh-ep-selector-wrap">
-                <button
-                  type="button"
-                  className="mh-ep-selector"
-                  aria-expanded={embedded ? epSwitchOpen : episodePanelOpen}
-                  aria-label={
-                    embedded ? t('editor.switchEpisode') : t('editor.manageEpisodes')
-                  }
-                  onClick={() =>
-                    embedded
-                      ? setEpSwitchOpen((v) => !v)
-                      : setEpisodePanelOpen((v) => !v)
-                  }
-                >
-                  <div className="mh-ep-name">{currentEpisodeTitle}</div>
-                  <div className="mh-ep-sub">
-                    {t('editor.sceneCount', { count: scenes.length })}
-                  </div>
-                </button>
-                {/* Embedded switcher: a plain episode list that hands the
-                    switch to the workspace (it re-resolves the episode's
-                    script and remounts the shell) — management lives in the
-                    workspace's Episodes module, not here. */}
-                {embedded && epSwitchOpen && (
-                  <div className="mh-ep-switch-menu" data-testid="editor-ep-switch-menu">
-                    {(episodesForSwitcher ?? []).map((ep) => (
-                      <button
-                        key={ep.episode_id}
-                        type="button"
-                        data-testid={`editor-ep-switch-${ep.episode_id}`}
-                        className={`mh-ep-switch-item${
-                          sameEpisodeId(ep.episode_id, currentEpisodeId) ? ' current' : ''
-                        }`}
-                        onClick={() => {
-                          setEpSwitchOpen(false);
-                          if (!sameEpisodeId(ep.episode_id, currentEpisodeId)) {
-                            onSwitchEpisode?.(ep.episode_id);
-                          }
-                        }}
-                      >
-                        {ep.title}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {!embedded && episodePanelOpen && projectId && (
-                  <EpisodePanel
-                    scriptId={scriptId}
-                    projectId={projectId}
-                    episodes={episodes}
-                    currentEpisodeId={currentEpisodeId}
-                    onChanged={reloadEpisodes}
-                    onClose={() => setEpisodePanelOpen(false)}
-                  />
-                )}
-              </div>
-            </div>
-            <RailModules activeView={railView} onSelect={selectRailView} />
-            <div className="mh-rail-scroll">
-              <RailEntities
-                characters={railCharacters}
-                locations={railLocations}
-                onSelect={handleSelectScene}
-              />
-              <section className="mh-rail-section" aria-label={t('editor.scenesLabel')}>
-                <div className="mh-rail-section-head">
-                  <span className="mh-rail-section-label">{t('editor.scenesLabel')}</span>
-                  {scenes.length > 0 && (
-                    <span className="mh-rail-count-badge">{scenes.length}</span>
+                <div className="mh-ep-selector-wrap">
+                  <button
+                    type="button"
+                    className="mh-ep-selector"
+                    aria-expanded={episodePanelOpen}
+                    aria-label={t('editor.manageEpisodes')}
+                    onClick={() => setEpisodePanelOpen((v) => !v)}
+                  >
+                    <div className="mh-ep-name">{currentEpisodeTitle}</div>
+                    <div className="mh-ep-sub">
+                      {t('editor.sceneCount', { count: scenes.length })}
+                    </div>
+                  </button>
+                  {episodePanelOpen && projectId && (
+                    <EpisodePanel
+                      scriptId={scriptId}
+                      projectId={projectId}
+                      episodes={episodes}
+                      currentEpisodeId={currentEpisodeId}
+                      onChanged={reloadEpisodes}
+                      onClose={() => setEpisodePanelOpen(false)}
+                    />
                   )}
                 </div>
-                <SceneRail
-                  scenes={scenes}
-                  activeSceneId={state.activeSceneId}
+              </div>
+              <RailModules activeView={railView} onSelect={selectRailView} />
+              <div className="mh-rail-scroll">
+                <RailEntities
+                  characters={railCharacters}
+                  locations={railLocations}
                   onSelect={handleSelectScene}
                 />
-              </section>
-            </div>
-          </>
-        )}
-      </nav>
+                <section className="mh-rail-section" aria-label={t('editor.scenesLabel')}>
+                  <div className="mh-rail-section-head">
+                    <span className="mh-rail-section-label">{t('editor.scenesLabel')}</span>
+                    {scenes.length > 0 && (
+                      <span className="mh-rail-count-badge">{scenes.length}</span>
+                    )}
+                  </div>
+                  <SceneRail
+                    scenes={scenes}
+                    activeSceneId={state.activeSceneId}
+                    onSelect={handleSelectScene}
+                  />
+                </section>
+              </div>
+            </>
+          )}
+        </nav>
+      )}
 
       {/* ===== CENTER PAPER COLUMN ===== */}
       <main className="mh-center-col" aria-label={t('editor.paperColumn')}>

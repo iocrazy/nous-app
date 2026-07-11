@@ -40,7 +40,7 @@ export function SceneRail({ scenes, activeSceneId, onSelect }: SceneRailProps) {
             aria-current={activeSceneId === s.id ? 'true' : undefined}
             onClick={() => onSelect(s.id)}
           >
-            <span className="mh-scene-num-chip">{i + 1}</span>
+            <span className="mh-scene-num-chip">S{i + 1}</span>
             <span className="mh-scene-meta-text">
               <span className="mh-scene-row-head">
                 <span className={`mh-ie-badge ${ext ? 'ext' : 'int'}`}>{ext ? 'EXT' : 'INT'}</span>

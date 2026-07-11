@@ -900,7 +900,6 @@ export const EDITOR_SHELL_STYLES = `
 .mh-shot-card:active{ cursor:grabbing; }
 .mh-shot-card.dragging{ opacity:0.55; }
 .mh-shot-head{ display:flex; align-items:center; gap:8px; }
-.mh-shot-num{ flex-shrink:0; }
 .mh-shot-status-corner{ flex:1; min-width:0; display:flex; align-items:center; }
 .mh-shot-status{ font-family:var(--mono); font-size:10.5px; font-weight:600; }
 .mh-shot-status.empty{ color:var(--ink-faint); }
@@ -1154,24 +1153,18 @@ export const EDITOR_SHELL_STYLES = `
   border:1px solid var(--hairline); border-radius:999px; padding:3px 8px; cursor:pointer;
 }
 
-/* ===== EMBEDDED — studio mode inside the workspace =====
-   The workspace hides its own sidebar while the studio is open, so the shell
-   keeps its full R2-A island look (the previous flatten pass is gone — the
-   double-sidebar was the real "app in an app" problem, per 2026-07-11
-   feedback + the single-rail mockup). Only the embedded episode SWITCH menu
-   below is studio-specific. */
-.mh-ep-switch-menu{
-  position:absolute; left:0; right:0; top:calc(100% + 6px); z-index:30;
-  display:flex; flex-direction:column; gap:2px; padding:6px;
-  background:var(--surface); border:1px solid var(--surface-border);
-  border-radius:var(--radius-md); box-shadow:var(--shadow-float);
-  max-height:240px; overflow-y:auto;
+/* ===== FILM NUMBERING (合一终稿, 2026-07-11) =====
+   Storyboard scene heads read S1/S2 (mono, indigo) and shot codes read 1A/1B
+   (scene number + shot letter) instead of the old plain black number squares —
+   the industry slate convention. Embedded (studio) mode now drops the editor's
+   own rail entirely, so the old episode SWITCH menu that lived here is gone. */
+.mh-sc-mark{
+  font-family:var(--mono); font-size:11px; font-weight:700;
+  color:var(--indigo); letter-spacing:.02em;
 }
-.mh-ep-switch-item{
-  font-family:var(--sans); font-size:12.5px; text-align:left; cursor:pointer;
-  color:var(--ink-soft); background:transparent; border:none;
-  border-radius:var(--radius-sm); padding:7px 10px;
+.mh-shot-no{
+  font-family:var(--mono); font-size:9.5px; font-weight:700; color:var(--indigo);
+  background:var(--indigo-soft); border:1px solid var(--surface-border); border-radius:6px;
+  padding:1.5px 6px; letter-spacing:.03em; flex-shrink:0;
 }
-.mh-ep-switch-item:hover{ background:var(--surface-2); color:var(--ink); }
-.mh-ep-switch-item.current{ color:var(--indigo-deep); background:var(--indigo-soft); font-weight:600; }
 `;

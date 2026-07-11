@@ -1360,6 +1360,8 @@
         "canvas": "Canvas",
         "episodes": "Episodes",
         "script": "Script",
+        "beats": "Beats",
+        "scenes": "Scenes",
         "storyboard": "Storyboard",
         "renders": "Renders",
         "publish": "Publish",

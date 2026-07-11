@@ -1,14 +1,17 @@
 /**
- * ProjectWorkspace — the PR-10b/PR-11 workspace shell (spec
+ * ProjectWorkspace — the unified workspace shell (合一终稿, 2026-07-11; spec
  * `2026-07-10-projects-workspace-final.html`, decisions G1/G2/G4/G6/G12/G13).
  * Flag-gated by VITE_FEATURE_PROJECT_WORKSPACE_V2 at the ProjectsPage call
- * site; this component owns everything inside the detail pane once the
- * flag is on: the top project bar, the scoped sidebar, and the module
- * content area. Script/Storyboard mount `EditorShell` INLINE (PR-11) — no
- * more deep-link route jump — with the editor's own left rail acting as the
- * script-level nav underneath this project-level sidebar; every other
- * sidebar item routes to its real module content (Canvas was the last
- * placeholder — wired to WorkspaceCanvas now).
+ * site; this component owns everything inside the detail pane once the flag is
+ * on: the top project bar, the single left-tree sidebar, and the module
+ * content area.
+ *
+ * The sidebar stays mounted at ALL times — including while Script/Storyboard
+ * mount `EditorShell` INLINE. The embedded editor drops its own left rail
+ * (EditorShell `embedded`), so this tree is the single side navigation: the
+ * episode's work views (剧本/节拍/分镜/场景) hang off the 剧集 node, and the
+ * editor's scene list is lifted up into a SCENES sub-section. The SOP stage is
+ * a read-only read-out in the top bar; advancing stages happens elsewhere.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -17,9 +20,6 @@ import {
   fetchCurrentStage,
   fetchEpisodesProgress,
   fetchStageCatalog,
-  fetchStageSuggestion,
-  generateMissingFrames,
-  setCurrentStage,
 } from '../../services/projectsService';
 import {
   createScriptProject,
@@ -32,7 +32,8 @@ import { ProjectTrashView } from '../ProjectTrashView';
 import { ProjectSettingsPanel } from '../ProjectSettingsPanel';
 import { EditorShell } from '../../editor/components/EditorShell';
 import type { RailView } from '../../editor/components/RailModules';
-import { WorkspaceSidebar } from './WorkspaceSidebar';
+import type { SceneDoc } from '../../editor/types';
+import { WorkspaceSidebar, type WorkView } from './WorkspaceSidebar';
 import { WorkspaceTopBar } from './WorkspaceTopBar';
 import { WorkspaceOverview } from './WorkspaceOverview';
 import { WorkspaceEpisodes } from './WorkspaceEpisodes';
@@ -40,13 +41,14 @@ import { WorkspaceEntities } from './WorkspaceEntities';
 import { WorkspaceFiles, type FilesChip } from './WorkspaceFiles';
 import { WorkspaceCanvas } from './WorkspaceCanvas';
 import { episodeStorageKey, type WorkspaceModule } from './workspaceModules';
-import type {
-  EpisodeProgress,
-  Project,
-  ProjectStage,
-  ProjectTab,
-  StageSuggestion as StageSuggestionData,
-} from '../../types';
+import type { EpisodeProgress, Project, ProjectStage } from '../../types';
+
+/** Minimal scene shape lifted from the embedded editor for the SCENES sidebar. */
+interface SceneLift {
+  id: string;
+  heading_int_ext: string | null;
+  location_text: string | null;
+}
 
 interface ProjectWorkspaceProps {
   project: Project;
@@ -55,16 +57,6 @@ interface ProjectWorkspaceProps {
   canWrite?: boolean;
   /** Settings module saved a project field — bubble the fresh row up so the caller can update its own state. */
   onProjectUpdated?: (project: Project) => void;
-}
-
-// A suggestion action's `tab` targets the legacy ProjectTab set — the
-// workspace shell has no 1:1 equivalent for every one of those (scripts /
-// storyboard live inside the current episode's editor now; output/shares
-// fold into the Files module for Wave 1). Map each to its workspace
-// counterpart so StageSuggestion's ghost CTA still does something sane.
-function suggestionTabToModule(tab: ProjectTab | null | undefined): WorkspaceModule {
-  if (tab === 'trash') return 'trash';
-  return 'files';
 }
 
 export function ProjectWorkspace({
@@ -82,10 +74,9 @@ export function ProjectWorkspace({
 
   const [activeModule, setActiveModule] = useState<WorkspaceModule>('overview');
 
-  // ── SOP stage (catalog + current + advance/jump) ──────────────────────
+  // ── SOP stage (catalog + current, READ-ONLY here) ─────────────────────
   const [catalog, setCatalog] = useState<ProjectStage[]>([]);
   const [currentStage, setCurrentStageState] = useState<ProjectStage | null>(null);
-  const [advancing, setAdvancing] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -112,61 +103,6 @@ export function ProjectWorkspace({
   }, [project.id]);
 
   const currentIndex = catalog.findIndex((s) => s.id === currentStage?.id);
-  const nextStage =
-    currentIndex >= 0 && currentIndex < catalog.length - 1 ? catalog[currentIndex + 1] : null;
-
-  const jumpToStage = useCallback(
-    async (stage: ProjectStage) => {
-      if (advancing) return;
-      setAdvancing(true);
-      try {
-        const updated = await setCurrentStage(project.id, stage.id);
-        if (updated) setCurrentStageState(updated);
-      } catch (err) {
-        console.error('[ProjectWorkspace] failed to change stage:', err);
-      } finally {
-        setAdvancing(false);
-      }
-    },
-    [advancing, project.id],
-  );
-
-  const handleAdvance = useCallback(() => {
-    if (!nextStage) return;
-    return jumpToStage(nextStage);
-  }, [nextStage, jumpToStage]);
-
-  // ── Stage suggestion (top-bar inline CTA) ──────────────────────────────
-  const [suggestion, setSuggestion] = useState<StageSuggestionData | null>(null);
-  const [suggestionBusy, setSuggestionBusy] = useState(false);
-
-  const loadSuggestion = useCallback(() => {
-    fetchStageSuggestion(project.id)
-      .then(setSuggestion)
-      .catch((err) => {
-        console.error('[ProjectWorkspace] failed to load stage suggestion:', err);
-        setSuggestion(null);
-      });
-  }, [project.id]);
-
-  useEffect(() => {
-    loadSuggestion();
-  }, [loadSuggestion, currentStage?.slug]);
-
-  const handleSuggestionGenerate = useCallback(async () => {
-    if (suggestionBusy) return;
-    setSuggestionBusy(true);
-    try {
-      const res = await generateMissingFrames(project.id);
-      addToast(t('projects.suggest.generating', { count: res.dispatched_count }), 'success');
-      loadSuggestion();
-    } catch (err) {
-      console.error('[ProjectWorkspace] generate-missing failed:', err);
-      addToast(t('common.error'), 'error');
-    } finally {
-      setSuggestionBusy(false);
-    }
-  }, [suggestionBusy, project.id, addToast, t, loadSuggestion]);
 
   // ── Episodes (sidebar current-episode block + switcher) ────────────────
   const [episodes, setEpisodes] = useState<EpisodeProgress[]>([]);
@@ -213,8 +149,7 @@ export function ProjectWorkspace({
 
   // Re-fetch the progress feed after a create/rename/reorder/delete in the
   // Episodes management module. Keeps the current selection when it still
-  // exists; otherwise falls back to the lowest sort_order episode (mirrors
-  // the initial-load fallback below, without touching that pinned effect).
+  // exists; otherwise falls back to the lowest sort_order episode.
   const refetchEpisodes = useCallback(() => {
     return fetchEpisodesProgress(project.id)
       .then((rows) => {
@@ -228,26 +163,28 @@ export function ProjectWorkspace({
       .catch((err) => console.error('[ProjectWorkspace] failed to refresh episodes progress:', err));
   }, [project.id]);
 
-  // ── Script/Storyboard inline mount (PR-11): resolve a given episode's most
-  // recently updated script and mount EditorShell directly in the content
-  // area (no more route jump); no script → fall back to the Episodes
-  // management module so the user can start one. Parameterized (rather than
-  // always reading `currentEpisode`) so the Episodes module's Open/Start CTA
-  // can switch episode + open its script in one action. `railView` presets
-  // which centre-pane view the shell opens on — 'storyboard' for the
-  // sidebar's Storyboard child, undefined (script sheet / stored pref) for
-  // Script. ───
+  // ── Studio (inline EditorShell) state ──────────────────────────────────
+  // studioView drives BOTH which work view the sidebar highlights and which
+  // centre-pane view the shell opens on. studioScenes/activeSceneId are lifted
+  // out of the embedded editor to feed the sidebar's SCENES sub-section;
+  // selectSceneRef lets a sidebar scene click reach back into the editor.
   const [resolvedScriptId, setResolvedScriptId] = useState<string | null>(null);
-  const [scriptInitialRailView, setScriptInitialRailView] = useState<RailView | undefined>(
-    undefined,
-  );
+  const [studioView, setStudioView] = useState<RailView>('script');
+  const [studioScenes, setStudioScenes] = useState<SceneLift[]>([]);
+  const [studioActiveSceneId, setStudioActiveSceneId] = useState<string | null>(null);
+  const selectSceneRef = useRef<((id: string) => void) | null>(null);
 
+  // Resolve a given episode's most recently updated script and mount
+  // EditorShell inline (no route jump); no script → provision an empty one the
+  // same way project-create does, then mount it. `railView` presets the work
+  // view (and the sidebar highlight). ───
   const openEpisodeScript = useCallback(
-    async (episode: EpisodeProgress | null, railView?: RailView) => {
+    async (episode: EpisodeProgress | null, railView: RailView = 'script') => {
       if (!episode) {
         setActiveModule('episodes');
         return;
       }
+      setStudioView(railView);
       try {
         const result = await fetchScriptProjects(project.id);
         const candidates = (result.data ?? []).filter(
@@ -265,7 +202,6 @@ export function ProjectWorkspace({
           });
           await updateScriptProject(created.id, { episode_id: episode.episode_id });
           setResolvedScriptId(created.id);
-          setScriptInitialRailView(railView);
           setActiveModule('script');
           return;
         }
@@ -273,7 +209,6 @@ export function ProjectWorkspace({
           (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
         );
         setResolvedScriptId(candidates[0].id);
-        setScriptInitialRailView(railView);
         setActiveModule('script');
       } catch (err) {
         console.error('[ProjectWorkspace] failed to resolve current episode script:', err);
@@ -290,8 +225,11 @@ export function ProjectWorkspace({
     [openEpisodeScript, currentEpisode],
   );
 
-  const openCurrentEpisodeStoryboard = useCallback(
-    () => openEpisodeScript(currentEpisode, 'storyboard'),
+  const handleOpenWorkView = useCallback(
+    (view: WorkView) => {
+      setStudioView(view);
+      void openEpisodeScript(currentEpisode, view);
+    },
     [openEpisodeScript, currentEpisode],
   );
 
@@ -304,33 +242,42 @@ export function ProjectWorkspace({
     [handleEpisodeChange, episodes, openEpisodeScript],
   );
 
-  // If the writer switches episodes (⇄ switcher) while the script module is
-  // open, re-resolve for the newly-selected episode rather than leaving a
-  // stale script mounted under the new episode's sidebar context.
+  // If the writer switches episodes (⇄ card) while the script module is open,
+  // re-resolve for the newly-selected episode rather than leaving a stale
+  // script mounted, preserving the current work view.
   const prevEpisodeIdRef = useRef(currentEpisodeId);
   useEffect(() => {
     const changed = prevEpisodeIdRef.current !== currentEpisodeId;
     prevEpisodeIdRef.current = currentEpisodeId;
     if (changed && activeModule === 'script') {
-      void openEpisodeScript(currentEpisode, scriptInitialRailView);
+      void openEpisodeScript(currentEpisode, studioView);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-resolve on an episode-id change, not on every render of the other deps
   }, [currentEpisodeId]);
 
-  const handleSuggestionNavigate = useCallback(
-    (tab: ProjectTab) => {
-      if (tab === 'scripts') {
-        void openCurrentEpisodeScript();
-        return;
-      }
-      if (tab === 'storyboard') {
-        void openCurrentEpisodeStoryboard();
-        return;
-      }
-      setActiveModule(suggestionTabToModule(tab));
-    },
-    [openCurrentEpisodeScript, openCurrentEpisodeStoryboard],
-  );
+  // Leaving the studio drops the lifted scene list so a later module render
+  // never shows a stale SCENES section under the tree.
+  useEffect(() => {
+    if (activeModule !== 'script') {
+      setStudioScenes([]);
+      setStudioActiveSceneId(null);
+    }
+  }, [activeModule]);
+
+  // Stable adapters (identity must not change per render, or EditorShell's
+  // scene-sync effect would re-fire → setState loop).
+  const handleScenesChange = useCallback((next: SceneDoc[]) => {
+    setStudioScenes(
+      next.map((s) => ({
+        id: String(s.id),
+        heading_int_ext: s.heading_int_ext,
+        location_text: s.location_text,
+      })),
+    );
+  }, []);
+  const handleActiveSceneChange = useCallback((id: string | null) => {
+    setStudioActiveSceneId(id == null ? null : String(id));
+  }, []);
 
   // ── Files module chip/episode-filter handoff (renders sidebar child) ──
   const [filesInitialChip, setFilesInitialChip] = useState<FilesChip>('all');
@@ -356,44 +303,49 @@ export function ProjectWorkspace({
     setActiveModule('files');
   }, []);
 
-  // Studio mode (activeModule 'script'): the editor's own rail is the ONLY
-  // side navigation — rendering the workspace sidebar next to it produced two
-  // parallel nav columns that read as an app nested inside an app ("还是内嵌
-  // 式样", prod feedback 2026-07-11; target look = the R2-A single-rail
-  // mockup). The top bar stays (identity + stage progress), and its back
-  // button first pops back to Overview instead of leaving the project.
   const studioMode = activeModule === 'script' && resolvedScriptId != null;
+
+  // Film slate read-out (studio only): 1-based episode + active-scene numbers.
+  const epIdx = episodes.findIndex((e) => e.episode_id === currentEpisode?.episode_id);
+  const epNumber = epIdx >= 0 ? epIdx + 1 : null;
+  const sceneNumber =
+    (studioActiveSceneId
+      ? studioScenes.findIndex((s) => s.id === studioActiveSceneId) + 1
+      : 0) || null;
+
+  const sidebarScenes =
+    activeModule === 'script' && studioScenes.length
+      ? studioScenes.map((s) => ({
+          scene_id: s.id,
+          int_ext: s.heading_int_ext,
+          label: s.location_text || t('editor.untitledScene'),
+        }))
+      : null;
 
   return (
     <div data-testid="project-workspace" className="flex h-full min-h-0">
-      {!studioMode && (
-        <WorkspaceSidebar
-          activeModule={activeModule}
-          onModuleChange={handleModuleChange}
-          episodes={episodes}
-          currentEpisode={currentEpisode}
-          onEpisodeChange={handleEpisodeChange}
-          onOpenScript={() => void openCurrentEpisodeScript()}
-          onOpenStoryboard={() => void openCurrentEpisodeStoryboard()}
-          onOpenRenders={handleOpenRenders}
-        />
-      )}
+      <WorkspaceSidebar
+        activeModule={activeModule}
+        onModuleChange={handleModuleChange}
+        episodes={episodes}
+        currentEpisode={currentEpisode}
+        onEpisodeChange={handleEpisodeChange}
+        activeWorkView={activeModule === 'script' ? studioView : null}
+        onOpenWorkView={handleOpenWorkView}
+        onOpenRenders={handleOpenRenders}
+        scenes={sidebarScenes}
+        activeSceneId={studioActiveSceneId}
+        onSelectScene={(id) => selectSceneRef.current?.(id)}
+      />
       <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
         <WorkspaceTopBar
           projectName={project.name}
-          onBack={studioMode ? () => setActiveModule('overview') : onBack}
+          onBack={onBack}
           catalog={catalog}
           currentStage={currentStage}
           currentIndex={currentIndex}
           canWrite={canWrite}
-          advancing={advancing}
-          onJumpStage={jumpToStage}
-          nextStage={nextStage}
-          onAdvance={handleAdvance}
-          suggestion={suggestion}
-          suggestionBusy={suggestionBusy}
-          onSuggestionGenerate={handleSuggestionGenerate}
-          onSuggestionNavigate={handleSuggestionNavigate}
+          slate={activeModule === 'script' && epNumber ? { ep: epNumber, scene: sceneNumber } : null}
         />
         {studioMode && resolvedScriptId ? (
           // Full-bleed: EditorShell manages its own internal layout/scroll
@@ -407,13 +359,11 @@ export function ProjectWorkspace({
               currentUserId={currentUserId}
               currentUserName={userProfile.name}
               projectId={project.id}
-              initialRailView={scriptInitialRailView}
+              initialRailView={studioView}
               embedded
-              episodesForSwitcher={episodes.map((e) => ({
-                episode_id: e.episode_id,
-                title: e.title,
-              }))}
-              onSwitchEpisode={handleEpisodeChange}
+              onScenesChange={handleScenesChange}
+              onActiveSceneChange={handleActiveSceneChange}
+              selectSceneRef={selectSceneRef}
             />
           </div>
         ) : (
@@ -421,12 +371,10 @@ export function ProjectWorkspace({
             {activeModule === 'overview' && (
               <WorkspaceOverview
                 project={project}
-                projectId={project.id}
-                currentStage={currentStage}
                 episodes={episodes}
                 currentEpisode={currentEpisode}
+                epNumber={epNumber}
                 onOpenScript={() => void openCurrentEpisodeScript()}
-                onSuggestionNavigate={handleSuggestionNavigate}
               />
             )}
             {activeModule === 'episodes' && (
