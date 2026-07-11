@@ -30,8 +30,14 @@ import {
 } from './factories';
 import { groupSelection, ungroupNode } from './grouping';
 import {
+  clearPendingGenTasks,
+  persistPendingGenTasks,
+  prunePendingGenTask,
+} from './genResume';
+import {
   appendGenerationResults,
   beginGenerationSlot,
+  markGenerationRecover,
   settleGenerationSlot,
 } from './genSlots';
 import { resolveSourceUrl } from './promptInputs';
@@ -111,11 +117,18 @@ export function CanvasComposer({
       shouldStop: () => stopRequestedRef.current,
       // Placeholder lifecycle (P0-3): shimmer cells appear at dispatch,
       // each finished item replaces one (first-done-first-shown), failures
-      // burn a cell into the failed count.
-      onDispatched: (id, count, kind) => beginGenerationSlot(id, count, kind),
+      // burn a cell into the failed count. Task ids persist on the prompt
+      // node (P1-13) so a reload resumes the batch; a broken poll becomes
+      // a recover mark ("task not lost") instead of a silent failure.
+      onDispatched: (id, count, kind, taskIds) => {
+        beginGenerationSlot(id, count, kind);
+        persistPendingGenTasks(id, taskIds, kind);
+      },
       onItemSettled: (id, item) => {
         if (item.url) appendGenerationResults(id, [item.url], item.kind);
+        else if (item.recoverable) markGenerationRecover(id, item.taskId, item.kind);
         else settleGenerationSlot(id, { failed: 1 });
+        prunePendingGenTask(id, item.taskId);
       },
     });
   }, [runnerOverride, canvasId]);
@@ -188,6 +201,8 @@ export function CanvasComposer({
       if (result.media_kind && (!result.ok || result.stopped)) {
         settleGenerationSlot(id, { clearPending: true });
       }
+      // The run settled in THIS session — nothing left to resume (P1-13).
+      if (result.media_kind) clearPendingGenTasks(id);
     },
   };
 

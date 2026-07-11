@@ -6,7 +6,14 @@
 import { expect, test, type Page } from '@playwright/test';
 import { setupStubbedSession, TEAM_ID } from './helpers/stubs';
 
-function prompt(id: string, x: number, y: number, runStatus: string, body: string) {
+function prompt(
+  id: string,
+  x: number,
+  y: number,
+  runStatus: string,
+  body: string,
+  extraData: Record<string, unknown> = {},
+) {
   return {
     id,
     type: 'prompt',
@@ -17,6 +24,7 @@ function prompt(id: string, x: number, y: number, runStatus: string, body: strin
       agent_id: null,
       run_status: runStatus,
       resource_refs: [],
+      ...extraData,
     },
   };
 }
@@ -30,8 +38,17 @@ const CANVAS = {
   nodes_json: [
     { id: 'shot1', type: 'shot', position: { x: 40, y: 60 }, data: { title: 'Shot', reference_resource_ids: [], notes: '' } },
     prompt('p-done', 400, 40, 'succeeded', 'Done prompt'),
-    prompt('p-active', 400, 260, 'running', 'Active prompt'),
-    prompt('p-wait', 400, 480, 'queued', 'Waiting prompt'),
+    // In-flight prompts carry their gen_tasks batch (P1-13): the reload
+    // resume re-polls them, and their live phase drives run_status — a
+    // stranded running/queued prompt WITHOUT a batch resets to failed.
+    prompt('p-active', 400, 260, 'running', 'Active prompt', {
+      gen: { kind: 'image', model: '', count: 1 },
+      gen_tasks: [{ task_id: 't-active', kind: 'image' }],
+    }),
+    prompt('p-wait', 400, 480, 'queued', 'Waiting prompt', {
+      gen: { kind: 'image', model: '', count: 1 },
+      gen_tasks: [{ task_id: 't-wait', kind: 'image' }],
+    }),
     { id: 'out1', type: 'output', position: { x: 800, y: 40 }, data: { kind: 'text', resource_id: null, preview_text: 'result', preview_url: null, crop_region: null } },
   ],
   connections_json: [
@@ -67,6 +84,19 @@ async function setupStubs(page: Page): Promise<void> {
       }),
     }),
   );
+  // Resume polling (P1-13): both in-flight tasks stay non-terminal so the
+  // edge classes hold steady while the page re-attaches their polls.
+  await page.route('**/api/v1/canvases/generations/*', (route) => {
+    const queued = route.request().url().includes('t-wait');
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        success: true,
+        data: { phase: queued ? 'queued' : 'in_progress', metadata: {} },
+      }),
+    });
+  });
 }
 
 test('edges carry run-state classes matching their prompt status', async ({ page }) => {

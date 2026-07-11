@@ -71,6 +71,9 @@ export interface PromptNodeData {
    * G4-B1 generation tasks instead of the text LLM.
    */
   gen?: PromptGenSettings | null;
+  /** In-flight generation batch (P1-13) — task ids persisted at dispatch
+   *  so a reload can resume polling (genResume). [] once the run settles. */
+  gen_tasks?: Array<{ task_id: string; kind: 'image' | 'video' }>;
 }
 
 /** Image/video generation settings on a prompt node. */
@@ -120,6 +123,10 @@ export interface OutputNodeData {
   gen_pending?: number;
   /** Items of the current batch that failed (P0-3) — surfaced as a chip. */
   gen_failed?: number;
+  /** Task ids whose POLL broke but whose backend task is still alive
+   *  (P1-13) — rendered as a "task not lost" recover overlay with a
+   *  Check Result re-query. */
+  gen_recover?: string[];
   /** Set on history-archive nodes: the output node this archives for. */
   history_for?: string;
   /** Snowflake resource id that owns the rendered artifact, when one

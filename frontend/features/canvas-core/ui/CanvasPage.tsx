@@ -19,6 +19,7 @@ import { ClassicPalette } from '../classic/ui/ClassicPalette';
 import { ClassicRunBar } from '../classic/ui/ClassicRunBar';
 import { CommandPalette } from '../palette/CommandPalette';
 import { CanvasComposer } from '../smart/CanvasComposer';
+import { resumePendingGenerations } from '../smart/genResume';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { useCanvasRealtime } from '../realtime/useCanvasRealtime';
 import { CanvasConflictDialog } from './CanvasConflictDialog';
@@ -61,6 +62,15 @@ export default function CanvasPage() {
       void flushSave().finally(reset);
     };
   }, [canvasId, loadCanvas, flushSave, reset]);
+
+  // Broken-connection resume (P1-13 — Infinite's resumeSmartPendingTasks):
+  // once the document is in, re-attach polling for any generation batch
+  // that was in flight when the previous page died, and reset prompts
+  // stranded in queued/running with nothing to resume.
+  useEffect(() => {
+    if (loadStatus !== 'ready' || kind !== 'smart') return;
+    void resumePendingGenerations();
+  }, [loadStatus, kind, canvasId]);
 
   if (!canvasId) {
     return <CanvasStatus title="Missing canvas id" tone="error" />;

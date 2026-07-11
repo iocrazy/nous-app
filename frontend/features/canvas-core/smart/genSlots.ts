@@ -162,6 +162,82 @@ export function appendGenerationResults(
   });
 }
 
+// ── Recover marks (P1-13) ───────────────────────────────────────────────────
+// Infinite's imageTaskRecover state: a broken POLL is not a failed TASK —
+// the backend keeps running it. The slot swaps that item's shimmer cell for
+// a "task not lost" overlay carrying the task id, re-queryable on demand
+// (genResume.requeryRecoverTask). Persisted in nodes_json → survives reload.
+
+/** Swap one pending cell for a recover entry (poll broke, task not lost).
+ *  Creates the slot when missing — a reload can land before the dispatch's
+ *  own slot write was autosaved, and the recover mark must not vanish. */
+export function markGenerationRecover(
+  promptId: string,
+  taskId: string,
+  kind: OutputKind = 'image',
+): void {
+  let slotId = slotIdFor(promptId);
+  if (!slotId) {
+    beginGenerationSlot(promptId, 0, kind);
+    slotId = slotIdFor(promptId);
+    if (!slotId) return;
+  }
+  const store = useCanvasCoreStore.getState();
+  const node = store.nodes.find((n) => asObj(n).id === slotId);
+  const data = (asObj(node).data ?? {}) as {
+    gen_pending?: number;
+    gen_recover?: string[];
+  };
+  const recover = data.gen_recover ?? [];
+  if (recover.includes(taskId)) return;
+  store.patchNode(slotId, {
+    data: {
+      gen_pending: Math.max(0, (data.gen_pending ?? 0) - 1),
+      gen_recover: [...recover, taskId],
+    },
+  });
+}
+
+/** Settle a recover entry after a re-query: url lands as an image, null
+ *  burns into the failed count. Never touches gen_pending — sibling tasks
+ *  still in flight own those cells. */
+export function resolveGenerationRecover(
+  promptId: string,
+  taskId: string,
+  outcome: { url: string | null; kind: OutputKind },
+): void {
+  const slotId = slotIdFor(promptId);
+  if (!slotId) return;
+  const store = useCanvasCoreStore.getState();
+  const node = store.nodes.find((n) => asObj(n).id === slotId);
+  const data = (asObj(node).data ?? {}) as {
+    images?: GeneratedImageRef[];
+    gen_recover?: string[];
+    gen_failed?: number;
+  };
+  const recover = data.gen_recover ?? [];
+  if (!recover.includes(taskId)) return;
+  const rest = recover.filter((id) => id !== taskId);
+  if (outcome.url) {
+    const images = [
+      ...(data.images ?? []),
+      { url: outcome.url, kind: outcome.kind } satisfies GeneratedImageRef,
+    ];
+    store.patchNode(slotId, {
+      data: {
+        kind: outcome.kind,
+        images,
+        preview_url: images[0]?.url ?? null,
+        gen_recover: rest,
+      },
+    });
+    return;
+  }
+  store.patchNode(slotId, {
+    data: { gen_recover: rest, gen_failed: (data.gen_failed ?? 0) + 1 },
+  });
+}
+
 /** Item(s) failed or the run was stopped: burn pending cells down. */
 export function settleGenerationSlot(
   promptId: string,
