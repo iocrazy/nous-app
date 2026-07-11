@@ -314,3 +314,30 @@ test('wheel zoom-out passes the old React Flow 0.5 floor (P0-6)', async ({ page 
     .poll(zoomOf, { message: 'zoom should go below the 0.5 RF default floor' })
     .toBeLessThan(0.45);
 });
+
+test('double-click empty canvas opens the create menu; picking adds an unwired node (P1-1)', async ({ page }) => {
+  await openCanvas(page);
+  await expect(page.locator('.react-flow__edge')).toHaveCount(2);
+
+  await page.locator('.react-flow__pane').dblclick({ position: { x: 700, y: 200 } });
+  const menu = page.getByRole('menu', { name: 'Add node' });
+  await expect(menu).toBeVisible();
+  await menu.getByRole('menuitem', { name: 'Prompt' }).click();
+
+  await expect(page.locator('.react-flow__node')).toHaveCount(4);
+  // No origin — the node arrives unwired.
+  await expect(page.locator('.react-flow__edge')).toHaveCount(2);
+  // And the double-click did NOT zoom (RF default off when the menu owns it).
+  const transform = await page
+    .locator('.react-flow__viewport')
+    .evaluate((el) => (el as HTMLElement).style.transform);
+  expect(transform).toContain('scale(1)');
+});
+
+test('right-click empty canvas opens the same create menu (P1-1)', async ({ page }) => {
+  await openCanvas(page);
+  await page.locator('.react-flow__pane').click({ button: 'right', position: { x: 700, y: 300 } });
+  await expect(page.getByRole('menu', { name: 'Add node' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu', { name: 'Add node' })).toHaveCount(0);
+});
