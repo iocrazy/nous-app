@@ -1011,6 +1011,18 @@ body {
 .mh-canvas .react-flow__handle:hover::after {
   transform: translate(-50%, -50%) scale(1.25);
 }
+/* Port fade (P1-9) — Infinite's smart ports are invisible until the node is
+   hovered/selected or a wire is being dragged (then EVERY port lights up as
+   a target). Hit areas stay live; only the visual fades. */
+.mh-canvas .react-flow__handle {
+  opacity: 0;
+  transition: opacity 0.14s var(--canvas-ease);
+}
+.mh-canvas .react-flow__node:hover .react-flow__handle,
+.mh-canvas .react-flow__node.selected .react-flow__handle,
+.mh-canvas:has(.react-flow__connection) .react-flow__handle {
+  opacity: 1;
+}
 
 .mh-canvas .react-flow__minimap {
   border-radius: var(--canvas-r-island) !important;
