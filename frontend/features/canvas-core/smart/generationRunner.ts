@@ -25,6 +25,15 @@ export interface GenerationRunnerDeps {
   /** Cooperative stop (P0-4) — abandons in-flight polling; the runner
    *  returns a `stopped` result so the node goes back to idle. */
   shouldStop?: () => boolean;
+  /** Placeholder lifecycle (P0-3): fired right after dispatch with the
+   *  fan-out size — the caller shows N shimmer cells. */
+  onDispatched?: (promptId: string, count: number, kind: 'image' | 'video') => void;
+  /** First-done-first-shown (P0-3): fired as EACH task completes with a
+   *  url — the caller replaces one shimmer cell. Errors fire with url=null. */
+  onItemSettled?: (
+    promptId: string,
+    item: { url: string | null; kind: 'image' | 'video' },
+  ) => void;
 }
 
 export function withGenerationRunner(
@@ -56,6 +65,7 @@ export function withGenerationRunner(
         params,
         ...(ctx.source_url ? { source_url: ctx.source_url } : {}),
       });
+      deps.onDispatched?.(ctx.promptId, taskIds.length, gen.kind);
 
       // Fold N tasks' phases into one prompt-level signal: queued while
       // EVERYTHING is still in line, running once anything starts.
@@ -73,6 +83,13 @@ export function withGenerationRunner(
             timeoutMs: deps.pollTimeoutMs,
             onTick: (t) => emit(t.phase === 'queued' ? 'queued' : 'running'),
             shouldStop: deps.shouldStop,
+          }).then((task) => {
+            // First-done-first-shown (P0-3): surface each item the moment
+            // its own poll settles instead of waiting for the whole batch.
+            const url =
+              task.phase === 'completed' ? task.metadata?.result_url ?? null : null;
+            deps.onItemSettled?.(ctx.promptId, { url, kind: gen.kind });
+            return task;
           }),
         ),
       );
@@ -94,6 +111,7 @@ export function withGenerationRunner(
           ok: false,
           text: '',
           error: firstError ?? 'generation completed without results',
+          media_kind: gen.kind,
         };
       }
       return {
@@ -107,12 +125,19 @@ export function withGenerationRunner(
       };
     } catch (err) {
       if (err instanceof PollStopped) {
-        return { ok: false, stopped: true, text: '', error: 'stopped by user' };
+        return {
+          ok: false,
+          stopped: true,
+          text: '',
+          error: 'stopped by user',
+          media_kind: gen.kind,
+        };
       }
       return {
         ok: false,
         text: '',
         error: err instanceof Error ? err.message : String(err),
+        media_kind: gen.kind,
       };
     }
   };

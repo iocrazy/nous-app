@@ -62,8 +62,17 @@ async function buildPreviewUrl(resourceId: string): Promise<string> {
 }
 
 export function OutputNodeView({ id, data, selected }: NodeProps) {
-  const { kind, resource_id, preview_text, preview_url, crop_region, images, history_for } =
-    data as unknown as OutputNodeData;
+  const {
+    kind,
+    resource_id,
+    preview_text,
+    preview_url,
+    crop_region,
+    images,
+    history_for,
+    gen_pending = 0,
+    gen_failed = 0,
+  } = data as unknown as OutputNodeData;
   const patchData = useNodeDataPatch(id);
   const [editorOpen, setEditorOpen] = useState(false);
   const [committing, setCommitting] = useState(false);
@@ -440,10 +449,12 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         className={`p-3 ${canCrop ? 'cursor-zoom-in' : ''}`}
         title={canCrop ? 'Double-click to crop' : undefined}
       >
-        {images && images.length > 1 ? (
-          /* Multi-result grid (G4-F2): count N lands N images in ONE node. */
+        {gen_pending > 0 || (images?.length ?? 0) + gen_pending > 1 ? (
+          /* Multi-result grid (G4-F2) + in-flight shimmer cells (P0-3):
+             the slot shows WHERE results land the moment the run is
+             dispatched; each finished item replaces a cell as it arrives. */
           <div className="grid grid-cols-2 gap-1" data-testid="output-images-grid">
-            {images.map((img, i) => (
+            {(images ?? []).map((img, i) => (
               <img
                 key={`${img.url}-${i}`}
                 src={img.url}
@@ -451,6 +462,14 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
                 draggable={false}
                 onClick={() => queueLightbox(i)}
                 className="block w-full cursor-zoom-in rounded object-contain"
+              />
+            ))}
+            {Array.from({ length: gen_pending }, (_, i) => (
+              <div
+                key={`pending-${i}`}
+                data-testid="output-pending-cell"
+                aria-label="Generating"
+                className="mh-loading-cell aspect-square w-full rounded"
               />
             ))}
           </div>
@@ -480,6 +499,14 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         ) : (
           <div className="text-xs italic text-canvas-muted">
             {kind === 'text' ? 'No text yet' : `No ${kind} rendered yet`}
+          </div>
+        )}
+        {gen_failed > 0 && (
+          <div
+            data-testid="output-failed-chip"
+            className="mt-1.5 inline-flex items-center rounded-full border border-rose-400/60 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-400"
+          >
+            {`${gen_failed} item${gen_failed > 1 ? 's' : ''} failed`}
           </div>
         )}
       </div>

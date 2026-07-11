@@ -226,3 +226,54 @@ describe('OutputNodeView — grid commit spawns tile nodes', () => {
     expect(useCanvasCoreStore.getState().nodes).toHaveLength(1);
   });
 });
+
+describe('generation placeholders (P0-3)', () => {
+  it('renders shimmer cells while gen_pending and a failed chip after settle', () => {
+    const data = {
+      kind: 'image',
+      resource_id: null,
+      preview_text: '',
+      preview_url: null,
+      crop_region: null,
+      images: [{ url: '/gm/1/cover', kind: 'image' }],
+      gen_pending: 2,
+      gen_failed: 1,
+      gen_slot: { node_id: 'p1', index: 0 },
+    };
+    useCanvasCoreStore.setState({
+      nodes: [{ id: 'out1', type: 'output', position: { x: 0, y: 0 }, data }],
+      connections: [],
+    });
+    const { container } = render(
+      <Wrap>
+        <OutputNodeView {...baseProps} id="out1" data={data} />
+      </Wrap>,
+    );
+    expect(screen.getAllByTestId('output-pending-cell')).toHaveLength(2);
+    expect(container.querySelectorAll('img')).toHaveLength(1);
+    expect(screen.getByTestId('output-failed-chip').textContent).toContain('1 item failed');
+  });
+
+  it('shows the grid even before the first image lands', () => {
+    const data = {
+      kind: 'image',
+      resource_id: null,
+      preview_text: '',
+      preview_url: null,
+      crop_region: null,
+      images: [],
+      gen_pending: 4,
+      gen_slot: { node_id: 'p1', index: 0 },
+    };
+    useCanvasCoreStore.setState({
+      nodes: [{ id: 'out1', type: 'output', position: { x: 0, y: 0 }, data }],
+      connections: [],
+    });
+    render(
+      <Wrap>
+        <OutputNodeView {...baseProps} id="out1" data={data} />
+      </Wrap>,
+    );
+    expect(screen.getAllByTestId('output-pending-cell')).toHaveLength(4);
+  });
+});
