@@ -808,17 +808,23 @@ export const EDITOR_SHELL_STYLES = `
 }
 .mh-chapter-fallback-body.empty{ font-style:italic; }
 
-/* ===== VISIBLE FOCUS RING AUDIT (a11y sweep, Task 10) ===== */
+/* ===== VISIBLE FOCUS RING AUDIT (a11y sweep, Task 10) =====
+   NOTE: .mh-el-editable is deliberately NOT in this group. Chrome treats a
+   focused contenteditable as :focus-visible ALWAYS (even on mouse click), so
+   ringing it drew a permanent indigo box around the script line the writer is
+   typing in — the "empty input box" the user kept reporting. A text-editing
+   surface's focus indicator is its blinking caret (Docs/Notion do the same);
+   buttons/selects/tabs keep the ring. */
 .mh-editor-shell button:focus-visible,
 .mh-editor-shell select:focus-visible,
 .mh-editor-shell input:focus-visible,
 .mh-editor-shell [role='tab']:focus-visible,
-.mh-editor-shell [role='option']:focus-visible,
-.mh-editor-shell .mh-el-editable:focus-visible{
+.mh-editor-shell [role='option']:focus-visible{
   outline:2px solid var(--indigo);
   outline-offset:2px;
   border-radius:5px;
 }
+.mh-editor-shell .mh-el-editable:focus-visible{ outline:none; }
 .mh-editor-shell .mh-drag-handle:focus-visible{ opacity:1; outline-offset:1px; }
 
 /* ===== COPILOT SUMMON — gutter-tick select + card (Task 11) ===== */
@@ -1367,4 +1373,55 @@ export const EDITOR_SHELL_STYLES = `
 .mh-chapter-convert-btn:hover:not(:disabled){ background:none; color:var(--indigo); }
 /* #8,#16: calmer vertical rhythm between scenes. */
 .mh-scene-block{ margin-bottom:20px; }
+
+/* ==================================================================
+   LAPER PARITY PASS — pixel-level alignment with the laper.ai page
+   (user reference screenshots): warm paper, real screenplay margins,
+   INT/EXT LOCATION - DAY/NIGHT chips for unset headings, per-type
+   placeholders on the focused empty block, laper's kbd hint rows.
+   ================================================================== */
+/* Warm paper, not cool lavender-white (light theme only; dark keeps its ink). */
+.mh-editor-shell[data-theme='light'] .mh-sheet{
+  background:linear-gradient(180deg, #fdfcf8 0%, #faf8f1 100%);
+  border-color:#eae7db;
+}
+/* A page, not a panel: screenplay margins (wide left like a bound page) and an
+   A4-ish minimum height so even an empty script reads as a sheet of paper. */
+.mh-sheet{ width:780px; padding:56px 48px 72px 72px; min-height:1040px; }
+/* Slug is uppercase REGULAR weight on a printed page (laper too) — position
+   and case carry the meaning, not boldness. */
+.mh-scene-heading-display{ font-weight:400; letter-spacing:0.01em; }
+/* Unset heading = laper's chip tokens, not a prose placeholder. */
+.mh-heading-chip{
+  display:inline-block; padding:0 7px; border-radius:4px;
+  background:color-mix(in srgb, var(--sheet-ink) 7%, transparent);
+  color:var(--sheet-ink-soft);
+}
+.mh-scene-heading-empty{ opacity:0.65; }
+/* Focused empty block whispers its element type (laper/Notion affordance) —
+   driven purely by the data-el-type attr, so no component plumbing. */
+.mh-el-editable:empty:focus::before{ font-style:normal; opacity:0.4; }
+.mh-el-editable[data-el-type='action']:empty:focus::before{ content:'Action'; }
+.mh-el-editable[data-el-type='character']:empty:focus::before{ content:'Character'; }
+.mh-el-editable[data-el-type='dialogue']:empty:focus::before{ content:'Dialogue'; }
+.mh-el-editable[data-el-type='paren']:empty:focus::before{ content:'Parenthetical'; }
+.mh-el-editable[data-el-type='transition']:empty:focus::before{ content:'Transition'; }
+.mh-el-editable[data-el-type='comment']:empty:focus::before{ content:'Comment'; }
+.mh-el-editable[data-el-type='subtitle']:empty:focus::before{ content:'Subtitle'; }
+/* laper's kbd hint rows — now rendered INSIDE the sheet top, only while the
+   script has no typed text (EditorShell gates it), so a real script page stays
+   pure. Overrides the earlier display:none chrome-kill. */
+.mh-keyboard-hint{
+  display:flex; flex-direction:column; align-items:flex-start; gap:9px;
+  margin:0 0 36px; padding:0; border:none; background:none;
+  font-family:var(--script-mono); font-size:12.5px;
+  color:var(--sheet-ink-soft); opacity:0.8;
+}
+.mh-keyboard-hint kbd{
+  background:color-mix(in srgb, var(--sheet-ink) 6%, transparent);
+  border:1px solid var(--sheet-border); border-radius:4px;
+  padding:0 7px; margin-right:9px;
+  font-family:var(--mono); font-size:10.5px; color:var(--sheet-ink-soft);
+}
+.mh-keyboard-hint .sep{ display:none; }
 `;

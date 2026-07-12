@@ -1010,7 +1010,16 @@ export function SceneBlock({
             onClick={enterHeadingEdit}
           >
             {displayHeading || (
-              <span className="mh-scene-heading-empty">{t('editor.sceneHeadingEmpty')}</span>
+              // laper-parity: an unset heading renders as the slug's chip
+              // tokens (INT/EXT LOCATION - DAY/NIGHT), not a prose placeholder.
+              // Screplay tokens are English by convention; the button's
+              // aria-label above still announces the editable purpose.
+              <span className="mh-scene-heading-empty">
+                <span className="mh-heading-chip">INT/EXT</span>{' '}
+                <span className="mh-heading-chip">LOCATION</span>
+                {' - '}
+                <span className="mh-heading-chip">DAY/NIGHT</span>
+              </span>
             )}
           </button>
         )}
