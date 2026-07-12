@@ -124,4 +124,34 @@ describe('EditorShell cold start', () => {
     expect(screen.queryByTestId('cold-start')).toBeNull();
     expect(screen.getByText('Old prose to convert.')).toBeInTheDocument();
   });
+
+  it('EMPTY legacy chapter offers Start Writing → creates a typeable scene (no LLM)', async () => {
+    svc.listScenes.mockResolvedValueOnce([]).mockResolvedValue([seededScene]);
+    scriptSvc.fetchScriptProject.mockResolvedValueOnce({
+      chapters: [{ id: 'ch1', title: 'Chapter One', content: '' }], // empty → no prose to split
+    });
+    svc.createScene.mockResolvedValue({
+      ...seededScene,
+      chapter_id: 'ch1',
+      elements: [],
+      content_version: 1,
+    });
+    svc.applyOps.mockResolvedValue({ content_version: 2, elements: seededScene.elements });
+
+    render(<EditorShell scriptId="1" />);
+    // An empty chapter shows "Start Writing", NOT the AI "Convert to Scenes".
+    const startBtn = await screen.findByRole('button', { name: 'editor.startWriting' });
+    expect(screen.queryByRole('button', { name: 'editor.convertToScenes' })).toBeNull();
+
+    fireEvent.click(startBtn);
+    // Client-side: a scene linked to the chapter + a seeded action row — no
+    // convert workflow is invoked.
+    await waitFor(() =>
+      expect(svc.createScene).toHaveBeenCalledWith(
+        '1',
+        expect.objectContaining({ chapter_id: 'ch1' }),
+      ),
+    );
+    await waitFor(() => expect(svc.applyOps).toHaveBeenCalled());
+  });
 });
