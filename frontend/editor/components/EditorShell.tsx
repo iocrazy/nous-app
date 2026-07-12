@@ -706,6 +706,12 @@ export function EditorShell({
   // the document-order block count, so heading + element numbers never reset
   // at a scene boundary (laper.ai-style).
   const blockBases = useMemo(() => sceneBlockBases(scenes), [scenes]);
+  // laper-parity: the kbd hint rows show inside the sheet top ONLY while the
+  // script has no typed text yet — a real script page stays hint-free.
+  const scriptUntouched = useMemo(
+    () => scenes.every((s) => s.elements.every((e) => !e.text.trim())),
+    [scenes],
+  );
 
   const recomputeWindow = useCallback(() => {
     if (!windowed) return;
@@ -1082,6 +1088,19 @@ export function EditorShell({
               />
               <div className="mh-sheet">
                 <div className="mh-sheet-inner">
+                  {state.mode !== 'outline' && scriptUntouched && (
+                    <div className="mh-keyboard-hint" aria-hidden="true">
+                      <div>
+                        <kbd>Tab</kbd> {t('editor.hintTab')}
+                      </div>
+                      <div>
+                        <kbd>Enter</kbd> {t('editor.hintEnter')}
+                      </div>
+                      <div>
+                        <kbd>@</kbd> {t('editor.hintMention')}
+                      </div>
+                    </div>
+                  )}
                   {state.mode === 'outline' ? (
                     <OutlineView
                       scenes={scenes}
@@ -1167,11 +1186,6 @@ export function EditorShell({
           )}
         </div>
 
-        <div className="mh-keyboard-hint">
-          <kbd>Tab</kbd> {t('editor.hintTab')} <span className="sep">·</span>
-          <kbd>Enter</kbd> {t('editor.hintEnter')} <span className="sep">·</span>
-          <kbd>@</kbd> {t('editor.hintMention')}
-        </div>
       </main>
 
       {/* ===== RIGHT PANEL ===== */}
