@@ -90,13 +90,28 @@ export function CanvasComposer({
   const setSelection = useCanvasCoreStore((s) => s.setSelection);
   const patchNode = useCanvasCoreStore((s) => s.patchNode);
 
-  const [running, setRunning] = useState(false);
-  // Cooperative stop (P0-4): ref (stable identity for the memoized runner)
-  // + state mirror for the Stopping… label.
-  const stopRequestedRef = useRef(false);
+  // Per-node run batches (P2-9 — Infinite's node-granular running state):
+  // each Run/Cascade owns an independent batch with its own cooperative
+  // stop flag, so a long video generation no longer freezes the composer.
+  // The map lives in a ref (stable identity for the memoized runner);
+  // counters mirror it into state for the button chrome.
+  const batchesRef = useRef(
+    new Map<number, { ids: Set<string>; stop: { requested: boolean } }>(),
+  );
+  const nextBatchIdRef = useRef(0);
+  const [activeBatchCount, setActiveBatchCount] = useState(0);
+  const [cascadeCount, setCascadeCount] = useState(0);
   const [stopRequested, setStopRequested] = useState(false);
   const knifeActive = useKnifeStore((s) => s.active);
   const toggleKnife = useKnifeStore((s) => s.toggle);
+
+  /** Is this prompt owned by any in-flight batch? */
+  const inAnyBatch = useCallback((promptId: string): boolean => {
+    for (const batch of batchesRef.current.values()) {
+      if (batch.ids.has(promptId)) return true;
+    }
+    return false;
+  }, []);
 
   const runner = useMemo<PromptCaller>(() => {
     const base = runnerOverride
@@ -114,7 +129,14 @@ export function CanvasComposer({
           data: { run_status: phase === 'queued' ? 'queued' : 'running' },
         });
       },
-      shouldStop: () => stopRequestedRef.current,
+      // Per-prompt stop resolution (P2-9): a poll aborts only when ITS
+      // batch was stopped, not when any run anywhere was.
+      shouldStop: (promptId) => {
+        for (const batch of batchesRef.current.values()) {
+          if (batch.ids.has(promptId)) return batch.stop.requested;
+        }
+        return false;
+      },
       // Placeholder lifecycle (P0-3): shimmer cells appear at dispatch,
       // each finished item replaces one (first-done-first-shown), failures
       // burn a cell into the failed count. Task ids persist on the prompt
@@ -207,26 +229,51 @@ export function CanvasComposer({
   };
 
   const doRunIds = useCallback(
-    async (ids: string[]) => {
-      if (ids.length === 0 || running) return;
-      stopRequestedRef.current = false;
-      setStopRequested(false);
-      setRunning(true);
+    async (ids: string[], opts?: { cascade?: boolean }) => {
+      // Filter out prompts that are already owned by an in-flight batch OR
+      // marked in flight in the store (loop/rerun channels) — the double
+      // dispatch would race the SAME gen_slot.
+      const liveNodes = useCanvasCoreStore.getState().nodes;
+      const inFlightStatus = new Set(['queued', 'running']);
+      const eligible = ids.filter((id) => {
+        if (inAnyBatch(id)) return false;
+        const node = liveNodes.find(
+          (n) => (n as Record<string, unknown>).id === id,
+        );
+        const status = (
+          (node as Record<string, unknown> | undefined)?.data as
+            | { run_status?: string }
+            | undefined
+        )?.run_status;
+        return !inFlightStatus.has(status ?? '');
+      });
+      if (eligible.length === 0) return;
+
+      const batch = { ids: new Set(eligible), stop: { requested: false } };
+      const key = nextBatchIdRef.current++;
+      batchesRef.current.set(key, batch);
+      setActiveBatchCount((c) => c + 1);
+      if (opts?.cascade) setCascadeCount((c) => c + 1);
       try {
-        await runPrompts(buildContexts(ids), runner, handlers, {
-          shouldStop: () => stopRequestedRef.current,
+        await runPrompts(buildContexts(eligible), runner, handlers, {
+          shouldStop: () => batch.stop.requested,
         });
       } finally {
-        setRunning(false);
-        stopRequestedRef.current = false;
-        setStopRequested(false);
+        batchesRef.current.delete(key);
+        setActiveBatchCount((c) => c - 1);
+        if (opts?.cascade) setCascadeCount((c) => c - 1);
+        // Last batch drained → the Stopping… label has nothing left to stop.
+        if (batchesRef.current.size === 0) setStopRequested(false);
       }
     },
-    [buildContexts, handlers, runner, running],
+    [buildContexts, handlers, runner, inAnyBatch],
   );
 
   const onStopRun = useCallback(() => {
-    stopRequestedRef.current = true;
+    // Stop EVERY active batch (per-node stop is a follow-up).
+    for (const batch of batchesRef.current.values()) {
+      batch.stop.requested = true;
+    }
     setStopRequested(true);
   }, []);
 
@@ -240,7 +287,7 @@ export function CanvasComposer({
 
   const onCascadeRun = useCallback(() => {
     const { order } = topoSortPrompts(nodes, connections);
-    void doRunIds(order);
+    void doRunIds(order, { cascade: true });
   }, [nodes, connections, doRunIds]);
 
   const onArrange = useCallback(() => {
@@ -404,7 +451,10 @@ export function CanvasComposer({
     <div
       role="toolbar"
       aria-label="Smart canvas composer"
-      className="canvas-island pointer-events-auto absolute inset-x-0 bottom-4 mx-auto flex w-fit gap-1 p-1.5"
+      // max-w + x-scroll: the island must never push its tail buttons off
+      // screen (the Stop key made the long-standing narrow-viewport
+      // overflow visible at 1280px).
+      className="canvas-island pointer-events-auto absolute inset-x-0 bottom-4 mx-auto flex w-fit max-w-[calc(100%-2rem)] gap-1 overflow-x-auto p-1.5"
     >
       <ComposerButton onClick={() => addNode('shot')}>+ Shot</ComposerButton>
       <ComposerButton onClick={() => addNode('prompt')}>+ Prompt</ComposerButton>
@@ -483,31 +533,30 @@ export function CanvasComposer({
         </div>
       )}
       <Divider />
-      {running ? (
-        // Cooperative stop (P0-4, Infinite's Run↔Stop swap): unstarted
-        // prompts are never dispatched; the in-flight poll is abandoned and
-        // its node returns to idle. The backend task itself keeps running
-        // (no cancel endpoint yet).
-        <ComposerButton
-          onClick={onStopRun}
-          disabled={stopRequested}
-          emphasis="primary"
-        >
+      {/* Per-node batches (P2-9): Run/Cascade stay live while batches run —
+          Stop appears BESIDE them and stops every active batch (P0-4
+          semantics per batch: unstarted prompts never dispatch, in-flight
+          polls abandon, nodes return to idle; the backend tasks themselves
+          keep running — no cancel endpoint yet). */}
+      {activeBatchCount > 0 && (
+        <ComposerButton onClick={onStopRun} disabled={stopRequested}>
           {stopRequested ? 'Stopping…' : 'Stop'}
         </ComposerButton>
-      ) : (
-        <>
-          <ComposerButton
-            onClick={onRunSelected}
-            disabled={selection.length === 0}
-          >
-            Run
-          </ComposerButton>
-          <ComposerButton onClick={onCascadeRun} emphasis="primary">
-            Cascade Run
-          </ComposerButton>
-        </>
       )}
+      <ComposerButton
+        onClick={onRunSelected}
+        disabled={selection.length === 0}
+      >
+        Run
+      </ComposerButton>
+      <ComposerButton
+        onClick={onCascadeRun}
+        // A second cascade while one runs would race the same topo order.
+        disabled={cascadeCount > 0}
+        emphasis="primary"
+      >
+        Cascade Run
+      </ComposerButton>
     </div>
   );
 }

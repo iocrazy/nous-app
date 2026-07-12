@@ -102,19 +102,19 @@ describe('withGenerationRunner stop plumbing', () => {
     expect(result.stopped).toBe(true);
   });
 
-  it('forwards shouldStop into the poll options', async () => {
+  it('forwards shouldStop into the poll options, resolved per prompt id (P2-9)', async () => {
     dispatchGenerations.mockResolvedValue(['t1']);
-    pollGeneration.mockResolvedValue({
-      phase: 'completed',
-      metadata: { result_url: '/u1' },
-    });
-    const shouldStop = () => false;
+    pollGeneration.mockImplementation(
+      async (_id: string, opts: { shouldStop?: () => boolean }) => {
+        // The poll-level probe must consult the caller's per-prompt check.
+        opts.shouldStop?.();
+        return { phase: 'completed', metadata: { result_url: '/u1' } };
+      },
+    );
+    const shouldStop = vi.fn(() => false);
     const base: PromptCaller = async () => ({ ok: true, text: '', error: null });
     const runner = withGenerationRunner(base, { canvasId: '9', shouldStop });
     await runner({ ...ctxOf('p1'), gen: { kind: 'image', model: '', count: 1 } });
-    expect(pollGeneration).toHaveBeenCalledWith(
-      't1',
-      expect.objectContaining({ shouldStop }),
-    );
+    expect(shouldStop).toHaveBeenCalledWith('p1');
   });
 });
