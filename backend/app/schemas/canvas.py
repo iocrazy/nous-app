@@ -117,3 +117,20 @@ class CanvasGenerationRequest(BaseModel):
         if not v.strip():
             raise ValueError("prompt must not be blank")
         return v
+
+
+class CanvasZipItem(BaseModel):
+    """One entry in a Download-All zip: a whitelisted generated-media serve
+    URL plus the desired archive filename."""
+
+    url: str = Field(..., min_length=1)
+    name: str = ""
+
+
+class CanvasZipRequest(BaseModel):
+    """POST /canvases/assets/zip — bundle several generated-media results
+    into one archive (P2-7). Only generated-media serve URLs are accepted;
+    each id is scope-checked before its bytes are read (no remote fetch)."""
+
+    filename: str = "canvas-assets.zip"
+    items: List[CanvasZipItem] = Field(..., min_length=1, max_length=64)

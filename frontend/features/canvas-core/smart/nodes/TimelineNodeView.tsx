@@ -137,11 +137,28 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
     .replace('animate-pulse', '')
     .trim();
 
+  // Delete/Backspace with a segment focused removes THAT segment instead of
+  // letting React Flow delete the whole node (P3-B). Guarded to when the
+  // keystroke isn't inside a text field and there's more than one segment.
+  const onNodeKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+    if (!activeId || segments.length <= 1) return;
+    const target = e.target as HTMLElement;
+    const tag = target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const next = removeSegment(segments, activeId);
+    patch({ segments: next });
+    setActiveId(next[0]?.id ?? null);
+  };
+
   return (
     <div
       data-testid="smart-timeline-node"
       className={`mh-node ${tone} ${selected ? 'mh-node-selected' : ''}`}
       style={{ width: SMART_NODE_DEFAULT_WIDTH.timeline ?? 420 }}
+      onKeyDown={onNodeKeyDown}
     >
       <Handle type="target" position={Position.Left} />
       <div className="mh-node-head">

@@ -726,7 +726,7 @@ body {
   --canvas-r-panel: 24px;
   --canvas-r-node: 22px;
   --canvas-r-island: 18px;
-  --canvas-shadow-island: 0 16px 42px rgba(0, 0, 0, 0.45);
+  --canvas-shadow-island: 0 16px 42px rgba(0, 0, 0, 0.28);
   --canvas-blur: 18px;
   --canvas-ease: cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -775,10 +775,10 @@ body {
   border-radius: var(--canvas-r-node);
   background: var(--canvas-card);
   color: var(--canvas-text);
-  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.28);
 }
 [data-theme="light"] .mh-node {
-  box-shadow: 0 16px 42px rgba(15, 23, 42, 0.1);
+  box-shadow: 0 16px 42px rgba(15, 23, 42, 0.08);
 }
 .mh-node-selected {
   outline: 2px solid var(--canvas-strong);
@@ -802,10 +802,8 @@ body {
   border-radius: 999px;
   background: transparent;
   color: var(--canvas-muted);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 600;
   padding: 2px 10px;
   transition: color 0.14s var(--canvas-ease), border-color 0.14s var(--canvas-ease);
 }
@@ -1018,8 +1016,21 @@ body {
 /* Edges: faint by default, strong on hover/selection (Infinite .link). */
 .mh-canvas .react-flow__edge-path {
   stroke: var(--canvas-line-strong);
-  stroke-width: 2.5px;
+  stroke-width: 1.6px;
   transition: stroke 0.14s var(--canvas-ease);
+}
+
+/* Smart-canvas run flow: gentler than the legacy canvas-edge-flow
+   (.6s/-18) — Infinite's dash-flow is .9s/-13. Scoped to the mh-canvas so
+   the legacy keyframes (still driving .canvas-processing-edge__flow) stay
+   untouched. */
+@keyframes mh-edge-flow {
+  0% {
+    stroke-dashoffset: 0;
+  }
+  100% {
+    stroke-dashoffset: -13;
+  }
 }
 
 .mh-canvas .react-flow__edge:hover .react-flow__edge-path,
@@ -1115,9 +1126,9 @@ body {
 
 .mh-canvas .mh-edge-active .react-flow__edge-path {
   stroke: var(--canvas-accent);
-  stroke-width: 2.5px;
+  stroke-width: 2px;
   stroke-dasharray: 6 6;
-  animation: canvas-edge-flow 0.6s linear infinite;
+  animation: mh-edge-flow 0.9s linear infinite;
 }
 
 .mh-canvas .mh-edge-done .react-flow__edge-path {
@@ -1131,6 +1142,38 @@ body {
 .mh-canvas .mh-edge-blocked .react-flow__edge-path {
   stroke: var(--canvas-line);
   opacity: 0.5;
+}
+
+/* Marquee selection (P3-A): the default RF blue box clashes with the glass
+   palette — Infinite uses a 1px strong border + faint fill + 10px radius. */
+.mh-canvas .react-flow__selection,
+.mh-canvas .react-flow__nodesselection-rect {
+  border: 1px solid var(--canvas-strong);
+  background: color-mix(in srgb, var(--canvas-strong) 8%, transparent);
+  border-radius: 10px;
+}
+
+/* Menu / panel entrance (P3-A): Infinite fades + rises .16s. */
+@keyframes mh-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.mh-pop-in {
+  animation: mh-pop-in 0.16s var(--canvas-ease);
+}
+
+/* Accent chip (P3-B): @-mention / resource-ref pills, tokenised off
+   --canvas-accent so they follow the theme instead of a fixed indigo that
+   goes muddy in light mode. */
+.mh-accent-chip {
+  background: rgb(var(--canvas-accent-rgb) / 0.15);
+  color: var(--canvas-accent);
 }
 
 /* Downloads grid: mobile 2 cols (Tailwind), desktop auto-fill fixed-width cards */

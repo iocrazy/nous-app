@@ -144,3 +144,27 @@ describe('progress + thumbnails + failed mark (P2-1)', () => {
     expect(screen.getByTestId('timeline-seg-s1').getAttribute('data-failed')).toBeNull();
   });
 });
+
+describe('in-node Delete removes a segment (P3-B)', () => {
+  it('Delete with a segment active removes it, not the whole node', () => {
+    renderTimeline();
+    const node = screen.getByTestId('smart-timeline-node');
+    // s1 is active by default (first segment).
+    fireEvent.keyDown(node, { key: 'Delete' });
+    expect(storeSegments().map((s) => s.id)).toEqual(['s2', 's3']);
+  });
+
+  it('does not fire from inside the prompt textarea', () => {
+    renderTimeline();
+    const textarea = screen.getByLabelText('Segment prompt');
+    fireEvent.keyDown(textarea, { key: 'Delete' });
+    expect(storeSegments()).toHaveLength(3);
+  });
+
+  it('is a no-op with a single segment (keeps the node deletable)', () => {
+    renderTimeline({ segments: [{ id: 'only', prompt: 'x', seconds: 5 }] });
+    const node = screen.getByTestId('smart-timeline-node');
+    fireEvent.keyDown(node, { key: 'Delete' });
+    expect(storeSegments()).toHaveLength(1);
+  });
+});

@@ -23,8 +23,10 @@ export interface GenerationRunnerDeps {
    *  task in line (jimeng queue), 'running' once it starts. */
   onPhase?: (promptId: string, phase: 'queued' | 'running') => void;
   /** Cooperative stop (P0-4) — abandons in-flight polling; the runner
-   *  returns a `stopped` result so the node goes back to idle. */
-  shouldStop?: () => boolean;
+   *  returns a `stopped` result so the node goes back to idle. Receives
+   *  the prompt id (P2-9) so callers with per-node batches can resolve
+   *  which batch's stop flag applies. */
+  shouldStop?: (promptId: string) => boolean;
   /** Placeholder lifecycle (P0-3): fired right after dispatch with the
    *  fan-out size — the caller shows N shimmer cells. taskIds (P1-13) let
    *  the caller persist the in-flight batch for reload resume. */
@@ -99,7 +101,9 @@ export function withGenerationRunner(
             intervalMs: deps.pollIntervalMs,
             timeoutMs: deps.pollTimeoutMs,
             onTick: (t) => emit(t.phase === 'queued' ? 'queued' : 'running'),
-            shouldStop: deps.shouldStop,
+            shouldStop: deps.shouldStop
+              ? () => deps.shouldStop!(ctx.promptId)
+              : undefined,
           }).then(
             (task) => {
               // First-done-first-shown (P0-3): surface each item the moment

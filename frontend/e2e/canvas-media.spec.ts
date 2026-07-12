@@ -210,3 +210,26 @@ test('floating toolbar on selected node — Preview opens the lightbox instantly
   await page.keyboard.press('Escape');
   await page.screenshot({ path: 'e2e-artifacts/canvas-media-toolbar.png', fullPage: true });
 });
+
+test('Download All packs a server-side zip (P2-7)', async ({ page }) => {
+  await openCanvas(page);
+
+  let zipCalled = false;
+  await page.route('**/api/v1/canvases/assets/zip', (route) => {
+    zipCalled = true;
+    // A minimal empty-zip signature is enough to satisfy the blob save.
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/zip',
+      body: Buffer.from([0x50, 0x4b, 0x05, 0x06, ...new Array(18).fill(0)]),
+    });
+  });
+
+  await page.locator('[data-testid="output-images-grid"] img').first().click();
+  await expect(page.getByTestId('output-lightbox')).toBeVisible();
+
+  const download = page.waitForEvent('download').catch(() => null);
+  await page.getByRole('button', { name: 'Download All' }).click();
+  await expect.poll(() => zipCalled).toBe(true);
+  await download;
+});

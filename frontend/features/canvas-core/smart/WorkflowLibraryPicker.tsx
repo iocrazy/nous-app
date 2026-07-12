@@ -27,7 +27,7 @@ export function WorkflowLibraryPicker({
   return (
     <div
       data-testid="workflow-library-picker"
-      className="canvas-island absolute bottom-full left-1/2 mb-2 w-80 -translate-x-1/2 p-2"
+      className="mh-pop-in canvas-island absolute bottom-full left-1/2 mb-2 w-80 -translate-x-1/2 p-2"
     >
       <div className="mb-1.5 flex items-center justify-between px-1">
         <span className="mh-node-title">Workflow Library</span>

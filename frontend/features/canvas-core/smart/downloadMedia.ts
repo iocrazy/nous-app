@@ -16,6 +16,22 @@ export function downloadName(item: DownloadableItem, fallbackIndex: number): str
   return tail || `output-${fallbackIndex + 1}`;
 }
 
+/** Save an already-in-memory blob (P2-8 video frame export) — same
+ *  object-URL anchor dance, no fetch. */
+export function downloadBlob(blob: Blob, filename: string): void {
+  const href = URL.createObjectURL(blob);
+  try {
+    const link = document.createElement('a');
+    link.href = href;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  } finally {
+    URL.revokeObjectURL(href);
+  }
+}
+
 export async function downloadUrl(
   item: DownloadableItem,
   fallbackIndex: number,

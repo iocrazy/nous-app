@@ -622,6 +622,21 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           kind={kind === 'video' ? 'video' : 'image'}
           onIndexChange={setLightboxIndex}
           onClose={() => setLightboxIndex(null)}
+          meta={(() => {
+            // The generating prompt's body (P3-B meta line) — from the
+            // source prompt node, snapshotted like compareSources below.
+            const promptId = promptIdForOutput(id);
+            if (!promptId) return undefined;
+            const node = useCanvasCoreStore
+              .getState()
+              .nodes.find((n) => (n as Record<string, unknown>).id === promptId);
+            const body = (
+              (node as Record<string, unknown> | undefined)?.data as
+                | { body?: string }
+                | undefined
+            )?.body;
+            return body?.trim() || undefined;
+          })()}
           compareSources={(() => {
             // Infinite compares result vs the run's INPUT images (thumbnail
             // picker when several qualify); fall back to the newest archived

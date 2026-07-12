@@ -34,6 +34,7 @@ from app.schemas.canvas import (
     CanvasResponse,
     CanvasTimelineRequest,
     CanvasUpdate,
+    CanvasZipRequest,
 )
 from app.schemas.canvas_run import (
     CanvasGraphRunRequest,
@@ -100,6 +101,94 @@ async def _gate_canvas_read(canvas_id: str, auth: AuthDep) -> str:
 # Smart-canvas generation (G4-B1) — static paths MUST register before the
 # dynamic /canvases/{canvas_id} below or they get captured as a canvas id.
 # ============================================================
+
+
+@router.post("/canvases/assets/zip")
+async def download_canvas_assets_zip(body: CanvasZipRequest, auth: AuthDep):
+    """Bundle several generated-media results into one archive (P2-7).
+
+    Only whitelisted ``/api/v1/generated-media/{id}/(file|stream|cover)``
+    URLs are accepted — no arbitrary-URL fetch (SSRF surface). Every id is
+    scope-checked against the caller's personal team before its bytes are
+    read; ids the caller can't see are silently skipped (partial success),
+    and an all-empty request 404s.
+    """
+    import io
+    import zipfile
+
+    from fastapi.responses import Response
+
+    from app.repositories.generated_media_repository import GeneratedMediaRepository
+    from app.services.canvas.zip_assets import (
+        dedupe_zip_name,
+        parse_generated_media_id,
+    )
+    from app.services.library.resources_service import _resolve_personal_team_id
+
+    scope_id = int(await _resolve_personal_team_id(str(auth.user_id)))
+    repo = GeneratedMediaRepository()
+
+    buffer = io.BytesIO()
+    taken: set[str] = set()
+    packed = 0
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for item in body.items:
+            gen_id = parse_generated_media_id(item.url)
+            if gen_id is None:
+                # Reject the whole request on a non-whitelisted URL — a
+                # malformed client (or an attempt at remote fetch) must not
+                # silently succeed with a partial archive.
+                raise HTTPException(
+                    status_code=400,
+                    detail="only generated-media serve URLs are allowed",
+                )
+            row = await repo.get(gen_id, scope_id)
+            if not row:
+                continue  # not visible to this caller — skip, don't leak
+            data = await _read_media_bytes(row)
+            if data is None:
+                continue
+            fallback = f"generated-{gen_id}"
+            name = dedupe_zip_name(item.name or fallback, taken)
+            archive.writestr(name, data)
+            packed += 1
+
+    if packed == 0:
+        raise HTTPException(status_code=404, detail="no downloadable assets")
+
+    filename = body.filename or "canvas-assets.zip"
+    if not filename.lower().endswith(".zip"):
+        filename = f"{filename}.zip"
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+async def _read_media_bytes(row: dict):
+    """Read a generated_media row's bytes from whichever backend holds it,
+    mirroring generated_media_router._serve_media_row minus the response."""
+    import os
+
+    from app.core.config import settings
+    from app.services.library.media_storage import ObjectStore, resolve_media_source
+
+    loc = resolve_media_source(row["file_path"])
+    if loc.is_object_store:
+        try:
+            return await ObjectStore(loc.bucket).get_bytes(loc.key)
+        except Exception:
+            return None
+    base = os.path.realpath(settings.DOWNLOAD_PATH)
+    real = os.path.realpath(os.path.join(settings.DOWNLOAD_PATH, loc.rel_path))
+    if not (real == base or real.startswith(base + os.sep)):
+        return None
+    if not os.path.isfile(real):
+        return None
+    with open(real, "rb") as fh:
+        return fh.read()
+
 
 _GENERATION_MODEL_PUBLIC_FIELDS = (
     "name",
