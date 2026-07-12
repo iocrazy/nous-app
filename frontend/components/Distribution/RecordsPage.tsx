@@ -10,22 +10,22 @@ import './distribution-v4.css';
 
 type Filter = 'all' | 'needs_action' | 'publishing' | 'done';
 
-const STATUS_CHIP: Record<PublishTask['status'], { cls: string; label: string; pulse?: boolean }> = {
-  success: { cls: 'chip-green', label: 'Published' },
-  partial: { cls: 'chip-amber', label: 'Partially published' },
-  pending_share: { cls: 'chip-amber', label: 'Waiting in Douyin' },
-  publishing: { cls: 'chip-indigo', label: 'Publishing', pulse: true },
-  failed: { cls: 'chip-red', label: 'Failed' },
-  pending: { cls: 'chip-mute', label: 'Queued' },
+const STATUS_META: Record<PublishTask['status'], { cls: string; pulse?: boolean }> = {
+  success: { cls: 'chip-green' },
+  partial: { cls: 'chip-amber' },
+  pending_share: { cls: 'chip-amber' },
+  publishing: { cls: 'chip-indigo', pulse: true },
+  failed: { cls: 'chip-red' },
+  pending: { cls: 'chip-mute' },
 };
 
-const ACCOUNT_STATUS_CHIP: Record<PublishTaskAccount['status'], { cls: string; label: string; pulse?: boolean }> = {
-  success: { cls: 'chip-green', label: 'Published' },
-  pending_share: { cls: 'chip-amber', label: 'Waiting in Douyin' },
-  publishing: { cls: 'chip-indigo', label: 'Publishing', pulse: true },
-  failed: { cls: 'chip-red', label: 'Failed' },
-  pending: { cls: 'chip-mute', label: 'Queued' },
-  cancelled: { cls: 'chip-mute', label: 'Cancelled' },
+const ACCOUNT_STATUS_META: Record<PublishTaskAccount['status'], { cls: string; pulse?: boolean }> = {
+  success: { cls: 'chip-green' },
+  pending_share: { cls: 'chip-amber' },
+  publishing: { cls: 'chip-indigo', pulse: true },
+  failed: { cls: 'chip-red' },
+  pending: { cls: 'chip-mute' },
+  cancelled: { cls: 'chip-mute' },
 };
 
 const PLATFORM_LABEL: Record<string, string> = {
@@ -96,6 +96,36 @@ export const RecordsPage: React.FC = () => {
     [accounts],
   );
 
+  const taskStatusLabel = useCallback(
+    (status: PublishTask['status']): string => {
+      switch (status) {
+        case 'success': return t('distribution.records.status_success', 'Published');
+        case 'partial': return t('distribution.records.status_partial', 'Partially published');
+        case 'pending_share': return t('distribution.records.statusPendingShare', 'Waiting in Douyin');
+        case 'publishing': return t('distribution.records.status_publishing', 'Publishing');
+        case 'failed': return t('distribution.records.status_failed', 'Failed');
+        case 'pending': return t('distribution.records.statusQueued', 'Queued');
+        default: return status;
+      }
+    },
+    [t],
+  );
+
+  const accountStatusLabel = useCallback(
+    (status: PublishTaskAccount['status']): string => {
+      switch (status) {
+        case 'success': return t('distribution.records.status_success', 'Published');
+        case 'pending_share': return t('distribution.records.statusPendingShare', 'Waiting in Douyin');
+        case 'publishing': return t('distribution.records.status_publishing', 'Publishing');
+        case 'failed': return t('distribution.records.status_failed', 'Failed');
+        case 'pending': return t('distribution.records.statusQueued', 'Queued');
+        case 'cancelled': return t('distribution.records.status_cancelled', 'Cancelled');
+        default: return status;
+      }
+    },
+    [t],
+  );
+
   const onRetry = async (id: string) => {
     try {
       await retryPublishTask(id);
@@ -147,7 +177,7 @@ export const RecordsPage: React.FC = () => {
           </h2>
           <p>{t('distribution.records.subtitle', 'Every publish task across accounts, live from Task Center.')}</p>
         </div>
-        <button type="button" className="btn btn-ghost btn-sm" disabled title="Coming in D3">Export</button>
+        <button type="button" className="btn btn-ghost btn-sm" disabled title={t('distribution.comingInD3', 'Coming in D3')}>{t('distribution.records.export', 'Export')}</button>
       </div>
 
       <div className="filters">
@@ -178,12 +208,17 @@ export const RecordsPage: React.FC = () => {
           <div className="day-label">{day}</div>
           {dayTasks.map((task) => {
             const open = Boolean(expanded[task.id]);
-            const chip = STATUS_CHIP[task.status];
+            const chipMeta = STATUS_META[task.status];
+            const chipLabel = taskStatusLabel(task.status);
             const singleAccount = task.accounts.length === 1 ? task.accounts[0] : null;
             const accountSummary = singleAccount
               ? `${singleAccount.username}${platformFor(singleAccount.account_id) ? ` (${platformFor(singleAccount.account_id)})` : ''}`
-              : `${task.accounts.length} accounts`;
-            const contentLabel = task.content_type === 'video' ? 'Video' : task.content_type === 'images' ? 'Images' : 'Article';
+              : t('distribution.records.accountsCount', '{{n}} accounts', { n: task.accounts.length });
+            const contentLabel = task.content_type === 'video'
+              ? t('distribution.records.contentVideo', 'Video')
+              : task.content_type === 'images'
+                ? t('distribution.records.contentImages', 'Images')
+                : t('distribution.records.contentArticle', 'Article');
 
             return (
               <div key={task.id} className={`rec ${task.status === 'pending_share' ? 'attn' : ''}`}>
@@ -206,8 +241,8 @@ export const RecordsPage: React.FC = () => {
                       {contentLabel}<span className="sep">·</span>{accountSummary}<span className="sep">·</span>{formatTime(task.created_at)}
                     </span>
                   </div>
-                  <span className={`chip ${chip.cls} ${chip.pulse ? 'pulse' : ''}`}>
-                    <span className="d" />{chip.label}
+                  <span className={`chip ${chipMeta.cls} ${chipMeta.pulse ? 'pulse' : ''}`}>
+                    <span className="d" />{chipLabel}
                   </span>
                   {task.status === 'pending_share' && (
                     <button
@@ -223,7 +258,8 @@ export const RecordsPage: React.FC = () => {
                 {open && task.accounts.length > 0 && (
                   <div className="rec-sub">
                     {task.accounts.map((a) => {
-                      const aChip = ACCOUNT_STATUS_CHIP[a.status];
+                      const aChipMeta = ACCOUNT_STATUS_META[a.status];
+                      const aChipLabel = accountStatusLabel(a.status);
                       const platform = platformFor(a.account_id);
                       return (
                         <div key={a.id} className="sub-row">
@@ -233,8 +269,8 @@ export const RecordsPage: React.FC = () => {
                           <span className="who">
                             {a.username}{platform ? ` · ${platform}` : ''}
                           </span>
-                          <span className={`chip ${aChip.cls} ${aChip.pulse ? 'pulse' : ''}`}>
-                            <span className="d" />{aChip.label}
+                          <span className={`chip ${aChipMeta.cls} ${aChipMeta.pulse ? 'pulse' : ''}`}>
+                            <span className="d" />{aChipLabel}
                           </span>
                           {a.status === 'success' && a.published_url && (
                             <a href={a.published_url} target="_blank" rel="noreferrer">

@@ -18,7 +18,6 @@ type Channel = 'official' | 'h5';
 type Orientation = 'vertical' | 'horizontal';
 
 const VIS: Visibility[] = ['public', 'friends', 'private'];
-const VIS_LABEL: Record<Visibility, string> = { public: 'Public', friends: 'Friends', private: 'Private' };
 const PLATFORM_LABEL: Record<string, string> = {
   douyin: 'Douyin', kuaishou: 'Kuaishou', xiaohongshu: 'Xiaohongshu',
 };
@@ -125,6 +124,12 @@ export const PublishPage: React.FC = () => {
   );
   const previewHandle = firstSelectedAccount?.username ?? 'yourhandle';
 
+  const visLabel = (v: Visibility): string => {
+    if (v === 'public') return t('distribution.publish.vis_public', 'Public');
+    if (v === 'private') return t('distribution.publish.vis_private', 'Private');
+    return t('distribution.publish.visFriends', 'Friends');
+  };
+
   const onToggleAccount = (accountId: string, expired: boolean) => {
     if (expired) return;
     setSelectedAccounts((s) => toggle(s, accountId));
@@ -178,12 +183,12 @@ export const PublishPage: React.FC = () => {
       <div className="stepper" aria-hidden="true">
         <span className="step done">
           <span className="n"><Check size={11} /></span>
-          Content
+          {t('distribution.publish.content', 'Content')}
         </span>
         <span className="step-line done" />
-        <span className="step cur"><span className="n">2</span>Details &amp; accounts</span>
+        <span className="step cur"><span className="n">2</span>{t('distribution.publish.stepDetailsAccounts', 'Details & accounts')}</span>
         <span className="step-line" />
-        <span className="step"><span className="n">3</span>Done</span>
+        <span className="step"><span className="n">3</span>{t('distribution.publish.stepDone', 'Done')}</span>
       </div>
 
       <div className="pub-cols">
@@ -192,11 +197,11 @@ export const PublishPage: React.FC = () => {
           <div className="fcard">
             <h4>
               {t('distribution.publish.content', 'Content')}
-              <span className="aux">Video · {selectedVideos.length} selected</span>
+              <span className="aux">{t('distribution.publish.videoSelectedCount', 'Video · {{n}} selected', { n: selectedVideos.length })}</span>
             </h4>
             <div className="seg">
-              <button type="button" className="on">From Library</button>
-              <button type="button" disabled title="Coming in D3">Upload</button>
+              <button type="button" className="on">{t('distribution.publish.fromLibrary', 'From Library')}</button>
+              <button type="button" disabled title={t('distribution.comingInD3', 'Coming in D3')}>{t('distribution.publish.upload', 'Upload')}</button>
             </div>
             <div className="thumbs">
               {videos.map((v, idx) => {
@@ -223,7 +228,7 @@ export const PublishPage: React.FC = () => {
                       <button
                         type="button"
                         className="rm"
-                        aria-label={`Remove ${v.filename}`}
+                        aria-label={t('distribution.publish.removeVideo', 'Remove {{name}}', { name: v.filename })}
                         onClick={(e) => { e.stopPropagation(); setSelectedVideos((s) => toggle(s, v.id)); }}
                       >
                         ×
@@ -235,9 +240,9 @@ export const PublishPage: React.FC = () => {
                   </div>
                 );
               })}
-              <div className="thumb add" title="Video picker coming soon">
+              <div className="thumb add" title={t('distribution.publish.videoPickerComingSoon', 'Video picker coming soon')}>
                 <Plus size={16} />
-                Add from Library
+                {t('distribution.publish.addFromLibrary', 'Add from Library')}
               </div>
               {videos.length === 0 && (
                 <p className="text-[12px]" style={{ color: 'var(--content-4)' }}>
@@ -248,23 +253,23 @@ export const PublishPage: React.FC = () => {
           </div>
 
           <div className="fcard">
-            <h4>Cover <span className="aux">Not set yet</span></h4>
+            <h4>{t('distribution.publish.cover', 'Cover')} <span className="aux">{t('distribution.publish.notSetYet', 'Not set yet')}</span></h4>
             <div className="cover-wrap">
               <div className="cover-slots">
                 <div className="cover-slot v">
                   <Sparkles />
-                  Vertical 3:4
+                  {t('distribution.publish.vertical34', 'Vertical 3:4')}
                 </div>
                 <div className="cover-slot h">
                   <Sparkles />
-                  Horizontal 4:3
+                  {t('distribution.publish.horizontal43', 'Horizontal 4:3')}
                 </div>
               </div>
               <div className="cover-ai">
                 <div className="head">
-                  <b><Sparkles size={14} />AI covers · Canvas</b>
+                  <b><Sparkles size={14} />{t('distribution.publish.aiCoversCanvas', 'AI covers · Canvas')}</b>
                   <a href="#cover-studio" aria-disabled="true" onClick={(e) => e.preventDefault()}>
-                    Open Cover Studio
+                    {t('distribution.publish.openCoverStudio', 'Open Cover Studio')}
                   </a>
                 </div>
                 <div className="cover-cands">
@@ -272,14 +277,14 @@ export const PublishPage: React.FC = () => {
                   <div className="cand" style={{ background: 'linear-gradient(170deg,#6e3446,#4c2b5e 60%,#1e1e3a)' }} />
                   <div className="cand" style={{ background: 'linear-gradient(200deg,#0f3a4d,#46346e 70%,#1e1e3a)' }} />
                 </div>
-                <div className="foot">Generates candidates from a video frame + your title.</div>
-                <div className="d4-note">Coming in D4</div>
+                <div className="foot">{t('distribution.publish.coverGenDesc', 'Generates candidates from a video frame + your title.')}</div>
+                <div className="d4-note">{t('distribution.publish.comingInD4', 'Coming in D4')}</div>
               </div>
             </div>
           </div>
 
           <div className="fcard">
-            <h4>Title <span className="aux">{title.length} / 500</span></h4>
+            <h4>{t('distribution.publish.titleLabel', 'Title')} <span className="aux">{title.length} / 500</span></h4>
             <input
               className="input"
               value={title}
@@ -287,7 +292,7 @@ export const PublishPage: React.FC = () => {
               maxLength={500}
               placeholder={t('distribution.publish.titlePlaceholder', 'Add a title')}
             />
-            <h4 style={{ marginTop: 15 }}>Description <span className="aux">{description.length} / 1000</span></h4>
+            <h4 style={{ marginTop: 15 }}>{t('distribution.publish.descriptionLabel', 'Description')} <span className="aux">{description.length} / 1000</span></h4>
             <textarea
               className="input"
               value={description}
@@ -298,11 +303,11 @@ export const PublishPage: React.FC = () => {
               placeholder={t('distribution.publish.descPlaceholder', 'Add a description')}
             />
             <div className="topics">
-              <span className="chip chip-mute"># Topic</span>
-              <span className="chip chip-mute">@ Mention</span>
+              <span className="chip chip-mute">{t('distribution.publish.topicChip', '# Topic')}</span>
+              <span className="chip chip-mute">{t('distribution.publish.mentionChip', '@ Mention')}</span>
             </div>
             <div className="topics" style={{ marginTop: 7 }}>
-              <span className="trending-label">Trending</span>
+              <span className="trending-label">{t('distribution.publish.trending', 'Trending')}</span>
               <span className="chip chip-mute">#goldenhour</span>
               <span className="chip chip-mute">#cityscape</span>
               <span className="chip chip-mute">#4k</span>
@@ -311,94 +316,96 @@ export const PublishPage: React.FC = () => {
 
           <div className="fcard">
             <div className="frow">
-              <div className="lbl"><b>Visibility</b></div>
+              <div className="lbl"><b>{t('distribution.publish.visibility', 'Visibility')}</b></div>
               <div className="seg">
                 {VIS.map((v) => (
                   <button key={v} type="button" className={visibility === v ? 'on' : ''} onClick={() => setVisibility(v)}>
-                    {VIS_LABEL[v]}
+                    {visLabel(v)}
                   </button>
                 ))}
               </div>
             </div>
             <div className="frow">
               <div className="lbl">
-                <b>AI-generated content</b>
-                <span>Adds the disclosure label on platforms that require it</span>
+                <b>{t('distribution.publish.aiContent', 'AI-generated content')}</b>
+                <span>{t('distribution.publish.aiContentDesc', 'Adds the disclosure label on platforms that require it')}</span>
               </div>
               <button
                 type="button"
                 role="switch"
                 aria-checked={aiContent}
-                aria-label="AI-generated content"
+                aria-label={t('distribution.publish.aiContent', 'AI-generated content')}
                 className={`toggle ${aiContent ? 'on' : ''}`}
                 onClick={() => setAiContent((v) => !v)}
               />
             </div>
             <div className="frow">
               <div className="lbl">
-                <b>Allow downloads</b>
-                <span>Viewers can save the video to their device</span>
+                <b>{t('distribution.publish.allowDownloadsLabel', 'Allow downloads')}</b>
+                <span>{t('distribution.publish.allowDownloadsDesc', 'Viewers can save the video to their device')}</span>
               </div>
               <button
                 type="button"
                 role="switch"
                 aria-checked={allowDownload}
-                aria-label="Allow downloads"
+                aria-label={t('distribution.publish.allowDownloadsLabel', 'Allow downloads')}
                 className={`toggle ${allowDownload ? 'on' : ''}`}
                 onClick={() => setAllowDownload((v) => !v)}
               />
             </div>
             <div className="frow">
-              <div className="lbl"><b>Publish time</b></div>
+              <div className="lbl"><b>{t('distribution.publish.publishTime', 'Publish time')}</b></div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <div className="seg">
-                  <button type="button" className="on">Now</button>
-                  <button type="button" disabled title="Coming in D3">Schedule</button>
+                  <button type="button" className="on">{t('distribution.publish.scheduleNow', 'Now')}</button>
+                  <button type="button" disabled title={t('distribution.comingInD3', 'Coming in D3')}>{t('distribution.publish.schedule', 'Schedule')}</button>
                 </div>
-                <span className="sched-input"><Calendar />Not scheduled</span>
+                <span className="sched-input"><Calendar />{t('distribution.publish.notScheduled', 'Not scheduled')}</span>
               </div>
             </div>
           </div>
 
           <div className="fcard">
-            <h4>More options</h4>
+            <h4>{t('distribution.publish.moreOptions', 'More options')}</h4>
             <div className="opt-row">
               <Folder />
-              <span className="ol">Collection</span>
-              <span className="oa">Change</span>
+              <span className="ol">{t('distribution.publish.collection', 'Collection')}</span>
+              <span className="oa">{t('distribution.publish.change', 'Change')}</span>
             </div>
             <div className="opt-row">
               <MapPin />
-              <span className="ol">Location</span>
-              <span className="oa">Add</span>
+              <span className="ol">{t('distribution.publish.location', 'Location')}</span>
+              <span className="oa">{t('distribution.publish.add', 'Add')}</span>
             </div>
             <div className="opt-row">
               <TrendingUp />
-              <span className="ol">Trending topic</span>
-              <span className="ov">Link a rising topic for extra reach</span>
-              <span className="oa">Link</span>
+              <span className="ol">{t('distribution.publish.trendingTopic', 'Trending topic')}</span>
+              <span className="ov">{t('distribution.publish.trendingTopicDesc', 'Link a rising topic for extra reach')}</span>
+              <span className="oa">{t('distribution.publish.link', 'Link')}</span>
             </div>
             <div className="opt-row">
               <ListOrdered />
-              <span className="ol">Chapters</span>
-              <span className="ov">Where the platform supports them</span>
-              <span className="oa">Add</span>
+              <span className="ol">{t('distribution.publish.chapters', 'Chapters')}</span>
+              <span className="ov">{t('distribution.publish.chaptersDesc', 'Where the platform supports them')}</span>
+              <span className="oa">{t('distribution.publish.add', 'Add')}</span>
             </div>
           </div>
 
           <div className="fcard">
             <h4>
-              Distribution mode
-              <span className="aux">{selectedVideos.length} videos × {selectedAccounts.length} accounts</span>
+              {t('distribution.publish.distributionMode', 'Distribution mode')}
+              <span className="aux">
+                {t('distribution.publish.videosAccountsCount', '{{v}} videos × {{a}} accounts', { v: selectedVideos.length, a: selectedAccounts.length })}
+              </span>
             </h4>
             <div className="mode-cards">
               <button type="button" className={`mode ${mode === 'broadcast' ? 'on' : ''}`} onClick={() => setMode('broadcast')}>
-                <b><Radio /> Broadcast</b>
-                <span>Every account posts every video — {postsBroadcast} posts total.</span>
+                <b><Radio /> {t('distribution.publish.mode_broadcast', 'Broadcast')}</b>
+                <span>{t('distribution.publish.broadcastDesc', 'Every account posts every video — {{n}} posts total.', { n: postsBroadcast })}</span>
               </button>
               <button type="button" className={`mode ${mode === 'one_to_one' ? 'on' : ''}`} onClick={() => setMode('one_to_one')}>
-                <b><ArrowLeftRight /> One-to-one</b>
-                <span>Videos are assigned round-robin — {postsOneToOne} posts total.</span>
+                <b><ArrowLeftRight /> {t('distribution.publish.mode_one_to_one', 'One-to-one')}</b>
+                <span>{t('distribution.publish.oneToOneDesc', 'Videos are assigned round-robin — {{n}} posts total.', { n: postsOneToOne })}</span>
               </button>
             </div>
           </div>
@@ -408,10 +415,10 @@ export const PublishPage: React.FC = () => {
         <div className="pub-rail">
           <div className="phone-card">
             <div className="bar">
-              <h4>Live preview</h4>
+              <h4>{t('distribution.publish.livePreview', 'Live preview')}</h4>
               <div className="seg">
-                <button type="button" className={orientation === 'vertical' ? 'on' : ''} onClick={() => setOrientation('vertical')}>Vertical</button>
-                <button type="button" className={orientation === 'horizontal' ? 'on' : ''} onClick={() => setOrientation('horizontal')}>Horizontal</button>
+                <button type="button" className={orientation === 'vertical' ? 'on' : ''} onClick={() => setOrientation('vertical')}>{t('distribution.publish.vertical', 'Vertical')}</button>
+                <button type="button" className={orientation === 'horizontal' ? 'on' : ''} onClick={() => setOrientation('horizontal')}>{t('distribution.publish.horizontal', 'Horizontal')}</button>
               </div>
             </div>
             <div className="phone">
@@ -419,17 +426,17 @@ export const PublishPage: React.FC = () => {
               <div className="scene" />
               <div className="shade" />
               <div className="ui">
-                <div className="tabs"><span>Following</span><span className="cur-t">For You</span></div>
+                <div className="tabs"><span>{t('distribution.publish.following', 'Following')}</span><span className="cur-t">{t('distribution.publish.forYou', 'For You')}</span></div>
                 <div className="bottom">
                   <div className="meta">
                     <div className="handle"><span className="a" />@{previewHandle}</div>
-                    <div className="cap">{title || 'Your title appears here'}</div>
-                    <div className="music"><MusicIcon />Original sound · {previewHandle}</div>
+                    <div className="cap">{title || t('distribution.publish.titlePlaceholderPreview', 'Your title appears here')}</div>
+                    <div className="music"><MusicIcon />{t('distribution.publish.originalSound', 'Original sound · {{handle}}', { handle: previewHandle })}</div>
                   </div>
                   <div className="rail">
                     <span className="act"><span className="ic"><HeartIcon /></span>0</span>
                     <span className="act"><span className="ic"><CommentIcon /></span>0</span>
-                    <span className="act"><span className="ic"><ShareGlyph /></span>Share</span>
+                    <span className="act"><span className="ic"><ShareGlyph /></span>{t('distribution.publish.shareLabel', 'Share')}</span>
                   </div>
                 </div>
               </div>
@@ -438,12 +445,14 @@ export const PublishPage: React.FC = () => {
 
           <div className="fcard">
             <h4>
-              Publish to
-              <span className="aux">{selectedAccounts.length} of {accounts.length} selected</span>
+              {t('distribution.publish.publishTo', 'Publish to')}
+              <span className="aux">
+                {t('distribution.publish.selectedOfTotal', '{{selected}} of {{total}} selected', { selected: selectedAccounts.length, total: accounts.length })}
+              </span>
             </h4>
             <div className="seg" style={{ marginBottom: 10 }}>
-              <button type="button" className={channel === 'h5' ? 'on' : ''} onClick={() => setChannel('h5')}>H5 share</button>
-              <button type="button" className={channel === 'official' ? 'on' : ''} onClick={() => setChannel('official')}>Official API</button>
+              <button type="button" className={channel === 'h5' ? 'on' : ''} onClick={() => setChannel('h5')}>{t('distribution.publish.channelH5', 'H5 share')}</button>
+              <button type="button" className={channel === 'official' ? 'on' : ''} onClick={() => setChannel('official')}>{t('distribution.publish.channel_official', 'Official API')}</button>
             </div>
 
             {accounts.map((a) => {
@@ -480,8 +489,8 @@ export const PublishPage: React.FC = () => {
                         {PLATFORM_LABEL[a.platform] ?? a.platform}
                         {' · '}
                         {expired
-                          ? 'Expired — reauthorize'
-                          : (a.scope_type === 'team' ? 'Team' : 'Personal')}
+                          ? t('distribution.publish.expiredReauthorize', 'Expired — reauthorize')
+                          : (a.scope_type === 'team' ? t('distribution.teamScope', 'Team') : t('distribution.personalScope', 'Personal'))}
                       </small>
                     </span>
                     {!expired && (
@@ -493,13 +502,13 @@ export const PublishPage: React.FC = () => {
                           setCustomizeOpen((s) => ({ ...s, [a.id]: !s[a.id] }));
                         }}
                       >
-                        Customize {open ? '▾' : '▸'}
+                        {t('distribution.publish.customize', 'Customize')} {open ? '▾' : '▸'}
                       </button>
                     )}
                   </div>
                   {!expired && open && (
                     <div className="override">
-                      <label htmlFor={`override-title-${a.id}`}>Title for this account</label>
+                      <label htmlFor={`override-title-${a.id}`}>{t('distribution.publish.titleForAccount', 'Title for this account')}</label>
                       <input
                         id={`override-title-${a.id}`}
                         className="input"
@@ -520,25 +529,25 @@ export const PublishPage: React.FC = () => {
           </div>
 
           <div className="summary">
-            <h4>Summary</h4>
-            <div className="line"><span>Videos</span><b>{selectedVideos.length}</b></div>
-            <div className="line"><span>Accounts</span><b>{selectedAccounts.length}</b></div>
-            <div className="line"><span>Mode</span><b>{mode === 'broadcast' ? 'Broadcast' : 'One-to-one'}</b></div>
-            <div className="line total"><span>Posts to create</span><b>{totalPosts}</b></div>
+            <h4>{t('distribution.publish.summaryHeading', 'Summary')}</h4>
+            <div className="line"><span>{t('distribution.publish.videosLabel', 'Videos')}</span><b>{selectedVideos.length}</b></div>
+            <div className="line"><span>{t('distribution.publish.accountsLabel', 'Accounts')}</span><b>{selectedAccounts.length}</b></div>
+            <div className="line"><span>{t('distribution.publish.modeLabel', 'Mode')}</span><b>{mode === 'broadcast' ? t('distribution.publish.mode_broadcast', 'Broadcast') : t('distribution.publish.mode_one_to_one', 'One-to-one')}</b></div>
+            <div className="line total"><span>{t('distribution.publish.postsToCreate', 'Posts to create')}</span><b>{totalPosts}</b></div>
 
             <div className="check warn">
               <AlertTriangle />
-              Cover not set — a video-frame cover will be used automatically.
+              {t('distribution.publish.coverNotSetWarning', 'Cover not set — a video-frame cover will be used automatically.')}
             </div>
             {canPublish && (
               <div className="check ok">
                 <Check strokeWidth={2.5} />
-                Title, topics and accounts look good.
+                {t('distribution.publish.lookingGood', 'Title, topics and accounts look good.')}
               </div>
             )}
 
             <div className="actions">
-              <button type="button" className="btn btn-ghost" disabled title="Coming in D3">Save draft</button>
+              <button type="button" className="btn btn-ghost" disabled title={t('distribution.comingInD3', 'Coming in D3')}>{t('distribution.publish.saveDraft', 'Save draft')}</button>
               <button type="button" className="btn btn-solid" disabled={!canPublish || submitting} onClick={onPublish}>
                 <Send size={15} /> {t('distribution.publish.publishNow', 'Publish now')}
               </button>
@@ -547,7 +556,7 @@ export const PublishPage: React.FC = () => {
             {channel === 'h5' && (
               <div className="handoff">
                 <AlertCircle />
-                Douyin personal accounts finish inside the Douyin app — we hand off automatically and track the result here.
+                {t('distribution.publish.handoffMsg', 'Douyin personal accounts finish inside the Douyin app — we hand off automatically and track the result here.')}
               </div>
             )}
           </div>
