@@ -82,6 +82,12 @@ export const EDITOR_SHELL_STYLES = `
    panel sits flush against the right edge and the script column fills + centres
    (via .mh-sheet-scroll{align-items:center} + .mh-sheet{max-width:100%}). */
 .mh-editor-shell.mh-embedded{ grid-template-columns:1fr auto; }
+/* Embedded: don't paint the standalone lavender page gradient — it clashed with
+   the workspace's own surface (a mismatched purple block in the empty area
+   right of the sheet). Go transparent so the workspace background shows through
+   and the whole area reads as ONE colour. The sheet keeps its own paper bg +
+   shadow, so it still reads as a page floating on the workspace surface. */
+.mh-editor-shell.mh-embedded{ background:transparent; }
 
 .mh-island{
   background:var(--surface);
