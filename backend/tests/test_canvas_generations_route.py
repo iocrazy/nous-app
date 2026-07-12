@@ -245,3 +245,70 @@ class TestGetGenerationStatus:
         data = resp.json()["data"]
         assert data["phase"] == "completed"
         assert data["metadata"]["result_url"] == "/api/v1/generated-media/5/cover"
+
+
+class TestCancelGeneration:
+    """DELETE /canvases/generations/{task_id} — real backend cancel (P1-1).
+
+    Stop used to only abandon the frontend poll while the DBOS task kept
+    burning provider quota. The endpoint asks the DBOS engine to cancel; the
+    mirror trigger reflects task_tracking.phase='cancelled' — route C, so the
+    endpoint MUST NOT write phase itself.
+    """
+
+    def _owned_row_client(self, *, row):
+        """A task-manager client whose task_tracking query returns ``row`` and
+        whose ``update`` path explodes — proving the endpoint never PATCHes."""
+
+        class _Q:
+            def table(self, *_a):
+                return self
+
+            def select(self, *_a):
+                return self
+
+            def eq(self, *_a):
+                return self
+
+            def single(self):
+                return self
+
+            async def execute(self):
+                return SimpleNamespace(data=row)
+
+            def update(self, *_a, **_k):  # pragma: no cover - must never run
+                raise AssertionError("cancel endpoint must not PATCH task_tracking")
+
+        return SimpleNamespace(_get_client=AsyncMock(return_value=_Q()))
+
+    @pytest.mark.asyncio
+    async def test_owner_cancel_calls_dbos_engine_and_skips_phase_patch(
+        self, client, monkeypatch
+    ):
+        row = {"dbos_workflow_id": "task-1", "phase": "processing"}
+        mgr = self._owned_row_client(row=row)
+        monkeypatch.setattr(canvases_router, "get_task_manager", lambda: mgr)
+
+        cancel = AsyncMock()
+        import app.services.infra.dbos_orchestrator as dbos_orch
+
+        monkeypatch.setattr(dbos_orch, "cancel_workflow", cancel, raising=False)
+
+        resp = await client.delete("/api/v1/canvases/generations/task-1")
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+        cancel.assert_awaited_once_with("task-1")
+
+    @pytest.mark.asyncio
+    async def test_unknown_or_unowned_task_is_404(self, client, monkeypatch):
+        mgr = self._owned_row_client(row=None)
+        monkeypatch.setattr(canvases_router, "get_task_manager", lambda: mgr)
+
+        cancel = AsyncMock()
+        import app.services.infra.dbos_orchestrator as dbos_orch
+
+        monkeypatch.setattr(dbos_orch, "cancel_workflow", cancel, raising=False)
+
+        resp = await client.delete("/api/v1/canvases/generations/nope")
+        assert resp.status_code == 404
+        cancel.assert_not_awaited()

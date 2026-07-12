@@ -30,6 +30,7 @@ import {
 } from './factories';
 import { groupSelection, ungroupNode } from './grouping';
 import {
+  cancelPendingGenTasks,
   clearPendingGenTasks,
   persistPendingGenTasks,
   prunePendingGenTask,
@@ -273,6 +274,12 @@ export function CanvasComposer({
     // Stop EVERY active batch (per-node stop is a follow-up).
     for (const batch of batchesRef.current.values()) {
       batch.stop.requested = true;
+      // Really cancel the in-flight backend generation tasks (P1-1) — Stop
+      // used to only abandon the poll while the DBOS task kept billing.
+      // Fire-and-forget; cancel is idempotent and best-effort.
+      for (const promptId of batch.ids) {
+        void cancelPendingGenTasks(promptId);
+      }
     }
     setStopRequested(true);
   }, []);

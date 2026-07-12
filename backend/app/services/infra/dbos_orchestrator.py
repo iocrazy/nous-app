@@ -435,6 +435,35 @@ def is_enabled() -> bool:
     return _dbos is not None or _client is not None
 
 
+async def cancel_workflow(workflow_id: str) -> None:
+    """Ask the DBOS engine to cancel a running/enqueued workflow.
+
+    Sets ``dbos.workflow_status`` → CANCELLED; the
+    ``mirror_dbos_lifecycle_to_tracking`` trigger then reflects
+    ``task_tracking.phase='cancelled'`` on its own — callers MUST NOT PATCH the
+    phase columns themselves (route C). Idempotent: cancelling an already
+    terminal workflow is a no-op in the engine. A step that is mid-flight
+    finishes, but DBOS raises at the next step boundary so no further provider
+    call fires — which is the whole point of Stop (stop burning quota).
+
+    Mirrors ``start_workflow_routed``'s dual path: the gateway enqueue-only
+    ``DBOSClient`` handle (dormant today) owns cancel when wired; otherwise the
+    in-process DBOS singleton (combined / worker) does. Both only write to the
+    shared sys DB, so either can cancel a workflow the other is executing.
+    """
+    if not is_enabled():
+        raise RuntimeError(
+            "DBOS orchestrator is not enabled (DBOS_DATABASE_URL missing or "
+            "init failed). Cannot cancel any workflow."
+        )
+    if _client is not None:
+        await _client.cancel_workflow_async(workflow_id)
+        return
+    from dbos import DBOS
+
+    await DBOS.cancel_workflow_async(workflow_id)
+
+
 # Sprint 5.5: optional bounds registry — gateway sets this on app.state
 # at startup. When provided, dispatch fail-fasts if NO live worker
 # advertises the workflow being dispatched.

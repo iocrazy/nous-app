@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const getGeneration = vi.fn();
 const pollGeneration = vi.fn();
+const cancelGeneration = vi.fn();
 vi.mock('../services/canvasGenerationService', async () => {
   const actual = await vi.importActual<
     typeof import('../services/canvasGenerationService')
@@ -16,11 +17,13 @@ vi.mock('../services/canvasGenerationService', async () => {
     ...actual,
     getGeneration: (...a: unknown[]) => getGeneration(...a),
     pollGeneration: (...a: unknown[]) => pollGeneration(...a),
+    cancelGeneration: (...a: unknown[]) => cancelGeneration(...a),
   };
 });
 
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import {
+  cancelPendingGenTasks,
   clearPendingGenTasks,
   persistPendingGenTasks,
   prunePendingGenTask,
@@ -79,6 +82,37 @@ describe('pending task persistence (P1-13)', () => {
     expect(promptData().gen_tasks).toEqual([{ task_id: 't2', kind: 'image' }]);
     clearPendingGenTasks('p1');
     expect(promptData().gen_tasks).toEqual([]);
+  });
+});
+
+describe('cancelPendingGenTasks (P1-1)', () => {
+  it('cancels every in-flight task on the node server-side', async () => {
+    seed();
+    persistPendingGenTasks('p1', ['t1', 't2'], 'image');
+    cancelGeneration.mockResolvedValue(undefined);
+
+    await cancelPendingGenTasks('p1');
+
+    expect(cancelGeneration).toHaveBeenCalledTimes(2);
+    expect(cancelGeneration).toHaveBeenCalledWith('t1');
+    expect(cancelGeneration).toHaveBeenCalledWith('t2');
+  });
+
+  it('is best-effort — a failing cancel logs and never rejects', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    seed();
+    persistPendingGenTasks('p1', ['t1'], 'video');
+    cancelGeneration.mockRejectedValue(new Error('boom'));
+
+    await expect(cancelPendingGenTasks('p1')).resolves.toBeUndefined();
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it('no-ops when the node has no pending tasks', async () => {
+    seed();
+    await cancelPendingGenTasks('p1');
+    expect(cancelGeneration).not.toHaveBeenCalled();
   });
 });
 
