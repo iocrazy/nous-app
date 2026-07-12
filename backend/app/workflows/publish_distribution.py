@@ -14,10 +14,17 @@ batch's publish_task_accounts and publishes each via the account's channel:
     UnifiedTaskManager.start()/complete()/fail() — never PATCHes phase/status.
   - per-account BUSINESS state lives in publish_task_accounts.status (includes
     the platform-specific 'pending_share'); business code writes it directly.
-  - a per-account failure is business state, NOT a workflow failure — the loop
-    continues. Only if EVERY account hard-failed (no success/pending_share) does
-    the workflow raise → the mirror trigger stamps task_tracking failed (never
-    return a failed dict — DBOS would read that as SUCCESS).
+  - a per-account failure is recorded as business state and the loop keeps
+    going to give every OTHER account a chance — but the workflow itself
+    raises (never returns a failed dict — DBOS would read that as SUCCESS)
+    whenever the batch is NOT a clean success: all-failed, or partial (some
+    succeeded, some failed). Raising on partial is deliberate (route-C
+    raise-on-partial, see ``classify_batch``): it's what makes the batch
+    eligible for retry via ``manager.retry_task`` (only failed/cancelled/lost
+    tasks are retryable), powering the Retry button on partial batches.
+  - a retry re-dispatch of the SAME task_id must not re-publish rows that
+    already settled (success / pending_share) — see the idempotency guard in
+    ``_run_accounts``.
 """
 
 from __future__ import annotations
@@ -27,6 +34,20 @@ from typing import Any, Optional
 
 from dbos import DBOS
 from loguru import logger
+
+_SETTLED = {"success", "pending_share"}
+
+
+def classify_batch(statuses: list[str]) -> str:
+    """Pure batch outcome for the workflow: 'all_failed' (raise) | 'partial'
+    (raise, some failed) | 'ok' (complete). Extracted so the completion
+    decision is unit-testable without the DBOS runtime."""
+    settled = [s for s in statuses if s in _SETTLED]
+    if not settled:
+        return "all_failed"
+    if any(s == "failed" for s in statuses):
+        return "partial"
+    return "ok"
 
 
 def decide_channel(task_channel: str, account: dict) -> str:
@@ -127,7 +148,6 @@ async def run_publish_accounts_step(task_id: int) -> dict[str, Any]:
     from app.repositories.publish_tasks_repository import PublishTasksRepository
     from app.repositories.social_accounts_repository import SocialAccountsRepository
     from app.services.distribution.credentials import get_douyin_credentials
-    from app.services.distribution.registry import get_adapter
 
     repo = PublishTasksRepository()
     accounts_repo = SocialAccountsRepository()
@@ -139,34 +159,62 @@ async def run_publish_accounts_step(task_id: int) -> dict[str, Any]:
         raise RuntimeError(f"publish task {task_id} has no accounts")
 
     creds = await get_douyin_credentials()
+    statuses = await _run_accounts(rows, accounts_repo, creds, task, repo)
+    return {"statuses": statuses}
+
+
+async def _run_accounts(rows, accounts_repo, creds, task: dict, repo) -> list[str]:
+    """Dispatch each account row, publishing only the ones still 'pending'.
+
+    Idempotency guard: a workflow re-dispatch (retry) must NOT re-publish rows
+    that already settled. Re-publishing a 'success' row would create a
+    duplicate irreversible Douyin post; re-publishing a 'pending_share' row
+    would mint a brand-new share_id and invalidate the link the user is
+    about to tap. Only 'pending' rows are actually published here — the
+    retry endpoint's reset_failed_accounts is what flips failed/cancelled
+    rows back to 'pending' before a retry dispatch, so this loop naturally
+    only republishes what was reset. Any other status (success,
+    pending_share, failed, cancelled) is carried straight through unchanged.
+    Extracted from the @DBOS.step so it's unit-testable with fakes.
+    """
+    from app.services.distribution.registry import get_adapter
+
     statuses: list[str] = []
     for row in rows:
-        if row.get("status") == "cancelled":
-            statuses.append("cancelled")
+        status = row.get("status")
+        if status != "pending":
+            statuses.append(status)
             continue
         # get_with_tokens returns decrypted access_token for the publish call.
         tokens = await accounts_repo.get_with_tokens(int(row["account_id"])) or {}
         merged = {**row, "access_token": tokens.get("access_token")}
         adapter = get_adapter(row.get("platform", "douyin"), creds)
         statuses.append(await _publish_one_account(merged, adapter, task, repo))
-    return {"statuses": statuses}
+    return statuses
 
 
 @DBOS.workflow()
 async def publish_distribution_workflow(task_id: int, user_id: str) -> dict[str, Any]:
-    """Publish every account in the batch. Completes when at least one account
-    reached a settled state (success / pending_share); raises only when every
-    account hard-failed (route C — never a failed dict).
+    """Publish every account in the batch, then classify the outcome via
+    ``classify_batch``:
+
+      - 'all_failed' (no account reached success/pending_share): fail + raise
+        (route C — never a failed dict).
+      - 'partial' (some settled, but at least one hard-failed): ALSO fail +
+        raise. This is intentional (route-C raise-on-partial): per-account
+        success/pending_share rows are already durably persisted by the step
+        (via ``set_account_status``) before this decision, so raising loses
+        nothing — and the idempotent ``_run_accounts`` loop guarantees a
+        retry dispatch won't re-publish those settled rows. Failing the task
+        is what makes it eligible for ``manager.retry_task`` (only
+        failed/cancelled/lost tasks are retryable), which is what powers the
+        Retry button on a partial batch.
+      - 'ok' (all settled, none failed): complete normally.
 
     ``publish_tasks`` has NO status/phase column (migration 356: "Never
     duplicate phase/status here" — task_tracking is the sole execution
-    source). The aggregated business label from Task 3's
-    ``aggregate_task_status`` is therefore recomputed here and stashed on
-    ``task_tracking.metadata`` (a legit business decoration field, route C
-    rule 3) rather than written back onto publish_tasks; the list/detail
-    endpoint recomputes the same label from the live account rows.
+    source), so the outcome only ever drives task_tracking via the manager.
     """
-    from app.repositories.publish_tasks_repository import aggregate_task_status
     from app.services.infra.unified_task_manager import get_task_manager
 
     manager = get_task_manager()
@@ -179,25 +227,25 @@ async def publish_distribution_workflow(task_id: int, user_id: str) -> dict[str,
         raise RuntimeError(f"publish task {task_id} errored: {e}") from e
 
     statuses = result["statuses"]
-    aggregated = aggregate_task_status(statuses)
+    outcome = classify_batch(statuses)
 
-    if aggregated == "failed":
+    if outcome == "all_failed":
         # Every account failed / cancelled — surface as a failed task.
-        await manager.fail(
-            DBOS.workflow_id,
-            "all accounts failed to publish",
-            metadata_patch={"aggregated_status": aggregated},
-        )
+        await manager.fail(DBOS.workflow_id, "all accounts failed to publish")
         raise RuntimeError(f"publish task {task_id}: all accounts failed")
+
+    if outcome == "partial":
+        ok = sum(1 for s in statuses if s == "success")
+        nfailed = sum(1 for s in statuses if s == "failed")
+        await manager.fail(
+            DBOS.workflow_id, f"{nfailed} account(s) failed ({ok} published)"
+        )
+        raise RuntimeError(f"publish task {task_id}: {nfailed} account(s) failed")
 
     pending = sum(1 for s in statuses if s == "pending_share")
     ok = sum(1 for s in statuses if s == "success")
     subtitle = f"{ok} published"
     if pending:
         subtitle += f", {pending} awaiting Douyin"
-    await manager.complete(
-        DBOS.workflow_id,
-        subtitle=subtitle,
-        metadata_patch={"aggregated_status": aggregated},
-    )
+    await manager.complete(DBOS.workflow_id, subtitle=subtitle)
     return {"status": "completed", "task_id": task_id, "statuses": statuses}
