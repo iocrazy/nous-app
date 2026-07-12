@@ -103,7 +103,7 @@ describe('uncontrolled editable vs parent re-renders', () => {
     });
     const { rerender } = render(
       <MentionNamesContext.Provider value={['CLIENT']}>
-        <ElementLine element={el('Old text.')} lineClass="hw-action" focused={false} {...noHandlers} />
+        <ElementLine element={el('Old text.')} index={0} lineClass="hw-action" focused={false} {...noHandlers} />
       </MentionNamesContext.Provider>,
     );
     expect(line().textContent).toBe('Old text.');
@@ -112,6 +112,7 @@ describe('uncontrolled editable vs parent re-renders', () => {
       <MentionNamesContext.Provider value={['CLIENT']}>
         <ElementLine
           element={el('Server says @CLIENT.')}
+          index={0}
           lineClass="hw-action"
           focused={false}
           {...noHandlers}

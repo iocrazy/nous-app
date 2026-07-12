@@ -368,7 +368,43 @@ export const EDITOR_SHELL_STYLES = `
 .mh-scene-heading-empty{ color:var(--sheet-ink-soft); font-weight:600; text-transform:none; font-style:italic; }
 
 /* ===== ELEMENT ROWS (Hollywood layout engine) ===== */
-.mh-el-row{ display:flex; align-items:flex-start; gap:9px; margin:0 0 7px; }
+.mh-el-row{ display:flex; align-items:flex-start; gap:9px; margin:0 0 7px; position:relative; }
+/* ── laper/Notion-style hover gutter: block number + 6-dot drag handle ──
+   Absolutely positioned in the sheet's left margin so it NEVER participates in
+   the flex row (the Hollywood ch-column grid stays exact). Hidden by default;
+   revealed on row hover / focus. */
+.mh-el-gutter{
+  position:absolute; left:-46px; top:1px; height:1.7em;
+  display:flex; align-items:center; justify-content:flex-end; gap:4px;
+  width:40px; opacity:0; transition:opacity 0.12s ease;
+  user-select:none; pointer-events:none;
+}
+.mh-el-row:hover .mh-el-gutter,
+.mh-el-row:focus-within .mh-el-gutter{ opacity:1; pointer-events:auto; }
+.mh-el-num{
+  font-family:var(--mono); font-size:10.5px; font-weight:600;
+  font-variant-numeric:tabular-nums; color:var(--sheet-ink-soft);
+  min-width:1.2em; text-align:right;
+}
+.mh-el-drag{
+  display:grid; grid-template-columns:repeat(2, 3px); grid-template-rows:repeat(3, 3px);
+  gap:2px; padding:3px; border:none; background:none; border-radius:4px;
+  color:var(--sheet-ink-soft); cursor:grab; line-height:0;
+}
+.mh-el-drag:hover{ color:var(--sheet-ink); background:var(--surface-2); }
+.mh-el-drag:active,
+.mh-el-drag.dragging{ cursor:grabbing; }
+.mh-el-drag:focus-visible{ outline:2px solid var(--indigo); outline-offset:1px; }
+.mh-el-dot{ width:3px; height:3px; border-radius:50%; background:currentColor; }
+/* Drop-edge indicator: a thin indigo line on the target row's leading/trailing
+   edge showing where the dragged element will land. */
+.mh-el-row.drop-top::before,
+.mh-el-row.drop-bottom::after{
+  content:""; position:absolute; left:0; right:0; height:2px;
+  background:var(--indigo); border-radius:2px; pointer-events:none;
+}
+.mh-el-row.drop-top::before{ top:-4px; }
+.mh-el-row.drop-bottom::after{ bottom:-4px; }
 .mh-el-tick{ width:3px; border-radius:2px; flex-shrink:0; align-self:stretch; min-height:18px; margin-top:3px; }
 .mh-el-tick.t-action{ background:var(--tick-action); }
 .mh-el-tick.t-dialogue{ background:var(--tick-dialogue); box-shadow:var(--tick-glow); }
@@ -1209,4 +1245,58 @@ export const EDITOR_SHELL_STYLES = `
   background:var(--indigo-soft); border:1px solid var(--surface-border); border-radius:6px;
   padding:1.5px 6px; letter-spacing:.03em; flex-shrink:0;
 }
+
+/* ==================================================================
+   SCREENPLAY CLEAN PAGE
+   Strip the persistent chrome so the sheet reads like a printed
+   script (a real screenplay page / laper.ai), not a form full of
+   badges + ticks + cards. Every affordance — scene number, block
+   number, drag handle — lives in the left margin and reveals on
+   HOVER only. The resting page is just the formatted script on paper.
+   ================================================================== */
+/* No persistent colour ticks: the hover gutter (block number + 6-dot
+   drag handle) is the sole per-line affordance. Removing the tick also
+   pulls each line flush to the sheet's left margin (the Hollywood ch
+   grid stays internally exact — every element loses the same 12px). */
+.mh-el-tick{ display:none; }
+/* Scene number → a faint margin number on hover, NOT a dark badge, so
+   the slugline sits flush-left like a real heading. Aligned to the same
+   margin column as the per-line block number. */
+.mh-scene-headrow{ position:relative; }
+.mh-scene-num-badge,
+.mh-editor-shell[data-theme='dark'] .mh-scene-num-badge{
+  position:absolute; left:-42px; top:3px; width:auto; height:auto; min-width:1.4em;
+  background:none; color:var(--sheet-ink-soft); font-size:10.5px; font-weight:600;
+  font-variant-numeric:tabular-nums; text-align:right; border-radius:0; padding:0;
+  opacity:0; transition:opacity 0.12s ease; pointer-events:none;
+}
+.mh-scene-block:hover .mh-scene-num-badge,
+.mh-scene-block:focus-within .mh-scene-num-badge{ opacity:1; }
+/* Keep the per-line hover gutter aligned to the same margin column. */
+.mh-el-gutter{ left:-42px; }
+/* The keyboard cheat-sheet is chrome — hide it; the page stays clean. */
+.mh-keyboard-hint{ display:none; }
+/* Legacy chapter prose: a quiet inline notice, not a heavy orange card. */
+.mh-chapter-fallback{
+  background:transparent; border:none; border-left:2px solid var(--sheet-border);
+  border-radius:0; padding:4px 0 4px 14px; margin:0 0 18px;
+}
+.mh-chapter-fallback-title{ font-size:12.5px; font-weight:600; color:var(--sheet-ink-soft); }
+.mh-chapter-convert-btn{
+  background:none; color:var(--indigo); border:1px solid var(--sheet-border);
+  font-size:11px; padding:3px 9px;
+}
+.mh-chapter-convert-btn:hover:not(:disabled){ background:var(--indigo-soft); }
+/* Cleaner paper — much less grain, closer to a printed white page. */
+.mh-sheet::after{ opacity:0.02; }
+/* A real script is monochrome: drop the decorative element colours so the
+   page reads as black-on-paper (character cues, transitions, parens, subtitle
+   all ink). The tick colour gutter is gone, so colour no longer carries type —
+   the fixed column position does, exactly like a printed screenplay. */
+/* A printed script distinguishes cues/transitions by COLUMN POSITION, not by
+   weight — everything is uniform Courier. Drop the bold to match a real page. */
+.hw-character{ color:var(--sheet-ink); font-weight:normal; letter-spacing:0; }
+.hw-transition{ color:var(--sheet-ink); font-weight:normal; letter-spacing:0; }
+.hw-paren{ color:var(--sheet-ink); font-style:normal; }
+.hw-subtitle{ color:var(--sheet-ink); }
 `;
