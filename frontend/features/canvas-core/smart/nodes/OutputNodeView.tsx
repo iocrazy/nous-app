@@ -1,5 +1,5 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import { getResourceFileUrl } from '../../../../services/resourceService';
 import { getSupabaseClient } from '../../../../supabaseClient';
@@ -31,9 +31,6 @@ import { OutputLightbox, type LightboxItem } from './OutputLightbox';
 import { OutputNodeToolbar } from './OutputNodeToolbar';
 import { useNodeDataPatch } from './useNodeDataPatch';
 
-/** Single-click waits this long for a possible double-click (crop) before
- *  opening the lightbox — the two gestures share the same image. */
-const LIGHTBOX_CLICK_DELAY_MS = 250;
 
 const KIND_LABEL: Record<OutputNodeData['kind'], string> = {
   text: 'Text',
@@ -90,16 +87,8 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
   const [outpaintCommitting, setOutpaintCommitting] = useState(false);
   const [outpaintError, setOutpaintError] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
-  const lightboxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const canvasId = useCanvasCoreStore((s) => s.canvasId);
   const regenerating = useRegenStore((s) => !!s.running[regenKey(canvasId, id)]);
-
-  useEffect(
-    () => () => {
-      if (lightboxTimerRef.current) clearTimeout(lightboxTimerRef.current);
-    },
-    [],
-  );
 
   const lightboxItems: LightboxItem[] =
     images && images.length > 0
@@ -108,25 +97,16 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         ? [{ url: preview_url, name: preview_text || undefined }]
         : [];
 
-  /** Deferred so a double-click (crop) can cancel the pending open. */
-  const queueLightbox = useCallback(
+  /** Open the lightbox at an item (P2-5 — double-click, no delay). Single
+   *  click now selects the node (Infinite parity); the 250ms click/dblclick
+   *  disambiguation timer is gone since crop moved to a header chip. */
+  const openLightbox = useCallback(
     (index: number) => {
       if (lightboxItems.length === 0) return;
-      if (lightboxTimerRef.current) clearTimeout(lightboxTimerRef.current);
-      lightboxTimerRef.current = setTimeout(() => {
-        lightboxTimerRef.current = null;
-        setLightboxIndex(index);
-      }, LIGHTBOX_CLICK_DELAY_MS);
+      setLightboxIndex(index);
     },
     [lightboxItems.length],
   );
-
-  const cancelQueuedLightbox = useCallback(() => {
-    if (lightboxTimerRef.current) {
-      clearTimeout(lightboxTimerRef.current);
-      lightboxTimerRef.current = null;
-    }
-  }, []);
 
   const canRegenerate = !!promptIdForOutput(id);
   const onRegenerate = useCallback(() => {
@@ -382,10 +362,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         <OutputNodeToolbar
           items={lightboxItems}
           pinned={selected}
-          onPreview={() => {
-            cancelQueuedLightbox();
-            setLightboxIndex(0);
-          }}
+          onPreview={() => openLightbox(0)}
           onRerun={canRegenerate ? onRegenerate : undefined}
           rerunning={regenerating}
         />
@@ -406,6 +383,20 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
               className="mh-chip"
             >
               {regenerating ? 'Rerunning…' : 'Rerun'}
+            </button>
+          )}
+          {canCrop && (
+            /* Crop moved to a header chip (P2-5): double-click now opens the
+               lightbox, so crop joins Expand/Mask/Split as an explicit
+               editing affordance instead of the old double-click gesture. */
+            <button
+              type="button"
+              data-testid="crop-open"
+              onClick={openEditor}
+              title="Crop the image"
+              className="mh-chip"
+            >
+              Crop
             </button>
           )}
           {canSplit && (
@@ -459,12 +450,11 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
       </div>
       <div
         data-testid="smart-output-body"
-        onDoubleClick={() => {
-          cancelQueuedLightbox();
-          openEditor();
-        }}
-        className={`p-3 ${canCrop ? 'cursor-zoom-in' : ''}`}
-        title={canCrop ? 'Double-click to crop' : undefined}
+        // Double-click the body opens the lightbox at the first item (P2-5);
+        // single click falls through to React Flow node selection.
+        onDoubleClick={() => openLightbox(0)}
+        className={`p-3 ${lightboxItems.length > 0 ? 'cursor-zoom-in' : ''}`}
+        title={lightboxItems.length > 0 ? 'Double-click to preview' : undefined}
       >
         {gen_pending > 0 || (images?.length ?? 0) + gen_pending > 1 ? (
           /* Multi-result grid (G4-F2) + in-flight shimmer cells (P0-3):
@@ -477,7 +467,12 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
                 src={img.url}
                 alt={img.name || `Generated ${i + 1}`}
                 draggable={false}
-                onClick={() => queueLightbox(i)}
+                onDoubleClick={(e) => {
+                  // Don't let the body's dblclick (opens index 0) override
+                  // this grid image's own index.
+                  e.stopPropagation();
+                  openLightbox(i);
+                }}
                 className="block w-full cursor-zoom-in rounded object-contain"
               />
             ))}
@@ -495,8 +490,8 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
             src={preview_url || images?.[0]?.url}
             alt={preview_text || 'Output preview'}
             draggable={false}
-            onClick={() => queueLightbox(0)}
-            className="block w-full rounded object-contain"
+            onDoubleClick={() => openLightbox(0)}
+            className="block w-full cursor-zoom-in rounded object-contain"
           />
         ) : kind === 'video' && (preview_url || images?.[0]?.url) ? (
           /* Clickable inline preview — the lightbox owns playback controls
@@ -506,7 +501,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
             src={preview_url || images?.[0]?.url}
             muted
             preload="metadata"
-            onClick={() => queueLightbox(0)}
+            onDoubleClick={() => openLightbox(0)}
             className="block w-full cursor-zoom-in rounded"
           />
         ) : preview_text ? (

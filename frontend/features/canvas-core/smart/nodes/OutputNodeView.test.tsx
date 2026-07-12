@@ -86,8 +86,8 @@ function seedImageOutput(
   return fullData;
 }
 
-describe('OutputNodeView — crop editor double-click', () => {
-  it('image-kind output with preview_url opens the modal on double-click', () => {
+describe('OutputNodeView — crop editor via header chip (P2-5)', () => {
+  it('image-kind output with preview_url opens the modal from the Crop chip', () => {
     const fullData = seedImageOutput('o1');
     render(
       <Wrap>
@@ -95,7 +95,7 @@ describe('OutputNodeView — crop editor double-click', () => {
       </Wrap>,
     );
     expect(screen.queryByTestId('crop-editor-modal')).not.toBeInTheDocument();
-    fireEvent.doubleClick(screen.getByTestId('smart-output-body'));
+    fireEvent.click(screen.getByTestId('crop-open'));
     expect(screen.getByTestId('crop-editor-modal')).toBeInTheDocument();
   });
 
@@ -108,7 +108,7 @@ describe('OutputNodeView — crop editor double-click', () => {
         <OutputNodeView {...baseProps} id="o1" type="output" data={fullData} />
       </Wrap>,
     );
-    fireEvent.doubleClick(screen.getByTestId('smart-output-body'));
+    fireEvent.click(screen.getByTestId('crop-open'));
     fireEvent.click(screen.getByTestId('crop-editor-commit'));
     const node = useCanvasCoreStore.getState().nodes[0] as Record<
       string,
@@ -133,7 +133,7 @@ describe('OutputNodeView — crop editor double-click', () => {
         <OutputNodeView {...baseProps} id="o1" type="output" data={fullData} />
       </Wrap>,
     );
-    fireEvent.doubleClick(screen.getByTestId('smart-output-body'));
+    fireEvent.click(screen.getByTestId('crop-open'));
     fireEvent.click(screen.getByTestId('crop-editor-cancel'));
     const node = useCanvasCoreStore.getState().nodes[0] as Record<
       string,
@@ -181,8 +181,8 @@ describe('OutputNodeView — crop editor double-click', () => {
         />
       </Wrap>,
     );
-    fireEvent.doubleClick(screen.getByTestId('smart-output-body'));
-    expect(screen.queryByTestId('crop-editor-modal')).not.toBeInTheDocument();
+    // No Crop chip when the node can't be cropped (canCrop=false).
+    expect(screen.queryByTestId('crop-open')).not.toBeInTheDocument();
   });
 
   it('image-kind WITHOUT preview_url does NOT open the modal', () => {
@@ -218,8 +218,8 @@ describe('OutputNodeView — crop editor double-click', () => {
         />
       </Wrap>,
     );
-    fireEvent.doubleClick(screen.getByTestId('smart-output-body'));
-    expect(screen.queryByTestId('crop-editor-modal')).not.toBeInTheDocument();
+    // No Crop chip when the node can't be cropped (canCrop=false).
+    expect(screen.queryByTestId('crop-open')).not.toBeInTheDocument();
   });
 
   it('shows a "Cropped" badge when crop_region is set', () => {

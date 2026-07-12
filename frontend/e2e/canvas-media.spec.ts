@@ -103,13 +103,13 @@ async function openCanvas(page: Page): Promise<void> {
   await expect(page.locator('.react-flow__node')).toHaveCount(3);
 }
 
-test('image click opens the lightbox; arrows navigate; Escape closes', async ({ page }) => {
+test('image double-click opens the lightbox; arrows navigate; Escape closes (P2-5)', async ({ page }) => {
   await openCanvas(page);
 
   await page
     .locator('[data-testid="output-images-grid"] img')
     .first()
-    .click();
+    .dblclick();
   const lightbox = page.getByTestId('output-lightbox');
   await expect(lightbox).toBeVisible();
   // MUST truly cover the viewport — without a body portal, RF's transformed
@@ -133,7 +133,7 @@ test('image click opens the lightbox; arrows navigate; Escape closes', async ({ 
 test('history-backed slot offers Compare with a draggable divider', async ({ page }) => {
   await openCanvas(page);
 
-  await page.locator('[data-testid="output-images-grid"] img').first().click();
+  await page.locator('[data-testid="output-images-grid"] img').first().dblclick();
   await page.getByRole('button', { name: 'Compare' }).click();
 
   const result = page.getByTestId('compare-result');
@@ -158,7 +158,7 @@ test('gen slot shows the Rerun affordance on card and in lightbox', async ({ pag
   await openCanvas(page);
 
   await expect(page.getByTestId('regenerate-open')).toBeVisible();
-  await page.locator('[data-testid="output-images-grid"] img').first().click();
+  await page.locator('[data-testid="output-images-grid"] img').first().dblclick();
   await expect(
     page.getByTestId('output-lightbox').getByRole('button', { name: 'Regenerate' }),
   ).toBeVisible();
@@ -166,7 +166,7 @@ test('gen slot shows the Rerun affordance on card and in lightbox', async ({ pag
 
 test('lightbox wheel-zoom + drag pan + double-click reset (P0-5)', async ({ page }) => {
   await openCanvas(page);
-  await page.locator('.react-flow__node[data-id="out1"] img').first().click();
+  await page.locator('.react-flow__node[data-id="out1"] img').first().dblclick();
   const lightbox = page.getByTestId('output-lightbox');
   await expect(lightbox).toBeVisible();
 
@@ -225,7 +225,7 @@ test('Download All packs a server-side zip (P2-7)', async ({ page }) => {
     });
   });
 
-  await page.locator('[data-testid="output-images-grid"] img').first().click();
+  await page.locator('[data-testid="output-images-grid"] img').first().dblclick();
   await expect(page.getByTestId('output-lightbox')).toBeVisible();
 
   const download = page.waitForEvent('download').catch(() => null);

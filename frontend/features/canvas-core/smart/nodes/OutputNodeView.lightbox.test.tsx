@@ -1,11 +1,11 @@
 // features/canvas-core/smart/nodes/OutputNodeView.lightbox.test.tsx
-// Lightbox wiring on the output node (G7): a single click on an image opens
-// the lightbox (deferred so it never races the double-click crop editor);
-// grid images open at the clicked index; a double-click opens crop only.
+// Lightbox wiring on the output node (P2-5 flipped gesture): DOUBLE-click an
+// image opens the lightbox at that index; a single click does NOT (it falls
+// through to React Flow node selection). Crop moved to a header chip.
 
 import { ReactFlowProvider } from '@xyflow/react';
-import { act, fireEvent, render, screen, cleanup } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, cleanup } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string, d?: string) => d ?? k }),
@@ -34,9 +34,7 @@ function renderOutput(data: Record<string, unknown>) {
   );
 }
 
-beforeEach(() => vi.useFakeTimers());
 afterEach(() => {
-  vi.useRealTimers();
   cleanup();
   useCanvasCoreStore.getState().reset();
 });
@@ -53,28 +51,23 @@ const IMAGE_DATA = {
   ],
 };
 
-describe('OutputNodeView lightbox wiring', () => {
-  it('single click on a grid image opens the lightbox at that index', () => {
+describe('OutputNodeView lightbox wiring (P2-5)', () => {
+  it('double-click on a grid image opens the lightbox at that index', () => {
     renderOutput(IMAGE_DATA);
-    fireEvent.click(screen.getAllByRole('img')[1]);
-    act(() => vi.advanceTimersByTime(300));
+    fireEvent.doubleClick(screen.getAllByRole('img')[1]);
     expect(screen.getByTestId('output-lightbox')).toBeTruthy();
     expect(screen.getByText('2 / 2')).toBeTruthy();
   });
 
-  it('double click cancels the pending lightbox (crop keeps its gesture)', () => {
+  it('single click does NOT open the lightbox (selection falls through)', () => {
     renderOutput({ ...IMAGE_DATA, images: [{ url: '/gm/1/cover', kind: 'image' }] });
-    const img = screen.getByRole('img');
-    fireEvent.click(img);
-    fireEvent.click(img);
-    fireEvent.doubleClick(img);
-    act(() => vi.advanceTimersByTime(400));
+    fireEvent.click(screen.getByRole('img'));
     expect(screen.queryByTestId('output-lightbox')).toBeNull();
   });
 });
 
 describe('video output entry (G7 review #2)', () => {
-  it('renders a clickable video preview that opens the video lightbox', () => {
+  it('double-click on the video preview opens the video lightbox', () => {
     renderOutput({
       kind: 'video',
       resource_id: null,
@@ -82,9 +75,7 @@ describe('video output entry (G7 review #2)', () => {
       preview_url: '/gm/9/stream',
       crop_region: null,
     });
-    const preview = screen.getByTestId('output-video-preview');
-    fireEvent.click(preview);
-    act(() => vi.advanceTimersByTime(300));
+    fireEvent.doubleClick(screen.getByTestId('output-video-preview'));
     expect(screen.getByTestId('output-lightbox')).toBeTruthy();
     expect(screen.getByTestId('lightbox-video')).toBeTruthy();
   });
