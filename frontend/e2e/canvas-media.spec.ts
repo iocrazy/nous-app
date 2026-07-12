@@ -233,3 +233,17 @@ test('Download All packs a server-side zip (P2-7)', async ({ page }) => {
   await expect.poll(() => zipCalled).toBe(true);
   await download;
 });
+
+test('? opens the keyboard shortcut help panel; Escape closes it (PR-7)', async ({ page }) => {
+  await openCanvas(page);
+
+  await page.keyboard.press('?');
+  const help = page.getByTestId('shortcut-help');
+  await expect(help).toBeVisible();
+  await expect(help.getByText('Keyboard Shortcuts')).toBeVisible();
+  await expect(help.getByText('Command palette')).toBeVisible();
+  await page.screenshot({ path: 'e2e-artifacts/canvas-shortcut-help.png' });
+
+  await page.keyboard.press('Escape');
+  await expect(help).toHaveCount(0);
+});

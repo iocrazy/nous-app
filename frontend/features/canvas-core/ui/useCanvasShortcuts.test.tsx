@@ -8,11 +8,13 @@ import { useCanvasShortcuts } from './useCanvasShortcuts';
 function Host({
   enabled,
   onOpenPalette,
+  onOpenHelp,
 }: {
   enabled?: boolean;
   onOpenPalette?: () => void;
+  onOpenHelp?: () => void;
 }) {
-  useCanvasShortcuts({ enabled, onOpenPalette });
+  useCanvasShortcuts({ enabled, onOpenPalette, onOpenHelp });
   return null;
 }
 
@@ -240,6 +242,30 @@ describe('useCanvasShortcuts — Cmd+K palette (Phase 6c)', () => {
     render(<Host />);
     // Should not throw even without a callback
     expect(() => fireKey({ key: 'k', meta: true })).not.toThrow();
+  });
+});
+
+describe('useCanvasShortcuts — ? help panel (PR-7)', () => {
+  it('? opens the help panel', () => {
+    const onOpenHelp = vi.fn();
+    render(<Host onOpenHelp={onOpenHelp} />);
+    fireKey({ key: '?' });
+    expect(onOpenHelp).toHaveBeenCalledTimes(1);
+  });
+
+  it('? is ignored inside an editable element (typing a question mark)', () => {
+    const onOpenHelp = vi.fn();
+    render(<Host onOpenHelp={onOpenHelp} />);
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    fireKey({ key: '?', target: input });
+    expect(onOpenHelp).not.toHaveBeenCalled();
+    document.body.removeChild(input);
+  });
+
+  it('? is a no-op without a callback', () => {
+    render(<Host />);
+    expect(() => fireKey({ key: '?' })).not.toThrow();
   });
 });
 
