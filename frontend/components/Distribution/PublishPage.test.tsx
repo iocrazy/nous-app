@@ -31,17 +31,29 @@ vi.mock('react-router-dom', async (orig) => ({
 // PublishPage calls useToast — mock it so the test needn't wrap ToastProvider.
 vi.mock('../Toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
 
+// PublishPage derives scope via useWorkspaceScope → useTeamContext, which throws
+// without a TeamProvider. Mock the context so the hook resolves a scope id.
+vi.mock('../../contexts/TeamContext', () => ({
+  useTeamContext: () => ({ personalTeamId: 'pt1' }),
+}));
+
 import PublishPage from './PublishPage';
 
 describe('PublishPage', () => {
   it('publishes only after content + account + title are chosen', async () => {
     render(<MemoryRouter><PublishPage /></MemoryRouter>);
-    await waitFor(() => expect(screen.getByLabelText('clip-a.mp4')).toBeInTheDocument());
+    // The Library is no longer flooded into the content card — it only appears
+    // inside the "Add from Library" picker. Wait for accounts to load first.
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
 
     const publishBtn = screen.getByRole('button', { name: /Publish now/i });
     expect(publishBtn).toBeDisabled();
 
-    fireEvent.click(screen.getByLabelText('clip-a.mp4'));           // pick content
+    // Open the picker, choose a video, then close it.
+    fireEvent.click(screen.getByRole('button', { name: /Add from Library/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'clip-a.mp4' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Done$/i }));
+
     fireEvent.click(screen.getByText('HEYGO'));                    // pick account
     fireEvent.change(screen.getByPlaceholderText(/Add a title/i), {
       target: { value: 'Launch day' },

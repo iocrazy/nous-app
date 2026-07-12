@@ -6,11 +6,11 @@
  *      succeeded | failed.
  *   2. Stamp run_started_at / run_finished_at / run_error.
  *
- * This PR ships a MOCK implementation (`mockRunner`) that just sleeps
- * and resolves — the real provider adapter (Jimeng CLI / nous-center)
- * lands in a follow-up. The runner is parameterised on the prompt-call
- * function so the swap is mechanical: pass `realRunner` instead of
- * `mockRunner` to `runPrompts` and nothing else changes.
+ * The runner is parameterised on the prompt-call function. The real backend
+ * adapter (`createBackendRunner` in `runner.backend.ts`) is what
+ * CanvasComposer wires up for a loaded canvas; the `mockRunner` here is only a
+ * fallback for when no canvas id is bound yet (isolated/headless renders), so
+ * the lifecycle UX stays exercisable without a backend.
  */
 
 import type { PromptGenSettings, PromptNodeData } from './types';
@@ -30,8 +30,8 @@ export interface RunnerContext {
 
 export interface RunnerResult {
   ok: boolean;
-  /** Free-form result text — surfaces in the downstream output node's
-   *  preview_text in a future slice. Empty for failures. */
+  /** Free-form result text — rendered by the downstream OutputNodeView.
+   *  Empty for failures. */
   text: string;
   /** When ok=false. */
   error: string | null;

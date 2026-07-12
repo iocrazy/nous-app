@@ -55,6 +55,14 @@ afterEach(() => {
 });
 
 describe('TimelineNodeView', () => {
+  it('aspect dropdown offers Auto + the shared composer presets (P2 unify)', () => {
+    renderTimeline();
+    const select = screen.getByLabelText('Aspect ratio') as HTMLSelectElement;
+    const values = Array.from(select.options).map((o) => o.value);
+    // Auto + the shared ASPECT_RATIOS — previously Timeline lacked 4:3/3:4.
+    expect(values).toEqual(['', '1:1', '16:9', '9:16', '4:3', '3:4']);
+  });
+
   it('renders one block per segment and the total readout', () => {
     renderTimeline();
     expect(screen.getAllByTestId(/timeline-seg-/)).toHaveLength(2);
