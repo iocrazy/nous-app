@@ -16,7 +16,7 @@
  * machine, debounced input, paste, IME) stays in SceneBlock and flows down
  * through `handlers`, so this component is purely presentational.
  */
-import { ElementLine, type LineMention } from './layoutShared';
+import { ElementLine, type ElementReorderApi, type LineMention } from './layoutShared';
 import type { LayoutHandlers } from './HollywoodLayout';
 import type { ElementType, ScriptElement } from '../types';
 
@@ -52,6 +52,8 @@ export interface AsianLayoutProps {
   selectedIds?: Set<string>;
   /** Gutter-tick click → copilot selection (Task 11). */
   onTickClick?: (elementId: string, shiftKey: boolean) => void;
+  /** Hover-gutter drag-to-reorder wiring; absent = element reorder disabled. */
+  elementReorder?: ElementReorderApi;
 }
 
 export function AsianLayout({
@@ -61,10 +63,11 @@ export function AsianLayout({
   mention,
   selectedIds,
   onTickClick,
+  elementReorder,
 }: AsianLayoutProps) {
   return (
     <>
-      {elements.map((el) => {
+      {elements.map((el, i) => {
         const prefix = ASIAN_PREFIX[el.type];
         const suffix = ASIAN_SUFFIX[el.type];
         return (
@@ -76,10 +79,21 @@ export function AsianLayout({
             )}
             <ElementLine
               element={el}
+              index={i}
               lineClass={ASIAN_LINE_CLASS[el.type]}
               focused={focusedElementId === el.id}
               selected={selectedIds?.has(el.id)}
               onTickClick={onTickClick}
+              draggingElementId={elementReorder?.draggingElementId ?? null}
+              dropElementEdge={
+                elementReorder?.dropTarget && elementReorder.dropTarget.elementId === el.id
+                  ? elementReorder.dropTarget.edge
+                  : null
+              }
+              onElementDragStart={elementReorder?.onDragStart}
+              onElementDragOver={elementReorder?.onDragOver}
+              onElementDrop={elementReorder?.onDrop}
+              onElementDragEnd={elementReorder?.onDragEnd}
               mentionAria={
                 mention && mention.elementId === el.id
                   ? {

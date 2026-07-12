@@ -243,6 +243,14 @@ export function SceneBlock({
   // selects only while editing. Entering focuses the INT/EXT select; blur out of
   // the row (or Esc) drops back to the read-mode slug.
   const [headingEditing, setHeadingEditing] = useState(false);
+  // Element-level drag-to-reorder (hover-gutter 6-dot handle): the element being
+  // dragged + the live drop target (which row + edge). Kept within this scene —
+  // v1 does not support cross-scene element moves.
+  const [draggingElementId, setDraggingElementId] = useState<string | null>(null);
+  const [elementDropTarget, setElementDropTarget] = useState<{
+    elementId: string;
+    edge: 'top' | 'bottom';
+  } | null>(null);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const headRowRef = useRef<HTMLDivElement | null>(null);
@@ -701,6 +709,38 @@ export function SceneBlock({
     reorder.onDrop(scene.id, edgeFromPointer(e.currentTarget, e.clientY));
   };
 
+  // ── Element reorder wiring (hover-gutter handle) ──────────────────────────
+  // Mirrors the scene-level pattern above but drives a `move` op WITHIN this
+  // scene. Edge 'top' lands the dragged element BEFORE the target (before_id),
+  // 'bottom' lands it AFTER (after_id); applyLocal re-anchors, and useSceneSync
+  // dispatches the op optimistically (route-C: no direct phase writes).
+  const handleElementDragStart = useCallback((elementId: string) => {
+    setDraggingElementId(elementId);
+  }, []);
+  const handleElementDragEnd = useCallback(() => {
+    setDraggingElementId(null);
+    setElementDropTarget(null);
+  }, []);
+  const handleElementDragOver = useCallback((elementId: string, edge: 'top' | 'bottom') => {
+    setElementDropTarget({ elementId, edge });
+  }, []);
+  const handleElementDrop = useCallback(
+    (targetId: string, edge: 'top' | 'bottom') => {
+      setElementDropTarget(null);
+      const dragging = draggingElementId;
+      setDraggingElementId(null);
+      // Dropping onto itself is a no-op; applyMove would also self-anchor-skip,
+      // but bailing here avoids an empty dispatch + version bump.
+      if (!dragging || dragging === targetId) return;
+      const op: ElementOp =
+        edge === 'top'
+          ? { op: 'move', element_id: dragging, before_id: targetId }
+          : { op: 'move', element_id: dragging, after_id: targetId };
+      sync.dispatchOps([op], applyLocal(sync.elements, [op]));
+    },
+    [draggingElementId, sync],
+  );
+
   // ── Copilot summon (Task 11) ──────────────────────────────────────────────
   const clearCopilot = useCallback(() => {
     setCopilotSelection([]);
@@ -975,6 +1015,14 @@ export function SceneBlock({
           mention={lineMention}
           selectedIds={copilotSelectedIds}
           onTickClick={handleTickClick}
+          elementReorder={{
+            draggingElementId,
+            dropTarget: elementDropTarget,
+            onDragStart: handleElementDragStart,
+            onDragOver: handleElementDragOver,
+            onDrop: handleElementDrop,
+            onDragEnd: handleElementDragEnd,
+          }}
           handlers={{
             onInput: handleInput,
             onKeyDown: handleKeyDown,
