@@ -525,6 +525,12 @@ export const EDITOR_SHELL_STYLES = `
 .mh-scene-chip.loc{ background:var(--surface-2); color:var(--sheet-ink-soft); border:1px solid var(--sheet-border); }
 .mh-el-line{ font-size:13.5px; line-height:1.7; color:var(--sheet-ink); margin-bottom:7px; }
 .mh-placeholder-line{ color:var(--sheet-ink-soft); font-style:italic; }
+/* Empty-scene seed affordance: a real click/keyboard target that materialises
+   the scene's first element (see EmptySceneHint). Reads as a faint clickable
+   line, not dead placeholder text. */
+.mh-placeholder-seed{ cursor:text; border-radius:4px; padding:1px 4px; margin-left:-4px; transition:background 0.12s ease; }
+.mh-placeholder-seed:hover{ background:var(--surface-2); }
+.mh-placeholder-seed:focus-visible{ outline:2px solid var(--indigo); outline-offset:-2px; }
 
 /* ===== @ MENTION CHIPS + PICKER ===== */
 .mh-mention{

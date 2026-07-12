@@ -57,6 +57,22 @@ describe('EmptyStates components', () => {
     render(<EmptySceneHint />);
     expect(screen.getByText('editor.emptyScene')).toBeInTheDocument();
   });
+
+  it('empty-scene hint is a real seed affordance: click and Enter fire onSeed', () => {
+    const onSeed = vi.fn();
+    render(<EmptySceneHint onSeed={onSeed} />);
+    const hint = screen.getByTestId('empty-scene-hint');
+    // It is a focusable button, not a dead <div> — this is what unblocks typing
+    // into a previously dead-end empty scene.
+    expect(hint).toHaveAttribute('role', 'button');
+    expect(hint).toHaveAttribute('tabindex', '0');
+    fireEvent.click(hint);
+    expect(onSeed).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(hint, { key: 'Enter' });
+    expect(onSeed).toHaveBeenCalledTimes(2);
+    fireEvent.keyDown(hint, { key: 'Tab' });
+    expect(onSeed).toHaveBeenCalledTimes(3);
+  });
 });
 
 const seededScene: SceneDoc = {

@@ -40,10 +40,31 @@ export function ColdStart({
   );
 }
 
-export function EmptySceneHint() {
+/**
+ * The inline nudge shown inside a scene block that has no elements yet. It is a
+ * REAL focusable/clickable affordance (not a static hint): clicking it — or
+ * pressing Enter/Tab/Space while focused — seeds the scene's first editable
+ * element and drops the caret in, the way a Notion doc always gives you an empty
+ * first block. Without this an empty scene was a dead-end: the old static <div>
+ * had no editable target, so "press Tab" never fired (Tab is a machine key that
+ * only triggers from a focused element line).
+ */
+export function EmptySceneHint({ onSeed }: { onSeed?: () => void }) {
   const { t } = useTranslation();
   return (
-    <div className="mh-el-line mh-placeholder-line" data-testid="empty-scene-hint">
+    <div
+      className="mh-el-line mh-placeholder-line mh-placeholder-seed"
+      data-testid="empty-scene-hint"
+      role="button"
+      tabIndex={0}
+      onClick={onSeed}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === 'Tab' || e.key === ' ') {
+          e.preventDefault();
+          onSeed?.();
+        }
+      }}
+    >
       {t('editor.emptyScene')}
     </div>
   );

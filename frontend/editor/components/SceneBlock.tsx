@@ -986,7 +986,15 @@ export function SceneBlock({
         />
       </MentionNamesContext.Provider>
 
-      {sync.elements.length === 0 && <EmptySceneHint />}
+      {sync.elements.length === 0 && (
+        <EmptySceneHint
+          onSeed={() =>
+            applyResult(
+              onEnter(sync.elements, { sceneId: scene.id, elementId: null, field: 'element' }),
+            )
+          }
+        />
+      )}
 
       {mention && (
         <MentionCombobox
