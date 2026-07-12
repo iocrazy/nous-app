@@ -54,6 +54,31 @@ describe('AgentMemoriesPanel', () => {
     expect(screen.getByText('Shared Memory Title')).toBeTruthy();
   });
 
+  it('does not setState after unmount when the fetch resolves late', async () => {
+    // The load promise settles AFTER the component is torn down — the effect
+    // must guard its setState calls or React throws "window is not defined"
+    // as an unhandled rejection (the CI teardown-race flake).
+    let resolveLoad!: (v: unknown[]) => void;
+    mockService.listAgentMemories.mockReturnValue(
+      new Promise((res) => {
+        resolveLoad = res as (v: unknown[]) => void;
+      }),
+    );
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { unmount } = render(<AgentMemoriesPanel />);
+    unmount();
+    // Resolve after teardown; a guarded effect swallows this quietly.
+    resolveLoad([ownItem]);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(
+      errorSpy.mock.calls.some((c) =>
+        String(c[0]).includes('unmounted') || String(c[0]).includes('window'),
+      ),
+    ).toBe(false);
+    errorSpy.mockRestore();
+  });
+
   it('own row has a delete button; team-shared row does not', async () => {
     render(<AgentMemoriesPanel />);
     await screen.findByText('Own Memory Title');

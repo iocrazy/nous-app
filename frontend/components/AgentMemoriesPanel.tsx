@@ -21,14 +21,27 @@ export const AgentMemoriesPanel: React.FC = () => {
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
 
   useEffect(() => {
+    // Guard against a late-resolving fetch touching state after unmount —
+    // otherwise the setState fires in a torn-down jsdom (window is undefined)
+    // and surfaces as an unhandled rejection in CI.
+    let cancelled = false;
     setLoading(true);
     setError(null);
     listAgentMemories()
-      .then(setItems)
-      .catch((err) =>
-        setError(err instanceof Error ? err.message : t('agentMemories.loadError')),
-      )
-      .finally(() => setLoading(false));
+      .then((data) => {
+        if (!cancelled) setItems(data);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : t('agentMemories.loadError'));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleDelete = async (id: number) => {
