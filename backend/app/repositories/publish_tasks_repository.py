@@ -44,10 +44,10 @@ def aggregate_task_status(statuses: list[str]) -> str:
         return "failed"
     if s <= {"pending"}:
         return "pending"
-    if "publishing" in s:
-        return "publishing"
     if "pending_share" in s:
         return "pending_share"
+    if "publishing" in s or "pending" in s:
+        return "publishing"
     if "success" in s and (s & {"failed", "cancelled"}):
         return "partial"
     return "pending"

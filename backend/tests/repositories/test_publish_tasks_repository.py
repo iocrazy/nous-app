@@ -20,6 +20,8 @@ from app.repositories.publish_tasks_repository import (
         (["pending_share", "success"], "pending_share"),
         (["publishing", "pending"], "publishing"),
         (["pending", "pending"], "pending"),
+        (["success", "pending"], "publishing"),
+        (["failed", "pending"], "publishing"),
         (["cancelled", "cancelled"], "failed"),
         ([], "pending"),
     ],
