@@ -286,4 +286,39 @@ describe('SceneBlock typographic head row (Task 4.5)', () => {
       expect(onHandled.mock.calls[0][0]).toBe('900');
     });
   });
+
+  // ── A1: continuous per-block numbering (badge shows the document-order
+  // block number, not the scene's position) ────────────────────────────────
+  describe('continuous block numbering (blockIndexBase)', () => {
+    it('defaults the scene heading badge to 1 when blockIndexBase is omitted', () => {
+      render(<SceneBlock scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])} index={0} />);
+      expect(document.querySelector('.mh-scene-num-badge')?.textContent).toBe('1');
+      const num = document.querySelector('[data-el-id="el_a"]')
+        ?.closest('.mh-el-row')
+        ?.querySelector('.mh-el-num');
+      expect(num?.textContent).toBe('2');
+    });
+
+    it('offsets the heading badge and element numbers by blockIndexBase', () => {
+      render(
+        <SceneBlock
+          scene={makeScene([
+            { id: 'el_a', type: 'action', text: 'A' },
+            { id: 'el_b', type: 'action', text: 'B' },
+          ])}
+          index={1}
+          blockIndexBase={3}
+        />,
+      );
+      expect(document.querySelector('.mh-scene-num-badge')?.textContent).toBe('4');
+      const numA = document.querySelector('[data-el-id="el_a"]')
+        ?.closest('.mh-el-row')
+        ?.querySelector('.mh-el-num');
+      const numB = document.querySelector('[data-el-id="el_b"]')
+        ?.closest('.mh-el-row')
+        ?.querySelector('.mh-el-num');
+      expect(numA?.textContent).toBe('5');
+      expect(numB?.textContent).toBe('6');
+    });
+  });
 });

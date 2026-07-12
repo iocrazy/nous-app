@@ -42,6 +42,10 @@ export interface HollywoodLayoutProps {
   onTickClick?: (elementId: string, shiftKey: boolean) => void;
   /** Hover-gutter drag-to-reorder wiring; absent = element reorder disabled. */
   elementReorder?: ElementReorderApi;
+  /** A1 continuous numbering: this scene's cumulative block-index base (from
+   *  `sceneBlockBases`). The heading consumed `blockIndexBase + 1`, so the
+   *  first element here is `blockIndexBase + 2`. Defaults to 0. */
+  blockIndexBase?: number;
 }
 
 export function HollywoodLayout({
@@ -52,6 +56,7 @@ export function HollywoodLayout({
   selectedIds,
   onTickClick,
   elementReorder,
+  blockIndexBase = 0,
 }: HollywoodLayoutProps) {
   return (
     <>
@@ -59,7 +64,7 @@ export function HollywoodLayout({
         <ElementLine
           key={el.id}
           element={el}
-          index={i}
+          index={blockIndexBase + 1 + i}
           lineClass={HOLLYWOOD_LINE_CLASS[el.type]}
           focused={focusedElementId === el.id}
           selected={selectedIds?.has(el.id)}

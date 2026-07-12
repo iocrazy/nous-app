@@ -53,6 +53,7 @@ import {
   type SceneWindow,
 } from '../windowing';
 import { EDITOR_SHELL_STYLES } from './editorShellStyles';
+import { sceneBlockBases } from './blockNumbering';
 import {
   SceneBlock,
   type TypeCommand,
@@ -75,7 +76,6 @@ import { SaveIndicator, aggregateSaveState } from './SaveIndicator';
 import { ConflictBar } from './ConflictBar';
 import { ColdStart } from './EmptyStates';
 import { ImportScriptModal } from './ImportScriptModal';
-import { ChapterFallback } from './ChapterFallback';
 import { useScriptPresence } from '../collab/useScriptPresence';
 import { useScriptOpsRealtime } from '../collab/useScriptOpsRealtime';
 import { PresenceAvatars } from '../collab/PresenceAvatars';
@@ -702,6 +702,11 @@ export function EditorShell({
     [scenes],
   );
 
+  // Continuous per-block numbering (A1): each scene's cumulative offset into
+  // the document-order block count, so heading + element numbers never reset
+  // at a scene boundary (laper.ai-style).
+  const blockBases = useMemo(() => sceneBlockBases(scenes), [scenes]);
+
   const recomputeWindow = useCallback(() => {
     if (!windowed) return;
     const el = sheetScrollRef.current;
@@ -1083,6 +1088,10 @@ export function EditorShell({
                       chapters={chapters}
                       onOpenScene={handleOpenScene}
                       onReload={reloadAll}
+                      orphanChapters={orphanChapters}
+                      converting={converting}
+                      onConvert={handleConvertChapter}
+                      onStartWriting={handleStartChapter}
                     />
                   ) : (
                     <>
@@ -1127,6 +1136,7 @@ export function EditorShell({
                             key={s.id}
                             scene={s}
                             index={i}
+                            blockIndexBase={blockBases[i]}
                             format={state.format}
                             mentionCandidates={mentionCandidates}
                             onFocusElement={handleFocusElement}
@@ -1149,15 +1159,6 @@ export function EditorShell({
                           />
                         );
                       })}
-                      {orphanChapters.map((ch) => (
-                        <ChapterFallback
-                          key={ch.id}
-                          chapter={ch}
-                          converting={!!converting[ch.id]}
-                          onConvert={handleConvertChapter}
-                          onStartWriting={handleStartChapter}
-                        />
-                      ))}
                     </>
                   )}
                 </div>

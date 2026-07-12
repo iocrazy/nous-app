@@ -339,11 +339,22 @@ export const EDITOR_SHELL_STYLES = `
 }
 .mh-sheet-inner{ position:relative; z-index:1; }
 .mh-scene-block{ margin-bottom:26px; position:relative; padding-left:4px; }
+/* A5: the scene-row drag handle is the SAME 6-dot affordance as the per-element
+   '.mh-el-drag' handle (see ELEMENT ROWS below) — one handle style across the
+   whole document, not a bespoke "::" glyph. Kept as its own class (positioned
+   directly on the scene row rather than inside a shared gutter box) but every
+   visual property mirrors '.mh-el-drag' exactly. */
 .mh-drag-handle{
-  position:absolute; left:-16px; top:0; color:var(--ink-faint);
-  font-size:13px; font-weight:700; letter-spacing:1px; cursor:grab;
-  user-select:none; opacity:0; font-family:var(--sans); background:none; border:none;
+  position:absolute; left:-16px; top:1px;
+  display:grid; grid-template-columns:repeat(2, 3px); grid-template-rows:repeat(3, 3px);
+  gap:2px; padding:3px; border:none; background:none; border-radius:4px;
+  color:var(--sheet-ink-soft); cursor:grab; line-height:0;
+  user-select:none; opacity:0; transition:opacity 0.12s ease;
 }
+.mh-drag-handle:hover{ color:var(--sheet-ink); background:var(--surface-2); }
+.mh-drag-handle:active,
+.mh-drag-handle.dragging{ cursor:grabbing; }
+.mh-drag-handle:focus-visible{ outline:2px solid var(--indigo); outline-offset:1px; }
 .mh-scene-block:hover .mh-drag-handle,
 .mh-scene-block:focus-within .mh-drag-handle{ opacity:1; }
 .mh-scene-headrow{ display:flex; align-items:center; gap:8px; margin-bottom:13px; flex-wrap:wrap; }
@@ -491,15 +502,10 @@ export const EDITOR_SHELL_STYLES = `
 .as-comment{ font-family:var(--script-song); border-left:3px solid var(--tick-comment); padding-left:8px; color:var(--sheet-ink-soft); font-style:italic; }
 .as-subtitle{ font-family:var(--script-hei); text-align:center; font-style:italic; color:var(--sheet-ink-soft); }
 
-/* Asian scene head = a flat numbered line (N. …) rather than a chip badge. */
-.mh-scene-headrow.asian .mh-scene-num-badge{
-  width:auto; height:auto; min-width:0; padding:0 4px 0 0;
-  background:transparent; color:var(--sheet-ink);
-  font-size:14px; font-weight:700;
-}
-.mh-editor-shell[data-theme='dark'] .mh-scene-headrow.asian .mh-scene-num-badge{
-  background:transparent; color:var(--sheet-ink);
-}
+/* A5/A1: the scene-head badge is the SAME hover-reveal block number in both
+   layout engines — no Asian-only chip/flat-number variant (see the shared
+   SCREENPLAY CLEAN PAGE rules below, which already cover both formats via the
+   plain '.mh-scene-num-badge' selector). */
 
 /* ===== HORIZONTAL MODE-SLOT TOOLBAR ===== */
 .mh-h-toolbar{
@@ -555,12 +561,15 @@ export const EDITOR_SHELL_STYLES = `
 .mh-stat-lbl{ font-size:10.5px; color:var(--ink-faint); font-weight:600; margin-top:2px; }
 .mh-cast-row{ display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--ink-soft); padding:3px 0; }
 .mh-cast-dot{ width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+/* A1/A5: the scene-head number is the SAME hover-reveal typography as the
+   per-element '.mh-el-num' block number (no dark ink chip) — final absolute
+   position + hover-reveal opacity live in the SCREENPLAY CLEAN PAGE block
+   below, this is the shared type spec both themes inherit unstyled. */
 .mh-scene-num-badge{
-  width:24px; height:24px; border-radius:7px; background:var(--ink);
-  color:var(--surface); font-size:11px; font-weight:700; font-family:var(--mono);
-  display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  font-family:var(--mono); font-size:10.5px; font-weight:600;
+  font-variant-numeric:tabular-nums; color:var(--sheet-ink-soft);
+  flex-shrink:0;
 }
-.mh-editor-shell[data-theme='dark'] .mh-scene-num-badge{ background:var(--indigo); color:var(--accent-on); }
 .mh-scene-chip{ font-size:11px; font-weight:700; letter-spacing:0.03em; padding:4px 9px; border-radius:6px; font-family:var(--mono); }
 .mh-scene-chip.ie-int{ background:var(--indigo-soft); color:var(--indigo-deep); }
 .mh-scene-chip.ie-ext{ background:var(--violet-soft); color:var(--violet); }
@@ -650,6 +659,19 @@ export const EDITOR_SHELL_STYLES = `
 .mh-outline-empty{
   padding:4px 12px 4px 22px; font-size:12px; color:var(--ink-faint); font-style:italic;
 }
+
+/* Unstarted (orphan) chapters — quiet secondary section beneath the real
+   outline groups (A3: moved out of the Script tab, these are not script
+   content, just a "hasn't been split into scenes yet" stub). */
+.mh-outline-orphan-chapters{
+  margin-top:36px; padding-top:20px; border-top:1px dashed var(--sheet-border);
+}
+.mh-outline-orphan-heading{
+  margin:0 0 12px; font-size:12px; font-weight:700; letter-spacing:0.04em;
+  text-transform:uppercase; color:var(--ink-faint);
+}
+.mh-outline-orphan-chapters .mh-chapter-fallback{ margin-bottom:14px; }
+.mh-outline-orphan-chapters .mh-chapter-fallback:last-child{ margin-bottom:0; }
 
 .mh-cover-card{
   width:820px; max-width:100%; min-height:60%;
@@ -747,8 +769,9 @@ export const EDITOR_SHELL_STYLES = `
 .mh-shell-state.error{ color:var(--red); }
 
 /* ===== SCENE REORDER (drag + keyboard, Task 10) ===== */
-.mh-drag-handle{ cursor:grab; border-radius:5px; }
-.mh-drag-handle:active{ cursor:grabbing; }
+/* cursor/border-radius/hover states live on the base .mh-drag-handle rule
+   above (A5: shares its full visual spec with the element-row .mh-el-drag
+   handle) — nothing scene-reorder-specific to add here beyond the dim. */
 .mh-scene-block.dragging{ opacity:0.55; }
 .mh-drop-indicator{
   height:2px; border-radius:2px; margin:5px 0;
@@ -1271,7 +1294,7 @@ export const EDITOR_SHELL_STYLES = `
 .mh-scene-headrow{ position:relative; }
 .mh-scene-num-badge,
 .mh-editor-shell[data-theme='dark'] .mh-scene-num-badge{
-  position:absolute; left:-42px; top:3px; width:auto; height:auto; min-width:1.4em;
+  position:absolute; left:-42px; top:3px; width:auto; height:auto; min-width:1.2em;
   background:none; color:var(--sheet-ink-soft); font-size:10.5px; font-weight:600;
   font-variant-numeric:tabular-nums; text-align:right; border-radius:0; padding:0;
   opacity:0; transition:opacity 0.12s ease; pointer-events:none;
@@ -1329,8 +1352,9 @@ export const EDITOR_SHELL_STYLES = `
 .mh-el-row:focus-within:not(:hover) .mh-el-gutter{ opacity:0; pointer-events:none; }
 .mh-scene-block:focus-within:not(:hover) .mh-scene-num-badge{ opacity:0; }
 /* #10: align the scene number to the same margin column + size as the block
-   number so the left rail reads as one tidy column. */
-.mh-scene-num-badge{ left:-42px; width:26px; text-align:right; font-size:10.5px; }
+   number so the left rail reads as one tidy column (identical min-width to
+   '.mh-el-num' — A5 one numbering style, not a wider chip column). */
+.mh-scene-num-badge{ left:-42px; min-width:1.2em; text-align:right; font-size:10.5px; }
 /* #4: the "按 Tab…" seed hint is a quiet whisper, not a headline. */
 .mh-placeholder-line{ font-size:12px; opacity:0.45; }
 /* #7,#13,#14: legacy chapter cards become a quiet unstarted-chapter list below

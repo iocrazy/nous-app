@@ -112,20 +112,30 @@ describe('EditorShell cold start', () => {
     );
   });
 
-  it('legacy script (chapters, no scenes) shows chapter cards with Convert, NOT cold start', async () => {
+  it('legacy script (chapters, no scenes): Script tab has NO chapter cards — they live in Outline', async () => {
     svc.listScenes.mockResolvedValue([]);
     scriptSvc.fetchScriptProject.mockResolvedValueOnce({
       chapters: [{ id: 'ch1', title: 'Chapter One', content: 'Old prose to convert.' }],
     });
     render(<EditorShell scriptId="1" />);
+    await waitFor(() => expect(screen.getByRole('main')).toBeInTheDocument());
+
+    // A3: orphan chapters are NOT script content — the Script tab (default view)
+    // must not render the chapter fallback card or its Convert button.
+    expect(screen.queryByTestId('chapter-fallback')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'editor.convertToScenes' })).toBeNull();
+    expect(screen.queryByText('Old prose to convert.')).toBeNull();
+
+    // Switching to the Outline tab surfaces the same chapter card + Convert action.
+    fireEvent.click(screen.getByRole('tab', { name: 'editor.tabOutline' }));
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'editor.convertToScenes' })).toBeInTheDocument(),
     );
-    expect(screen.queryByTestId('cold-start')).toBeNull();
+    expect(screen.getByTestId('chapter-fallback')).toBeInTheDocument();
     expect(screen.getByText('Old prose to convert.')).toBeInTheDocument();
   });
 
-  it('EMPTY legacy chapter offers Start Writing → creates a typeable scene (no LLM)', async () => {
+  it('EMPTY legacy chapter: Outline tab offers Start Writing → creates a typeable scene (no LLM)', async () => {
     svc.listScenes.mockResolvedValueOnce([]).mockResolvedValue([seededScene]);
     scriptSvc.fetchScriptProject.mockResolvedValueOnce({
       chapters: [{ id: 'ch1', title: 'Chapter One', content: '' }], // empty → no prose to split
@@ -139,7 +149,13 @@ describe('EditorShell cold start', () => {
     svc.applyOps.mockResolvedValue({ content_version: 2, elements: seededScene.elements });
 
     render(<EditorShell scriptId="1" />);
-    // An empty chapter shows "Start Writing", NOT the AI "Convert to Scenes".
+    await waitFor(() => expect(screen.getByRole('main')).toBeInTheDocument());
+
+    // Not in the Script tab...
+    expect(screen.queryByTestId('chapter-fallback')).toBeNull();
+
+    // ...but visible from the Outline tab.
+    fireEvent.click(screen.getByRole('tab', { name: 'editor.tabOutline' }));
     const startBtn = await screen.findByRole('button', { name: 'editor.startWriting' });
     expect(screen.queryByRole('button', { name: 'editor.convertToScenes' })).toBeNull();
 
