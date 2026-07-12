@@ -138,3 +138,24 @@ test('segment edge drag resizes; block drag reorders (P2-1)', async ({ page }) =
   await expect(firstBlock).toHaveAttribute('data-testid', 'timeline-seg-s2');
   await page.screenshot({ path: 'e2e-artifacts/canvas-timeline-reorder.png', fullPage: true });
 });
+
+test('in-node Delete removes the segment, not the whole node (P3-B)', async ({ page }) => {
+  await openCanvas(page);
+
+  const strip = page.getByTestId('timeline-strip');
+  await expect(
+    strip.locator('button[data-testid^="timeline-seg-"]'),
+  ).toHaveCount(2);
+
+  // Focus a segment block, then Delete — React's stopPropagation must beat
+  // React Flow's document-level delete listener (jsdom can't prove this).
+  await page.getByTestId('timeline-seg-s1').click();
+  await page.keyboard.press('Delete');
+
+  await expect(
+    strip.locator('button[data-testid^="timeline-seg-"]'),
+  ).toHaveCount(1);
+  // The node itself survived — only a segment was removed.
+  await expect(page.getByTestId('smart-timeline-node')).toBeVisible();
+  await expect(page.locator('.react-flow__node')).toHaveCount(1);
+});

@@ -44,6 +44,15 @@ afterEach(() => {
 });
 
 describe('LoopNodeView run affordance', () => {
+  it('uses the standard node header instead of the bespoke slate one (P3-B)', () => {
+    const { container } = renderLoop();
+    const head = container.querySelector('.mh-node-head');
+    expect(head).toBeTruthy();
+    expect(head?.querySelector('.mh-node-title')?.textContent).toBe('Loop');
+    // The zinc-era hardcoded header title colour is gone from the header.
+    expect(head?.querySelector('.text-slate-500')).toBeNull();
+  });
+
   it('idle: Run button starts the loop run', () => {
     renderLoop();
     fireEvent.click(screen.getByLabelText('Run loop'));

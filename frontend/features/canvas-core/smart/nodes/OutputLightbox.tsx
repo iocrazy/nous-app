@@ -38,6 +38,9 @@ export interface OutputLightboxProps {
   kind: 'image' | 'video';
   onIndexChange: (next: number) => void;
   onClose: () => void;
+  /** Meta line addendum (P3-B) — the generating prompt (front truncated),
+   *  shown alongside the resolution (Infinite's updatePreviewMetaHint). */
+  meta?: string;
   /** Candidate compare underlays (upstream input images, or the newest
    *  archived version as fallback) — enables Compare when non-empty. */
   compareSources?: LightboxItem[];
@@ -54,6 +57,7 @@ export function OutputLightbox({
   kind,
   onIndexChange,
   onClose,
+  meta,
   compareSources,
   onRegenerate,
   regenerating,
@@ -382,6 +386,15 @@ export function OutputLightbox({
             <span data-testid="lightbox-counter">{`${index + 1} / ${items.length}`}</span>
           )}
           {resolution && <span data-testid="lightbox-resolution">{resolution}</span>}
+          {meta && (
+            <span
+              data-testid="lightbox-meta"
+              className="max-w-[40vw] truncate text-canvas-muted"
+              title={meta}
+            >
+              {meta.length > 60 ? `${meta.slice(0, 60)}…` : meta}
+            </span>
+          )}
           {(downloadError || exportError) && (
             <span role="alert" className="text-rose-400">
               {downloadError || exportError}

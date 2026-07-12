@@ -129,18 +129,6 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
       <div className="mh-node-head">
         <div className="mh-node-title">Prompt</div>
         <div className="flex items-center gap-1.5">
-          {run_status === 'failed' && (
-            /* Failed-run retry (G4-F3) — re-dispatch with CURRENT settings
-               and the upstream image input intact. */
-            <button
-              type="button"
-              className="mh-chip !border-rose-400/60 !text-rose-400"
-              onClick={() => void rerunPrompt(id)}
-              title="Re-run this prompt"
-            >
-              Retry
-            </button>
-          )}
           {/* Text stays the legacy LLM path; Image/Video route Run through
               the G4-B1 generation tasks (Infinite composer's kind toggle). */}
           <select
@@ -169,7 +157,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
               data-testid="prompt-elapsed"
               className={`rounded-full px-1.5 py-0.5 font-mono text-[10px] tabular-nums ${
                 running
-                  ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-300'
+                  ? 'mh-accent-chip'
                   : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
               }`}
             >
@@ -285,14 +273,6 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
               )}
             </div>
           )}
-          {run_error && (
-            <span
-              className="ml-2 truncate text-rose-600 dark:text-rose-400"
-              title={run_error}
-            >
-              {run_error}
-            </span>
-          )}
         </div>
 
         {/* Ref chips: show attached resources below the textarea */}
@@ -301,12 +281,12 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             {(resource_refs as PromptResourceRef[]).map((ref) => (
               <span
                 key={ref.resource_id}
-                className="inline-flex items-center gap-1 rounded-full bg-indigo-900/40 px-2 py-0.5 text-[10px] text-indigo-200"
+                className="mh-accent-chip inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px]"
                 data-testid="prompt-ref-chip"
               >
                 @{ref.name}
                 <button
-                  className="ml-0.5 text-indigo-400 hover:text-indigo-200"
+                  className="ml-0.5 opacity-70 hover:opacity-100"
                   aria-label={`Remove reference to ${ref.name}`}
                   onMouseDown={(e) => {
                     // prevent blur from firing before the click is processed
@@ -323,6 +303,31 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                 </button>
               </span>
             ))}
+          </div>
+        )}
+
+        {/* Failed-run recovery panel (P3-B): a full-width rose panel with the
+            error text + Retry, replacing the old truncated one-liner + a tiny
+            header chip. Mirrors the OutputNodeView RecoverCell shape. */}
+        {run_status === 'failed' && (
+          <div
+            data-testid="prompt-failure-panel"
+            role="alert"
+            className="mt-2 rounded-lg border border-rose-400/50 bg-rose-400/10 p-2"
+          >
+            <div className="text-[11px] font-bold text-rose-500">Run failed</div>
+            {run_error && (
+              <div className="mt-0.5 text-[10px] text-canvas-muted" title={run_error}>
+                {run_error}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => void rerunPrompt(id)}
+              className="nodrag mh-chip mt-1.5 !border-rose-400/60 !text-rose-500"
+            >
+              Retry
+            </button>
           </div>
         )}
       </div>

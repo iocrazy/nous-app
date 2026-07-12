@@ -110,3 +110,36 @@ describe('OutputLightbox portal + key isolation', () => {
     expect(onIndexChange).not.toHaveBeenCalled();
   });
 });
+
+describe('OutputLightbox meta line (P3-B)', () => {
+  it('shows a truncated prompt in the meta line when provided', () => {
+    const long = 'a very detailed prompt about a cat sitting on a windowsill at golden hour with soft light';
+    render(
+      <OutputLightbox
+        items={ITEMS}
+        index={0}
+        kind="image"
+        onIndexChange={vi.fn()}
+        onClose={vi.fn()}
+        meta={long}
+      />,
+    );
+    const meta = screen.getByTestId('lightbox-meta');
+    expect(meta.textContent).toContain('a very detailed prompt');
+    expect(meta.textContent?.endsWith('…')).toBe(true);
+    expect(meta.getAttribute('title')).toBe(long);
+  });
+
+  it('renders no meta line without a meta prop', () => {
+    render(
+      <OutputLightbox
+        items={ITEMS}
+        index={0}
+        kind="image"
+        onIndexChange={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId('lightbox-meta')).toBeNull();
+  });
+});

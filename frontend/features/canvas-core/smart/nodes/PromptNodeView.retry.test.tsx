@@ -31,14 +31,21 @@ afterEach(() => {
   useCanvasCoreStore.getState().reset();
 });
 
-function renderPrompt(run_status: string) {
+function renderPrompt(run_status: string, run_error: string | null = null) {
   render(
     <ReactFlowProvider>
       <PromptNodeView
         {...baseProps}
         id="p1"
         type="prompt"
-        data={{ body: 'x', provider_slug: '', agent_id: null, run_status, resource_refs: [] }}
+        data={{
+          body: 'x',
+          provider_slug: '',
+          agent_id: null,
+          run_status,
+          run_error,
+          resource_refs: [],
+        }}
       />
     </ReactFlowProvider>,
   );
@@ -54,5 +61,15 @@ describe('PromptNodeView retry', () => {
   it('no Retry on non-failed prompts', () => {
     renderPrompt('succeeded');
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+  });
+
+  it('failure shows a full-width recovery panel with the error text (P3-B)', () => {
+    renderPrompt('failed', 'no credit');
+    const panel = screen.getByTestId('prompt-failure-panel');
+    expect(panel.getAttribute('role')).toBe('alert');
+    expect(panel.textContent).toContain('Run failed');
+    expect(panel.textContent).toContain('no credit');
+    // Retry lives inside the panel now, not as a header chip.
+    expect(panel.querySelector('button')?.textContent).toBe('Retry');
   });
 });
