@@ -17,9 +17,11 @@ vi.mock('../../../services/apiClient', () => ({
 }));
 
 import {
+  cancelGeneration,
   dispatchGenerations,
   getGeneration,
   listGenerationModels,
+  listTextModels,
   pollGeneration,
 } from './canvasGenerationService';
 
@@ -40,6 +42,23 @@ describe('canvasGenerationService', () => {
     const models = await listGenerationModels();
     expect(apiFetch).toHaveBeenCalledWith('/api/v1/canvases/generation-models');
     expect(models[0].name).toBe('jimeng-cli-image');
+  });
+
+  it('lists text (llm) models from the DB catalog endpoint', async () => {
+    apiFetch.mockResolvedValue(
+      jsonResponse({ success: true, data: [{ name: 'mediahub-doubao-llm', type: 'llm' }] }),
+    );
+    const models = await listTextModels();
+    expect(apiFetch).toHaveBeenCalledWith('/api/v1/canvases/text-models');
+    expect(models[0].name).toBe('mediahub-doubao-llm');
+  });
+
+  it('cancels a generation task via DELETE', async () => {
+    apiFetch.mockResolvedValue(jsonResponse({ success: true }));
+    await cancelGeneration('task-9');
+    expect(apiFetch).toHaveBeenCalledWith('/api/v1/canvases/generations/task-9', {
+      method: 'DELETE',
+    });
   });
 
   it('dispatches generations and returns task ids', async () => {

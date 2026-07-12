@@ -248,6 +248,32 @@ async def get_canvas_generation(task_id: str, auth: AuthDep) -> dict:
     return {"success": True, "data": result.data}
 
 
+@router.delete("/canvases/generations/{task_id}")
+async def cancel_canvas_generation(task_id: str, auth: AuthDep) -> dict:
+    """Really cancel one generation task (P1-1). Stop used to only abandon the
+    frontend poll while the DBOS task kept burning provider quota; here we ask
+    the DBOS engine to cancel it. Ownership is gated through task_tracking (the
+    UI's single source of truth — route C); we NEVER PATCH phase ourselves —
+    the ``mirror_dbos_lifecycle_to_tracking`` trigger reflects
+    phase='cancelled' once the engine flips the workflow to CANCELLED.
+    Idempotent: cancelling an already-terminal task is a harmless no-op."""
+    from app.services.infra import dbos_orchestrator
+
+    client = await get_task_manager()._get_client()
+    result = await (
+        client.table("task_tracking")
+        .select("dbos_workflow_id")
+        .eq("dbos_workflow_id", task_id)
+        .eq("user_id", auth.user_id)
+        .single()
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Task not found")
+    await dbos_orchestrator.cancel_workflow(task_id)
+    return {"success": True}
+
+
 async def _is_team_member(team_id: str, user_id: str) -> bool:
     """Same membership check as scope_guards.verify_scope_access."""
     from app.db import get_async_supabase_admin

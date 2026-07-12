@@ -111,9 +111,17 @@ export async function getGeneration(taskId: string): Promise<GenerationTask> {
   return body.data;
 }
 
-/** Thrown by pollGeneration when the caller's shouldStop trips — the
- *  backend task keeps running (no cancel endpoint yet, G4 挂账); only the
- *  frontend wait is abandoned. */
+/** Really cancel one generation task server-side (P1-1). DELETE asks the DBOS
+ *  engine to cancel; the mirror trigger flips task_tracking to phase=cancelled.
+ *  Idempotent on the backend (cancelling a terminal task is a no-op), so the
+ *  caller can fire-and-forget on Stop without racing task completion. */
+export async function cancelGeneration(taskId: string): Promise<void> {
+  await apiFetch(`/api/v1/canvases/generations/${taskId}`, { method: 'DELETE' });
+}
+
+/** Thrown by pollGeneration when the caller's shouldStop trips — the frontend
+ *  wait is abandoned. Stop also fires cancelGeneration() for the in-flight
+ *  tasks (P1-1), so the backend workflow really stops instead of running on. */
 export class PollStopped extends Error {
   constructor(taskId: string) {
     super(`polling for generation task ${taskId} stopped by user`);

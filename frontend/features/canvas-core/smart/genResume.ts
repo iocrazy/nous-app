@@ -9,6 +9,7 @@
 // guard on every write.
 
 import {
+  cancelGeneration,
   getGeneration,
   pollGeneration,
 } from '../services/canvasGenerationService';
@@ -63,6 +64,25 @@ export function prunePendingGenTask(promptId: string, taskId: string): void {
 /** Run settled as a whole (success, failure, or stop) — forget the batch. */
 export function clearPendingGenTasks(promptId: string): void {
   useCanvasCoreStore.getState().patchNode(promptId, { data: { gen_tasks: [] } });
+}
+
+/**
+ * Stop pressed (P1-1): really cancel every in-flight generation task on this
+ * prompt node server-side, so the DBOS workflow stops burning provider quota
+ * instead of just abandoning the frontend poll. Best-effort — a failed cancel
+ * only logs; the poll is abandoned regardless via the batch's shouldStop.
+ */
+export async function cancelPendingGenTasks(promptId: string): Promise<void> {
+  const store = useCanvasCoreStore.getState();
+  const prompt = store.nodes.find((n) => asObj(n).id === promptId);
+  if (!prompt) return;
+  await Promise.all(
+    pendingTasksOf(prompt).map((t) =>
+      cancelGeneration(t.task_id).catch((err: unknown) => {
+        console.error('[canvas] cancel generation failed:', t.task_id, err);
+      }),
+    ),
+  );
 }
 
 /**
