@@ -101,6 +101,33 @@ def provider_key_for_model(model: str) -> str:
     )
 
 
+# Every provider key get_adapter_for_user can build. Used to validate an
+# admin-named actual_provider before dispatching on it.
+_PROVIDER_KEYS = frozenset(
+    {"claude", "deepseek", "doubao", "openai", "modelscope", "qwen"}
+)
+
+
+def resolve_provider_key(actual_provider: str, model: str) -> str:
+    """Dispatch key for a PLATFORM catalog row (``mediahub_models``).
+
+    The admin explicitly named the provider on the row, so that wins when it
+    matches a buildable adapter key. Unknown labels fall back to the
+    model-prefix rule; a model no prefix rule knows (e.g. ``qwen3-6-35b``,
+    2026-07-12 real-machine bug) falls back to ``qwen`` — the OpenAI-compatible
+    chat-completions adapter, the SAME contract the admin health probe
+    validates against the row's base_url. Never raises: a catalog row always
+    carries base_url + api_key, which is all the fallback adapter needs.
+    """
+    key = (actual_provider or "").strip().lower()
+    if key in _PROVIDER_KEYS:
+        return key
+    try:
+        return provider_key_for_model(model)
+    except ValueError:
+        return "qwen"
+
+
 def get_adapter(model: str, settings: Any) -> AIAdapter:
     """DEPRECATED shim — ``settings`` is IGNORED (env credentials retired
     2026-07-07, 铁律). Delegates to :func:`get_adapter_for_user` with no user
@@ -128,7 +155,32 @@ def get_adapter_for_user(
 
     Raises ValueError for unknown model prefixes.
     """
-    provider_key = provider_key_for_model(model)
+    return _build_adapter_for_key(
+        provider_key_for_model(model), model, user_provider_config, fallback_settings
+    )
+
+
+def get_adapter_for_key(
+    provider_key: str,
+    model: str,
+    user_provider_config: Dict[str, Any],
+) -> AIAdapter:
+    """Build an adapter for an EXPLICITLY named provider key.
+
+    Platform catalog rows name their provider (``actual_provider``) — dispatch
+    on that instead of guessing from the model prefix, which breaks for models
+    like ``qwen3-6-35b`` that no prefix rule knows. ``provider_key`` must be
+    one of the buildable keys (see ``resolve_provider_key``).
+    """
+    return _build_adapter_for_key(provider_key, model, user_provider_config, None)
+
+
+def _build_adapter_for_key(
+    provider_key: str,
+    model: str,
+    user_provider_config: Dict[str, Any],
+    fallback_settings: Any,
+) -> AIAdapter:
     user_cfg = (user_provider_config or {}).get(provider_key, {}) or {}
 
     # Sprint 2 #5: api_key may be str OR list[str] (multi-key BYO).
@@ -151,8 +203,11 @@ def get_adapter_for_user(
 
         def _build_with_key(key: str):
             # Recurse with a single-key config so the normal branch below
-            # builds the right per-provider adapter.
-            return get_adapter_for_user(
+            # builds the right per-provider adapter. Recurse on the SAME
+            # explicit provider_key — re-deriving it from the model prefix
+            # would break explicit-key callers (get_adapter_for_key).
+            return _build_adapter_for_key(
+                provider_key,
                 model,
                 {
                     **(user_provider_config or {}),
