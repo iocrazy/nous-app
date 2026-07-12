@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   AlertCircle, AlertTriangle, ArrowLeftRight, Calendar, Check, Folder,
   ListOrdered, MapPin, Plus, Radio, Search, Send, Sparkles, TrendingUp, X,
@@ -10,6 +10,7 @@ import {
 } from '../../services/distributionService';
 import { SocialAccount, LibraryVideo } from '../../types';
 import { useToast } from '../Toast';
+import { useWorkspaceScope } from '../../hooks/useWorkspaceScope';
 import './distribution-v4.css';
 
 type Visibility = 'public' | 'friends' | 'private';
@@ -75,7 +76,7 @@ export const PublishPage: React.FC = () => {
   const { t } = useTranslation();
   const { addToast } = useToast();
   const navigate = useNavigate();
-  const { teamId } = useParams();
+  const { scopeId } = useWorkspaceScope();
 
   const [videos, setVideos] = useState<LibraryVideo[]>([]);
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
@@ -97,14 +98,14 @@ export const PublishPage: React.FC = () => {
 
   const load = useCallback(async () => {
     try {
-      const [v, a] = await Promise.all([listLibraryVideos(teamId ?? ''), listAccounts()]);
+      const [v, a] = await Promise.all([listLibraryVideos(scopeId), listAccounts()]);
       setVideos(v);
       setAccounts(a);
     } catch (err) {
       console.error('distribution: publish page load failed', err);
       addToast(t('distribution.publish.loadFailed', 'Failed to load publish data'), 'error');
     }
-  }, [addToast, t, teamId]);
+  }, [addToast, t, scopeId]);
 
   useEffect(() => { void load(); }, [load]);
 
