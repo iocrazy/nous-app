@@ -36,12 +36,12 @@ import PublishPage from './PublishPage';
 describe('PublishPage', () => {
   it('publishes only after content + account + title are chosen', async () => {
     render(<MemoryRouter><PublishPage /></MemoryRouter>);
-    await waitFor(() => expect(screen.getByText('clip-a.mp4')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText('clip-a.mp4')).toBeInTheDocument());
 
     const publishBtn = screen.getByRole('button', { name: /Publish now/i });
     expect(publishBtn).toBeDisabled();
 
-    fireEvent.click(screen.getByText('clip-a.mp4'));               // pick content
+    fireEvent.click(screen.getByLabelText('clip-a.mp4'));           // pick content
     fireEvent.click(screen.getByText('HEYGO'));                    // pick account
     fireEvent.change(screen.getByPlaceholderText(/Add a title/i), {
       target: { value: 'Launch day' },
@@ -59,6 +59,6 @@ describe('PublishPage', () => {
   it('marks expired accounts non-selectable', async () => {
     render(<MemoryRouter><PublishPage /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('Expired One')).toBeInTheDocument());
-    expect(screen.getByText(/Authorization expired/i)).toBeInTheDocument();
+    expect(screen.getByText(/Expired/i)).toBeInTheDocument();
   });
 });

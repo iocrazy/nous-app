@@ -1,17 +1,76 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Check, Send } from 'lucide-react';
-import { PageHeader } from '../AILibrary/PageHeader';
-import { useToast } from '../Toast';
+import {
+  AlertCircle, AlertTriangle, ArrowLeftRight, Calendar, Check, Folder,
+  ListOrdered, MapPin, Plus, Radio, Send, Sparkles, TrendingUp,
+} from 'lucide-react';
 import {
   createPublishTask, listAccounts, listLibraryVideos,
 } from '../../services/distributionService';
 import { SocialAccount, LibraryVideo } from '../../types';
+import { useToast } from '../Toast';
+import './distribution-v4.css';
 
 type Visibility = 'public' | 'friends' | 'private';
 type Mode = 'broadcast' | 'one_to_one';
 type Channel = 'official' | 'h5';
+type Orientation = 'vertical' | 'horizontal';
+
+const VIS: Visibility[] = ['public', 'friends', 'private'];
+const VIS_LABEL: Record<Visibility, string> = { public: 'Public', friends: 'Friends', private: 'Private' };
+const PLATFORM_LABEL: Record<string, string> = {
+  douyin: 'Douyin', kuaishou: 'Kuaishou', xiaohongshu: 'Xiaohongshu',
+};
+
+// Deterministic gradient pick per account id — keeps avatars visually
+// distinct without needing per-user color config.
+const AVA_GRADIENTS = [
+  'linear-gradient(135deg,#0ea5e9,#6366f1)',
+  'linear-gradient(135deg,#8b5cf6,#ec4899)',
+  'linear-gradient(135deg,#f97316,#ef4444)',
+  'linear-gradient(135deg,#10b981,#0ea5e9)',
+  'linear-gradient(135deg,#f59e0b,#ec4899)',
+];
+const gradientFor = (id: string): string => {
+  let h = 0;
+  for (let i = 0; i < id.length; i += 1) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return AVA_GRADIENTS[h % AVA_GRADIENTS.length];
+};
+
+const PLATFORM_BADGE: Record<string, { bg: string; icon: React.ReactNode }> = {
+  douyin: {
+    bg: '#000',
+    icon: (
+      <svg viewBox="0 0 24 24" fill="#fff">
+        <path d="M16.6 5.82A4.28 4.28 0 0 1 15.54 3h-3.09v12.4a2.59 2.59 0 1 1-1.77-2.45V9.79a5.76 5.76 0 1 0 4.86 5.69V9.05a7.35 7.35 0 0 0 4.3 1.38V7.3a4.28 4.28 0 0 1-3.24-1.48Z" />
+      </svg>
+    ),
+  },
+  kuaishou: {
+    bg: '#FF4906',
+    icon: <svg viewBox="0 0 24 24" fill="#fff"><path d="m10 8 6 4-6 4Z" /></svg>,
+  },
+  xiaohongshu: {
+    bg: '#FE2C55',
+    icon: <svg viewBox="0 0 24 24" fill="#fff"><circle cx="12" cy="12" r="5" /></svg>,
+  },
+};
+
+const HeartIcon: React.FC = () => (
+  <svg viewBox="0 0 24 24"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" /></svg>
+);
+const CommentIcon: React.FC = () => (
+  <svg viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" /></svg>
+);
+const ShareGlyph: React.FC = () => (
+  <svg viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z" /></svg>
+);
+const MusicIcon: React.FC = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
+  </svg>
+);
 
 export const PublishPage: React.FC = () => {
   const { t } = useTranslation();
@@ -30,6 +89,9 @@ export const PublishPage: React.FC = () => {
   const [allowDownload, setAllowDownload] = useState(true);
   const [mode, setMode] = useState<Mode>('broadcast');
   const [channel, setChannel] = useState<Channel>('h5');
+  const [orientation, setOrientation] = useState<Orientation>('vertical');
+  const [customizeOpen, setCustomizeOpen] = useState<Record<string, boolean>>({});
+  const [accountConfigs, setAccountConfigs] = useState<Record<string, { title: string }>>({});
   const [submitting, setSubmitting] = useState(false);
 
   const load = useCallback(async () => {
@@ -46,17 +108,41 @@ export const PublishPage: React.FC = () => {
   useEffect(() => { void load(); }, [load]);
 
   const toggle = (list: string[], id: string): string[] =>
-    list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
+    (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
 
   const canPublish = useMemo(
     () => selectedVideos.length > 0 && selectedAccounts.length > 0 && title.trim().length > 0,
     [selectedVideos, selectedAccounts, title],
   );
 
+  const postsBroadcast = selectedVideos.length * selectedAccounts.length;
+  const postsOneToOne = selectedVideos.length > 0 ? selectedAccounts.length : 0;
+  const totalPosts = mode === 'broadcast' ? postsBroadcast : postsOneToOne;
+
+  const firstSelectedAccount = useMemo(
+    () => accounts.find((a) => a.id === selectedAccounts[0]),
+    [accounts, selectedAccounts],
+  );
+  const previewHandle = firstSelectedAccount?.username ?? 'yourhandle';
+
+  const onToggleAccount = (accountId: string, expired: boolean) => {
+    if (expired) return;
+    setSelectedAccounts((s) => toggle(s, accountId));
+  };
+
+  const onAccountTitleChange = (accountId: string, value: string) => {
+    setAccountConfigs((prev) => ({ ...prev, [accountId]: { title: value } }));
+  };
+
   const onPublish = async () => {
     if (!canPublish || submitting) return;
     setSubmitting(true);
     try {
+      const accountConfigsPayload = Object.fromEntries(
+        Object.entries(accountConfigs)
+          .filter(([id, cfg]) => selectedAccounts.includes(id) && cfg.title.trim().length > 0)
+          .map(([id, cfg]) => [id, { title: cfg.title.trim() }]),
+      );
       await createPublishTask({
         content_type: 'video',
         resource_ids: selectedVideos,
@@ -68,6 +154,7 @@ export const PublishPage: React.FC = () => {
         distribution_mode: mode,
         channel,
         account_ids: selectedAccounts,
+        account_configs: Object.keys(accountConfigsPayload).length ? accountConfigsPayload : undefined,
       });
       addToast(t('distribution.publish.queued', 'Publish task created'), 'success');
       navigate('../records');
@@ -79,137 +166,391 @@ export const PublishPage: React.FC = () => {
     }
   };
 
-  const VIS: Visibility[] = ['public', 'friends', 'private'];
-
   return (
-    <div className="pt-6">
-      <PageHeader
-        title={t('distribution.publish.title', 'Publish')}
-        subtitle={t('distribution.publish.subtitle', 'Send a video from your Library to connected accounts')}
-      />
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
-        {/* Left column */}
-        <div className="flex flex-col gap-5">
-          <section>
-            <h2 className="mb-2 text-[13px] font-semibold text-ink-200">
+    <div className="dist-v4">
+      <div className="page-head">
+        <div>
+          <h2>{t('distribution.publish.title', 'Publish')}</h2>
+          <p>{t('distribution.publish.subtitle', 'Send library media to your connected accounts.')}</p>
+        </div>
+      </div>
+
+      <div className="stepper" aria-hidden="true">
+        <span className="step done">
+          <span className="n"><Check size={11} /></span>
+          Content
+        </span>
+        <span className="step-line done" />
+        <span className="step cur"><span className="n">2</span>Details &amp; accounts</span>
+        <span className="step-line" />
+        <span className="step"><span className="n">3</span>Done</span>
+      </div>
+
+      <div className="pub-cols">
+        {/* ── left: form ── */}
+        <div className="pub-form">
+          <div className="fcard">
+            <h4>
               {t('distribution.publish.content', 'Content')}
-            </h2>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-2">
-              {videos.map((v) => {
+              <span className="aux">Video · {selectedVideos.length} selected</span>
+            </h4>
+            <div className="seg">
+              <button type="button" className="on">From Library</button>
+              <button type="button" disabled title="Coming in D3">Upload</button>
+            </div>
+            <div className="thumbs">
+              {videos.map((v, idx) => {
                 const on = selectedVideos.includes(v.id);
+                const hasImg = Boolean(v.thumbnail_url);
                 return (
-                  <button key={v.id} onClick={() => setSelectedVideos((s) => toggle(s, v.id))}
-                    className={`relative flex aspect-video items-end rounded-lg border p-2 text-left text-[11px] ${
-                      on ? 'border-indigo-500 bg-indigo-500/10 text-ink-100'
-                         : 'border-ink-800 bg-ink-900/60 text-ink-400 hover:border-ink-700'}`}>
-                    {on && <Check size={14} className="absolute right-1.5 top-1.5 text-indigo-300" />}
-                    <span className="truncate">{v.filename}</span>
-                  </button>
+                  <div
+                    key={v.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={on}
+                    aria-label={v.filename}
+                    className={`thumb ${hasImg ? '' : idx % 2 === 0 ? 't1' : 't2'} ${on ? 'sel' : ''}`}
+                    style={hasImg ? { backgroundImage: `url(${v.thumbnail_url})` } : undefined}
+                    onClick={() => setSelectedVideos((s) => toggle(s, v.id))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setSelectedVideos((s) => toggle(s, v.id));
+                      }
+                    }}
+                  >
+                    {on && (
+                      <button
+                        type="button"
+                        className="rm"
+                        aria-label={`Remove ${v.filename}`}
+                        onClick={(e) => { e.stopPropagation(); setSelectedVideos((s) => toggle(s, v.id)); }}
+                      >
+                        ×
+                      </button>
+                    )}
+                    <span className="play">
+                      <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                    </span>
+                  </div>
                 );
               })}
+              <div className="thumb add" title="Video picker coming soon">
+                <Plus size={16} />
+                Add from Library
+              </div>
               {videos.length === 0 && (
-                <p className="text-[12px] text-ink-600">
+                <p className="text-[12px]" style={{ color: 'var(--content-4)' }}>
                   {t('distribution.publish.noContent', 'No video resources in your Library yet')}
                 </p>
               )}
             </div>
-          </section>
+          </div>
 
-          <section>
-            <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={500}
+          <div className="fcard">
+            <h4>Cover <span className="aux">Not set yet</span></h4>
+            <div className="cover-wrap">
+              <div className="cover-slots">
+                <div className="cover-slot v">
+                  <Sparkles />
+                  Vertical 3:4
+                </div>
+                <div className="cover-slot h">
+                  <Sparkles />
+                  Horizontal 4:3
+                </div>
+              </div>
+              <div className="cover-ai">
+                <div className="head">
+                  <b><Sparkles size={14} />AI covers · Canvas</b>
+                  <a href="#cover-studio" aria-disabled="true" onClick={(e) => e.preventDefault()}>
+                    Open Cover Studio
+                  </a>
+                </div>
+                <div className="cover-cands">
+                  <div className="cand" style={{ background: 'linear-gradient(170deg,#46346e,#23375f 55%,#132c47)' }} />
+                  <div className="cand" style={{ background: 'linear-gradient(170deg,#6e3446,#4c2b5e 60%,#1e1e3a)' }} />
+                  <div className="cand" style={{ background: 'linear-gradient(200deg,#0f3a4d,#46346e 70%,#1e1e3a)' }} />
+                </div>
+                <div className="foot">Generates candidates from a video frame + your title.</div>
+                <div className="d4-note">Coming in D4</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="fcard">
+            <h4>Title <span className="aux">{title.length} / 500</span></h4>
+            <input
+              className="input"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              maxLength={500}
               placeholder={t('distribution.publish.titlePlaceholder', 'Add a title')}
-              className="w-full rounded-lg border border-ink-800 bg-ink-900/60 px-3 py-2 text-[14px] text-ink-100 placeholder:text-ink-600" />
-            <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3}
+            />
+            <h4 style={{ marginTop: 15 }}>Description <span className="aux">{description.length} / 1000</span></h4>
+            <textarea
+              className="input"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              maxLength={1000}
+              rows={3}
+              style={{ minHeight: 64 }}
               placeholder={t('distribution.publish.descPlaceholder', 'Add a description')}
-              className="mt-2 w-full resize-none rounded-lg border border-ink-800 bg-ink-900/60 px-3 py-2 text-[13px] text-ink-200 placeholder:text-ink-600" />
-          </section>
+            />
+            <div className="topics">
+              <span className="chip chip-mute"># Topic</span>
+              <span className="chip chip-mute">@ Mention</span>
+            </div>
+            <div className="topics" style={{ marginTop: 7 }}>
+              <span className="trending-label">Trending</span>
+              <span className="chip chip-mute">#goldenhour</span>
+              <span className="chip chip-mute">#cityscape</span>
+              <span className="chip chip-mute">#4k</span>
+            </div>
+          </div>
 
-          <section className="flex flex-wrap gap-4 text-[12px] text-ink-300">
-            <label className="flex items-center gap-2">
-              <span className="text-ink-500">{t('distribution.publish.visibility', 'Visibility')}</span>
-              <select value={visibility} onChange={(e) => setVisibility(e.target.value as Visibility)}
-                className="rounded-md border border-ink-800 bg-ink-900 px-2 py-1 text-ink-200">
+          <div className="fcard">
+            <div className="frow">
+              <div className="lbl"><b>Visibility</b></div>
+              <div className="seg">
                 {VIS.map((v) => (
-                  <option key={v} value={v}>{t(`distribution.publish.vis_${v}`, v)}</option>
+                  <button key={v} type="button" className={visibility === v ? 'on' : ''} onClick={() => setVisibility(v)}>
+                    {VIS_LABEL[v]}
+                  </button>
                 ))}
-              </select>
-            </label>
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={aiContent} onChange={(e) => setAiContent(e.target.checked)} />
-              {t('distribution.publish.aiContent', 'AI-generated content')}
-            </label>
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={allowDownload} onChange={(e) => setAllowDownload(e.target.checked)} />
-              {t('distribution.publish.allowDownload', 'Allow download')}
-            </label>
-          </section>
+              </div>
+            </div>
+            <div className="frow">
+              <div className="lbl">
+                <b>AI-generated content</b>
+                <span>Adds the disclosure label on platforms that require it</span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={aiContent}
+                aria-label="AI-generated content"
+                className={`toggle ${aiContent ? 'on' : ''}`}
+                onClick={() => setAiContent((v) => !v)}
+              />
+            </div>
+            <div className="frow">
+              <div className="lbl">
+                <b>Allow downloads</b>
+                <span>Viewers can save the video to their device</span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={allowDownload}
+                aria-label="Allow downloads"
+                className={`toggle ${allowDownload ? 'on' : ''}`}
+                onClick={() => setAllowDownload((v) => !v)}
+              />
+            </div>
+            <div className="frow">
+              <div className="lbl"><b>Publish time</b></div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div className="seg">
+                  <button type="button" className="on">Now</button>
+                  <button type="button" disabled title="Coming in D3">Schedule</button>
+                </div>
+                <span className="sched-input"><Calendar />Not scheduled</span>
+              </div>
+            </div>
+          </div>
 
-          <section className="flex gap-2 text-[12px]">
-            {(['broadcast', 'one_to_one'] as Mode[]).map((m) => (
-              <button key={m} onClick={() => setMode(m)}
-                className={`rounded-md border px-3 py-1.5 ${
-                  mode === m ? 'border-indigo-500 bg-indigo-500/10 text-indigo-300'
-                             : 'border-ink-800 text-ink-400 hover:border-ink-700'}`}>
-                {t(`distribution.publish.mode_${m}`, m === 'broadcast' ? 'Broadcast' : 'One-to-one')}
+          <div className="fcard">
+            <h4>More options</h4>
+            <div className="opt-row">
+              <Folder />
+              <span className="ol">Collection</span>
+              <span className="oa">Change</span>
+            </div>
+            <div className="opt-row">
+              <MapPin />
+              <span className="ol">Location</span>
+              <span className="oa">Add</span>
+            </div>
+            <div className="opt-row">
+              <TrendingUp />
+              <span className="ol">Trending topic</span>
+              <span className="ov">Link a rising topic for extra reach</span>
+              <span className="oa">Link</span>
+            </div>
+            <div className="opt-row">
+              <ListOrdered />
+              <span className="ol">Chapters</span>
+              <span className="ov">Where the platform supports them</span>
+              <span className="oa">Add</span>
+            </div>
+          </div>
+
+          <div className="fcard">
+            <h4>
+              Distribution mode
+              <span className="aux">{selectedVideos.length} videos × {selectedAccounts.length} accounts</span>
+            </h4>
+            <div className="mode-cards">
+              <button type="button" className={`mode ${mode === 'broadcast' ? 'on' : ''}`} onClick={() => setMode('broadcast')}>
+                <b><Radio /> Broadcast</b>
+                <span>Every account posts every video — {postsBroadcast} posts total.</span>
               </button>
-            ))}
-          </section>
+              <button type="button" className={`mode ${mode === 'one_to_one' ? 'on' : ''}`} onClick={() => setMode('one_to_one')}>
+                <b><ArrowLeftRight /> One-to-one</b>
+                <span>Videos are assigned round-robin — {postsOneToOne} posts total.</span>
+              </button>
+            </div>
+          </div>
         </div>
 
-        {/* Right column */}
-        <div className="flex flex-col gap-4 rounded-2xl border border-ink-800 bg-ink-900/40 p-4">
-          <h2 className="text-[13px] font-semibold text-ink-200">
-            {t('distribution.publish.accounts', 'Target accounts')}
-          </h2>
-          <div className="flex flex-col gap-1.5">
+        {/* ── right: rail ── */}
+        <div className="pub-rail">
+          <div className="phone-card">
+            <div className="bar">
+              <h4>Live preview</h4>
+              <div className="seg">
+                <button type="button" className={orientation === 'vertical' ? 'on' : ''} onClick={() => setOrientation('vertical')}>Vertical</button>
+                <button type="button" className={orientation === 'horizontal' ? 'on' : ''} onClick={() => setOrientation('horizontal')}>Horizontal</button>
+              </div>
+            </div>
+            <div className="phone">
+              <span className="notch" />
+              <div className="scene" />
+              <div className="shade" />
+              <div className="ui">
+                <div className="tabs"><span>Following</span><span className="cur-t">For You</span></div>
+                <div className="bottom">
+                  <div className="meta">
+                    <div className="handle"><span className="a" />@{previewHandle}</div>
+                    <div className="cap">{title || 'Your title appears here'}</div>
+                    <div className="music"><MusicIcon />Original sound · {previewHandle}</div>
+                  </div>
+                  <div className="rail">
+                    <span className="act"><span className="ic"><HeartIcon /></span>0</span>
+                    <span className="act"><span className="ic"><CommentIcon /></span>0</span>
+                    <span className="act"><span className="ic"><ShareGlyph /></span>Share</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="fcard">
+            <h4>
+              Publish to
+              <span className="aux">{selectedAccounts.length} of {accounts.length} selected</span>
+            </h4>
+            <div className="seg" style={{ marginBottom: 10 }}>
+              <button type="button" className={channel === 'h5' ? 'on' : ''} onClick={() => setChannel('h5')}>H5 share</button>
+              <button type="button" className={channel === 'official' ? 'on' : ''} onClick={() => setChannel('official')}>Official API</button>
+            </div>
+
             {accounts.map((a) => {
               const expired = a.status === 'expired';
               const on = selectedAccounts.includes(a.id);
+              const badge = PLATFORM_BADGE[a.platform];
+              const open = customizeOpen[a.id];
               return (
-                <button key={a.id} disabled={expired}
-                  onClick={() => setSelectedAccounts((s) => toggle(s, a.id))}
-                  className={`flex items-center justify-between rounded-lg border px-3 py-2 text-left text-[12.5px] ${
-                    expired ? 'cursor-not-allowed border-ink-800 text-ink-600'
-                      : on ? 'border-indigo-500 bg-indigo-500/10 text-ink-100'
-                           : 'border-ink-800 text-ink-300 hover:border-ink-700'}`}>
-                  <span className="truncate">{a.username}</span>
-                  {expired
-                    ? <span className="text-[10px] text-amber-400">{t('distribution.expired', 'Authorization expired')}</span>
-                    : on && <Check size={14} className="text-indigo-300" />}
-                </button>
+                <React.Fragment key={a.id}>
+                  <div
+                    role="checkbox"
+                    aria-checked={on}
+                    aria-disabled={expired}
+                    tabIndex={expired ? -1 : 0}
+                    className={`acct-row ${on ? 'sel' : ''} ${expired ? 'dis' : ''}`}
+                    onClick={() => onToggleAccount(a.id, expired)}
+                    onKeyDown={(e) => {
+                      if (!expired && (e.key === 'Enter' || e.key === ' ')) {
+                        e.preventDefault();
+                        onToggleAccount(a.id, expired);
+                      }
+                    }}
+                  >
+                    <span className="ck" />
+                    <span className="ava" style={{ background: gradientFor(a.id) }}>
+                      {a.username.slice(0, 2).toUpperCase()}
+                      {badge && (
+                        <span className="pbadge sm" style={{ background: badge.bg }}>{badge.icon}</span>
+                      )}
+                    </span>
+                    <span className="nm">
+                      {a.username}
+                      <small>
+                        {PLATFORM_LABEL[a.platform] ?? a.platform}
+                        {' · '}
+                        {expired
+                          ? 'Expired — reauthorize'
+                          : (a.scope_type === 'team' ? 'Team' : 'Personal')}
+                      </small>
+                    </span>
+                    {!expired && (
+                      <button
+                        type="button"
+                        className="cust"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCustomizeOpen((s) => ({ ...s, [a.id]: !s[a.id] }));
+                        }}
+                      >
+                        Customize {open ? '▾' : '▸'}
+                      </button>
+                    )}
+                  </div>
+                  {!expired && open && (
+                    <div className="override">
+                      <label htmlFor={`override-title-${a.id}`}>Title for this account</label>
+                      <input
+                        id={`override-title-${a.id}`}
+                        className="input"
+                        value={accountConfigs[a.id]?.title ?? ''}
+                        placeholder={title}
+                        onChange={(e) => onAccountTitleChange(a.id, e.target.value)}
+                      />
+                    </div>
+                  )}
+                </React.Fragment>
               );
             })}
             {accounts.length === 0 && (
-              <p className="text-[12px] text-ink-600">
+              <p className="text-[12px]" style={{ color: 'var(--content-4)' }}>
                 {t('distribution.publish.noAccounts', 'Connect an account first')}
               </p>
             )}
           </div>
 
-          <label className="flex items-center justify-between text-[12px] text-ink-300">
-            <span className="text-ink-500">{t('distribution.publish.channel', 'Channel')}</span>
-            <select value={channel} onChange={(e) => setChannel(e.target.value as Channel)}
-              className="rounded-md border border-ink-800 bg-ink-900 px-2 py-1 text-ink-200">
-              <option value="h5">{t('distribution.publish.channel_h5', 'H5 share (finish on phone)')}</option>
-              <option value="official">{t('distribution.publish.channel_official', 'Official API')}</option>
-            </select>
-          </label>
+          <div className="summary">
+            <h4>Summary</h4>
+            <div className="line"><span>Videos</span><b>{selectedVideos.length}</b></div>
+            <div className="line"><span>Accounts</span><b>{selectedAccounts.length}</b></div>
+            <div className="line"><span>Mode</span><b>{mode === 'broadcast' ? 'Broadcast' : 'One-to-one'}</b></div>
+            <div className="line total"><span>Posts to create</span><b>{totalPosts}</b></div>
 
-          <div className="mt-2 border-t border-ink-800 pt-3 text-[11px] text-ink-500">
-            {t('distribution.publish.summary', '{{v}} video(s) → {{a}} account(s)', {
-              v: selectedVideos.length, a: selectedAccounts.length,
-            })}
+            <div className="check warn">
+              <AlertTriangle />
+              Cover not set — a video-frame cover will be used automatically.
+            </div>
+            {canPublish && (
+              <div className="check ok">
+                <Check strokeWidth={2.5} />
+                Title, topics and accounts look good.
+              </div>
+            )}
+
+            <div className="actions">
+              <button type="button" className="btn btn-ghost" disabled title="Coming in D3">Save draft</button>
+              <button type="button" className="btn btn-solid" disabled={!canPublish || submitting} onClick={onPublish}>
+                <Send size={15} /> {t('distribution.publish.publishNow', 'Publish now')}
+              </button>
+            </div>
+
             {channel === 'h5' && (
-              <p className="mt-1 text-amber-400/80">
-                {t('distribution.publish.h5Hint', 'H5: each account is finished on the Douyin app')}
-              </p>
+              <div className="handoff">
+                <AlertCircle />
+                Douyin personal accounts finish inside the Douyin app — we hand off automatically and track the result here.
+              </div>
             )}
           </div>
-
-          <button onClick={onPublish} disabled={!canPublish || submitting}
-            className="btn-tint-indigo flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-[13px] font-medium disabled:cursor-not-allowed disabled:opacity-40">
-            <Send size={15} /> {t('distribution.publish.publishNow', 'Publish now')}
-          </button>
         </div>
       </div>
     </div>
