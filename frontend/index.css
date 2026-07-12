@@ -771,18 +771,21 @@ body {
 }
 
 .mh-node {
+  --mh-node-shadow: 0 16px 42px rgba(0, 0, 0, 0.28);
   border-width: 1px;
   border-radius: var(--canvas-r-node);
   background: var(--canvas-card);
   color: var(--canvas-text);
-  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--mh-node-shadow);
 }
 [data-theme="light"] .mh-node {
-  box-shadow: 0 16px 42px rgba(15, 23, 42, 0.08);
+  --mh-node-shadow: 0 16px 42px rgba(15, 23, 42, 0.08);
 }
+/* Selection ring: a box-shadow spread FOLLOWS border-radius, so the ring
+   hugs the node's rounded corners — an `outline` is always rectangular and
+   left a square frame around the rounded card (screenshot-reported). */
 .mh-node-selected {
-  outline: 2px solid var(--canvas-strong);
-  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--canvas-strong), var(--mh-node-shadow);
 }
 .mh-node-head {
   display: flex;
@@ -1094,16 +1097,36 @@ body {
   border: 1px solid var(--canvas-line);
   backdrop-filter: blur(16px);
   padding: 6px;
+  /* Clip the rectangular svg (mask + nodes) to the rounded island — without
+     this the mask's square edges poke past the corners (screenshot). */
+  overflow: hidden;
 }
 .mh-canvas .react-flow__minimap svg {
   width: 176px;
   height: 114px;
+}
+/* Softer viewport mask: the default RF overlay drew a hard rectangle inside
+   the glass card. A lighter fill + hairline stroke reads as a gentle
+   viewport hint aligned with the island tone. */
+.mh-canvas .react-flow__minimap-mask {
+  fill: color-mix(in srgb, var(--canvas-mask) 55%, transparent);
+  stroke: var(--canvas-line-strong);
+  stroke-width: 1;
 }
 
 .mh-canvas .react-flow__controls {
   border-radius: var(--canvas-r-island);
   overflow: hidden;
   box-shadow: var(--canvas-shadow-island);
+}
+
+/* React Flow paints a default RECTANGULAR selected/focus ring on the node
+   wrapper (`--xy-node-boxshadow-selected: 0 0 0 0.5px`, applied via the
+   .react-flow__node-<type>.selectable.selected rules — same node-<type>
+   specificity trap as #1209). Zero the RF variable so its rule computes to
+   none; our rounded .mh-node-selected box-shadow is the only ring left. */
+.mh-canvas .react-flow__node {
+  --xy-node-boxshadow-selected: none;
 }
 
 /* Snap-connect hover target (Phase 1 G1) — Infinite's `.drop-target`
