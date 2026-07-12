@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { vi, describe, it, expect } from 'vitest';
 
@@ -36,12 +36,19 @@ import PublishPage from './PublishPage';
 describe('PublishPage', () => {
   it('publishes only after content + account + title are chosen', async () => {
     render(<MemoryRouter><PublishPage /></MemoryRouter>);
-    await waitFor(() => expect(screen.getByLabelText('clip-a.mp4')).toBeInTheDocument());
+    // Accounts + Library load; the account tile shows up front.
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
 
     const publishBtn = screen.getByRole('button', { name: /Publish now/i });
     expect(publishBtn).toBeDisabled();
 
-    fireEvent.click(screen.getByLabelText('clip-a.mp4'));           // pick content
+    // Content is now chosen through the Library picker MODAL (D2 #1273), not a
+    // full grid: open it, pick the clip, close it.
+    fireEvent.click(screen.getByRole('button', { name: /Add from Library/i }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: /clip-a\.mp4/i }));
+    fireEvent.click(within(dialog).getByLabelText('Close'));
+
     fireEvent.click(screen.getByText('HEYGO'));                    // pick account
     fireEvent.change(screen.getByPlaceholderText(/Add a title/i), {
       target: { value: 'Launch day' },
