@@ -39,10 +39,8 @@ export function LoopNodeView({ id, data, selected }: NodeProps) {
         type="target"
         position={Position.Left}
       />
-      <div className="flex items-center justify-between border-b border-canvas-line px-3 py-1.5 ">
-        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-          Loop
-        </div>
+      <div className="mh-node-head">
+        <div className="mh-node-title">Loop</div>
         <div className="flex items-center gap-1">
           <select
             className="nodrag mh-chip outline-none focus:ring-1 focus:ring-canvas-strong/40"

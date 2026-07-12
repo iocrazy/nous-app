@@ -1168,6 +1168,14 @@ body {
   animation: mh-pop-in 0.16s var(--canvas-ease);
 }
 
+/* Accent chip (P3-B): @-mention / resource-ref pills, tokenised off
+   --canvas-accent so they follow the theme instead of a fixed indigo that
+   goes muddy in light mode. */
+.mh-accent-chip {
+  background: rgb(var(--canvas-accent-rgb) / 0.15);
+  color: var(--canvas-accent);
+}
+
 /* Downloads grid: mobile 2 cols (Tailwind), desktop auto-fill fixed-width cards */
 @media (min-width: 768px) {
   .downloads-grid {
