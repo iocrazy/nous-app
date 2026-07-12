@@ -115,7 +115,7 @@
 .dist-v4 .thumb .play svg { width: 11px; height: 11px; fill: #fff; margin-left: 1px; }
 .dist-v4 .thumb .dur { position: absolute; right: 5px; bottom: 5px; font-size: 10px; font-weight: 550; padding: 1.5px 6px; border-radius: 6px; background: rgba(0, 0, 0, .55); color: #fff; font-variant-numeric: tabular-nums; }
 .dist-v4 .thumb .rm { position: absolute; top: 5px; right: 5px; width: 17px; height: 17px; border-radius: 50%; background: rgba(0, 0, 0, .5); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 11px; cursor: pointer; border: 0; }
-.dist-v4 .thumb.add { border-style: dashed; border-color: var(--line-strong); background: transparent; display: flex; flex-direction: column; gap: 7px; align-items: center; justify-content: center; color: var(--content-3); font-size: 11px; cursor: pointer; text-align: center; padding: 8px; line-height: 1.4; }
+.dist-v4 .thumb.add { border-style: dashed; border-color: var(--line-strong); background: transparent; display: flex; flex-direction: column; gap: 7px; align-items: center; justify-content: center; color: var(--content-3); font: inherit; font-size: 11px; cursor: pointer; text-align: center; padding: 8px; line-height: 1.4; }
 .dist-v4 .thumb.add:hover:not(:disabled) { color: var(--t-indigo); border-color: rgba(99, 102, 241, .45); }
 .dist-v4 .thumb.add:disabled { cursor: not-allowed; opacity: .55; }
 .dist-v4 .thumb.add svg { width: 16px; height: 16px; }
@@ -271,6 +271,33 @@
 @media (prefers-reduced-motion: reduce) {
   .dist-v4 .pulse { animation: none; }
 }
+
+/* ═══ library picker (Add from Library modal) ═══ */
+.dist-v4 .picker-overlay { position: fixed; inset: 0; z-index: 200; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(0, 0, 0, .5); backdrop-filter: blur(2px); }
+.dist-v4 .picker { width: min(680px, 100%); max-height: min(80vh, 640px); display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line-strong); border-radius: 16px; box-shadow: 0 20px 60px rgba(0, 0, 0, .5); overflow: hidden; }
+.dist-v4 .picker-head { display: flex; align-items: flex-start; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+.dist-v4 .picker-head h3 { margin: 0; font-size: 14px; font-weight: 600; color: var(--content); letter-spacing: -.01em; }
+.dist-v4 .picker-head > div:first-child { flex: 1; min-width: 0; }
+.dist-v4 .picker-head p { margin: 3px 0 0; font-size: 12px; color: var(--content-4); line-height: 1.4; }
+.dist-v4 .picker-count { font-size: 11.5px; font-weight: 550; color: var(--t-indigo); background: var(--accent-soft); border-radius: 999px; padding: 3px 10px; white-space: nowrap; font-variant-numeric: tabular-nums; align-self: center; }
+.dist-v4 .picker-close { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--line); background: var(--island-2); color: var(--content-3); cursor: pointer; flex-shrink: 0; transition: color .12s, border-color .12s; }
+.dist-v4 .picker-close:hover { color: var(--content); border-color: var(--line-strong); }
+.dist-v4 .picker-close svg { width: 16px; height: 16px; }
+.dist-v4 .picker-search { display: flex; align-items: center; gap: 8px; margin: 14px 18px 0; padding: 8px 12px; border-radius: 10px; background: var(--island-2); border: 1px solid var(--line-strong); }
+.dist-v4 .picker-search svg { width: 14px; height: 14px; color: var(--content-4); flex-shrink: 0; }
+.dist-v4 .picker-search input { flex: 1; min-width: 0; font: inherit; font-size: 13px; color: var(--content); background: none; border: 0; outline: none; }
+.dist-v4 .picker-search input::placeholder { color: var(--content-4); }
+.dist-v4 .picker-grid { flex: 1; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 12px; padding: 16px 18px; align-content: start; }
+.dist-v4 .picker-item { display: flex; flex-direction: column; gap: 6px; padding: 0; background: none; border: 0; font: inherit; cursor: pointer; text-align: left; min-width: 0; }
+.dist-v4 .pi-thumb { position: relative; width: 100%; aspect-ratio: 3 / 4; border-radius: 10px; border: 1px solid var(--thumb-line); background-size: cover; background-position: center; overflow: hidden; }
+.dist-v4 .pi-thumb.ph { background: radial-gradient(70px 50px at 30% 25%, rgba(120, 220, 255, .22), transparent 70%), linear-gradient(170deg, #46346e 0%, #23375f 55%, #132c47 100%); }
+.dist-v4 .picker-item:hover .pi-thumb { border-color: var(--line-strong); }
+.dist-v4 .picker-item.sel .pi-thumb { outline: 2px solid var(--accent); outline-offset: -2px; border-color: transparent; }
+.dist-v4 .pi-check { position: absolute; top: 5px; right: 5px; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 4px rgba(0, 0, 0, .4); }
+.dist-v4 .pi-name { font-size: 11px; color: var(--content-2); line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dist-v4 .picker-item.sel .pi-name { color: var(--content); }
+.dist-v4 .picker-empty { grid-column: 1 / -1; text-align: center; color: var(--content-4); font-size: 12.5px; padding: 34px 0; }
+.dist-v4 .picker-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 18px; border-top: 1px solid var(--line); }
 
 /* ═══ responsive ═══ */
 @media (max-width: 900px) {
