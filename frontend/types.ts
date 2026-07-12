@@ -1858,6 +1858,8 @@ export interface PublishRequest {
   distribution_mode?: 'broadcast' | 'one_to_one';
   channel?: 'official' | 'h5';
   account_ids: string[];
+  /** Per-account overrides keyed by account_id — e.g. a custom title for one account. */
+  account_configs?: Record<string, { title?: string; description?: string; topics?: string[] }>;
 }
 
 export interface LibraryVideo {

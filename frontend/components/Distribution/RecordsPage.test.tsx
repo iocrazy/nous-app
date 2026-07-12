@@ -38,6 +38,16 @@ vi.mock('../../services/distributionService', () => ({
   cancelPublishTask: vi.fn(),
   retryPublishTask,
   getShareSchema,
+  listAccounts: vi.fn().mockResolvedValue([
+    { id: '10', scope_type: 'user', scope_id: 'u1', platform: 'douyin', platform_user_id: 'op1',
+      username: 'HEYGO', avatar_url: null, token_expires_at: null, status: 'active', created_at: '2026-07-08T00:00:00Z' },
+    { id: '11', scope_type: 'user', scope_id: 'u1', platform: 'douyin', platform_user_id: 'op2',
+      username: 'Ok One', avatar_url: null, token_expires_at: null, status: 'active', created_at: '2026-07-08T00:00:00Z' },
+    { id: '12', scope_type: 'user', scope_id: 'u1', platform: 'douyin', platform_user_id: 'op3',
+      username: 'Bad One', avatar_url: null, token_expires_at: null, status: 'active', created_at: '2026-07-08T00:00:00Z' },
+    { id: '13', scope_type: 'user', scope_id: 'u1', platform: 'douyin', platform_user_id: 'op4',
+      username: 'Winner', avatar_url: null, token_expires_at: null, status: 'active', created_at: '2026-07-08T00:00:00Z' },
+  ]),
 }));
 
 // RecordsPage calls useToast — mock it so the test needn't wrap ToastProvider.
