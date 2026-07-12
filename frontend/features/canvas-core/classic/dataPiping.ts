@@ -114,7 +114,8 @@ export function nodeOutputValue(
  *                                          body derivation then picks it up)
  *   - comfy:     `prompt-in`  → `prompt`, `image-in`  → `reference_image_url`
  *   - text_join: `text-a-in` → `text_a`, `text-b-in` → `text_b`  (W3 transform)
- *   - sources (prompt/text/image/video) and sinks (output/preview/note/group) → null
+ *   - preview:   `image-in`  → `preview_image`, `text-in` → `preview_text` (P1-2 display sink)
+ *   - sources (prompt/text/image/video) and silent sinks (output/note/group) → null
  */
 export function inputParamKey(
   nodeType: string | undefined,
@@ -145,6 +146,13 @@ export function inputParamKey(
     case 'text_join':
       if (inputHandleId === 'text-a-in') return 'text_a';
       if (inputHandleId === 'text-b-in') return 'text_b';
+      return null;
+    // P1-2 display sink: preview's typed inputs fill display fields the cascade
+    // folds (buildEffectiveData) and patches so PreviewNodeView renders the
+    // real piped image/text instead of a static placeholder.
+    case 'preview':
+      if (inputHandleId === 'image-in') return 'preview_image';
+      if (inputHandleId === 'text-in') return 'preview_text';
       return null;
     default:
       return null;

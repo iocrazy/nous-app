@@ -133,10 +133,17 @@ describe('inputParamKey — backend-matching param keys', () => {
 
   it('sinks and sources take no run param (null)', () => {
     expect(inputParamKey('output', 'image-in')).toBeNull();
-    expect(inputParamKey('preview', 'image-in')).toBeNull();
     expect(inputParamKey('prompt', 'prompt-out')).toBeNull();
     expect(inputParamKey('image_gen', undefined)).toBeNull();
     expect(inputParamKey(undefined, 'prompt-in')).toBeNull();
+  });
+
+  // P1-2: preview is a DISPLAY sink — its typed inputs fill display fields the
+  // cascade folds and PreviewNodeView renders (no backend param).
+  it('preview maps image-in→preview_image, text-in→preview_text', () => {
+    expect(inputParamKey('preview', 'image-in')).toBe('preview_image');
+    expect(inputParamKey('preview', 'text-in')).toBe('preview_text');
+    expect(inputParamKey('preview', 'nonexistent')).toBeNull();
   });
 
   // W3: text_join transform node param keys
