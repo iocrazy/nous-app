@@ -1305,4 +1305,42 @@ export const EDITOR_SHELL_STYLES = `
 .hw-transition{ color:var(--sheet-ink); font-weight:normal; letter-spacing:0; }
 .hw-paren{ color:var(--sheet-ink); font-style:normal; }
 .hw-subtitle{ color:var(--sheet-ink); }
+
+/* ==================================================================
+   EMPTY-STATE POLISH — the 16-point audit (empty scenes read like a
+   real script page, not a form full of empty boxes + placeholders).
+   ================================================================== */
+/* #1,#2,#12: an empty line is NOT an input box. Kill the focus ring +
+   rounded box so a focused empty 60ch line shows only the blinking
+   caret, the way a real script line does. */
+.mh-el-row.focused .mh-el-editable{ box-shadow:none; border-radius:0; }
+/* No focus box AND no focus tint — a real script line shows only the blinking
+   caret. (The user explicitly rejected the box; a tint still reads as a box.) */
+.mh-el-row.focused{ background:none; }
+/* #9: slug and action share ONE left margin (flush), like a printed page —
+   drop the heading button's left padding that pushed the slug 8px right. */
+.mh-scene-heading-display{ padding-left:0; }
+/* #3,#11: an unset heading is a faint Courier slugline placeholder, not a
+   jarring italic-sans label. */
+.mh-scene-heading-empty{ font-family:var(--script-mono); font-style:normal; font-weight:600; text-transform:none; color:var(--sheet-ink-soft); opacity:0.5; }
+/* #5: scene number + block gutter reveal on HOVER of that row/scene ONLY.
+   focus-within kept them lit across the whole scene while typing — hide them
+   again when focused-but-not-hovered (higher specificity wins over the reveal). */
+.mh-el-row:focus-within:not(:hover) .mh-el-gutter{ opacity:0; pointer-events:none; }
+.mh-scene-block:focus-within:not(:hover) .mh-scene-num-badge{ opacity:0; }
+/* #10: align the scene number to the same margin column + size as the block
+   number so the left rail reads as one tidy column. */
+.mh-scene-num-badge{ left:-42px; width:26px; text-align:right; font-size:10.5px; }
+/* #4: the "按 Tab…" seed hint is a quiet whisper, not a headline. */
+.mh-placeholder-line{ font-size:12px; opacity:0.45; }
+/* #7,#13,#14: legacy chapter cards become a quiet unstarted-chapter list below
+   the script — no border, no orange bar, no purple pill, empty-body hidden. */
+.mh-chapter-fallback{ background:transparent; border:none; border-radius:0; padding:3px 0; margin:0 0 8px; }
+.mh-chapter-fallback-head{ margin-bottom:0; }
+.mh-chapter-fallback-title{ font-size:12.5px; font-weight:600; color:var(--sheet-ink-soft); }
+.mh-chapter-fallback-body.empty{ display:none; }
+.mh-chapter-convert-btn{ background:none; border:none; color:var(--sheet-ink-soft); text-decoration:underline; text-underline-offset:2px; font-size:11px; padding:0; }
+.mh-chapter-convert-btn:hover:not(:disabled){ background:none; color:var(--indigo); }
+/* #8,#16: calmer vertical rhythm between scenes. */
+.mh-scene-block{ margin-bottom:20px; }
 `;
