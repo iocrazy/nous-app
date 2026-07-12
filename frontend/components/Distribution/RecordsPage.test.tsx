@@ -2,8 +2,12 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { vi, describe, it, expect } from 'vitest';
 
-const retryPublishTask = vi.fn().mockResolvedValue({});
-const getShareSchema = vi.fn().mockResolvedValue({ schema_url: 'snssdk1128://x', share_id: 's1' });
+// vi.mock is hoisted above top-level consts, so the fns it references must be
+// hoisted too (vi.hoisted) — otherwise "Cannot access before initialization".
+const { retryPublishTask, getShareSchema } = vi.hoisted(() => ({
+  retryPublishTask: vi.fn().mockResolvedValue({}),
+  getShareSchema: vi.fn().mockResolvedValue({ schema_url: 'snssdk1128://x', share_id: 's1' }),
+}));
 
 vi.mock('../../services/distributionService', () => ({
   listPublishTasks: vi.fn().mockResolvedValue([
@@ -35,6 +39,9 @@ vi.mock('../../services/distributionService', () => ({
   retryPublishTask,
   getShareSchema,
 }));
+
+// RecordsPage calls useToast — mock it so the test needn't wrap ToastProvider.
+vi.mock('../Toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
 
 import RecordsPage from './RecordsPage';
 
