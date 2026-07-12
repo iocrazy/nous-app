@@ -1447,5 +1447,31 @@ export const EDITOR_SHELL_STYLES = `
 .mh-scene-num-badge{
   top:50%; transform:translateY(-50%); left:-42px; width:18px; min-width:0;
 }
-.mh-drag-handle{ top:50%; transform:translateY(-50%); left:-20px; }
+/* The scene handle is positioned against the WHOLE .mh-scene-block (it is a
+   sibling of the headrow, not a child), so top:50% floated it to the vertical
+   middle of the entire scene — overlapping element gutters below (the mangled
+   dots the user framed). Anchor it to the HEADING line instead: the heading
+   button's first line centre sits ~12px from the block top (4px padding + half
+   a ~16px line box); the 16px-tall handle needs top ≈ 4px. */
+.mh-drag-handle{ top:4px; transform:none; left:-20px; }
+
+/* ── Pass-3 fixes (user-framed prod issues) ──
+   1) An EMPTY block always whispers its element type — faint when idle,
+      slightly firmer when focused — so a hover gutter never floats over a
+      blank void (the orphan "4 ⠿ over nothing" the user framed). */
+.mh-el-editable:empty::before{ font-style:normal; opacity:0.22; }
+.mh-el-editable:empty:focus::before{ opacity:0.4; }
+.mh-el-editable[data-el-type='action']:empty::before{ content:'Action'; }
+.mh-el-editable[data-el-type='character']:empty::before{ content:'Character'; }
+.mh-el-editable[data-el-type='dialogue']:empty::before{ content:'Dialogue'; }
+.mh-el-editable[data-el-type='paren']:empty::before{ content:'Parenthetical'; }
+.mh-el-editable[data-el-type='transition']:empty::before{ content:'Transition'; }
+.mh-el-editable[data-el-type='comment']:empty::before{ content:'Comment'; }
+.mh-el-editable[data-el-type='subtitle']:empty::before{ content:'Subtitle'; }
+/* 2) Hover tints were the COOL chrome surface (--surface-2, lavender) sitting
+      on the WARM paper — read as a wrong-coloured box around the heading.
+      Warm ink-mix tints instead. */
+.mh-scene-heading-display:hover{ background:color-mix(in srgb, var(--sheet-ink) 5%, transparent); }
+.mh-el-drag:hover,
+.mh-drag-handle:hover{ background:color-mix(in srgb, var(--sheet-ink) 7%, transparent); }
 `;
