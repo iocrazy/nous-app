@@ -414,14 +414,25 @@ async def cancel_task(task_id: int, user: CurrentUserDep):
 )
 async def retry_task(task_id: int, user: CurrentUserDep):
     task = await _authorize_task(task_id, user)
-    await publish_repo.reset_failed_accounts(task_id)
     # Re-key task_tracking to a fresh workflow id and re-dispatch (retry_task
     # with new_workflow_id — otherwise the row keeps pointing at the terminal
     # workflow and the sweeper re-marks it lost; see bug_retry_failed_downloads).
+    # retry_task() only mutates task_tracking (and returns non-None) when the
+    # row is actually in a terminal/retryable state (failed/cancelled/lost).
+    # It must gate everything below: dispatching unconditionally would fire a
+    # SECOND real DBOS workflow under new_wf while task_tracking still points
+    # at old_wf — an orphaned, untracked duplicate that also republishes
+    # already-succeeded accounts a second time.
     new_wf = str(_uuid.uuid4())
     old_wf = task.get("dbos_workflow_id")
-    if old_wf:
-        await get_task_manager().retry_task(old_wf, user["id"], new_workflow_id=new_wf)
+    if not old_wf:
+        raise HTTPException(status_code=409, detail="Task cannot be retried")
+    retried = await get_task_manager().retry_task(
+        old_wf, user["id"], new_workflow_id=new_wf
+    )
+    if retried is None:
+        raise HTTPException(status_code=409, detail="Task is not in a retryable state")
+    await publish_repo.reset_failed_accounts(task_id)
     await publish_repo.set_task_workflow_id(task_id, new_wf)
     await start_workflow_routed(
         "publish",

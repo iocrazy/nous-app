@@ -116,3 +116,132 @@ def test_create_task_dispatches_and_returns_accounts(monkeypatch):
     assert len(body["accounts"]) == 2
     # task_tracking id and the dispatched workflow_id are the SAME wf_id (路线 C)
     assert dispatched["tt_create"] == dispatched["start_wf"] == dispatched["set_wf"]
+
+
+def _fake_task_with_wf():
+    async def fake_get_task(task_id):
+        return {
+            "id": "700",
+            "user_id": "u-1",
+            "title": "x",
+            "content_type": "video",
+            "topics": [],
+            "visibility": "public",
+            "distribution_mode": "broadcast",
+            "created_at": "2026-07-08T00:00:00Z",
+            "dbos_workflow_id": "wf-old",
+        }
+
+    return fake_get_task
+
+
+def test_retry_non_terminal_task_409(monkeypatch):
+    """retry_task() returning None (task not failed/cancelled/lost) must NOT
+    re-dispatch a second, untracked DBOS workflow — it must 409 instead."""
+    app = _make_app(monkeypatch, module_on=True)
+    spy = {}
+
+    async def fake_get_task_accounts(task_id):
+        return []
+
+    async def fake_reset_failed_accounts(task_id):
+        spy["reset_failed_accounts"] = task_id
+
+    async def fake_set_wf(task_id, wf_id):
+        spy["set_wf"] = wf_id
+
+    class _Mgr:
+        async def retry_task(self, old_wf, user_id, *, new_workflow_id=None):
+            spy["retry_task_called_with"] = (old_wf, user_id, new_workflow_id)
+            return None  # simulate: task not in a terminal state
+
+    async def fake_start_wf(*a, **kw):
+        spy["start_wf"] = kw.get("workflow_id")
+        return {"mode": "dbos"}
+
+    monkeypatch.setattr(dr.publish_repo, "get_task", _fake_task_with_wf())
+    monkeypatch.setattr(dr.publish_repo, "get_task_accounts", fake_get_task_accounts)
+    monkeypatch.setattr(
+        dr.publish_repo, "reset_failed_accounts", fake_reset_failed_accounts
+    )
+    monkeypatch.setattr(dr.publish_repo, "set_task_workflow_id", fake_set_wf)
+    monkeypatch.setattr(dr, "get_task_manager", lambda: _Mgr())
+    monkeypatch.setattr(dr, "start_workflow_routed", fake_start_wf)
+
+    client = TestClient(app)
+    resp = client.post("/api/v1/distribution/tasks/700/retry")
+
+    assert resp.status_code == 409, resp.text
+    assert "retry_task_called_with" in spy  # manager was consulted
+    assert "reset_failed_accounts" not in spy
+    assert "set_wf" not in spy
+    assert "start_wf" not in spy
+
+
+def test_retry_terminal_task_redispatches(monkeypatch):
+    """retry_task() returning a truthy result (task WAS failed/cancelled/lost)
+    must re-dispatch under the SAME new wf_id used to re-key task_tracking."""
+    app = _make_app(monkeypatch, module_on=True)
+    spy = {}
+
+    async def fake_get_task_accounts(task_id):
+        return []
+
+    async def fake_reset_failed_accounts(task_id):
+        spy["reset_failed_accounts"] = task_id
+
+    async def fake_set_wf(task_id, wf_id):
+        spy["set_wf"] = wf_id
+
+    class _Mgr:
+        async def retry_task(self, old_wf, user_id, *, new_workflow_id=None):
+            spy["retry_task_called_with"] = (old_wf, user_id, new_workflow_id)
+            return {"dbos_workflow_id": new_workflow_id}
+
+    async def fake_start_wf(*a, **kw):
+        spy["start_wf"] = kw.get("workflow_id")
+        return {"mode": "dbos"}
+
+    monkeypatch.setattr(dr.publish_repo, "get_task", _fake_task_with_wf())
+    monkeypatch.setattr(dr.publish_repo, "get_task_accounts", fake_get_task_accounts)
+    monkeypatch.setattr(
+        dr.publish_repo, "reset_failed_accounts", fake_reset_failed_accounts
+    )
+    monkeypatch.setattr(dr.publish_repo, "set_task_workflow_id", fake_set_wf)
+    monkeypatch.setattr(dr, "get_task_manager", lambda: _Mgr())
+    monkeypatch.setattr(dr, "start_workflow_routed", fake_start_wf)
+
+    client = TestClient(app)
+    resp = client.post("/api/v1/distribution/tasks/700/retry")
+
+    assert resp.status_code == 200, resp.text
+    assert spy["reset_failed_accounts"] == 700
+    assert spy["set_wf"] == spy["start_wf"]
+    # same new wf_id flowed through retry_task -> set_task_workflow_id -> dispatch
+    assert spy["retry_task_called_with"][2] == spy["set_wf"]
+
+
+def test_authorize_task_cross_user_404(monkeypatch):
+    """IDOR guard: a task owned by another user must 404, not 403 — existence
+    of the task must not be leaked to a non-owner."""
+    app = _make_app(monkeypatch, module_on=True)
+
+    async def fake_get_task(task_id):
+        return {
+            "id": "700",
+            "user_id": "someone-else",
+            "title": "x",
+            "content_type": "video",
+            "topics": [],
+            "visibility": "public",
+            "distribution_mode": "broadcast",
+            "created_at": "2026-07-08T00:00:00Z",
+            "dbos_workflow_id": "wf-old",
+        }
+
+    monkeypatch.setattr(dr.publish_repo, "get_task", fake_get_task)
+
+    client = TestClient(app)
+    resp = client.get("/api/v1/distribution/tasks/700")
+
+    assert resp.status_code == 404, resp.text
