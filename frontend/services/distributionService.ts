@@ -1,4 +1,4 @@
-import { SocialAccount } from '../types';
+import { SocialAccount, PublishRequest, PublishTask, LibraryVideo } from '../types';
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
 
@@ -51,5 +51,50 @@ export const getModuleStatus = async (): Promise<DistributionModuleStatus> => {
   } catch (err) {
     console.error('distribution: module-status load failed', err);
     return { enabled: false, visible: false };
+  }
+};
+
+export const createPublishTask = (body: PublishRequest): Promise<PublishTask> =>
+  request<PublishTask>('/tasks', { method: 'POST', body: JSON.stringify(body) });
+
+export const listPublishTasks = (): Promise<PublishTask[]> =>
+  request<{ tasks: PublishTask[] }>('/tasks').then((r) => r.tasks);
+
+export const getPublishTask = (id: string): Promise<PublishTask> =>
+  request<PublishTask>(`/tasks/${id}`);
+
+export const cancelPublishTask = (id: string): Promise<PublishTask> =>
+  request<PublishTask>(`/tasks/${id}/cancel`, { method: 'POST' });
+
+export const retryPublishTask = (id: string): Promise<PublishTask> =>
+  request<PublishTask>(`/tasks/${id}/retry`, { method: 'POST' });
+
+export const getShareSchema = (
+  id: string,
+): Promise<{ schema_url: string; share_id: string }> =>
+  request<{ schema_url: string; share_id: string }>(`/tasks/${id}/share-schema`);
+
+/**
+ * Content source for the Publish page — recent video resources from the
+ * Library. Goes through `request` (reuses auth headers) and hops out of the
+ * /distribution prefix via `/../resources` (standards-compliant URL path
+ * normalization → /api/v1/resources). Fails soft to [] so the page renders.
+ */
+export const listLibraryVideos = async (scopeId: string): Promise<LibraryVideo[]> => {
+  try {
+    const res = await request<{ success: boolean; data: Array<Record<string, unknown>> }>(
+      `/../resources?scope_id=${encodeURIComponent(scopeId)}&types=video`,
+    );
+    const rows = res?.data ?? [];
+    return rows.map((r) => ({
+      id: String(r.id),
+      filename: String(r.filename ?? 'Untitled'),
+      thumbnail_url: r.thumbnail_path
+        ? `${getApiUrl()}/api/v1/resources/${String(r.id)}/cover`
+        : null,
+    }));
+  } catch (err) {
+    console.error('distribution: list library videos failed', err);
+    return [];
   }
 };

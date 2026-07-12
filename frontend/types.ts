@@ -1819,3 +1819,49 @@ export interface SocialAccount {
   status: 'active' | 'expired';
   created_at: string;
 }
+
+export interface PublishTaskAccount {
+  id: string;
+  account_id: string;
+  username: string;
+  avatar_url: string | null;
+  channel: 'official' | 'h5';
+  status: 'pending' | 'pending_share' | 'publishing' | 'success' | 'failed' | 'cancelled';
+  error_message: string | null;
+  published_url: string | null;
+  platform_item_id: string | null;
+  published_at: string | null;
+}
+
+export interface PublishTask {
+  id: string;
+  content_type: 'video' | 'images' | 'article';
+  title: string;
+  description: string | null;
+  topics: string[];
+  visibility: 'public' | 'friends' | 'private';
+  distribution_mode: 'broadcast' | 'one_to_one';
+  status: 'pending' | 'publishing' | 'pending_share' | 'success' | 'partial' | 'failed';
+  created_at: string;
+  accounts: PublishTaskAccount[];
+}
+
+export interface PublishRequest {
+  content_type?: 'video' | 'images' | 'article';
+  resource_ids: string[];
+  title: string;
+  description?: string;
+  topics?: string[];
+  visibility?: 'public' | 'friends' | 'private';
+  ai_content?: boolean;
+  allow_download?: boolean;
+  distribution_mode?: 'broadcast' | 'one_to_one';
+  channel?: 'official' | 'h5';
+  account_ids: string[];
+}
+
+export interface LibraryVideo {
+  id: string;
+  filename: string;
+  thumbnail_url: string | null;
+}

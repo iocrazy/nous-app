@@ -86,6 +86,12 @@ const DistributionLayout = lazyWithRetry(() =>
 const AccountsPage = lazyWithRetry(() =>
   import('./components/Distribution/AccountsPage').then(m => ({ default: m.AccountsPage })),
 );
+const PublishPage = lazyWithRetry(() =>
+  import('./components/Distribution/PublishPage').then(m => ({ default: m.PublishPage })),
+);
+const RecordsPage = lazyWithRetry(() =>
+  import('./components/Distribution/RecordsPage').then(m => ({ default: m.RecordsPage })),
+);
 
 // Distribution area visibility is admin-controlled (DB `distribution.module`
 // display switch), NOT a build-time env flag — same model as Topic Inspiration.
@@ -159,6 +165,8 @@ export const router = createBrowserRouter([
       { path: 'skills/:slug', element: <RedirectToTeam view="skills" /> },
       { path: 'distribution', element: <RedirectToTeam view="distribution" /> },
       { path: 'distribution/accounts', element: <RedirectToTeam view="distribution" /> },
+      { path: 'distribution/publish', element: <RedirectToTeam view="distribution" /> },
+      { path: 'distribution/records', element: <RedirectToTeam view="distribution" /> },
       { path: 'canvas', element: <RedirectToTeam view="canvas" /> },
       { path: 'canvas/:canvasId', element: <RedirectToTeam view="canvas" /> },
 
@@ -251,6 +259,8 @@ export const router = createBrowserRouter([
             children: [
               { index: true, element: <Navigate to="accounts" replace /> },
               { path: 'accounts', element: <SuspenseWrap><AccountsPage /></SuspenseWrap> },
+              { path: 'publish', element: <SuspenseWrap><PublishPage /></SuspenseWrap> },
+              { path: 'records', element: <SuspenseWrap><RecordsPage /></SuspenseWrap> },
             ],
           },
           { path: 'player/:displayId', element: <SuspenseWrap><DownloadDetailPage /></SuspenseWrap> },

@@ -1,7 +1,7 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Users, Send, LineChart, Settings } from 'lucide-react';
+import { Users, Send, LineChart, Settings, History } from 'lucide-react';
 
 const Item: React.FC<{ to?: string; icon: React.ElementType; label: string; disabled?: boolean }> =
   ({ to, icon: Icon, label, disabled }) => {
@@ -33,7 +33,8 @@ export const DistributionSidebar: React.FC = () => {
         <span className="text-sm font-semibold text-ink-200">{t('sidebar.distribution', 'Distribution')}</span>
       </div>
       <div className="px-2 flex flex-col gap-0.5">
-        <Item icon={Send} label={t('distribution.nav.publish', 'Publish')} disabled />
+        <Item to="publish" icon={Send} label={t('distribution.nav.publish', 'Publish')} />
+        <Item to="records" icon={History} label={t('distribution.nav.records', 'Records')} />
         <div className="mx-3 my-2 border-t border-ink-800/80" />
         <span className="px-2 text-[11px] font-medium uppercase tracking-wider text-ink-600">
           {t('distribution.nav.accounts', 'Accounts')}
