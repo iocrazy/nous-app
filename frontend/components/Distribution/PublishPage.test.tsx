@@ -2,7 +2,11 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { vi, describe, it, expect } from 'vitest';
 
-const createPublishTask = vi.fn().mockResolvedValue({ id: '700', accounts: [] });
+// vi.mock is hoisted above top-level consts, so the fn it references must be
+// hoisted too (vi.hoisted) — otherwise "Cannot access before initialization".
+const { createPublishTask } = vi.hoisted(() => ({
+  createPublishTask: vi.fn().mockResolvedValue({ id: '700', accounts: [] }),
+}));
 
 vi.mock('../../services/distributionService', () => ({
   listAccounts: vi.fn().mockResolvedValue([
@@ -23,6 +27,9 @@ vi.mock('react-router-dom', async (orig) => ({
   ...(await orig<typeof import('react-router-dom')>()),
   useNavigate: () => vi.fn(),
 }));
+
+// PublishPage calls useToast — mock it so the test needn't wrap ToastProvider.
+vi.mock('../Toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
 
 import PublishPage from './PublishPage';
 
