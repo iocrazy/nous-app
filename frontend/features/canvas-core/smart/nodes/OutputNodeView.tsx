@@ -28,6 +28,7 @@ import { regenKey, useRegenStore } from '../regenStore';
 import type { OutputNodeData } from '../types';
 import { SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { OutputLightbox, type LightboxItem } from './OutputLightbox';
+import { OutputNodeToolbar } from './OutputNodeToolbar';
 import { useNodeDataPatch } from './useNodeDataPatch';
 
 /** Single-click waits this long for a possible double-click (crop) before
@@ -368,13 +369,27 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
   return (
     <div
       data-testid="smart-output-node"
-      className={`mh-node border-canvas-line ${selected ? 'mh-node-selected' : ''}`}
+      className={`group mh-node relative border-canvas-line ${selected ? 'mh-node-selected' : ''}`}
       style={{ width: SMART_NODE_DEFAULT_WIDTH.output }}
     >
       <Handle
         type="target"
         position={Position.Left}
       />
+      {/* Floating toolbar (P2-3): pinned while selected, hover-revealed
+          otherwise. Preview bypasses the 250ms crop-disambiguation delay. */}
+      {lightboxItems.length > 0 && (
+        <OutputNodeToolbar
+          items={lightboxItems}
+          pinned={selected}
+          onPreview={() => {
+            cancelQueuedLightbox();
+            setLightboxIndex(0);
+          }}
+          onRerun={canRegenerate ? onRegenerate : undefined}
+          rerunning={regenerating}
+        />
+      )}
       <div className="mh-node-head">
         <div className="mh-node-title">
           {history_for ? 'History · ' : ''}

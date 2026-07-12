@@ -195,3 +195,18 @@ test('lightbox wheel-zoom + drag pan + double-click reset (P0-5)', async ({ page
   await expect(page.getByTestId('lightbox-zoom-readout')).toHaveCount(0);
   await page.keyboard.press('Escape');
 });
+
+test('floating toolbar on selected node — Preview opens the lightbox instantly (P2-3)', async ({ page }) => {
+  await openCanvas(page);
+
+  // Selecting the node pins the toolbar visible.
+  const node = page.locator('.react-flow__node[data-id="out1"]');
+  await node.click({ position: { x: 10, y: 10 } });
+  const toolbar = node.getByTestId('output-node-toolbar');
+  await expect(toolbar).toBeVisible();
+
+  await toolbar.getByRole('button', { name: 'Preview' }).click();
+  await expect(page.getByTestId('output-lightbox')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.screenshot({ path: 'e2e-artifacts/canvas-media-toolbar.png', fullPage: true });
+});
