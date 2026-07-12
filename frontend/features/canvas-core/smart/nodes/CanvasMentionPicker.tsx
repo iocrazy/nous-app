@@ -26,7 +26,7 @@ type SuggestionProps = ComponentProps<typeof ResourcePickerSuggestion>;
 export function CanvasMentionPicker(props: SuggestionProps): React.ReactElement {
   return (
     <div
-      className="absolute bottom-full left-0 z-50 mb-1"
+      className="mh-pop-in absolute bottom-full left-0 z-50 mb-1"
       onMouseDown={(e) => e.preventDefault()}
       data-testid="canvas-mention-picker"
     >
