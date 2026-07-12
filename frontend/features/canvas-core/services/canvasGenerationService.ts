@@ -55,6 +55,30 @@ export async function listGenerationModels(): Promise<GenerationModel[]> {
   return body.data;
 }
 
+/** An enabled `llm` catalog row for the text prompt's model picker. Same
+ *  public-field contract as GenerationModel — the two come from the same
+ *  `mediahub_models` table, differing only in `type`. */
+export interface TextModel {
+  name: string;
+  display_name: string;
+  type: 'llm';
+  actual_provider: string;
+  sort_order?: number;
+}
+
+/** Enabled llm models from the platform catalog (public columns only) — the
+ *  single source of truth for the text prompt node's model dropdown, replacing
+ *  the old hardcoded PROVIDER_OPTIONS that named models the platform doesn't
+ *  carry (the 2026-07-12 "default prompt won't run" root cause). */
+export async function listTextModels(): Promise<TextModel[]> {
+  const response = await apiFetch('/api/v1/canvases/text-models');
+  const body = (await response.json()) as { success: boolean; data?: TextModel[] };
+  if (!body.success || !Array.isArray(body.data)) {
+    throw new ApiError('text-models response missing data', 500);
+  }
+  return body.data;
+}
+
 export async function dispatchGenerations(
   canvasId: string,
   req: GenerationDispatchRequest,

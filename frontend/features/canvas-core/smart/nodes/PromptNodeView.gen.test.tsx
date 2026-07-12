@@ -24,6 +24,7 @@ vi.mock('./useGenerationModels', () => ({
       { name: 'jimeng-cli-seedance', display_name: 'Seedance', type: 'video', actual_provider: 'jimeng-cli' },
     ].filter((m) => !kind || m.type === kind),
 }));
+vi.mock('./useTextModels', () => ({ useTextModels: () => [] }));
 
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { PromptNodeView } from './PromptNodeView';

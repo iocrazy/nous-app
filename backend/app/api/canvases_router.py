@@ -214,6 +214,22 @@ async def list_generation_models(auth: AuthDep) -> dict:
     return {"success": True, "data": data}
 
 
+@router.get("/canvases/text-models")
+async def list_text_models(auth: AuthDep) -> dict:
+    """Enabled ``llm`` rows from the mediahub_models catalog (public columns
+    only — no api_key/base_url) for the prompt node's text-model picker.
+
+    Same catalog and public-field contract as ``generation-models``; the two
+    endpoints differ only in the ``type`` they surface (text vs image/video),
+    so the smart-canvas text prompt and the image/video composer read one
+    consistent source of truth instead of a hardcoded frontend list."""
+    from app.repositories import mediahub_model_repository as _repo_mod
+
+    rows = await _repo_mod.get_mediahub_model_repository().list_enabled("llm")
+    data = [{k: r.get(k) for k in _GENERATION_MODEL_PUBLIC_FIELDS} for r in rows]
+    return {"success": True, "data": data}
+
+
 @router.get("/canvases/generations/{task_id}")
 async def get_canvas_generation(task_id: str, auth: AuthDep) -> dict:
     """Poll one generation task. Reads task_tracking (the UI's single source

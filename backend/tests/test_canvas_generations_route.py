@@ -173,6 +173,40 @@ class TestGenerationModels:
         assert data[0]["type"] == "image"
 
 
+class TestTextModels:
+    @pytest.mark.asyncio
+    async def test_lists_enabled_llm_public_fields_only(self, client, monkeypatch):
+        # The repo does the type filter (list_enabled("llm")); the endpoint
+        # only strips to public columns. Mirror that: the mock returns llm rows
+        # and we assert no secret columns leak and the type-filter arg is used.
+        llm_rows = [
+            {
+                "name": "mediahub-doubao-llm",
+                "display_name": "Doubao LLM",
+                "type": "llm",
+                "actual_provider": "doubao",
+                "is_enabled": True,
+                "sort_order": 1,
+                "api_key": "platform-secret",
+                "base_url": "https://ark.example.com/v1",
+            },
+        ]
+        list_enabled = AsyncMock(return_value=llm_rows)
+        repo = SimpleNamespace(list_enabled=list_enabled)
+        import app.repositories.mediahub_model_repository as repo_mod
+
+        monkeypatch.setattr(repo_mod, "get_mediahub_model_repository", lambda: repo)
+
+        resp = await client.get("/api/v1/canvases/text-models")
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert [m["name"] for m in data] == ["mediahub-doubao-llm"]
+        assert data[0]["type"] == "llm"
+        # Public columns only — credentials must never reach the browser.
+        assert all("api_key" not in m and "base_url" not in m for m in data)
+        list_enabled.assert_awaited_once_with("llm")
+
+
 class TestGetGenerationStatus:
     @pytest.mark.asyncio
     async def test_returns_task_row_fields(self, client, monkeypatch):

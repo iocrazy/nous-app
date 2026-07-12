@@ -36,6 +36,15 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string) => k }),
 }));
 
+// The text prompt's provider dropdown is now sourced from the platform DB
+// catalog (P0-1). Stub the hook with fixed llm rows so the dropdown has
+// selectable options without a network fetch.
+vi.mock('./useTextModels', () => ({
+  useTextModels: () => [
+    { name: 'mediahub-doubao-llm', display_name: 'Doubao LLM', type: 'llm', actual_provider: 'doubao' },
+  ],
+}));
+
 beforeEach(() => {
   useCanvasCoreStore.getState().reset();
   useCanvasCoreStore.setState({
@@ -189,13 +198,13 @@ describe('PromptNodeView — edit affordances', () => {
       </Wrap>,
     );
     fireEvent.change(screen.getByLabelText('Prompt provider'), {
-      target: { value: 'nous/storyboard' },
+      target: { value: 'mediahub-doubao-llm' },
     });
     const node = useCanvasCoreStore.getState().nodes[0] as Record<
       string,
       Record<string, unknown>
     >;
-    expect(node.data.provider_slug).toBe('nous/storyboard');
+    expect(node.data.provider_slug).toBe('mediahub-doubao-llm');
   });
 
   it('renders run_error when present', () => {
