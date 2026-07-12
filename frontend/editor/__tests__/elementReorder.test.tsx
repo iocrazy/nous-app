@@ -102,9 +102,12 @@ const threeElements = (): SceneDoc['elements'] => [
 
 describe('SceneBlock element hover-gutter reorder', () => {
   it('renders a block number and a 6-dot drag handle per element row', () => {
+    // Continuous document-order numbering (A1): the scene heading consumes
+    // block 1 (blockIndexBase defaults to 0), so this scene's elements start
+    // at 2, not 1.
     render(<SceneBlock scene={makeScene(threeElements())} index={0} />);
     const nums = Array.from(document.querySelectorAll('.mh-el-num')).map((n) => n.textContent);
-    expect(nums).toEqual(['1', '2', '3']);
+    expect(nums).toEqual(['2', '3', '4']);
     const handles = document.querySelectorAll('.mh-el-drag');
     expect(handles).toHaveLength(3);
     // 6 dots per handle.

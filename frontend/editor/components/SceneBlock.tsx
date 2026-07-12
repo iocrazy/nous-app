@@ -132,6 +132,11 @@ interface SceneMeta {
 export interface SceneBlockProps {
   scene: SceneDoc;
   index: number;
+  /** Cumulative block-index offset from `sceneBlockBases` (A1 continuous
+   *  numbering): this scene's heading renders as `blockIndexBase + 1` and its
+   *  elements as `blockIndexBase + 2, +3, ...`. Defaults to 0 so a bare
+   *  SceneBlock (e.g. in isolation tests) still numbers from 1. */
+  blockIndexBase?: number;
   /** Reports the focused element up so the toolbar/statistics can track the cursor. */
   onFocusElement?: (cursor: CursorState) => void;
   /** Toolbar retype command targeted (by sceneId) at this block's focused element. */
@@ -177,6 +182,7 @@ function edgeFromPointer(el: HTMLElement, clientY: number): 'before' | 'after' {
 export function SceneBlock({
   scene,
   index,
+  blockIndexBase = 0,
   onFocusElement,
   typeCommand,
   format = 'hollywood',
@@ -925,7 +931,7 @@ export function SceneBlock({
       )}
       <button
         type="button"
-        className="mh-drag-handle"
+        className={`mh-drag-handle${isDragging ? ' dragging' : ''}`}
         aria-label={t('editor.dragScene')}
         aria-grabbed={reorder ? isDragging : undefined}
         draggable={!!reorder}
@@ -942,7 +948,11 @@ export function SceneBlock({
         onDragEnd={reorder ? () => reorder.onDragEnd() : undefined}
         onKeyDown={handleHandleKeyDown}
       >
-        ::
+        {/* 6-dot grid — identical affordance to the per-element `.mh-el-drag`
+         *  handle (A5: one drag-handle style across the whole document). */}
+        {[0, 1, 2, 3, 4, 5].map((d) => (
+          <span key={d} className="mh-el-dot" aria-hidden="true" />
+        ))}
       </button>
 
       <div
@@ -951,10 +961,9 @@ export function SceneBlock({
         onBlur={headingEditing ? handleHeadRowBlur : undefined}
         onKeyDown={headingEditing ? handleHeadRowKeyDown : undefined}
       >
-        <span className="mh-scene-num-badge">
-          {index + 1}
-          {format === 'asian' ? '.' : ''}
-        </span>
+        {/* A1: continuous document-order block number (scene heading = block
+         *  `blockIndexBase + 1`), NOT the scene's position among scenes. */}
+        <span className="mh-scene-num-badge">{blockIndexBase + 1}</span>
         {headingEditing ? (
           <>
             <select
@@ -1011,6 +1020,7 @@ export function SceneBlock({
       <MentionNamesContext.Provider value={mentionCandidates}>
         <LayoutEngine
           elements={sync.elements}
+          blockIndexBase={blockIndexBase}
           focusedElementId={focusedElementId}
           mention={lineMention}
           selectedIds={copilotSelectedIds}

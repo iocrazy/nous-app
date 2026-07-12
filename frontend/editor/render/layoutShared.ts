@@ -170,8 +170,10 @@ export interface ElementLineProps {
   lineClass: string;
   focused: boolean;
   placeholder?: string;
-  /** 0-based position of this element within its scene; rendered as `index + 1`
-   *  in the hover gutter (laper/Notion-style block number). */
+  /** Document-order position of this element MINUS ONE (rendered as `index + 1`
+   *  in the hover gutter, laper/Notion-style). The layout engines add the
+   *  scene's `blockIndexBase` (A1 continuous numbering) so this keeps
+   *  counting up across scene boundaries instead of resetting per scene. */
   index: number;
   /** When set, this line is the open mention combobox (ARIA lives here, not the popup). */
   mentionAria?: LineMentionAria;

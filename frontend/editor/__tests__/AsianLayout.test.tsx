@@ -102,6 +102,20 @@ describe('AsianLayout', () => {
     expect(container.querySelector('.as-suffix')).toBeNull();
   });
 
+  it('offsets the hover-gutter block number by blockIndexBase + 1 (A1 continuous numbering)', () => {
+    const { container } = render(
+      <AsianLayout
+        elements={[allTypes[0], allTypes[1]]}
+        focusedElementId={null}
+        handlers={noopHandlers()}
+        blockIndexBase={3}
+      />,
+    );
+    const nums = Array.from(container.querySelectorAll('.mh-el-num')).map((n) => n.textContent);
+    // blockIndexBase=3 → scene heading would be block 4, so elements start at 5.
+    expect(nums).toEqual(['5', '6']);
+  });
+
   it('applies the focused class only to the focused row', () => {
     const { container } = render(
       <AsianLayout

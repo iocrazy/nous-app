@@ -53,6 +53,7 @@ import {
   type SceneWindow,
 } from '../windowing';
 import { EDITOR_SHELL_STYLES } from './editorShellStyles';
+import { sceneBlockBases } from './blockNumbering';
 import {
   SceneBlock,
   type TypeCommand,
@@ -702,6 +703,11 @@ export function EditorShell({
     [scenes],
   );
 
+  // Continuous per-block numbering (A1): each scene's cumulative offset into
+  // the document-order block count, so heading + element numbers never reset
+  // at a scene boundary (laper.ai-style).
+  const blockBases = useMemo(() => sceneBlockBases(scenes), [scenes]);
+
   const recomputeWindow = useCallback(() => {
     if (!windowed) return;
     const el = sheetScrollRef.current;
@@ -1127,6 +1133,7 @@ export function EditorShell({
                             key={s.id}
                             scene={s}
                             index={i}
+                            blockIndexBase={blockBases[i]}
                             format={state.format}
                             mentionCandidates={mentionCandidates}
                             onFocusElement={handleFocusElement}

@@ -54,6 +54,10 @@ export interface AsianLayoutProps {
   onTickClick?: (elementId: string, shiftKey: boolean) => void;
   /** Hover-gutter drag-to-reorder wiring; absent = element reorder disabled. */
   elementReorder?: ElementReorderApi;
+  /** A1 continuous numbering: this scene's cumulative block-index base (from
+   *  `sceneBlockBases`). The heading consumed `blockIndexBase + 1`, so the
+   *  first element here is `blockIndexBase + 2`. Defaults to 0. */
+  blockIndexBase?: number;
 }
 
 export function AsianLayout({
@@ -64,6 +68,7 @@ export function AsianLayout({
   selectedIds,
   onTickClick,
   elementReorder,
+  blockIndexBase = 0,
 }: AsianLayoutProps) {
   return (
     <>
@@ -79,7 +84,7 @@ export function AsianLayout({
             )}
             <ElementLine
               element={el}
-              index={i}
+              index={blockIndexBase + 1 + i}
               lineClass={ASIAN_LINE_CLASS[el.type]}
               focused={focusedElementId === el.id}
               selected={selectedIds?.has(el.id)}
