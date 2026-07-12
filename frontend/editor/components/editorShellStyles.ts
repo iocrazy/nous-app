@@ -74,6 +74,14 @@ export const EDITOR_SHELL_STYLES = `
   overflow:hidden;
 }
 .mh-editor-shell *{ box-sizing:border-box; }
+/* Embedded in the projects workspace: the editor's own left rail is NOT
+   rendered (the workspace sidebar replaces it), so the shell has only two grid
+   children — the script column and the Writing panel. The default 3-track
+   template (auto 1fr auto) then left the 296px panel floating inside the middle
+   1fr cell with a big empty gap to its right. Collapse to two tracks so the
+   panel sits flush against the right edge and the script column fills + centres
+   (via .mh-sheet-scroll{align-items:center} + .mh-sheet{max-width:100%}). */
+.mh-editor-shell.mh-embedded{ grid-template-columns:1fr auto; }
 
 .mh-island{
   background:var(--surface);
