@@ -5,7 +5,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { downloadName, downloadUrl } from './downloadMedia';
+import { downloadBlob, downloadName, downloadUrl } from './downloadMedia';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -45,5 +45,19 @@ describe('downloadUrl', () => {
       status: 404,
     } as unknown as Response);
     await expect(downloadUrl({ url: '/gm/404/cover' }, 0)).rejects.toThrow('404');
+  });
+});
+
+describe('downloadBlob', () => {
+  it('saves an in-memory blob via an object-URL anchor (P2-8 frame export)', () => {
+    const createSpy = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock');
+    const revokeSpy = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => {});
+    downloadBlob(new Blob(['x'], { type: 'image/png' }), 'frame.png');
+    expect(createSpy).toHaveBeenCalled();
+    expect(clickSpy).toHaveBeenCalled();
+    expect(revokeSpy).toHaveBeenCalledWith('blob:mock');
   });
 });

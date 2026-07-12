@@ -19,7 +19,12 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-import { downloadUrl } from '../downloadMedia';
+import { downloadBlob, downloadUrl } from '../downloadMedia';
+import {
+  exportFrameTime,
+  nextFrameTime,
+  type ExportWhich,
+} from '../videoFrames';
 
 export interface LightboxItem {
   url: string;
@@ -71,6 +76,72 @@ export function OutputLightbox({
   const stageRef = useRef<HTMLDivElement | null>(null);
   const panDrag = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
   const zoomEnabled = kind === 'image' && !compareOn;
+
+  // ── Video frame stepping + export (P2-8, Infinite parity) ─────────────────
+  // No autoplay (Infinite): the wheel and arrow keys pause-and-seek by
+  // fixed 30fps frames; the toolbar exports first/current/last frames as
+  // PNGs via a canvas draw. The <video> is same-origin under prod's Vercel
+  // rewrite, so canvas export won't taint; a cross-origin source throws
+  // SecurityError → surfaced as an export error.
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  const stepVideoFrame = useCallback((dir: 1 | -1) => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.pause();
+    v.currentTime = nextFrameTime(v.currentTime, dir, v.duration);
+  }, []);
+
+  const exportFrame = useCallback(
+    (which: ExportWhich) => {
+      const v = videoRef.current;
+      if (!v) return;
+      setExportError(null);
+      const w = v.videoWidth;
+      const h = v.videoHeight;
+      if (!w || !h) {
+        setExportError('Frame not ready');
+        return;
+      }
+      v.pause();
+      const target = exportFrameTime(which, v.currentTime, v.duration);
+      const original = v.currentTime;
+      let done = false;
+      const draw = () => {
+        if (done) return;
+        done = true;
+        v.removeEventListener('seeked', draw);
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) throw new Error('no 2d context');
+          ctx.drawImage(v, 0, 0, w, h);
+          canvas.toBlob((blob) => {
+            if (blob) {
+              const base = (current?.name ?? 'frame').replace(/\.[^./]+$/, '');
+              downloadBlob(blob, `${base}-${which}-frame.png`);
+            } else {
+              setExportError('Export failed');
+            }
+            // Restore the viewer's position for current/last exports.
+            if (which !== 'current') v.currentTime = original;
+          }, 'image/png');
+        } catch (err) {
+          console.error('frame export failed', err);
+          setExportError('Export failed (cross-origin?)');
+        }
+      };
+      v.addEventListener('seeked', draw);
+      v.currentTime = target;
+      // Belt-and-braces: if the browser was already at the target, `seeked`
+      // may not fire — draw on the next tick.
+      if (Math.abs(v.currentTime - target) < 1e-3) draw();
+    },
+    [current?.name],
+  );
   // Progressive load (P1-3, adapted): no thumbnail variants exist on the
   // durable endpoints, so "progressive" here means an immediate shimmer
   // skeleton instead of a white void, plus a broken-image recovery state
@@ -96,6 +167,12 @@ export function OutputLightbox({
 
   const applyWheelZoom = useCallback(
     (e: WheelEvent) => {
+      // Video: the wheel scrubs frames instead of zooming (P2-8).
+      if (kind === 'video') {
+        e.preventDefault();
+        stepVideoFrame(e.deltaY < 0 ? -1 : 1);
+        return;
+      }
       if (!zoomEnabled) return;
       e.preventDefault();
       const stage = stageRef.current;
@@ -117,7 +194,7 @@ export function OutputLightbox({
         return nextZoom;
       });
     },
-    [zoomEnabled],
+    [zoomEnabled, kind, stepVideoFrame],
   );
 
   // React marks onWheel passive on some roots — bind non-passive by hand so
@@ -220,11 +297,20 @@ export function OutputLightbox({
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-      else if (e.key === 'ArrowRight') goto(index + 1);
+      if (e.key === 'Escape') {
+        onClose();
+        return;
+      }
+      // Video: arrows scrub frames instead of switching items (P2-8).
+      if (kind === 'video') {
+        if (e.key === 'ArrowRight') stepVideoFrame(1);
+        else if (e.key === 'ArrowLeft') stepVideoFrame(-1);
+        return;
+      }
+      if (e.key === 'ArrowRight') goto(index + 1);
       else if (e.key === 'ArrowLeft') goto(index - 1);
     },
-    [onClose, goto, index],
+    [onClose, goto, index, kind, stepVideoFrame],
   );
 
   const doDownload = useCallback(
@@ -272,13 +358,30 @@ export function OutputLightbox({
             <span data-testid="lightbox-counter">{`${index + 1} / ${items.length}`}</span>
           )}
           {resolution && <span data-testid="lightbox-resolution">{resolution}</span>}
-          {downloadError && (
+          {(downloadError || exportError) && (
             <span role="alert" className="text-rose-400">
-              {downloadError}
+              {downloadError || exportError}
             </span>
           )}
         </div>
         <div className="flex items-center gap-1.5">
+          {kind === 'video' && (
+            // Frame export (P2-8): grab first / current / last as PNGs.
+            <>
+              <LightboxButton label="First Frame" onClick={() => exportFrame('first')}>
+                <span className="text-[11px]">First</span>
+              </LightboxButton>
+              <LightboxButton
+                label="Current Frame"
+                onClick={() => exportFrame('current')}
+              >
+                <span className="text-[11px]">Frame</span>
+              </LightboxButton>
+              <LightboxButton label="Last Frame" onClick={() => exportFrame('last')}>
+                <span className="text-[11px]">Last</span>
+              </LightboxButton>
+            </>
+          )}
           {compareUrl && kind === 'image' && (
             <LightboxButton
               label="Compare"
@@ -347,10 +450,15 @@ export function OutputLightbox({
         >
           {kind === 'video' ? (
             <video
+              ref={videoRef}
               data-testid="lightbox-video"
               src={current.url}
               controls
-              autoPlay
+              // No autoplay (Infinite parity): frame scrubbing and playback
+              // are mutually exclusive; the node's inline <video> already
+              // covers "glance at it". crossOrigin lets canvas export the
+              // same-origin stream without tainting.
+              crossOrigin="anonymous"
               className="max-h-[80vh] max-w-full"
               onLoadedMetadata={(e) => {
                 const v = e.currentTarget;
