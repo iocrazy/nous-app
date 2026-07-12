@@ -529,6 +529,42 @@ export function EditorShell({
     [scriptId, addToast, t, startPoll],
   );
 
+  // An EMPTY legacy chapter has no prose for the AI convert to split — that
+  // path calls the LLM and then `persist_scenes` skips element-less scenes, so
+  // the poll never settles and the button spins forever. Instead turn the
+  // chapter straight into a plain, typeable scene (no model call): create a
+  // scene linked to the chapter, seed one empty action row, and drop the caret
+  // in — the same seed handleCreateStory uses. The orphan card then disappears
+  // (a scene now points at the chapter) and the writer is editing blocks.
+  const handleStartChapter = useCallback(
+    async (chapterId: string) => {
+      setConverting((prev) => ({ ...prev, [chapterId]: true }));
+      try {
+        const created = await createScene(scriptId, {
+          chapter_id: chapterId,
+          sort_order: scenes.length,
+        });
+        const elementId = newElementId();
+        const op: ElementOp = {
+          op: 'insert',
+          element_id: elementId,
+          after_id: null,
+          payload: { type: 'action', text: '' },
+        };
+        await applyOps(created.id, [op], created.content_version);
+        await reload();
+        setActiveScene(created.id);
+        setPendingFocusId(elementId);
+      } catch (err) {
+        console.error('[EditorShell] start chapter failed', err);
+        addToast(t('editor.convertFailed'), 'error');
+      } finally {
+        setConverting((prev) => ({ ...prev, [chapterId]: false }));
+      }
+    },
+    [scriptId, scenes.length, reload, addToast, t],
+  );
+
   const handleSelectType = useCallback(
     (type: ElementType) => {
       setNextInsertType(type);
@@ -1119,6 +1155,7 @@ export function EditorShell({
                           chapter={ch}
                           converting={!!converting[ch.id]}
                           onConvert={handleConvertChapter}
+                          onStartWriting={handleStartChapter}
                         />
                       ))}
                     </>

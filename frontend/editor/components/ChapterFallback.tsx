@@ -16,13 +16,24 @@ import type { ScriptChapter } from '../../types';
 export interface ChapterFallbackProps {
   chapter: ScriptChapter;
   converting: boolean;
+  /** AI-split the chapter's prose into scenes (only meaningful when it HAS prose). */
   onConvert: (chapterId: string) => void;
+  /** Turn an EMPTY chapter straight into a plain, typeable scene (no LLM). */
+  onStartWriting: (chapterId: string) => void;
 }
 
-export function ChapterFallback({ chapter, converting, onConvert }: ChapterFallbackProps) {
+export function ChapterFallback({
+  chapter,
+  converting,
+  onConvert,
+  onStartWriting,
+}: ChapterFallbackProps) {
   const { t } = useTranslation();
   const title = chapter.title?.trim() || t('editor.untitledChapter');
   const body = chapter.content?.trim() ?? '';
+  // An empty chapter has nothing for the AI to split; offer a direct "start
+  // writing" that materialises a typeable scene, not a convert that spins.
+  const isEmpty = body.length === 0;
 
   return (
     <div className="mh-chapter-fallback" data-testid="chapter-fallback" data-chapter-id={chapter.id}>
@@ -33,9 +44,13 @@ export function ChapterFallback({ chapter, converting, onConvert }: ChapterFallb
           className="mh-chapter-convert-btn"
           disabled={converting}
           aria-busy={converting}
-          onClick={() => onConvert(chapter.id)}
+          onClick={() => (isEmpty ? onStartWriting(chapter.id) : onConvert(chapter.id))}
         >
-          {converting ? t('editor.converting') : t('editor.convertToScenes')}
+          {converting
+            ? t('editor.converting')
+            : isEmpty
+              ? t('editor.startWriting')
+              : t('editor.convertToScenes')}
         </button>
       </div>
       {body ? (
