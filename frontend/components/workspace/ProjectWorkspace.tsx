@@ -347,7 +347,18 @@ export function ProjectWorkspace({
       : null;
 
   return (
-    <div data-testid="project-workspace" className="flex h-full min-h-0">
+    <div data-testid="project-workspace" className="flex flex-col h-full min-h-0">
+      {/* Full-width project bar on top, spanning over the sidebar. */}
+      <WorkspaceTopBar
+        projectName={project.name}
+        onBack={onBack}
+        catalog={catalog}
+        currentStage={currentStage}
+        currentIndex={currentIndex}
+        canWrite={canWrite}
+        slate={activeModule === 'script' && epNumber ? { ep: epNumber, scene: sceneNumber } : null}
+      />
+      <div className="flex-1 min-h-0 flex overflow-hidden">
       <WorkspaceSidebar
         activeModule={activeModule}
         onModuleChange={handleModuleChange}
@@ -362,15 +373,6 @@ export function ProjectWorkspace({
         onSelectScene={(id) => selectSceneRef.current?.(id)}
       />
       <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
-        <WorkspaceTopBar
-          projectName={project.name}
-          onBack={onBack}
-          catalog={catalog}
-          currentStage={currentStage}
-          currentIndex={currentIndex}
-          canWrite={canWrite}
-          slate={activeModule === 'script' && epNumber ? { ep: epNumber, scene: sceneNumber } : null}
-        />
         <Suspense
           fallback={
             <div className="flex-1 grid place-items-center text-ink-500">
@@ -447,6 +449,7 @@ export function ProjectWorkspace({
           </div>
         )}
         </Suspense>
+      </div>
       </div>
     </div>
   );
