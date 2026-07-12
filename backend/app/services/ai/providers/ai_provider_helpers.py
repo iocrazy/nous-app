@@ -341,26 +341,26 @@ async def resolve_db_adapter(
       2. user BYOK (``user_provider_config`` = the user's ``ai_providers``);
       3. neither → :class:`ProviderNotConfiguredError` from the factory.
 
-    Returns an :class:`AIAdapter`. Platform credentials are injected under
-    BOTH the catalog's ``actual_provider`` and the factory's own prefix-derived
-    key, so a catalog row whose ``actual_provider`` label drifts from the
-    model-prefix convention still resolves.
+    Returns an :class:`AIAdapter`. A catalog hit dispatches on the row's
+    admin-named ``actual_provider`` (``resolve_provider_key``) — NEVER a
+    prefix guess on ``actual_model``, which raises for models like
+    ``qwen3-6-35b`` (2026-07-12 real-machine bug: row green in the admin
+    health panel, dead in canvas). The final fallback is the
+    OpenAI-compatible adapter — the same base_url + /chat/completions
+    contract the health probe validates against this row.
     """
     from app.services.ai.adapters.factory import (
+        get_adapter_for_key,
         get_adapter_for_user,
-        provider_key_for_model,
+        resolve_provider_key,
     )
 
     hit = await resolve_mediahub_model(model, module)
     if hit:
         actual_provider, cfg, actual_model = hit
         creds = {"api_key": cfg["api_key"], "base_url": cfg["base_url"]}
-        injected: Dict[str, Any] = {actual_provider: creds}
-        try:
-            injected[provider_key_for_model(actual_model)] = creds
-        except ValueError:
-            pass  # unknown prefix — factory will raise the same error below
-        return get_adapter_for_user(actual_model, injected, None)
+        provider_key = resolve_provider_key(actual_provider, actual_model)
+        return get_adapter_for_key(provider_key, actual_model, {provider_key: creds})
 
     return get_adapter_for_user(model, user_provider_config or {}, None)
 
