@@ -235,3 +235,14 @@ api_router.include_router(router=inspiration_router, tags=["Inspiration"])
 from app.api.distribution_router import router as distribution_api_router  # noqa: E402
 
 api_router.include_router(router=distribution_api_router, tags=["Distribution"])
+
+# PR-D2: Douyin publish webhook (share-completion callback). Ungated by
+# require_distribution — the platform calls this, not a logged-in user.
+# Aliased the same way as distribution_api_router above, for the same reason
+# (the submodule's own basename must stay resolvable via attribute traversal
+# for ``import app.api.distribution_webhook as wh`` in tests).
+from app.api.distribution_webhook import (  # noqa: E402
+    router as distribution_webhook_router,
+)
+
+api_router.include_router(router=distribution_webhook_router, tags=["Distribution"])
