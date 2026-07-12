@@ -28,6 +28,7 @@ import {
   type TimelineSegment,
 } from '../timeline';
 import { startTimelineRun, useTimelineRunStore } from '../timelineRun';
+import { ASPECT_RATIOS } from '../aspectPresets';
 import { useNodeDataPatch } from './useNodeDataPatch';
 
 /** Movement below this many px stays a click (select-to-edit). */
@@ -171,10 +172,14 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
             onChange={(e) => patch({ aspect: e.target.value })}
             aria-label="Aspect ratio"
           >
+            {/* Auto (empty) + the shared composer presets — kept in lockstep
+                with the Prompt node via ASPECT_RATIOS (P2). */}
             <option value="">Auto</option>
-            <option value="16:9">16:9</option>
-            <option value="9:16">9:16</option>
-            <option value="1:1">1:1</option>
+            {ASPECT_RATIOS.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
           </select>
         </div>
       </div>

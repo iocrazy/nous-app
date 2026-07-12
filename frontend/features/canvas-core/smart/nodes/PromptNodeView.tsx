@@ -17,11 +17,9 @@ import { useCanvasMentionPicker } from './useCanvasMentionPicker';
 import { CanvasMentionPicker } from './CanvasMentionPicker';
 import { useResourceSearch } from '../../../../hooks/useResourceSearch';
 import type { ResourceSearchResult } from '../../../../types';
+import { ASPECT_RATIOS } from '../aspectPresets';
 
 type ActiveKind = '' | 'video' | 'image' | 'doc' | 'audio' | 'pdf';
-
-/** Image aspect presets — the Infinite composer's core set. */
-const RATIO_OPTIONS = ['1:1', '16:9', '9:16', '4:3', '3:4'] as const;
 
 export function PromptNodeView({ id, data, selected }: NodeProps) {
   const {
@@ -223,7 +221,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                     onChange={(e) => patch({ gen: { ...gen, ratio: e.target.value } })}
                     aria-label="Aspect ratio"
                   >
-                    {RATIO_OPTIONS.map((r) => (
+                    {ASPECT_RATIOS.map((r) => (
                       <option key={r} value={r}>
                         {r}
                       </option>
@@ -254,7 +252,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                   onChange={(e) => patch({ gen: { ...gen, aspect: e.target.value } })}
                   aria-label="Video aspect"
                 >
-                  {RATIO_OPTIONS.map((r) => (
+                  {ASPECT_RATIOS.map((r) => (
                     <option key={r} value={r}>
                       {r}
                     </option>
