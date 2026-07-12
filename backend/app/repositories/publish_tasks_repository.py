@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any, Optional
 
 from app.db import engine as db_engine
@@ -66,6 +67,37 @@ def _public_task_row(row: dict) -> dict:
 
 def _public_account_row(row: dict) -> dict:
     return _stringify(row, _ACCOUNT_BIGINT_COLS)
+
+
+def build_filesystem_media_url(
+    file_path: str,
+    creator_id: str,
+    *,
+    media_public_url: str,
+    download_path: str,
+    ttl_seconds: int = 3600,
+    now: Optional[int] = None,
+) -> str:
+    """Build an externally-reachable, HMAC-signed URL for a filesystem-backed
+    resource. Mirrors ``app.workflows.ai_transcription._run_volcengine_asr``'s
+    "resource file_path → public URL" derivation (the canonical pattern for
+    handing a file to an outbound API that pulls rather than accepts an
+    upload) — same ``/media/{rel_path}?token=`` shape, same 4-part HMAC
+    signer. Pure string building so it is unit-testable without a DB or the
+    signer's wall-clock dependency (``now`` is injectable).
+    """
+    from app.api.media_auth import _sign_token
+
+    issued_at = now if now is not None else int(time.time())
+    expires_at = issued_at + ttl_seconds
+    media_token = _sign_token(str(creator_id), issued_at, expires_at)
+
+    rel_path = file_path
+    download_root = download_path.rstrip("/")
+    if file_path.startswith(download_root + "/"):
+        rel_path = file_path[len(download_root) + 1 :]
+
+    return f"{media_public_url}/media/{rel_path}?token={media_token}"
 
 
 class PublishTasksRepository(AsyncpgRepository):
@@ -226,13 +258,43 @@ class PublishTasksRepository(AsyncpgRepository):
         )
 
     async def get_resource_media_url(self, resource_id: int) -> Optional[str]:
-        # resources.url is a Text column (confirmed against
-        # app/models/media.py::Resources) that stores a servable URL for the
-        # asset — Douyin publish_video / H5 share both need one.
+        # resources has NO `url` column (file_path / cover_image_path /
+        # thumbnail_path / media_id / creator_id / mime_type / filename /
+        # ... — confirmed against information_schema). A servable public URL
+        # must be DERIVED from resources.file_path, the same way
+        # app.workflows.ai_transcription._run_volcengine_asr derives one for
+        # the volcengine ASR pull-URL: filesystem paths get a short-TTL
+        # HMAC-signed /media/ URL (app.api.media_auth._sign_token); object
+        # store paths (`sb://bucket/key`, per app.services.library.media_storage
+        # .resolve_media_source) get a Supabase Storage signed URL. Both
+        # Douyin publish_video and the H5 share flow need a fetchable public
+        # URL, so this is the single place both channels call through.
+        from app.core.config import settings
+        from app.services.library.media_storage import ObjectStore, resolve_media_source
+
         row = await self.fetch_one(
-            "SELECT url FROM resources WHERE id = $1", self._bigint(resource_id)
+            "SELECT file_path, creator_id FROM resources WHERE id = $1",
+            self._bigint(resource_id),
         )
-        return (row or {}).get("url") if row else None
+        if not row or not row.get("file_path"):
+            return None
+
+        file_path = row["file_path"]
+        loc = resolve_media_source(file_path)
+        if loc.is_object_store:
+            return await ObjectStore(loc.bucket).signed_url(loc.key, ttl_seconds=3600)
+
+        return build_filesystem_media_url(
+            file_path,
+            row["creator_id"],
+            media_public_url=settings.MEDIA_PUBLIC_URL,
+            download_path=settings.DOWNLOAD_PATH,
+            ttl_seconds=3600,
+        )
 
 
-__all__ = ["PublishTasksRepository", "aggregate_task_status"]
+__all__ = [
+    "PublishTasksRepository",
+    "aggregate_task_status",
+    "build_filesystem_media_url",
+]
