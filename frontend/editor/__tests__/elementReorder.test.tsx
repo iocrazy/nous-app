@@ -101,7 +101,7 @@ const threeElements = (): SceneDoc['elements'] => [
 ];
 
 describe('SceneBlock element hover-gutter reorder', () => {
-  it('renders a block number and a 6-dot drag handle per element row', () => {
+  it('renders a block number and a 4-dot drag handle per element row', () => {
     // Continuous document-order numbering (A1): the scene heading consumes
     // block 1 (blockIndexBase defaults to 0), so this scene's elements start
     // at 2, not 1.
@@ -110,8 +110,8 @@ describe('SceneBlock element hover-gutter reorder', () => {
     expect(nums).toEqual(['2', '3', '4']);
     const handles = document.querySelectorAll('.mh-el-drag');
     expect(handles).toHaveLength(3);
-    // 6 dots per handle.
-    expect(handles[0].querySelectorAll('.mh-el-dot')).toHaveLength(6);
+    // 4 dots per handle (2×2 — six read as too busy).
+    expect(handles[0].querySelectorAll('.mh-el-dot')).toHaveLength(4);
     expect(handles[0]).toHaveAttribute('aria-label', 'Drag to reorder');
     expect(handles[0]).toHaveAttribute('draggable', 'true');
   });

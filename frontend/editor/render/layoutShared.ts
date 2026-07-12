@@ -281,8 +281,8 @@ export function ElementLine({
   // rendered in the row's left margin and revealed on hover / focus via CSS.
   // The handle is the ONLY draggable element; the row is the drop target. This
   // is a SEPARATE affordance from the copilot-select tick above — neither
-  // touches the other. The six dots are drawn as a 2×3 grid of `.mh-el-dot`
-  // spans (crisper than a unicode glyph across fonts).
+  // touches the other. The four dots are drawn as a 2×2 grid of `.mh-el-dot`
+  // spans (crisper than a unicode glyph across fonts; six read as too busy).
   const dragEnabled = !!onElementDragStart;
   const gutter = createElement(
     'div',
@@ -295,6 +295,9 @@ export function ElementLine({
         className: `mh-el-drag${draggingElementId === element.id ? ' dragging' : ''}`,
         tabIndex: -1,
         'aria-label': 'Drag to reorder',
+        // Disambiguates the two drag scopes for sighted users: this handle
+        // moves ONE paragraph; the scene-heading handle moves the whole scene.
+        title: 'Move paragraph',
         draggable: dragEnabled,
         // Keep the handle from stealing focus/selection from the editable.
         onMouseDown: (e: MouseEvent) => e.preventDefault(),
@@ -307,7 +310,7 @@ export function ElementLine({
           : undefined,
         onDragEnd: dragEnabled ? () => onElementDragEnd?.() : undefined,
       },
-      [0, 1, 2, 3, 4, 5].map((d) =>
+      [0, 1, 2, 3].map((d) =>
         createElement('span', { key: d, className: 'mh-el-dot', 'aria-hidden': 'true' }),
       ),
     ),

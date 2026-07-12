@@ -933,6 +933,9 @@ export function SceneBlock({
         type="button"
         className={`mh-drag-handle${isDragging ? ' dragging' : ''}`}
         aria-label={t('editor.dragScene')}
+        // Disambiguates the two drag scopes: this handle (on the heading row)
+        // moves the WHOLE scene; each paragraph's handle moves that paragraph.
+        title="Move scene"
         aria-grabbed={reorder ? isDragging : undefined}
         draggable={!!reorder}
         tabIndex={reorder ? 0 : -1}
@@ -948,9 +951,9 @@ export function SceneBlock({
         onDragEnd={reorder ? () => reorder.onDragEnd() : undefined}
         onKeyDown={handleHandleKeyDown}
       >
-        {/* 6-dot grid — identical affordance to the per-element `.mh-el-drag`
-         *  handle (A5: one drag-handle style across the whole document). */}
-        {[0, 1, 2, 3, 4, 5].map((d) => (
+        {/* 4-dot (2×2) grid — identical affordance to the per-element
+         *  `.mh-el-drag` handle (A5: one drag-handle style document-wide). */}
+        {[0, 1, 2, 3].map((d) => (
           <span key={d} className="mh-el-dot" aria-hidden="true" />
         ))}
       </button>

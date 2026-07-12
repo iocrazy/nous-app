@@ -1424,4 +1424,28 @@ export const EDITOR_SHELL_STYLES = `
   font-family:var(--mono); font-size:10.5px; color:var(--sheet-ink-soft);
 }
 .mh-keyboard-hint .sep{ display:none; }
+
+/* ── Gutter refinement (user pass 2): 4 dots, lighter ink, true alignment ──
+   The scene badge (top:3px), scene handle (top:1px) and element gutter each
+   picked their own offsets — visibly misaligned rows. Unify: 2×2 dot grid on
+   BOTH handles, one faint ink tint, scene badge+handle vertically centred on
+   the heading row, and both columns right-aligned to the same x as the
+   element gutter (num column ends -24px, handle ends -2px). */
+.mh-el-drag,
+.mh-drag-handle{
+  grid-template-columns:repeat(2, 3px); grid-template-rows:repeat(2, 3px);
+  gap:2px; padding:4px 5px;
+}
+.mh-el-num,
+.mh-scene-num-badge{ line-height:1; }
+.mh-el-num,
+.mh-el-drag,
+.mh-scene-num-badge,
+.mh-drag-handle{ color:color-mix(in srgb, var(--sheet-ink) 34%, transparent); }
+.mh-el-drag:hover,
+.mh-drag-handle:hover{ color:var(--sheet-ink-soft); background:var(--surface-2); }
+.mh-scene-num-badge{
+  top:50%; transform:translateY(-50%); left:-42px; width:18px; min-width:0;
+}
+.mh-drag-handle{ top:50%; transform:translateY(-50%); left:-20px; }
 `;
