@@ -59,6 +59,8 @@ describe('PublishPage', () => {
   it('marks expired accounts non-selectable', async () => {
     render(<MemoryRouter><PublishPage /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('Expired One')).toBeInTheDocument());
-    expect(screen.getByText(/Expired/i)).toBeInTheDocument();
+    // The account name ("Expired One") and the status subtitle both match
+    // /Expired/i, so assert on the unambiguous reauthorize prompt instead.
+    expect(screen.getByText(/reauthorize/i)).toBeInTheDocument();
   });
 });
