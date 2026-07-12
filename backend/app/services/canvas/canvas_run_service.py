@@ -6,7 +6,10 @@ skill/tool/history machinery into what is conceptually a single-turn
 creative generation.
 
 Provider mapping:
-    None or ""         → DEFAULT_MODEL          (qwen-plus)
+    None or ""         → DB default text model  (_default_text_model — the
+                                                 first enabled ``llm`` row in
+                                                 the ``mediahub_models`` catalog,
+                                                 never a hardcoded slug)
     "qwen/<model>"     → <model>
     "claude/<model>"   → <model>                (e.g. claude-sonnet-4-6)
     "deepseek/<model>" → <model>
@@ -43,7 +46,6 @@ from app.services.library.generated_media_service import (
 )
 from app.services.library.resources_service import _resolve_personal_team_id
 
-DEFAULT_MODEL = "qwen-plus"
 # nous-routed runs are always workflow nodes (comfy/image/video) that can run
 # minutes — well past the default chat-style NOUS_CENTER_MAX_WAIT_S. Lift the
 # poll ceiling for this path; override via NOUS_CENTER_MAX_WAIT_S_WORKFLOW.
@@ -58,12 +60,21 @@ MAX_TOKENS = 2048
 
 
 def _resolve_model(provider_slug: Optional[str]) -> str:
-    """Pick the model id the adapter factory should dispatch on."""
+    """Parse an explicit model id out of a provider slug.
+
+    Returns ``""`` when the slug names no explicit model (``None``/empty, or a
+    bare ``"<provider>/"`` with no tail). An empty return is a signal — the
+    caller falls back to :meth:`CanvasRunService._default_text_model`, the
+    DB-backed catalog default. We deliberately never bake a hardcoded model
+    slug in here (config→DB 铁律): a constant like the old ``qwen-plus`` drifts
+    out of the platform catalog and makes the default Run path raise
+    ProviderNotConfiguredError.
+    """
     if not provider_slug:
-        return DEFAULT_MODEL
+        return ""
     if "/" in provider_slug:
         _, _, model = provider_slug.partition("/")
-        return model or DEFAULT_MODEL
+        return model  # "" when tail empty → caller resolves the DB default
     return provider_slug
 
 
@@ -213,6 +224,36 @@ class CanvasRunService:
 
         return await resolve_db_adapter(model, "canvas")
 
+    async def _default_text_model(self) -> str:
+        """The catalog model an empty ``provider_slug`` resolves to.
+
+        First enabled ``llm`` row in the platform ``mediahub_models`` catalog,
+        falling back to the governed maintenance model (itself a catalog
+        entry). DB-only, so the default text Run always names a model the
+        platform actually has configured — the root cause of the 2026-07-12
+        "default prompt won't run" report was a hardcoded ``qwen-plus`` that
+        the catalog no longer carries.
+        """
+        from app.repositories.mediahub_model_repository import (
+            get_mediahub_model_repository,
+        )
+        from app.services.ai.providers.ai_provider_helpers import (
+            get_maintenance_model,
+        )
+
+        try:
+            rows = await get_mediahub_model_repository().list_enabled("llm")
+        except Exception:  # noqa: BLE001 — degrade to the governed default
+            logger.opt(exception=True).warning(
+                "canvas: enabled-llm catalog read failed; using maintenance model"
+            )
+            rows = []
+        for row in rows:
+            name = row.get("name")
+            if isinstance(name, str) and name.strip():
+                return name.strip()
+        return await get_maintenance_model()
+
     async def run_prompt(
         self,
         *,
@@ -235,7 +276,8 @@ class CanvasRunService:
                 ok=False, text="", error="prompt body is empty"
             )
 
-        model = _resolve_model(provider_slug)
+        # Empty parse → DB catalog default (never a hardcoded slug).
+        model = _resolve_model(provider_slug) or await self._default_text_model()
         system_message = _compose_system_message(agent_id)
 
         try:

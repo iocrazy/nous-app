@@ -4,6 +4,7 @@ import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { PromptGenSettings, PromptNodeData, PromptResourceRef } from '../types';
 import { RUN_STATUS_TONE, SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { useGenerationModels } from './useGenerationModels';
+import { useTextModels } from './useTextModels';
 import { useNodeDataPatch } from './useNodeDataPatch';
 import { rerunPrompt } from '../regenerate';
 import { RunStatusBadge } from './RunStatusBadge';
@@ -16,22 +17,6 @@ import { useCanvasMentionPicker } from './useCanvasMentionPicker';
 import { CanvasMentionPicker } from './CanvasMentionPicker';
 import { useResourceSearch } from '../../../../hooks/useResourceSearch';
 import type { ResourceSearchResult } from '../../../../types';
-
-/**
- * Provider options for the dropdown. Bare model IDs use the existing
- * `get_adapter()` prefix dispatch; `nous/<workflow>` triggers the
- * nous-center routing in the canvas-run service (#610).
- *
- * Kept small for now — the AI Library settings page will own the
- * full per-team provider catalogue in a future slice.
- */
-const PROVIDER_OPTIONS: ReadonlyArray<{ slug: string; label: string }> = [
-  { slug: '', label: 'Default (qwen-plus)' },
-  { slug: 'qwen/qwen-plus', label: 'Qwen Plus' },
-  { slug: 'qwen/qwen-turbo', label: 'Qwen Turbo' },
-  { slug: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
-  { slug: 'nous/storyboard', label: 'nous-center · storyboard' },
-];
 
 type ActiveKind = '' | 'video' | 'image' | 'doc' | 'audio' | 'pdf';
 
@@ -52,6 +37,9 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   const patch = useNodeDataPatch(id);
   const genKind = gen?.kind ?? 'text';
   const genModels = useGenerationModels(gen ? gen.kind : undefined);
+  // Text-mode model options come from the platform DB catalog (same source as
+  // genModels), never a hardcoded list (P0-1).
+  const textModels = useTextModels();
 
   // Kind filter for the @-mention picker tabs (All / Video / Image / Doc …)
   const [activeKind, setActiveKind] = useState<ActiveKind>('');
@@ -203,9 +191,11 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
               onChange={(e) => patch({ provider_slug: e.target.value })}
               aria-label="Prompt provider"
             >
-              {PROVIDER_OPTIONS.map((opt) => (
-                <option key={opt.slug || '_default'} value={opt.slug}>
-                  {opt.label}
+              {/* Empty value → backend resolves the DB catalog default. */}
+              <option value="">Catalog default</option>
+              {textModels.map((m) => (
+                <option key={m.name} value={m.name}>
+                  {m.display_name || m.name}
                 </option>
               ))}
             </select>

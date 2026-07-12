@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.services.canvas.canvas_run_service import (
-    DEFAULT_MODEL,
     CanvasRunService,
     _resolve_model,
 )
@@ -50,11 +49,12 @@ def make_service(adapter: FakeAdapter) -> CanvasRunService:
 
 
 class TestResolveModel:
-    def test_none_falls_back_to_default(self):
-        assert _resolve_model(None) == DEFAULT_MODEL
+    def test_none_returns_empty_signalling_db_default(self):
+        # "" signals the caller to fall back to _default_text_model (DB catalog).
+        assert _resolve_model(None) == ""
 
-    def test_empty_string_falls_back_to_default(self):
-        assert _resolve_model("") == DEFAULT_MODEL
+    def test_empty_string_returns_empty_signalling_db_default(self):
+        assert _resolve_model("") == ""
 
     def test_bare_model_id_passes_through(self):
         assert _resolve_model("claude-sonnet-4-6") == "claude-sonnet-4-6"
@@ -63,8 +63,8 @@ class TestResolveModel:
         assert _resolve_model("qwen/qwen-plus") == "qwen-plus"
         assert _resolve_model("anthropic/claude-sonnet-4-6") == "claude-sonnet-4-6"
 
-    def test_slash_with_empty_suffix_falls_back_to_default(self):
-        assert _resolve_model("qwen/") == DEFAULT_MODEL
+    def test_slash_with_empty_suffix_returns_empty_signalling_db_default(self):
+        assert _resolve_model("qwen/") == ""
 
 
 # ============================================================
@@ -128,12 +128,18 @@ class TestRunPrompt:
         svc._get_adapter.assert_called_once_with("claude-sonnet-4-6")
 
     @pytest.mark.asyncio
-    async def test_no_provider_slug_uses_default_model(self):
+    async def test_no_provider_slug_uses_db_default_text_model(self):
         adapter = FakeAdapter()
         svc = make_service(adapter)
         svc._get_adapter = AsyncMock(return_value=adapter)  # type: ignore[assignment]
+        # Empty slug → run_prompt awaits the DB catalog default, then dispatches
+        # the adapter for whatever that resolves to.
+        svc._default_text_model = AsyncMock(  # type: ignore[assignment]
+            return_value="mediahub-doubao-llm"
+        )
         await svc.run_prompt(body="hi")
-        svc._get_adapter.assert_called_once_with(DEFAULT_MODEL)
+        svc._default_text_model.assert_awaited_once()
+        svc._get_adapter.assert_called_once_with("mediahub-doubao-llm")
 
     @pytest.mark.asyncio
     async def test_agent_id_is_appended_to_system_message(self):
@@ -708,7 +714,9 @@ class TestRunClassicVideoGenLocalFile:
 
     @pytest.mark.asyncio
     async def test_local_video_registers_and_returns_durable_stream_url(self):
-        gen = AsyncMock(return_value={"video_url": "", "video_path": "/tmp/jimeng_x/clip.mp4"})
+        gen = AsyncMock(
+            return_value={"video_url": "", "video_path": "/tmp/jimeng_x/clip.mp4"}
+        )
         svc = self._service_with_video(SimpleNamespace(generate_video=gen))
 
         with (
@@ -739,7 +747,9 @@ class TestRunClassicVideoGenLocalFile:
 
     @pytest.mark.asyncio
     async def test_local_video_registration_failure_is_an_inband_error(self):
-        gen = AsyncMock(return_value={"video_url": "", "video_path": "/tmp/jimeng_x/clip.mp4"})
+        gen = AsyncMock(
+            return_value={"video_url": "", "video_path": "/tmp/jimeng_x/clip.mp4"}
+        )
         svc = self._service_with_video(SimpleNamespace(generate_video=gen))
 
         with (
@@ -762,11 +772,16 @@ class TestRunClassicVideoGenLocalFile:
             )
 
         assert result.ok is False
-        assert "persist" in (result.error or "").lower() or "register" in (result.error or "").lower()
+        assert (
+            "persist" in (result.error or "").lower()
+            or "register" in (result.error or "").lower()
+        )
 
     @pytest.mark.asyncio
     async def test_local_video_without_user_context_is_an_inband_error(self):
-        gen = AsyncMock(return_value={"video_url": "", "video_path": "/tmp/jimeng_x/clip.mp4"})
+        gen = AsyncMock(
+            return_value={"video_url": "", "video_path": "/tmp/jimeng_x/clip.mp4"}
+        )
         svc = self._service_with_video(SimpleNamespace(generate_video=gen))
 
         result = await svc.run_classic_node(
