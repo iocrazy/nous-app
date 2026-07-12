@@ -19,7 +19,8 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-import { downloadBlob, downloadUrl } from '../downloadMedia';
+import { downloadCanvasAssetsZip } from '../../services/canvasGenerationService';
+import { downloadBlob, downloadName, downloadUrl } from '../downloadMedia';
 import {
   exportFrameTime,
   nextFrameTime,
@@ -313,22 +314,45 @@ export function OutputLightbox({
     [onClose, goto, index, kind, stepVideoFrame],
   );
 
+  /** Per-file loop — the single-download path and the zip fallback. */
+  const downloadEach = useCallback(
+    async (targets: ReadonlyArray<readonly [LightboxItem, number]>) => {
+      for (const [item, i] of targets) {
+        try {
+          await downloadUrl(item, i);
+        } catch (err) {
+          setDownloadError(err instanceof Error ? err.message : 'Download failed');
+          return;
+        }
+      }
+    },
+    [],
+  );
+
   const doDownload = useCallback(
     (only?: LightboxItem, onlyIndex?: number) => {
       setDownloadError(null);
-      const targets = only ? [[only, onlyIndex ?? 0] as const] : items.map((it, i) => [it, i] as const);
+      if (only) {
+        void downloadEach([[only, onlyIndex ?? 0] as const]);
+        return;
+      }
+      // Download All → one server-side zip (P2-7); fall back to the per-file
+      // loop if the endpoint errors (deploy-skew window: frontend ships
+      // seconds ahead of the backend).
       void (async () => {
-        for (const [item, i] of targets) {
-          try {
-            await downloadUrl(item, i);
-          } catch (err) {
-            setDownloadError(err instanceof Error ? err.message : 'Download failed');
-            return;
-          }
+        try {
+          const filename = `${downloadName(items[0], 0).replace(/\.[^./]+$/, '') || 'canvas'}-assets.zip`;
+          const blob = await downloadCanvasAssetsZip(
+            filename,
+            items.map((it, i) => ({ url: it.url, name: downloadName(it, i) })),
+          );
+          downloadBlob(blob, filename);
+        } catch {
+          await downloadEach(items.map((it, i) => [it, i] as const));
         }
       })();
     },
-    [items],
+    [items, downloadEach],
   );
 
   if (!current) return null;

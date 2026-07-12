@@ -133,6 +133,27 @@ export interface TimelineRunRequest {
   aspect: string;
 }
 
+// ---- Download-all zip (P2-7) ---------------------------------------------
+
+export interface ZipAssetItem {
+  url: string;
+  name: string;
+}
+
+/** Bundle several generated-media results into one archive server-side
+ *  (P2-7). Returns the zip blob; the auth header rides via apiFetch. Throws
+ *  ApiError on a non-2xx so the caller can fall back to per-file download. */
+export async function downloadCanvasAssetsZip(
+  filename: string,
+  items: ZipAssetItem[],
+): Promise<Blob> {
+  const response = await apiFetch('/api/v1/canvases/assets/zip', {
+    method: 'POST',
+    json: { filename, items },
+  });
+  return response.blob();
+}
+
 /** Dispatch one multi-segment film task; returns its task id. */
 export async function dispatchTimelineRun(
   canvasId: string,
