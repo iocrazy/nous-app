@@ -23,6 +23,7 @@ import { moveScene } from '../sceneService';
 import { sceneSummary } from '../nodes/sceneNodeMapper';
 import type { SceneDoc } from '../types';
 import type { ScriptChapter } from '../../types';
+import { ChapterFallback } from './ChapterFallback';
 
 /** Longest chapter-excerpt line rendered under a title before truncation. */
 const EXCERPT_MAX = 80;
@@ -34,6 +35,18 @@ export interface OutlineViewProps {
   onOpenScene: (sceneId: string) => void;
   /** Re-fetch scenes+chapters after a reorder/reparent settles. */
   onReload: () => void | Promise<void>;
+  /**
+   * Legacy chapters with no scene pointing at them yet (A3: moved here from the
+   * Script tab — they are not script content, just an unstarted prose stub with
+   * a "Start Writing" / "Convert to Scenes" entry point).
+   */
+  orphanChapters?: ScriptChapter[];
+  /** Per-chapter in-flight state for the convert/start-writing button. */
+  converting?: Record<string, boolean>;
+  /** AI-split a chapter's prose into scenes. */
+  onConvert?: (chapterId: string) => void;
+  /** Turn an EMPTY chapter straight into a plain, typeable scene (no LLM). */
+  onStartWriting?: (chapterId: string) => void;
 }
 
 /** A group key that also identifies the reparent target chapter (null = Unassigned). */
@@ -72,7 +85,16 @@ function edgeFromPointer(el: HTMLElement, clientY: number): 'before' | 'after' {
   return clientY < rect.top + rect.height / 2 ? 'before' : 'after';
 }
 
-export function OutlineView({ scenes, chapters, onOpenScene, onReload }: OutlineViewProps) {
+export function OutlineView({
+  scenes,
+  chapters,
+  onOpenScene,
+  onReload,
+  orphanChapters = [],
+  converting = {},
+  onConvert,
+  onStartWriting,
+}: OutlineViewProps) {
   const { t } = useTranslation();
 
   const [dragging, setDragging] = useState<string | null>(null);
@@ -84,22 +106,33 @@ export function OutlineView({ scenes, chapters, onOpenScene, onReload }: Outline
   // closure between the separate dragstart/dragover/drop event ticks.
   const draggingRef = useRef<string | null>(null);
 
+  // Orphan chapters (no scene yet) get their own "unstarted" card below with the
+  // Start Writing / Convert action — they are excluded from the regular chapter
+  // groups here so a same chapter never renders twice (once as an empty group,
+  // once as the fallback card).
+  const orphanIds = useMemo(
+    () => new Set(orphanChapters.map((ch) => chapterKey(ch.id))),
+    [orphanChapters],
+  );
+
   const groups = useMemo<OutlineGroup[]>(() => {
     const claimed = new Set<string>();
-    const chapterGroups: OutlineGroup[] = chapters.map((ch) => {
-      const key = chapterKey(ch.id);
-      const groupScenes = scenes
-        .filter((s) => s.chapter_id != null && chapterKey(s.chapter_id) === key)
-        .sort((a, b) => a.sort_order - b.sort_order);
-      groupScenes.forEach((s) => claimed.add(s.id));
-      return {
-        key: `ch-${key}`,
-        chapterId: ch.id,
-        title: ch.title?.trim() || t('editor.untitledChapter'),
-        excerpt: chapterExcerpt(ch),
-        scenes: groupScenes,
-      };
-    });
+    const chapterGroups: OutlineGroup[] = chapters
+      .filter((ch) => !orphanIds.has(chapterKey(ch.id)))
+      .map((ch) => {
+        const key = chapterKey(ch.id);
+        const groupScenes = scenes
+          .filter((s) => s.chapter_id != null && chapterKey(s.chapter_id) === key)
+          .sort((a, b) => a.sort_order - b.sort_order);
+        groupScenes.forEach((s) => claimed.add(s.id));
+        return {
+          key: `ch-${key}`,
+          chapterId: ch.id,
+          title: ch.title?.trim() || t('editor.untitledChapter'),
+          excerpt: chapterExcerpt(ch),
+          scenes: groupScenes,
+        };
+      });
     // Everything a listed chapter did not claim (chapter_id null OR pointing at
     // an absent chapter) lands in Unassigned. Shown when it has scenes, or when
     // there are no chapters at all (so a flat script still renders its scenes).
@@ -117,7 +150,7 @@ export function OutlineView({ scenes, chapters, onOpenScene, onReload }: Outline
       });
     }
     return all;
-  }, [scenes, chapters, t]);
+  }, [scenes, chapters, t, orphanIds]);
 
   // Continuous 1..N numbering across the whole outline in display order — the
   // rows read like a numbered document rather than restarting per chapter.
@@ -293,6 +326,21 @@ export function OutlineView({ scenes, chapters, onOpenScene, onReload }: Outline
           )}
         </section>
       ))}
+
+      {orphanChapters.length > 0 && (
+        <section className="mh-outline-orphan-chapters" aria-label={t('editor.outlineUnstartedChapters')}>
+          <h3 className="mh-outline-orphan-heading">{t('editor.outlineUnstartedChapters')}</h3>
+          {orphanChapters.map((ch) => (
+            <ChapterFallback
+              key={ch.id}
+              chapter={ch}
+              converting={!!converting[ch.id]}
+              onConvert={onConvert ?? (() => {})}
+              onStartWriting={onStartWriting ?? (() => {})}
+            />
+          ))}
+        </section>
+      )}
     </div>
   );
 }

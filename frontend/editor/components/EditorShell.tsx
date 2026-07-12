@@ -76,7 +76,6 @@ import { SaveIndicator, aggregateSaveState } from './SaveIndicator';
 import { ConflictBar } from './ConflictBar';
 import { ColdStart } from './EmptyStates';
 import { ImportScriptModal } from './ImportScriptModal';
-import { ChapterFallback } from './ChapterFallback';
 import { useScriptPresence } from '../collab/useScriptPresence';
 import { useScriptOpsRealtime } from '../collab/useScriptOpsRealtime';
 import { PresenceAvatars } from '../collab/PresenceAvatars';
@@ -1089,6 +1088,10 @@ export function EditorShell({
                       chapters={chapters}
                       onOpenScene={handleOpenScene}
                       onReload={reloadAll}
+                      orphanChapters={orphanChapters}
+                      converting={converting}
+                      onConvert={handleConvertChapter}
+                      onStartWriting={handleStartChapter}
                     />
                   ) : (
                     <>
@@ -1156,15 +1159,6 @@ export function EditorShell({
                           />
                         );
                       })}
-                      {orphanChapters.map((ch) => (
-                        <ChapterFallback
-                          key={ch.id}
-                          chapter={ch}
-                          converting={!!converting[ch.id]}
-                          onConvert={handleConvertChapter}
-                          onStartWriting={handleStartChapter}
-                        />
-                      ))}
                     </>
                   )}
                 </div>

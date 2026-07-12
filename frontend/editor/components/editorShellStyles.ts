@@ -660,6 +660,19 @@ export const EDITOR_SHELL_STYLES = `
   padding:4px 12px 4px 22px; font-size:12px; color:var(--ink-faint); font-style:italic;
 }
 
+/* Unstarted (orphan) chapters — quiet secondary section beneath the real
+   outline groups (A3: moved out of the Script tab, these are not script
+   content, just a "hasn't been split into scenes yet" stub). */
+.mh-outline-orphan-chapters{
+  margin-top:36px; padding-top:20px; border-top:1px dashed var(--sheet-border);
+}
+.mh-outline-orphan-heading{
+  margin:0 0 12px; font-size:12px; font-weight:700; letter-spacing:0.04em;
+  text-transform:uppercase; color:var(--ink-faint);
+}
+.mh-outline-orphan-chapters .mh-chapter-fallback{ margin-bottom:14px; }
+.mh-outline-orphan-chapters .mh-chapter-fallback:last-child{ margin-bottom:0; }
+
 .mh-cover-card{
   width:820px; max-width:100%; min-height:60%;
   background:var(--surface); border:1px dashed var(--surface-border);

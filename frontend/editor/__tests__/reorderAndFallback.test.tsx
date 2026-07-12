@@ -104,11 +104,16 @@ describe('scene reorder (drag + keyboard)', () => {
 });
 
 describe('legacy chapter fallback + convert', () => {
-  it('renders a prose card for an unclaimed chapter and converts on click', async () => {
+  it('renders a prose card for an unclaimed chapter in the Outline tab (A3: not Script) and converts on click', async () => {
     svc.listScenes.mockResolvedValue([scene({ id: 'scene1', chapter_id: null })]);
     scriptSvc.fetchScriptProject.mockResolvedValue({ chapters: [chapter({})] });
     render(<EditorShell scriptId="s1" />);
+    await waitFor(() => expect(screen.getByTestId('scene-block')).toBeInTheDocument());
 
+    // Not in the default Script view.
+    expect(screen.queryByTestId('chapter-fallback')).toBeNull();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'editor.tabOutline' }));
     const card = await screen.findByTestId('chapter-fallback');
     expect(within(card).getByText('Chapter One')).toBeInTheDocument();
     expect(within(card).getByText('Some legacy prose.')).toBeInTheDocument();
@@ -117,12 +122,16 @@ describe('legacy chapter fallback + convert', () => {
     await waitFor(() => expect(svc.convertToScenes).toHaveBeenCalledWith('s1', 'ch1'));
   });
 
-  it('does NOT render a fallback for a chapter that already has scenes', async () => {
+  it('does NOT render a fallback (Script or Outline) for a chapter that already has scenes', async () => {
     svc.listScenes.mockResolvedValue([scene({ id: 'scene1', chapter_id: 'ch1' })]);
     scriptSvc.fetchScriptProject.mockResolvedValue({ chapters: [chapter({ id: 'ch1' })] });
     render(<EditorShell scriptId="s1" />);
 
     await waitFor(() => expect(screen.getByTestId('scene-block')).toBeInTheDocument());
+    expect(screen.queryByTestId('chapter-fallback')).toBeNull();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'editor.tabOutline' }));
+    await waitFor(() => expect(screen.getByTestId('outline-view')).toBeInTheDocument());
     expect(screen.queryByTestId('chapter-fallback')).toBeNull();
   });
 });
