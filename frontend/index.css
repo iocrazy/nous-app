@@ -1097,10 +1097,21 @@ body {
   border: 1px solid var(--canvas-line);
   backdrop-filter: blur(16px);
   padding: 6px;
+  /* Clip the rectangular svg (mask + nodes) to the rounded island — without
+     this the mask's square edges poke past the corners (screenshot). */
+  overflow: hidden;
 }
 .mh-canvas .react-flow__minimap svg {
   width: 176px;
   height: 114px;
+}
+/* Softer viewport mask: the default RF overlay drew a hard rectangle inside
+   the glass card. A lighter fill + hairline stroke reads as a gentle
+   viewport hint aligned with the island tone. */
+.mh-canvas .react-flow__minimap-mask {
+  fill: color-mix(in srgb, var(--canvas-mask) 55%, transparent);
+  stroke: var(--canvas-line-strong);
+  stroke-width: 1;
 }
 
 .mh-canvas .react-flow__controls {
