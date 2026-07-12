@@ -19,6 +19,7 @@ import {
   useEffect,
   useRef,
   type ClipboardEvent,
+  type DragEvent,
   type FormEvent,
   type KeyboardEvent,
   type MouseEvent,
@@ -128,6 +129,31 @@ export interface LineMention extends LineMentionAria {
   elementId: string;
 }
 
+/** Which half of an element row the pointer is over → the drop edge. Mirrors
+ *  SceneBlock's scene-level edgeFromPointer, but named for element rows: 'top'
+ *  lands the dragged element BEFORE this row, 'bottom' lands it AFTER. */
+export function elementEdgeFromPointer(el: HTMLElement, clientY: number): 'top' | 'bottom' {
+  const rect = el.getBoundingClientRect();
+  return clientY < rect.top + rect.height / 2 ? 'top' : 'bottom';
+}
+
+/**
+ * Element-level drag-to-reorder wiring, owned by SceneBlock and threaded through
+ * the layout engines to every ElementLine. Mirrors the scene-level SceneReorderApi
+ * but stays WITHIN one scene (v1: no cross-scene element moves). The gutter's
+ * 6-dot handle is the drag source; the row is the drop target.
+ */
+export interface ElementReorderApi {
+  /** The element currently being dragged (drives handle :active + row guards). */
+  draggingElementId: string | null;
+  /** The active drop target: which element row and which edge the line lands on. */
+  dropTarget: { elementId: string; edge: 'top' | 'bottom' } | null;
+  onDragStart: (elementId: string) => void;
+  onDragOver: (elementId: string, edge: 'top' | 'bottom') => void;
+  onDrop: (elementId: string, edge: 'top' | 'bottom') => void;
+  onDragEnd: () => void;
+}
+
 export const ELEMENT_TICK_CLASS: Record<ElementType, string> = {
   action: 't-action',
   dialogue: 't-dialogue',
@@ -144,12 +170,29 @@ export interface ElementLineProps {
   lineClass: string;
   focused: boolean;
   placeholder?: string;
+  /** 0-based position of this element within its scene; rendered as `index + 1`
+   *  in the hover gutter (laper/Notion-style block number). */
+  index: number;
   /** When set, this line is the open mention combobox (ARIA lives here, not the popup). */
   mentionAria?: LineMentionAria;
   /** Copilot selection state for this row's gutter tick (Task 11). */
   selected?: boolean;
   /** Clicking the gutter tick selects the element for the copilot (Task 11). */
   onTickClick?: (elementId: string, shiftKey: boolean) => void;
+  // ── Element drag-to-reorder (hover gutter handle) — all optional so the row
+  //    stays backward-compatible when reorder is not wired. ─────────────────
+  /** The element currently being dragged anywhere in this scene. */
+  draggingElementId?: string | null;
+  /** The drop-edge highlight for THIS row (null = not the current target). */
+  dropElementEdge?: 'top' | 'bottom' | null;
+  /** Drag started on THIS row's 6-dot handle. */
+  onElementDragStart?: (elementId: string) => void;
+  /** Pointer moved over THIS row while an element is being dragged. */
+  onElementDragOver?: (elementId: string, edge: 'top' | 'bottom') => void;
+  /** Element dropped onto THIS row. */
+  onElementDrop?: (elementId: string, edge: 'top' | 'bottom') => void;
+  /** The drag gesture ended (dropped or cancelled). */
+  onElementDragEnd?: () => void;
   onInput: (elementId: string, text: string) => void;
   onKeyDown: (elementId: string, e: KeyboardEvent<HTMLDivElement>) => void;
   onFocus: (elementId: string) => void;
@@ -163,9 +206,16 @@ export function ElementLine({
   lineClass,
   focused,
   placeholder,
+  index,
   mentionAria,
   selected,
   onTickClick,
+  draggingElementId,
+  dropElementEdge,
+  onElementDragStart,
+  onElementDragOver,
+  onElementDrop,
+  onElementDragEnd,
   onInput,
   onKeyDown,
   onFocus,
@@ -225,9 +275,69 @@ export function ElementLine({
         'aria-hidden': 'true',
       });
 
+  // Hover gutter (laper/Notion-style): a block number + a 6-dot drag handle,
+  // rendered in the row's left margin and revealed on hover / focus via CSS.
+  // The handle is the ONLY draggable element; the row is the drop target. This
+  // is a SEPARATE affordance from the copilot-select tick above — neither
+  // touches the other. The six dots are drawn as a 2×3 grid of `.mh-el-dot`
+  // spans (crisper than a unicode glyph across fonts).
+  const dragEnabled = !!onElementDragStart;
+  const gutter = createElement(
+    'div',
+    { className: 'mh-el-gutter', contentEditable: false, 'aria-hidden': dragEnabled ? undefined : 'true' },
+    createElement('span', { className: 'mh-el-num' }, String(index + 1)),
+    createElement(
+      'button',
+      {
+        type: 'button',
+        className: `mh-el-drag${draggingElementId === element.id ? ' dragging' : ''}`,
+        tabIndex: -1,
+        'aria-label': 'Drag to reorder',
+        draggable: dragEnabled,
+        // Keep the handle from stealing focus/selection from the editable.
+        onMouseDown: (e: MouseEvent) => e.preventDefault(),
+        onDragStart: dragEnabled
+          ? (e: DragEvent<HTMLButtonElement>) => {
+              e.dataTransfer.effectAllowed = 'move';
+              e.dataTransfer.setData('text/plain', element.id);
+              onElementDragStart?.(element.id);
+            }
+          : undefined,
+        onDragEnd: dragEnabled ? () => onElementDragEnd?.() : undefined,
+      },
+      [0, 1, 2, 3, 4, 5].map((d) =>
+        createElement('span', { key: d, className: 'mh-el-dot', 'aria-hidden': 'true' }),
+      ),
+    ),
+  );
+
+  const dropClass =
+    dropElementEdge === 'top' ? ' drop-top' : dropElementEdge === 'bottom' ? ' drop-bottom' : '';
+
   return createElement(
     'div',
-    { className: `mh-el-row${focused ? ' focused' : ''}${isTransition ? ' transition-row' : ''}` },
+    {
+      className: `mh-el-row${focused ? ' focused' : ''}${
+        isTransition ? ' transition-row' : ''
+      }${dropClass}`,
+      // Row is the drop target: allow the drop (preventDefault) and report the
+      // edge only while an element in this scene is actually being dragged.
+      onDragOver: onElementDragOver
+        ? (e: DragEvent<HTMLDivElement>) => {
+            if (!draggingElementId) return;
+            e.preventDefault();
+            onElementDragOver(element.id, elementEdgeFromPointer(e.currentTarget, e.clientY));
+          }
+        : undefined,
+      onDrop: onElementDrop
+        ? (e: DragEvent<HTMLDivElement>) => {
+            if (!draggingElementId) return;
+            e.preventDefault();
+            onElementDrop(element.id, elementEdgeFromPointer(e.currentTarget, e.clientY));
+          }
+        : undefined,
+    },
+    gutter,
     tick,
     createElement('div', {
       ref: editableRef,

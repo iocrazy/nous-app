@@ -7,7 +7,12 @@
  * map. All interaction (keydown machine, debounced input, paste) is owned by
  * SceneBlock and passed down as `handlers`, so this component stays presentational.
  */
-import { ElementLine, type ElementLineProps, type LineMention } from './layoutShared';
+import {
+  ElementLine,
+  type ElementLineProps,
+  type ElementReorderApi,
+  type LineMention,
+} from './layoutShared';
 import type { ElementType, ScriptElement } from '../types';
 
 export const HOLLYWOOD_LINE_CLASS: Record<ElementType, string> = {
@@ -35,6 +40,8 @@ export interface HollywoodLayoutProps {
   selectedIds?: Set<string>;
   /** Gutter-tick click → copilot selection (Task 11). */
   onTickClick?: (elementId: string, shiftKey: boolean) => void;
+  /** Hover-gutter drag-to-reorder wiring; absent = element reorder disabled. */
+  elementReorder?: ElementReorderApi;
 }
 
 export function HollywoodLayout({
@@ -44,17 +51,29 @@ export function HollywoodLayout({
   mention,
   selectedIds,
   onTickClick,
+  elementReorder,
 }: HollywoodLayoutProps) {
   return (
     <>
-      {elements.map((el) => (
+      {elements.map((el, i) => (
         <ElementLine
           key={el.id}
           element={el}
+          index={i}
           lineClass={HOLLYWOOD_LINE_CLASS[el.type]}
           focused={focusedElementId === el.id}
           selected={selectedIds?.has(el.id)}
           onTickClick={onTickClick}
+          draggingElementId={elementReorder?.draggingElementId ?? null}
+          dropElementEdge={
+            elementReorder?.dropTarget && elementReorder.dropTarget.elementId === el.id
+              ? elementReorder.dropTarget.edge
+              : null
+          }
+          onElementDragStart={elementReorder?.onDragStart}
+          onElementDragOver={elementReorder?.onDragOver}
+          onElementDrop={elementReorder?.onDrop}
+          onElementDragEnd={elementReorder?.onDragEnd}
           mentionAria={
             mention && mention.elementId === el.id
               ? {
