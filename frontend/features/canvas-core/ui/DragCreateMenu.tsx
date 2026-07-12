@@ -156,7 +156,7 @@ export function DragCreateMenu({
       <div
         role="menu"
         aria-label={t('canvas.dragCreate.title', 'Add node')}
-        className="absolute z-50 min-w-[9rem] rounded-lg border border-ink-700 bg-ink-900/95 p-1 shadow-xl backdrop-blur"
+        className="mh-pop-in absolute z-50 min-w-[9rem] rounded-lg border border-ink-700 bg-ink-900/95 p-1 shadow-xl backdrop-blur"
         style={{ left: screenPosition.x, top: screenPosition.y }}
         onClick={(e) => e.stopPropagation()}
       >

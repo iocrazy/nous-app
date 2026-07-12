@@ -121,7 +121,7 @@ test('edges carry run-state classes matching their prompt status', async ({ page
 
   // The active wire animates (dash-flow) with the accent stroke.
   const activePath = page.locator('.mh-edge-active .react-flow__edge-path').first();
-  await expect(activePath).toHaveCSS('animation-name', 'canvas-edge-flow');
+  await expect(activePath).toHaveCSS('animation-name', 'mh-edge-flow');
 
   await page.screenshot({ path: 'e2e-artifacts/canvas-run-viz.png', fullPage: true });
 });
