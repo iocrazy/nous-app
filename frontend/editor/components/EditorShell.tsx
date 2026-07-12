@@ -713,6 +713,31 @@ export function EditorShell({
     [scenes],
   );
 
+  // ── Cross-scene paragraph drag coordination ───────────────────────────────
+  // The shell broadcasts which element is mid-drag (and from which scene) so
+  // every other SceneBlock can accept the drop; each block registers an op
+  // dispatcher here so the target block can ask for the source-scene delete.
+  const [elementDrag, setElementDrag] = useState<{
+    sceneId: string;
+    element: ScriptElement;
+  } | null>(null);
+  const externalOpsRef = useRef(new Map<string, (ops: ElementOp[]) => void>());
+  const handleRegisterExternalOps = useCallback(
+    (sceneId: string, fn: ((ops: ElementOp[]) => void) | null) => {
+      if (fn) externalOpsRef.current.set(sceneId, fn);
+      else externalOpsRef.current.delete(sceneId);
+    },
+    [],
+  );
+  const handleElementDragBegin = useCallback(
+    (sceneId: string, element: ScriptElement) => setElementDrag({ sceneId, element }),
+    [],
+  );
+  const handleElementDragDone = useCallback(() => setElementDrag(null), []);
+  const handleCrossSceneDelete = useCallback((sceneId: string, elementId: string) => {
+    externalOpsRef.current.get(sceneId)?.([{ op: 'delete', element_id: elementId }]);
+  }, []);
+
   const recomputeWindow = useCallback(() => {
     if (!windowed) return;
     const el = sheetScrollRef.current;
@@ -1168,6 +1193,11 @@ export function EditorShell({
                             typeCommand={typeCommand ?? undefined}
                             focusPresence={presenceByScene[String(s.id)]}
                             selfActorId={currentUserId}
+                            elementDrag={elementDrag}
+                            onElementDragBegin={handleElementDragBegin}
+                            onElementDragDone={handleElementDragDone}
+                            onCrossSceneDelete={handleCrossSceneDelete}
+                            onRegisterExternalOps={handleRegisterExternalOps}
                             onRegisterRemoteApply={
                               COLLAB_ENABLED ? registerRemoteApply : undefined
                             }

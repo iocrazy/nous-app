@@ -171,6 +171,19 @@ export interface SceneBlockProps {
    *  stale snapshot, then calls onRemoteStaleHandled to clear the flag (C2). */
   remoteStale?: boolean;
   onRemoteStaleHandled?: (sceneId: string) => void;
+  /** ── Cross-scene paragraph drag (shell-coordinated) ──
+   * The shell holds which element is being dragged from which scene; every
+   * OTHER SceneBlock treats that as an external drag it can accept. */
+  elementDrag?: { sceneId: string; element: ScriptElement } | null;
+  /** Report drag start/finish up so the shell can broadcast the drag. */
+  onElementDragBegin?: (sceneId: string, element: ScriptElement) => void;
+  onElementDragDone?: () => void;
+  /** Ask the shell to delete the dragged element from its SOURCE scene after
+   *  this (target) scene inserted it. */
+  onCrossSceneDelete?: (sceneId: string, elementId: string) => void;
+  /** Registers a dispatcher the shell can use to apply ops to this scene from
+   *  outside (the cross-scene delete); called with null on unmount. */
+  onRegisterExternalOps?: (sceneId: string, fn: ((ops: ElementOp[]) => void) | null) => void;
 }
 
 /** Which half of a block the pointer is over → the drop edge. */
@@ -198,6 +211,11 @@ export function SceneBlock({
   onRegisterRemoteApply,
   remoteStale,
   onRemoteStaleHandled,
+  elementDrag,
+  onElementDragBegin,
+  onElementDragDone,
+  onCrossSceneDelete,
+  onRegisterExternalOps,
 }: SceneBlockProps) {
   const { t } = useTranslation();
   const sync = useSceneSync(scene, { selfActorId });
@@ -720,32 +738,90 @@ export function SceneBlock({
   // scene. Edge 'top' lands the dragged element BEFORE the target (before_id),
   // 'bottom' lands it AFTER (after_id); applyLocal re-anchors, and useSceneSync
   // dispatches the op optimistically (route-C: no direct phase writes).
-  const handleElementDragStart = useCallback((elementId: string) => {
-    setDraggingElementId(elementId);
-  }, []);
+  //
+  // CROSS-SCENE: a drag whose source is ANOTHER scene (shell-broadcast via the
+  // `elementDrag` prop) is accepted too — the drop inserts the element here
+  // (insert op, full payload, same id) and asks the shell to delete it from
+  // the source scene. Insert-then-delete order so a failure can only duplicate,
+  // never lose, the paragraph.
+  const externalDrag = elementDrag && elementDrag.sceneId !== scene.id ? elementDrag : null;
+
+  // Register a dispatcher the shell can use for the cross-scene delete leg.
+  useEffect(() => {
+    if (!onRegisterExternalOps) return;
+    onRegisterExternalOps(scene.id, (ops) => {
+      syncRef.current.dispatchOps(ops, applyLocal(elementsRef.current, ops));
+    });
+    return () => onRegisterExternalOps(scene.id, null);
+  }, [scene.id, onRegisterExternalOps]);
+
+  const handleElementDragStart = useCallback(
+    (elementId: string) => {
+      setDraggingElementId(elementId);
+      const el = elementsRef.current.find((e) => e.id === elementId);
+      if (el) onElementDragBegin?.(scene.id, el);
+    },
+    [scene.id, onElementDragBegin],
+  );
   const handleElementDragEnd = useCallback(() => {
     setDraggingElementId(null);
     setElementDropTarget(null);
-  }, []);
+    onElementDragDone?.();
+  }, [onElementDragDone]);
   const handleElementDragOver = useCallback((elementId: string, edge: 'top' | 'bottom') => {
     setElementDropTarget({ elementId, edge });
   }, []);
+  /** Build the insert op that lands an external element at the given anchor. */
+  const acceptExternalDrop = useCallback(
+    (anchor: { before_id?: string; after_id?: string }) => {
+      if (!externalDrag) return;
+      const { sceneId: fromSceneId, element } = externalDrag;
+      const op: ElementOp = {
+        op: 'insert',
+        element_id: element.id,
+        payload: {
+          type: element.type,
+          text: element.text,
+          ...(element.character_id ? { character_id: element.character_id } : {}),
+        },
+        ...anchor,
+      };
+      sync.dispatchOps([op], applyLocal(sync.elements, [op]));
+      onCrossSceneDelete?.(fromSceneId, element.id);
+      onElementDragDone?.();
+    },
+    [externalDrag, sync, onCrossSceneDelete, onElementDragDone],
+  );
   const handleElementDrop = useCallback(
     (targetId: string, edge: 'top' | 'bottom') => {
       setElementDropTarget(null);
       const dragging = draggingElementId;
       setDraggingElementId(null);
-      // Dropping onto itself is a no-op; applyMove would also self-anchor-skip,
-      // but bailing here avoids an empty dispatch + version bump.
-      if (!dragging || dragging === targetId) return;
-      const op: ElementOp =
-        edge === 'top'
-          ? { op: 'move', element_id: dragging, before_id: targetId }
-          : { op: 'move', element_id: dragging, after_id: targetId };
-      sync.dispatchOps([op], applyLocal(sync.elements, [op]));
+      if (dragging) {
+        // Same-scene reorder (existing move-op path). Dropping onto itself is a
+        // no-op; applyMove would also self-anchor-skip, but bailing here avoids
+        // an empty dispatch + version bump.
+        if (dragging === targetId) return;
+        const op: ElementOp =
+          edge === 'top'
+            ? { op: 'move', element_id: dragging, before_id: targetId }
+            : { op: 'move', element_id: dragging, after_id: targetId };
+        sync.dispatchOps([op], applyLocal(sync.elements, [op]));
+        return;
+      }
+      if (externalDrag) {
+        acceptExternalDrop(edge === 'top' ? { before_id: targetId } : { after_id: targetId });
+      }
     },
-    [draggingElementId, sync],
+    [draggingElementId, sync, externalDrag, acceptExternalDrop],
   );
+  // External drop on the scene HEADING row → insert at the head of this scene
+  // (covers empty scenes, which have no element rows to target).
+  const handleHeadRowExternalDrop = useCallback(() => {
+    if (!externalDrag) return;
+    const firstId = elementsRef.current[0]?.id;
+    acceptExternalDrop(firstId ? { before_id: firstId } : {});
+  }, [externalDrag, acceptExternalDrop]);
 
   // ── Copilot summon (Task 11) ──────────────────────────────────────────────
   const clearCopilot = useCallback(() => {
@@ -963,6 +1039,18 @@ export function SceneBlock({
         ref={headRowRef}
         onBlur={headingEditing ? handleHeadRowBlur : undefined}
         onKeyDown={headingEditing ? handleHeadRowKeyDown : undefined}
+        // Cross-scene drop target: dropping a dragged paragraph on the heading
+        // row lands it at the HEAD of this scene (works for empty scenes too).
+        onDragOver={externalDrag ? (e) => e.preventDefault() : undefined}
+        onDrop={
+          externalDrag
+            ? (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleHeadRowExternalDrop();
+              }
+            : undefined
+        }
       >
         {/* A1: continuous document-order block number (scene heading = block
          *  `blockIndexBase + 1`), NOT the scene's position among scenes. */}
@@ -1038,7 +1126,10 @@ export function SceneBlock({
           selectedIds={copilotSelectedIds}
           onTickClick={handleTickClick}
           elementReorder={{
-            draggingElementId,
+            // An external (cross-scene) drag arms this scene's rows as drop
+            // targets exactly like a local drag would — the rows only gate on
+            // a non-null dragging id.
+            draggingElementId: draggingElementId ?? externalDrag?.element.id ?? null,
             dropTarget: elementDropTarget,
             onDragStart: handleElementDragStart,
             onDragOver: handleElementDragOver,

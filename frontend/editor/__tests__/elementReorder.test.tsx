@@ -1,3 +1,4 @@
+import { useRef, useState } from 'react';
 import { render, cleanup, fireEvent } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ElementOp, SceneDoc } from '../types';
@@ -169,5 +170,107 @@ describe('SceneBlock element hover-gutter reorder', () => {
     fireDragAt(bRow, 'drop', 5);
 
     expect(sync.dispatch).not.toHaveBeenCalled();
+  });
+});
+
+// ── Cross-scene paragraph drag ───────────────────────────────────────────────
+// A shell-like harness: holds the broadcast elementDrag state + the external-ops
+// registry, exactly as EditorShell wires them, and renders TWO SceneBlocks.
+function TwoScenes({
+  sceneA,
+  sceneB,
+}: {
+  sceneA: SceneDoc;
+  sceneB: SceneDoc;
+}) {
+  const [elementDrag, setElementDrag] = useState<{
+    sceneId: string;
+    element: SceneDoc['elements'][number];
+  } | null>(null);
+  const reg = useRef(new Map<string, (ops: ElementOp[]) => void>());
+  const shared = {
+    elementDrag,
+    onElementDragBegin: (sceneId: string, element: SceneDoc['elements'][number]) =>
+      setElementDrag({ sceneId, element }),
+    onElementDragDone: () => setElementDrag(null),
+    onCrossSceneDelete: (sceneId: string, elementId: string) =>
+      reg.current.get(sceneId)?.([{ op: 'delete', element_id: elementId }]),
+    onRegisterExternalOps: (sceneId: string, fn: ((ops: ElementOp[]) => void) | null) => {
+      if (fn) reg.current.set(sceneId, fn);
+      else reg.current.delete(sceneId);
+    },
+  };
+  return (
+    <>
+      <SceneBlock scene={sceneA} index={0} {...shared} />
+      <SceneBlock scene={sceneB} index={1} blockIndexBase={4} {...shared} />
+    </>
+  );
+}
+
+describe('cross-scene paragraph drag', () => {
+  const sceneA = (): SceneDoc => ({ ...makeScene(threeElements()), id: '900' });
+  const sceneB = (elements: SceneDoc['elements']): SceneDoc => ({
+    ...makeScene(elements),
+    id: '901',
+  });
+
+  it('dropping onto another scene inserts there (full payload) then deletes from the source', () => {
+    render(
+      <TwoScenes
+        sceneA={sceneA()}
+        sceneB={sceneB([{ id: 'el_x', type: 'action', text: 'X-ray.' }])}
+      />,
+    );
+
+    const aHandle = rowOf('el_a').querySelector('.mh-el-drag') as HTMLElement;
+    const xRow = rowOf('el_x');
+    stubRect(xRow);
+
+    fireEvent.dragStart(aHandle, { dataTransfer: fakeDataTransfer() });
+    fireDragAt(xRow, 'dragover', 5); // above midpoint → 'top' → before el_x
+    fireDragAt(xRow, 'drop', 5);
+
+    const allOps = sync.dispatch.mock.calls.map(([ops]) => ops[0]);
+    const insert = allOps.find((op: ElementOp) => op.op === 'insert');
+    expect(insert).toMatchObject({
+      op: 'insert',
+      element_id: 'el_a',
+      before_id: 'el_x',
+      payload: { type: 'action', text: 'Alpha.' },
+    });
+    const del = allOps.find((op: ElementOp) => op.op === 'delete');
+    expect(del).toMatchObject({ op: 'delete', element_id: 'el_a' });
+    // Insert lands BEFORE the source delete (a failure duplicates, never loses).
+    expect(allOps.indexOf(insert!)).toBeLessThan(allOps.indexOf(del!));
+    // No same-scene move op was involved.
+    expect(allOps.some((op: ElementOp) => op.op === 'move')).toBe(false);
+  });
+
+  it('dropping on an EMPTY scene heading row appends the paragraph there', () => {
+    render(<TwoScenes sceneA={sceneA()} sceneB={sceneB([])} />);
+
+    const aHandle = rowOf('el_a').querySelector('.mh-el-drag') as HTMLElement;
+    const headrows = document.querySelectorAll('.mh-scene-headrow');
+    const bHead = headrows[1] as HTMLElement;
+
+    fireEvent.dragStart(aHandle, { dataTransfer: fakeDataTransfer() });
+    fireEvent.dragOver(bHead, { dataTransfer: fakeDataTransfer() });
+    fireEvent.drop(bHead, { dataTransfer: fakeDataTransfer() });
+
+    const allOps = sync.dispatch.mock.calls.map(([ops]) => ops[0]);
+    const insert = allOps.find((op: ElementOp) => op.op === 'insert');
+    // Empty scene → plain append: no before_id / after_id anchor.
+    expect(insert).toMatchObject({
+      op: 'insert',
+      element_id: 'el_a',
+      payload: { type: 'action', text: 'Alpha.' },
+    });
+    expect(insert).not.toHaveProperty('before_id');
+    expect(insert).not.toHaveProperty('after_id');
+    expect(allOps.find((op: ElementOp) => op.op === 'delete')).toMatchObject({
+      op: 'delete',
+      element_id: 'el_a',
+    });
   });
 });
