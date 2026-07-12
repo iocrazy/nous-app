@@ -44,6 +44,9 @@ interface UseCanvasShortcutsOptions {
    * so stale-closure re-registration is never needed.
    */
   onOpenPalette?: () => void;
+  /** Called on `?` (Shift+/) outside an editable element — opens the
+   *  keyboard-shortcut help panel. */
+  onOpenHelp?: () => void;
 }
 
 export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
@@ -52,8 +55,10 @@ export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
   // Keep a stable ref so the window listener never goes stale without
   // re-subscribing (avoids adding onOpenPalette to the effect dep array).
   const onOpenPaletteRef = useRef(options.onOpenPalette);
+  const onOpenHelpRef = useRef(options.onOpenHelp);
   useEffect(() => {
     onOpenPaletteRef.current = options.onOpenPalette;
+    onOpenHelpRef.current = options.onOpenHelp;
   });
 
   useEffect(() => {
@@ -70,6 +75,14 @@ export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
       if (meta && (key === 'k' || key === 'K')) {
         event.preventDefault();
         onOpenPaletteRef.current?.();
+        return;
+      }
+
+      // ? (Shift+/) — open the shortcut help panel. No modifier: it's a
+      // bare punctuation key, not a chord.
+      if (!meta && key === '?') {
+        event.preventDefault();
+        onOpenHelpRef.current?.();
         return;
       }
 

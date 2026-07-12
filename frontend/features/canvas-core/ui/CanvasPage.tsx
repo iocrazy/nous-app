@@ -24,6 +24,7 @@ import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { useCanvasRealtime } from '../realtime/useCanvasRealtime';
 import { CanvasConflictDialog } from './CanvasConflictDialog';
 import { CanvasSurface } from './CanvasSurface';
+import { ShortcutHelpPanel } from './ShortcutHelpPanel';
 import { useCanvasShortcuts } from './useCanvasShortcuts';
 
 export default function CanvasPage() {
@@ -40,12 +41,14 @@ export default function CanvasPage() {
   const reset = useCanvasCoreStore((s) => s.reset);
   const { t } = useTranslation();
 
-  // Cmd+K palette — canvas-only scope, active only when canvas is ready.
+  // Cmd+K palette + ? help — canvas-only scope, active only when ready.
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   useCanvasShortcuts({
     enabled: loadStatus === 'ready',
     onOpenPalette: () => setPaletteOpen(true),
+    onOpenHelp: () => setHelpOpen(true),
   });
 
   // Phase 6a — cross-tab / cross-user realtime invalidation.
@@ -126,6 +129,7 @@ export default function CanvasPage() {
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
       />
+      <ShortcutHelpPanel open={helpOpen} onClose={() => setHelpOpen(false)} />
     </div>
   );
 }
