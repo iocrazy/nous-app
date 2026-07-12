@@ -38,6 +38,9 @@ from app.workflows.issue_lifecycle import (  # noqa: F401
     respond_to_issue_reply,
 )
 from app.workflows.parse import parse_user_queue, parse_workflow  # noqa: F401
+from app.workflows.publish_distribution import (  # noqa: F401
+    publish_distribution_workflow,
+)
 from app.workflows.script_ai_workflows import (  # noqa: F401
     script_create_branches_workflow,
     script_expand_chapter_workflow,
