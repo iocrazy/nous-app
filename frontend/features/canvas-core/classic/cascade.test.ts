@@ -277,6 +277,60 @@ describe('runClassicCascade — passive preview sink downstream', () => {
   });
 });
 
+describe('runClassicCascade — preview display sink piping (P1-2)', () => {
+  /** Capture the full patch objects (not just run_status). */
+  function fullRecorder() {
+    const patches: Array<{ id: string; patch: Record<string, unknown> }> = [];
+    const handlers: CascadeHandlers = {
+      onNodePatch: (id, patch) => patches.push({ id, patch }),
+      onToast: () => {},
+      now: () => '2026-06-14T00:00:00Z',
+    };
+    return { patches, handlers };
+  }
+
+  it('folds a piped llm text output into the preview_text display field', async () => {
+    // L(llm) --text-out→text-in--> V(preview)
+    const nodes = [node('L', 'llm', { model: 'qwen' }), node('V', 'preview')];
+    const conns = [wire('L', 'text-out', 'V', 'text-in')];
+    const runner: ClassicRunner = async () => ({ ok: true, text: 'hello world', error: null });
+    const r = fullRecorder();
+
+    const report = await runClassicCascade(nodes, conns, runner, r.handlers);
+
+    const vPatch = r.patches.find((p) => p.id === 'V');
+    expect(vPatch?.patch.preview_text).toBe('hello world');
+    // preview is still a skipped sink, never a run.
+    expect(report.skipped).toContain('V');
+    expect(vPatch?.patch.run_status).toBeUndefined();
+  });
+
+  it('folds a piped image_gen url into the preview_image display field', async () => {
+    // G(image_gen) --image-out→image-in--> V(preview)
+    const nodes = [node('G', 'image_gen', { prompt: 'a cat' }), node('V', 'preview')];
+    const conns = [wire('G', 'image-out', 'V', 'image-in')];
+    const runner: ClassicRunner = async () => ({
+      ok: true,
+      text: '',
+      error: null,
+      result: { image_url: '/gm/9/cover' },
+    });
+    const r = fullRecorder();
+
+    await runClassicCascade(nodes, conns, runner, r.handlers);
+
+    const vPatch = r.patches.find((p) => p.id === 'V');
+    expect(vPatch?.patch.preview_image).toBe('/gm/9/cover');
+  });
+
+  it('an unwired preview gets no display patch', async () => {
+    const nodes = [node('V', 'preview')];
+    const r = fullRecorder();
+    await runClassicCascade(nodes, [], okRunner, r.handlers);
+    expect(r.patches.find((p) => p.id === 'V')).toBeUndefined();
+  });
+});
+
 describe('runClassicCascade — portless group container', () => {
   it('a portless group alongside a runnable chain is skipped, chain runs, no throw, no toast', async () => {
     // P(prompt, passive) → L(llm, runnable); G(group, portless) is isolated.

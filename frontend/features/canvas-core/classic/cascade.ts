@@ -259,11 +259,31 @@ export async function runClassicCascade(
     const dispatch = dispatchClassicNode(nodeType);
 
     if (dispatch.kind === 'passive') {
-      // Literal/sink node — not an execution step. Pass through silently, but
-      // RECORD its data so a downstream node can read a passive SOURCE node's
-      // output (prompt/text/image/video). Sinks (output/preview/note/group)
-      // record too but emit nothing — `nodeOutputValue` returns undefined for
-      // them.
+      // preview is a passive DISPLAY sink (P1-2): unlike other passive nodes it
+      // must reflect its piped inputs so the frame shows the real upstream
+      // image/text. Fold incoming wires into effective data and patch the
+      // display fields the PreviewNodeView renders. No run_status is written —
+      // preview never "runs" — so it stays idle in the report.
+      if (nodeType === 'preview') {
+        const effectiveData = buildEffectiveData(
+          nodeType,
+          readData(node),
+          incomingWires.get(nodeId) ?? [],
+          outputs,
+        );
+        const patch: Record<string, unknown> = {};
+        if ('preview_image' in effectiveData) patch.preview_image = effectiveData.preview_image;
+        if ('preview_text' in effectiveData) patch.preview_text = effectiveData.preview_text;
+        if (Object.keys(patch).length > 0) handlers.onNodePatch(nodeId, patch);
+        outputs.set(nodeId, { nodeType, data: effectiveData, runResult: null });
+        report.skipped.push(nodeId);
+        continue;
+      }
+      // Other literal/sink nodes — not an execution step. Pass through
+      // silently, but RECORD their data so a downstream node can read a passive
+      // SOURCE node's output (prompt/text/image/video). Silent sinks
+      // (output/note/group) record too but emit nothing — `nodeOutputValue`
+      // returns undefined for them.
       outputs.set(nodeId, {
         nodeType,
         data: readData(node),

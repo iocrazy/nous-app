@@ -125,6 +125,25 @@ describe('CLASSIC_NODE_TYPES — preview display sink', () => {
     expect(screen.getByTestId('classic-node-preview-display')).toBeInTheDocument();
   });
 
+  // P1-2: the cascade folds piped inputs into data.preview_image/preview_text.
+  it('renders a piped image via data.preview_image', () => {
+    renderNode('preview', { preview_image: '/gm/9/cover' });
+    const img = screen.getByTestId('classic-node-preview-image') as HTMLImageElement;
+    expect(img.getAttribute('src')).toBe('/gm/9/cover');
+  });
+
+  it('renders piped text via data.preview_text', () => {
+    renderNode('preview', { preview_text: 'hello world' });
+    expect(screen.getByTestId('classic-node-preview-text')).toHaveTextContent('hello world');
+  });
+
+  it('falls back to the empty placeholder when nothing is piped', () => {
+    renderNode('preview');
+    expect(screen.queryByTestId('classic-node-preview-image')).toBeNull();
+    expect(screen.queryByTestId('classic-node-preview-text')).toBeNull();
+    expect(screen.getByTestId('classic-node-preview-display')).toHaveTextContent('Preview');
+  });
+
   it('renders all typed input handles (image + text + video), zero outputs', () => {
     const { container } = renderNode('preview');
     const def = classicNodeDefinitions.preview;
