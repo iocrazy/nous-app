@@ -19,6 +19,8 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { downloadUrl } from '../downloadMedia';
+
 export interface LightboxItem {
   url: string;
   name?: string;
@@ -37,31 +39,8 @@ export interface OutputLightboxProps {
   regenerating?: boolean;
 }
 
-function downloadName(item: LightboxItem, fallbackIndex: number): string {
-  if (item.name) return item.name;
-  const tail = item.url.split('/').filter(Boolean).pop() ?? '';
-  return tail || `output-${fallbackIndex + 1}`;
-}
-
-/** fetch→blob→anchor: the `download` attribute is ignored on cross-origin
- *  URLs (the API host differs from the app origin), so a plain anchor would
- *  navigate away instead of saving. */
-async function downloadUrl(item: LightboxItem, fallbackIndex: number): Promise<void> {
-  const res = await fetch(item.url);
-  if (!res.ok) throw new Error(`Download failed (${res.status})`);
-  const blob = await res.blob();
-  const href = URL.createObjectURL(blob);
-  try {
-    const link = document.createElement('a');
-    link.href = href;
-    link.download = downloadName(item, fallbackIndex);
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-  } finally {
-    URL.revokeObjectURL(href);
-  }
-}
+// downloadUrl / downloadName live in smart/downloadMedia.ts (shared with
+// the node toolbar, P2-3) — fetch→blob→anchor for cross-origin safety.
 
 export function OutputLightbox({
   items,
