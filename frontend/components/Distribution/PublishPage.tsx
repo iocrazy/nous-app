@@ -1,15 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   AlertCircle, AlertTriangle, ArrowLeftRight, Calendar, Check, Folder,
-  ListOrdered, MapPin, Plus, Radio, Send, Sparkles, TrendingUp,
+  ListOrdered, MapPin, Plus, Radio, Search, Send, Sparkles, TrendingUp, X,
 } from 'lucide-react';
 import {
   createPublishTask, listAccounts, listLibraryVideos,
 } from '../../services/distributionService';
 import { SocialAccount, LibraryVideo } from '../../types';
 import { useToast } from '../Toast';
+import { useWorkspaceScope } from '../../hooks/useWorkspaceScope';
 import './distribution-v4.css';
 
 type Visibility = 'public' | 'friends' | 'private';
@@ -75,7 +76,7 @@ export const PublishPage: React.FC = () => {
   const { t } = useTranslation();
   const { addToast } = useToast();
   const navigate = useNavigate();
-  const { teamId } = useParams();
+  const { scopeId } = useWorkspaceScope();
 
   const [videos, setVideos] = useState<LibraryVideo[]>([]);
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
@@ -92,22 +93,50 @@ export const PublishPage: React.FC = () => {
   const [customizeOpen, setCustomizeOpen] = useState<Record<string, boolean>>({});
   const [accountConfigs, setAccountConfigs] = useState<Record<string, { title: string }>>({});
   const [submitting, setSubmitting] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerQuery, setPickerQuery] = useState('');
 
   const load = useCallback(async () => {
     try {
-      const [v, a] = await Promise.all([listLibraryVideos(teamId ?? ''), listAccounts()]);
+      const [v, a] = await Promise.all([listLibraryVideos(scopeId), listAccounts()]);
       setVideos(v);
       setAccounts(a);
     } catch (err) {
       console.error('distribution: publish page load failed', err);
       addToast(t('distribution.publish.loadFailed', 'Failed to load publish data'), 'error');
     }
-  }, [addToast, t, teamId]);
+  }, [addToast, t, scopeId]);
 
   useEffect(() => { void load(); }, [load]);
 
+  // Close the library picker on Escape while it is open.
+  useEffect(() => {
+    if (!pickerOpen) return undefined;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPickerOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [pickerOpen]);
+
   const toggle = (list: string[], id: string): string[] =>
     (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
+
+  const removeVideo = (id: string) =>
+    setSelectedVideos((s) => s.filter((x) => x !== id));
+
+  // Only the videos the user actually picked are shown as content thumbs —
+  // never the whole Library. Resolve ids → video rows, dropping any that no
+  // longer exist in the loaded Library list.
+  const selectedVideoObjs = useMemo(
+    () => selectedVideos
+      .map((id) => videos.find((v) => v.id === id))
+      .filter((v): v is LibraryVideo => Boolean(v)),
+    [selectedVideos, videos],
+  );
+
+  const pickerResults = useMemo(() => {
+    const q = pickerQuery.trim().toLowerCase();
+    return q ? videos.filter((v) => v.filename.toLowerCase().includes(q)) : videos;
+  }, [videos, pickerQuery]);
 
   const canPublish = useMemo(
     () => selectedVideos.length > 0 && selectedAccounts.length > 0 && title.trim().length > 0,
@@ -204,51 +233,38 @@ export const PublishPage: React.FC = () => {
               <button type="button" disabled title={t('distribution.comingInD3', 'Coming in D3')}>{t('distribution.publish.upload', 'Upload')}</button>
             </div>
             <div className="thumbs">
-              {videos.map((v, idx) => {
-                const on = selectedVideos.includes(v.id);
+              {selectedVideoObjs.map((v, idx) => {
                 const hasImg = Boolean(v.thumbnail_url);
                 return (
                   <div
                     key={v.id}
-                    role="button"
-                    tabIndex={0}
-                    aria-pressed={on}
                     aria-label={v.filename}
-                    className={`thumb ${hasImg ? '' : idx % 2 === 0 ? 't1' : 't2'} ${on ? 'sel' : ''}`}
+                    title={v.filename}
+                    className={`thumb ${hasImg ? '' : idx % 2 === 0 ? 't1' : 't2'}`}
                     style={hasImg ? { backgroundImage: `url(${v.thumbnail_url})` } : undefined}
-                    onClick={() => setSelectedVideos((s) => toggle(s, v.id))}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        setSelectedVideos((s) => toggle(s, v.id));
-                      }
-                    }}
                   >
-                    {on && (
-                      <button
-                        type="button"
-                        className="rm"
-                        aria-label={t('distribution.publish.removeVideo', 'Remove {{name}}', { name: v.filename })}
-                        onClick={(e) => { e.stopPropagation(); setSelectedVideos((s) => toggle(s, v.id)); }}
-                      >
-                        ×
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      className="rm"
+                      aria-label={t('distribution.publish.removeVideo', 'Remove {{name}}', { name: v.filename })}
+                      onClick={() => removeVideo(v.id)}
+                    >
+                      ×
+                    </button>
                     <span className="play">
                       <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
                     </span>
                   </div>
                 );
               })}
-              <div className="thumb add" title={t('distribution.publish.videoPickerComingSoon', 'Video picker coming soon')}>
+              <button
+                type="button"
+                className="thumb add"
+                onClick={() => { setPickerQuery(''); setPickerOpen(true); }}
+              >
                 <Plus size={16} />
                 {t('distribution.publish.addFromLibrary', 'Add from Library')}
-              </div>
-              {videos.length === 0 && (
-                <p className="text-[12px]" style={{ color: 'var(--content-4)' }}>
-                  {t('distribution.publish.noContent', 'No video resources in your Library yet')}
-                </p>
-              )}
+              </button>
             </div>
           </div>
 
@@ -562,6 +578,89 @@ export const PublishPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {pickerOpen && (
+        <div
+          className="picker-overlay"
+          role="presentation"
+          onClick={() => setPickerOpen(false)}
+        >
+          <div
+            className="picker"
+            role="dialog"
+            aria-modal="true"
+            aria-label={t('distribution.publish.pickerTitle', 'Add from Library')}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="picker-head">
+              <div>
+                <h3>{t('distribution.publish.pickerTitle', 'Add from Library')}</h3>
+                <p>{t('distribution.publish.pickerSubtitle', 'Pick videos to include in this publish.')}</p>
+              </div>
+              <div className="picker-count">
+                {t('distribution.publish.pickerSelectedCount', '{{n}} selected', { n: selectedVideos.length })}
+              </div>
+              <button
+                type="button"
+                className="picker-close"
+                aria-label={t('distribution.publish.pickerClose', 'Close')}
+                onClick={() => setPickerOpen(false)}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="picker-search">
+              <Search size={14} />
+              <input
+                value={pickerQuery}
+                onChange={(e) => setPickerQuery(e.target.value)}
+                placeholder={t('distribution.publish.pickerSearch', 'Search videos')}
+                aria-label={t('distribution.publish.pickerSearch', 'Search videos')}
+              />
+            </div>
+
+            <div className="picker-grid">
+              {pickerResults.map((v) => {
+                const on = selectedVideos.includes(v.id);
+                const hasImg = Boolean(v.thumbnail_url);
+                return (
+                  <button
+                    type="button"
+                    key={v.id}
+                    className={`picker-item ${on ? 'sel' : ''}`}
+                    aria-pressed={on}
+                    onClick={() => setSelectedVideos((s) => toggle(s, v.id))}
+                  >
+                    <span
+                      className={`pi-thumb ${hasImg ? '' : 'ph'}`}
+                      style={hasImg ? { backgroundImage: `url(${v.thumbnail_url})` } : undefined}
+                    >
+                      {on && (
+                        <span className="pi-check"><Check size={12} strokeWidth={3} /></span>
+                      )}
+                    </span>
+                    <span className="pi-name" title={v.filename}>{v.filename}</span>
+                  </button>
+                );
+              })}
+              {pickerResults.length === 0 && (
+                <p className="picker-empty">
+                  {videos.length === 0
+                    ? t('distribution.publish.noContent', 'No video resources in your Library yet')
+                    : t('distribution.publish.pickerNoResults', 'No videos match your search')}
+                </p>
+              )}
+            </div>
+
+            <div className="picker-foot">
+              <button type="button" className="btn btn-solid" onClick={() => setPickerOpen(false)}>
+                {t('distribution.publish.pickerDone', 'Done')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

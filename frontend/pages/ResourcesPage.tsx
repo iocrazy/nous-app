@@ -1,22 +1,10 @@
-import { useParams } from 'react-router-dom';
 import { ResourcesView } from '../components/ResourcesView';
-import { useTeamContext } from '../contexts/TeamContext';
+import { useWorkspaceScope } from '../hooks/useWorkspaceScope';
 
 export function ResourcesPage() {
-  const { teamId: urlTeamId } = useParams();
-  const { personalTeamId } = useTeamContext();
+  // Scope derivation lives in one shared hook so the Library and Distribution
+  // pages can never disagree on "which library" (see useWorkspaceScope).
+  const { isPersonal, scopeId } = useWorkspaceScope();
 
-  // Use URL teamId directly (not context) to avoid stale state on workspace switch
-  const effectiveTeamId = urlTeamId || personalTeamId;
-  const isPersonal = !effectiveTeamId || effectiveTeamId === personalTeamId;
-
-  // After Spec 1 PR-C, scope_id on resource_items/folders/tags/smart_collections
-  // is the personal-team snowflake (not the user UUID). Pass personalTeamId
-  // for personal mode so the listing query joins correctly.
-  return (
-    <ResourcesView
-      isPersonal={isPersonal}
-      scopeId={isPersonal ? (personalTeamId || '') : (effectiveTeamId || '')}
-    />
-  );
+  return <ResourcesView isPersonal={isPersonal} scopeId={scopeId} />;
 }
