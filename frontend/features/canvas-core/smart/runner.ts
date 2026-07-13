@@ -13,6 +13,7 @@
  * the lifecycle UX stays exercisable without a backend.
  */
 
+import type { EntityRef } from './entityRef';
 import type { PromptGenSettings, PromptNodeData } from './types';
 
 export type PromptStatus = PromptNodeData['run_status'];
@@ -26,6 +27,9 @@ export interface RunnerContext {
   gen?: PromptGenSettings | null;
   /** Durable upstream image (G4-F3) — the i2i/i2v generation source. */
   source_url?: string | null;
+  /** Owning library card (CC5) — stamped into generation params so the
+   *  produced media backlinks to its character/location/prop. */
+  entity_ref?: EntityRef | null;
 }
 
 export interface RunnerResult {

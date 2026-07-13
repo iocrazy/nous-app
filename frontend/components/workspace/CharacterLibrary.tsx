@@ -30,6 +30,7 @@ import {
   listCanvases,
 } from '../../features/canvas-core/services/canvasService';
 import { useToast } from '../Toast';
+import { EntityAssetStrip } from './EntityAssetStrip';
 
 interface CharacterLibraryProps {
   projectId: string;
@@ -283,10 +284,8 @@ export function CharacterLibrary({ projectId }: CharacterLibraryProps) {
             </div>
 
             {/* Asset strip — media linked by character_id lands here (CC5). */}
-            <div className="mt-3 flex items-center justify-between border-t border-ink-800 pt-3">
-              <span className="text-[10px] text-ink-600">
-                {t('characters.assetsHint', 'Generated assets appear here')}
-              </span>
+            <div className="mt-3 flex items-center justify-between gap-3 border-t border-ink-800 pt-3">
+              <EntityAssetStrip entityKind="character" entityId={row.id} />
               <button
                 type="button"
                 onClick={() => void handleOpenCanvas(row)}

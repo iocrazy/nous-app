@@ -82,7 +82,7 @@ async def test_list_passes_kind_filter(monkeypatch, client):
     async def _fake_scope(uid: str) -> str:
         return "7"
 
-    async def _fake_list(scope_id: int, *, kind=None, cursor=None, limit=30):
+    async def _fake_list(scope_id: int, *, kind=None, cursor=None, limit=30, **_):
         captured["kind"] = kind
         captured["scope_id"] = scope_id
         return {"items": [], "next_cursor": None}
@@ -98,6 +98,33 @@ async def test_list_passes_kind_filter(monkeypatch, client):
     assert resp.status_code == 200, resp.text
     assert captured["kind"] == "image"
     assert captured["scope_id"] == 7
+
+
+@pytest.mark.asyncio
+async def test_list_passes_entity_filter(monkeypatch, client):
+    """CC5: entity_kind/entity_id query params are forwarded to the repo."""
+    captured: dict = {}
+
+    async def _fake_scope(uid: str) -> str:
+        return "7"
+
+    async def _fake_list(scope_id: int, **k):
+        captured.update(k)
+        return {"items": [], "next_cursor": None}
+
+    monkeypatch.setattr(r, "_resolve_personal_team_id", _fake_scope)
+    monkeypatch.setattr(
+        r.GeneratedMediaRepository,
+        "list_for_scope",
+        lambda self, sid, **k: _fake_list(sid, **k),
+    )
+
+    resp = await client.get(
+        "/api/v1/generated-media?entity_kind=character&entity_id=123456789"
+    )
+    assert resp.status_code == 200, resp.text
+    assert captured["entity_kind"] == "character"
+    assert captured["entity_id"] == "123456789"
 
 
 @pytest.mark.asyncio
