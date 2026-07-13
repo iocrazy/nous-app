@@ -20,6 +20,7 @@
 // Pure orchestration: caller/handlers/stop are injected, no store access.
 
 import type { CanvasConnection, CanvasNode } from '../types';
+import { resolveEntityRef } from './entityRef';
 import { resolveSourceUrl } from './promptInputs';
 import {
   injectLoopVariables,
@@ -106,6 +107,7 @@ export async function runLoopCascade(opts: LoopRunOptions): Promise<LoopRunSumma
       // path — loop-driven image prompts silently ran as LLM calls (F3 fix).
       gen: d.gen ?? null,
       source_url: resolveSourceUrl(id, opts.nodes, opts.connections),
+      entity_ref: resolveEntityRef(id, opts.nodes, opts.connections),
     });
   }
   if (baseContexts.length === 0) {

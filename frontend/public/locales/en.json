@@ -3076,6 +3076,8 @@
     "bioLabel": "Description",
     "bioPlaceholder": "Look, mood, period, materials…",
     "assetsHint": "Generated assets appear here",
+    "videoAsset": "Video asset",
+    "generatedAsset": "Generated asset",
     "openCanvas": "Open in Canvas",
     "location": {
       "label": "location",

@@ -188,6 +188,48 @@ async def test_list_for_scope_no_next_cursor_when_last_page(monkeypatch):
     assert result["next_cursor"] is None
 
 
+@pytest.mark.asyncio
+async def test_list_for_scope_entity_filter_hits_params_jsonb(monkeypatch):
+    """CC5: entity_kind/entity_id filter on the params jsonb columns."""
+    import app.db.engine as _engine
+
+    captured = {}
+
+    async def _fake_fetch_all(sql, params):
+        captured["sql"] = sql
+        captured["params"] = params
+        return list(_FAKE_ROWS[:1])
+
+    monkeypatch.setattr(_engine, "fetch_all", _fake_fetch_all)
+
+    result = await GeneratedMediaRepository().list_for_scope(
+        42, entity_kind="character", entity_id="123456789", limit=12
+    )
+
+    assert len(result["items"]) == 1
+    assert "params->>'entity_kind'" in captured["sql"]
+    assert "params->>'entity_id'" in captured["sql"]
+    assert captured["params"]["entity_kind"] == "character"
+    assert captured["params"]["entity_id"] == "123456789"
+
+
+@pytest.mark.asyncio
+async def test_list_for_scope_no_entity_filter_by_default(monkeypatch):
+    """Without entity args the SQL must not mention the params jsonb."""
+    import app.db.engine as _engine
+
+    captured = {}
+
+    async def _fake_fetch_all(sql, params):
+        captured["sql"] = sql
+        return list(_FAKE_ROWS[:1])
+
+    monkeypatch.setattr(_engine, "fetch_all", _fake_fetch_all)
+
+    await GeneratedMediaRepository().list_for_scope(42, limit=2)
+    assert "entity_kind" not in captured["sql"]
+
+
 # ---------------------------------------------------------------------------
 # Object-store cleanup on delete (Phase 1d) — dedup refcount guard
 # ---------------------------------------------------------------------------

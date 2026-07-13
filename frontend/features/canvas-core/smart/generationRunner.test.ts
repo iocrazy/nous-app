@@ -78,6 +78,30 @@ describe('withGenerationRunner', () => {
     expect(baseCaller).not.toHaveBeenCalled();
   });
 
+  it('stamps entity ownership into dispatch params (CC5 asset backlink)', async () => {
+    dispatchGenerations.mockResolvedValue(['t1']);
+    pollGeneration.mockResolvedValue({
+      phase: 'completed',
+      metadata: { result_url: '/api/v1/generated-media/1/cover', media_kind: 'image' },
+    });
+
+    const runner = withGenerationRunner(baseCaller, { canvasId: '9' });
+    await runner({
+      ...TEXT_CTX,
+      gen: { kind: 'image', model: '', ratio: '3:4', count: 1 },
+      entity_ref: { kind: 'character', id: '123456789' },
+    });
+
+    expect(dispatchGenerations).toHaveBeenCalledWith('9', {
+      node_id: 'p1',
+      kind: 'image',
+      prompt: 'hello',
+      model: '',
+      count: 1,
+      params: { ratio: '3:4', entity_kind: 'character', entity_id: '123456789' },
+    });
+  });
+
   it('reports a failed task in-band', async () => {
     dispatchGenerations.mockResolvedValue(['t1']);
     pollGeneration.mockResolvedValue({ phase: 'failed', error_msg: 'no credit' });

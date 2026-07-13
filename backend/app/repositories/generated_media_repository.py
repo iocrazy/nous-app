@@ -129,6 +129,8 @@ class GeneratedMediaRepository:
         scope_id: int,
         *,
         kind: Optional[str] = None,
+        entity_kind: Optional[str] = None,
+        entity_id: Optional[str] = None,
         cursor: Optional[str] = None,
         limit: int = 30,
     ) -> dict:
@@ -138,6 +140,15 @@ class GeneratedMediaRepository:
         if kind:
             where.append("media_kind = :kind")
             params["kind"] = kind
+        # CC5 asset backlink: generations dispatched from an entity branch
+        # carry entity_kind/entity_id in params (stamped by the frontend at
+        # dispatch); the library asset strips filter on them (mig 360 index).
+        if entity_kind:
+            where.append("params->>'entity_kind' = :entity_kind")
+            params["entity_kind"] = entity_kind
+        if entity_id:
+            where.append("params->>'entity_id' = :entity_id")
+            params["entity_id"] = entity_id
         decoded = _decode_cursor(cursor)
         if decoded:
             params["c_ts"], params["c_id"] = decoded

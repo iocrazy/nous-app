@@ -23,6 +23,7 @@ import {
   listCanvases,
 } from '../../features/canvas-core/services/canvasService';
 import { useToast } from '../Toast';
+import { EntityAssetStrip } from './EntityAssetStrip';
 
 interface EntityLibraryProps {
   entityType: LibEntityType;
@@ -270,10 +271,8 @@ export function EntityLibrary({ entityType, projectId }: EntityLibraryProps) {
               </div>
             </div>
 
-            <div className="mt-3 flex items-center justify-between border-t border-ink-800 pt-3">
-              <span className="text-[10px] text-ink-600">
-                {t('libEntities.assetsHint', 'Generated assets appear here')}
-              </span>
+            <div className="mt-3 flex items-center justify-between gap-3 border-t border-ink-800 pt-3">
+              <EntityAssetStrip entityKind={entityType} entityId={row.id} />
               <button
                 type="button"
                 onClick={() => void handleOpenCanvas(row)}
