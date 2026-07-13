@@ -166,13 +166,10 @@ async def _list_persistent_agents(agent_repo: Any) -> list[dict[str, Any]]:
     """Persistent agents (worker-style, exposed for delegation) — these
     are the ones with Delegate-as-tool semantics. Skip ephemeral / chat-
     only agents from MCP exposure."""
-    if hasattr(agent_repo, "list_persistent"):
-        return await agent_repo.list_persistent()
-    # Fallback: read all agents.
+    # The old supabase-py fallback here was dead code that could never
+    # succeed (AgentRepository is ORM-only since #959 — no `_get_client`).
     try:
-        client = await agent_repo._get_client()  # noqa: SLF001
-        result = await client.table("ai_agents").select("*").execute()
-        return result.data or []
+        return await agent_repo.list_persistent()
     except Exception:
         return []
 
