@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ArrowLeft, Upload, Link, LayoutGrid, LayoutList, Loader2, FileText, FolderOpen, ChevronDown, Plus, ChevronRight, Folder as FolderIcon, Search, Users, Inbox } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Project, ProjectFile, ProjectFolder, ReviewStatus } from '../types';
-import { fetchProjectFiles, uploadFile, fetchProjectFolders, createProjectFolder, updateFile, deleteFile, updateReviewStatus } from '../services/projectsService';
+import { fetchProjectFiles, uploadFile, fetchProjectFolders, createProjectFolder, updateFile, deleteFile, updateReviewStatus, getProjectFileDownloadUrl } from '../services/projectsService';
 import { FileCard } from './FileCard';
 import { FileInfoPanel } from './FileInfoPanel';
 import { LinkVideoModal } from './LinkVideoModal';
@@ -10,7 +10,7 @@ import { ProjectShareModal } from './ProjectShareModal';
 import { ProjectFileContextMenu } from './ProjectFileContextMenu';
 import { ProjectCollectModal } from './ProjectCollectModal';
 import { useToast } from './Toast';
-import { downloadFile } from '../utils/download';
+import { downloadWithAuth } from '../utils/download';
 
 type SortField = 'updated_at' | 'filename' | 'file_size_bytes';
 type FilterType = 'all' | 'video' | 'image' | 'document' | 'audio';
@@ -207,12 +207,18 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
   };
 
   const handleDownload = async (file: ProjectFile) => {
-    if (file.file_path) {
-      await downloadFile(file.file_path, file.filename || 'download', {
+    // file.file_path is a storage-internal path (legacy fs-relative or
+    // sb://) — never a fetchable URL. Go through the dedicated download
+    // endpoint, which resolves it via the shared reader and forces
+    // Content-Disposition: attachment.
+    await downloadWithAuth(
+      getProjectFileDownloadUrl(project.id, file.id),
+      file.filename || 'download',
+      {
         onSuccess: (f) => addToast(`Downloaded: ${f}`, 'success'),
         onError: (msg) => addToast(`Download failed (${msg})`, 'error'),
-      });
-    }
+      },
+    );
   };
 
   const handleRenameStart = (file: ProjectFile) => {
