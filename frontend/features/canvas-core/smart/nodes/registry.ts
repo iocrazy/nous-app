@@ -6,6 +6,7 @@
  */
 
 import { CharacterNodeView } from './CharacterNodeView';
+import { LibEntityNodeView } from './LibEntityNodeView';
 import { GroupNodeView } from './GroupNodeView';
 import { LoopNodeView } from './LoopNodeView';
 import { OutputNodeView } from './OutputNodeView';
@@ -15,6 +16,8 @@ import { TimelineNodeView } from './TimelineNodeView';
 
 export const SMART_NODE_TYPES = {
   character: CharacterNodeView,
+  location: LibEntityNodeView,
+  prop: LibEntityNodeView,
   shot: ShotNodeView,
   prompt: PromptNodeView,
   group: GroupNodeView,
