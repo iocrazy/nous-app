@@ -416,6 +416,9 @@ export function SceneBlock({
     const node = containerRef.current?.querySelector<HTMLElement>(`[data-el-id="${elementId}"]`);
     if (!node) return;
     node.textContent = text;
+    // A select made from the popup's embedded search input leaves focus in
+    // that input — reclaim it so the caret placement below lands visibly.
+    node.focus();
     const sel = window.getSelection();
     if (!sel) return;
     const range = document.createRange();
@@ -868,11 +871,57 @@ export function SceneBlock({
       }
       const op: ElementOp = { op: 'update', element_id: m.elementId, payload: { text: newText } };
       tiptapRef.current?.replaceElementText(m.elementId, newText);
+      // Selecting from the popup's embedded search input leaves focus there —
+      // focusElement reclaims the editor (caret at the line end). Its
+      // synchronous selection-update may re-open the cue picker, but the
+      // setMention(null) below runs after and wins.
+      tiptapRef.current?.focusElement(m.elementId);
       sync.dispatchOps([op], applyLocal(elementsRef.current, [op]));
       setMention(null);
     },
     [sync],
   );
+
+  // ── Popup-embedded search input paths (laper cue picker) ───────────────
+  // The character-cue popup carries its own input; these mirror the line's
+  // keyboard semantics for keystrokes that happen INSIDE that input.
+  const refocusMentionLine = useCallback(
+    (elementId: string) => {
+      if (tiptapOn) {
+        tiptapRef.current?.focusElement(elementId);
+      } else {
+        containerRef.current?.querySelector<HTMLElement>(`[data-el-id="${elementId}"]`)?.focus();
+      }
+    },
+    [tiptapOn],
+  );
+
+  const handleMentionQueryChange = useCallback((q: string) => {
+    setMention((prev) => (prev ? { ...prev, query: q } : prev));
+  }, []);
+
+  // Tab in the popup input: abandon the cue, revert the block to action
+  // (same semantics as Tab on the line — spec §3.2 laper behaviour).
+  const handleMentionTabAction = useCallback(() => {
+    const m = mentionRef.current;
+    if (!m) return;
+    if (m.kind === 'character') {
+      const op: ElementOp = { op: 'update', element_id: m.elementId, payload: { type: 'action' } };
+      if (tiptapOn) tiptapRef.current?.retypeElement(m.elementId, 'action');
+      sync.dispatchOps([op], applyLocal(elementsRef.current, [op]));
+    }
+    refocusMentionLine(m.elementId);
+    setMention(null);
+  }, [sync, tiptapOn, refocusMentionLine]);
+
+  // Escape in the popup input: close and hand focus back to the line. Refocus
+  // FIRST — its selection-update may re-open the picker, and the close below
+  // must win.
+  const handleMentionPopClose = useCallback(() => {
+    const m = mentionRef.current;
+    if (m) refocusMentionLine(m.elementId);
+    setMention(null);
+  }, [refocusMentionLine]);
 
   const tiptapMentionMenu: MenuBridge | null = useMemo(() => {
     if (!mention) return null;
@@ -1528,6 +1577,10 @@ export function SceneBlock({
           // based `handleTiptapMentionSelect` instead.
           onSelect={tiptapOn ? handleTiptapMentionSelect : handleMentionSelect}
           onHover={setMentionActive}
+          kind={mention.kind}
+          onQueryChange={handleMentionQueryChange}
+          onTabAction={handleMentionTabAction}
+          onClose={handleMentionPopClose}
         />
       )}
 
