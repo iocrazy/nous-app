@@ -81,11 +81,18 @@ async def _scope(auth) -> int:
 async def list_generations(
     auth: AuthDep,
     kind: Optional[str] = Query(None),
+    entity_kind: Optional[str] = Query(None, pattern="^(character|location|prop)$"),
+    entity_id: Optional[str] = Query(None, max_length=32),
     cursor: Optional[str] = Query(None),
     limit: int = Query(30, ge=1, le=100),
 ) -> dict:
     page = await GeneratedMediaRepository().list_for_scope(
-        await _scope(auth), kind=kind, cursor=cursor, limit=limit
+        await _scope(auth),
+        kind=kind,
+        entity_kind=entity_kind,
+        entity_id=entity_id,
+        cursor=cursor,
+        limit=limit,
     )
     return {"data": page}
 
