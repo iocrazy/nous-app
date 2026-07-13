@@ -12,6 +12,7 @@
 // (user edits — undoable).
 
 import type { CanvasNode } from '../types';
+import { stripRfInternals } from '../store/canvasCoreStore';
 
 const GROUP_PADDING = 24;
 const FALLBACK_W = 240;
@@ -267,11 +268,11 @@ export function applyDropMembership(
 
   if (hit && hitId) {
     const hitPos = asObj(hit).position as { x: number; y: number };
-    const adopted = {
+    const adopted = stripRfInternals({
       ...(dragged as object),
       parentId: hitId,
       position: { x: abs.x - hitPos.x, y: abs.y - hitPos.y },
-    } as CanvasNode;
+    } as CanvasNode);
     // RF requires parents before children: re-append the dragged node after
     // everything (also puts it on top inside the container).
     const rest = nodes.filter((n) => String(asObj(n).id) !== draggedId);
@@ -280,6 +281,6 @@ export function applyDropMembership(
 
   // Dropped on open canvas while parented → release to absolute coords.
   const { parentId: _drop, ...restFields } = dragged as unknown as Record<string, unknown>;
-  const released = { ...restFields, position: abs } as CanvasNode;
+  const released = stripRfInternals({ ...restFields, position: abs } as CanvasNode);
   return nodes.map((n) => (String(asObj(n).id) === draggedId ? released : n));
 }

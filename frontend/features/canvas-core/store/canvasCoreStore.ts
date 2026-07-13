@@ -60,7 +60,7 @@ const RF_INTERNAL_KEYS = [
   'positionAbsolute',
 ] as const;
 
-function stripRfInternals(node: CanvasNode): CanvasNode {
+export function stripRfInternals(node: CanvasNode): CanvasNode {
   const obj = node as Record<string, unknown>;
   let dirty = false;
   for (const k of RF_INTERNAL_KEYS) {
@@ -264,7 +264,11 @@ export function createCanvasCoreStore(
         kind: row.kind,
         name: row.name ?? null,
         viewport: row.viewport_json ?? IDENTITY_VIEWPORT,
-        nodes: row.nodes_json ?? [],
+        // Sanitize on load: interaction paths (alignment snap, group
+        // membership) historically persisted RF-internal size snapshots
+        // (measured/width/height) into rows — stale ones clamp a node's
+        // rendered box below its content (dangling-selects screenshot).
+        nodes: (row.nodes_json ?? []).map(stripRfInternals),
         connections: row.connections_json ?? [],
         nodeOps: row.node_ops_json ?? [],
         connectionOps: row.connection_ops_json ?? [],

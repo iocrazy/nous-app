@@ -156,3 +156,30 @@ describe('applyDropMembership', () => {
     expect(applyDropMembership(nodes, 'inner')).toBeNull();
   });
 });
+
+describe('applyDropMembership strips RF-internal fields', () => {
+  it('adopted and released nodes never keep measured/width/height snapshots', () => {
+    const dirty = {
+      ...n('a', 120, 120),
+      width: 280,
+      height: 120,
+      selected: true,
+      dragging: false,
+    } as unknown as CanvasNode;
+    const absorbed = applyDropMembership([dirty, grp('g1', 100, 100, 300, 200)], 'a')!;
+    const a = absorbed.find((x) => (x as { id: string }).id === 'a') as Record<string, unknown>;
+    expect(a.measured).toBeUndefined();
+    expect(a.width).toBeUndefined();
+    expect(a.selected).toBeUndefined();
+
+    const child = {
+      ...n('b', 500, 500, { parentId: 'g1' }),
+      width: 280,
+      height: 120,
+    } as unknown as CanvasNode;
+    const released = applyDropMembership([grp('g1', 100, 100, 300, 200), child], 'b')!;
+    const b = released.find((x) => (x as { id: string }).id === 'b') as Record<string, unknown>;
+    expect(b.width).toBeUndefined();
+    expect(b.measured).toBeUndefined();
+  });
+});
