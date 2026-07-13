@@ -15,9 +15,9 @@ def _mod(module_id):
     return MODULES_BY_ID[module_id]
 
 
-def test_registry_lists_the_two_modules_with_correct_defaults():
+def test_registry_lists_all_modules_with_correct_defaults():
     ids = {m.id for m in MODULES}
-    assert ids == {"topic-inspiration", "distribution"}
+    assert ids == {"topic-inspiration", "distribution", "script-tiptap"}
 
     topic = MODULES_BY_ID["topic-inspiration"]
     assert topic.key == "topics.module"
@@ -29,9 +29,15 @@ def test_registry_lists_the_two_modules_with_correct_defaults():
     assert dist.enabled_default is False
     assert dist.visible_default is False  # fail-closed
 
+    tiptap = MODULES_BY_ID["script-tiptap"]
+    assert tiptap.key == "editor.tiptap_surface"
+    assert tiptap.enabled_default is False
+    assert tiptap.visible_default is False  # fail-closed (legacy engine)
+
     # by-key index is consistent with by-id
     assert MODULES_BY_KEY["topics.module"] is topic
     assert MODULES_BY_KEY["distribution.module"] is dist
+    assert MODULES_BY_KEY["editor.tiptap_surface"] is tiptap
 
 
 def test_parse_dict_value_reads_both_fields():
