@@ -94,6 +94,7 @@ describe('CanvasListPage', () => {
     await waitFor(() => {
       expect(createCanvas).toHaveBeenCalledWith('p1', {
         name: 'Untitled Canvas',
+        kind: 'smart',
       });
       expect(mockNavigate).toHaveBeenCalledWith('/team/team-1/canvas/c-new');
     });

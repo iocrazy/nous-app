@@ -9,7 +9,7 @@ Library chat path and is overkill here.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -68,104 +68,3 @@ class CanvasPromptRunResult(BaseModel):
     text: str = ""
     error: Optional[str] = None
     result: Optional[Dict[str, Any]] = None
-
-
-# ---------------------------------------------------------------------------
-# ClassicMode node run (Phase 5a path B)
-# ---------------------------------------------------------------------------
-
-
-class ClassicNodePayload(BaseModel):
-    """One ClassicMode node: type + opaque data + id.
-
-    Mirrors the frontend ``features/canvas-core/classic/registry.ts`` node
-    shape closely enough to dispatch server-side. ``data`` is opaque on the
-    wire — the dispatch layer reads provider/workflow/op params out of it.
-    """
-
-    id: str = Field(..., description="Classic node id")
-    type: str = Field(..., description="Classic node type (llm/comfy/image_gen/...)")
-    data: Dict[str, Any] = Field(default_factory=dict)
-
-
-class ClassicNodeRunRequest(BaseModel):
-    """Frontend → backend payload for running one ClassicMode node.
-
-    Replaces the old frontend dispatch-mirror: the cascade no longer guesses
-    a provider_slug client-side; it hands the node here and the server resolves
-    the route (provider vs op vs reject).
-    """
-
-    canvas_id: str = Field(..., description="Snowflake canvas id (string)")
-    node: ClassicNodePayload
-    body: str = Field(
-        default="",
-        max_length=10_000,
-        description=(
-            "Upstream/aggregated text fed into the node (e.g. the prompt for "
-            "an llm node). image_gen prefers its own data.prompt but falls "
-            "back to this."
-        ),
-    )
-    agent_id: Optional[str] = Field(
-        default=None,
-        description="AI Library agent id (UUID) for persona injection. Null = bare.",
-    )
-
-
-class ClassicNodeRunResponse(BaseModel):
-    """Backend → frontend reply for a ClassicMode node run.
-
-    Same in-band contract as CanvasPromptRunResponse: ``ok=False`` always
-    carries a non-null ``error``; HTTP stays 200 for normal runs. ``result``
-    carries structured output (image_url for image_gen).
-    """
-
-    ok: bool
-    text: str = ""
-    error: Optional[str] = None
-    result: Optional[Dict[str, Any]] = None
-    response_kind: Literal["classic_node_run"] = "classic_node_run"
-
-
-# ---------------------------------------------------------------------------
-# Full-graph canvas run (Phase 6d / M1)
-# ---------------------------------------------------------------------------
-
-
-class CanvasGraphRunRequest(BaseModel):
-    """Enqueue a full-graph canvas run (Phase 6d M1).
-
-    The frontend computes topo-sort order (reusing ``topology.ts:topoSortPrompts``)
-    and sends the node IDs in execution order. The backend DBOS workflow runs
-    each node sequentially via the existing CanvasRunService.
-    """
-
-    canvas_id: str = Field(..., description="Snowflake canvas id (string)")
-    node_order: List[str] = Field(
-        ...,
-        description=(
-            "Node IDs in topo-sorted execution order "
-            "(frontend supplies via topoSortPrompts)"
-        ),
-    )
-    continue_on_failure: bool = Field(
-        default=False,
-        description=(
-            "When True the workflow continues running remaining nodes even when "
-            "an earlier node fails. The parent workflow still raises at the end "
-            "when any node failed so task_tracking reflects the partial failure."
-        ),
-    )
-
-
-class CanvasGraphRunResponse(BaseModel):
-    """Immediate response: the workflow is enqueued, not yet complete.
-
-    ``task_id`` == ``dbos_workflow_id`` — both are the same UUID, exposed
-    as two fields so the frontend can treat ``task_id`` as an opaque handle
-    and also poll ``/api/v1/workflows/{dbos_workflow_id}`` for status.
-    """
-
-    task_id: str = Field(..., description="task_tracking row key (== dbos_workflow_id)")
-    dbos_workflow_id: str = Field(..., description="DBOS workflow id (== task_id)")

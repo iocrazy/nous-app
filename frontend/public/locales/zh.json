@@ -1697,8 +1697,9 @@
     "groupLoadFailed": "加载该项目的画布失败",
     "createFailed": "创建画布失败",
     "kind": {
-      "smart": "智能",
-      "classic": "经典"
+      "smart": "普通",
+      "classic": "经典",
+      "lite": "智能"
     },
     "moveToTrash": "移入回收站",
     "movedToTrash": "已移入回收站",

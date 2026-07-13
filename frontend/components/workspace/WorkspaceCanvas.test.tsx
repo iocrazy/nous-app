@@ -69,15 +69,33 @@ describe('WorkspaceCanvas', () => {
     render(<WorkspaceCanvas projectId="p1" teamId="t1" />);
     await screen.findByRole('button', { name: /New Canvas/ });
 
-    // The tile opens the IC-style dialog; Create submits the name only —
-    // the backend defaults the kind (classic is retired).
+    // The tile opens the IC-style dialog; Create submits name + kind
+    // (Standard = kind 'smart' is the default toggle option).
     fireEvent.click(screen.getByRole('button', { name: /New Canvas/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
     await waitFor(() => {
       expect(mockService.createCanvas).toHaveBeenCalledWith('p1', {
         name: 'Untitled Canvas',
+        kind: 'smart',
       });
       expect(mockNavigate).toHaveBeenCalledWith('/team/t1/canvas/c9');
+    });
+  });
+
+  it('picking the Smart option creates a lite canvas', async () => {
+    mockService.listCanvases.mockResolvedValue([]);
+    mockService.createCanvas.mockResolvedValue({ id: 'c10' });
+    render(<WorkspaceCanvas projectId="p1" teamId="t1" />);
+    await screen.findByRole('button', { name: /New Canvas/ });
+
+    fireEvent.click(screen.getByRole('button', { name: /New Canvas/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Smart' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    await waitFor(() => {
+      expect(mockService.createCanvas).toHaveBeenCalledWith(
+        'p1',
+        expect.objectContaining({ kind: 'lite' }),
+      );
     });
   });
 

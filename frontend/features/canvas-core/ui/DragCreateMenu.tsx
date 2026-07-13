@@ -143,11 +143,19 @@ export function DragCreateMenu({
     ) as { type?: string } | undefined;
     const srcType = srcNode?.type;
     if (isSmartFamily(kind)) {
+      // Lite ("Smart") canvases keep IC's four-card menu: upload / group /
+      // prompt / loop — the workflow-only nodes stay Standard-canvas tools.
+      const items =
+        kind === 'lite'
+          ? SMART_ITEMS.filter((i) =>
+              ['media', 'group', 'prompt', 'loop'].includes(i.type),
+            )
+          : SMART_ITEMS;
       // No origin (pane double-click / right-click, P1-1): every node type.
-      if (!fromNodeId) return SMART_ITEMS;
+      if (!fromNodeId) return items;
       // Only node types the source may legally feed (excludes e.g. Shot as a
       // target and anything when the source is an Output).
-      return SMART_ITEMS.filter((item) => canConnectSmart(srcType, item.type));
+      return items.filter((item) => canConnectSmart(srcType, item.type));
     }
     return [];
   }, [kind, nodes, fromNodeId]);

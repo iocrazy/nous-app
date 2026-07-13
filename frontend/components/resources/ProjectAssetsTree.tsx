@@ -3,6 +3,7 @@
 // A synthetic "Chat Uploads" root sits above the projects.
 
 import React, { useEffect, useState } from 'react';
+import type { CreatableCanvasKind } from '../../features/canvas-core/types';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ChevronDown, ChevronRight, Layers, MessageSquare, Plus, Sparkles } from 'lucide-react';
@@ -65,13 +66,14 @@ export const ProjectAssetsTree: React.FC<Props> = ({ selection, onSelect, chatUp
   // The new canvas has no nodes yet, so batch A's orphan filter keeps it out
   // of THIS tree until a node is added — that's why we navigate rather than
   // refresh the tree in place.
-  const handleCreateCanvas = async ({ name }: { name: string }) => {
+  const handleCreateCanvas = async ({ name, kind }: { name: string; kind: CreatableCanvasKind }) => {
     const projectId = dialogProjectId;
     if (!projectId || creatingProjectId) return;
     setCreatingProjectId(projectId);
     try {
       const canvas = await createCanvas(projectId, {
         name: name || t('projectAssets.untitledCanvas', 'Untitled Canvas'),
+        kind,
       });
       navigate(`/team/${teamId}/canvas/${canvas.id}`);
     } catch (err) {

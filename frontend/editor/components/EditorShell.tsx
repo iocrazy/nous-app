@@ -58,6 +58,8 @@ import {
   type SceneWindow,
 } from '../windowing';
 import { EDITOR_SHELL_STYLES } from './editorShellStyles';
+import { isTiptapEnabled } from '../tiptap/flag';
+import { fetchTiptapModuleStatus } from '../tiptap/moduleStatus';
 import { sceneBlockBases } from './blockNumbering';
 import {
   SceneBlock,
@@ -738,6 +740,26 @@ export function EditorShell({
     [scenes],
   );
 
+  // ── TipTap surface switch (M4 cutover) ────────────────────────────────────
+  // The OFFICIAL toggle is the admin module registry (system_settings
+  // ['editor.tiptap_surface'], the project's single toggle convention),
+  // fetched once per mount and fail-closed. localStorage 'editor.tiptap'
+  // stays as a per-browser emergency override; env is a dev-only fallback.
+  // Until the fetch resolves (null) the resolver falls back to override/env —
+  // i.e. legacy by default, with at most one surface swap shortly after load
+  // when the admin switch is ON.
+  const [tiptapDb, setTiptapDb] = useState<boolean | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetchTiptapModuleStatus().then((enabled) => {
+      if (alive) setTiptapDb(enabled);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const tiptapSurface = isTiptapEnabled(tiptapDb);
+
   // ── Paged-mode page seams (v2 — real page look) ───────────────────────────
   // Measure the sheet's rows after layout, subtract any already-rendered seam
   // heights to get stable CONTENT coordinates (one-pass fixed point: inserting
@@ -1326,6 +1348,7 @@ export function EditorShell({
                             onCrossSceneDelete={handleCrossSceneDelete}
                             onRegisterExternalOps={handleRegisterExternalOps}
                             pageSeams={pageSeams}
+                            tiptapSurface={tiptapSurface}
                             onRegisterRemoteApply={
                               COLLAB_ENABLED ? registerRemoteApply : undefined
                             }

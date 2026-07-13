@@ -190,6 +190,11 @@ export interface SceneBlockProps {
   onRegisterExternalOps?: (sceneId: string, fn: ((ops: ElementOp[]) => void) | null) => void;
   /** Paged mode v2: page seams keyed by element id (rendered before that row). */
   pageSeams?: Map<string, { page: number; filler: number }>;
+  /** TipTap surface switch RESOLVED BY THE SHELL (admin module registry →
+   *  localStorage emergency override → env dev fallback). When omitted the
+   *  block resolves locally (override/env only) — keeps standalone renders
+   *  and existing tests working. */
+  tiptapSurface?: boolean;
 }
 
 /** Which half of a block the pointer is over → the drop edge. */
@@ -223,6 +228,7 @@ export function SceneBlock({
   onCrossSceneDelete,
   onRegisterExternalOps,
   pageSeams,
+  tiptapSurface,
 }: SceneBlockProps) {
   const { t } = useTranslation();
   const sync = useSceneSync(scene, { selfActorId });
@@ -290,7 +296,7 @@ export function SceneBlock({
   const composingRef = useRef(false);
   // TipTap editing surface (flag-dark, spec D7): re-read per render (not a
   // frozen module const) so tests can `vi.stubEnv` it — see tiptap/flag.ts.
-  const tiptapOn = isTiptapEnabled();
+  const tiptapOn = tiptapSurface ?? isTiptapEnabled();
   const tiptapRef = useRef<TipTapSceneEditorHandle>(null);
   const elementsRef = useRef<ScriptElement[]>(sync.elements);
   const inputTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});

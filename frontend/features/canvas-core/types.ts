@@ -11,7 +11,7 @@
 // 'classic' (canvas 1.0 engine) is RETIRED: no new classic canvases can be
 // created and the engine is gone, but the kind stays in the union because
 // soft-deleted rows in the trash still serialize with it.
-export type CanvasKind = 'smart' | 'classic' | 'character' | 'location' | 'prop';
+export type CanvasKind = 'smart' | 'lite' | 'classic' | 'character' | 'location' | 'prop';
 
 /** Kinds a NEW canvas may be created with (mirror of backend
  *  `CreatableCanvasKind`) — everything except the retired 'classic'. */
@@ -21,7 +21,11 @@ export type CreatableCanvasKind = Exclude<CanvasKind, 'classic'>;
  *  pipeline). 'character' is smart + CharacterNode + a preset workflow.
  *  Accepts null (store kind before load) for call-site convenience. */
 export const isSmartFamily = (kind: CanvasKind | null | undefined): boolean =>
-  kind === 'smart' || kind === 'character' || kind === 'location' || kind === 'prop';
+  kind === 'smart' ||
+  kind === 'lite' ||
+  kind === 'character' ||
+  kind === 'location' ||
+  kind === 'prop';
 
 /** The library-entity canvas kinds — each seeds its own preset workflow. */
 export type EntityCanvasKind = 'character' | 'location' | 'prop';

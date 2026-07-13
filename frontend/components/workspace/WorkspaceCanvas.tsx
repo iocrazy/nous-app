@@ -22,7 +22,7 @@ import {
   createCanvas,
   listCanvases,
 } from '../../features/canvas-core/services/canvasService';
-import type { Canvas } from '../../features/canvas-core/types';
+import type { Canvas, CreatableCanvasKind } from '../../features/canvas-core/types';
 import { NewCanvasDialog } from '../../features/canvas-core/ui/NewCanvasDialog';
 import { formatRelativeTime } from '../../utils/relativeTime';
 import { CanvasCardPreview } from './CanvasCardPreview';
@@ -66,14 +66,15 @@ export function WorkspaceCanvas({ projectId, teamId }: WorkspaceCanvasProps) {
   const editorPath = (canvasId: string) =>
     teamId ? `/team/${teamId}/canvas/${canvasId}` : `/canvas/${canvasId}`;
 
-  // IC-style create dialog (name only) — the actual POST happens here once
-  // the dialog submits; the backend defaults the kind to smart.
-  const handleCreate = async ({ name }: { name: string }) => {
+  // IC-style create dialog (name + Standard/Smart kind) — the actual POST
+  // happens here once the dialog submits.
+  const handleCreate = async ({ name, kind }: { name: string; kind: CreatableCanvasKind }) => {
     if (creating) return;
     setCreating(true);
     try {
       const canvas = await createCanvas(projectId, {
         name: name || t('canvasList.untitled', 'Untitled Canvas'),
+        kind,
       });
       navigate(editorPath(String(canvas.id)));
     } catch (err) {
@@ -136,10 +137,10 @@ export function WorkspaceCanvas({ projectId, teamId }: WorkspaceCanvasProps) {
                 {canvas.name || t('canvasList.untitled', 'Untitled Canvas')}
               </span>
               <div className="flex items-center gap-2 text-[11px] text-ink-500">
-                {canvas.kind === 'smart' ? (
+                {canvas.kind === 'lite' ? (
                   <span className="inline-flex items-center gap-1 rounded-full bg-indigo-500/10 px-2 py-0.5 font-medium text-indigo-500">
                     <Sparkles size={10} />
-                    {t('canvasList.kind.smart', 'Smart')}
+                    {t('canvasList.kind.lite', 'Smart')}
                   </span>
                 ) : (
                   <span className="rounded-full bg-ink-800 px-2 py-0.5 text-ink-400">
