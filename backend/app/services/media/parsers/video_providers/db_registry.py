@@ -11,63 +11,30 @@ here, dispatching on the row's ``actual_provider``:
     lower-priority fallback).
   - ``doubao`` / ``ark`` → the OpenAI-compatible Ark image endpoint.
 
+Row SELECTION lives here (``_enabled_rows`` / ``_pick_row``); CONSTRUCTION of
+the actual provider/adapter is delegated to the matching provider protocol
+(``resolve_generation_protocol(actual_provider).build_image_provider(row)`` /
+``.build_video_provider(row)`` — see ``app.services.ai.provider_protocols``).
 Image callers use the ``BaseImageProvider.generate`` contract, so the CLI
 provider is wrapped in ``_JimengImageAdapter`` (returns an ``ImageGenResult``
-with ``image_path`` set — a local file, not a URL). Video callers use
-``JimengCliProvider.generate_video`` directly (only the CLI has a wired video
-path today), so ``resolve_video_provider`` returns the provider as-is.
+with ``image_path`` set — a local file, not a URL; the adapter class now lives
+in ``provider_protocols.jimeng``, next to the protocol that builds it). Video
+callers use ``JimengCliProvider.generate_video`` directly (only the CLI has a
+wired video path today), so ``resolve_video_provider`` returns the provider
+as-is.
 """
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import TYPE_CHECKING, Optional, Tuple
 
 from loguru import logger
 
-from app.services.media.parsers.video_providers.ark_image import ArkImageProvider
-from app.services.media.parsers.video_providers.base import (
-    BaseImageProvider,
-    ImageGenResult,
-    TaskStatus,
-)
-from app.services.media.parsers.video_providers.jimeng_cli import JimengCliProvider
-
-_ARK_PROVIDERS = {"doubao", "ark"}
-_JIMENG_PROVIDERS = {"jimeng-cli", "jimeng"}
-
-
-class _JimengImageAdapter(BaseImageProvider):
-    """Adapts JimengCliProvider onto the BaseImageProvider ``generate`` contract.
-
-    ``generate`` returns an ``ImageGenResult`` whose ``image_path`` is the local
-    file the CLI produced (``image_url`` stays empty — there is no URL). The
-    downstream persist step ingests the local file via ``source_path``.
-    """
-
-    def __init__(self, provider: JimengCliProvider) -> None:
-        self._provider = provider
-
-    async def generate(self, prompt: str, model: str, **kwargs) -> ImageGenResult:
-        result = await self._provider.generate_image(
-            prompt=prompt,
-            aspect=kwargs.get("aspect_ratio") or "",
-            model_version=model or None,
-        )
-        return ImageGenResult(
-            image_url="",
-            image_path=result.local_path,
-            provider="jimeng-cli",
-            model=model or "",
-            metadata={"mime": result.mime, **(result.raw or {})},
-        )
-
-    async def check_status(self, task_id: str) -> TaskStatus:
-        raise NotImplementedError(
-            "JimengCliProvider generation is synchronous; check_status is n/a"
-        )
-
-    def list_models(self) -> list[str]:
-        return []
+if TYPE_CHECKING:
+    from app.services.media.parsers.video_providers.base import BaseImageProvider
+    from app.services.media.parsers.video_providers.jimeng_cli import (
+        JimengCliProvider,
+    )
 
 
 def _pick_row(rows: list[dict], name: Optional[str], jimeng_first: bool = True) -> dict:
@@ -81,11 +48,19 @@ def _pick_row(rows: list[dict], name: Optional[str], jimeng_first: bool = True) 
         if match is not None:
             return match
     if jimeng_first:
+        from app.services.ai.provider_protocols import resolve_generation_protocol
+
         jimeng = next(
             (
                 r
                 for r in rows
-                if (r.get("actual_provider") or "").lower() in _JIMENG_PROVIDERS
+                if (
+                    protocol := resolve_generation_protocol(
+                        r.get("actual_provider") or ""
+                    )
+                )
+                is not None
+                and protocol.generation_family == "jimeng-cli"
             ),
             None,
         )
@@ -125,31 +100,22 @@ async def resolve_image_provider(
 
     row = _pick_row(image_rows, name)
     actual_provider = (row.get("actual_provider") or "").lower()
-    actual_model = row.get("actual_model") or ""
 
-    if actual_provider in _JIMENG_PROVIDERS:
-        logger.info(
-            "Resolved image provider from catalog: jimeng-cli (model={})", actual_model
-        )
-        return _JimengImageAdapter(JimengCliProvider()), actual_model
+    from app.services.ai.provider_protocols import resolve_generation_protocol
 
-    if actual_provider in _ARK_PROVIDERS:
-        provider = ArkImageProvider(
-            api_key=row.get("api_key") or "",
-            base_url=row.get("base_url") or "",
-            default_model=actual_model,
+    protocol = resolve_generation_protocol(actual_provider)
+    if protocol is None:
+        raise RuntimeError(
+            f"No image provider implementation for actual_provider="
+            f"{actual_provider!r} (catalog row name={row.get('name')!r})"
         )
-        logger.info(
-            "Resolved image provider from catalog: {} (model={})",
-            actual_provider,
-            actual_model,
-        )
-        return provider, actual_model
-
-    raise RuntimeError(
-        f"No image provider implementation for actual_provider="
-        f"{actual_provider!r} (catalog row name={row.get('name')!r})"
+    provider, actual_model = protocol.build_image_provider(row)
+    logger.info(
+        "Resolved image provider from catalog: {} (model={})",
+        actual_provider,
+        actual_model,
     )
+    return provider, actual_model
 
 
 async def resolve_video_provider(
@@ -170,15 +136,17 @@ async def resolve_video_provider(
 
     row = _pick_row(video_rows, name)
     actual_provider = (row.get("actual_provider") or "").lower()
-    actual_model = row.get("actual_model") or ""
 
-    if actual_provider in _JIMENG_PROVIDERS:
-        logger.info(
-            "Resolved video provider from catalog: jimeng-cli (model={})", actual_model
+    from app.services.ai.provider_protocols import resolve_generation_protocol
+
+    protocol = resolve_generation_protocol(actual_provider)
+    if protocol is None or protocol.generation_family != "jimeng-cli":
+        raise RuntimeError(
+            f"No video provider implementation for actual_provider="
+            f"{actual_provider!r} (catalog row name={row.get('name')!r})"
         )
-        return JimengCliProvider(), actual_model
-
-    raise RuntimeError(
-        f"No video provider implementation for actual_provider="
-        f"{actual_provider!r} (catalog row name={row.get('name')!r})"
+    provider, actual_model = protocol.build_video_provider(row)
+    logger.info(
+        "Resolved video provider from catalog: jimeng-cli (model={})", actual_model
     )
+    return provider, actual_model
