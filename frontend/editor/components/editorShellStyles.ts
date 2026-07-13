@@ -591,22 +591,28 @@ export const EDITOR_SHELL_STYLES = `
   box-decoration-break:clone; -webkit-box-decoration-break:clone;
 }
 .mh-mention.unknown{ color:var(--ink-faint); background:var(--surface-2); font-weight:500; }
+/* Unified with the APP-WIDE dropdown (UiSelect in ui/primitives.tsx — the AI
+   model selector): same always-dark panel tokens (--ui-surface-panel /
+   --ui-border-soft / --ui-shadow-panel, defined once at :root), 6px radius,
+   px-3 py-2 text-sm options, accent-filled active row. User rule: every
+   floating option list in the product shares ONE look. */
 .mh-mention-pop{
-  z-index:20; min-width:180px; max-width:260px; margin-top:2px;
-  background:var(--surface); border:1px solid var(--surface-border);
-  border-radius:var(--radius-md); box-shadow:var(--shadow-float);
-  padding:5px; font-family:var(--sans);
+  z-index:20; min-width:190px; max-width:280px; margin-top:2px;
+  background:var(--ui-surface-panel); border:1px solid var(--ui-border-soft);
+  border-radius:6px; box-shadow:var(--ui-shadow-panel);
+  padding:4px; font-family:var(--sans);
 }
-.mh-mention-list{ list-style:none; margin:0; padding:0; max-height:220px; overflow-y:auto; }
+.mh-mention-list{ list-style:none; margin:0; padding:0; max-height:228px; overflow-y:auto; }
 .mh-mention-opt{
-  padding:7px 10px; border-radius:var(--radius-sm); font-size:12.5px;
-  color:var(--ink-soft); cursor:pointer; white-space:nowrap;
+  padding:8px 12px; border-radius:4px; font-size:13px;
+  color:#e4e4e7; cursor:pointer; white-space:nowrap;
   overflow:hidden; text-overflow:ellipsis;
+  transition:background 0.12s ease;
 }
-.mh-mention-opt:hover,
-.mh-mention-opt.active{ background:var(--indigo-soft); color:var(--indigo-deep); }
+.mh-mention-opt:hover{ background:rgba(255,255,255,0.08); }
+.mh-mention-opt.active{ background:var(--accent); color:#fff; }
 .mh-mention-opt[aria-selected='true']{ font-weight:600; }
-.mh-mention-empty{ padding:8px 10px; font-size:12px; color:var(--ink-faint); }
+.mh-mention-empty{ padding:8px 12px; font-size:12.5px; color:var(--text-muted); }
 
 /* Outline / Cover placeholders (read-only in Phase 1) */
 .mh-doc-outline{ font-family:var(--sans); color:var(--sheet-ink); }
@@ -1506,24 +1512,28 @@ export const EDITOR_SHELL_STYLES = `
 /* ── Slash menu (the "/" block-type picker) ── mirrors the mention popup.
    NOTE: never put backticks inside this template literal — one terminated the
    string early and the whole stylesheet evaluated to NaN (total unstyle). */
+/* Unified with the app-wide dropdown (UiSelect) — same DNA as .mh-mention-pop
+   above: one look for every floating option list in the product. */
 .mh-slash-menu{
   position:absolute; z-index:30; min-width:190px;
-  background:var(--surface); border:1px solid var(--surface-border);
-  border-radius:10px; box-shadow:var(--shadow-float); padding:4px;
+  background:var(--ui-surface-panel); border:1px solid var(--ui-border-soft);
+  border-radius:6px; box-shadow:var(--ui-shadow-panel); padding:4px;
   font-family:var(--sans);
 }
 .mh-slash-item{
   display:flex; align-items:center; gap:9px; width:100%; text-align:left;
-  padding:6px 10px; border:none; border-radius:6px; background:none;
-  font-size:12.5px; color:var(--ink); cursor:pointer;
+  padding:8px 12px; border:none; border-radius:4px; background:none;
+  font-size:13px; color:#e4e4e7; cursor:pointer;
+  transition:background 0.12s ease;
 }
-.mh-slash-item.active{ background:var(--indigo-soft); color:var(--indigo-deep); }
+.mh-slash-item:hover{ background:rgba(255,255,255,0.08); }
+.mh-slash-item.active{ background:var(--accent); color:#fff; }
 .mh-slash-glyph{
   width:18px; text-align:center; font-family:var(--mono); font-size:11px;
-  color:var(--ink-faint); flex-shrink:0;
+  color:var(--text-muted); flex-shrink:0;
 }
-.mh-slash-item.active .mh-slash-glyph{ color:var(--indigo-deep); }
-.mh-slash-empty{ padding:7px 10px; font-size:12px; color:var(--ink-faint); }
+.mh-slash-item.active .mh-slash-glyph{ color:#fff; }
+.mh-slash-empty{ padding:8px 12px; font-size:12.5px; color:var(--text-muted); }
 
 /* ── Paged mode v2: real page seams. An IN-FLOW band between rows: filler pads
    the current page to fixed height, then paper-bottom edge, an inter-page gap
