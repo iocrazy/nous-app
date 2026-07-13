@@ -33,7 +33,7 @@ from app.repositories.resources_repository import (
     EXPIRED_TRASH_BATCH,
     ResourcesRepository,
 )
-from app.services.library.media_storage import store_local_file
+from app.services.library.media_storage import resolve_media_source, store_local_file
 
 
 async def _resolve_personal_team_id(user_id: str) -> str:
@@ -945,34 +945,46 @@ class ResourcesService:
                 logger.info(f"[Transcode] Skip: no file_path for version {version_id}")
                 return
 
-            file_path = Path(settings.DOWNLOAD_PATH) / version["file_path"]
-            if not file_path.exists():
-                logger.info(f"[Transcode] Skip: file not found {file_path}")
-                return
+            loc = resolve_media_source(version["file_path"])
+            if loc.is_object_store:
+                # sb:// rows have no local file to stat/ffprobe — gate from
+                # facts already on the version row instead of downloading a
+                # temp copy just to decide the gate: file_size_bytes is
+                # written at upload, duration_seconds is persisted by
+                # upload_postprocess Phase A (which reads via materialize)
+                # before this Phase C dispatch runs. The transcode workflow
+                # itself materializes the source when it actually runs.
+                file_size_mb = (version.get("file_size_bytes") or 0) / (1024 * 1024)
+                duration_sec = version.get("duration_seconds")
+            else:
+                file_path = Path(settings.DOWNLOAD_PATH) / version["file_path"]
+                if not file_path.exists():
+                    logger.info(f"[Transcode] Skip: file not found {file_path}")
+                    return
 
-            file_size_mb = file_path.stat().st_size / (1024 * 1024)
+                file_size_mb = file_path.stat().st_size / (1024 * 1024)
 
-            # Async duration probe
-            duration_sec = None
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    "ffprobe",
-                    "-v",
-                    "error",
-                    "-show_entries",
-                    "format=duration",
-                    "-of",
-                    "default=noprint_wrappers=1:nokey=1",
-                    str(file_path),
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    **safe_popen_kwargs(),
-                )
-                stdout, _ = await proc.communicate()
-                if proc.returncode == 0 and stdout.strip():
-                    duration_sec = float(stdout.strip())
-            except Exception:
-                pass
+                # Async duration probe
+                duration_sec = None
+                try:
+                    proc = await asyncio.create_subprocess_exec(
+                        "ffprobe",
+                        "-v",
+                        "error",
+                        "-show_entries",
+                        "format=duration",
+                        "-of",
+                        "default=noprint_wrappers=1:nokey=1",
+                        str(file_path),
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        **safe_popen_kwargs(),
+                    )
+                    stdout, _ = await proc.communicate()
+                    if proc.returncode == 0 and stdout.strip():
+                        duration_sec = float(stdout.strip())
+                except Exception:
+                    pass
 
             if file_size_mb < MIN_SIZE_MB and (duration_sec or 0) < MIN_DURATION_SEC:
                 logger.info(

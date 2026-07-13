@@ -155,3 +155,146 @@ async def test_hls_dir_legacy_fs_source_unchanged(monkeypatch, tmp_path):
 
 class _ObjectStoreLoc:
     is_object_store = True
+
+
+# ─── Task 2.4b — _trigger_transcode_async gate works for sb:// rows ─────────
+#
+# The automatic post-upload HLS dispatch gate
+# (ResourcesService._trigger_transcode_async) used to join
+# Path(DOWNLOAD_PATH)/version["file_path"] and bail on `.exists()` — always
+# False for an sb:// row, so large object-store videos silently never got
+# transcoded. Fixed: the gate resolves through resolve_media_source; sb://
+# rows gate from row data already in hand (file_size_bytes written at
+# upload, duration_seconds persisted by postprocess Phase A before this
+# Phase C dispatch), fs rows keep the byte-identical legacy stat/ffprobe
+# path.
+
+_MIN_GATE_BYTES = 200 * _MB  # comfortably above the 100 MB dispatch gate
+
+
+def _dispatch_env(monkeypatch, version_row: dict):
+    """Build a ResourcesService with a stubbed repo + captured dispatch."""
+    import app.services.library.resources_service as rs
+
+    svc = rs.ResourcesService()
+
+    updates: list[tuple[str, dict]] = []
+    dispatched: list[dict] = []
+
+    class _Repo:
+        async def get_version_by_id(self, version_id):
+            return version_row
+
+        async def update_version(self, version_id, data):
+            updates.append((version_id, data))
+            return {}
+
+    svc.repo = _Repo()
+
+    async def _fake_start_workflow_routed(name, **kwargs):
+        dispatched.append({"name": name, **kwargs})
+        return "wf-1"
+
+    monkeypatch.setattr(
+        "app.services.infra.dbos_orchestrator.start_workflow_routed",
+        _fake_start_workflow_routed,
+    )
+    return svc, updates, dispatched
+
+
+async def test_gate_sb_version_meeting_size_gate_dispatches(monkeypatch, tmp_path):
+    """sb:// version row with file_size_bytes above the gate -> transcode
+    workflow IS dispatched (no local file exists anywhere)."""
+    import app.services.library.resources_service as rs
+
+    monkeypatch.setattr(rs.settings, "DOWNLOAD_PATH", str(tmp_path))
+    svc, updates, dispatched = _dispatch_env(
+        monkeypatch,
+        {
+            "id": "v1",
+            "file_path": "sb://library/t1/ab/cd/deadbeef.mp4",
+            "file_size_bytes": _MIN_GATE_BYTES,
+            "duration_seconds": 1200,
+        },
+    )
+
+    await svc._trigger_transcode_async("r1", "v1", "video/mp4", user_id="u1")
+
+    assert len(dispatched) == 1, "sb:// row above the gate must dispatch"
+    assert dispatched[0]["name"] == "transcode"
+    assert dispatched[0]["dbos_workflow_kwargs"]["version_id"] == "v1"
+    assert ("v1", {"transcode_status": "pending"}) in updates
+
+
+async def test_gate_sb_version_below_gate_not_dispatched(monkeypatch, tmp_path):
+    """sb:// version row below both size and duration gates -> skipped."""
+    import app.services.library.resources_service as rs
+
+    monkeypatch.setattr(rs.settings, "DOWNLOAD_PATH", str(tmp_path))
+    svc, updates, dispatched = _dispatch_env(
+        monkeypatch,
+        {
+            "id": "v1",
+            "file_path": "sb://library/t1/ab/cd/deadbeef.mp4",
+            "file_size_bytes": 10 * _MB,
+            "duration_seconds": 60,
+        },
+    )
+
+    await svc._trigger_transcode_async("r1", "v1", "video/mp4", user_id="u1")
+
+    assert dispatched == [], "sb:// row below the gate must not dispatch"
+    assert updates == []
+
+
+async def test_gate_legacy_fs_missing_file_still_skips(monkeypatch, tmp_path):
+    """Legacy fs row whose file is missing on disk -> skip, exactly the
+    pre-existing behavior (the fs existence check is retained for fs rows)."""
+    import app.services.library.resources_service as rs
+
+    monkeypatch.setattr(rs.settings, "DOWNLOAD_PATH", str(tmp_path))
+    svc, updates, dispatched = _dispatch_env(
+        monkeypatch,
+        {
+            "id": "v1",
+            "file_path": "teams/1/uploads/9/v1/video.mp4",
+            "file_size_bytes": _MIN_GATE_BYTES,
+            "duration_seconds": 1200,
+        },
+    )
+
+    await svc._trigger_transcode_async("r1", "v1", "video/mp4", user_id="u1")
+
+    assert dispatched == [], "missing fs file must still skip dispatch"
+    assert updates == []
+
+
+async def test_gate_legacy_fs_large_file_dispatches(monkeypatch, tmp_path):
+    """Legacy fs row with a real on-disk file above the size gate ->
+    dispatched, from the file's actual stat (not row metadata)."""
+    import app.services.library.resources_service as rs
+
+    monkeypatch.setattr(rs.settings, "DOWNLOAD_PATH", str(tmp_path))
+    rel = "teams/1/uploads/9/v1/video.mp4"
+    abs_path = tmp_path / rel
+    abs_path.parent.mkdir(parents=True)
+    # Sparse file: 200 MB apparent size without writing 200 MB of bytes.
+    with open(abs_path, "wb") as fh:
+        fh.truncate(_MIN_GATE_BYTES)
+
+    svc, updates, dispatched = _dispatch_env(
+        monkeypatch,
+        {
+            "id": "v1",
+            "file_path": rel,
+            # Row size deliberately BELOW the gate: proves the fs branch
+            # still gates on the actual file stat, unchanged.
+            "file_size_bytes": 1 * _MB,
+            "duration_seconds": None,
+        },
+    )
+
+    await svc._trigger_transcode_async("r1", "v1", "video/mp4", user_id="u1")
+
+    assert len(dispatched) == 1, "large on-disk legacy file must dispatch"
+    assert ("v1", {"transcode_status": "pending"}) in updates
