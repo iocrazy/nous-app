@@ -364,7 +364,14 @@ async def materialize(file_path: str) -> AsyncIterator["Path"]:
 
     loc = resolve_media_source(file_path)
     if not loc.is_object_store:
-        yield Path(settings.DOWNLOAD_PATH) / loc.rel_path
+        # Containment guard (mirrors resolve_generated_media_local_path): a
+        # corrupt/hostile rel_path with ".." segments or symlink tricks must
+        # never escape DOWNLOAD_PATH.
+        base = os.path.realpath(settings.DOWNLOAD_PATH)
+        real = os.path.realpath(os.path.join(base, loc.rel_path or ""))
+        if not (real == base or real.startswith(base + os.sep)):
+            raise ValueError(f"file_path escapes DOWNLOAD_PATH: {file_path!r}")
+        yield Path(real)
         return
     store = ObjectStore(loc.bucket)
     fd, tmp = tempfile.mkstemp(suffix=Path(loc.key).suffix)

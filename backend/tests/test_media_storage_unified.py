@@ -95,6 +95,29 @@ async def test_materialize_filesystem_yields_download_path(tmp_path, monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_materialize_filesystem_rejects_traversal(tmp_path, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "DOWNLOAD_PATH", str(tmp_path / "downloads"))
+    (tmp_path / "downloads").mkdir()
+    with pytest.raises(ValueError, match="escapes DOWNLOAD_PATH"):
+        async with materialize("../../etc/passwd"):
+            pytest.fail("must raise before yielding")  # pragma: no cover
+
+
+@pytest.mark.asyncio
+async def test_materialize_filesystem_rejects_embedded_dotdot(tmp_path, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "DOWNLOAD_PATH", str(tmp_path / "downloads"))
+    (tmp_path / "downloads").mkdir()
+    # An embedded ".." segment that climbs out of DOWNLOAD_PATH must raise too.
+    with pytest.raises(ValueError, match="escapes DOWNLOAD_PATH"):
+        async with materialize("teams/1/../../../outside.txt"):
+            pytest.fail("must raise before yielding")  # pragma: no cover
+
+
+@pytest.mark.asyncio
 async def test_materialize_object_store_pulls_temp_and_cleans(monkeypatch):
     import app.services.library.media_storage as ms
 
