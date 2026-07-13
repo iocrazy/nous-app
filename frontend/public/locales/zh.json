@@ -1670,6 +1670,8 @@
     "subtitle": "所有项目下的画布",
     "newCanvas": "新建画布",
     "untitled": "未命名画布",
+    "nodeCount": "{{count}} 个节点",
+    "namePlaceholder": "画布名称（可留空）",
     "emptyProjects": "还没有项目——先创建一个项目再开始画布。",
     "loadFailed": "加载画布失败",
     "groupLoadFailed": "加载该项目的画布失败",

@@ -1670,6 +1670,8 @@
     "subtitle": "All canvases across your projects",
     "newCanvas": "New Canvas",
     "untitled": "Untitled Canvas",
+    "nodeCount": "{{count}} nodes",
+    "namePlaceholder": "Canvas name (optional)",
     "emptyProjects": "No projects yet — create a project to start a canvas.",
     "loadFailed": "Failed to load canvases",
     "groupLoadFailed": "Failed to load canvases for this project",
