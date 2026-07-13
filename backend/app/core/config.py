@@ -126,6 +126,17 @@ class Settings(BaseSettings):
         "written sb:// rows readable. Flip only after verifying storage-api "
         "is deployed + healthy on the target stack (Phase 2 ops gate).",
     )
+    FEATURE_UNIFIED_STORAGE: bool = Field(
+        default=False,
+        description="Route new library writes (resource uploads, project_files, "
+        "storyboard originals) to the Supabase Storage `library` bucket "
+        "(sb:// paths) instead of the filesystem. Off (default) = every write "
+        "stays on the filesystem (current behavior). Readers auto-resolve both "
+        "path shapes via resolve_media_source, so flipping on is forward-only "
+        "and rollback (flag off) keeps already-written sb:// rows readable. "
+        "Flip only after OPS-0 (GLOBAL_S3_BUCKET=nous rename) and mig 358 are "
+        "done on the target stack.",
+    )
     FEATURE_SHOT_GENERATE: bool = Field(
         default=False,
         description="Enable single-shot image generation (POST "
