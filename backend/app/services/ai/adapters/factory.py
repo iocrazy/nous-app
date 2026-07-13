@@ -33,6 +33,7 @@ from app.services.ai.adapters.doubao import DoubaoAdapter
 from app.services.ai.adapters.modelscope import ModelScopeAdapter
 from app.services.ai.adapters.openai import OpenAIAdapter
 from app.services.ai.adapters.qwen import QwenAdapter
+from app.services.ai.provider_protocols import chat_provider_keys as _chat_keys
 
 _KNOWN_PREFIXES = (
     "qwen-*, tongyi-*, deepseek-*, doubao-*, ep-*, claude-*, gpt-*, o1-*, o3-*, "
@@ -102,10 +103,11 @@ def provider_key_for_model(model: str) -> str:
 
 
 # Every provider key get_adapter_for_user can build. Used to validate an
-# admin-named actual_provider before dispatching on it.
-_PROVIDER_KEYS = frozenset(
-    {"claude", "deepseek", "doubao", "openai", "modelscope", "qwen"}
-)
+# admin-named actual_provider before dispatching on it. DERIVED from the
+# provider-protocol registry (single source of truth, 2026-07-13) — the
+# contract test in tests/test_provider_protocols_contract.py fails if this
+# and the registry disagree.
+_PROVIDER_KEYS = _chat_keys()
 
 
 def resolve_provider_key(actual_provider: str, model: str) -> str:
