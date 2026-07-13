@@ -1513,4 +1513,10 @@ export const EDITOR_SHELL_STYLES = `
 /* Warm paper (light) — the number chip must sit on the warm tone, not the
    cool token. */
 .mh-editor-shell[data-theme='light'] .mh-page-break-num{ background:#faf8f1; }
+
+/* The format toolbar pins to the top while the script scrolls (user request:
+   menu bar fixed on scroll-down). It is a direct child of the .mh-sheet-scroll
+   scrollport, so sticky just works; z sits above the sheet + page-break
+   overlays + hover gutters. */
+.mh-sheet-scroll > .mh-h-toolbar{ position:sticky; top:0; z-index:40; }
 `;
