@@ -32,15 +32,17 @@ export const ASIAN_LINE_CLASS: Record<ElementType, string> = {
   subtitle: 'as-subtitle',
 };
 
-/** Rows that carry a leading ornament (rendered before the editable line). */
-const ASIAN_PREFIX: Partial<Record<ElementType, string>> = {
+/** Rows that carry a leading ornament (rendered before the editable line).
+ *  Exported so the TipTap NodeView (M3, spec D5) can render the SAME marks
+ *  from one source instead of a second hand-kept copy. */
+export const ASIAN_PREFIX: Partial<Record<ElementType, string>> = {
   action: '△',
 };
 
 /** Rows that carry a trailing label ornament (rendered after the editable line).
  *  Character cue uses the FULLWIDTH colon `：` — Chinese punctuation, per the
  *  国内剧本 "角色名：对白" convention (halfwidth `:` reads as a Latin colon). */
-const ASIAN_SUFFIX: Partial<Record<ElementType, string>> = {
+export const ASIAN_SUFFIX: Partial<Record<ElementType, string>> = {
   character: '：',
 };
 

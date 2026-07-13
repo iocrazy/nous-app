@@ -15,6 +15,27 @@
  * call does that, and even then only when the incoming elements actually
  * differ from what's on screen.
  *
+ * ── M3 — format switch recreates the editor (deliberate choice) ───────────
+ * `format` (hollywood/asian) is ALSO read once at mount, same as
+ * `initialElements`, for a structural reason: the Asian row DOM nests an
+ * extra `.as-row` wrapper + optional `△`/`：` ornament spans AROUND the
+ * `.mh-el-row` the Hollywood engine renders bare (spec D5 — see
+ * `ScriptElementView` below), and `ReactNodeViewRenderer` re-renders the
+ * SAME NodeView component tree, gated by the perf-sensitive
+ * childCount/propsSync tick in `ScriptElementView` (M2 item 1c) — routing a
+ * live format flip through that path would mean either bumping the tick on
+ * every format change too (defeating the perf gate's whole purpose, since
+ * format changes are rare but would need to force-repaint every row anyway)
+ * or accepting a stale DOM shape until the next incidental transaction. A
+ * format toggle is a deliberate, infrequent user action (a script-wide
+ * setting), not a per-keystroke hot path, so `SceneBlock` keys the
+ * `<TipTapSceneEditor key={format}>` element on format instead — React fully
+ * unmounts the old editor (flushing any pending debounce via the unmount
+ * effect below, so no edit is lost) and mounts a fresh one from the CURRENT
+ * `sync.elements`. The one user-visible cost is caret position resets on a
+ * format switch — an acceptable trade for a structural DOM change that is
+ * not a per-keystroke event.
+ *
  * ── M2 architecture note — drag/drop and toolbar-retype bypass the mapper ──
  * Same-scene reorder, cross-scene insert, and TypeCommand retype are all
  * ALREADY fully implemented in `SceneBlock` for the legacy layout engines
@@ -64,7 +85,9 @@ import { applyLocal } from '../opBuilder';
 import { elementEdgeFromPointer } from '../render/layoutShared';
 import type { ElementOp, ElementType, ScriptElement } from '../types';
 import { HOLLYWOOD_LINE_CLASS } from '../render/HollywoodLayout';
-import { ASIAN_LINE_CLASS } from '../render/AsianLayout';
+import { ASIAN_LINE_CLASS, ASIAN_PREFIX, ASIAN_SUFFIX } from '../render/AsianLayout';
+import { createPageSeamExtension, type PageSeamMap } from './pageSeamPlugin';
+import { createMentionDecorationExtension } from './mentionDecorationPlugin';
 
 export type SceneFormat = 'hollywood' | 'asian';
 
@@ -118,6 +141,16 @@ export interface TipTapSceneEditorProps {
   onMentionClose?: () => void;
   /** The currently-open mention/cue picker's keyboard-nav bridge, or null. */
   mentionMenu?: MenuBridge | null;
+  // ── M3: paged-mode seams + mention chips ──────────────────────────────
+  /** Element-level page seams (`EditorShell`'s measurement effect), rendered
+   *  as a widget decoration immediately before the matching node — see
+   *  `pageSeamPlugin.ts`. Scene-level (`scene:<id>`) seams stay at the shell
+   *  and never reach this component. */
+  pageSeams?: PageSeamMap;
+  /** The script's mention candidates (distinct CAST names) — drives the
+   *  SAME `@name` chip decoration `MentionNamesContext` drives for the
+   *  legacy engines (see `mentionDecorationPlugin.ts`). */
+  mentionCandidates?: string[];
 }
 
 export interface TipTapSceneEditorHandle {
@@ -259,10 +292,14 @@ function ScriptElementView({ node, editor, getPos }: NodeViewProps, refs: Script
   }
   const displayIndex = refs.blockIndexBaseRef.current + 2 + siblingIndex;
 
-  const lineClass =
-    refs.formatRef.current === 'asian'
-      ? ASIAN_LINE_CLASS[attrs.elType]
-      : HOLLYWOOD_LINE_CLASS[attrs.elType];
+  const isAsian = refs.formatRef.current === 'asian';
+  const lineClass = isAsian ? ASIAN_LINE_CLASS[attrs.elType] : HOLLYWOOD_LINE_CLASS[attrs.elType];
+  // Asian ornaments (spec D5, M3 item 1): a leading `△` (action) or trailing
+  // fullwidth `：` (character) mark, rendered OUTSIDE the contentDOM — see
+  // `AsianLayout.tsx`'s `ASIAN_PREFIX`/`ASIAN_SUFFIX` (single source, no
+  // second hand-kept copy). `undefined` for every other type, same as legacy.
+  const prefix = isAsian ? ASIAN_PREFIX[attrs.elType] : undefined;
+  const suffix = isAsian ? ASIAN_SUFFIX[attrs.elType] : undefined;
 
   const onTickClick = refs.onTickClickRef.current;
   const selected = refs.selectedElementIdsRef.current?.has(attrs.id) ?? false;
@@ -275,72 +312,107 @@ function ScriptElementView({ node, editor, getPos }: NodeViewProps, refs: Script
       : null;
   const dropClass = dropEdge === 'top' ? ' drop-top' : dropEdge === 'bottom' ? ' drop-bottom' : '';
 
-  return (
-    <NodeViewWrapper
+  const onRowDragOver = (e: ReactDragEvent<HTMLDivElement>) => {
+    const onOver = refs.onElementDragOverRef.current;
+    if (!refs.draggingElementIdRef.current || !onOver) return;
+    e.preventDefault();
+    onOver(attrs.id, elementEdgeFromPointer(e.currentTarget, e.clientY));
+  };
+  const onRowDrop = (e: ReactDragEvent<HTMLDivElement>) => {
+    const onDropCb = refs.onElementDropRef.current;
+    if (!refs.draggingElementIdRef.current || !onDropCb) return;
+    e.preventDefault();
+    onDropCb(attrs.id, elementEdgeFromPointer(e.currentTarget, e.clientY));
+  };
+
+  // Gutter + tick + content — the SAME three children in both formats;
+  // what differs is what wraps them (see the isAsian branch below).
+  const gutter = (
+    <div className="mh-el-gutter" contentEditable={false}>
+      <span className="mh-el-num">{displayIndex}</span>
+      <button
+        type="button"
+        className={`mh-el-drag${draggingElementId === attrs.id ? ' dragging' : ''}`}
+        contentEditable={false}
+        tabIndex={-1}
+        aria-label="Drag to reorder"
+        title="Move paragraph"
+        draggable={dragEnabled}
+        onMouseDown={(e: ReactMouseEvent) => e.preventDefault()}
+        onDragStart={
+          dragEnabled
+            ? (e: ReactDragEvent<HTMLButtonElement>) => {
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', attrs.id);
+                refs.onElementDragStartRef.current?.(attrs.id);
+              }
+            : undefined
+        }
+        onDragEnd={dragEnabled ? () => refs.onElementDragEndRef.current?.() : undefined}
+      >
+        <span className="mh-el-dot" />
+        <span className="mh-el-dot" />
+        <span className="mh-el-dot" />
+        <span className="mh-el-dot" />
+      </button>
+    </div>
+  );
+  const tick = onTickClick ? (
+    <button
+      type="button"
+      className={`mh-el-tick tick-btn t-${attrs.elType}${selected ? ' selected' : ''}`}
+      contentEditable={false}
+      tabIndex={-1}
+      aria-pressed={selected ? 'true' : 'false'}
+      aria-label="Select element"
+      data-tick-id={attrs.id}
+      onMouseDown={(e: ReactMouseEvent) => e.preventDefault()}
+      onClick={(e: ReactMouseEvent) => onTickClick(attrs.id, e.shiftKey)}
+    />
+  ) : (
+    <span className={`mh-el-tick t-${attrs.elType}`} contentEditable={false} aria-hidden="true" />
+  );
+  const content = (
+    <NodeViewContent
       as="div"
-      className={`mh-el-row${dropClass}`}
-      onDragOver={(e: ReactDragEvent<HTMLDivElement>) => {
-        const onOver = refs.onElementDragOverRef.current;
-        if (!refs.draggingElementIdRef.current || !onOver) return;
-        e.preventDefault();
-        onOver(attrs.id, elementEdgeFromPointer(e.currentTarget, e.clientY));
-      }}
-      onDrop={(e: ReactDragEvent<HTMLDivElement>) => {
-        const onDropCb = refs.onElementDropRef.current;
-        if (!refs.draggingElementIdRef.current || !onDropCb) return;
-        e.preventDefault();
-        onDropCb(attrs.id, elementEdgeFromPointer(e.currentTarget, e.clientY));
-      }}
-    >
-      <div className="mh-el-gutter" contentEditable={false}>
-        <span className="mh-el-num">{displayIndex}</span>
-        <button
-          type="button"
-          className={`mh-el-drag${draggingElementId === attrs.id ? ' dragging' : ''}`}
-          contentEditable={false}
-          tabIndex={-1}
-          aria-label="Drag to reorder"
-          title="Move paragraph"
-          draggable={dragEnabled}
-          onMouseDown={(e: ReactMouseEvent) => e.preventDefault()}
-          onDragStart={
-            dragEnabled
-              ? (e: ReactDragEvent<HTMLButtonElement>) => {
-                  e.dataTransfer.effectAllowed = 'move';
-                  e.dataTransfer.setData('text/plain', attrs.id);
-                  refs.onElementDragStartRef.current?.(attrs.id);
-                }
-              : undefined
-          }
-          onDragEnd={dragEnabled ? () => refs.onElementDragEndRef.current?.() : undefined}
-        >
-          <span className="mh-el-dot" />
-          <span className="mh-el-dot" />
-          <span className="mh-el-dot" />
-          <span className="mh-el-dot" />
-        </button>
-      </div>
-      {onTickClick ? (
-        <button
-          type="button"
-          className={`mh-el-tick tick-btn t-${attrs.elType}${selected ? ' selected' : ''}`}
-          contentEditable={false}
-          tabIndex={-1}
-          aria-pressed={selected ? 'true' : 'false'}
-          aria-label="Select element"
-          data-tick-id={attrs.id}
-          onMouseDown={(e: ReactMouseEvent) => e.preventDefault()}
-          onClick={(e: ReactMouseEvent) => onTickClick(attrs.id, e.shiftKey)}
-        />
-      ) : (
-        <span className={`mh-el-tick t-${attrs.elType}`} contentEditable={false} aria-hidden="true" />
-      )}
-      <NodeViewContent
-        as="div"
-        className={`mh-el-editable mh-el-line ${lineClass}`}
-        data-el-type={attrs.elType}
-        data-el-id={attrs.id}
-      />
+      className={`mh-el-editable mh-el-line ${lineClass}`}
+      data-el-type={attrs.elType}
+      data-el-id={attrs.id}
+    />
+  );
+
+  if (isAsian) {
+    // `.as-row.as-row-<type>[data-el-type]` wraps [prefix] + the SAME
+    // `.mh-el-row` Hollywood renders bare + [suffix] — byte-identical to
+    // `AsianLayout.tsx`'s `<div class="as-row..."><PageSeam/>?<span
+    // as-prefix/><ElementLine/><span as-suffix/></div>` nesting (minus the
+    // seam, which is a decoration — see pageSeamPlugin.ts — not JSX here).
+    return (
+      <NodeViewWrapper as="div" className={`as-row as-row-${attrs.elType}`} data-el-type={attrs.elType}>
+        {prefix && (
+          <span className="as-mark as-prefix" contentEditable={false} aria-hidden="true">
+            {prefix}
+          </span>
+        )}
+        <div className={`mh-el-row${dropClass}`} onDragOver={onRowDragOver} onDrop={onRowDrop}>
+          {gutter}
+          {tick}
+          {content}
+        </div>
+        {suffix && (
+          <span className="as-mark as-suffix" contentEditable={false} aria-hidden="true">
+            {suffix}
+          </span>
+        )}
+      </NodeViewWrapper>
+    );
+  }
+
+  return (
+    <NodeViewWrapper as="div" className={`mh-el-row${dropClass}`} onDragOver={onRowDragOver} onDrop={onRowDrop}>
+      {gutter}
+      {tick}
+      {content}
     </NodeViewWrapper>
   );
 }
@@ -366,6 +438,8 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
       onMentionOpen,
       onMentionClose,
       mentionMenu,
+      pageSeams,
+      mentionCandidates,
     },
     ref,
   ) {
@@ -409,6 +483,14 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
     mentionMenuRef.current = mentionMenu ?? null;
     const slashMenuRef = useRef<MenuBridge | null>(slashMenu ?? null);
     slashMenuRef.current = slashMenu ?? null;
+    // M3 prop refs — read fresh by the decoration plugins' `decorations(state)`
+    // (called by PM on every transaction; see pageSeamPlugin.ts /
+    // mentionDecorationPlugin.ts's module docs for why a live ref beats
+    // threading these through plugin state).
+    const pageSeamsRef = useRef<PageSeamMap>(pageSeams ?? new Map());
+    pageSeamsRef.current = pageSeams ?? new Map();
+    const mentionCandidatesRef = useRef<string[]>(mentionCandidates ?? []);
+    mentionCandidatesRef.current = mentionCandidates ?? [];
 
     // The mapper's diff base: the last element list dispatched to (or
     // adopted from, via applyExternalElements) the server. Advances on every
@@ -447,7 +529,17 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
         },
       });
       const menuBridgeKeymap = createMenuBridgeKeymap({ mentionMenuRef, slashMenuRef });
-      return [ScriptDocument, ScriptText, ViewNode, menuBridgeKeymap, ScriptKeymap];
+      const pageSeamExtension = createPageSeamExtension(pageSeamsRef);
+      const mentionDecorationExtension = createMentionDecorationExtension(mentionCandidatesRef);
+      return [
+        ScriptDocument,
+        ScriptText,
+        ViewNode,
+        menuBridgeKeymap,
+        ScriptKeymap,
+        pageSeamExtension,
+        mentionDecorationExtension,
+      ];
     }, []);
 
     const clearDebounce = useCallback(() => {
@@ -588,10 +680,21 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
     // DOM, and including them would re-fire this on every keystroke of an
     // open menu's filter — exactly the per-keystroke repaint cost item 1c
     // eliminated.
+    //
+    // M3: `pageSeams`/`mentionCandidates` ride the SAME dispatch — neither
+    // is a React NodeView prop (both are read straight off a ref by the
+    // decoration plugins' `decorations(state)`, see pageSeamPlugin.ts /
+    // mentionDecorationPlugin.ts), but PM only re-calls `decorations(state)`
+    // after a transaction, so a prop change with no doc edit of its own
+    // (a re-measured seam map, an updated cast list) needs this same forced
+    // dispatch to actually repaint. Both change far less often than a
+    // keystroke (a ResizeObserver-throttled layout pass; a cast-list edit),
+    // so folding them into the existing per-row repaint gate is an
+    // acceptable one-more-repaint cost, not a new per-keystroke one.
     useEffect(() => {
       if (!editor) return;
       editor.view.dispatch(editor.state.tr.setMeta('propsSync', true));
-    }, [editor, selectedElementIds, draggingElementId, dropElementEdge]);
+    }, [editor, selectedElementIds, draggingElementId, dropElementEdge, pageSeams, mentionCandidates]);
 
     // Composition end: PM defers doc sync while `view.composing` is true, so
     // the "final" onUpdate carrying the composed text may land in the SAME
