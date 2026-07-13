@@ -3009,5 +3009,26 @@
     "diffKindMoved": "Moved",
     "diffEmptyLine": "(empty line)",
     "switchEpisode": "Switch episode"
+  },
+  "characters": {
+    "extractFailed": "Failed to extract characters",
+    "createFailed": "Failed to create character",
+    "updateFailed": "Failed to save character",
+    "openCanvasFailed": "Failed to open character canvas",
+    "untitled": "New Character",
+    "emptyTitle": "No characters yet",
+    "emptyHint": "Extract the cast from your scripts, or add one by hand.",
+    "extract": "Extract from script",
+    "add": "Add Character",
+    "nameLabel": "Character name",
+    "bioLabel": "Character bio",
+    "bioPlaceholder": "Backstory, look, temperament…",
+    "assetsHint": "Generated assets appear here",
+    "openCanvas": "Open in Canvas",
+    "role": {
+      "lead": "Lead",
+      "support": "Support",
+      "antagonist": "Antagonist"
+    }
   }
 }

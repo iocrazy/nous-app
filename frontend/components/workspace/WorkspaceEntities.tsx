@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { fetchProjectEntities } from '../../services/projectsService';
+import { CharacterLibrary } from './CharacterLibrary';
 import type { EpisodeProgress, ProjectEntities } from '../../types';
 
 interface WorkspaceEntitiesProps {
@@ -35,6 +36,15 @@ function initials(name: string): string {
 }
 
 export function WorkspaceEntities({ kind, projectId, episodes }: WorkspaceEntitiesProps) {
+  // Characters got the authored bible-card library (PR-CC4); locations keep
+  // the derived read-only list below until their own pass.
+  if (kind === 'characters') {
+    return <CharacterLibrary projectId={projectId} />;
+  }
+  return <DerivedEntities kind={kind} projectId={projectId} episodes={episodes} />;
+}
+
+function DerivedEntities({ kind, projectId, episodes }: WorkspaceEntitiesProps) {
   const { t } = useTranslation();
   const [entities, setEntities] = useState<ProjectEntities>({ characters: [], locations: [] });
   const [loading, setLoading] = useState(true);
