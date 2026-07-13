@@ -195,8 +195,10 @@ export function AIModelsPage() {
           const data = await res.json()
           setProtocols(data.protocols || [])
         }
-      } catch {
-        // silent — the field degrades to a text input
+      } catch (err) {
+        // Non-fatal: the field degrades to a create-only Select. Log per the
+        // project's no-silent-swallow rule so a broken endpoint is visible.
+        console.error('[ai] failed to load provider protocols', err)
       }
     }
     loadProtocols()
