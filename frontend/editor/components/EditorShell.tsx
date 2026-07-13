@@ -73,6 +73,7 @@ import { BeatsView } from '../beats/BeatsView';
 import { NodesView } from '../nodes/NodesView';
 import { StoryboardView } from '../storyboard/StoryboardView';
 import { VersionDiff } from '../versions/VersionDiff';
+import { VersionPanel } from '../versions/VersionPanel';
 import { OutlineView } from './OutlineView';
 import { EpisodePanel } from './EpisodePanel';
 import { RailEntities } from './RailEntities';
@@ -1250,6 +1251,21 @@ export function EditorShell({
                 onSelectType={handleSelectType}
                 onInsertScene={handleInsertScene}
               />
+              {/* Version history floats in the empty margin RIGHT OF the sheet
+                  (user direction: versions live next to the text, not in the
+                  Writing island). Sticky zero-height wrapper so the card stays
+                  in view while the paper scrolls beneath it. */}
+              {state.mode !== 'outline' && (
+                <div className="mh-version-rail" data-testid="version-rail">
+                  <div className="mh-version-rail-inner">
+                    <VersionPanel
+                      scriptId={scriptId}
+                      onCompare={handleCompareCommit}
+                      onRolledBack={handleRolledBack}
+                    />
+                  </div>
+                </div>
+              )}
               <div className="mh-sheet" ref={pageSheetRef}>
                 <div className="mh-sheet-inner">
                   {state.mode !== 'outline' && scriptUntouched && (
@@ -1405,9 +1421,6 @@ export function EditorShell({
               onFormatChange={handleFormatChange}
               pagination={paginationMode}
               onPaginationChange={handlePaginationChange}
-              scriptId={scriptId}
-              onCompareCommit={handleCompareCommit}
-              onRolledBack={handleRolledBack}
             />
           </>
         )}

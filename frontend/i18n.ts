@@ -11,9 +11,12 @@ i18n
   .use(HttpBackend)
   .use(initReactI18next)
   .init({
-    // Lazy load from public folder
+    // Lazy load from public folder. Locale files are static assets with no
+    // content hash in their URL, so browsers/CDNs cache them across releases —
+    // without a version param, newly added keys render as raw key paths on
+    // prod until the cache expires (seen live: editor.cueHintEnter).
     backend: {
-      loadPath: '/locales/{{lng}}.json',
+      loadPath: `/locales/{{lng}}.json?v=${__APP_VERSION__}`,
     },
     lng: savedLang,
     fallbackLng: 'en',
