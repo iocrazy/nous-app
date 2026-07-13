@@ -33,6 +33,7 @@ from app.repositories.resources_repository import (
     EXPIRED_TRASH_BATCH,
     ResourcesRepository,
 )
+from app.services.library.media_storage import store_local_file
 
 
 async def _resolve_personal_team_id(user_id: str) -> str:
@@ -143,23 +144,42 @@ class ResourcesService:
             resource = await self.repo.create_resource(resource_data)
             resource_id = str(resource["id"])
 
-            # Move the streamed file into teams/{scope_id}/uploads/{id}/v1/
-            save_dir = (
-                Path(settings.DOWNLOAD_PATH)
-                / "teams"
-                / scope_id
-                / "uploads"
-                / resource_id
-                / "v1"
-            )
-            save_dir.mkdir(parents=True, exist_ok=True)
-            target = save_dir / safe_name
-            await asyncio.to_thread(shutil.move, str(tmp_path), str(target))
+            stored = None
+            if settings.FEATURE_UNIFIED_STORAGE:
+                try:
+                    stored = await store_local_file(
+                        scope_id=int(scope_id),
+                        source_path=str(tmp_path),
+                        mime=mime,
+                        filename=safe_name,
+                        sha256=file_hash,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        f"[upload_resource] unified-storage write failed, falling "
+                        f"back to filesystem: scope={scope_id} error={exc!r}"
+                    )
+            if stored is not None:
+                relative_path = stored.file_path
+            else:
+                # Move the streamed file into teams/{scope_id}/uploads/{id}/v1/
+                save_dir = (
+                    Path(settings.DOWNLOAD_PATH)
+                    / "teams"
+                    / scope_id
+                    / "uploads"
+                    / resource_id
+                    / "v1"
+                )
+                save_dir.mkdir(parents=True, exist_ok=True)
+                target = save_dir / safe_name
+                await asyncio.to_thread(shutil.move, str(tmp_path), str(target))
+                relative_path = f"teams/{scope_id}/uploads/{resource_id}/v1/{safe_name}"
         finally:
-            # No-op if the move succeeded (tmp_path no longer exists).
+            # No-op if the move succeeded (tmp_path no longer exists); when
+            # the object-store write succeeded, this is what cleans up the
+            # tmp file (store_local_file only reads it, never deletes it).
             tmp_path.unlink(missing_ok=True)
-
-        relative_path = f"teams/{scope_id}/uploads/{resource_id}/v1/{safe_name}"
 
         # Update resource with file path only. Media metadata extraction
         # (ffprobe duration/resolution, Pillow image dimensions) and HLS
