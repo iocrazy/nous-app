@@ -10,6 +10,7 @@ and character management. Delegates data access to the repository layer.
 import asyncio
 import hashlib
 import os
+import tempfile
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -17,6 +18,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import HTTPException
 from loguru import logger
 
+from app.core.config import settings
 from app.repositories.storyboard_repository import (
     get_storyboard_asset_repository,
     get_storyboard_character_repository,
@@ -26,6 +28,7 @@ from app.repositories.storyboard_repository import (
     get_storyboard_project_repository,
 )
 from app.schemas.storyboard import CanvasSyncRequest
+from app.services.library.media_storage import materialize, store_local_file
 
 # NAS directory sub-structure created for every new storyboard project
 _PROJECT_SUBDIRS = [
@@ -128,7 +131,11 @@ class StoryboardService:
             project = await self.project_repo.create(project_data)
             project_id = project.get("id", "")
 
-            if project_id:
+            # Directory pre-provisioning is only meaningful for the fs
+            # fallback track: unified storage needs no directories for
+            # originals, and derived-artifact write sites (previews/splits/
+            # exports) already mkdir(parents=True, exist_ok=True) on demand.
+            if project_id and not settings.FEATURE_UNIFIED_STORAGE:
                 self._ensure_nas_directories(team_id, project_id)
 
             logger.info(
@@ -147,7 +154,7 @@ class StoryboardService:
             team_id: UUID of the team (used as top-level folder).
             project_id: UUID of the project.
         """
-        nas_base = os.environ.get("NAS_BASE_PATH", "/app/downloads")
+        nas_base = settings.DOWNLOAD_PATH
         project_root = os.path.join(
             nas_base, "teams", str(team_id), "storyboard", str(project_id)
         )
@@ -564,31 +571,24 @@ class StoryboardService:
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
 
-        team_id = str(project.get("team_id", "unknown"))
-        nas_base = os.environ.get("NAS_BASE_PATH", "/app/downloads")
+        team_id_raw = project.get("team_id")
+        team_id = str(team_id_raw) if team_id_raw is not None else "unknown"
 
         # Derive extension from filename
         ext = Path(filename).suffix.lower()
         if not ext:
             ext = _mime_to_ext(content_type)
 
-        # Build relative paths (stored in DB, relative to NAS_BASE_PATH)
-        rel_dir = f"teams/{team_id}/storyboard/{str(project_id)}/images"
+        # Preview thumbnail — a regenerable derivative (same policy as
+        # thumbnails/HLS elsewhere): ALWAYS lands on the local filesystem
+        # under settings.DOWNLOAD_PATH regardless of the storage track, and
+        # is generated straight from the in-memory bytes (no materialize()
+        # needed — nothing has been persisted anywhere yet).
         rel_preview_dir = f"teams/{team_id}/storyboard/{str(project_id)}/previews"
-        rel_image_path = f"{rel_dir}/{file_hash}{ext}"
         rel_preview_path = f"{rel_preview_dir}/{file_hash}.jpg"
-
-        abs_image_path = Path(nas_base) / rel_image_path
-        abs_preview_path = Path(nas_base) / rel_preview_path
-
-        # Create directories
-        abs_image_path.parent.mkdir(parents=True, exist_ok=True)
+        abs_preview_path = Path(settings.DOWNLOAD_PATH) / rel_preview_path
         abs_preview_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Save original
-        abs_image_path.write_bytes(file_bytes)
-
-        # Get dimensions and generate preview
         width, height = 0, 0
         try:
             from PIL import Image
@@ -612,6 +612,47 @@ class StoryboardService:
             )
             # Still proceed — preview just won't be available
             rel_preview_path = ""
+
+        # Original — dual-track write. FEATURE_UNIFIED_STORAGE on
+        # content-addresses the bytes into the Supabase Storage `library`
+        # bucket via store_local_file(), scoped by the project's team_id
+        # (storyboard_projects.team_id is NOT NULL, unlike project_files —
+        # no personal-team fallback needed). Flag off, or ANY storage-track
+        # failure (including scope-id coercion), falls back to the legacy
+        # teams/{team}/storyboard/{project}/images/ filesystem write —
+        # already content-addressed by file_hash, so no dedup-suffix logic
+        # is needed on the fs fallback either.
+        stored = None
+        if settings.FEATURE_UNIFIED_STORAGE:
+            tmp_fd, tmp_name = tempfile.mkstemp(suffix=ext)
+            os.close(tmp_fd)
+            tmp_path = Path(tmp_name)
+            try:
+                tmp_path.write_bytes(file_bytes)
+                scope_id = int(team_id_raw)
+                stored = await store_local_file(
+                    scope_id=scope_id,
+                    source_path=str(tmp_path),
+                    mime=content_type,
+                    filename=filename,
+                    sha256=file_hash,
+                )
+            except Exception as exc:
+                logger.error(
+                    f"[upload_image] unified-storage write failed, falling "
+                    f"back to filesystem: project={project_id} error={exc!r}"
+                )
+            finally:
+                tmp_path.unlink(missing_ok=True)
+
+        if stored is not None:
+            rel_image_path = stored.file_path
+        else:
+            rel_dir = f"teams/{team_id}/storyboard/{str(project_id)}/images"
+            rel_image_path = f"{rel_dir}/{file_hash}{ext}"
+            abs_image_path = Path(settings.DOWNLOAD_PATH) / rel_image_path
+            abs_image_path.parent.mkdir(parents=True, exist_ok=True)
+            abs_image_path.write_bytes(file_bytes)
 
         # 4. Insert asset record
         metadata: Dict[str, Any] = {"original_filename": filename}
@@ -712,48 +753,55 @@ class StoryboardService:
             raise HTTPException(status_code=404, detail="Project not found")
 
         team_id = str(project.get("team_id", "unknown"))
-        nas_base = os.environ.get("NAS_BASE_PATH", "/app/downloads")
-
-        source_file_path = Path(nas_base) / source_asset["file_path"]
-        if not source_file_path.exists():
-            raise HTTPException(
-                status_code=404, detail="Source image file not found on disk"
-            )
+        download_base = settings.DOWNLOAD_PATH
 
         # Compute a hash prefix for output filenames
         source_hash = source_asset.get("file_hash", "unknown")[:12]
 
-        # Output directories (relative to NAS_BASE_PATH)
+        # Output directories — splits + previews are regenerable derivatives
+        # (same policy as thumbnails/HLS: given the source asset + rows/cols
+        # the grid can always be re-split deterministically), so they ALWAYS
+        # land on the local filesystem under settings.DOWNLOAD_PATH
+        # regardless of the storage track the source asset itself used.
         rel_split_dir = f"teams/{team_id}/storyboard/{project_id}/splits"
         rel_preview_dir = f"teams/{team_id}/storyboard/{project_id}/previews"
-        abs_split_dir = Path(nas_base) / rel_split_dir
-        abs_preview_dir = Path(nas_base) / rel_preview_dir
+        abs_split_dir = Path(download_base) / rel_split_dir
+        abs_preview_dir = Path(download_base) / rel_preview_dir
 
-        # 3. Split the image
+        # 3. Split the image. The source asset's file_path may be either a
+        # legacy fs-relative path or an sb:// unified-storage key —
+        # materialize() resolves either shape to a real local Path (streamed
+        # to a temp file and cleaned up for the sb:// case), mirroring the
+        # ffmpeg/tooling read precedent.
         image_service = StoryboardImageService()
-        try:
-            cells = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: image_service.split_image_to_grid(
-                    image_path=str(source_file_path),
-                    rows=rows,
-                    cols=cols,
-                    output_dir=str(abs_split_dir),
-                    preview_dir=str(abs_preview_dir),
-                    file_prefix=source_hash,
-                ),
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc))
-        except Exception as exc:
-            logger.error(
-                "split_image_asset: image processing failed for asset %s: %s",
-                asset_id,
-                exc,
-            )
-            raise HTTPException(
-                status_code=500, detail=f"Image splitting failed: {exc}"
-            )
+        async with materialize(source_asset["file_path"]) as source_file_path:
+            if not source_file_path.exists():
+                raise HTTPException(
+                    status_code=404, detail="Source image file not found on disk"
+                )
+            try:
+                cells = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: image_service.split_image_to_grid(
+                        image_path=str(source_file_path),
+                        rows=rows,
+                        cols=cols,
+                        output_dir=str(abs_split_dir),
+                        preview_dir=str(abs_preview_dir),
+                        file_prefix=source_hash,
+                    ),
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc))
+            except Exception as exc:
+                logger.error(
+                    "split_image_asset: image processing failed for asset %s: %s",
+                    asset_id,
+                    exc,
+                )
+                raise HTTPException(
+                    status_code=500, detail=f"Image splitting failed: {exc}"
+                )
 
         # 4. Create asset + frame records for each cell
         created_frames: List[Dict[str, Any]] = []
@@ -761,9 +809,9 @@ class StoryboardService:
         for cell in cells:
             # Compute relative paths (stored in DB)
             cell_abs_path = Path(cell["file_path"])
-            cell_rel_path = str(cell_abs_path.relative_to(nas_base))
+            cell_rel_path = str(cell_abs_path.relative_to(download_base))
             preview_abs_path = Path(cell["preview_path"])
-            preview_rel_path = str(preview_abs_path.relative_to(nas_base))
+            preview_rel_path = str(preview_abs_path.relative_to(download_base))
 
             # Compute hash for the cell image
             cell_hash = hashlib.sha256(cell_abs_path.read_bytes()).hexdigest()
