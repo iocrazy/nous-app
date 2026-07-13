@@ -133,3 +133,153 @@ export function releaseChildrenOf(
     return { ...rest, position: absolutePositionOf(n, group) } as CanvasNode;
   });
 }
+
+// ---- Drop membership (IC parity 1b — Infinite's 拖入自动收进分组) --------
+
+const EMPTY_GROUP_W = 320;
+const EMPTY_GROUP_H = 220;
+
+export interface NodeSize {
+  width: number;
+  height: number;
+}
+
+/** An empty group container placed from the create menu (Infinite's 分组
+ *  card) — members arrive later by dragging nodes onto it. */
+export function createEmptyGroup(position: { x: number; y: number }): CanvasNode {
+  return {
+    id: `group-${crypto.randomUUID()}`,
+    type: 'group',
+    position,
+    style: { width: EMPTY_GROUP_W, height: EMPTY_GROUP_H },
+    data: { label: 'Group' },
+  } as unknown as CanvasNode;
+}
+
+function rectOfGroup(group: CanvasNode): { x: number; y: number; w: number; h: number } {
+  const obj = asObj(group);
+  const pos = obj.position as { x: number; y: number };
+  const style = obj.style as { width?: number; height?: number } | undefined;
+  return {
+    x: pos.x,
+    y: pos.y,
+    w: style?.width ?? EMPTY_GROUP_W,
+    h: style?.height ?? EMPTY_GROUP_H,
+  };
+}
+
+/** Grow a group (in-place on a cloned array) so `childAbs` sits inside it
+ *  with padding. A grow toward the top/left shifts the container origin, so
+ *  every existing child's container-relative position is compensated. */
+function fitGroupToRect(
+  nodes: CanvasNode[],
+  groupId: string,
+  childAbs: { x: number; y: number; w: number; h: number },
+): CanvasNode[] {
+  const group = nodes.find((n) => String(asObj(n).id) === groupId);
+  if (!group) return nodes;
+  const g = rectOfGroup(group);
+  const minX = Math.min(g.x, childAbs.x - GROUP_PADDING);
+  const minY = Math.min(g.y, childAbs.y - GROUP_PADDING);
+  const maxX = Math.max(g.x + g.w, childAbs.x + childAbs.w + GROUP_PADDING);
+  const maxY = Math.max(g.y + g.h, childAbs.y + childAbs.h + GROUP_PADDING);
+  if (minX === g.x && minY === g.y && maxX === g.x + g.w && maxY === g.y + g.h) {
+    return nodes;
+  }
+  const dx = g.x - minX;
+  const dy = g.y - minY;
+  return nodes.map((n) => {
+    const obj = asObj(n);
+    if (String(obj.id) === groupId) {
+      return {
+        ...(n as object),
+        position: { x: minX, y: minY },
+        style: {
+          ...((obj.style as object) ?? {}),
+          width: maxX - minX,
+          height: maxY - minY,
+        },
+      } as CanvasNode;
+    }
+    if (obj.parentId === groupId && (dx !== 0 || dy !== 0)) {
+      const pos = obj.position as { x: number; y: number };
+      return {
+        ...(n as object),
+        position: { x: pos.x + dx, y: pos.y + dy },
+      } as CanvasNode;
+    }
+    return n;
+  });
+}
+
+/**
+ * Membership change for a solo node drop (Infinite's center-point rule):
+ * the dragged node's CENTER inside a group's rect absorbs it (topmost
+ * group wins); a child whose center left its parent is released back to
+ * absolute coords. Returns the new node array, or null when nothing
+ * changes. Groups themselves never re-parent (group-into-group deferred).
+ */
+export function applyDropMembership(
+  nodes: CanvasNode[],
+  draggedId: string,
+  sizes?: ReadonlyMap<string, Partial<NodeSize>>,
+): CanvasNode[] | null {
+  const dragged = nodes.find((n) => String(asObj(n).id) === draggedId);
+  if (!dragged || asObj(dragged).type === 'group') return null;
+
+  const measured = sizes?.get(draggedId);
+  const fallback = sizeOf(dragged);
+  const w = measured?.width ?? fallback.width;
+  const h = measured?.height ?? fallback.height;
+
+  const parentId =
+    typeof asObj(dragged).parentId === 'string'
+      ? (asObj(dragged).parentId as string)
+      : null;
+  const parent = parentId
+    ? nodes.find((n) => String(asObj(n).id) === parentId)
+    : undefined;
+  const pos = asObj(dragged).position as { x: number; y: number };
+  const parentPos = parent
+    ? (asObj(parent).position as { x: number; y: number })
+    : { x: 0, y: 0 };
+  const abs = { x: pos.x + parentPos.x, y: pos.y + parentPos.y };
+  const center = { x: abs.x + w / 2, y: abs.y + h / 2 };
+
+  // Topmost hit = LAST in array order (React Flow paints later nodes above).
+  let hit: CanvasNode | undefined;
+  for (const n of nodes) {
+    const obj = asObj(n);
+    if (obj.type !== 'group' || String(obj.id) === draggedId) continue;
+    const r = rectOfGroup(n);
+    if (
+      center.x >= r.x &&
+      center.x <= r.x + r.w &&
+      center.y >= r.y &&
+      center.y <= r.y + r.h
+    ) {
+      hit = n;
+    }
+  }
+
+  const hitId = hit ? String(asObj(hit).id) : null;
+  if (hitId === parentId) return null; // still inside the same parent (or none)
+
+  if (hit && hitId) {
+    const hitPos = asObj(hit).position as { x: number; y: number };
+    const adopted = {
+      ...(dragged as object),
+      parentId: hitId,
+      position: { x: abs.x - hitPos.x, y: abs.y - hitPos.y },
+    } as CanvasNode;
+    // RF requires parents before children: re-append the dragged node after
+    // everything (also puts it on top inside the container).
+    const rest = nodes.filter((n) => String(asObj(n).id) !== draggedId);
+    return fitGroupToRect([...rest, adopted], hitId, { x: abs.x, y: abs.y, w, h });
+  }
+
+  // Dropped on open canvas while parented → release to absolute coords.
+  const { parentId: _drop, ...restFields } = dragged as unknown as Record<string, unknown>;
+  const released = { ...restFields, position: abs } as CanvasNode;
+  return nodes.map((n) => (String(asObj(n).id) === draggedId ? released : n));
+}

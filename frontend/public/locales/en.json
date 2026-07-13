@@ -1732,7 +1732,8 @@
         "output": "Output",
         "loop": "Loop",
         "timeline": "Timeline",
-        "media": "Upload"
+        "media": "Upload",
+        "group": "Group"
       },
       "desc": {
         "shot": "Shot card — media for one storyboard beat",
@@ -1740,7 +1741,8 @@
         "output": "Collects generated results",
         "loop": "Controls rounds, batches and variables",
         "timeline": "Multi-segment film, stitched in order",
-        "media": "Import images or video onto the canvas"
+        "media": "Import images or video onto the canvas",
+        "group": "Collect media, prompts and loops together"
       }
     },
     "toolbar": {
