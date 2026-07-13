@@ -16,8 +16,10 @@
  * machine, debounced input, paste, IME) stays in SceneBlock and flows down
  * through `handlers`, so this component is purely presentational.
  */
+import { Fragment } from 'react';
 import { ElementLine, type ElementReorderApi, type LineMention } from './layoutShared';
 import type { LayoutHandlers } from './HollywoodLayout';
+import { PageSeam } from '../components/PageSeam';
 import type { ElementType, ScriptElement } from '../types';
 
 export const ASIAN_LINE_CLASS: Record<ElementType, string> = {
@@ -58,6 +60,8 @@ export interface AsianLayoutProps {
    *  `sceneBlockBases`). The heading consumed `blockIndexBase + 1`, so the
    *  first element here is `blockIndexBase + 2`. Defaults to 0. */
   blockIndexBase?: number;
+  /** Paged mode v2: a seam rendered BEFORE the element with the matching id. */
+  pageSeams?: Map<string, { page: number; filler: number }>;
 }
 
 export function AsianLayout({
@@ -69,14 +73,18 @@ export function AsianLayout({
   onTickClick,
   elementReorder,
   blockIndexBase = 0,
+  pageSeams,
 }: AsianLayoutProps) {
   return (
     <>
       {elements.map((el, i) => {
         const prefix = ASIAN_PREFIX[el.type];
         const suffix = ASIAN_SUFFIX[el.type];
+        const seam = pageSeams?.get(el.id);
         return (
-          <div key={el.id} className={`as-row as-row-${el.type}`} data-el-type={el.type}>
+          <Fragment key={el.id}>
+          {seam && <PageSeam page={seam.page} filler={seam.filler} />}
+          <div className={`as-row as-row-${el.type}`} data-el-type={el.type}>
             {prefix && (
               <span className="as-mark as-prefix" aria-hidden="true">
                 {prefix}
@@ -116,6 +124,7 @@ export function AsianLayout({
               </span>
             )}
           </div>
+          </Fragment>
         );
       })}
     </>

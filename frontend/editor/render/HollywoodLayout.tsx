@@ -7,12 +7,14 @@
  * map. All interaction (keydown machine, debounced input, paste) is owned by
  * SceneBlock and passed down as `handlers`, so this component stays presentational.
  */
+import { Fragment } from 'react';
 import {
   ElementLine,
   type ElementLineProps,
   type ElementReorderApi,
   type LineMention,
 } from './layoutShared';
+import { PageSeam } from '../components/PageSeam';
 import type { ElementType, ScriptElement } from '../types';
 
 export const HOLLYWOOD_LINE_CLASS: Record<ElementType, string> = {
@@ -46,6 +48,9 @@ export interface HollywoodLayoutProps {
    *  `sceneBlockBases`). The heading consumed `blockIndexBase + 1`, so the
    *  first element here is `blockIndexBase + 2`. Defaults to 0. */
   blockIndexBase?: number;
+  /** Paged mode v2: a seam rendered BEFORE the element with the matching id
+   *  (page boundary — filler + paper edges + next page number). */
+  pageSeams?: Map<string, { page: number; filler: number }>;
 }
 
 export function HollywoodLayout({
@@ -57,12 +62,16 @@ export function HollywoodLayout({
   onTickClick,
   elementReorder,
   blockIndexBase = 0,
+  pageSeams,
 }: HollywoodLayoutProps) {
   return (
     <>
-      {elements.map((el, i) => (
+      {elements.map((el, i) => {
+        const seam = pageSeams?.get(el.id);
+        return (
+        <Fragment key={el.id}>
+        {seam && <PageSeam page={seam.page} filler={seam.filler} />}
         <ElementLine
-          key={el.id}
           element={el}
           index={blockIndexBase + 1 + i}
           lineClass={HOLLYWOOD_LINE_CLASS[el.type]}
@@ -90,7 +99,9 @@ export function HollywoodLayout({
           }
           {...handlers}
         />
-      ))}
+        </Fragment>
+        );
+      })}
     </>
   );
 }

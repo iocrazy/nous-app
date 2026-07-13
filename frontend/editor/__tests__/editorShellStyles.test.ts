@@ -22,7 +22,7 @@ describe('EDITOR_SHELL_STYLES integrity', () => {
     expect(EDITOR_SHELL_STYLES).toContain('.mh-el-editable{');
     // appended passes at the bottom (would vanish if the literal split early)
     expect(EDITOR_SHELL_STYLES).toContain('.mh-slash-menu{');
-    expect(EDITOR_SHELL_STYLES).toContain('.mh-page-break{');
+    expect(EDITOR_SHELL_STYLES).toContain('.mh-page-seam{');
   });
 
   it('has no stray backtick inside the stylesheet text', () => {
