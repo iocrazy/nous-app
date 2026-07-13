@@ -435,7 +435,8 @@ export const EDITOR_SHELL_STYLES = `
   font-family:var(--mono); color:var(--sheet-ink);
   white-space:pre-wrap; word-break:break-word; min-height:1.7em;
 }
-.mh-el-editable:empty::before{
+.mh-el-editable:empty::before,
+.mh-el-editable:has(br.ProseMirror-trailingBreak)::before{
   content:attr(data-placeholder); color:var(--sheet-ink-soft); font-style:italic;
 }
 .mh-el-row.focused .mh-el-editable{
@@ -1399,15 +1400,33 @@ export const EDITOR_SHELL_STYLES = `
 }
 .mh-scene-heading-empty{ opacity:0.65; }
 /* Focused empty block whispers its element type (laper/Notion affordance) —
-   driven purely by the data-el-type attr, so no component plumbing. */
-.mh-el-editable:empty:focus::before{ font-style:normal; opacity:0.4; }
-.mh-el-editable[data-el-type='action']:empty:focus::before{ content:'Action'; }
-.mh-el-editable[data-el-type='character']:empty:focus::before{ content:'Character'; }
-.mh-el-editable[data-el-type='dialogue']:empty:focus::before{ content:'Dialogue'; }
-.mh-el-editable[data-el-type='paren']:empty:focus::before{ content:'Parenthetical'; }
-.mh-el-editable[data-el-type='transition']:empty:focus::before{ content:'Transition'; }
-.mh-el-editable[data-el-type='comment']:empty:focus::before{ content:'Comment'; }
-.mh-el-editable[data-el-type='subtitle']:empty:focus::before{ content:'Subtitle'; }
+   driven purely by the data-el-type attr, so no component plumbing.
+   TipTap mode (M2): ProseMirror always renders a trailing break element
+   (class ProseMirror-trailingBreak) inside an empty textblock
+   (prosemirror-view's addHackNode — unconditional, not something we can
+   turn off) so the NodeView's content div is NEVER matched by :empty;
+   :has(br...) (a DESCENDANT match, not a direct-child one — @tiptap/react's
+   NodeViewContent interposes its own wrapper div between our data-el-id div
+   and PM's actual contentDOM, so the break element sits two levels deep) is
+   the equivalent signal for that engine. Legacy's contentEditable never
+   contains that node, so this is purely additive — zero effect on the
+   legacy path. */
+.mh-el-editable:empty:focus::before,
+.mh-el-editable:has(br.ProseMirror-trailingBreak):focus::before{ font-style:normal; opacity:0.4; }
+.mh-el-editable[data-el-type='action']:empty:focus::before,
+.mh-el-editable[data-el-type='action']:has(br.ProseMirror-trailingBreak):focus::before{ content:'Action'; }
+.mh-el-editable[data-el-type='character']:empty:focus::before,
+.mh-el-editable[data-el-type='character']:has(br.ProseMirror-trailingBreak):focus::before{ content:'Character'; }
+.mh-el-editable[data-el-type='dialogue']:empty:focus::before,
+.mh-el-editable[data-el-type='dialogue']:has(br.ProseMirror-trailingBreak):focus::before{ content:'Dialogue'; }
+.mh-el-editable[data-el-type='paren']:empty:focus::before,
+.mh-el-editable[data-el-type='paren']:has(br.ProseMirror-trailingBreak):focus::before{ content:'Parenthetical'; }
+.mh-el-editable[data-el-type='transition']:empty:focus::before,
+.mh-el-editable[data-el-type='transition']:has(br.ProseMirror-trailingBreak):focus::before{ content:'Transition'; }
+.mh-el-editable[data-el-type='comment']:empty:focus::before,
+.mh-el-editable[data-el-type='comment']:has(br.ProseMirror-trailingBreak):focus::before{ content:'Comment'; }
+.mh-el-editable[data-el-type='subtitle']:empty:focus::before,
+.mh-el-editable[data-el-type='subtitle']:has(br.ProseMirror-trailingBreak):focus::before{ content:'Subtitle'; }
 /* laper's kbd hint rows — now rendered INSIDE the sheet top, only while the
    script has no typed text (EditorShell gates it), so a real script page stays
    pure. Overrides the earlier display:none chrome-kill. */
@@ -1459,15 +1478,24 @@ export const EDITOR_SHELL_STYLES = `
    1) An EMPTY block always whispers its element type — faint when idle,
       slightly firmer when focused — so a hover gutter never floats over a
       blank void (the orphan "4 ⠿ over nothing" the user framed). */
-.mh-el-editable:empty::before{ font-style:normal; opacity:0.22; }
-.mh-el-editable:empty:focus::before{ opacity:0.4; }
-.mh-el-editable[data-el-type='action']:empty::before{ content:'Action'; }
-.mh-el-editable[data-el-type='character']:empty::before{ content:'Character'; }
-.mh-el-editable[data-el-type='dialogue']:empty::before{ content:'Dialogue'; }
-.mh-el-editable[data-el-type='paren']:empty::before{ content:'Parenthetical'; }
-.mh-el-editable[data-el-type='transition']:empty::before{ content:'Transition'; }
-.mh-el-editable[data-el-type='comment']:empty::before{ content:'Comment'; }
-.mh-el-editable[data-el-type='subtitle']:empty::before{ content:'Subtitle'; }
+.mh-el-editable:empty::before,
+.mh-el-editable:has(br.ProseMirror-trailingBreak)::before{ font-style:normal; opacity:0.22; }
+.mh-el-editable:empty:focus::before,
+.mh-el-editable:has(br.ProseMirror-trailingBreak):focus::before{ opacity:0.4; }
+.mh-el-editable[data-el-type='action']:empty::before,
+.mh-el-editable[data-el-type='action']:has(br.ProseMirror-trailingBreak)::before{ content:'Action'; }
+.mh-el-editable[data-el-type='character']:empty::before,
+.mh-el-editable[data-el-type='character']:has(br.ProseMirror-trailingBreak)::before{ content:'Character'; }
+.mh-el-editable[data-el-type='dialogue']:empty::before,
+.mh-el-editable[data-el-type='dialogue']:has(br.ProseMirror-trailingBreak)::before{ content:'Dialogue'; }
+.mh-el-editable[data-el-type='paren']:empty::before,
+.mh-el-editable[data-el-type='paren']:has(br.ProseMirror-trailingBreak)::before{ content:'Parenthetical'; }
+.mh-el-editable[data-el-type='transition']:empty::before,
+.mh-el-editable[data-el-type='transition']:has(br.ProseMirror-trailingBreak)::before{ content:'Transition'; }
+.mh-el-editable[data-el-type='comment']:empty::before,
+.mh-el-editable[data-el-type='comment']:has(br.ProseMirror-trailingBreak)::before{ content:'Comment'; }
+.mh-el-editable[data-el-type='subtitle']:empty::before,
+.mh-el-editable[data-el-type='subtitle']:has(br.ProseMirror-trailingBreak)::before{ content:'Subtitle'; }
 /* 2) Hover tints were the COOL chrome surface (--surface-2, lavender) sitting
       on the WARM paper — read as a wrong-coloured box around the heading.
       Warm ink-mix tints instead. */
