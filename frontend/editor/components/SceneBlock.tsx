@@ -1108,35 +1108,6 @@ export function SceneBlock({
       {dropEdge === 'before' && (
         <div className="mh-drop-indicator before" data-testid="drop-indicator" aria-hidden="true" />
       )}
-      <button
-        type="button"
-        className={`mh-drag-handle${isDragging ? ' dragging' : ''}`}
-        aria-label={t('editor.dragScene')}
-        // Disambiguates the two drag scopes: this handle (on the heading row)
-        // moves the WHOLE scene; each paragraph's handle moves that paragraph.
-        title="Move scene"
-        aria-grabbed={reorder ? isDragging : undefined}
-        draggable={!!reorder}
-        tabIndex={reorder ? 0 : -1}
-        onDragStart={
-          reorder
-            ? (e) => {
-                e.dataTransfer.effectAllowed = 'move';
-                e.dataTransfer.setData('text/plain', scene.id);
-                reorder.onDragStart(scene.id);
-              }
-            : undefined
-        }
-        onDragEnd={reorder ? () => reorder.onDragEnd() : undefined}
-        onKeyDown={handleHandleKeyDown}
-      >
-        {/* 4-dot (2×2) grid — identical affordance to the per-element
-         *  `.mh-el-drag` handle (A5: one drag-handle style document-wide). */}
-        {[0, 1, 2, 3].map((d) => (
-          <span key={d} className="mh-el-dot" aria-hidden="true" />
-        ))}
-      </button>
-
       <div
         className={`mh-scene-headrow${format === 'asian' ? ' asian' : ''}`}
         ref={headRowRef}
@@ -1161,9 +1132,44 @@ export function SceneBlock({
             : undefined
         }
       >
-        {/* A1: continuous document-order block number (scene heading = block
-         *  `blockIndexBase + 1`), NOT the scene's position among scenes. */}
-        <span className="mh-scene-num-badge">{blockIndexBase + 1}</span>
+        {/* IN-FLOW gutter (structural fix for the misalignment class): the
+         *  number + drag handle live INSIDE the heading row's flex line, pulled
+         *  into the left margin with a negative margin — they share the text's
+         *  line box, so they can never drift vertically (the absolute+magic-top
+         *  approach misaligned per font/row kind). Same pattern as .mh-el-gutter. */}
+        <span className="mh-scene-gutter" contentEditable={false}>
+          {/* A1: continuous document-order block number (scene heading = block
+           *  `blockIndexBase + 1`), NOT the scene's position among scenes. */}
+          <span className="mh-scene-num-badge">{blockIndexBase + 1}</span>
+          <button
+            type="button"
+            className={`mh-drag-handle${isDragging ? ' dragging' : ''}`}
+            aria-label={t('editor.dragScene')}
+            // Disambiguates the two drag scopes: this handle (on the heading
+            // row) moves the WHOLE scene; a paragraph's handle moves that
+            // paragraph.
+            title="Move scene"
+            aria-grabbed={reorder ? isDragging : undefined}
+            draggable={!!reorder}
+            tabIndex={reorder ? 0 : -1}
+            onDragStart={
+              reorder
+                ? (e) => {
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', scene.id);
+                    reorder.onDragStart(scene.id);
+                  }
+                : undefined
+            }
+            onDragEnd={reorder ? () => reorder.onDragEnd() : undefined}
+            onKeyDown={handleHandleKeyDown}
+          >
+            {/* 4-dot (2×2) grid — identical affordance to `.mh-el-drag`. */}
+            {[0, 1, 2, 3].map((d) => (
+              <span key={d} className="mh-el-dot" aria-hidden="true" />
+            ))}
+          </button>
+        </span>
         {headingEditing ? (
           <>
             <select
