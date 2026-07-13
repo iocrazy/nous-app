@@ -31,6 +31,7 @@ export interface PromptResourceRef {
 export type SmartNodeType =
   | 'shot'
   | 'media'
+  | 'llm'
   | 'prompt'
   | 'output'
   | 'loop'
@@ -122,6 +123,20 @@ export interface MediaNodeData {
   items: GeneratedImageRef[];
   /** In-flight upload count — rendered as shimmer cells. */
   uploading?: number;
+}
+
+/** Standalone LLM node (IC 普通画布's LLM card, dual-canvas Phase 2.1):
+ *  INPUT text (typed or wired from prompt/llm upstream) → run → OUTPUT
+ *  text shown in-node. Self-contained — it does NOT spawn output nodes. */
+export interface LlmNodeData {
+  /** mediahub_models catalog row name ('' = catalog default). */
+  provider_slug: string;
+  /** AI-library agent id, or null = plain runner. */
+  agent_id: string | null;
+  input_text: string;
+  output_text: string;
+  run_status: 'idle' | 'running' | 'succeeded' | 'failed';
+  run_error: string | null;
 }
 
 export interface GroupNodeData {
@@ -256,6 +271,16 @@ export function canConnectSmart(
   if (targetType === 'media') return false;
   // Group containers hold members via parentId, never via wires.
   if (targetType === 'group') return false;
+  // LLM cards take TEXT upstreams only, and feed text consumers.
+  if (targetType === 'llm')
+    return sourceType === 'prompt' || sourceType === 'llm';
+  if (
+    sourceType === 'llm' &&
+    targetType !== 'prompt' &&
+    targetType !== 'loop' &&
+    targetType !== 'llm'
+  )
+    return false;
   if (sourceType === 'media' && targetType !== 'prompt' && targetType !== 'loop')
     return false;
   // Entity cards (character/location/prop) are SOURCE cards like shot:
@@ -274,6 +299,7 @@ export function canConnectSmart(
 export const SMART_NODE_DEFAULT_WIDTH: Record<SmartNodeType, number> = {
   shot: 240,
   media: 240,
+  llm: 300,
   prompt: 280,
   output: 260,
   loop: 200,

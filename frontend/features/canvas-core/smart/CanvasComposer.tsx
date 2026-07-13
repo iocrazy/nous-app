@@ -24,6 +24,7 @@ import { screenToWorld } from '../utils/viewport';
 import {
   createLoopNode,
   createOutputNode,
+  createLlmNode,
   createPromptNode,
   createShotNode,
   createTimelineNode,
@@ -172,11 +173,13 @@ export function CanvasComposer({
   }, [surfaceRef, viewport]);
 
   const addNode = useCallback(
-    (kind: 'shot' | 'prompt' | 'output' | 'loop' | 'timeline') => {
+    (kind: 'shot' | 'prompt' | 'llm' | 'output' | 'loop' | 'timeline') => {
       const position = dropPosition();
       const node =
         kind === 'shot'
           ? createShotNode({}, { position })
+          : kind === 'llm'
+            ? createLlmNode({}, { position })
           : kind === 'prompt'
             ? createPromptNode({}, { position })
             : kind === 'output'
@@ -473,6 +476,9 @@ export function CanvasComposer({
         <ComposerButton onClick={() => addNode('shot')}>+ Shot</ComposerButton>
       )}
       <ComposerButton onClick={() => addNode('prompt')}>+ Prompt</ComposerButton>
+      {!isLite && (
+        <ComposerButton onClick={() => addNode('llm')}>+ LLM</ComposerButton>
+      )}
       {!isLite && (
         <ComposerButton onClick={() => addNode('output')}>+ Output</ComposerButton>
       )}
