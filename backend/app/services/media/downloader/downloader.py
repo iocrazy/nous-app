@@ -32,6 +32,46 @@ from app.schemas.media import (
 )
 
 
+async def persist_video_download(
+    repo: MediaRepository,
+    *,
+    platform_id: str,
+    download_path: str,
+    duration: float,
+    storage_size: int,
+) -> bool:
+    """Persist a finished video download to parsed_media; return False on failure.
+
+    The DB write is the step that makes a download visible to the UI — if it
+    fails, the download must NOT be reported as completed (2026-07-05
+    incident: asyncpg bind error here was swallowed, every download looked
+    successful while download_path stayed NULL for 8 days). On failure this
+    also best-effort marks the row failed so the UI offers Retry.
+    """
+    try:
+        await repo.mark_media_as_downloaded(
+            platform_id=platform_id,
+            download_path=download_path,
+            duration=duration,
+            storage_size=storage_size,
+        )
+        return True
+    except Exception as e:
+        logger.error(
+            f"Video {platform_id} downloaded to disk, "
+            f"but failed to update the database: {e}."
+        )
+        try:
+            await repo.mark_download_failed(
+                platform_id,
+                f"DB write failed after download: {e}",
+                is_video=True,
+            )
+        except Exception as mark_err:
+            logger.error(f"Also failed to mark {platform_id} as failed: {mark_err}")
+        return False
+
+
 class DownloaderService:
 
     @staticmethod
@@ -585,30 +625,32 @@ class DownloaderService:
                         video_full_path
                     )
 
-                    try:
-                        # Calculate file size (after optimization)
-                        file_size = (
-                            os.path.getsize(video_full_path)
-                            if os.path.exists(video_full_path)
-                            else 0
-                        )
+                    # Calculate file size (after optimization)
+                    file_size = (
+                        os.path.getsize(video_full_path)
+                        if os.path.exists(video_full_path)
+                        else 0
+                    )
 
-                        # Store relative path and file size to database
-                        await repo.mark_media_as_downloaded(
-                            platform_id=platform_id,
-                            download_path=video_relative_path,  # Use relative path
-                            duration=download_duration,
-                            storage_size=file_size,
-                        )
-                    except Exception as e:
-                        logger.error(
-                            f"Marked video {platform_id} as downloaded successfully, "
-                            f"but failed to update the database: {e}."
-                        )
+                    # Store relative path and file size to database. If this
+                    # write fails the UI will never see the file — report
+                    # FAILED so the user gets a working Retry, not a phantom
+                    # "completed" with no video (2026-07-05 incident).
+                    persisted = await persist_video_download(
+                        repo,
+                        platform_id=platform_id,
+                        download_path=video_relative_path,
+                        duration=download_duration,
+                        storage_size=file_size,
+                    )
+                    if not persisted:
+                        result.video_download_status = DownloadStatus.FAILED
                         result.error = (
-                            f"Marked video {platform_id} as downloaded successfully, "
-                            f"but failed to update the database: {e}."
+                            f"Video {platform_id} downloaded to disk but the "
+                            f"database write failed; reported as failed so "
+                            f"retry can re-run the registration."
                         )
+                        break
 
                     # Update result object
                     result.video_download_status = DownloadStatus.COMPLETED
@@ -633,7 +675,13 @@ class DownloaderService:
                         )
                     break
 
-            if result.video_download_status != DownloadStatus.COMPLETED:
+            # "All URLs failed" applies only when no earlier step already
+            # recorded a specific failure — the persist-failure path above
+            # sets result.error itself, and this block would clobber that
+            # message (and the DB error_message) with "unknown".
+            if result.video_download_status != DownloadStatus.COMPLETED and not (
+                result.error
+            ):
                 error_detail = (
                     "; ".join(download_errors) if download_errors else "unknown"
                 )

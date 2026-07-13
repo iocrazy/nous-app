@@ -93,6 +93,7 @@ from loguru import logger
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, insert, or_, select, text, update
 
+from app.db.pg_coerce import coerce_datetime_strings
 from app.db.repository_base import AsyncpgRepository
 from app.db.scope import is_enforced, scoped_sql, system_request_scope
 from app.db.session import read_scope, write_scope
@@ -527,7 +528,10 @@ class ResourcesRepository(AsyncpgRepository):
                 obj = await session.get(Resources, self._bigint(resource_id))
                 if obj is None:
                     return {}
-                for k, v in data.items():
+                # ISO-string timestamps would make asyncpg reject the flush
+                # (see app.db.pg_coerce) — parse them at the boundary.
+                normalized = coerce_datetime_strings(Resources, data)
+                for k, v in normalized.items():
                     setattr(obj, _RESOURCES_NAME_TO_ATTR.get(k, k), v)
                 await session.flush()
                 refresh_cm = (
@@ -1260,11 +1264,14 @@ class ResourcesRepository(AsyncpgRepository):
         self, version_id: str, data: Dict[str, Any]
     ) -> Dict[str, Any]:
         try:
+            # ISO-string timestamps would make asyncpg roll back the whole
+            # UPDATE (see app.db.pg_coerce) — parse them at the boundary.
+            normalized = coerce_datetime_strings(ResourceVersions, data)
             async with write_scope() as session:
                 result = await session.execute(
                     update(ResourceVersions)
                     .where(ResourceVersions.id == self._bigint(version_id))
-                    .values(**data)
+                    .values(**normalized)
                     .returning(*ResourceVersions.__table__.columns)
                 )
                 row = result.mappings().first()

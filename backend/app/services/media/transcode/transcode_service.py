@@ -312,7 +312,7 @@ class TranscodeService:
                         {
                             "hls_path": relative_hls,
                             "transcode_status": "completed",
-                            "transcode_at": datetime.now(timezone.utc).isoformat(),
+                            "transcode_at": datetime.now(timezone.utc),
                         },
                     )
 
@@ -434,7 +434,7 @@ class TranscodeService:
                 {
                     "hls_path": relative_hls,
                     "transcode_status": "completed",
-                    "transcode_at": datetime.now(timezone.utc).isoformat(),
+                    "transcode_at": datetime.now(timezone.utc),
                 },
             )
 

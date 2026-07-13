@@ -106,7 +106,10 @@ async def _publish_one_account(account: dict, adapter, task: dict, repo) -> str:
                 "success",
                 platform_item_id=item_id,
                 published_url=f"https://www.douyin.com/video/{item_id}",
-                published_at=datetime.now(timezone.utc).isoformat(),
+                # datetime OBJECT — this reaches a raw asyncpg $N bind
+                # (publish_tasks_repository.set_account_status), which
+                # refuses ISO strings for timestamptz.
+                published_at=datetime.now(timezone.utc),
             )
             return "success"
         # H5 share channel
