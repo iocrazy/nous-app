@@ -368,19 +368,17 @@ async def serve_version_file(
 
         # Storage unification: version originals may be a legacy fs-relative
         # path or an `sb://` object-store row (dual-track uploads). Route
-        # through the shared reader so both shapes work; the P3 nginx
-        # direct-serve redirect only ever applies to legacy fs rows.
+        # through the shared reader so both shapes work.
+        #
+        # Deliberately EXCLUDED from the P3 nginx direct-serve redirect:
+        # this endpoint forces `Content-Disposition: attachment` (browser
+        # download with the version's filename), but nginx's /f/ location
+        # sets no Content-Disposition — a P3 302 would silently open the
+        # file inline instead of downloading. The pre-port endpoint never
+        # consulted P3 either, so skipping it preserves exact behavior.
         from urllib.parse import quote as urlquote
 
         from app.services.library.media_serving import serve_stored_file
-        from app.services.library.media_storage import resolve_media_source
-        from app.services.media.nginx_direct import maybe_direct_redirect
-
-        loc = resolve_media_source(file_path)
-        if not loc.is_object_store:
-            redirect = await maybe_direct_redirect(loc.rel_path)  # P3, legacy only
-            if redirect is not None:
-                return redirect
 
         # Mirror Starlette's FileResponse Content-Disposition formatting
         # (filename= for ascii, filename*=utf-8''... otherwise) so the

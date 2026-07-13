@@ -228,12 +228,23 @@ async def test_version_sb_row_served_via_serve_stored_file():
 
 
 @pytest.mark.asyncio
-async def test_version_legacy_row_consults_redirect():
-    """Legacy version row → P3 redirect consulted with the rel path."""
-    ver = _version(file_path=FS_PATH, mime_type="video/mp4")
-    sentinel = RedirectResponse("https://host:8081/f/y?st=sig", status_code=302)
-    redirect = AsyncMock(return_value=sentinel)
-    serve = AsyncMock()
+@pytest.mark.parametrize(
+    "file_path,mime",
+    [(FS_PATH, "video/mp4"), (SB_PATH, "image/png")],
+    ids=["legacy-fs-row", "sb-row"],
+)
+async def test_version_download_never_consults_p3_redirect(file_path, mime):
+    """The version download endpoint is EXCLUDED from the P3 nginx redirect
+    for BOTH path shapes: it forces `Content-Disposition: attachment`, and
+    nginx's /f/ location sets no Content-Disposition — a 302 there would
+    silently open the file inline instead of downloading. Every row goes
+    through serve_stored_file directly (pre-port behavior: no P3 consult)."""
+    ver = _version(file_path=file_path, mime_type=mime)
+    sentinel = Response(content=b"v-bytes")
+    serve = AsyncMock(return_value=sentinel)
+    redirect = AsyncMock(
+        return_value=RedirectResponse("https://host:8081/f/y?st=sig", status_code=302)
+    )
 
     with (
         _patch_version_repo(ver),
@@ -255,5 +266,7 @@ async def test_version_legacy_row_consults_redirect():
         )
 
     assert resp is sentinel
-    redirect.assert_awaited_once_with(FS_PATH)
-    serve.assert_not_awaited()
+    redirect.assert_not_awaited()
+    args, kwargs = serve.await_args
+    assert args[0] == file_path
+    assert kwargs["disposition"].startswith("attachment;")
