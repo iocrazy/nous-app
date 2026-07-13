@@ -33,6 +33,15 @@ interface NousModel {
   last_tested_at?: string | null
 }
 
+interface ProviderProtocol {
+  key: string
+  label: string
+  description: string
+  model_types: string[]
+  aliases: string[]
+  is_default: boolean
+}
+
 // A provider card groups every model that shares the same provider + base URL
 // (and therefore the same platform key).
 interface ProviderGroup {
@@ -136,6 +145,7 @@ export function AIModelsPage() {
   const [modalMode, setModalMode] = useState<'new' | 'add'>('new')
   const [modalGroup, setModalGroup] = useState<ProviderGroup | null>(null)
   const [fetchedModels, setFetchedModels] = useState<string[]>([])
+  const [protocols, setProtocols] = useState<ProviderProtocol[]>([])
   const [selectedModels, setSelectedModels] = useState<string[]>([])
   const [probeLoading, setProbeLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -175,6 +185,24 @@ export function AIModelsPage() {
 
   useEffect(() => { fetchModels() }, [fetchModels])
 
+  useEffect(() => {
+    // Best-effort: a failure leaves protocols=[] and the field falls back to
+    // a plain text input (see the Actual Provider FormItem).
+    const loadProtocols = async () => {
+      try {
+        const res = await fetch(`${apiBase}/api/v1/admin/mediahub-models/protocols`, { headers })
+        if (res.ok) {
+          const data = await res.json()
+          setProtocols(data.protocols || [])
+        }
+      } catch {
+        // silent — the field degrades to a text input
+      }
+    }
+    loadProtocols()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token])
+
   const groups = useMemo<ProviderGroup[]>(() => {
     const map = new Map<string, ProviderGroup>()
     for (const m of models) {
@@ -192,6 +220,15 @@ export function AIModelsPage() {
     }
     return Array.from(map.values())
   }, [models])
+
+  const protocolOptions = useMemo(
+    () =>
+      protocols.map((p) => ({
+        label: `${p.label} — ${p.model_types.join('/')}`,
+        value: p.key,
+      })),
+    [protocols],
+  )
 
   const openAddProvider = () => {
     setModalMode('new')
@@ -677,8 +714,18 @@ export function AIModelsPage() {
         <Form form={form} layout="vertical">
           {modalMode === 'new' ? (
             <>
-              <FormItem label="Actual Provider" field="actual_provider" rules={[{ required: true }]}>
-                <Input placeholder="e.g. openai, deepseek, doubao" />
+              <FormItem
+                label="Actual Provider"
+                field="actual_provider"
+                rules={[{ required: true }]}
+                extra="Dispatch protocol. Unknown/custom values fall back to the generic OpenAI-compatible adapter."
+              >
+                <Select
+                  allowCreate
+                  showSearch
+                  placeholder="Select a protocol or type a custom value"
+                  options={protocolOptions}
+                />
               </FormItem>
               <FormItem
                 label="API Base URL"
