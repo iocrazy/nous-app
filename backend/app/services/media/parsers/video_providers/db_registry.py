@@ -24,6 +24,7 @@ from typing import Optional, Tuple
 
 from loguru import logger
 
+from app.services.ai.provider_protocols import generation_keys_for as _gen_keys
 from app.services.media.parsers.video_providers.ark_image import ArkImageProvider
 from app.services.media.parsers.video_providers.base import (
     BaseImageProvider,
@@ -32,8 +33,12 @@ from app.services.media.parsers.video_providers.base import (
 )
 from app.services.media.parsers.video_providers.jimeng_cli import JimengCliProvider
 
-_ARK_PROVIDERS = {"doubao", "ark"}
-_JIMENG_PROVIDERS = {"jimeng-cli", "jimeng"}
+# Accepted actual_provider strings per generation family. DERIVED from the
+# provider-protocol registry (single source of truth, 2026-07-13); the
+# contract test in tests/test_provider_protocols_contract.py fails if these
+# and the registry disagree.
+_ARK_PROVIDERS = _gen_keys("ark")
+_JIMENG_PROVIDERS = _gen_keys("jimeng-cli")
 
 
 class _JimengImageAdapter(BaseImageProvider):
