@@ -48,6 +48,7 @@ import { HollywoodLayout } from '../render/HollywoodLayout';
 import { AsianLayout } from '../render/AsianLayout';
 import { MentionNamesContext, type LineMention } from '../render/layoutShared';
 import { MentionCombobox, filterMentionCandidates } from './MentionCombobox';
+import { SlashMenu, SLASH_ITEMS, filterSlashItems, type SlashItem } from './SlashMenu';
 import { CopilotCard, type CopilotPhase } from './CopilotCard';
 import { EmptySceneHint } from './EmptyStates';
 import type { EditorFormat } from '../useEditorState';
@@ -306,10 +307,31 @@ export function SceneBlock({
   const mentionFilteredRef = useRef<string[]>(mentionFiltered);
   const mentionActiveRef = useRef(0);
 
+  // ── Slash menu (`/` at block start → block-type picker) ──────────────────
+  // Mirrors the mention picker's state/ref shape exactly: the open state +
+  // filtered items live in state, and refs feed the stable keydown handler.
+  const [slash, setSlash] = useState<{
+    elementId: string;
+    query: string;
+    position?: { top: number; left: number };
+  } | null>(null);
+  const [slashActive, setSlashActive] = useState(0);
+  const slashListId = useId();
+  const slashRef = useRef<typeof slash>(null);
+  const slashFiltered = useMemo(
+    () => (slash ? filterSlashItems(SLASH_ITEMS, slash.query, t) : []),
+    [slash, t],
+  );
+  const slashFilteredRef = useRef<SlashItem[]>(slashFiltered);
+  const slashActiveRef = useRef(0);
+
   elementsRef.current = sync.elements;
   mentionRef.current = mention;
   mentionFilteredRef.current = mentionFiltered;
   mentionActiveRef.current = mentionActive;
+  slashRef.current = slash;
+  slashFilteredRef.current = slashFiltered;
+  slashActiveRef.current = slashActive;
 
   // Reset the active option to the top whenever the picker opens or its filter
   // changes (typing narrows the list); nav-only changes must NOT reset it.
@@ -418,6 +440,25 @@ export function SceneBlock({
     [sync, setNodeText],
   );
 
+  // Apply a slash-menu pick: retype the CURRENT block and clear the `/query`
+  // text (both the model, via one update op, and the live DOM node — the
+  // focused row is never repainted by React, same caret rule as mentions).
+  const applySlash = useCallback(
+    (type: ElementType) => {
+      const s = slashRef.current;
+      if (!s) return;
+      const op: ElementOp = {
+        op: 'update',
+        element_id: s.elementId,
+        payload: { type, text: '' },
+      };
+      sync.dispatchOps([op], applyLocal(elementsRef.current, [op]));
+      setNodeText(s.elementId, '');
+      setSlash(null);
+    },
+    [sync, setNodeText],
+  );
+
   const handleKeyDown = useCallback(
     (elementId: string, e: KeyboardEvent<HTMLDivElement>) => {
       // Never intervene mid-IME-composition — let the browser compose.
@@ -475,6 +516,39 @@ export function SceneBlock({
         }
       }
 
+      // While the slash menu is open on this line, it owns the nav keys.
+      const slashOpen = slashRef.current;
+      if (slashOpen && slashOpen.elementId === elementId) {
+        const filtered = slashFilteredRef.current;
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          if (filtered.length > 0) setSlashActive((prev) => (prev + 1) % filtered.length);
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          if (filtered.length > 0) {
+            setSlashActive((prev) => (prev - 1 + filtered.length) % filtered.length);
+          }
+          return;
+        }
+        if (e.key === 'Enter' || e.key === 'Tab') {
+          e.preventDefault();
+          const active = slashActiveRef.current;
+          if (filtered.length > 0 && active >= 0 && active < filtered.length) {
+            applySlash(filtered[active].type);
+          } else {
+            setSlash(null);
+          }
+          return;
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setSlash(null);
+          return;
+        }
+      }
+
       // Typing `@` opens the inline picker; let the character itself be typed.
       if (e.key === '@') {
         openMention(elementId, 'inline');
@@ -511,7 +585,7 @@ export function SceneBlock({
         applyResult(result);
       }
     },
-    [scene.id, applyResult, sync, openMention, handleMentionSelect, onExitEditing],
+    [scene.id, applyResult, sync, openMention, handleMentionSelect, applySlash, onExitEditing],
   );
 
   const handleInput = useCallback(
@@ -526,6 +600,21 @@ export function SceneBlock({
         } else {
           setMention({ ...m, query: text });
         }
+      }
+
+      // Slash menu: `/` at the START of a block opens the type picker; the
+      // text after the slash is the live filter. Anything else closes it.
+      if (text.startsWith('/')) {
+        const node = containerRef.current?.querySelector<HTMLElement>(
+          `[data-el-id="${elementId}"]`,
+        );
+        const position = node
+          ? { top: node.offsetTop + node.offsetHeight, left: node.offsetLeft }
+          : undefined;
+        setSlashActive(0);
+        setSlash({ elementId, query: text.slice(1), position });
+      } else if (slashRef.current?.elementId === elementId) {
+        setSlash(null);
       }
 
       const timers = inputTimersRef.current;
@@ -1166,6 +1255,17 @@ export function SceneBlock({
           position={mention.position}
           onSelect={handleMentionSelect}
           onHover={setMentionActive}
+        />
+      )}
+
+      {slash && (
+        <SlashMenu
+          items={slashFiltered}
+          activeIndex={slashActive}
+          listboxId={slashListId}
+          position={slash.position}
+          onSelect={applySlash}
+          onHover={setSlashActive}
         />
       )}
 

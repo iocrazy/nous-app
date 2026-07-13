@@ -16,6 +16,7 @@
 import { useTranslation } from 'react-i18next';
 import type { SceneDoc } from '../types';
 import type { EditorFormat } from '../useEditorState';
+import type { PaginationMode } from '../paginationStorage';
 import type { ScriptCommit } from '../sceneService';
 import { VersionPanel } from '../versions/VersionPanel';
 
@@ -70,6 +71,10 @@ export interface WritingPanelProps {
   scenes: SceneDoc[];
   format: EditorFormat;
   onFormatChange: (format: EditorFormat) => void;
+  /** Paged (laper-style page rules) vs Continuous flow. Optional so the panel
+   *  renders standalone in stats-only tests. */
+  pagination?: PaginationMode;
+  onPaginationChange?: (mode: PaginationMode) => void;
   // Version history (Phase B P4). Optional so the panel renders standalone
   // (statistics-only) when no script is bound — e.g. the deriveStatistics tests.
   scriptId?: string;
@@ -81,6 +86,8 @@ export function WritingPanel({
   scenes,
   format,
   onFormatChange,
+  pagination,
+  onPaginationChange,
   scriptId,
   onCompareCommit,
   onRolledBack,
@@ -97,6 +104,33 @@ export function WritingPanel({
             onCompare={onCompareCommit}
             onRolledBack={onRolledBack}
           />
+          <div className="mh-divider" />
+        </>
+      )}
+
+      {pagination && onPaginationChange && (
+        <>
+          <div>
+            <div className="mh-field-label">{t('editor.pagination')}</div>
+            <div className="mh-segmented" role="group" aria-label={t('editor.pagination')}>
+              <button
+                type="button"
+                className={`mh-seg${pagination === 'continuous' ? ' active' : ''}`}
+                aria-pressed={pagination === 'continuous'}
+                onClick={() => onPaginationChange('continuous')}
+              >
+                {t('editor.continuous')}
+              </button>
+              <button
+                type="button"
+                className={`mh-seg${pagination === 'paged' ? ' active' : ''}`}
+                aria-pressed={pagination === 'paged'}
+                onClick={() => onPaginationChange('paged')}
+              >
+                {t('editor.paged')}
+              </button>
+            </div>
+          </div>
           <div className="mh-divider" />
         </>
       )}
