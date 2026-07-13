@@ -112,7 +112,7 @@ async def resolve_image_provider(
     provider, actual_model = protocol.build_image_provider(row)
     logger.info(
         "Resolved image provider from catalog: {} (model={})",
-        protocol.generation_family,
+        actual_provider,
         actual_model,
     )
     return provider, actual_model
