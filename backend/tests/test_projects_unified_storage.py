@@ -1,10 +1,15 @@
-"""Task 3.1 — dual-track ``upload_file`` for project_files.
+"""Tasks 3.1 + 3.2 — dual-track ``upload_file`` / ``upload_new_version`` for
+project_files.
 
 Exercises ProjectsService against a stubbed repo (in-memory dict) so the
 tests pin ONLY the storage-selection logic — flag on routes bytes through
 store_local_file() into the "sb://library/..." shape, flag off (and any
 storage failure) preserves the legacy mediatrack/{project_id}/... filesystem
 path. Mirrors the FakeRepo style of test_resources_unified_storage.py.
+
+Task 3.2's audit found no serve/tooling-read points in the grep'd files
+(projects_router.py has no file-serving route at all) — see the comment
+block near the bottom of this file for the full finding.
 """
 
 import hashlib
@@ -238,3 +243,165 @@ async def test_upload_file_missing_project_raises(service):
     file = FakeUploadFile("x.txt", b"data", "text/plain")
     with pytest.raises(ValueError, match="Project not found"):
         await service.upload_file(project_id="999", user_id="u1", file=file)
+
+
+# ── Task 3.2: upload_new_version dual-track (the "另一子路径" write point) ──
+
+
+@pytest.mark.asyncio
+async def test_new_version_flag_on_writes_object_store_path(service, monkeypatch):
+    monkeypatch.setattr(ps.settings, "FEATURE_UNIFIED_STORAGE", True)
+    _seed_project(service.repo, 10, team_id=42)
+
+    file_row = {
+        "id": 500,
+        "project_id": 10,
+        "filename": "orig.mp4",
+        "file_path": "mediatrack/10/orig.mp4",
+        "current_version": 1,
+    }
+    service.repo.files[500] = file_row
+    service.repo.versions.append(
+        {
+            "file_id": "500",
+            "version_number": 1,
+            "filename": "orig.mp4",
+            "file_path": "mediatrack/10/orig.mp4",
+        }
+    )
+
+    captured = {}
+
+    async def fake_store_local_file(
+        *, scope_id, source_path, mime, filename=None, sha256=None, store=None
+    ):
+        assert Path(source_path).exists()
+        captured["scope_id"] = scope_id
+        captured["source_path"] = source_path
+        return StoredObject(
+            file_path=f"sb://library/t{scope_id}/ab/cd/{sha256}.bin",
+            size_bytes=Path(source_path).stat().st_size,
+            sha256=sha256,
+        )
+
+    monkeypatch.setattr(ps, "store_local_file", fake_store_local_file)
+
+    file = FakeUploadFile("clip-v2.mp4", b"version two bytes", "video/mp4")
+    version = await service.upload_new_version(
+        project_id="10", file_id="500", user_id="u1", file=file, notes="v2"
+    )
+
+    assert version["version_number"] == 2
+    assert version["file_path"].startswith("sb://library/t42/")
+    assert service.repo.files[500]["file_path"] == version["file_path"]
+    assert service.repo.files[500]["current_version"] == 2
+    assert captured["scope_id"] == 42
+    assert not Path(captured["source_path"]).exists()
+
+
+@pytest.mark.asyncio
+async def test_new_version_flag_off_keeps_legacy_filesystem_path(service, monkeypatch):
+    monkeypatch.setattr(ps.settings, "FEATURE_UNIFIED_STORAGE", False)
+    _seed_project(service.repo, 11, team_id=7)
+
+    service.repo.files[501] = {
+        "id": 501,
+        "project_id": 11,
+        "filename": "orig.txt",
+        "file_path": "mediatrack/11/orig.txt",
+        "current_version": 1,
+    }
+    service.repo.versions.append(
+        {
+            "file_id": "501",
+            "version_number": 1,
+            "filename": "orig.txt",
+            "file_path": "mediatrack/11/orig.txt",
+        }
+    )
+
+    called = {"n": 0}
+
+    async def fake_store_local_file(*args, **kwargs):
+        called["n"] += 1
+        raise AssertionError("store_local_file must not be called when flag is off")
+
+    monkeypatch.setattr(ps, "store_local_file", fake_store_local_file)
+
+    file = FakeUploadFile("notes-v2.txt", b"version two legacy", "text/plain")
+    version = await service.upload_new_version(
+        project_id="11", file_id="501", user_id="u1", file=file
+    )
+
+    assert called["n"] == 0
+    expected = "mediatrack/11/versions/501/v2_notes-v2.txt"
+    assert version["file_path"] == expected
+    assert service.repo.files[501]["file_path"] == expected
+
+    on_disk = Path(ps.settings.DOWNLOAD_PATH) / expected
+    assert on_disk.exists()
+    assert on_disk.read_bytes() == b"version two legacy"
+
+
+@pytest.mark.asyncio
+async def test_new_version_store_failure_falls_back_to_filesystem(service, monkeypatch):
+    monkeypatch.setattr(ps.settings, "FEATURE_UNIFIED_STORAGE", True)
+    _seed_project(service.repo, 12, team_id=9)
+
+    service.repo.files[502] = {
+        "id": 502,
+        "project_id": 12,
+        "filename": "orig.png",
+        "file_path": "mediatrack/12/orig.png",
+        "current_version": 1,
+    }
+    service.repo.versions.append(
+        {
+            "file_id": "502",
+            "version_number": 1,
+            "filename": "orig.png",
+            "file_path": "mediatrack/12/orig.png",
+        }
+    )
+
+    async def failing_store_local_file(*args, **kwargs):
+        raise RuntimeError("storage-api unreachable")
+
+    monkeypatch.setattr(ps, "store_local_file", failing_store_local_file)
+
+    err_mock = MagicMock()
+    monkeypatch.setattr(ps.logger, "error", err_mock)
+
+    file = FakeUploadFile("photo-v2.png", b"fallback v2 bytes", "image/png")
+    version = await service.upload_new_version(
+        project_id="12", file_id="502", user_id="u1", file=file
+    )
+
+    expected = "mediatrack/12/versions/502/v2_photo-v2.png"
+    assert version["file_path"] == expected
+
+    on_disk = Path(ps.settings.DOWNLOAD_PATH) / expected
+    assert on_disk.exists()
+    assert on_disk.read_bytes() == b"fallback v2 bytes"
+
+    err_mock.assert_called_once()
+    assert "unified-storage write failed" in err_mock.call_args[0][0]
+
+
+# ── Task 3.2 audit note: no serve/tooling-read points exist in the grep'd
+# files ───────────────────────────────────────────────────────────────────
+#
+# `grep -rn "mediatrack\|DOWNLOAD_PATH" backend/app/api/projects_router.py
+#  backend/app/services/library/projects_service.py`
+#
+# turns up exactly the write points covered above (upload_file @ 3.1,
+# upload_new_version @ 3.2) — zero FileResponse/StreamingResponse/serve
+# endpoints and zero "read an existing stored file for tooling" points in
+# either file. projects_router.py has no file-serving route at all; the
+# only runtime consumer of a project_files.file_path value is the generic
+# legacy-fallback `@app.get("/media/{file_path:path}")` catch-all in
+# app/main.py (`serve_media_by_path`), which lives outside this task's
+# grep scope, is untested today, and is shared by multiple unrelated
+# routes (`/media/{id}`, `/media/{id}/cover`) in one try/except block.
+# Left unmodified — see the task report's Concerns section for the
+# follow-up recommendation.

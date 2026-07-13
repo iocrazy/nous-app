@@ -741,7 +741,8 @@ class ProjectsService:
         Steps:
         1. Validate project + file
         2. Get next version number
-        3. Save file to disk
+        3. Stream to a temp file, then dual-track write (mirrors
+           upload_file / Task 2.2's upload_new_version pattern)
         4. Extract metadata if video
         5. Create version record
         6. Update current_version + metadata on project_files
@@ -757,36 +758,75 @@ class ProjectsService:
         # Get next version number
         next_version = await self.repo.get_next_version_number(file_id)
 
-        # Save to disk
+        # Stream to a temp file first (mirrors upload_file): the final
+        # location depends on the storage track, and the object-store PUT
+        # needs a local source file either way.
         safe_name = sanitize_filename(file.filename)
-        save_dir = (
-            Path(settings.DOWNLOAD_PATH)
-            / "mediatrack"
-            / project_id
-            / "versions"
-            / file_id
-        )
-        save_dir.mkdir(parents=True, exist_ok=True)
+        tmp_fd, tmp_name = tempfile.mkstemp()
+        os.close(tmp_fd)
+        tmp_path = Path(tmp_name)
+        try:
+            file_size, file_hash = await stream_upload_to_disk(
+                file, tmp_path, MAX_UPLOAD_SIZE
+            )
 
-        target = save_dir / f"v{next_version}_{safe_name}"
-        file_size, _ = await stream_upload_to_disk(file, target, MAX_UPLOAD_SIZE)
+            # Classify and extract metadata — sniff real content type first.
+            mime = (
+                sniff_mime(tmp_path)
+                or file.content_type
+                or mimetypes.guess_type(safe_name)[0]
+                or ""
+            )
+            file_type = self._classify_file_type(mime)
+            metadata = {}
+            if file_type == "video":
+                metadata = await self._extract_video_metadata(str(tmp_path))
 
-        # Classify and extract metadata — sniff real content type first.
-        mime = (
-            sniff_mime(target)
-            or file.content_type
-            or mimetypes.guess_type(safe_name)[0]
-            or ""
-        )
-        file_type = self._classify_file_type(mime)
-        metadata = {}
-        if file_type == "video":
-            metadata = await self._extract_video_metadata(str(target))
+            stored = None
+            if settings.FEATURE_UNIFIED_STORAGE:
+                scope_id = await self._resolve_project_scope_id(project)
+                try:
+                    stored = await store_local_file(
+                        scope_id=scope_id,
+                        source_path=str(tmp_path),
+                        mime=mime,
+                        filename=safe_name,
+                        sha256=file_hash,
+                    )
+                except Exception as exc:
+                    logger.error(
+                        f"[upload_new_version] unified-storage write failed, "
+                        f"falling back to filesystem: project={project_id} "
+                        f"file={file_id} error={exc!r}"
+                    )
+
+            if stored is not None:
+                relative_path = stored.file_path
+            else:
+                # Legacy filesystem move — fs fallback only. Version
+                # filenames already carry the "v{n}_" prefix so there is
+                # no duplicate-name concern (unlike upload_file's flat dir).
+                save_dir = (
+                    Path(settings.DOWNLOAD_PATH)
+                    / "mediatrack"
+                    / project_id
+                    / "versions"
+                    / file_id
+                )
+                save_dir.mkdir(parents=True, exist_ok=True)
+                target = save_dir / f"v{next_version}_{safe_name}"
+                await asyncio.to_thread(shutil.move, str(tmp_path), str(target))
+                relative_path = (
+                    f"mediatrack/{project_id}/versions/{file_id}/"
+                    f"v{next_version}_{safe_name}"
+                )
+        finally:
+            # No-op if the move succeeded (tmp_path no longer exists); when
+            # the object-store write succeeded, this is what cleans up the
+            # tmp file (store_local_file only reads it, never deletes it).
+            tmp_path.unlink(missing_ok=True)
 
         # Create version record
-        relative_path = (
-            f"mediatrack/{project_id}/versions/{file_id}/v{next_version}_{safe_name}"
-        )
         version_data = {
             "file_id": file_id,
             "version_number": next_version,
