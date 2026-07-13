@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { applyDropMembership, createEmptyGroup, groupSelection, ungroupNode, releaseChildrenOf } from './grouping';
+import { absorbMediaIntoGroup, applyDropMembership, createEmptyGroup, groupSelection, hitGroupIdFor, ungroupNode, releaseChildrenOf } from './grouping';
 import type { CanvasNode } from '../types';
 
 const n = (id: string, x: number, y: number, extra: Record<string, unknown> = {}): CanvasNode =>
@@ -181,5 +181,88 @@ describe('applyDropMembership strips RF-internal fields', () => {
     const b = released.find((x) => (x as { id: string }).id === 'b') as Record<string, unknown>;
     expect(b.width).toBeUndefined();
     expect(b.measured).toBeUndefined();
+  });
+});
+
+const mediaNode = (id: string, x: number, y: number, urls: string[]): CanvasNode =>
+  ({
+    id,
+    type: 'media',
+    position: { x, y },
+    data: { title: 'Media', items: urls.map((url) => ({ url, kind: 'image' })) },
+    measured: { width: 100, height: 50 },
+  }) as unknown as CanvasNode;
+
+describe('absorbMediaIntoGroup (group v2 — IC smart-group)', () => {
+  const conn = (id: string, source: string, target: string) => ({
+    id,
+    source,
+    target,
+    sourceHandle: null,
+    targetHandle: null,
+  });
+
+  it('merges items (deduped), removes the media node, re-routes wires to the group', () => {
+    const nodes = [
+      grp('g1', 100, 100, 300, 200),
+      mediaNode('m1', 120, 120, ['/api/v1/generated-media/1/cover', '/api/v1/generated-media/2/cover']),
+      n('p1', 600, 100, { type: 'prompt' }),
+    ];
+    (nodes[0] as unknown as { data: Record<string, unknown> }).data = {
+      label: 'G',
+      items: [{ url: '/api/v1/generated-media/2/cover', kind: 'image' }],
+    };
+    const res = absorbMediaIntoGroup(
+      nodes,
+      [conn('e1', 'm1', 'p1')],
+      'm1',
+      'g1',
+    )!;
+    expect(res).not.toBeNull();
+    const ids = res.nodes.map((x) => (x as { id: string }).id);
+    expect(ids).not.toContain('m1');
+    const g = res.nodes.find((x) => (x as { id: string }).id === 'g1') as {
+      data: { items: Array<{ url: string }> };
+    };
+    expect(g.data.items.map((i) => i.url)).toEqual([
+      '/api/v1/generated-media/2/cover',
+      '/api/v1/generated-media/1/cover',
+    ]);
+    expect(res.connections).toEqual([
+      expect.objectContaining({ source: 'g1', target: 'p1' }),
+    ]);
+  });
+
+  it('dedupes a re-routed wire that would duplicate an existing group wire', () => {
+    const nodes = [grp('g1', 100, 100, 300, 200), mediaNode('m1', 120, 120, []), n('p1', 600, 100)];
+    const res = absorbMediaIntoGroup(
+      nodes,
+      [conn('e1', 'g1', 'p1'), conn('e2', 'm1', 'p1')],
+      'm1',
+      'g1',
+    )!;
+    expect(res.connections).toHaveLength(1);
+  });
+
+  it('grows a too-short group to fit the grid', () => {
+    const urls = Array.from({ length: 8 }, (_, i) => `/api/v1/generated-media/${i}/cover`);
+    const nodes = [grp('g1', 100, 100, 300, 60), mediaNode('m1', 120, 110, urls)];
+    const res = absorbMediaIntoGroup(nodes, [], 'm1', 'g1')!;
+    const g = res.nodes.find((x) => (x as { id: string }).id === 'g1') as Record<string, unknown>;
+    expect((g.style as { height: number }).height).toBeGreaterThan(60);
+  });
+
+  it('returns null for a non-media node', () => {
+    const nodes = [grp('g1', 100, 100, 300, 200), n('a', 120, 120)];
+    expect(absorbMediaIntoGroup(nodes, [], 'a', 'g1')).toBeNull();
+  });
+});
+
+describe('hitGroupIdFor', () => {
+  it('matches applyDropMembership center-point semantics', () => {
+    const nodes = [mediaNode('m1', 120, 120, []), grp('g1', 100, 100, 300, 200)];
+    expect(hitGroupIdFor(nodes, 'm1')).toBe('g1');
+    const far = [mediaNode('m2', 900, 900, []), grp('g1', 100, 100, 300, 200)];
+    expect(hitGroupIdFor(far, 'm2')).toBeNull();
   });
 });
