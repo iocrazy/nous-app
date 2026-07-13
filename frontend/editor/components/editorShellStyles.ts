@@ -1475,7 +1475,9 @@ export const EDITOR_SHELL_STYLES = `
 .mh-el-drag:hover,
 .mh-drag-handle:hover{ background:color-mix(in srgb, var(--sheet-ink) 7%, transparent); }
 
-/* ── Slash menu (`/` block-type picker) ── mirrors the mention popup chrome. */
+/* ── Slash menu (the "/" block-type picker) ── mirrors the mention popup.
+   NOTE: never put backticks inside this template literal — one terminated the
+   string early and the whole stylesheet evaluated to NaN (total unstyle). */
 .mh-slash-menu{
   position:absolute; z-index:30; min-width:190px;
   background:var(--surface); border:1px solid var(--surface-border);
