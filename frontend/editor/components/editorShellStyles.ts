@@ -1539,4 +1539,40 @@ export const EDITOR_SHELL_STYLES = `
    scrollport, so sticky just works; z sits above the sheet + page-break
    overlays + hover gutters. */
 .mh-sheet-scroll > .mh-h-toolbar{ position:sticky; top:0; z-index:40; }
+
+/* ==================================================================
+   IN-FLOW GUTTERS — the structural fix for the misalignment CLASS.
+   Absolute-positioned gutters needed a hand-tuned top offset per row
+   kind and font (Latin vs CJK line boxes), and drifted every time. An
+   in-flow flex member SHARES the text's line box, so it can never
+   drift vertically: it sits in the left margin via negative
+   margin-left (numbers/handles never shift the text grid), align-self
+   pins to the FIRST line, align-items centres within that 1.7em box.
+   Overrides every earlier absolute/top rule for these elements.
+   ================================================================== */
+.mh-el-gutter{
+  position:static; left:auto; top:auto;
+  width:42px; margin-left:-51px; /* 42px box + the row's 9px flex gap */
+  flex-shrink:0; align-self:flex-start; height:1.7em;
+  display:flex; align-items:center; justify-content:flex-end; gap:4px;
+}
+.mh-scene-gutter{
+  width:42px; margin-left:-50px; /* 42px box + the headrow's 8px flex gap */
+  flex-shrink:0; display:inline-flex; align-items:center;
+  justify-content:flex-end; gap:4px;
+  opacity:0; transition:opacity 0.12s ease;
+}
+.mh-scene-block:hover .mh-scene-gutter{ opacity:1; }
+.mh-scene-block:focus-within:not(:hover) .mh-scene-gutter{ opacity:0; }
+/* Children are always opaque — the WRAPPER gates the reveal now. Neutralise
+   the earlier per-child opacity rules at equal-or-higher specificity. */
+.mh-scene-num-badge,
+.mh-drag-handle,
+.mh-scene-block:hover .mh-scene-num-badge,
+.mh-scene-block:focus-within .mh-scene-num-badge,
+.mh-scene-block:focus-within:not(:hover) .mh-scene-num-badge,
+.mh-scene-block:hover .mh-drag-handle,
+.mh-scene-block:focus-within .mh-drag-handle{ opacity:1; }
+.mh-scene-num-badge{ position:static; left:auto; top:auto; transform:none; width:auto; min-width:0; }
+.mh-drag-handle{ position:static; left:auto; top:auto; transform:none; }
 `;
