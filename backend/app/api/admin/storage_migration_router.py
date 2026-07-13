@@ -26,11 +26,12 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from loguru import logger
 from pydantic import BaseModel, Field
 
 from app.core.admin_deps import AdminAuthDep
+from app.utils.admin_helpers import create_audit_log
 from app.workflows.storage_migration import _MODULES, storage_migration_workflow
 
 router = APIRouter()
@@ -58,6 +59,7 @@ class StorageMigrationResponse(BaseModel):
 async def dispatch_storage_migration(
     body: StorageMigrationRequest,
     auth: AdminAuthDep,
+    request: Request,
 ):
     """Dispatch one ``storage_migration_workflow`` run for ``body.module``.
 
@@ -89,6 +91,24 @@ async def dispatch_storage_migration(
         },
     )
     workflow_id = result["dbos_workflow_id"]
+
+    # Audit log (non-blocking — failures inside create_audit_log never
+    # affect the dispatch). Mirrors transcode_router.py::retry_transcode.
+    await create_audit_log(
+        admin_id=auth.user_id,
+        action="storage_migration_dispatch",
+        target_type="module",
+        target_id=body.module,
+        details={
+            "module": body.module,
+            "scope_id": body.scope_id,
+            "limit": body.limit,
+            "dry_run": body.dry_run,
+            "delete_source": body.delete_source,
+            "workflow_id": workflow_id,
+        },
+        ip_address=request.client.host if request.client else None,
+    )
 
     logger.info(
         f"[Admin] storage_migration dispatched: module={body.module} "
