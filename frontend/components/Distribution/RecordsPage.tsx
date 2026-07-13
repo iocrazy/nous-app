@@ -9,7 +9,7 @@ import {
 import { PublishTask, PublishTaskAccount, SocialAccount } from '../../types';
 import './distribution-v4.css';
 
-type Filter = 'all' | 'needs_action' | 'publishing' | 'done';
+type Filter = 'all' | 'needs_action' | 'publishing' | 'failed' | 'done';
 
 const STATUS_META: Record<PublishTask['status'], { cls: string; pulse?: boolean }> = {
   success: { cls: 'chip-green' },
@@ -57,10 +57,19 @@ const matchesFilter = (t: PublishTask, f: Filter): boolean => {
   if (f === 'all') return true;
   if (f === 'needs_action') return t.status === 'pending_share' || t.status === 'failed' || t.status === 'partial';
   if (f === 'publishing') return t.status === 'publishing' || t.status === 'pending';
+  if (f === 'failed') return t.status === 'failed' || t.status === 'partial';
   return t.status === 'success';
 };
 
 const dayKey = (iso: string): string => iso.slice(0, 10);
+
+/** ISO day → local calendar day string for Today/Yesterday comparison. */
+const localDayKey = (d: Date): string => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
 
 const formatTime = (iso: string): string => {
   const d = new Date(iso);
@@ -199,8 +208,42 @@ export const RecordsPage: React.FC = () => {
     { key: 'all', label: t('distribution.records.all', 'All') },
     { key: 'needs_action', label: t('distribution.records.needsAction', 'Needs action'), count: needsActionCount },
     { key: 'publishing', label: t('distribution.records.publishing', 'Publishing'), count: publishingCount },
+    { key: 'failed', label: t('distribution.records.failed', 'Failed') },
     { key: 'done', label: t('distribution.records.done', 'Completed') },
   ];
+
+  // v4 day groups read "Today"/"Yesterday" instead of raw ISO dates.
+  const dayLabel = useCallback((key: string): string => {
+    const now = new Date();
+    if (key === localDayKey(now)) return t('distribution.records.today', 'Today');
+    const yesterday = new Date(now.getTime() - 86_400_000);
+    if (key === localDayKey(yesterday)) return t('distribution.records.yesterday', 'Yesterday');
+    const d = new Date(`${key}T00:00:00`);
+    return Number.isNaN(d.getTime())
+      ? key
+      : d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+  }, [t]);
+
+  // Collapsed multi-account cards show a per-status breakdown
+  // ("2 done · 1 publishing · 1 failed") like the v4 mockup.
+  const breakdownFor = useCallback((accounts: PublishTaskAccount[]): string => {
+    const buckets: Record<string, number> = {};
+    for (const a of accounts) {
+      const k = (a.status === 'pending' || a.status === 'publishing') ? 'publishing'
+        : a.status === 'pending_share' ? 'waiting'
+          : a.status === 'success' ? 'done'
+            : a.status === 'cancelled' ? 'cancelled' : 'failed';
+      buckets[k] = (buckets[k] ?? 0) + 1;
+    }
+    const parts: string[] = [];
+    if (buckets.done) parts.push(t('distribution.records.bdDone', '{{n}} done', { n: buckets.done }));
+    if (buckets.publishing) parts.push(t('distribution.records.bdPublishing', '{{n}} publishing', { n: buckets.publishing }));
+    if (buckets.waiting) parts.push(t('distribution.records.bdWaiting', '{{n}} waiting', { n: buckets.waiting }));
+    if (buckets.failed) parts.push(t('distribution.records.bdFailed', '{{n}} failed', { n: buckets.failed }));
+    if (buckets.cancelled) parts.push(t('distribution.records.bdCancelled', '{{n}} cancelled', { n: buckets.cancelled }));
+    // A single homogeneous bucket duplicates the status chip — skip it then.
+    return parts.length > 1 ? parts.join(' · ') : '';
+  }, [t]);
 
   return (
     <div className="dist-v4">
@@ -240,12 +283,13 @@ export const RecordsPage: React.FC = () => {
 
       {groups.map(([day, dayTasks]) => (
         <div key={day}>
-          <div className="day-label">{day}</div>
+          <div className="day-label">{dayLabel(day)}</div>
           {dayTasks.map((task) => {
             const open = Boolean(expanded[task.id]);
             const chipMeta = STATUS_META[task.status];
             const chipLabel = taskStatusLabel(task.status);
             const singleAccount = task.accounts.length === 1 ? task.accounts[0] : null;
+            const breakdown = singleAccount ? '' : breakdownFor(task.accounts);
             const accountSummary = singleAccount
               ? `${singleAccount.username}${platformFor(singleAccount.account_id) ? ` (${platformFor(singleAccount.account_id)})` : ''}`
               : t('distribution.records.accountsCount', '{{n}} accounts', { n: task.accounts.length });
@@ -273,7 +317,9 @@ export const RecordsPage: React.FC = () => {
                   <div className="info">
                     <b>{task.title}</b>
                     <span>
-                      {contentLabel}<span className="sep">·</span>{accountSummary}<span className="sep">·</span>{formatTime(task.created_at)}
+                      {contentLabel}<span className="sep">·</span>{accountSummary}
+                      {breakdown && (<><span className="sep">·</span>{breakdown}</>)}
+                      <span className="sep">·</span>{formatTime(task.created_at)}
                     </span>
                   </div>
                   <span className={`chip ${chipMeta.cls} ${chipMeta.pulse ? 'pulse' : ''}`}>
