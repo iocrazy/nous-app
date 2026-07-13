@@ -1434,6 +1434,12 @@ export function SceneBlock({
           <EmptySceneHint onSeed={handleTiptapSeed} />
         ) : (
           <TipTapSceneEditor
+            // M3: format is a mount-time snapshot (see TipTapSceneEditor's
+            // module doc, "format switch recreates the editor") — keying on
+            // it forces a full remount (flushing any pending debounce first)
+            // whenever the script-wide Hollywood/Asian toggle flips, instead
+            // of trying to live-patch the NodeView's structural DOM change.
+            key={format}
             ref={tiptapRef}
             initialElements={sync.elements}
             format={format}
@@ -1453,6 +1459,8 @@ export function SceneBlock({
             onMentionOpen={handleTiptapMentionOpen}
             onMentionClose={handleTiptapMentionClose}
             mentionMenu={tiptapMentionMenu}
+            pageSeams={pageSeams}
+            mentionCandidates={mentionCandidates}
           />
         )
       ) : (
