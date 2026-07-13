@@ -3076,6 +3076,8 @@
     "bioLabel": "描述",
     "bioPlaceholder": "外观、氛围、年代、材质……",
     "assetsHint": "生成的资产会出现在这里",
+    "videoAsset": "视频资产",
+    "generatedAsset": "生成的资产",
     "openCanvas": "在画布中打开",
     "location": {
       "label": "场景",
