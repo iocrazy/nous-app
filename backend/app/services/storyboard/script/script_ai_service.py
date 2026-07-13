@@ -148,11 +148,18 @@ class ScriptAIService:
         # provider config; otherwise the platform ``mediahub_models`` catalog
         # resolves the agent's model — no env fallback.
         if self._provider_key and self._provider_config and model:
-            from app.services.ai.adapters.factory import get_adapter_for_user
-
-            adapter = get_adapter_for_user(
-                model, {self._provider_key: self._provider_config}, None
+            from app.services.ai.adapters.factory import (
+                get_adapter_for_key,
+                resolve_provider_key,
             )
+
+            # Dispatch on the resolver's EXPLICIT provider_key (#1313
+            # contract) — get_adapter_for_user re-derives the provider from
+            # the model prefix and raises for catalog models like
+            # ``qwen3-6-35b``. Every sibling task service degrades on
+            # unknown labels; this was the last unguarded call site.
+            key = resolve_provider_key(self._provider_key, model)
+            adapter = get_adapter_for_key(key, model, {key: self._provider_config})
         else:
             from app.services.ai.providers.ai_provider_helpers import (
                 resolve_db_adapter,
