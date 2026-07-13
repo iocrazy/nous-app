@@ -45,10 +45,7 @@ def generation_keys_for(family: str) -> frozenset[str]:
 
 
 def default_chat_key() -> str:
-    for p in PROTOCOLS:
-        if p.is_chat_key and p.is_default:
-            return p.key
-    raise RuntimeError("no default chat protocol configured")
+    return _default_chat_protocol().key
 
 
 def _default_chat_protocol() -> ProviderProtocol:

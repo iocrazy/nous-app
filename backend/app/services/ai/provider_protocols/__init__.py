@@ -17,6 +17,7 @@ from app.services.ai.provider_protocols._registry import (
 )
 from app.services.ai.provider_protocols.base import (
     ProtocolCapabilityError,
+    ProviderNotConfiguredError,
     ProviderProtocol,
 )
 
@@ -24,6 +25,7 @@ __all__ = [
     "PROTOCOLS",
     "ProviderProtocol",
     "ProtocolCapabilityError",
+    "ProviderNotConfiguredError",
     "all_protocols",
     "chat_provider_keys",
     "generation_keys_for",

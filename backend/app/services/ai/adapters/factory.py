@@ -27,42 +27,15 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from app.services.ai.adapters.base import AIAdapter
-from app.services.ai.adapters.claude import ClaudeAdapter
-from app.services.ai.adapters.deepseek import DeepSeekAdapter
-from app.services.ai.adapters.doubao import DoubaoAdapter
-from app.services.ai.adapters.modelscope import ModelScopeAdapter
-from app.services.ai.adapters.openai import OpenAIAdapter
-from app.services.ai.adapters.qwen import QwenAdapter
 from app.services.ai.provider_protocols import chat_provider_keys as _chat_keys
+from app.services.ai.provider_protocols.base import (  # noqa: F401
+    ProviderNotConfiguredError,
+)
 
 _KNOWN_PREFIXES = (
     "qwen-*, tongyi-*, deepseek-*, doubao-*, ep-*, claude-*, gpt-*, o1-*, o3-*, "
     "org/name (ModelScope)"
 )
-
-# Official public endpoints — an ENDPOINT is not a credential, so these may
-# live in code. Keys never may.
-DEEPSEEK_DEFAULT_URL = "https://api.deepseek.com/v1/chat/completions"
-DOUBAO_DEFAULT_URL = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
-
-
-class ProviderNotConfiguredError(ValueError):
-    """No credential resolved for the provider serving ``model``.
-
-    Raised instead of building a keyless adapter (opaque upstream 401) or —
-    the pre-2026-07-07 behavior — silently falling back to env vars. Users
-    configure their own keys in Settings → AI Providers; platform models are
-    managed by the admin in Admin → AI Models.
-    """
-
-    def __init__(self, provider: str, model: str):
-        self.provider = provider
-        self.model = model
-        super().__init__(
-            f"AI provider '{provider}' is not configured for model {model!r}. "
-            "Add your API key in Settings → AI Providers, or ask the admin "
-            "to enable a platform model (Admin → AI Models)."
-        )
 
 
 def _is_openai(model: str) -> bool:
@@ -223,62 +196,9 @@ def _build_adapter_for_key(
     user_key = user_keys[0] if user_keys else ""
     user_base = (user_cfg.get("base_url") or "").strip()
 
-    if provider_key == "claude":
-        if not user_key:
-            raise ProviderNotConfiguredError("claude", model)
-        return ClaudeAdapter(
-            api_key=user_key,
-            default_model=model or "claude-opus-4-5",
-        )
+    from app.services.ai.provider_protocols import get_chat_protocol
 
-    if provider_key == "deepseek":
-        if not user_key:
-            raise ProviderNotConfiguredError("deepseek", model)
-        return DeepSeekAdapter(
-            api_url=user_base or DEEPSEEK_DEFAULT_URL,
-            api_key=user_key,
-            default_model=model or "deepseek-chat",
-        )
-
-    if provider_key == "doubao":
-        if not user_key:
-            raise ProviderNotConfiguredError("doubao", model)
-        return DoubaoAdapter(
-            api_url=user_base or DOUBAO_DEFAULT_URL,
-            api_key=user_key,
-            default_model=model,
-        )
-
-    if provider_key == "openai":
-        if not user_key:
-            raise ProviderNotConfiguredError("openai", model)
-        return OpenAIAdapter(
-            api_key=user_key,
-            default_model=model or "gpt-4o",
-            api_url=user_base or None,
-        )
-
-    if provider_key == "modelscope":
-        # DB-only like every other provider (2026-07-07 follow-up): a missing
-        # key raises here instead of building a keyless adapter that dies
-        # upstream with ModelScope's opaque auth error.
-        if not user_key:
-            raise ProviderNotConfiguredError("modelscope", model)
-        from app.services.ai.adapters.modelscope import MODELSCOPE_DEFAULT_URL
-
-        return ModelScopeAdapter(
-            api_url=user_base or MODELSCOPE_DEFAULT_URL,
-            api_key=user_key,
-            default_model=model,
-        )
-
-    # provider_key == "qwen" (default / only remaining case). Qwen-compatible
-    # endpoints have no universal public URL — the base_url IS part of the
-    # credential set, so it must come from the DB (platform catalog or BYOK).
-    if not user_base:
-        raise ProviderNotConfiguredError("qwen", model)
-    return QwenAdapter(
-        api_url=user_base,
-        api_key=user_key,
-        default_model=model,
+    protocol = get_chat_protocol(provider_key)
+    return protocol.build_chat_adapter(
+        model, {"api_key": user_key, "base_url": user_base}
     )

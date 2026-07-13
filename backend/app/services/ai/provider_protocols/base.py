@@ -22,6 +22,24 @@ class ProtocolCapabilityError(RuntimeError):
         super().__init__(f"protocol {key!r} does not support {capability}")
 
 
+class ProviderNotConfiguredError(ValueError):
+    """No credential resolved for the provider serving ``model``.
+
+    Raised instead of building a keyless adapter (opaque upstream 401) or —
+    the pre-2026-07-07 behavior — silently falling back to env vars. Users
+    configure their own keys in Settings → AI Providers; platform models are
+    managed by the admin in Admin → AI Models."""
+
+    def __init__(self, provider: str, model: str):
+        self.provider = provider
+        self.model = model
+        super().__init__(
+            f"AI provider '{provider}' is not configured for model {model!r}. "
+            "Add your API key in Settings → AI Providers, or ask the admin "
+            "to enable a platform model (Admin → AI Models)."
+        )
+
+
 class ProviderProtocol:
     """One provider protocol. Metadata mirrors Phase 1's dataclass fields;
     build hooks own the per-protocol adapter/provider construction."""
