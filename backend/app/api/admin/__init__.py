@@ -16,6 +16,7 @@ from .request_logs_router import router as request_logs_router
 from .search_router import router as search_router
 from .settings_router import router as settings_router
 from .stats_router import router as stats_router
+from .storage_migration_router import router as storage_migration_router
 from .table_preferences_router import router as table_preferences_router
 from .tags_router import router as tags_router
 from .tasks_router import router as tasks_router
@@ -134,6 +135,11 @@ admin_router.include_router(
     boundary_audit_router,
     prefix="/boundary-audit",
     tags=["Admin - Boundary Audit"],
+)
+admin_router.include_router(
+    storage_migration_router,
+    prefix="/storage-migration",
+    tags=["Admin - Storage Migration"],
 )
 
 # Wave I (I3): agent harness telemetry snapshot
