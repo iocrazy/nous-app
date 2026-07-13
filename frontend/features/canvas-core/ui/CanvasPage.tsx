@@ -16,8 +16,6 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft } from 'lucide-react';
 
-import { ClassicPalette } from '../classic/ui/ClassicPalette';
-import { ClassicRunBar } from '../classic/ui/ClassicRunBar';
 import { CommandPalette } from '../palette/CommandPalette';
 import { CanvasComposer } from '../smart/CanvasComposer';
 import { buildCharacterTemplate } from '../smart/characterTemplate';
@@ -144,17 +142,25 @@ export default function CanvasPage() {
     );
   }
 
-  // Both modes render the same React Flow surface — CanvasSurface picks
-  // the nodeTypes map (smart vs classic) off the store `kind`. The
-  // per-mode overlays differ: SmartMode adds the node composer palette;
-  // ClassicMode adds its own palette (top-left, to ADD nodes) plus the run
-  // bar (bottom-center, to RUN the cascade) — the two overlays are placed
-  // so they never overlap. Branch explicitly per mode.
+  // Classic (canvas 1.0 engine) is retired: existing rows are soft-deleted
+  // by migration, but a stale deep link / trash restore can still land here.
+  // Show a friendly notice instead of rendering a surface with no engine.
+  if (kind === 'classic') {
+    return (
+      <CanvasStatus
+        title={t('canvas.classicRetired', 'Classic canvases have been retired')}
+        tone="info"
+      />
+    );
+  }
+
+  // The smart family renders the React Flow surface plus the node composer
+  // palette overlay.
   return (
     <div ref={surfaceRef} className="relative h-full w-full">
       <CanvasSurface />
       {/* Back-to-list pill + canvas name (Infinite parity) — top-left, above
-          the surface; ClassicPalette sits below it (top offset). */}
+          the surface. */}
       <div className="pointer-events-none absolute left-4 top-4 z-30 flex flex-col gap-1">
         <button
           type="button"
@@ -183,12 +189,6 @@ export default function CanvasPage() {
         </div>
       )}
       {isSmartFamily(kind) && <CanvasComposer surfaceRef={surfaceRef} teamId={teamId} />}
-      {kind === 'classic' && (
-        <>
-          <ClassicPalette surfaceRef={surfaceRef} />
-          <ClassicRunBar />
-        </>
-      )}
       <CanvasConflictDialog />
       <SaveBadge status={saveStatus} error={saveError} />
       <CommandPalette

@@ -8,7 +8,14 @@
 
 // 'character' (mig 357) reuses the smart pipeline with the CharacterNode +
 // preset agent workflow on top (character canvas epic).
+// 'classic' (canvas 1.0 engine) is RETIRED: no new classic canvases can be
+// created and the engine is gone, but the kind stays in the union because
+// soft-deleted rows in the trash still serialize with it.
 export type CanvasKind = 'smart' | 'classic' | 'character' | 'location' | 'prop';
+
+/** Kinds a NEW canvas may be created with (mirror of backend
+ *  `CreatableCanvasKind`) — everything except the retired 'classic'. */
+export type CreatableCanvasKind = Exclude<CanvasKind, 'classic'>;
 
 /** kinds that render the smart surface (composer, smart node set, generation
  *  pipeline). 'character' is smart + CharacterNode + a preset workflow.
@@ -53,7 +60,7 @@ export interface Canvas {
 
 export interface CanvasCreatePayload {
   name?: string;
-  kind?: CanvasKind;
+  kind?: CreatableCanvasKind;
   viewport_json?: CanvasViewport;
 }
 

@@ -163,7 +163,7 @@ describe('useCanvasShortcuts — copy / paste', () => {
     useCanvasCoreStore.setState({ kind: 'smart' });
     useCanvasCoreStore.getState().setSelection(['a']);
     fireKey({ key: 'c', meta: true }); // copied under kind 'smart'
-    useCanvasCoreStore.setState({ kind: 'classic' }); // switch canvas kind
+    useCanvasCoreStore.setState({ kind: 'character' }); // switch canvas kind
     const before = useCanvasCoreStore.getState().nodes.length;
     const ev = fireKey({ key: 'v', meta: true });
     expect(useCanvasCoreStore.getState().nodes).toHaveLength(before); // no paste

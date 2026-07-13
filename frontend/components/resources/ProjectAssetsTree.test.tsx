@@ -55,7 +55,7 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('ProjectAssetsTree New Canvas entry', () => {
-  it('opens the kind dialog and creates with the chosen kind (IC-style)', async () => {
+  it('opens the name dialog and creates through it (IC-style)', async () => {
     fetchProjectAssetsTree.mockResolvedValue([
       {
         project_id: 'proj-1',
@@ -76,15 +76,13 @@ describe('ProjectAssetsTree New Canvas entry', () => {
     expect(createCanvas).not.toHaveBeenCalled();
 
     const dialog = await screen.findByRole('dialog');
-    // Pick Classic — the whole point of the dialog (three entries used to
-    // silently default every canvas to smart).
-    fireEvent.click(within(dialog).getByRole('button', { name: /canvasList\.kind\.classic/ }));
+    // The dialog is name-only now (classic is retired); Create submits and
+    // the backend defaults the kind to smart.
     fireEvent.click(within(dialog).getByRole('button', { name: 'common.create' }));
 
     await waitFor(() => expect(createCanvas).toHaveBeenCalledTimes(1));
     expect(createCanvas).toHaveBeenCalledWith('proj-1', {
       name: 'projectAssets.untitledCanvas',
-      kind: 'classic',
     });
     await waitFor(() =>
       expect(navigate).toHaveBeenCalledWith('/team/t1/canvas/c-new'),
@@ -92,7 +90,7 @@ describe('ProjectAssetsTree New Canvas entry', () => {
     expect(addToast).not.toHaveBeenCalled();
   });
 
-  it('offers the dialog from the empty (no-canvas) project state, default smart', async () => {
+  it('offers the dialog from the empty (no-canvas) project state', async () => {
     fetchProjectAssetsTree.mockResolvedValue([
       { project_id: 'proj-2', name: 'Empty Proj', canvases: [] },
     ]);
@@ -108,13 +106,12 @@ describe('ProjectAssetsTree New Canvas entry', () => {
     fireEvent.click(entries[entries.length - 1]);
 
     const dialog = await screen.findByRole('dialog');
-    // Just hit Create — kind defaults to smart, matching the old behavior.
+    // Just hit Create — the backend defaults the kind to smart.
     fireEvent.click(within(dialog).getByRole('button', { name: 'common.create' }));
 
     await waitFor(() =>
       expect(createCanvas).toHaveBeenCalledWith('proj-2', {
         name: 'projectAssets.untitledCanvas',
-        kind: 'smart',
       }),
     );
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/team/t1/canvas/c-empty-new'));

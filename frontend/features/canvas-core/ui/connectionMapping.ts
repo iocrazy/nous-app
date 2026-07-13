@@ -5,16 +5,15 @@
  * the handle ids (`sourceHandle` / `targetHandle`) thread cleanly through
  * the validation path.
  *
- * ClassicMode nodes have MULTIPLE typed ports (image / text / prompt), so
- * a wire must remember WHICH handle it connects to. SmartMode has no
- * handle ids; the round-trip and validation are a no-op for it.
+ * Handle ids (`sourceHandle` / `targetHandle`) are preserved on the
+ * round-trip when present; SmartMode has no handle ids, so the mapping is
+ * effectively a no-op for it.
  */
 
 import type { Connection, Edge } from '@xyflow/react';
 
 import type { CanvasConnection, CanvasKind } from '../types';
 import { canConnectSmart } from '../smart/types';
-import { canConnectClassic } from '../classic/registry';
 
 /**
  * Map stored `CanvasConnection`s into React Flow edges, preserving the
@@ -37,15 +36,12 @@ export function toReactFlowEdges(connections: CanvasConnection[]): Edge[] {
 
 /**
  * Validate a proposed (or existing) connection. Accepts the full React
- * Flow `Connection` / `Edge` shape so the handle ids are AVAILABLE to the
- * validator — ClassicMode port-typed validation (B2) will read
- * `connection.sourceHandle` / `connection.targetHandle`.
+ * Flow `Connection` / `Edge` shape so the handle ids stay available to
+ * the validator.
  *
  * For SmartMode the rule is purely node-type based (handles ignored,
- * which is harmless). For ClassicMode the rule is typed-port based: the
- * source node's OUTPUT port (`sourceHandle`) must share a port type with
- * the target node's INPUT port (`targetHandle`), and a node may not wire
- * to itself. For any other kind we allow any connection.
+ * which is harmless), and a node may not wire to itself. For any other
+ * kind we allow any connection.
  */
 export function validateCanvasConnection(
   connection: Connection | Edge,
@@ -53,22 +49,14 @@ export function validateCanvasConnection(
   nodeTypeById: (id: string) => string | undefined,
 ): boolean {
   // A node may never wire to itself, in ANY kind. This is the only layer that
-  // sees node IDs (`canConnectClassic`/`canConnectSmart` see only types), so
-  // the self-loop guard lives here — and must cover smart too, else dragging a
-  // wire from a prompt's output back onto its own input would be accepted.
+  // sees node IDs (`canConnectSmart` sees only types), so the self-loop guard
+  // lives here — else dragging a wire from a prompt's output back onto its
+  // own input would be accepted.
   if (connection.source === connection.target) return false;
   if (kind === 'smart') {
     return canConnectSmart(
       nodeTypeById(connection.source),
       nodeTypeById(connection.target),
-    );
-  }
-  if (kind === 'classic') {
-    return canConnectClassic(
-      nodeTypeById(connection.source),
-      nodeTypeById(connection.target),
-      connection.sourceHandle,
-      connection.targetHandle,
     );
   }
   return true;

@@ -57,7 +57,7 @@ export interface PromptNodeData {
   agent_id: string | null;
   /** "idle" | "queued" | "running" | "succeeded" | "failed" | "blocked" —
    *  driven by the run protocol. "blocked" marks a downstream node that was
-   *  not run because an upstream node failed (set by the ClassicMode cascade).
+   *  not run because an upstream node failed.
    *  Persisted so a reload shows the last-known state. */
   run_status:
     | 'idle'

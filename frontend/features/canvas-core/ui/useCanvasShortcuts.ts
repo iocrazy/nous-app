@@ -134,7 +134,7 @@ export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
       if (meta && (key === 'v' || key === 'V')) {
         const buf = readClipboard();
         if (!buf || buf.nodes.length === 0) return;
-        // Don't paste a classic selection into a smart canvas (or vice versa):
+        // Don't paste a selection copied from a canvas of a different kind:
         // the node types wouldn't render in the other kind's registry.
         if (buf.kind !== store.kind) return;
         event.preventDefault();

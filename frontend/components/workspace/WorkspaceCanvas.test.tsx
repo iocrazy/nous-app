@@ -36,7 +36,7 @@ vi.mock('../../features/canvas-core/services/canvasService', () => mockService);
 
 const CANVASES = [
   { id: 'c1', name: 'Hero Canvas', kind: 'smart', updated_at: '2026-07-01T00:00:00Z' },
-  { id: 'c2', name: 'Board', kind: 'classic', updated_at: '2026-07-02T00:00:00Z' },
+  { id: 'c2', name: 'Board', kind: 'character', updated_at: '2026-07-02T00:00:00Z' },
 ];
 
 afterEach(() => {
@@ -63,20 +63,20 @@ describe('WorkspaceCanvas', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/canvas/c1');
   });
 
-  it('New Canvas opens the kind dialog, then creates and drops into the editor', async () => {
+  it('New Canvas opens the name dialog, then creates and drops into the editor', async () => {
     mockService.listCanvases.mockResolvedValue([]);
     mockService.createCanvas.mockResolvedValue({ id: 'c9' });
     render(<WorkspaceCanvas projectId="p1" teamId="t1" />);
     await screen.findByRole('button', { name: /New Canvas/ });
 
-    // The tile opens the IC-style dialog; Create submits name + kind.
+    // The tile opens the IC-style dialog; Create submits the name only —
+    // the backend defaults the kind (classic is retired).
     fireEvent.click(screen.getByRole('button', { name: /New Canvas/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
     await waitFor(() => {
-      expect(mockService.createCanvas).toHaveBeenCalledWith(
-        'p1',
-        expect.objectContaining({ kind: 'smart' }),
-      );
+      expect(mockService.createCanvas).toHaveBeenCalledWith('p1', {
+        name: 'Untitled Canvas',
+      });
       expect(mockNavigate).toHaveBeenCalledWith('/team/t1/canvas/c9');
     });
   });

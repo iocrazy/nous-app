@@ -9,7 +9,7 @@
  * We mock React Flow down to a prop-capturing stub so we can invoke the real
  * `onConnect` callback the surface wires up, then assert what lands in the
  * store. The validator path (`validateCanvasConnection`) is exercised for
- * real — classic typed-port AND smart node-type rules.
+ * real — the smart node-type rules.
  */
 
 import { render, cleanup } from '@testing-library/react';
@@ -49,68 +49,50 @@ function onConnect(connection: Connection): void {
   (capturedProps.onConnect as (c: Connection) => void)(connection);
 }
 
-describe('CanvasSurface onConnect — classic typed-port commit', () => {
-  it('appends a VALID typed-port connection with the right source/target/handles', () => {
-    seedStore('classic', [
-      { id: 'gen', type: 'image_gen', position: { x: 0, y: 0 }, data: {} },
-      { id: 'out', type: 'output', position: { x: 300, y: 0 }, data: {} },
+describe('CanvasSurface onConnect — commit shape', () => {
+  it('appends a valid connection preserving source/target/handles', () => {
+    seedStore('smart', [
+      { id: 's1', type: 'shot', position: { x: 0, y: 0 }, data: {} },
+      { id: 'p1', type: 'prompt', position: { x: 300, y: 0 }, data: {} },
     ]);
     render(<CanvasSurface />);
 
     onConnect({
-      source: 'gen',
-      target: 'out',
-      sourceHandle: 'image-out',
-      targetHandle: 'image-in',
+      source: 's1',
+      target: 'p1',
+      sourceHandle: 'out',
+      targetHandle: 'in',
     });
 
     const conns = useCanvasCoreStore.getState().connections;
     expect(conns).toHaveLength(1);
     const edge = conns[0] as Record<string, unknown>;
-    expect(edge.source).toBe('gen');
-    expect(edge.target).toBe('out');
-    expect(edge.sourceHandle).toBe('image-out');
-    expect(edge.targetHandle).toBe('image-in');
+    expect(edge.source).toBe('s1');
+    expect(edge.target).toBe('p1');
+    expect(edge.sourceHandle).toBe('out');
+    expect(edge.targetHandle).toBe('in');
     expect(typeof edge.id).toBe('string');
     expect(edge.id as string).toMatch(/^edge-/);
   });
 
-  it('drops an INVALID type-mismatch connection (nothing appended)', () => {
-    seedStore('classic', [
-      // llm emits `text`; output only accepts `image` → mismatch.
-      { id: 'llm', type: 'llm', position: { x: 0, y: 0 }, data: {} },
-      { id: 'out', type: 'output', position: { x: 300, y: 0 }, data: {} },
-    ]);
-    render(<CanvasSurface />);
-
-    onConnect({
-      source: 'llm',
-      target: 'out',
-      sourceHandle: 'text-out',
-      targetHandle: 'image-in',
-    });
-
-    expect(useCanvasCoreStore.getState().connections).toHaveLength(0);
-  });
-
   it('drops a self-loop (source === target)', () => {
-    seedStore('classic', [
-      { id: 'gen', type: 'image_gen', position: { x: 0, y: 0 }, data: {} },
+    seedStore('smart', [
+      { id: 'p1', type: 'prompt', position: { x: 0, y: 0 }, data: {} },
     ]);
     render(<CanvasSurface />);
 
     onConnect({
-      source: 'gen',
-      target: 'gen',
-      sourceHandle: 'image-out',
-      targetHandle: 'image-in',
+      source: 'p1',
+      target: 'p1',
+      sourceHandle: null,
+      targetHandle: null,
     });
 
     expect(useCanvasCoreStore.getState().connections).toHaveLength(0);
   });
 });
 
-describe('CanvasSurface onConnect — smart-mode commit (gained additively)', () => {
+describe('CanvasSurface onConnect — smart-mode validation', () => {
   it('appends a valid smart connection (shot → prompt)', () => {
     seedStore('smart', [
       { id: 's1', type: 'shot', position: { x: 0, y: 0 }, data: {} },

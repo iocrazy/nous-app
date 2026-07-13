@@ -89,10 +89,9 @@ export interface HistorySnapshot {
 interface CanvasState {
   // ---- Lifecycle ----
   canvasId: string | null;
-  /** smart = Infinite-Canvas-style with shot/prompt/output nodes;
-   *  classic = legacy block editor. Surface uses this to pick the
-   *  React Flow nodeTypes map and toolbar. NULL until loadCanvas
-   *  resolves. */
+  /** smart-family = Infinite-Canvas-style with shot/prompt/output
+   *  nodes. Surface uses this to pick the React Flow nodeTypes map
+   *  and toolbar. NULL until loadCanvas resolves. */
   kind: CanvasKind | null;
   /** Display name from the server row — read-only chrome (back-pill area). */
   name: string | null;

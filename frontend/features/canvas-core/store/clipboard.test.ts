@@ -33,7 +33,7 @@ describe('clipboard module', () => {
 
   it('copy captures only edges internal to the selection', () => {
     copyToClipboard(
-      'classic',
+      'character',
       [node('a'), node('b')],
       [edge('e1', 'a', 'b'), edge('e2', 'a', 'outside')],
     );

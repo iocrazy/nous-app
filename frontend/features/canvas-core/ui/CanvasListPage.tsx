@@ -17,7 +17,6 @@ import { useToast } from '../../../components/Toast';
 import { CANVAS_NAV_ENABLED } from '../flags';
 import { CanvasTrashSection } from './CanvasTrashSection';
 import { NewCanvasDialog } from './NewCanvasDialog';
-import type { CanvasKind } from '../types';
 import {
   createCanvas,
   deleteCanvas,
@@ -90,18 +89,17 @@ export default function CanvasListPage() {
     }
   };
 
-  // Create with the dialog's name/kind choice, then drop the user straight
-  // into the editor.
+  // Create with the dialog's name choice (backend defaults the kind to
+  // smart), then drop the user straight into the editor.
   const handleCreateCanvas = async (
     projectId: string,
-    payload: { name: string; kind: CanvasKind },
+    payload: { name: string },
   ) => {
     if (creatingProjectId) return;
     setCreatingProjectId(projectId);
     try {
       const canvas = await createCanvas(projectId, {
         name: payload.name || t('canvasList.untitled', 'Untitled Canvas'),
-        kind: payload.kind,
       });
       navigate(`/team/${teamId}/canvas/${canvas.id}`);
     } catch (err) {

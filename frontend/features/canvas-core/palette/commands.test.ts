@@ -145,7 +145,7 @@ describe('buildCanvasCommands — enabled predicates', () => {
   });
 
   it('node-add commands are disabled when canvas kind is not smart', () => {
-    useCanvasCoreStore.setState({ kind: 'classic' });
+    useCanvasCoreStore.setState({ kind: 'character' });
     const addShot = buildCanvasCommands().find((c) => c.id === 'add-shot')!;
     expect(addShot.enabled?.()).toBe(false);
   });

@@ -1,9 +1,8 @@
 /**
  * Connection-mapping unit tests (Phase 5a B1).
  *
- * ClassicMode nodes have MULTIPLE typed ports (image / text / prompt),
- * so the React Flow handle ids (`sourceHandle` / `targetHandle`) must
- * survive into the stored `CanvasConnection` AND be reachable by the
+ * React Flow handle ids (`sourceHandle` / `targetHandle`) must survive
+ * into the stored `CanvasConnection` AND be reachable by the
  * connection-validation path. SmartMode has no handle ids — passing them
  * through must be a no-op for it.
  */
@@ -78,9 +77,8 @@ describe('validateCanvasConnection', () => {
       sourceHandle: 'image-out',
       targetHandle: 'text-in',
     };
-    // The handle ids are reachable on the argument the validator receives
-    // — this is what ClassicMode port validation (B2) consumes. A kind
-    // that has no rule (null) still short-circuits to valid.
+    // The handle ids are reachable on the argument the validator receives.
+    // A kind that has no rule (null) still short-circuits to valid.
     expect(connection.sourceHandle).toBe('image-out');
     expect(connection.targetHandle).toBe('text-in');
     expect(validateCanvasConnection(connection, null, typeOf({}))).toBe(true);
@@ -115,7 +113,7 @@ describe('validateCanvasConnection', () => {
 
   it('smart mode: rejects a self-loop even when the node types would allow it', () => {
     // prompt→prompt is type-allowed by canConnectSmart, but a node must never
-    // wire to itself — the guard now covers smart, not just classic.
+    // wire to itself — the self-loop guard lives in the validator.
     const types = typeOf({ p1: 'prompt' });
     expect(
       validateCanvasConnection(
@@ -145,71 +143,5 @@ describe('validateCanvasConnection', () => {
         typeOf({}),
       ),
     ).toBe(true);
-  });
-
-  describe('classic mode', () => {
-    // image node → output node, via the matching typed handles.
-    const types = typeOf({ img1: 'image', out1: 'output', llm1: 'llm', cmf1: 'comfy' });
-
-    it('valid typed wire: image-out → image-in ✓', () => {
-      expect(
-        validateCanvasConnection(
-          { source: 'img1', target: 'out1', sourceHandle: 'image-out', targetHandle: 'image-in' },
-          'classic',
-          types,
-        ),
-      ).toBe(true);
-    });
-
-    it('port-type mismatch rejected: image-out → llm prompt-in ✗', () => {
-      expect(
-        validateCanvasConnection(
-          { source: 'img1', target: 'llm1', sourceHandle: 'image-out', targetHandle: 'prompt-in' },
-          'classic',
-          types,
-        ),
-      ).toBe(false);
-    });
-
-    it('multi-output comfy resolves the right handle: text-out → image-in ✗', () => {
-      expect(
-        validateCanvasConnection(
-          { source: 'cmf1', target: 'out1', sourceHandle: 'text-out', targetHandle: 'image-in' },
-          'classic',
-          types,
-        ),
-      ).toBe(false);
-      expect(
-        validateCanvasConnection(
-          { source: 'cmf1', target: 'out1', sourceHandle: 'image-out', targetHandle: 'image-in' },
-          'classic',
-          types,
-        ),
-      ).toBe(true);
-    });
-
-    it('self-loop (source === target node) rejected even with matching ports', () => {
-      // comfy has both an image output and an image-typed... no plain image
-      // input, but llm self-loop with image-out→image-in would type-match;
-      // the source===target guard must reject it regardless.
-      const selfTypes = typeOf({ n1: 'comfy' });
-      expect(
-        validateCanvasConnection(
-          { source: 'n1', target: 'n1', sourceHandle: 'image-out', targetHandle: 'image-in' },
-          'classic',
-          selfTypes,
-        ),
-      ).toBe(false);
-    });
-
-    it('unknown handle id rejected', () => {
-      expect(
-        validateCanvasConnection(
-          { source: 'img1', target: 'out1', sourceHandle: 'nope', targetHandle: 'image-in' },
-          'classic',
-          types,
-        ),
-      ).toBe(false);
-    });
   });
 });

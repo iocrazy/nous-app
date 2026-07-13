@@ -27,8 +27,6 @@ vi.mock('react-i18next', () => ({
 vi.mock('./CanvasSurface', () => ({
   CanvasSurface: () => <div data-testid="canvas-surface" />,
 }));
-vi.mock('../classic/ui/ClassicPalette', () => ({ ClassicPalette: () => null }));
-vi.mock('../classic/ui/ClassicRunBar', () => ({ ClassicRunBar: () => null }));
 vi.mock('../smart/CanvasComposer', () => ({ CanvasComposer: () => null }));
 vi.mock('../palette/CommandPalette', () => ({ CommandPalette: () => null }));
 vi.mock('./CanvasConflictDialog', () => ({ CanvasConflictDialog: () => null }));
@@ -38,11 +36,11 @@ vi.mock('./useCanvasShortcuts', () => ({ useCanvasShortcuts: () => {} }));
 import CanvasPage from './CanvasPage';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 
-const seedReady = (nodes: unknown[]) => {
+const seedReady = (nodes: unknown[], kind = 'smart') => {
   useCanvasCoreStore.getState().reset();
   useCanvasCoreStore.setState({
     loadStatus: 'ready',
-    kind: 'classic',
+    kind,
     nodes: nodes as never,
     // Neutralise the mount effect so it never hits the network.
     loadCanvas: vi.fn(),
@@ -79,5 +77,14 @@ describe('CanvasPage empty state', () => {
     render(<CanvasPage />);
     expect(screen.getByTestId('canvas-surface')).toBeTruthy();
     expect(screen.queryByText('canvas.empty.title')).toBeNull();
+  });
+
+  it('renders the retired notice (no surface) for a classic canvas', () => {
+    // Classic (canvas 1.0 engine) is retired — a stale deep link / trash
+    // restore must land on a friendly notice, never an engine-less surface.
+    seedReady([{ id: 'n1' }], 'classic');
+    render(<CanvasPage />);
+    expect(screen.getByText('canvas.classicRetired')).toBeTruthy();
+    expect(screen.queryByTestId('canvas-surface')).toBeNull();
   });
 });

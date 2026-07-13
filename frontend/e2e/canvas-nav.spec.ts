@@ -34,7 +34,7 @@ const CANVASES = [
     id: 'c2',
     project_id: 'p1',
     name: 'Storyline Board',
-    kind: 'classic',
+    kind: 'smart',
     viewport_json: { x: 0, y: 0, zoom: 1 },
     nodes_json: [],
     connections_json: [],

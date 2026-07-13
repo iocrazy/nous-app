@@ -23,7 +23,6 @@ import { useTranslation } from 'react-i18next';
 
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import type { CanvasConnection, CanvasNode } from '../types';
-import { CLASSIC_NODE_DEFINITIONS, getClassicNodeDefinition } from '../classic/registry';
 import { canConnectSmart } from '../smart/types';
 import { createEmptyGroup } from '../smart/grouping';
 import {
@@ -123,36 +122,6 @@ const SMART_ITEMS: MenuItem[] = [
   },
 ];
 
-/**
- * Classic menu items that can LEGALLY receive a wire from the source output
- * (port type `srcOutType`): only node types with an input port of the matching
- * type, wired into THAT input (not blindly `inputs[0]`). Zero-input and
- * type-incompatible nodes are dropped so drag-create can't produce an edge the
- * connection validator would reject.
- */
-function classicItems(srcOutType: string | undefined, all = false): MenuItem[] {
-  const items: MenuItem[] = [];
-  for (const def of CLASSIC_NODE_DEFINITIONS) {
-    if (def.type === 'group') continue;
-    const input = srcOutType
-      ? def.inputs.find((i) => i.type === srcOutType)
-      : undefined;
-    if (!input && !all) continue;
-    items.push({
-      type: def.type,
-      label: def.label,
-      targetHandle: input?.id ?? null,
-      make: (p) => ({
-        id: `${def.type}-${crypto.randomUUID()}`,
-        type: def.type,
-        position: p,
-        data: { label: def.label },
-      }),
-    });
-  }
-  return items;
-}
-
 export function DragCreateMenu({
   screenPosition,
   flowPosition,
@@ -180,14 +149,8 @@ export function DragCreateMenu({
       // target and anything when the source is an Output).
       return SMART_ITEMS.filter((item) => canConnectSmart(srcType, item.type));
     }
-    if (kind === 'classic') {
-      if (!fromNodeId) return classicItems(undefined, true);
-      const srcDef = getClassicNodeDefinition(srcType);
-      const srcOutType = srcDef?.outputs.find((o) => o.id === fromHandle)?.type;
-      return classicItems(srcOutType);
-    }
     return [];
-  }, [kind, nodes, fromNodeId, fromHandle]);
+  }, [kind, nodes, fromNodeId]);
 
   // Escape closes the menu without creating anything.
   useEffect(() => {
@@ -231,9 +194,7 @@ export function DragCreateMenu({
       <div
         role="menu"
         aria-label={t('canvas.dragCreate.title', 'Add node')}
-        className={`mh-pop-in absolute z-50 rounded-xl border border-ink-700 bg-ink-900/95 shadow-xl backdrop-blur ${
-          isSmartFamily(kind) ? 'w-[22rem] max-w-[90vw] p-1.5' : 'min-w-[9rem] p-1'
-        }`}
+        className="mh-pop-in absolute z-50 w-[22rem] max-w-[90vw] rounded-xl border border-ink-700 bg-ink-900/95 p-1.5 shadow-xl backdrop-blur"
         style={{ left: screenPosition.x, top: screenPosition.y }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -241,7 +202,7 @@ export function DragCreateMenu({
           <div className="px-2 py-1 text-xs text-ink-500">
             {t('canvas.dragCreate.noCompatible', 'No compatible node')}
           </div>
-        ) : isSmartFamily(kind) ? (
+        ) : (
           /* Infinite-style card grid: icon + title + one-line description. */
           <div className="grid grid-cols-2 gap-1">
             {items.map((item) => {
@@ -273,23 +234,6 @@ export function DragCreateMenu({
               );
             })}
           </div>
-        ) : (
-          <>
-            <div className="px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-ink-400">
-              {t('canvas.dragCreate.title', 'Add node')}
-            </div>
-            {items.map((item) => (
-              <button
-                key={item.type}
-                type="button"
-                role="menuitem"
-                onClick={() => create(item)}
-                className="block w-full rounded-md px-2 py-1 text-left text-xs font-medium text-ink-100 hover:bg-ink-800 hover:text-white"
-              >
-                {item.label}
-              </button>
-            ))}
-          </>
         )}
       </div>
     </>

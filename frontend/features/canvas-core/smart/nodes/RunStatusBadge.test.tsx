@@ -30,7 +30,7 @@ describe('RunStatusBadge', () => {
 
   it('smart prompt halo no longer whole-card pulses', async () => {
     // Guard the tone-filter seam: the smart views strip animate-pulse from
-    // RUN_STATUS_TONE (classic keeps it) — the dot owns the motion now.
+    // RUN_STATUS_TONE — the dot owns the motion now.
     const { RUN_STATUS_TONE } = await import('../types');
     expect(RUN_STATUS_TONE.running).toContain('animate-pulse');
   });

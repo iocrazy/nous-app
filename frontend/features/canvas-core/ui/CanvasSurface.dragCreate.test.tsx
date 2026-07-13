@@ -44,7 +44,7 @@ function dragToEmpty(): void {
   act(() => {
     (capturedProps.onConnectStart as (e: unknown, p: unknown) => void)(
       {},
-      { nodeId: 'gen', handleId: 'image-out', handleType: 'source' },
+      { nodeId: 'gen', handleId: null, handleType: 'source' },
     );
     // The release point now comes from the pointer event's client coords (the
     // engine converts them via screenToFlowPosition; with no measured instance
@@ -58,19 +58,19 @@ function dragToEmpty(): void {
 
 describe('CanvasSurface drag-to-create', () => {
   it('opens the create menu when a wire is dropped in empty canvas', () => {
-    seed('classic', [{ id: 'gen', type: 'image', position: { x: 0, y: 0 }, data: {} }]);
+    seed('smart', [{ id: 'gen', type: 'prompt', position: { x: 0, y: 0 }, data: {} }]);
     render(<CanvasSurface />);
     dragToEmpty();
     expect(screen.getByRole('menu')).toBeTruthy();
   });
 
   it('creates the picked node at the drop point and auto-wires it via the store', () => {
-    seed('classic', [{ id: 'gen', type: 'image', position: { x: 0, y: 0 }, data: {} }]);
+    seed('smart', [{ id: 'gen', type: 'prompt', position: { x: 0, y: 0 }, data: {} }]);
     render(<CanvasSurface />);
     dragToEmpty();
 
     // Pick "Output" from the menu.
-    const output = screen.getByRole('menuitem', { name: 'Output' });
+    const output = screen.getByRole('menuitem', { name: /Output/ });
     act(() => fireEvent.click(output));
 
     const state = useCanvasCoreStore.getState();
@@ -83,9 +83,9 @@ describe('CanvasSurface drag-to-create', () => {
     const conns = state.connections as Array<Record<string, unknown>>;
     expect(conns).toHaveLength(1);
     expect(conns[0].source).toBe('gen');
-    expect(conns[0].sourceHandle).toBe('image-out');
+    expect(conns[0].sourceHandle).toBeNull();
     expect(conns[0].target).toBe(created.id);
-    expect(conns[0].targetHandle).toBe('image-in');
+    expect(conns[0].targetHandle).toBeNull();
 
     // The new node is selected and the menu is dismissed.
     expect(state.selection).toEqual([created.id]);
@@ -93,7 +93,7 @@ describe('CanvasSurface drag-to-create', () => {
   });
 
   it('closes the menu on Escape without creating a node', () => {
-    seed('classic', [{ id: 'gen', type: 'image', position: { x: 0, y: 0 }, data: {} }]);
+    seed('smart', [{ id: 'gen', type: 'prompt', position: { x: 0, y: 0 }, data: {} }]);
     render(<CanvasSurface />);
     dragToEmpty();
     expect(screen.getByRole('menu')).toBeTruthy();
@@ -106,34 +106,33 @@ describe('CanvasSurface drag-to-create', () => {
   });
 
   it('offers only node types that can legally receive the source wire', () => {
-    // Dragging from an `image-out` (image type) → only nodes with an image
-    // input may be created + auto-wired. Zero-input / type-mismatched nodes
-    // must not be offered (they would produce an edge the validator rejects).
-    seed('classic', [{ id: 'gen', type: 'image', position: { x: 0, y: 0 }, data: {} }]);
+    // Dragging from a prompt → only nodes the prompt may legally feed are
+    // offered. Source-only cards (Shot, Upload/media) and wireless containers
+    // (Group) must not be offered (they would produce an edge the validator
+    // rejects).
+    seed('smart', [{ id: 'gen', type: 'prompt', position: { x: 0, y: 0 }, data: {} }]);
     render(<CanvasSurface />);
     dragToEmpty();
-    expect(screen.getByRole('menuitem', { name: 'Output' })).toBeTruthy();
-    // Zero-input source-only nodes are excluded.
-    expect(screen.queryByRole('menuitem', { name: 'Image' })).toBeNull();
-    expect(screen.queryByRole('menuitem', { name: 'Prompt' })).toBeNull();
-    expect(screen.queryByRole('menuitem', { name: 'Text' })).toBeNull();
-    expect(screen.queryByRole('menuitem', { name: 'Note' })).toBeNull();
+    expect(screen.getByRole('menuitem', { name: /Output/ })).toBeTruthy();
+    expect(screen.queryByRole('menuitem', { name: /Shot/ })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: /Upload/ })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: /Group/ })).toBeNull();
   });
 });
 
 describe('CanvasSurface onConnect — duplicate guard', () => {
   it('does not add a second identical edge', () => {
-    seed('classic', [
-      { id: 'img', type: 'image', position: { x: 0, y: 0 }, data: {} },
+    seed('smart', [
+      { id: 'gen', type: 'prompt', position: { x: 0, y: 0 }, data: {} },
       { id: 'out', type: 'output', position: { x: 200, y: 0 }, data: {} },
     ]);
     render(<CanvasSurface />);
     const onConnect = capturedProps.onConnect as (c: unknown) => void;
     const conn = {
-      source: 'img',
+      source: 'gen',
       target: 'out',
-      sourceHandle: 'image-out',
-      targetHandle: 'image-in',
+      sourceHandle: null,
+      targetHandle: null,
     };
     act(() => onConnect(conn));
     act(() => onConnect(conn)); // identical second attempt

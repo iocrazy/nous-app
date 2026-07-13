@@ -15,7 +15,11 @@ from pydantic import BaseModel, Field, field_validator
 
 # 'character' (mig 357) reuses the smart pipeline with the CharacterNode +
 # preset agent workflow on top (character canvas epic 2026-07-13).
+# 'classic' (canvas 1.0 engine) is RETIRED (mig 361 soft-deleted every
+# remaining row): it stays in CanvasKind so trashed rows still serialize,
+# but new canvases may only use CreatableCanvasKind.
 CanvasKind = Literal["smart", "classic", "character", "location", "prop"]
+CreatableCanvasKind = Literal["smart", "character", "location", "prop"]
 
 
 class CanvasViewport(BaseModel):
@@ -44,7 +48,7 @@ class CanvasResponse(BaseModel):
 
 class CanvasCreate(BaseModel):
     name: str = "Untitled"
-    kind: CanvasKind = "smart"
+    kind: CreatableCanvasKind = "smart"
     viewport_json: Optional[Dict[str, Any]] = None
 
 

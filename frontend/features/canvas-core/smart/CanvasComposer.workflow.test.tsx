@@ -108,7 +108,7 @@ describe('CanvasComposer — workflow export/import', () => {
       JSON.stringify({
         format: WORKFLOW_FORMAT,
         version: 1,
-        kind: 'classic',
+        kind: 'character',
         nodes: [{ id: 'n1', position: { x: 0, y: 0 } }],
         connections: [],
       }),

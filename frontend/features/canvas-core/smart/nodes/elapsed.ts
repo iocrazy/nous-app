@@ -1,5 +1,5 @@
 /**
- * Elapsed-seconds helpers for the ClassicMode comfy node (Phase 5a B4).
+ * Elapsed-seconds helpers for run-time pills on smart nodes (Phase 5a B4).
  *
  * Split out from the view so the formatting is unit-testable without a
  * DOM, and the ticking hook is the only stateful piece.
