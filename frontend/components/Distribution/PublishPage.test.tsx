@@ -2,10 +2,11 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { vi, describe, it, expect } from 'vitest';
 
-// vi.mock is hoisted above top-level consts, so the fn it references must be
+// vi.mock is hoisted above top-level consts, so the fns it references must be
 // hoisted too (vi.hoisted) — otherwise "Cannot access before initialization".
-const { createPublishTask } = vi.hoisted(() => ({
+const { createPublishTask, promoteGeneratedVideo } = vi.hoisted(() => ({
   createPublishTask: vi.fn().mockResolvedValue({ id: '700', accounts: [] }),
+  promoteGeneratedVideo: vi.fn().mockResolvedValue('900'),
 }));
 
 vi.mock('../../services/distributionService', () => ({
@@ -20,7 +21,20 @@ vi.mock('../../services/distributionService', () => ({
   listLibraryVideos: vi.fn().mockResolvedValue([
     { id: '30', filename: 'clip-a.mp4', thumbnail_url: null },
   ]),
+  listGeneratedVideos: vi.fn().mockResolvedValue([
+    { id: '77', name: 'Sunset drone shot', created_at: '2026-07-10T00:00:00Z',
+      promoted_resource_id: null },
+  ]),
+  promoteGeneratedVideo,
   createPublishTask,
+}));
+
+// Tag plumbing behind the "To publish" mark — inert defaults.
+vi.mock('../../services/unifiedTagService', () => ({
+  fetchAllTags: vi.fn().mockResolvedValue([]),
+  createTag: vi.fn().mockResolvedValue({ id: 'tag-1', name: 'To Publish' }),
+  addResourceTag: vi.fn().mockResolvedValue(undefined),
+  removeResourceTag: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('react-router-dom', async (orig) => ({
@@ -49,9 +63,10 @@ describe('PublishPage', () => {
     const publishBtn = screen.getByRole('button', { name: /Publish now/i });
     expect(publishBtn).toBeDisabled();
 
-    // Open the picker, choose a video, then close it.
+    // Open the picker, choose a video, then close it. (The tile's accessible
+    // name includes the bookmark toggle's label, so match by substring.)
     fireEvent.click(screen.getByRole('button', { name: /Add from Library/i }));
-    fireEvent.click(await screen.findByRole('button', { name: 'clip-a.mp4' }));
+    fireEvent.click(await screen.findByRole('button', { name: /clip-a\.mp4/ }));
     fireEvent.click(screen.getByRole('button', { name: /^Done$/i }));
 
     fireEvent.click(screen.getByText('HEYGO'));                    // pick account
@@ -66,6 +81,28 @@ describe('PublishPage', () => {
     expect(arg.resource_ids).toEqual(['30']);
     expect(arg.account_ids).toEqual(['10']);
     expect(arg.title).toBe('Launch day');
+  });
+
+  it('promotes a generated video on pick and publishes its resource id', async () => {
+    render(<MemoryRouter><PublishPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: /Add from Library/i }));
+    // Switch to the Generated tab and pick the generation — first pick
+    // promotes it into the Library and selects the resulting resource id.
+    fireEvent.click(await screen.findByRole('button', { name: /^Generated$/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Sunset drone shot/ }));
+    await waitFor(() => expect(promoteGeneratedVideo).toHaveBeenCalledWith('77'));
+    fireEvent.click(screen.getByRole('button', { name: /^Done$/i }));
+
+    fireEvent.click(screen.getByText('HEYGO'));
+    fireEvent.change(screen.getByPlaceholderText(/Add a title/i), {
+      target: { value: 'Gen launch' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Publish now/i }));
+    await waitFor(() => expect(createPublishTask).toHaveBeenCalled());
+    const arg = createPublishTask.mock.calls.at(-1)?.[0];
+    expect(arg.resource_ids).toEqual(['900']);
   });
 
   it('marks expired accounts non-selectable', async () => {

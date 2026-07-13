@@ -2,12 +2,16 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import {
-  AlertCircle, AlertTriangle, ArrowLeftRight, Calendar, Check, Folder,
+  AlertCircle, AlertTriangle, ArrowLeftRight, Bookmark, Calendar, Check, Folder,
   ListOrdered, MapPin, Plus, Radio, Search, Send, Sparkles, TrendingUp, X,
 } from 'lucide-react';
 import {
-  createPublishTask, listAccounts, listLibraryVideos,
+  createPublishTask, listAccounts, listGeneratedVideos, listLibraryVideos,
+  promoteGeneratedVideo, GeneratedVideo,
 } from '../../services/distributionService';
+import {
+  addResourceTag, createTag, fetchAllTags, removeResourceTag,
+} from '../../services/unifiedTagService';
 import { SocialAccount, LibraryVideo } from '../../types';
 import { useToast } from '../Toast';
 import { useWorkspaceScope } from '../../hooks/useWorkspaceScope';
@@ -22,6 +26,12 @@ const VIS: Visibility[] = ['public', 'friends', 'private'];
 const PLATFORM_LABEL: Record<string, string> = {
   douyin: 'Douyin', kuaishou: 'Kuaishou', xiaohongshu: 'Xiaohongshu',
 };
+
+// Well-known tag that marks Library assets as queued for publishing ("待发布").
+// Users can apply it from the Library tag UI or the picker's bookmark toggle;
+// the picker's "To publish" filter lists exactly the resources carrying it.
+// Created lazily on first mark.
+const TO_PUBLISH_TAG_NAME = 'To Publish';
 
 // Deterministic gradient pick per account id — keeps avatars visually
 // distinct without needing per-user color config.
@@ -95,15 +105,42 @@ export const PublishPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerQuery, setPickerQuery] = useState('');
+  const [pickerTab, setPickerTab] = useState<'library' | 'generated'>('library');
+  const [toPublishOnly, setToPublishOnly] = useState(false);
+  const [generated, setGenerated] = useState<GeneratedVideo[]>([]);
+  // genId → promoted resource id (seeded from the backlink, extended on pick).
+  const [genResourceIds, setGenResourceIds] = useState<Record<string, string>>({});
+  const [toPublishTagId, setToPublishTagId] = useState<string | null>(null);
+  const [markedIds, setMarkedIds] = useState<Set<string>>(new Set());
+  const [promotingId, setPromotingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [v, a] = await Promise.all([listLibraryVideos(scopeId), listAccounts()]);
+      const [v, a, gen] = await Promise.all([
+        listLibraryVideos(scopeId), listAccounts(), listGeneratedVideos(),
+      ]);
       setVideos(v);
       setAccounts(a);
+      setGenerated(gen);
+      setGenResourceIds(Object.fromEntries(
+        gen.filter((g) => g.promoted_resource_id).map((g) => [g.id, g.promoted_resource_id as string]),
+      ));
     } catch (err) {
       console.error('distribution: publish page load failed', err);
       addToast(t('distribution.publish.loadFailed', 'Failed to load publish data'), 'error');
+    }
+    // "To publish" mark state — non-fatal side channel; failures leave the
+    // filter empty but never block the page.
+    try {
+      const tags = await fetchAllTags();
+      const tag = tags.find((tg) => tg.name.toLowerCase() === TO_PUBLISH_TAG_NAME.toLowerCase());
+      if (tag) {
+        setToPublishTagId(tag.id);
+        const marked = await listLibraryVideos(scopeId, { tagId: tag.id });
+        setMarkedIds(new Set(marked.map((m) => m.id)));
+      }
+    } catch (err) {
+      console.error('distribution: load to-publish marks failed', err);
     }
   }, [addToast, t, scopeId]);
 
@@ -135,8 +172,77 @@ export const PublishPage: React.FC = () => {
 
   const pickerResults = useMemo(() => {
     const q = pickerQuery.trim().toLowerCase();
-    return q ? videos.filter((v) => v.filename.toLowerCase().includes(q)) : videos;
-  }, [videos, pickerQuery]);
+    const base = toPublishOnly ? videos.filter((v) => markedIds.has(v.id)) : videos;
+    return q ? base.filter((v) => v.filename.toLowerCase().includes(q)) : base;
+  }, [videos, pickerQuery, toPublishOnly, markedIds]);
+
+  const generatedResults = useMemo(() => {
+    const q = pickerQuery.trim().toLowerCase();
+    return q ? generated.filter((g) => g.name.toLowerCase().includes(q)) : generated;
+  }, [generated, pickerQuery]);
+
+  // Toggle the "To Publish" mark on a Library video (creates the well-known
+  // tag on first use). Optimistic; reverts by reloading marks on failure.
+  const onToggleMark = async (videoId: string) => {
+    const wasMarked = markedIds.has(videoId);
+    setMarkedIds((prev) => {
+      const next = new Set(prev);
+      if (wasMarked) next.delete(videoId); else next.add(videoId);
+      return next;
+    });
+    try {
+      let tagId = toPublishTagId;
+      if (!tagId) {
+        const created = await createTag({ name: TO_PUBLISH_TAG_NAME, color: '#6366f1' });
+        tagId = created.id;
+        setToPublishTagId(tagId);
+      }
+      if (wasMarked) await removeResourceTag(videoId, tagId);
+      else await addResourceTag(videoId, tagId);
+    } catch (err) {
+      console.error('distribution: toggle to-publish mark failed', err);
+      addToast(t('distribution.publish.markUpdateFailed', 'Could not update publish mark'), 'error');
+      setMarkedIds((prev) => {
+        const next = new Set(prev);
+        if (wasMarked) next.add(videoId); else next.delete(videoId);
+        return next;
+      });
+    }
+  };
+
+  // Insert a synthetic Library row for a promoted generation so the selected
+  // thumbs can resolve it even when the resource lives outside the current
+  // workspace listing (promote targets the personal scope).
+  const ensureVideoRow = (resourceId: string, name: string) =>
+    setVideos((prev) => (prev.some((v) => v.id === resourceId)
+      ? prev
+      : [{ id: resourceId, filename: name, thumbnail_url: null }, ...prev]));
+
+  // Pick a generated video: promote it into the Library on first pick
+  // (idempotent server-side via the promoted_resource_id backlink), then
+  // toggle the resulting resource id like any other selection.
+  const onPickGenerated = async (g: GeneratedVideo) => {
+    const fallbackName = g.name || t('distribution.publish.generatedUntitled', 'Generated video');
+    const known = genResourceIds[g.id];
+    if (known) {
+      ensureVideoRow(known, fallbackName);
+      setSelectedVideos((s) => toggle(s, known));
+      return;
+    }
+    if (promotingId) return;
+    setPromotingId(g.id);
+    try {
+      const resourceId = await promoteGeneratedVideo(g.id);
+      setGenResourceIds((prev) => ({ ...prev, [g.id]: resourceId }));
+      ensureVideoRow(resourceId, fallbackName);
+      setSelectedVideos((s) => (s.includes(resourceId) ? s : [...s, resourceId]));
+    } catch (err) {
+      console.error('distribution: promote generated video failed', err);
+      addToast(t('distribution.publish.promoteFailed', 'Could not add generated video'), 'error');
+    } finally {
+      setPromotingId(null);
+    }
+  };
 
   const canPublish = useMemo(
     () => selectedVideos.length > 0 && selectedAccounts.length > 0 && title.trim().length > 0,
@@ -620,38 +726,128 @@ export const PublishPage: React.FC = () => {
               />
             </div>
 
-            <div className="picker-grid">
-              {pickerResults.map((v) => {
-                const on = selectedVideos.includes(v.id);
-                const hasImg = Boolean(v.thumbnail_url);
-                return (
-                  <button
-                    type="button"
-                    key={v.id}
-                    className={`picker-item ${on ? 'sel' : ''}`}
-                    aria-pressed={on}
-                    onClick={() => setSelectedVideos((s) => toggle(s, v.id))}
-                  >
-                    <span
-                      className={`pi-thumb ${hasImg ? '' : 'ph'}`}
-                      style={hasImg ? { backgroundImage: `url(${v.thumbnail_url})` } : undefined}
-                    >
-                      {on && (
-                        <span className="pi-check"><Check size={12} strokeWidth={3} /></span>
-                      )}
-                    </span>
-                    <span className="pi-name" title={v.filename}>{v.filename}</span>
-                  </button>
-                );
-              })}
-              {pickerResults.length === 0 && (
-                <p className="picker-empty">
-                  {videos.length === 0
-                    ? t('distribution.publish.noContent', 'No video resources in your Library yet')
-                    : t('distribution.publish.pickerNoResults', 'No videos match your search')}
-                </p>
+            <div className="picker-tabs">
+              <div className="seg">
+                <button
+                  type="button"
+                  className={pickerTab === 'library' ? 'on' : ''}
+                  onClick={() => setPickerTab('library')}
+                >
+                  {t('distribution.publish.pickerTabLibrary', 'Library')}
+                </button>
+                <button
+                  type="button"
+                  className={pickerTab === 'generated' ? 'on' : ''}
+                  onClick={() => setPickerTab('generated')}
+                >
+                  {t('distribution.publish.pickerTabGenerated', 'Generated')}
+                </button>
+              </div>
+              {pickerTab === 'library' && (
+                <button
+                  type="button"
+                  className={`chip ${toPublishOnly ? 'chip-indigo' : 'chip-mute'}`}
+                  aria-pressed={toPublishOnly}
+                  onClick={() => setToPublishOnly((v) => !v)}
+                >
+                  <Bookmark size={11} />
+                  {t('distribution.publish.pickerToPublishOnly', 'To publish')}
+                </button>
               )}
             </div>
+
+            {pickerTab === 'library' && (
+              <div className="picker-grid">
+                {pickerResults.map((v) => {
+                  const on = selectedVideos.includes(v.id);
+                  const marked = markedIds.has(v.id);
+                  const hasImg = Boolean(v.thumbnail_url);
+                  return (
+                    <button
+                      type="button"
+                      key={v.id}
+                      className={`picker-item ${on ? 'sel' : ''}`}
+                      aria-pressed={on}
+                      onClick={() => setSelectedVideos((s) => toggle(s, v.id))}
+                    >
+                      <span
+                        className={`pi-thumb ${hasImg ? '' : 'ph'}`}
+                        style={hasImg ? { backgroundImage: `url(${v.thumbnail_url})` } : undefined}
+                      >
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          className={`pi-mark ${marked ? 'on' : ''}`}
+                          aria-label={marked
+                            ? t('distribution.publish.pickerUnmark', 'Unmark to publish')
+                            : t('distribution.publish.pickerMark', 'Mark to publish')}
+                          title={marked
+                            ? t('distribution.publish.pickerUnmark', 'Unmark to publish')
+                            : t('distribution.publish.pickerMark', 'Mark to publish')}
+                          onClick={(e) => { e.stopPropagation(); void onToggleMark(v.id); }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              void onToggleMark(v.id);
+                            }
+                          }}
+                        >
+                          <Bookmark size={11} strokeWidth={2.5} />
+                        </span>
+                        {on && (
+                          <span className="pi-check"><Check size={12} strokeWidth={3} /></span>
+                        )}
+                      </span>
+                      <span className="pi-name" title={v.filename}>{v.filename}</span>
+                    </button>
+                  );
+                })}
+                {pickerResults.length === 0 && (
+                  <p className="picker-empty">
+                    {videos.length === 0
+                      ? t('distribution.publish.noContent', 'No video resources in your Library yet')
+                      : toPublishOnly && markedIds.size === 0
+                        ? t('distribution.publish.pickerNoMarked', 'No videos marked to publish yet')
+                        : t('distribution.publish.pickerNoResults', 'No videos match your search')}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {pickerTab === 'generated' && (
+              <div className="picker-grid">
+                {generatedResults.map((g) => {
+                  const resourceId = genResourceIds[g.id];
+                  const on = resourceId ? selectedVideos.includes(resourceId) : false;
+                  const busy = promotingId === g.id;
+                  const name = g.name || t('distribution.publish.generatedUntitled', 'Generated video');
+                  return (
+                    <button
+                      type="button"
+                      key={g.id}
+                      className={`picker-item ${on ? 'sel' : ''}`}
+                      aria-pressed={on}
+                      disabled={busy}
+                      onClick={() => void onPickGenerated(g)}
+                    >
+                      <span className={`pi-thumb ph gen ${busy ? 'pulse' : ''}`}>
+                        <span className="pi-gen-badge"><Sparkles size={10} /></span>
+                        {on && (
+                          <span className="pi-check"><Check size={12} strokeWidth={3} /></span>
+                        )}
+                      </span>
+                      <span className="pi-name" title={name}>{name}</span>
+                    </button>
+                  );
+                })}
+                {generatedResults.length === 0 && (
+                  <p className="picker-empty">
+                    {t('distribution.publish.pickerNoGenerated', 'No generated videos yet')}
+                  </p>
+                )}
+              </div>
+            )}
 
             <div className="picker-foot">
               <button type="button" className="btn btn-solid" onClick={() => setPickerOpen(false)}>
