@@ -1722,9 +1722,24 @@
       "title": "画布为空",
       "hint": "这里还没有任何内容。"
     },
+    "backToList": "返回画布列表",
     "dragCreate": {
       "title": "添加节点",
-      "noCompatible": "无兼容节点"
+      "noCompatible": "无兼容节点",
+      "node": {
+        "shot": "分镜",
+        "prompt": "提示词",
+        "output": "输出",
+        "loop": "循环",
+        "timeline": "时间线"
+      },
+      "desc": {
+        "shot": "分镜卡——承载一拍的媒体素材",
+        "prompt": "手写或用 LLM 生成文本并运行",
+        "output": "承接生成结果",
+        "loop": "控制运行轮数、批次和变量",
+        "timeline": "多段成片按序拼接"
+      }
     },
     "toolbar": {
       "zoomIn": "放大",

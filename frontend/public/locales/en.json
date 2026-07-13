@@ -1722,9 +1722,24 @@
       "title": "This canvas is empty",
       "hint": "It doesn't have any content yet."
     },
+    "backToList": "Back to canvases",
     "dragCreate": {
       "title": "Add node",
-      "noCompatible": "No compatible node"
+      "noCompatible": "No compatible node",
+      "node": {
+        "shot": "Shot",
+        "prompt": "Prompt",
+        "output": "Output",
+        "loop": "Loop",
+        "timeline": "Timeline"
+      },
+      "desc": {
+        "shot": "Shot card — media for one storyboard beat",
+        "prompt": "Write or AI-generate text, then run it",
+        "output": "Collects generated results",
+        "loop": "Controls rounds, batches and variables",
+        "timeline": "Multi-segment film, stitched in order"
+      }
     },
     "toolbar": {
       "zoomIn": "Zoom In",

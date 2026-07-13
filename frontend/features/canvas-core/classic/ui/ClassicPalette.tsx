@@ -76,7 +76,7 @@ export function ClassicPalette({ surfaceRef }: ClassicPaletteProps = {}) {
     <div
       role="toolbar"
       aria-label="Classic canvas palette"
-      className="pointer-events-auto absolute left-4 top-4 flex w-fit max-w-[12rem] flex-wrap gap-1 rounded-lg border border-ink-700 bg-ink-900/90 p-1.5 shadow-lg backdrop-blur"
+      className="pointer-events-auto absolute left-4 top-[4.75rem] flex w-fit max-w-[12rem] flex-wrap gap-1 rounded-lg border border-ink-700 bg-ink-900/90 p-1.5 shadow-lg backdrop-blur"
     >
       {CLASSIC_NODE_DEFINITIONS.map((def) => (
         <PaletteButton
