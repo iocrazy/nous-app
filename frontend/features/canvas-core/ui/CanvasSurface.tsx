@@ -24,7 +24,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { CanvasConnection, CanvasNode } from '../types';
 import { isSmartFamily } from '../types';
-import { useCanvasCoreStore } from '../store/canvasCoreStore';
+import { stripRfInternals, useCanvasCoreStore } from '../store/canvasCoreStore';
 import { SMART_NODE_TYPES } from '../smart/nodes/registry';
 import { SMART_EDGE_TYPES } from '../smart/edges/registry';
 import { toReactFlowEdges, validateCanvasConnection } from './connectionMapping';
@@ -264,7 +264,12 @@ export function CanvasSurface() {
   // action so revision/persist stay consistent.
   const onNodesSnap = useCallback(
     (snapped: AnyNode[]) => {
-      setNodes(snapped as unknown as CanvasNode[]);
+      // The engine hands back RF-rendered nodes — strip RF-internal fields
+      // (measured/width/height/selected/dragging) so size snapshots never
+      // reach the document (stale ones clamp the node box on reload).
+      setNodes(
+        (snapped as unknown as CanvasNode[]).map(stripRfInternals),
+      );
     },
     [setNodes],
   );
