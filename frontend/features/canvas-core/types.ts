@@ -10,6 +10,12 @@
 // preset agent workflow on top (character canvas epic).
 export type CanvasKind = 'smart' | 'classic' | 'character';
 
+/** kinds that render the smart surface (composer, smart node set, generation
+ *  pipeline). 'character' is smart + CharacterNode + a preset workflow.
+ *  Accepts null (store kind before load) for call-site convenience. */
+export const isSmartFamily = (kind: CanvasKind | null | undefined): boolean =>
+  kind === 'smart' || kind === 'character';
+
 export interface CanvasViewport {
   x: number;
   y: number;

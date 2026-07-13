@@ -5,6 +5,7 @@
  * RF docs).
  */
 
+import { CharacterNodeView } from './CharacterNodeView';
 import { GroupNodeView } from './GroupNodeView';
 import { LoopNodeView } from './LoopNodeView';
 import { OutputNodeView } from './OutputNodeView';
@@ -13,6 +14,7 @@ import { ShotNodeView } from './ShotNodeView';
 import { TimelineNodeView } from './TimelineNodeView';
 
 export const SMART_NODE_TYPES = {
+  character: CharacterNodeView,
   shot: ShotNodeView,
   prompt: PromptNodeView,
   group: GroupNodeView,

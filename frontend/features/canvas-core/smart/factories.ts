@@ -23,6 +23,8 @@ import type {
   SmartNodeType,
   LoopNode,
   LoopNodeData,
+  CharacterNode,
+  CharacterNodeData,
 } from './types';
 
 interface Position {
@@ -90,6 +92,9 @@ export function createPromptNode(
       run_finished_at: data.run_finished_at ?? null,
       run_error: data.run_error ?? null,
       resource_refs: data.resource_refs ?? [],
+      // Generation settings (G4-F1) — only persisted when provided (absent =
+      // legacy text prompt; the character template seeds image branches).
+      ...(data.gen ? { gen: data.gen } : {}),
     },
   };
 }
@@ -154,6 +159,26 @@ export function createLoopNode(
       rounds: data.rounds ?? 1,
       round_start: data.round_start ?? 1,
       prompts: data.prompts ?? [''],
+    },
+  };
+}
+
+/** Character canvas: the bible-card source node the preset workflow hangs off. */
+export function createCharacterNode(
+  data: Partial<CharacterNodeData> = {},
+  opts: FactoryOptions = {},
+): CharacterNode {
+  const random = opts.randomSuffix ?? DEFAULT_RANDOM_SUFFIX;
+  return {
+    id: makeId('character', random),
+    type: 'character',
+    position: opts.position ?? DEFAULT_POSITION,
+    data: {
+      character_id: data.character_id ?? null,
+      name: data.name ?? 'New character',
+      role_tag: data.role_tag ?? '',
+      description: data.description ?? '',
+      portrait_url: data.portrait_url ?? null,
     },
   };
 }

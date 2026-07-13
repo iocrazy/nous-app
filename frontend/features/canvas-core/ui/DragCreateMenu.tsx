@@ -8,6 +8,7 @@
  * setSelection), never bypassing them. Escape or a backdrop click dismisses.
  */
 import { useCallback, useEffect, useMemo } from 'react';
+import { isSmartFamily } from '../types';
 import { useTranslation } from 'react-i18next';
 
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
@@ -98,7 +99,7 @@ export function DragCreateMenu({
       (n) => (n as { id?: string }).id === fromNodeId,
     ) as { type?: string } | undefined;
     const srcType = srcNode?.type;
-    if (kind === 'smart') {
+    if (isSmartFamily(kind)) {
       // No origin (pane double-click / right-click, P1-1): every node type.
       if (!fromNodeId) return SMART_ITEMS;
       // Only node types the source may legally feed (excludes e.g. Shot as a

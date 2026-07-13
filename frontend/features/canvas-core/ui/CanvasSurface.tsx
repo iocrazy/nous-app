@@ -23,6 +23,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { CanvasConnection, CanvasNode } from '../types';
+import { isSmartFamily } from '../types';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { SMART_NODE_TYPES } from '../smart/nodes/registry';
 import { SMART_EDGE_TYPES } from '../smart/edges/registry';
@@ -120,7 +121,7 @@ export function CanvasSurface() {
   // changes — edge identities stay stable mid-drag (RF re-renders every
   // EdgeWrapper when they churn). Empty string = nothing to decorate.
   const promptStatusSig = useMemo(() => {
-    if (kind !== 'smart') return '';
+    if (!isSmartFamily(kind)) return '';
     const entries: Array<[string, string]> = [];
     for (const n of nodes) {
       const obj = n as Record<string, unknown>;
@@ -147,7 +148,7 @@ export function CanvasSurface() {
     const edges = toReactFlowEdges(connections).map((edge) =>
       selectedEdgeIds.has(edge.id) ? { ...edge, selected: true } : edge,
     );
-    if (kind !== 'smart' || !promptStatusSig) return edges;
+    if (!isSmartFamily(kind) || !promptStatusSig) return edges;
     const statusById = new Map(JSON.parse(promptStatusSig) as Array<[string, string]>);
     return edges.map((edge) => {
       const cls = edgeRunStateClass(edge, (id) => {
@@ -373,14 +374,14 @@ export function CanvasSurface() {
   );
 
   const nodeTypes =
-    kind === 'smart'
+    isSmartFamily(kind)
       ? SMART_NODE_TYPES
       : kind === 'classic'
         ? CLASSIC_NODE_TYPES
         : undefined;
   // Smart mode swaps the default edge for the scissors edge (G6 conn-cut);
   // classic keeps the stock bezier so nothing else changes.
-  const edgeTypes = kind === 'smart' ? SMART_EDGE_TYPES : undefined;
+  const edgeTypes = isSmartFamily(kind) ? SMART_EDGE_TYPES : undefined;
 
   return (
     <CanvasEngine
@@ -412,7 +413,7 @@ export function CanvasSurface() {
       allowConnect
       onConnect={onConnect}
       isValidConnection={isConnectionValid}
-      allowSnapConnect={kind === 'smart'}
+      allowSnapConnect={isSmartFamily(kind)}
       snapProbeFor={snapProbeFor}
       onSnapConnect={onSnapConnect}
       allowDragCreate
