@@ -508,19 +508,25 @@ async def serve_resource_file(
         # When served with ?token= in URL, prevent intermediate caching.
         cache_headers = {"Cache-Control": "private, no-store"} if token else {}
 
-        # Resolve full path from DOWNLOAD_PATH base
-        from app.core.config import settings
+        # Storage unification: file_path may be a legacy filesystem-relative
+        # path OR an `sb://` object-store row (Task 2.1/2.2 dual-track
+        # uploads). serve_stored_file is the ONE reader that handles both
+        # shapes; the P3 nginx direct-serve redirect only ever applies to
+        # legacy fs rows (nginx has no route for object-store keys).
+        from app.services.library.media_serving import serve_stored_file
+        from app.services.library.media_storage import resolve_media_source
+        from app.services.media.nginx_direct import maybe_direct_redirect
 
-        full_path = Path(settings.DOWNLOAD_PATH) / file_path
-
-        if not full_path.exists():
-            raise HTTPException(status_code=404, detail="File not found on disk")
-
-        return FileResponse(
-            path=str(full_path),
-            media_type=resource.get("mime_type", "application/octet-stream"),
-            content_disposition_type="inline",
-            headers=cache_headers,
+        loc = resolve_media_source(file_path)
+        if not loc.is_object_store:
+            redirect = await maybe_direct_redirect(loc.rel_path)  # P3, legacy only
+            if redirect is not None:
+                return redirect
+        return await serve_stored_file(
+            file_path,
+            mime=resource.get("mime_type", "application/octet-stream"),
+            request=request,
+            extra_headers=cache_headers,
         )
     except HTTPException:
         raise
@@ -594,7 +600,7 @@ async def _enqueue_lazy_thumbnail(
 
 
 @router.get("/{resource_id}/cover")
-async def serve_resource_cover(resource_id: str):
+async def serve_resource_cover(resource_id: str, request: Request):
     """Serve cover/thumbnail image for a resource (no auth required).
 
     Priority for INDEPENDENT resources (user uploads):
@@ -618,6 +624,8 @@ async def serve_resource_cover(resource_id: str):
         import mimetypes
 
         from app.core.config import settings
+        from app.services.library.media_serving import serve_stored_file
+        from app.services.library.media_storage import resolve_media_source
         from app.services.media.nginx_direct import maybe_direct_redirect
 
         # Try thumbnail first, then cover image (independent uploads).
@@ -686,18 +694,30 @@ async def serve_resource_cover(resource_id: str):
         mime_type = resource.get("mime_type") or ""
         file_path = resource.get("file_path")
         if not media_id and file_path and not file_path.startswith("http"):
-            full_path = Path(settings.DOWNLOAD_PATH) / file_path
-            if full_path.exists():
+            loc = resolve_media_source(file_path)
+            # Storage unification: an sb:// original always "exists" from the
+            # router's point of view — serve_stored_file resolves it lazily
+            # (and 404s on a genuinely missing object). A legacy fs row keeps
+            # the existence check so we don't hand FileResponse a dead path.
+            exists = (
+                loc.is_object_store
+                or (Path(settings.DOWNLOAD_PATH) / (loc.rel_path or "")).exists()
+            )
+            if exists:
                 size = resource.get("file_size_bytes") or 0
                 if mime_type.startswith("image/") and 0 < size <= 512_000:
-                    redirect = await maybe_direct_redirect(file_path)
-                    if redirect is not None:
-                        return redirect
-                    mime, _ = mimetypes.guess_type(str(full_path))
-                    return FileResponse(
-                        path=str(full_path),
-                        media_type=mime or "image/jpeg",
-                        headers={"Cache-Control": "public, max-age=604800"},
+                    if not loc.is_object_store:
+                        redirect = await maybe_direct_redirect(
+                            loc.rel_path
+                        )  # P3, legacy only
+                        if redirect is not None:
+                            return redirect
+                    mime, _ = mimetypes.guess_type(file_path)
+                    return await serve_stored_file(
+                        file_path,
+                        mime=mime or "image/jpeg",
+                        request=request,
+                        extra_headers={"Cache-Control": "public, max-age=604800"},
                     )
                 await _enqueue_lazy_thumbnail(str(resource_id), file_path, mime_type)
                 return _cover_placeholder(mime_type)
@@ -705,12 +725,17 @@ async def serve_resource_cover(resource_id: str):
         # Legacy fallback for image files without a local file-size record.
         if mime_type.startswith("image/"):
             if file_path and not file_path.startswith("http"):
-                full_path = Path(settings.DOWNLOAD_PATH) / file_path
-                if full_path.exists():
-                    mime, _ = mimetypes.guess_type(str(full_path))
-                    return FileResponse(
-                        path=str(full_path),
-                        media_type=mime or "image/jpeg",
+                loc = resolve_media_source(file_path)
+                exists = (
+                    loc.is_object_store
+                    or (Path(settings.DOWNLOAD_PATH) / (loc.rel_path or "")).exists()
+                )
+                if exists:
+                    mime, _ = mimetypes.guess_type(file_path)
+                    return await serve_stored_file(
+                        file_path,
+                        mime=mime or "image/jpeg",
+                        request=request,
                     )
 
         raise HTTPException(status_code=404, detail="No cover image available")

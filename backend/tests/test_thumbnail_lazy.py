@@ -11,12 +11,18 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from starlette.requests import Request
 
 from app.api.resources_crud_router import (
     _cover_placeholder,
     _enqueue_lazy_thumbnail,
     serve_resource_cover,
 )
+
+
+def _request() -> Request:
+    """Minimal ASGI Request for handlers routed through serve_stored_file."""
+    return Request({"type": "http", "method": "GET", "path": "/", "headers": []})
 
 
 def _resource(**over):
@@ -52,7 +58,7 @@ async def test_cover_miss_enqueues_and_serves_placeholder(tmp_path):
         patch("app.core.config.settings.DOWNLOAD_PATH", str(tmp_path)),
         patch("app.services.infra.dbos_orchestrator.start_workflow_routed", new=start),
     ):
-        resp = await serve_resource_cover(res["id"])
+        resp = await serve_resource_cover(res["id"], _request())
 
     assert resp.media_type == "image/svg+xml"
     assert resp.headers["Cache-Control"] == "no-store"
@@ -76,7 +82,7 @@ async def test_small_image_serves_original_without_enqueue(tmp_path):
         patch("app.core.config.settings.DOWNLOAD_PATH", str(tmp_path)),
         patch("app.services.infra.dbos_orchestrator.start_workflow_routed", new=start),
     ):
-        resp = await serve_resource_cover(res["id"])
+        resp = await serve_resource_cover(res["id"], _request())
 
     # FileResponse (original bytes), and the queue was never touched.
     assert resp.__class__.__name__ == "FileResponse"
@@ -96,7 +102,7 @@ async def test_existing_thumbnail_short_circuits(tmp_path):
         patch("app.core.config.settings.DOWNLOAD_PATH", str(tmp_path)),
         patch("app.services.infra.dbos_orchestrator.start_workflow_routed", new=start),
     ):
-        resp = await serve_resource_cover(res["id"])
+        resp = await serve_resource_cover(res["id"], _request())
 
     assert resp.__class__.__name__ == "FileResponse"
     start.assert_not_awaited()
@@ -124,7 +130,7 @@ async def test_media_backed_resource_never_lazy_enqueues(tmp_path):
         from fastapi import HTTPException
 
         with pytest.raises(HTTPException) as exc:
-            await serve_resource_cover(res["id"])
+            await serve_resource_cover(res["id"], _request())
 
     assert exc.value.status_code == 404
     start.assert_not_awaited()

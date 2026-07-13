@@ -73,41 +73,70 @@ class ThumbnailService:
         Returns:
             Relative path to the saved thumbnail, or None on failure/skip.
         """
+        from app.services.library.media_storage import materialize, resolve_media_source
+
         try:
-            abs_path = Path(settings.DOWNLOAD_PATH) / file_path
-            if not abs_path.exists():
-                logger.warning(
-                    f"Thumbnail skipped: source file not found at {abs_path}"
+            loc = resolve_media_source(file_path)
+            async with materialize(file_path) as local_path:
+                if not local_path.exists():
+                    logger.warning(
+                        f"Thumbnail skipped: source file not found at {local_path}"
+                    )
+                    return None
+
+                # Derived artifacts (thumbnail/sprite) always stay on the
+                # filesystem (storage unification: only originals go to
+                # object storage). A legacy fs source saves next to itself
+                # as before; an sb:// source has no "next to it" directory
+                # under DOWNLOAD_PATH, so it lands in a resource_id-keyed
+                # derived tree instead.
+                if loc.is_object_store:
+                    out_dir = (
+                        Path(settings.DOWNLOAD_PATH)
+                        / "derived"
+                        / "thumbnails"
+                        / str(resource_id)
+                    )
+                    out_dir.mkdir(parents=True, exist_ok=True)
+                else:
+                    out_dir = local_path.parent
+
+                # Target: save thumbnail.webp alongside the source (or in the
+                # derived dir for sb:// sources).
+                # (webp ≈ 30-50% smaller than jpeg at equivalent quality)
+                thumb_abs = out_dir / "thumbnail.webp"
+
+                if mime_type.startswith("video/"):
+                    ok = await self._generate_video_thumbnail(
+                        str(local_path), str(thumb_abs)
+                    )
+                    # Also generate preview sprite for hover scrub
+                    sprite_abs = out_dir / "preview_sprite.jpg"
+                    await self._generate_video_sprite(str(local_path), str(sprite_abs))
+                elif mime_type.startswith("image/"):
+                    ok = await self._generate_image_thumbnail(
+                        str(local_path), str(thumb_abs)
+                    )
+                elif mime_type.startswith("audio/"):
+                    # Save as PNG for waveform (better for sharp lines)
+                    thumb_abs = out_dir / "thumbnail.png"
+                    ok = await self._generate_audio_thumbnail(
+                        str(local_path), str(thumb_abs)
+                    )
+                else:
+                    logger.debug(
+                        f"Thumbnail skipped for resource {resource_id}: "
+                        f"unsupported type {mime_type}"
+                    )
+                    return None
+
+                if not ok:
+                    return None
+
+                # Store relative path (same pattern as file_path)
+                thumb_relative = str(
+                    thumb_abs.relative_to(Path(settings.DOWNLOAD_PATH))
                 )
-                return None
-
-            # Target: save thumbnail.webp in the same directory as source file
-            # (webp ≈ 30-50% smaller than jpeg at equivalent quality)
-            thumb_abs = abs_path.parent / "thumbnail.webp"
-
-            if mime_type.startswith("video/"):
-                ok = await self._generate_video_thumbnail(str(abs_path), str(thumb_abs))
-                # Also generate preview sprite for hover scrub
-                sprite_abs = abs_path.parent / "preview_sprite.jpg"
-                await self._generate_video_sprite(str(abs_path), str(sprite_abs))
-            elif mime_type.startswith("image/"):
-                ok = await self._generate_image_thumbnail(str(abs_path), str(thumb_abs))
-            elif mime_type.startswith("audio/"):
-                # Save as PNG for waveform (better for sharp lines)
-                thumb_abs = abs_path.parent / "thumbnail.png"
-                ok = await self._generate_audio_thumbnail(str(abs_path), str(thumb_abs))
-            else:
-                logger.debug(
-                    f"Thumbnail skipped for resource {resource_id}: "
-                    f"unsupported type {mime_type}"
-                )
-                return None
-
-            if not ok:
-                return None
-
-            # Store relative path (same pattern as file_path)
-            thumb_relative = str(thumb_abs.relative_to(Path(settings.DOWNLOAD_PATH)))
 
             await self.repo.update_resource(
                 resource_id, {"thumbnail_path": thumb_relative}
