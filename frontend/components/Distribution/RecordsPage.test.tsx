@@ -53,6 +53,12 @@ vi.mock('../../services/distributionService', () => ({
 // RecordsPage calls useToast — mock it so the test needn't wrap ToastProvider.
 vi.mock('../Toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
 
+// RecordsPage subscribes to task_tracking via useTaskManager (DBOS live
+// sync) — mock the context so the test needn't wrap TaskManagerProvider.
+vi.mock('../../contexts/TaskManagerContext', () => ({
+  useTaskManager: () => ({ tasks: [] }),
+}));
+
 import RecordsPage from './RecordsPage';
 
 describe('RecordsPage', () => {

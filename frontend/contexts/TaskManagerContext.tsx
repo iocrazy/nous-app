@@ -34,7 +34,11 @@ export type TaskType =
   | 'agent'
   // Scheduled agent routine fires (paperclip R1) — task_tracking rows pinned
   // to the execute_issue workflow id, mirrored by the lifecycle trigger.
-  | 'agent_routine';
+  | 'agent_routine'
+  // Distribution publish batches (publish_distribution workflow, D2) —
+  // task_tracking task_type='publish', per-account business state lives in
+  // publish_task_accounts.
+  | 'publish';
 
 export type TaskCategory = 'transfer' | 'processing' | 'ai';
 
@@ -95,6 +99,8 @@ export function getTaskCategory(type: TaskType): TaskCategory {
     case 'parse':
     case 'download':
     case 'upload':
+    // Outbound content transfer to social platforms (Distribution D2).
+    case 'publish':
       return 'transfer';
     case 'transcode':
       return 'processing';
@@ -800,6 +806,7 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
     canvas_gen: 0,
     canvas_graph_run: 0,
     canvas_timeline: 0,
+    publish: 0,
   };
   for (const [type, n] of Object.entries(state.activeData.byType)) {
     if (type in activeCounts) {
@@ -892,6 +899,7 @@ export function taskTypeLabel(type: TaskType): string {
     case 'canvas_gen': return 'Canvas Generate';
     case 'canvas_graph_run': return 'Canvas Run';
     case 'canvas_timeline': return 'Timeline Film';
+    case 'publish': return 'Publish';
     default: return type;
   }
 }
