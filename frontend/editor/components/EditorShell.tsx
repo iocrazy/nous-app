@@ -17,6 +17,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -44,6 +45,8 @@ import type { ScriptChapter } from '../../types';
 import { useEditorState, type EditorFormat, type EditorMode } from '../useEditorState';
 import type { SaveState } from '../useSceneSync';
 import { persistFormat, readStoredFormat } from '../formatStorage';
+import { persistPagination, readStoredPagination, type PaginationMode } from '../paginationStorage';
+import { computePageBreaks, type PageBreak } from '../paginate';
 import { persistRailView, readStoredRailView } from '../railViewStorage';
 import { useConvertPoll } from '../useConvertPoll';
 import {
@@ -147,6 +150,19 @@ export function EditorShell({
   // Restore the per-script layout engine synchronously so the first paint uses
   // it (no engine flash on remount).
   const initialFormat = useMemo(() => readStoredFormat(scriptId) ?? undefined, [scriptId]);
+  // Pagination mode (laper's Paged vs Continuous), persisted per script like
+  // the format engine. Paged draws dashed page rules + page numbers as an
+  // overlay computed from measured block boxes (see the layout effect below).
+  const [paginationMode, setPaginationMode] = useState<PaginationMode>(
+    () => readStoredPagination(scriptId) ?? 'continuous',
+  );
+  const handlePaginationChange = useCallback(
+    (mode: PaginationMode) => {
+      setPaginationMode(mode);
+      persistPagination(scriptId, mode);
+    },
+    [scriptId],
+  );
   const { state, setMode, setFormat, toggleTheme, setTheme, setActiveScene, setCursor, setNextInsertType } =
     useEditorState({ initialFormat });
   const { addToast } = useToast();
@@ -713,6 +729,42 @@ export function EditorShell({
     [scenes],
   );
 
+  // ── Paged-mode page breaks ────────────────────────────────────────────────
+  // Measure the sheet's block rows after layout and compute where the dashed
+  // page rules fall (pure math in paginate.ts). A ResizeObserver re-runs the
+  // measurement as typing grows/shrinks the sheet.
+  const pageSheetRef = useRef<HTMLDivElement | null>(null);
+  const [pageBreaks, setPageBreaks] = useState<PageBreak[]>([]);
+  useLayoutEffect(() => {
+    if (paginationMode !== 'paged' || state.mode !== 'script') {
+      setPageBreaks([]);
+      return;
+    }
+    const sheet = pageSheetRef.current;
+    if (!sheet) return;
+    let frame = 0;
+    const compute = () => {
+      const sheetTop = sheet.getBoundingClientRect().top;
+      const rows = Array.from(
+        sheet.querySelectorAll<HTMLElement>('.mh-scene-headrow, .mh-el-row'),
+      ).map((r) => {
+        const rect = r.getBoundingClientRect();
+        return { top: rect.top - sheetTop, bottom: rect.bottom - sheetTop };
+      });
+      setPageBreaks(computePageBreaks(rows));
+    };
+    compute();
+    const ro = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(compute);
+    });
+    ro.observe(sheet);
+    return () => {
+      cancelAnimationFrame(frame);
+      ro.disconnect();
+    };
+  }, [paginationMode, state.mode, scenes]);
+
   // ── Cross-scene paragraph drag coordination ───────────────────────────────
   // The shell broadcasts which element is mid-drag (and from which scene) so
   // every other SceneBlock can accept the drop; each block registers an op
@@ -1111,7 +1163,19 @@ export function EditorShell({
                 onSelectType={handleSelectType}
                 onInsertScene={handleInsertScene}
               />
-              <div className="mh-sheet">
+              <div className="mh-sheet" ref={pageSheetRef}>
+                {/* Paged mode: laper-style dashed page rules + centred page
+                    numbers, an overlay at measured block boundaries. */}
+                {pageBreaks.map((b) => (
+                  <div
+                    key={b.page}
+                    className="mh-page-break"
+                    style={{ top: b.y }}
+                    aria-hidden="true"
+                  >
+                    <span className="mh-page-break-num">{b.page}</span>
+                  </div>
+                ))}
                 <div className="mh-sheet-inner">
                   {state.mode !== 'outline' && scriptUntouched && (
                     <div className="mh-keyboard-hint" aria-hidden="true">
@@ -1251,6 +1315,8 @@ export function EditorShell({
               scenes={statsScenes}
               format={state.format}
               onFormatChange={handleFormatChange}
+              pagination={paginationMode}
+              onPaginationChange={handlePaginationChange}
               scriptId={scriptId}
               onCompareCommit={handleCompareCommit}
               onRolledBack={handleRolledBack}

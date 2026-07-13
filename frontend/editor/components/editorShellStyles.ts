@@ -1474,4 +1474,41 @@ export const EDITOR_SHELL_STYLES = `
 .mh-scene-heading-display:hover{ background:color-mix(in srgb, var(--sheet-ink) 5%, transparent); }
 .mh-el-drag:hover,
 .mh-drag-handle:hover{ background:color-mix(in srgb, var(--sheet-ink) 7%, transparent); }
+
+/* ── Slash menu (`/` block-type picker) ── mirrors the mention popup chrome. */
+.mh-slash-menu{
+  position:absolute; z-index:30; min-width:190px;
+  background:var(--surface); border:1px solid var(--surface-border);
+  border-radius:10px; box-shadow:var(--shadow-float); padding:4px;
+  font-family:var(--sans);
+}
+.mh-slash-item{
+  display:flex; align-items:center; gap:9px; width:100%; text-align:left;
+  padding:6px 10px; border:none; border-radius:6px; background:none;
+  font-size:12.5px; color:var(--ink); cursor:pointer;
+}
+.mh-slash-item.active{ background:var(--indigo-soft); color:var(--indigo-deep); }
+.mh-slash-glyph{
+  width:18px; text-align:center; font-family:var(--mono); font-size:11px;
+  color:var(--ink-faint); flex-shrink:0;
+}
+.mh-slash-item.active .mh-slash-glyph{ color:var(--indigo-deep); }
+.mh-slash-empty{ padding:7px 10px; font-size:12px; color:var(--ink-faint); }
+
+/* ── Paged mode: laper's dashed page rule + centred page number. An overlay
+   at measured block boundaries — never reflows the text. */
+.mh-page-break{
+  position:absolute; left:20px; right:20px; height:0;
+  border-top:1px dashed color-mix(in srgb, var(--sheet-ink) 22%, transparent);
+  pointer-events:none; z-index:2;
+}
+.mh-page-break-num{
+  position:absolute; left:50%; top:0; transform:translate(-50%, -50%);
+  padding:0 10px; background:var(--sheet-bg-2);
+  font-family:var(--script-mono); font-size:10.5px; line-height:1.6;
+  color:color-mix(in srgb, var(--sheet-ink) 40%, transparent);
+}
+/* Warm paper (light) — the number chip must sit on the warm tone, not the
+   cool token. */
+.mh-editor-shell[data-theme='light'] .mh-page-break-num{ background:#faf8f1; }
 `;
