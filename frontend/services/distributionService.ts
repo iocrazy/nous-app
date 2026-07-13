@@ -84,10 +84,14 @@ export const getShareSchema = (
  * newest 500 so huge libraries can't flood the response (search happens
  * client-side within that window). Fails soft to [] so the page renders.
  */
-export const listLibraryVideos = async (scopeId: string): Promise<LibraryVideo[]> => {
+export const listLibraryVideos = async (
+  scopeId: string,
+  opts?: { tagId?: string },
+): Promise<LibraryVideo[]> => {
   try {
+    const tagFilter = opts?.tagId ? `&tag_ids=${encodeURIComponent(opts.tagId)}` : '';
     const res = await request<{ success: boolean; data: Array<Record<string, unknown>> }>(
-      `/../resources?scope_id=${encodeURIComponent(scopeId)}&types=video&all_folders=true&limit=500`,
+      `/../resources?scope_id=${encodeURIComponent(scopeId)}&types=video&all_folders=true&limit=500${tagFilter}`,
     );
     const rows = res?.data ?? [];
     return rows.map((r) => ({
@@ -101,4 +105,47 @@ export const listLibraryVideos = async (scopeId: string): Promise<LibraryVideo[]
     console.error('distribution: list library videos failed', err);
     return [];
   }
+};
+
+/**
+ * AI/canvas-generated videos (Tier-1 `generated_media`, personal scope).
+ * They only become publishable `resources` after promote — the picker's
+ * Generated tab lists them and promotes ON PICK (idempotent server-side via
+ * the promoted_resource_id backlink). No cover endpoint exists for video
+ * kind, so tiles render the placeholder gradient + prompt text.
+ */
+export interface GeneratedVideo {
+  id: string;
+  /** Display name — the generation prompt, or a fallback label. */
+  name: string;
+  created_at: string;
+  /** Set when this generation was already promoted into the Library. */
+  promoted_resource_id: string | null;
+}
+
+export const listGeneratedVideos = async (): Promise<GeneratedVideo[]> => {
+  try {
+    const res = await request<{
+      data: { items?: Array<Record<string, unknown>>; next_cursor?: string | null };
+    }>('/../generated-media?kind=video&limit=100');
+    const items = res?.data?.items ?? [];
+    return items.map((g) => ({
+      id: String(g.id),
+      name: typeof g.prompt === 'string' && g.prompt.trim() ? g.prompt.trim() : '',
+      created_at: String(g.created_at ?? ''),
+      promoted_resource_id: g.promoted_resource_id ? String(g.promoted_resource_id) : null,
+    }));
+  } catch (err) {
+    console.error('distribution: list generated videos failed', err);
+    return [];
+  }
+};
+
+/** Promote a generated video into the Library; returns the resource id. */
+export const promoteGeneratedVideo = async (genId: string): Promise<string> => {
+  const res = await request<{ data: { promoted_resource_id: string } }>(
+    `/../generated-media/${encodeURIComponent(genId)}/promote`,
+    { method: 'POST' },
+  );
+  return String(res.data.promoted_resource_id);
 };

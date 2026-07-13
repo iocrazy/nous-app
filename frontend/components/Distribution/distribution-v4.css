@@ -298,6 +298,14 @@
 .dist-v4 .picker-item.sel .pi-name { color: var(--content); }
 .dist-v4 .picker-empty { grid-column: 1 / -1; text-align: center; color: var(--content-4); font-size: 12.5px; padding: 34px 0; }
 .dist-v4 .picker-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 18px; border-top: 1px solid var(--line); }
+.dist-v4 .picker-tabs { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 12px 18px 0; }
+.dist-v4 .picker-tabs .chip { cursor: pointer; font: inherit; }
+.dist-v4 .pi-mark { position: absolute; top: 5px; left: 5px; width: 18px; height: 18px; border-radius: 6px; background: rgba(0, 0, 0, .45); color: rgba(255, 255, 255, .75); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background .12s, color .12s; }
+.dist-v4 .pi-mark:hover { color: #fff; background: rgba(0, 0, 0, .65); }
+.dist-v4 .pi-mark.on { background: var(--amber); color: #fff; }
+.dist-v4 .pi-mark.on svg { fill: currentColor; }
+.dist-v4 .pi-thumb.gen { background: radial-gradient(70px 50px at 68% 22%, rgba(167, 139, 250, .35), transparent 70%), linear-gradient(170deg, #3b2f5e 0%, #232b52 55%, #14203c 100%); }
+.dist-v4 .pi-gen-badge { position: absolute; left: 5px; bottom: 5px; width: 18px; height: 18px; border-radius: 6px; background: rgba(167, 139, 250, .25); color: var(--violet); display: flex; align-items: center; justify-content: center; }
 
 /* ═══ responsive ═══ */
 @media (max-width: 900px) {
