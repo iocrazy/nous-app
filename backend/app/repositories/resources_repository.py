@@ -948,6 +948,8 @@ class ResourcesRepository(AsyncpgRepository):
         scope_id: str,
         scope_type: Optional[str] = None,
         folder_id: Optional[str] = None,
+        all_folders: bool = False,
+        limit: Optional[int] = None,
         include_trashed: bool = False,
         tag_ids: Optional[List[str]] = None,
         min_rating: Optional[int] = None,
@@ -1007,7 +1009,10 @@ class ResourcesRepository(AsyncpgRepository):
             if folder_id:
                 where.append("i.folder_id = :folder_id")
                 params["folder_id"] = self._bigint(folder_id)
-            else:
+            elif not all_folders:
+                # Default = root-level items only (the folder-browsing UI).
+                # all_folders=True skips the predicate so scope-wide pickers
+                # (e.g. Distribution Publish) also see items filed in folders.
                 where.append("i.folder_id IS NULL")
 
             if not include_trashed:
@@ -1070,6 +1075,10 @@ class ResourcesRepository(AsyncpgRepository):
             # an item-level ``updated_at``. We select the real item columns +
             # the embedded ``resource`` (row_to_json, decoded to a dict) and
             # alias i.created_at so it survives the resource overlay.
+            limit_sql = ""
+            if limit is not None and limit > 0:
+                limit_sql = " LIMIT :limit"
+                params["limit"] = int(limit)
             sql = (
                 "SELECT i.id, i.resource_id, i.scope_id, "
                 "       i.folder_id, i.added_by, i.library_id, "
@@ -1078,7 +1087,7 @@ class ResourcesRepository(AsyncpgRepository):
                 "FROM resource_items i "
                 "INNER JOIN resources r ON i.resource_id = r.id "
                 f"WHERE {' AND '.join(where)} "
-                "ORDER BY i.created_at DESC"
+                f"ORDER BY i.created_at DESC{limit_sql}"
             )
 
             async with read_scope() as session:
