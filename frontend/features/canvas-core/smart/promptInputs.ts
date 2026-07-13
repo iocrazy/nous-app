@@ -8,7 +8,12 @@
 // (resource_refs 打通 stays parked until a resource_id bridge exists).
 
 import type { CanvasConnection, CanvasNode } from '../types';
-import type { GeneratedImageRef, MediaNodeData, OutputNodeData } from './types';
+import type {
+  GeneratedImageRef,
+  GroupNodeData,
+  MediaNodeData,
+  OutputNodeData,
+} from './types';
 
 const DURABLE_PREFIX = '/api/v1/generated-media/';
 
@@ -26,6 +31,13 @@ function durableImagesOf(node: CanvasNode): string[] {
     // Upload cards (the media node) mint durable URLs via the import
     // endpoint — same i2i eligibility as generated outputs.
     const data = (asObj(node).data ?? {}) as MediaNodeData;
+    const items: GeneratedImageRef[] = Array.isArray(data.items) ? data.items : [];
+    return durableUrls(items.filter((i) => i.kind !== 'video').map((i) => i.url));
+  }
+  if (type === 'group') {
+    // Groups with absorbed media (group v2) source their grid like a
+    // media card does.
+    const data = (asObj(node).data ?? {}) as GroupNodeData;
     const items: GeneratedImageRef[] = Array.isArray(data.items) ? data.items : [];
     return durableUrls(items.filter((i) => i.kind !== 'video').map((i) => i.url));
   }

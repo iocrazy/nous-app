@@ -142,6 +142,13 @@ export interface LlmNodeData {
 export interface GroupNodeData {
   /** User-editable caption shown in the container corner (②-3). */
   label?: string;
+  /** Absorbed media (IC's smart-group `images[]`, group v2): dropping a
+   *  media node onto the group swallows its items into this grid; the
+   *  group then acts as an i2i source when wired into a prompt. Durable
+   *  /generated-media/ URLs only. */
+  items?: GeneratedImageRef[];
+  /** In-flight direct-to-group uploads — shimmer cells in the grid. */
+  uploading?: number;
 }
 
 export interface OutputNodeData {
@@ -269,8 +276,15 @@ export function canConnectSmart(
   if (targetType === 'shot') return false;
   // Media cards are sources like shot: they feed prompts/loops only.
   if (targetType === 'media') return false;
-  // Group containers hold members via parentId, never via wires.
+  // Group containers hold members via parentId, never via wires — but a
+  // group WITH absorbed media is a source like a media card (group v2).
   if (targetType === 'group') return false;
+  if (
+    sourceType === 'group' &&
+    targetType !== 'prompt' &&
+    targetType !== 'loop'
+  )
+    return false;
   // LLM cards take TEXT upstreams only, and feed text consumers.
   if (targetType === 'llm')
     return sourceType === 'prompt' || sourceType === 'llm';

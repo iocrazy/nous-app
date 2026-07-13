@@ -133,3 +133,27 @@ describe('media upload nodes as sources', () => {
     ]);
   });
 });
+
+describe('groups with absorbed media as sources (group v2)', () => {
+  it('uses the group grid durable images, skipping videos/external', () => {
+    const nodes: CanvasNode[] = [
+      {
+        id: 'g1',
+        type: 'group',
+        position: { x: 0, y: 0 },
+        data: {
+          label: 'G',
+          items: [
+            { url: '/api/v1/generated-media/31/cover', kind: 'image' },
+            { url: '/api/v1/generated-media/32/stream', kind: 'video' },
+            { url: 'https://external.example.com/x.png', kind: 'image' },
+          ],
+        },
+      },
+      { id: 'p9', type: 'prompt', position: { x: 320, y: 0 }, data: { body: 'x' } },
+    ];
+    expect(resolveSourceUrls('p9', nodes, [conn('g1', 'p9')])).toEqual([
+      '/api/v1/generated-media/31/cover',
+    ]);
+  });
+});

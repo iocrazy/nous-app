@@ -220,6 +220,117 @@ function fitGroupToRect(
  * absolute coords. Returns the new node array, or null when nothing
  * changes. Groups themselves never re-parent (group-into-group deferred).
  */
+/** Center-point group hit (Infinite's rule): the dragged node's center
+ *  against every group rect; topmost (last-painted) hit wins. Exported so
+ *  the media-absorb path shares the exact same test. */
+export function hitGroupIdFor(
+  nodes: CanvasNode[],
+  draggedId: string,
+  sizes?: ReadonlyMap<string, Partial<NodeSize>>,
+): string | null {
+  const dragged = nodes.find((n) => String(asObj(n).id) === draggedId);
+  if (!dragged) return null;
+  const measured = sizes?.get(draggedId);
+  const fallback = sizeOf(dragged);
+  const w = measured?.width ?? fallback.width;
+  const h = measured?.height ?? fallback.height;
+  const parentId =
+    typeof asObj(dragged).parentId === 'string'
+      ? (asObj(dragged).parentId as string)
+      : null;
+  const parent = parentId
+    ? nodes.find((n) => String(asObj(n).id) === parentId)
+    : undefined;
+  const pos = asObj(dragged).position as { x: number; y: number };
+  const parentPos = parent
+    ? (asObj(parent).position as { x: number; y: number })
+    : { x: 0, y: 0 };
+  const center = {
+    x: pos.x + parentPos.x + w / 2,
+    y: pos.y + parentPos.y + h / 2,
+  };
+  let hitId: string | null = null;
+  for (const n of nodes) {
+    const obj = asObj(n);
+    if (obj.type !== 'group' || String(obj.id) === draggedId) continue;
+    const r = rectOfGroup(n);
+    if (
+      center.x >= r.x &&
+      center.x <= r.x + r.w &&
+      center.y >= r.y &&
+      center.y <= r.y + r.h
+    ) {
+      hitId = String(obj.id);
+    }
+  }
+  return hitId;
+}
+
+/** Absorb a media node into a group (IC's absorbImageNodeIntoSmartGroup,
+ *  group v2): its items merge into the group grid (deduped by url), wires
+ *  FROM the media node re-route to the group (deduped), the media node is
+ *  removed, and the group grows tall enough to show the grid. */
+export function absorbMediaIntoGroup(
+  nodes: CanvasNode[],
+  connections: Array<Record<string, unknown>>,
+  mediaId: string,
+  groupId: string,
+): { nodes: CanvasNode[]; connections: Array<Record<string, unknown>> } | null {
+  const media = nodes.find((n) => String(asObj(n).id) === mediaId);
+  const group = nodes.find((n) => String(asObj(n).id) === groupId);
+  if (!media || !group || asObj(media).type !== 'media') return null;
+
+  const mediaItems = (
+    ((asObj(media).data ?? {}) as { items?: Array<{ url: string }> }).items ?? []
+  ) as Array<Record<string, unknown>>;
+  const groupData = (asObj(group).data ?? {}) as Record<string, unknown>;
+  const existing = (groupData.items ?? []) as Array<Record<string, unknown>>;
+  const seen = new Set(existing.map((i) => String(i.url)));
+  const merged = [
+    ...existing,
+    ...mediaItems.filter((i) => !seen.has(String(i.url))),
+  ];
+
+  // Grid space: header + rows of GRID_CELL thumbs (max GRID_COLS per row,
+  // capped preview at GRID_MAX) — grow the group if it is too short.
+  const shown = Math.min(merged.length, GRID_MAX);
+  const rows = Math.max(1, Math.ceil(shown / GRID_COLS));
+  const minH = 44 + rows * (GRID_CELL + 6) + 16;
+  const g = rectOfGroup(group);
+
+  const nextNodes = nodes
+    .filter((n) => String(asObj(n).id) !== mediaId)
+    .map((n) => {
+      if (String(asObj(n).id) !== groupId) return n;
+      return {
+        ...(n as object),
+        data: { ...groupData, items: merged },
+        style: {
+          ...((asObj(n).style as object) ?? {}),
+          width: g.w,
+          height: Math.max(g.h, minH),
+        },
+      } as CanvasNode;
+    });
+
+  const dedup = new Set<string>();
+  const nextConnections: Array<Record<string, unknown>> = [];
+  for (const c of connections) {
+    if (String(c.target) === mediaId) continue; // media cards take no wires
+    const rerouted =
+      String(c.source) === mediaId ? { ...c, source: groupId } : c;
+    const key = `${rerouted.source}→${rerouted.target}:${rerouted.sourceHandle ?? ''}:${rerouted.targetHandle ?? ''}`;
+    if (dedup.has(key)) continue;
+    dedup.add(key);
+    nextConnections.push(rerouted);
+  }
+  return { nodes: nextNodes, connections: nextConnections };
+}
+
+export const GRID_COLS = 4;
+export const GRID_CELL = 44;
+export const GRID_MAX = 8;
+
 export function applyDropMembership(
   nodes: CanvasNode[],
   draggedId: string,

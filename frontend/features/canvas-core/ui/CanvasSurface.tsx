@@ -29,7 +29,11 @@ import { SMART_NODE_TYPES } from '../smart/nodes/registry';
 import { SMART_EDGE_TYPES } from '../smart/edges/registry';
 import { toReactFlowEdges, validateCanvasConnection } from './connectionMapping';
 import { edgeRunStateClass } from '../smart/edgeRunState';
-import { applyDropMembership } from '../smart/grouping';
+import {
+  absorbMediaIntoGroup,
+  applyDropMembership,
+  hitGroupIdFor,
+} from '../smart/grouping';
 import { CanvasEngine } from '../../../canvas-kit/CanvasEngine';
 import type { NodeDragStopContext } from '../../../canvas-kit/CanvasEngine';
 import { KnifeOverlay } from '../../../canvas-kit/KnifeOverlay';
@@ -288,6 +292,29 @@ export function CanvasSurface() {
           { width: n.measured?.width, height: n.measured?.height },
         ]),
       );
+      const draggedType = (
+        store.nodes.find((n) => (n as { id?: unknown }).id === String(node.id)) as
+          | { type?: string }
+          | undefined
+      )?.type;
+      // Media cards dropped on a group are ABSORBED (IC group v2): their
+      // items merge into the group grid, wires re-route, the card vanishes.
+      if (draggedType === 'media') {
+        const hitId = hitGroupIdFor(store.nodes, String(node.id), sizes);
+        if (hitId) {
+          const absorbed = absorbMediaIntoGroup(
+            store.nodes,
+            store.connections as Array<Record<string, unknown>>,
+            String(node.id),
+            hitId,
+          );
+          if (absorbed) {
+            store.setNodes(absorbed.nodes);
+            store.setConnections(absorbed.connections as never);
+            return;
+          }
+        }
+      }
       const next = applyDropMembership(store.nodes, String(node.id), sizes);
       if (next) store.setNodes(next);
     },
