@@ -2,6 +2,7 @@
 
 Routes (all under prefix /generated-media, registered in app/api/__init__.py):
   GET  /generated-media                → {data: {items, next_cursor}}
+  POST /generated-media/import         → {data: {id, url, media_kind, mime}}
   GET  /generated-media/{id}           → {data: row}   (404 if not in scope)
   GET  /generated-media/{id}/cover     → FileResponse  (image, no auth — <img>)
   GET  /generated-media/{id}/stream    → FileResponse  (video, no auth — <video>)
@@ -13,9 +14,11 @@ Scope = caller's personal team resolved via _resolve_personal_team_id.
 
 from __future__ import annotations
 
+import os
+import tempfile
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 
 from app.core.deps import AuthDep
@@ -135,6 +138,92 @@ async def get_generation_stream(gen_id: int, request: Request):
         request,
         headers={"Cache-Control": "public, max-age=604800, immutable"},
     )
+
+
+IMPORT_MAX_BYTES = 50 * 1024 * 1024  # matches Infinite-Canvas's 50MB upload cap
+IMPORT_CHUNK_BYTES = 1024 * 1024
+_IMPORT_KIND_ENDPOINT = {"image": "cover", "video": "stream"}
+
+
+@router.post("/import")
+async def import_generation(
+    auth: AuthDep,
+    file: UploadFile = File(...),
+    canvas_id: Optional[str] = Form(None),
+    node_id: Optional[str] = Form(None),
+) -> dict:
+    """Ingest a user-uploaded image/video into Tier-1 (canvas media node).
+
+    The canvas generation bridge can only read durable /generated-media/
+    URLs, so uploads must land in the same store as generations — this is
+    the resource-upload-free path the smart canvas's Upload node uses.
+    Streams to a temp file (bounded at IMPORT_MAX_BYTES) and reuses
+    register_generated_media's object-store/filesystem dual write.
+    """
+    from app.services.library.generated_media_service import (
+        GenerationOrigin,
+        media_kind_from_mime,
+        register_generated_media,
+    )
+
+    mime = (file.content_type or "").lower()
+    if not (mime.startswith("image/") or mime.startswith("video/")):
+        raise HTTPException(status_code=400, detail="only image/* or video/* uploads")
+
+    canvas_id_int: Optional[int] = None
+    if canvas_id:
+        try:
+            canvas_id_int = int(canvas_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="canvas_id must be an integer")
+
+    tmp_path: Optional[str] = None
+    try:
+        fd, tmp_path = tempfile.mkstemp(prefix="genmedia_import_")
+        total = 0
+        with os.fdopen(fd, "wb") as out:
+            while True:
+                chunk = await file.read(IMPORT_CHUNK_BYTES)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > IMPORT_MAX_BYTES:
+                    raise HTTPException(status_code=413, detail="file exceeds 50MB")
+                out.write(chunk)
+        if total == 0:
+            raise HTTPException(status_code=400, detail="empty file")
+
+        row = await register_generated_media(
+            user_id=str(auth.user_id),
+            scope_id=await _scope(auth),
+            source_path=tmp_path,
+            mime=mime,
+            origin=GenerationOrigin(
+                kind="canvas_upload",
+                canvas_id=canvas_id_int,
+                node_id=node_id,
+                params={"filename": file.filename or ""},
+            ),
+        )
+        gen_id = row.get("id")
+        if gen_id is None:
+            raise HTTPException(status_code=500, detail="import failed")
+        media_kind = media_kind_from_mime(mime)
+        endpoint = _IMPORT_KIND_ENDPOINT.get(media_kind, "file")
+        return {
+            "data": {
+                "id": str(gen_id),
+                "url": f"/api/v1/generated-media/{gen_id}/{endpoint}",
+                "media_kind": media_kind,
+                "mime": mime,
+            }
+        }
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
 
 @router.get("/{gen_id}/file")

@@ -23,6 +23,19 @@ const NODES: CanvasNode[] = [
   },
   { id: 'p1', type: 'prompt', position: { x: 320, y: 0 }, data: { body: 'x' } },
   { id: 'shot1', type: 'shot', position: { x: 0, y: 400 }, data: { title: 's' } },
+  {
+    id: 'media1',
+    type: 'media',
+    position: { x: 0, y: 600 },
+    data: {
+      title: 'Media',
+      items: [
+        { url: '/api/v1/generated-media/22/cover', kind: 'image' },
+        { url: '/api/v1/generated-media/23/stream', kind: 'video' },
+        { url: 'https://external.example.com/nope.png', kind: 'image' },
+      ],
+    },
+  },
 ];
 
 const conn = (source: string, target: string): CanvasConnection => ({
@@ -110,5 +123,13 @@ describe('resolveSourceUrls (P1-4 multi-source compare)', () => {
     expect(resolveSourceUrl('p1', MULTI, [conn('out3', 'p1')])).toBe(
       '/api/v1/generated-media/31/cover',
     );
+  });
+});
+
+describe('media upload nodes as sources', () => {
+  it('uses media-node durable image items, skipping videos and external URLs', () => {
+    expect(resolveSourceUrls('p1', NODES, [conn('media1', 'p1')])).toEqual([
+      '/api/v1/generated-media/22/cover',
+    ]);
   });
 });

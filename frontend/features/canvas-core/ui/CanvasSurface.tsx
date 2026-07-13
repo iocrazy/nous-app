@@ -30,7 +30,9 @@ import { SMART_EDGE_TYPES } from '../smart/edges/registry';
 import { CLASSIC_NODE_TYPES } from '../classic/ClassicNodeViews';
 import { toReactFlowEdges, validateCanvasConnection } from './connectionMapping';
 import { edgeRunStateClass } from '../smart/edgeRunState';
+import { applyDropMembership } from '../smart/grouping';
 import { CanvasEngine } from '../../../canvas-kit/CanvasEngine';
+import type { NodeDragStopContext } from '../../../canvas-kit/CanvasEngine';
 import { KnifeOverlay } from '../../../canvas-kit/KnifeOverlay';
 import { sampleEdgesFromDom, sampleNodesFromDom } from '../../../canvas-kit/knifeDomSampling';
 import { useKnifeStore } from '../../../canvas-kit/knifeStore';
@@ -268,6 +270,26 @@ export function CanvasSurface() {
     [setNodes],
   );
 
+  // Drop membership (IC parity 1b): a solo node dropped with its center
+  // inside a group is absorbed (container grows to fit); a child dropped
+  // outside its parent is released. Skipped for multi-drops and Ctrl
+  // snap-connect drops (their position is restored, not committed).
+  const onNodeDragStop = useCallback(
+    (node: AnyNode, ctx: NodeDragStopContext) => {
+      if (!isSmartFamily(kind) || ctx.isGroupDrop || ctx.snapConnected) return;
+      const store = useCanvasCoreStore.getState();
+      const sizes = new Map(
+        ctx.nodes.map((n) => [
+          String(n.id),
+          { width: n.measured?.width, height: n.measured?.height },
+        ]),
+      );
+      const next = applyDropMembership(store.nodes, String(node.id), sizes);
+      if (next) store.setNodes(next);
+    },
+    [kind],
+  );
+
   const onMove = useCallback(
     (nextViewport: Viewport) => {
       // Fix 2 — update viewport state immediately for React Flow controlled-mode
@@ -406,6 +428,7 @@ export function CanvasSurface() {
       viewport={viewport}
       onNodesChange={onNodesChange}
       onNodeDragStart={noteDragStart}
+      onNodeDragStop={onNodeDragStop}
       onNodesSnap={onNodesSnap}
       onEdgesChange={onEdgesChange}
       onMove={onMove}

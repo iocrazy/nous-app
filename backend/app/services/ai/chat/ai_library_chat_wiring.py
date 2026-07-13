@@ -31,7 +31,11 @@ from uuid import UUID
 
 from app.core.config import settings
 from app.repositories.agent_memory_repository import get_user_team_ids
-from app.services.ai.adapters.factory import get_adapter_for_user
+from app.services.ai.adapters.factory import (
+    get_adapter_for_key,
+    get_adapter_for_user,
+    resolve_provider_key,
+)
 from app.services.ai.llm.llm_fallback_chain import LLMFallbackChain
 from app.services.ai.memory import registry as memory_registry
 from app.services.ai.memory.agent_memory import recall
@@ -332,9 +336,12 @@ async def build_agent_runner_stack(
         if _hit:
             _prov, _pcfg, _actual = _hit
             _creds = {"api_key": _pcfg["api_key"], "base_url": _pcfg["base_url"]}
-            _platform_adapters[_m] = get_adapter_for_user(
-                _actual, {_prov: _creds}, None
-            )
+            # Dispatch on the row's admin-named actual_provider (#1279
+            # contract) — a prefix guess on actual_model raises for catalog
+            # models like ``qwen3-6-35b`` and killed EVERY chat turn at
+            # stack-build time (prod 2026-07-06→13).
+            _key = resolve_provider_key(_prov, _actual)
+            _platform_adapters[_m] = get_adapter_for_key(_key, _actual, {_key: _creds})
 
     def _adapter_factory(model: str):
         pre_resolved = _platform_adapters.get(model)

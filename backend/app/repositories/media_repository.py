@@ -44,6 +44,7 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, insert, or_, select, update
 
 from app.core.enums import DownloadStatus
+from app.db.pg_coerce import coerce_datetime_strings
 from app.db.repository_base import AsyncpgRepository
 from app.db.session import read_scope, write_scope
 from app.db.supabase_client import get_async_supabase_admin
@@ -96,13 +97,15 @@ def _normalize_for_pg(data: Dict[str, Any]) -> Dict[str, Any]:
     """Coerce DownloadStatus enum values for the parsed_media table.
 
     Returns a NEW dict — caller's input is not mutated (immutability rule).
-    Datetimes are passed through AS-IS — the asyncpg driver's timestamp
-    codec expects ``datetime.datetime`` instances, NOT isoformat strings.
+    The asyncpg timestamp codec expects ``datetime.datetime`` instances, NOT
+    isoformat strings — call sites should bind datetimes, and any ISO string
+    that slips through is parsed here (``coerce_datetime_strings``) instead
+    of rolling back the whole UPDATE (the 2026-07-05 download_path incident).
 
     Also remaps the DB column name ``metadata`` (callers pass raw column
     names) to the model attribute ``metadata_`` so ORM ``.values()`` —
     which keys on attribute names — accepts it."""
-    out = dict(data)
+    out = coerce_datetime_strings(ParsedMedia, data)
     for field in _DOWNLOAD_STATUS_FIELDS:
         v = out.get(field)
         if isinstance(v, DownloadStatus):
@@ -615,7 +618,10 @@ class MediaRepository(AsyncpgRepository):
             "video_download_status": DownloadStatus.COMPLETED.value,
             "download_path": download_path,
             "download_duration": duration,
-            "download_time": datetime.now().isoformat(),
+            # datetime OBJECT, not .isoformat() — a string here made asyncpg
+            # roll back the whole UPDATE (download_path included), which is
+            # how downloads silently stopped registering on 2026-07-05.
+            "download_time": datetime.now(timezone.utc),
         }
         if storage_size > 0:
             data["storage_size"] = storage_size
@@ -640,7 +646,7 @@ class MediaRepository(AsyncpgRepository):
                 "image_download_status": DownloadStatus.COMPLETED.value,
                 "image_download_path": download_path,
                 "download_duration": duration,
-                "download_time": datetime.now().isoformat(),
+                "download_time": datetime.now(timezone.utc),
             },
         )
 

@@ -1731,14 +1731,18 @@
         "prompt": "Prompt",
         "output": "Output",
         "loop": "Loop",
-        "timeline": "Timeline"
+        "timeline": "Timeline",
+        "media": "Upload",
+        "group": "Group"
       },
       "desc": {
         "shot": "Shot card — media for one storyboard beat",
         "prompt": "Write or AI-generate text, then run it",
         "output": "Collects generated results",
         "loop": "Controls rounds, batches and variables",
-        "timeline": "Multi-segment film, stitched in order"
+        "timeline": "Multi-segment film, stitched in order",
+        "media": "Import images or video onto the canvas",
+        "group": "Collect media, prompts and loops together"
       }
     },
     "toolbar": {
@@ -1749,6 +1753,13 @@
       "unlock": "Unlock Canvas",
       "snapGrid": "Snap to Grid",
       "delete": "Clear Canvas"
+    },
+    "mediaNode": {
+      "title": "Media",
+      "add": "+ Add",
+      "emptyHint": "Click or drop images / video",
+      "rejected": "Only images/videos up to 50MB",
+      "uploadFailed": "Upload failed"
     }
   },
   "modelParams": {

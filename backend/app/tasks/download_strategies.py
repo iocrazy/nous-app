@@ -251,9 +251,13 @@ def _do_douyin_download(
                             from app.repositories.media_repository import (
                                 MediaRepository as _MR_yt,
                             )
+                            from app.services.media.downloader.downloader import (
+                                persist_video_download,
+                            )
 
-                            run_async(
-                                _MR_yt().mark_media_as_downloaded(
+                            persisted = run_async(
+                                persist_video_download(
+                                    _MR_yt(),
                                     platform_id=platform_id,
                                     download_path=relative_path,
                                     duration=0,
@@ -265,10 +269,16 @@ def _do_douyin_download(
                                     ytdlp_result["file_path"]
                                 )
                             )
-                            results["video"] = DownloadStatus.COMPLETED.value
-                            logger.success(
-                                f"[Download/Exec] video: yt-dlp fallback succeeded for {platform_id}"
-                            )
+                            if persisted:
+                                results["video"] = DownloadStatus.COMPLETED.value
+                                logger.success(
+                                    f"[Download/Exec] video: yt-dlp fallback succeeded for {platform_id}"
+                                )
+                            else:
+                                logger.error(
+                                    f"[Download/Exec] video: yt-dlp fallback downloaded "
+                                    f"but DB write failed for {platform_id}"
+                                )
                         else:
                             logger.warning(
                                 f"[Download/Exec] video: yt-dlp fallback also failed for {platform_id}"

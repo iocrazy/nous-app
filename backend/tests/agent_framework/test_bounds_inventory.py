@@ -88,33 +88,6 @@ class _FakeAgentRepo:
         return list(self._slugs)
 
 
-class _FakeAgentRepoFallback:
-    """Simulates an older repo without list_all_slugs — exercises the
-    raw-client fallback path."""
-
-    def __init__(self, rows):
-        self._rows = rows
-
-    async def _get_client(self):
-        return _FakeClient(self._rows)
-
-
-class _FakeClient:
-    def __init__(self, rows):
-        self._rows = rows
-        self._calls: list[tuple] = []
-
-    def table(self, name):
-        self._calls.append(("table", name))
-        return self
-
-    def select(self, *args):
-        return self
-
-    async def execute(self):
-        return SimpleNamespace(data=self._rows)
-
-
 @pytest.mark.asyncio
 async def test_inventory_agent_slugs_uses_dedicated_method():
     repo = _FakeAgentRepo(["script_ai", "summarize", "storyboard"])
@@ -123,12 +96,13 @@ async def test_inventory_agent_slugs_uses_dedicated_method():
 
 
 @pytest.mark.asyncio
-async def test_inventory_agent_slugs_fallback_path():
-    repo = _FakeAgentRepoFallback(
-        [{"slug": "script_ai"}, {"slug": "summarize"}, {"slug": None}]
-    )
-    slugs = await inventory_agent_slugs(repo)
-    assert slugs == frozenset({"script_ai", "summarize"})
+async def test_inventory_agent_slugs_contract_on_real_repo():
+    """The REAL AgentRepository must expose list_all_slugs — the old
+    supabase-py fallback masked its absence and the advertisement
+    silently degraded to empty (found 2026-07-13)."""
+    from app.repositories.agent_repository import AgentRepository
+
+    assert callable(getattr(AgentRepository, "list_all_slugs", None))
 
 
 @pytest.mark.asyncio
@@ -142,8 +116,8 @@ async def test_inventory_agent_slugs_swallows_errors():
     """Best-effort — DB error must not block worker startup."""
 
     class _Broken:
-        async def _get_client(self):
-            raise RuntimeError("supabase down")
+        async def list_all_slugs(self):
+            raise RuntimeError("db down")
 
     assert await inventory_agent_slugs(_Broken()) == frozenset()
 

@@ -197,8 +197,11 @@ class SeedLoader:
             logger.info(f"seed_loader: inserted agent {slug}")
 
     async def _insert_agent_row(self, fields: dict[str, Any]) -> None:
-        client = await self.agent_repo._get_client()
-        await client.table("ai_agents").insert(fields).execute()
+        # ORM insert via the repo — AgentRepository lost `_get_client` in
+        # #959 (ORM-only collapse); the old supabase-py reach-in silently
+        # broke every NEW preset seed (existing agents take the update
+        # path, so nothing failed until the 8 CC presets landed).
+        await self.agent_repo.insert(fields)
 
     # ---------- skills ----------
 
@@ -268,9 +271,10 @@ class SeedLoader:
             self._upserted["skills"] += 1
             logger.info(f"seed_loader: updated skill {slug} (id={skill_id})")
             return skill_id
-        client = await self.skill_repo._get_client()
-        resp = await client.table("skills").insert(fields_with_hash).execute()
-        skill_id = int(resp.data[0]["id"])
+        # ORM insert via the repo (same class of drift as _insert_agent_row —
+        # never reach into a repo's private client for writes).
+        row = await self.skill_repo.insert(fields_with_hash)
+        skill_id = int(row["id"])
         self._upserted["skills"] += 1
         logger.info(f"seed_loader: inserted skill {slug} (id={skill_id})")
         return skill_id

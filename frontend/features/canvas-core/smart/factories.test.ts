@@ -4,12 +4,32 @@ import {
   _resetIdCounter,
   createOutputNode,
   createPromptNode,
+  createMediaNode,
   createShotNode,
 } from './factories';
 
 afterEach(() => _resetIdCounter());
 
 const fixedSuffix = () => 'aaaa';
+
+describe('createMediaNode', () => {
+  it('defaults to an empty upload card', () => {
+    const node = createMediaNode({}, { randomSuffix: fixedSuffix });
+    expect(node.type).toBe('media');
+    expect(node.id).toBe('media-1-aaaa');
+    expect(node.data.title).toBe('Media');
+    expect(node.data.items).toEqual([]);
+  });
+
+  it('accepts seeded items and position', () => {
+    const node = createMediaNode(
+      { items: [{ url: '/api/v1/generated-media/9/cover', kind: 'image' }] },
+      { position: { x: 5, y: 6 }, randomSuffix: fixedSuffix },
+    );
+    expect(node.position).toEqual({ x: 5, y: 6 });
+    expect(node.data.items).toHaveLength(1);
+  });
+});
 
 describe('createShotNode', () => {
   it('defaults to "New shot" title + empty refs + empty notes', () => {
