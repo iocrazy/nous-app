@@ -22,29 +22,30 @@ afterEach(() => {
 });
 
 describe('CanvasComposer — add nodes', () => {
-  it('renders four Add buttons + Run + Cascade Run', () => {
+  it('Standard canvases have NO add buttons (top node bar owns adding)', () => {
     render(<CanvasComposer />);
-    expect(screen.getByRole('button', { name: /\+ shot/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /\+ prompt/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /\+ output/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /\+ loop/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /\+ shot/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /\+ prompt/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /\+ output/i })).toBeNull();
     expect(screen.getByRole('button', { name: /^run$/i })).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: /cascade run/i }),
     ).toBeInTheDocument();
   });
 
-  it('clicking "+ Shot" appends a shot node + selects it', () => {
+  it('lite: clicking "+ Prompt" appends a prompt node + selects it', () => {
+    useCanvasCoreStore.setState({ kind: 'lite' });
     render(<CanvasComposer />);
-    fireEvent.click(screen.getByRole('button', { name: /\+ shot/i }));
+    fireEvent.click(screen.getByRole('button', { name: /\+ prompt/i }));
     const state = useCanvasCoreStore.getState();
     expect(state.nodes).toHaveLength(1);
     const node = state.nodes[0] as Record<string, unknown>;
-    expect(node.type).toBe('shot');
+    expect(node.type).toBe('prompt');
     expect(state.selection).toEqual([node.id]);
   });
 
   it('+ Loop appends a loop node defaulting to serial mode', () => {
+    useCanvasCoreStore.setState({ kind: 'lite' });
     render(<CanvasComposer />);
     fireEvent.click(screen.getByRole('button', { name: /\+ loop/i }));
     const node = useCanvasCoreStore.getState().nodes[0] as Record<
@@ -55,12 +56,13 @@ describe('CanvasComposer — add nodes', () => {
     expect((node.data as Record<string, unknown>).mode).toBe('serial');
   });
 
-  it('lite ("Smart") canvases hide the workflow-only add buttons', () => {
+  it('lite ("Smart") canvases keep only the Prompt/Loop quick-adds', () => {
     useCanvasCoreStore.setState({ kind: 'lite' });
     render(<CanvasComposer />);
     expect(screen.queryByRole('button', { name: /\+ shot/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /\+ output/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /\+ timeline/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /\+ llm/i })).toBeNull();
     expect(screen.getByRole('button', { name: /\+ prompt/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /\+ loop/i })).toBeInTheDocument();
   });
