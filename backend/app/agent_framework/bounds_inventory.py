@@ -68,15 +68,12 @@ async def inventory_agent_slugs(agent_repo: Any) -> frozenset[str]:
     if agent_repo is None:
         return frozenset()
     try:
-        # AgentRepository.list_all may be missing in older revisions;
-        # fall back to a raw client read in that case.
-        if hasattr(agent_repo, "list_all_slugs"):
-            slugs = await agent_repo.list_all_slugs()
-            return frozenset(slugs)
-        # Generic fallback path: read via the underlying admin client.
-        client = await agent_repo._get_client()  # noqa: SLF001
-        result = await client.table("ai_agents").select("slug").execute()
-        return frozenset(row["slug"] for row in (result.data or []) if row.get("slug"))
+        # The old supabase-py fallback here could never succeed —
+        # AgentRepository is ORM-only (#959, no `_get_client`) and had no
+        # ``list_all_slugs`` either, so the advertisement always degraded
+        # to an empty set. The repo method exists now; use it directly.
+        slugs = await agent_repo.list_all_slugs()
+        return frozenset(slugs)
     except Exception:
         return frozenset()
 

@@ -364,6 +364,23 @@ class AgentRepository:
             logger.error(f"Failed to delete agent {agent_id}: {e}")
             return False
 
+    async def list_all_slugs(self) -> List[str]:
+        """All distinct ``ai_agents.slug`` values.
+
+        Contract expected by ``bounds_inventory.inventory_agent_slugs``
+        since its introduction — the method never existed here, so the
+        inventory silently degraded to an empty advertisement via its
+        (now removed) supabase-py fallback."""
+        try:
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(AiAgents.slug).where(AiAgents.slug.is_not(None))
+                )
+                return [s for (s,) in result.all() if s]
+        except Exception as e:
+            logger.error(f"Failed to list agent slugs: {e}")
+            return []
+
     async def list_presets(self) -> List[Dict[str, Any]]:
         """All system-preset agents (the admin catalog), ordered by name."""
         try:
