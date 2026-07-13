@@ -721,9 +721,20 @@ export function SceneBlock({
   }, [remoteStale, scene.id, sync.reconcile, onRemoteStaleHandled]);
 
   // Lift optimistic elements to the shell for live Statistics + rail entities
-  // (Task 6 ⑥), debounced 1s so a burst of keystrokes collapses into one update.
+  // (Task 6 ⑥). STRUCTURAL changes (a block created/deleted/moved/retyped —
+  // via Tab, slash menu, toolbar, Enter) report IMMEDIATELY so anything
+  // derived from types (the toolbar's active pill) never lags; pure text
+  // typing keeps the 1s debounce so a keystroke burst collapses into one
+  // update.
+  const lastSkeletonRef = useRef('');
   useEffect(() => {
     if (!onElementsChange) return;
+    const skeleton = sync.elements.map((e) => `${e.id}:${e.type}`).join('|');
+    if (skeleton !== lastSkeletonRef.current) {
+      lastSkeletonRef.current = skeleton;
+      onElementsChange(scene.id, sync.elements);
+      return;
+    }
     const id = setTimeout(() => onElementsChange(scene.id, sync.elements), 1000);
     return () => clearTimeout(id);
   }, [sync.elements, scene.id, onElementsChange]);
@@ -1131,6 +1142,12 @@ export function SceneBlock({
         ref={headRowRef}
         onBlur={headingEditing ? handleHeadRowBlur : undefined}
         onKeyDown={headingEditing ? handleHeadRowKeyDown : undefined}
+        // Focus anywhere in the heading row (read-mode slug button, the
+        // int/ext + time selects, the location input — focus bubbles) reports
+        // a HEADING cursor so the toolbar's active pill switches to Scene.
+        onFocus={() =>
+          onFocusElement?.({ sceneId: scene.id, elementId: null, field: 'heading_int_ext' })
+        }
         // Cross-scene drop target: dropping a dragged paragraph on the heading
         // row lands it at the HEAD of this scene (works for empty scenes too).
         onDragOver={externalDrag ? (e) => e.preventDefault() : undefined}

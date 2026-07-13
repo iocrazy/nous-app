@@ -163,7 +163,7 @@ describe('SceneBlock element editing', () => {
 });
 
 describe('SceneBlock live-stats lift (Task 6 ⑥)', () => {
-  it('reports optimistic elements up (debounced 1s) after an edit', () => {
+  it('reports STRUCTURAL changes (retype) immediately, without waiting the 1s debounce', () => {
     vi.useFakeTimers();
     const onElementsChange = vi.fn();
     render(
@@ -174,17 +174,21 @@ describe('SceneBlock live-stats lift (Task 6 ⑥)', () => {
       />,
     );
     const row = document.querySelector('[data-el-id="el_a"]') as HTMLElement;
-    fireEvent.keyDown(row, { key: 'Tab' }); // action → character (optimistic)
     onElementsChange.mockClear();
 
-    // Nothing lifted until the 1s debounce elapses.
-    expect(onElementsChange).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(1000);
-
+    // Tab retype (action → character) is a STRUCTURAL change: it must lift
+    // immediately so the toolbar's active pill never lags behind the block's
+    // real type (user-reported). Text-only edits keep the 1s debounce.
+    fireEvent.keyDown(row, { key: 'Tab' });
     expect(onElementsChange).toHaveBeenCalledWith(
       '900',
       expect.arrayContaining([expect.objectContaining({ id: 'el_a', type: 'character' })]),
     );
+
+    // No duplicate report fires later for the same skeleton.
+    onElementsChange.mockClear();
+    vi.advanceTimersByTime(1000);
+    expect(onElementsChange).not.toHaveBeenCalled();
   });
 });
 

@@ -658,14 +658,17 @@ export function EditorShell({
     [scenes, liveElements],
   );
 
-  // Active toolbar pill follows the cursor element's type. Look it up in the
-  // LIVE (optimistic) elements, not the loaded snapshot — a block created or
-  // retyped this session only exists optimistically, and the stale-snapshot
-  // lookup made the toolbar keep highlighting Action after focusing a
-  // Character block (user-reported). Falls back to the pending next-insert
-  // type when the element is unknown in both.
-  const activeType: ElementType | null = (() => {
+  // Active toolbar pill follows the cursor. Three cases (generalised after the
+  // user caught it lagging piecemeal):
+  //  - a HEADING field focused (slug button / int-ext / location / time) →
+  //    the Scene pill;
+  //  - an element focused → its LIVE (optimistic) type — the loaded snapshot
+  //    misses blocks created/retyped this session, and SceneBlock reports
+  //    structural changes immediately (text-only edits stay debounced);
+  //  - otherwise → the pending next-insert type.
+  const activeType: ElementType | 'scene' | null = (() => {
     const cursor = state.cursor;
+    if (cursor && cursor.field !== 'element') return 'scene';
     if (cursor?.elementId) {
       for (const s of statsScenes) {
         const el = s.elements.find((e) => e.id === cursor.elementId);
