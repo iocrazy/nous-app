@@ -7,12 +7,7 @@ from __future__ import annotations
 import pytest
 
 from app.services.ai.adapters import factory
-from app.services.ai.provider_protocols import (
-    chat_provider_keys,
-    default_chat_key,
-    generation_keys_for,
-)
-from app.services.media.parsers.video_providers import db_registry
+from app.services.ai.provider_protocols import chat_provider_keys, default_chat_key
 
 
 @pytest.mark.unit
@@ -26,13 +21,3 @@ def test_registry_default_matches_resolve_provider_key_fallback():
     assert factory.resolve_provider_key("totally-unknown", "no-prefix-model") == (
         default_chat_key()
     )
-
-
-@pytest.mark.unit
-def test_db_registry_ark_set_is_registry_derived():
-    assert set(db_registry._ARK_PROVIDERS) == generation_keys_for("ark")
-
-
-@pytest.mark.unit
-def test_db_registry_jimeng_set_is_registry_derived():
-    assert set(db_registry._JIMENG_PROVIDERS) == generation_keys_for("jimeng-cli")

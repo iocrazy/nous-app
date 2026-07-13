@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
+from app.services.ai.provider_protocols.jimeng import _JimengImageAdapter
 from app.services.media.parsers.video_providers.ark_image import ArkImageProvider
 from app.services.media.parsers.video_providers.db_registry import (
-    _JimengImageAdapter,
     resolve_image_provider,
     resolve_video_provider,
 )
