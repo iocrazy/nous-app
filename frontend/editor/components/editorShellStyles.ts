@@ -1497,22 +1497,42 @@ export const EDITOR_SHELL_STYLES = `
 .mh-slash-item.active .mh-slash-glyph{ color:var(--indigo-deep); }
 .mh-slash-empty{ padding:7px 10px; font-size:12px; color:var(--ink-faint); }
 
-/* ── Paged mode: laper's dashed page rule + centred page number. An overlay
-   at measured block boundaries — never reflows the text. */
-.mh-page-break{
-  position:absolute; left:20px; right:20px; height:0;
-  border-top:1px dashed color-mix(in srgb, var(--sheet-ink) 22%, transparent);
-  pointer-events:none; z-index:2;
+/* ── Paged mode v2: real page seams. An IN-FLOW band between rows: filler pads
+   the current page to fixed height, then paper-bottom edge, an inter-page gap
+   painted with the chrome surface (so one continuous sheet reads as separate
+   sheets), and the next paper's top edge with the screenplay page number
+   (top-right, trailing period). Heights 12+28+24 = SEAM_CHROME_PX (paginate.ts).
+   Bleeds past the sheet text padding so the edges run edge-to-edge. */
+.mh-page-seam{
+  margin:0 -49px 0 -73px; pointer-events:none; user-select:none;
+  position:relative; z-index:3;
 }
-.mh-page-break-num{
-  position:absolute; left:50%; top:0; transform:translate(-50%, -50%);
-  padding:0 10px; background:var(--sheet-bg-2);
-  font-family:var(--script-mono); font-size:10.5px; line-height:1.6;
-  color:color-mix(in srgb, var(--sheet-ink) 40%, transparent);
+.mh-page-seam-bottom{
+  height:12px;
+  border-bottom:1px solid var(--sheet-border);
+  box-shadow:0 12px 14px -12px rgba(35,20,90,0.20);
 }
-/* Warm paper (light) — the number chip must sit on the warm tone, not the
-   cool token. */
-.mh-editor-shell[data-theme='light'] .mh-page-break-num{ background:#faf8f1; }
+.mh-page-seam-gap{ height:28px; background:var(--surface-2); }
+.mh-page-seam-topedge{
+  height:24px; position:relative;
+  border-top:1px solid var(--sheet-border);
+  box-shadow:0 -10px 12px -12px rgba(35,20,90,0.14) inset;
+}
+.mh-page-seam-num{
+  position:absolute; top:7px; right:73px;
+  font-family:var(--script-mono); font-size:10.5px; line-height:1;
+  color:color-mix(in srgb, var(--sheet-ink) 45%, transparent);
+}
+
+/* ── Gutter micro-alignment (user pass-4): the block number and the dot
+   handle each derived their height from font metrics, reading as vertically
+   offset from each other. Pin both to one 16px flex-centred box. */
+.mh-el-num,
+.mh-scene-num-badge{
+  height:16px; display:inline-flex; align-items:center; justify-content:flex-end;
+}
+.mh-el-drag,
+.mh-drag-handle{ height:16px; align-content:center; }
 
 /* The format toolbar pins to the top while the script scrolls (user request:
    menu bar fixed on scroll-down). It is a direct child of the .mh-sheet-scroll

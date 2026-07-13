@@ -15,6 +15,7 @@
  * scenes so the shell is exercised end to end.
  */
 import {
+  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -46,7 +47,8 @@ import { useEditorState, type EditorFormat, type EditorMode } from '../useEditor
 import type { SaveState } from '../useSceneSync';
 import { persistFormat, readStoredFormat } from '../formatStorage';
 import { persistPagination, readStoredPagination, type PaginationMode } from '../paginationStorage';
-import { computePageBreaks, type PageBreak } from '../paginate';
+import { computePageLayout, type MeasuredRow, type RowKind } from '../paginate';
+import { PageSeam } from './PageSeam';
 import { persistRailView, readStoredRailView } from '../railViewStorage';
 import { useConvertPoll } from '../useConvertPoll';
 import {
@@ -634,19 +636,6 @@ export function EditorShell({
     [setFormat, scriptId],
   );
 
-  // Active toolbar pill follows the cursor element's type (from the loaded
-  // snapshot); falls back to the pending next-insert type when unknown.
-  const activeType: ElementType | null = (() => {
-    const cursor = state.cursor;
-    if (cursor?.elementId) {
-      for (const s of scenes) {
-        const el = s.elements.find((e) => e.id === cursor.elementId);
-        if (el) return el.type;
-      }
-    }
-    return state.nextInsertType;
-  })();
-
   // Current episode's display title for the rail selector (#1006: compare ids
   // as strings). Falls back to "Ep 1" when the script has no episode yet.
   const currentEpisodeTitle = useMemo(() => {
@@ -668,6 +657,23 @@ export function EditorShell({
     () => scenes.map((s) => (liveElements[s.id] ? { ...s, elements: liveElements[s.id] } : s)),
     [scenes, liveElements],
   );
+
+  // Active toolbar pill follows the cursor element's type. Look it up in the
+  // LIVE (optimistic) elements, not the loaded snapshot — a block created or
+  // retyped this session only exists optimistically, and the stale-snapshot
+  // lookup made the toolbar keep highlighting Action after focusing a
+  // Character block (user-reported). Falls back to the pending next-insert
+  // type when the element is unknown in both.
+  const activeType: ElementType | null = (() => {
+    const cursor = state.cursor;
+    if (cursor?.elementId) {
+      for (const s of statsScenes) {
+        const el = s.elements.find((e) => e.id === cursor.elementId);
+        if (el) return el.type;
+      }
+    }
+    return state.nextInsertType;
+  })();
 
   // Project-level @-mention extras (PR-11, G13): the owning project's other
   // episodes' character names, fetched once per project id. Best-effort —
@@ -729,15 +735,20 @@ export function EditorShell({
     [scenes],
   );
 
-  // ── Paged-mode page breaks ────────────────────────────────────────────────
-  // Measure the sheet's block rows after layout and compute where the dashed
-  // page rules fall (pure math in paginate.ts). A ResizeObserver re-runs the
-  // measurement as typing grows/shrinks the sheet.
+  // ── Paged-mode page seams (v2 — real page look) ───────────────────────────
+  // Measure the sheet's rows after layout, subtract any already-rendered seam
+  // heights to get stable CONTENT coordinates (one-pass fixed point: inserting
+  // seams never changes content coordinates), and compute the seam list (pure
+  // math + keep-together rules in paginate.ts). A ResizeObserver re-runs the
+  // measurement as typing reflows the sheet; the deep-equality guard below
+  // stops the observe→setState→observe loop once the layout converges.
   const pageSheetRef = useRef<HTMLDivElement | null>(null);
-  const [pageBreaks, setPageBreaks] = useState<PageBreak[]>([]);
+  const [pageSeams, setPageSeams] = useState<Map<string, { page: number; filler: number }>>(
+    () => new Map(),
+  );
   useLayoutEffect(() => {
     if (paginationMode !== 'paged' || state.mode !== 'script') {
-      setPageBreaks([]);
+      setPageSeams((prev) => (prev.size === 0 ? prev : new Map()));
       return;
     }
     const sheet = pageSheetRef.current;
@@ -745,13 +756,64 @@ export function EditorShell({
     let frame = 0;
     const compute = () => {
       const sheetTop = sheet.getBoundingClientRect().top;
-      const rows = Array.from(
-        sheet.querySelectorAll<HTMLElement>('.mh-scene-headrow, .mh-el-row'),
-      ).map((r) => {
-        const rect = r.getBoundingClientRect();
-        return { top: rect.top - sheetTop, bottom: rect.bottom - sheetTop };
+      const seamBoxes = Array.from(sheet.querySelectorAll<HTMLElement>('.mh-page-seam')).map(
+        (el) => {
+          const r = el.getBoundingClientRect();
+          return { top: r.top - sheetTop, height: r.height };
+        },
+      );
+      const seamHeightAbove = (top: number) =>
+        seamBoxes.reduce((acc, s) => acc + (s.top < top ? s.height : 0), 0);
+
+      const rows: MeasuredRow[] = [];
+      const rowEls = Array.from(
+        sheet.querySelectorAll<HTMLElement>(
+          '.mh-scene-headrow, .mh-el-row, .mh-scene-placeholder',
+        ),
+      );
+      for (const el of rowEls) {
+        const r = el.getBoundingClientRect();
+        const sub = seamHeightAbove(r.top - sheetTop);
+        let key = '';
+        let kind: RowKind = 'action';
+        if (el.classList.contains('mh-scene-headrow')) {
+          const sid = (el.closest('[data-scene-id]') as HTMLElement | null)?.dataset.sceneId;
+          if (!sid) continue;
+          key = `scene:${sid}`;
+          kind = 'heading';
+        } else if (el.classList.contains('mh-scene-placeholder')) {
+          const sid = el.dataset.sceneId;
+          if (!sid) continue;
+          key = `scene:${sid}`;
+          kind = 'placeholder';
+        } else {
+          const editable = el.querySelector<HTMLElement>('[data-el-id]');
+          if (!editable) continue;
+          key = editable.dataset.elId ?? '';
+          kind = (editable.dataset.elType as RowKind) || 'action';
+        }
+        if (!key) continue;
+        rows.push({ key, kind, top: r.top - sheetTop - sub, bottom: r.bottom - sheetTop - sub });
+      }
+
+      const layout = computePageLayout(rows);
+      const next = new Map(
+        layout.seams.map((s) => [s.beforeKey, { page: s.page, filler: s.filler }]),
+      );
+      setPageSeams((prev) => {
+        if (prev.size === next.size) {
+          let same = true;
+          for (const [k, v] of next) {
+            const p = prev.get(k);
+            if (!p || p.page !== v.page || Math.abs(p.filler - v.filler) > 1) {
+              same = false;
+              break;
+            }
+          }
+          if (same) return prev;
+        }
+        return next;
       });
-      setPageBreaks(computePageBreaks(rows));
     };
     compute();
     const ro = new ResizeObserver(() => {
@@ -1164,18 +1226,6 @@ export function EditorShell({
                 onInsertScene={handleInsertScene}
               />
               <div className="mh-sheet" ref={pageSheetRef}>
-                {/* Paged mode: laper-style dashed page rules + centred page
-                    numbers, an overlay at measured block boundaries. */}
-                {pageBreaks.map((b) => (
-                  <div
-                    key={b.page}
-                    className="mh-page-break"
-                    style={{ top: b.y }}
-                    aria-hidden="true"
-                  >
-                    <span className="mh-page-break-num">{b.page}</span>
-                  </div>
-                ))}
                 <div className="mh-sheet-inner">
                   {state.mode !== 'outline' && scriptUntouched && (
                     <div className="mh-keyboard-hint" aria-hidden="true">
@@ -1206,6 +1256,9 @@ export function EditorShell({
                       {scenes.map((s, i) => {
                         const mounted =
                           !windowed || (i >= sceneWindow.start && i <= sceneWindow.end);
+                        // Paged v2: a seam keyed `scene:<id>` lands BEFORE this
+                        // scene (its heading starts the next page).
+                        const sceneSeam = pageSeams.get(`scene:${s.id}`);
                         if (!mounted) {
                           // A windowed-out scene is still a valid drop target so a
                           // drag can cross the mounted window: dropping on the
@@ -1213,8 +1266,11 @@ export function EditorShell({
                           // reorder (Alt+Arrow) covers the a11y path, so the
                           // decorative placeholder stays aria-hidden.
                           return (
+                            <Fragment key={s.id}>
+                            {sceneSeam && (
+                              <PageSeam page={sceneSeam.page} filler={sceneSeam.filler} />
+                            )}
                             <div
-                              key={s.id}
                               className="mh-scene-placeholder"
                               data-testid="scene-placeholder"
                               data-scene-id={s.id}
@@ -1237,11 +1293,15 @@ export function EditorShell({
                                   : undefined
                               }
                             />
+                            </Fragment>
                           );
                         }
                         return (
+                          <Fragment key={s.id}>
+                          {sceneSeam && (
+                            <PageSeam page={sceneSeam.page} filler={sceneSeam.filler} />
+                          )}
                           <SceneBlock
-                            key={s.id}
                             scene={s}
                             index={i}
                             blockIndexBase={blockBases[i]}
@@ -1262,6 +1322,7 @@ export function EditorShell({
                             onElementDragDone={handleElementDragDone}
                             onCrossSceneDelete={handleCrossSceneDelete}
                             onRegisterExternalOps={handleRegisterExternalOps}
+                            pageSeams={pageSeams}
                             onRegisterRemoteApply={
                               COLLAB_ENABLED ? registerRemoteApply : undefined
                             }
@@ -1270,6 +1331,7 @@ export function EditorShell({
                               COLLAB_ENABLED ? handleRemoteStaleHandled : undefined
                             }
                           />
+                          </Fragment>
                         );
                       })}
                     </>

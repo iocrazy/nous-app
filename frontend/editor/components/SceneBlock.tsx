@@ -185,6 +185,8 @@ export interface SceneBlockProps {
   /** Registers a dispatcher the shell can use to apply ops to this scene from
    *  outside (the cross-scene delete); called with null on unmount. */
   onRegisterExternalOps?: (sceneId: string, fn: ((ops: ElementOp[]) => void) | null) => void;
+  /** Paged mode v2: page seams keyed by element id (rendered before that row). */
+  pageSeams?: Map<string, { page: number; filler: number }>;
 }
 
 /** Which half of a block the pointer is over → the drop edge. */
@@ -217,6 +219,7 @@ export function SceneBlock({
   onElementDragDone,
   onCrossSceneDelete,
   onRegisterExternalOps,
+  pageSeams,
 }: SceneBlockProps) {
   const { t } = useTranslation();
   const sync = useSceneSync(scene, { selfActorId });
@@ -1210,6 +1213,7 @@ export function SceneBlock({
         <LayoutEngine
           elements={sync.elements}
           blockIndexBase={blockIndexBase}
+          pageSeams={pageSeams}
           focusedElementId={focusedElementId}
           mention={lineMention}
           selectedIds={copilotSelectedIds}
