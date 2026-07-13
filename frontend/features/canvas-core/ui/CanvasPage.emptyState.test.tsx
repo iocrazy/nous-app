@@ -13,6 +13,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('react-router-dom', () => ({
   useParams: () => ({ canvasId: 'c1' }),
+  // CanvasPage reads ?name=&characterId= for the character-canvas seeding.
+  useSearchParams: () => [new URLSearchParams()],
 }));
 
 vi.mock('react-i18next', () => ({

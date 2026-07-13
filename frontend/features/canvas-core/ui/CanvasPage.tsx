@@ -12,14 +12,16 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 import { ClassicPalette } from '../classic/ui/ClassicPalette';
 import { ClassicRunBar } from '../classic/ui/ClassicRunBar';
 import { CommandPalette } from '../palette/CommandPalette';
 import { CanvasComposer } from '../smart/CanvasComposer';
+import { buildCharacterTemplate } from '../smart/characterTemplate';
 import { resumePendingGenerations } from '../smart/genResume';
+import { isSmartFamily } from '../types';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { useCanvasRealtime } from '../realtime/useCanvasRealtime';
 import { CanvasConflictDialog } from './CanvasConflictDialog';
@@ -71,9 +73,30 @@ export default function CanvasPage() {
   // that was in flight when the previous page died, and reset prompts
   // stranded in queued/running with nothing to resume.
   useEffect(() => {
-    if (loadStatus !== 'ready' || kind !== 'smart') return;
+    if (loadStatus !== 'ready' || !isSmartFamily(kind)) return;
     void resumePendingGenerations();
   }, [loadStatus, kind, canvasId]);
+
+  // Character canvas preset workflow (PR-CC2): an EMPTY kind='character'
+  // canvas seeds the bible-card + four agent branches exactly once. Guarded
+  // by nodeCount===0 AND a per-canvas ref (StrictMode double-run), persisted
+  // through the normal debounced save. ?name=&description=&characterId= from
+  // the library's "Open in Canvas" pre-fill the card.
+  const [searchParams] = useSearchParams();
+  const seededRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (loadStatus !== 'ready' || kind !== 'character') return;
+    if (nodeCount > 0 || !canvasId || seededRef.current === canvasId) return;
+    seededRef.current = canvasId;
+    const { nodes, connections } = buildCharacterTemplate({
+      character_id: searchParams.get('characterId'),
+      name: searchParams.get('name') ?? undefined,
+      description: searchParams.get('description') ?? undefined,
+    });
+    const store = useCanvasCoreStore.getState();
+    store.setNodes(nodes);
+    store.setConnections(connections);
+  }, [loadStatus, kind, nodeCount, canvasId, searchParams]);
 
   if (!canvasId) {
     return <CanvasStatus title="Missing canvas id" tone="error" />;
@@ -116,7 +139,7 @@ export default function CanvasPage() {
           </div>
         </div>
       )}
-      {kind === 'smart' && <CanvasComposer surfaceRef={surfaceRef} teamId={teamId} />}
+      {isSmartFamily(kind) && <CanvasComposer surfaceRef={surfaceRef} teamId={teamId} />}
       {kind === 'classic' && (
         <>
           <ClassicPalette surfaceRef={surfaceRef} />

@@ -28,7 +28,14 @@ export interface PromptResourceRef {
   scope: { type: 'personal' | 'team'; id: string };
 }
 
-export type SmartNodeType = 'shot' | 'prompt' | 'output' | 'loop' | 'timeline' | 'group';
+export type SmartNodeType =
+  | 'shot'
+  | 'prompt'
+  | 'output'
+  | 'loop'
+  | 'timeline'
+  | 'group'
+  | 'character';
 
 export type LoopMode = 'serial' | 'parallel' | 'batch';
 
@@ -173,7 +180,20 @@ export type ShotNode = SmartNode<ShotNodeData>;
 export type PromptNode = SmartNode<PromptNodeData>;
 export type OutputNode = SmartNode<OutputNodeData>;
 export type LoopNode = SmartNode<LoopNodeData>;
-export type AnySmartNode = ShotNode | PromptNode | OutputNode | LoopNode;
+export type CharacterNode = SmartNode<CharacterNodeData>;
+export type AnySmartNode = ShotNode | PromptNode | OutputNode | LoopNode | CharacterNode;
+
+/** Character canvas (kind='character'): the bible-card node the preset agent
+ *  workflow hangs off. Binds a project_characters row when opened from the
+ *  library; unbound (character_id null) when hand-placed. */
+export interface CharacterNodeData {
+  /** project_characters row id (snowflake string), or null = unbound. */
+  character_id: string | null;
+  name: string;
+  role_tag: string;
+  description: string;
+  portrait_url: string | null;
+}
 
 /**
  * Connect-rule predicate for smart mode.
@@ -200,6 +220,9 @@ export function canConnectSmart(
   if (!sourceType || !targetType) return true;
   if (sourceType === 'output') return false;
   if (targetType === 'shot') return false;
+  // character is a SOURCE card (like shot): feeds prompts only, takes nothing.
+  if (targetType === 'character') return false;
+  if (sourceType === 'character' && targetType !== 'prompt') return false;
   if (sourceType === 'shot' && targetType !== 'prompt' && targetType !== 'loop')
     return false;
   if (sourceType === 'loop' && (targetType === 'output' || targetType === 'shot'))
@@ -215,6 +238,7 @@ export const SMART_NODE_DEFAULT_WIDTH: Record<SmartNodeType, number> = {
   loop: 200,
   timeline: 420,
   group: 300,
+  character: 280,
 };
 
 export const LOOP_MODE_TONE: Record<LoopMode, string> = {
