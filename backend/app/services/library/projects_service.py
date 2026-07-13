@@ -10,6 +10,9 @@ file uploads with metadata extraction (ffprobe), and video linking.
 import asyncio
 import json
 import mimetypes
+import os
+import shutil
+import tempfile
 import uuid as _uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +31,8 @@ from app.core.file_utils import (
 from app.repositories.projects_repository import get_projects_repository
 from app.services.infra.dbos_orchestrator import start_workflow_routed
 from app.services.infra.unified_task_manager import get_task_manager
+from app.services.library.media_storage import store_local_file
+from app.services.library.resources_service import _resolve_personal_team_id
 
 # Card enrichment defaults when a project has no stage/members/history rows
 # (or the batch lookups failed) — the frontend renders the base card.
@@ -513,6 +518,20 @@ class ProjectsService:
     # File uploads
     # ------------------------------------------------------------------ #
 
+    @staticmethod
+    async def _resolve_project_scope_id(project: dict) -> int:
+        """Scope id (a ``teams.id`` snowflake) for a project's uploads.
+
+        Projects are optionally attached to a team (``team_id`` is nullable —
+        a "personal" project has none). When absent, the owner's personal
+        team is the scope, mirroring how resource uploads without an
+        explicit ``scope_id`` fall back to ``_resolve_personal_team_id``.
+        """
+        team_id = project.get("team_id")
+        if team_id is not None:
+            return int(team_id)
+        return int(await _resolve_personal_team_id(str(project["owner_id"])))
+
     async def upload_file(
         self,
         project_id: str,
@@ -525,7 +544,10 @@ class ProjectsService:
 
         Steps:
         1. Validate project exists
-        2. Save file to disk under DOWNLOAD_PATH/mediatrack/{project_id}/
+        2. Stream to a temp file, then dual-track: FEATURE_UNIFIED_STORAGE on
+           content-addresses it into the Supabase Storage `library` bucket;
+           flag off (or any storage failure) moves it into
+           DOWNLOAD_PATH/mediatrack/{project_id}/ (legacy, dedup-suffixed).
         3. Classify file type from MIME
         4. Extract video metadata via ffprobe (if applicable)
         5. Create DB record
@@ -546,42 +568,83 @@ class ProjectsService:
         if not project:
             raise ValueError("Project not found")
 
-        # Save to disk
         safe_name = sanitize_filename(file.filename)
-        save_dir = Path(settings.DOWNLOAD_PATH) / "mediatrack" / project_id
-        save_dir.mkdir(parents=True, exist_ok=True)
 
-        # Handle duplicate filenames
-        target = save_dir / safe_name
-        counter = 1
-        stem = target.stem
-        suffix = target.suffix
-        while target.exists():
-            target = save_dir / f"{stem}_{counter}{suffix}"
-            counter += 1
+        # Stream to a temp file first (mirrors resources_service.
+        # upload_resource): the final location depends on the storage
+        # track, and the object-store PUT needs a local source file
+        # either way.
+        tmp_fd, tmp_name = tempfile.mkstemp()
+        os.close(tmp_fd)
+        tmp_path = Path(tmp_name)
+        try:
+            file_size, file_hash = await stream_upload_to_disk(
+                file, tmp_path, MAX_UPLOAD_SIZE
+            )
 
-        file_size, _ = await stream_upload_to_disk(file, target, MAX_UPLOAD_SIZE)
+            # Classify — sniff real content type first so a forged
+            # Content-Type cannot mislabel a binary as media.
+            mime = (
+                sniff_mime(tmp_path)
+                or file.content_type
+                or mimetypes.guess_type(safe_name)[0]
+                or ""
+            )
+            file_type = self._classify_file_type(mime)
 
-        # Classify — sniff real content type first so a forged Content-Type
-        # cannot mislabel a binary as media.
-        mime = (
-            sniff_mime(target)
-            or file.content_type
-            or mimetypes.guess_type(safe_name)[0]
-            or ""
-        )
-        file_type = self._classify_file_type(mime)
+            # Extract video metadata from the local tmp path — the file is
+            # still on disk either way (store_local_file only reads it), so
+            # no materialize() is needed here.
+            metadata = {}
+            if file_type == "video":
+                metadata = await self._extract_video_metadata(str(tmp_path))
 
-        # Extract video metadata
-        metadata = {}
-        if file_type == "video":
-            metadata = await self._extract_video_metadata(str(target))
+            stored = None
+            if settings.FEATURE_UNIFIED_STORAGE:
+                scope_id = await self._resolve_project_scope_id(project)
+                try:
+                    stored = await store_local_file(
+                        scope_id=scope_id,
+                        source_path=str(tmp_path),
+                        mime=mime,
+                        filename=safe_name,
+                        sha256=file_hash,
+                    )
+                except Exception as exc:
+                    logger.error(
+                        f"[upload_file] unified-storage write failed, falling "
+                        f"back to filesystem: project={project_id} error={exc!r}"
+                    )
+
+            if stored is not None:
+                relative_path = stored.file_path
+                final_name = safe_name
+            else:
+                # Legacy filesystem move — fs fallback only: content
+                # addressing has no name collisions, so the duplicate-name
+                # "_counter" suffixing only makes sense here.
+                save_dir = Path(settings.DOWNLOAD_PATH) / "mediatrack" / project_id
+                save_dir.mkdir(parents=True, exist_ok=True)
+                target = save_dir / safe_name
+                counter = 1
+                stem = target.stem
+                suffix = target.suffix
+                while target.exists():
+                    target = save_dir / f"{stem}_{counter}{suffix}"
+                    counter += 1
+                await asyncio.to_thread(shutil.move, str(tmp_path), str(target))
+                final_name = target.name
+                relative_path = f"mediatrack/{project_id}/{final_name}"
+        finally:
+            # No-op if the move succeeded (tmp_path no longer exists); when
+            # the object-store write succeeded, this is what cleans up the
+            # tmp file (store_local_file only reads it, never deletes it).
+            tmp_path.unlink(missing_ok=True)
 
         # Create DB record
-        relative_path = f"mediatrack/{project_id}/{target.name}"
         file_data = {
             "project_id": project_id,
-            "filename": target.name,
+            "filename": final_name,
             "file_type": file_type,
             "mime_type": mime,
             "file_path": relative_path,
@@ -596,7 +659,7 @@ class ProjectsService:
         version_data = {
             "file_id": created_file["id"],
             "version_number": 1,
-            "filename": target.name,
+            "filename": final_name,
             "file_path": relative_path,
             "file_size_bytes": file_size,
             "mime_type": mime,
