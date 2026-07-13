@@ -2285,6 +2285,12 @@ async def send_chat_message_stream(
                 data = json.dumps(evt.get("data") or {}, ensure_ascii=False)
                 yield f"event: {event_name}\ndata: {data}\n\n"
         except Exception as exc:
+            # SSE errors never surface as HTTP 5xx — without this log the
+            # server side is blind (2026-07-13 incident: chat dead for a
+            # week with zero rows in application_logs).
+            logger.exception(
+                f"[ai-library] chat-stream failed session={session_id}: {exc}"
+            )
             data = json.dumps({"error": f"{type(exc).__name__}: {exc}"})
             yield f"event: error\ndata: {data}\n\n"
 

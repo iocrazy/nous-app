@@ -274,6 +274,10 @@ class AILibraryChatService:
         try:
             result = await chat_task
         except Exception as exc:
+            # The SSE consumer turns this into an in-stream error event
+            # (HTTP stays 200) — log it or the failure is invisible
+            # server-side.
+            logger.exception(f"[chat-stream] turn failed session={session_id}: {exc}")
             yield {"type": "error", "data": {"error": f"{type(exc).__name__}: {exc}"}}
             return
 
