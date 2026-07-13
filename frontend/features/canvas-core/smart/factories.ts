@@ -25,6 +25,7 @@ import type {
   LoopNodeData,
   CharacterNode,
   CharacterNodeData,
+  LibEntityNodeData,
 } from './types';
 
 interface Position {
@@ -179,6 +180,27 @@ export function createCharacterNode(
       role_tag: data.role_tag ?? '',
       description: data.description ?? '',
       portrait_url: data.portrait_url ?? null,
+    },
+  };
+}
+
+/** Location/prop canvas: the library-card source node (SP2). */
+export function createLibEntityNode(
+  type: 'location' | 'prop',
+  data: Partial<LibEntityNodeData> = {},
+  opts: FactoryOptions = {},
+): SmartNode<LibEntityNodeData> {
+  const random = opts.randomSuffix ?? DEFAULT_RANDOM_SUFFIX;
+  return {
+    id: makeId(type, random),
+    type,
+    position: opts.position ?? DEFAULT_POSITION,
+    data: {
+      entity_id: data.entity_id ?? null,
+      name: data.name ?? (type === 'location' ? 'New location' : 'New prop'),
+      badge_tag: data.badge_tag ?? '',
+      description: data.description ?? '',
+      cover_url: data.cover_url ?? null,
     },
   };
 }

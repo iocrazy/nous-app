@@ -35,7 +35,9 @@ export type SmartNodeType =
   | 'loop'
   | 'timeline'
   | 'group'
-  | 'character';
+  | 'character'
+  | 'location'
+  | 'prop';
 
 export type LoopMode = 'serial' | 'parallel' | 'batch';
 
@@ -195,6 +197,16 @@ export interface CharacterNodeData {
   portrait_url: string | null;
 }
 
+/** Location/prop canvas (SP2): the library-card node the preset workflow
+ *  hangs off. Binds a project_lib_entities row; unbound when hand-placed. */
+export interface LibEntityNodeData {
+  entity_id: string | null;
+  name: string;
+  badge_tag: string;
+  description: string;
+  cover_url: string | null;
+}
+
 /**
  * Connect-rule predicate for smart mode.
  *
@@ -220,9 +232,11 @@ export function canConnectSmart(
   if (!sourceType || !targetType) return true;
   if (sourceType === 'output') return false;
   if (targetType === 'shot') return false;
-  // character is a SOURCE card (like shot): feeds prompts only, takes nothing.
-  if (targetType === 'character') return false;
-  if (sourceType === 'character' && targetType !== 'prompt') return false;
+  // Entity cards (character/location/prop) are SOURCE cards like shot:
+  // they feed prompts only and take nothing.
+  const ENTITY = new Set(['character', 'location', 'prop']);
+  if (ENTITY.has(targetType)) return false;
+  if (ENTITY.has(sourceType) && targetType !== 'prompt') return false;
   if (sourceType === 'shot' && targetType !== 'prompt' && targetType !== 'loop')
     return false;
   if (sourceType === 'loop' && (targetType === 'output' || targetType === 'shot'))
@@ -239,6 +253,8 @@ export const SMART_NODE_DEFAULT_WIDTH: Record<SmartNodeType, number> = {
   timeline: 420,
   group: 300,
   character: 280,
+  location: 280,
+  prop: 280,
 };
 
 export const LOOP_MODE_TONE: Record<LoopMode, string> = {

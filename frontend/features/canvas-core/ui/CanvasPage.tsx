@@ -20,6 +20,7 @@ import { ClassicRunBar } from '../classic/ui/ClassicRunBar';
 import { CommandPalette } from '../palette/CommandPalette';
 import { CanvasComposer } from '../smart/CanvasComposer';
 import { buildCharacterTemplate } from '../smart/characterTemplate';
+import { buildEntityTemplate } from '../smart/entityTemplates';
 import { resumePendingGenerations } from '../smart/genResume';
 import { isSmartFamily } from '../types';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
@@ -85,14 +86,25 @@ export default function CanvasPage() {
   const [searchParams] = useSearchParams();
   const seededRef = useRef<string | null>(null);
   useEffect(() => {
-    if (loadStatus !== 'ready' || kind !== 'character') return;
+    const isEntityKind =
+      kind === 'character' || kind === 'location' || kind === 'prop';
+    if (loadStatus !== 'ready' || !isEntityKind) return;
     if (nodeCount > 0 || !canvasId || seededRef.current === canvasId) return;
     seededRef.current = canvasId;
-    const { nodes, connections } = buildCharacterTemplate({
-      character_id: searchParams.get('characterId'),
-      name: searchParams.get('name') ?? undefined,
-      description: searchParams.get('description') ?? undefined,
-    });
+    const name = searchParams.get('name') ?? undefined;
+    const description = searchParams.get('description') ?? undefined;
+    const { nodes, connections } =
+      kind === 'character'
+        ? buildCharacterTemplate({
+            character_id: searchParams.get('characterId'),
+            name,
+            description,
+          })
+        : buildEntityTemplate(kind, {
+            entity_id: searchParams.get('entityId'),
+            name,
+            description,
+          });
     const store = useCanvasCoreStore.getState();
     store.setNodes(nodes);
     store.setConnections(connections);
