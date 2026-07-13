@@ -55,6 +55,16 @@ describe('CanvasComposer — add nodes', () => {
     expect((node.data as Record<string, unknown>).mode).toBe('serial');
   });
 
+  it('lite ("Smart") canvases hide the workflow-only add buttons', () => {
+    useCanvasCoreStore.setState({ kind: 'lite' });
+    render(<CanvasComposer />);
+    expect(screen.queryByRole('button', { name: /\+ shot/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /\+ output/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /\+ timeline/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /\+ prompt/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /\+ loop/i })).toBeInTheDocument();
+  });
+
   it('toolbar is role="toolbar" with an accessible name', () => {
     render(<CanvasComposer />);
     expect(

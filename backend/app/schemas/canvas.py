@@ -18,8 +18,8 @@ from pydantic import BaseModel, Field, field_validator
 # 'classic' (canvas 1.0 engine) is RETIRED (mig 361 soft-deleted every
 # remaining row): it stays in CanvasKind so trashed rows still serialize,
 # but new canvases may only use CreatableCanvasKind.
-CanvasKind = Literal["smart", "classic", "character", "location", "prop"]
-CreatableCanvasKind = Literal["smart", "character", "location", "prop"]
+CanvasKind = Literal["smart", "lite", "classic", "character", "location", "prop"]
+CreatableCanvasKind = Literal["smart", "lite", "character", "location", "prop"]
 
 
 class CanvasViewport(BaseModel):

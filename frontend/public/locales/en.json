@@ -1697,8 +1697,9 @@
     "groupLoadFailed": "Failed to load canvases for this project",
     "createFailed": "Failed to create canvas",
     "kind": {
-      "smart": "Smart",
-      "classic": "Classic"
+      "smart": "Standard",
+      "classic": "Classic",
+      "lite": "Smart"
     },
     "moveToTrash": "Move to trash",
     "movedToTrash": "Moved to trash",

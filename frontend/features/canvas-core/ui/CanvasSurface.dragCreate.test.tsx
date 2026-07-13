@@ -27,6 +27,7 @@ vi.mock('@xyflow/react', async (importOriginal) => {
 });
 
 import { CanvasSurface } from './CanvasSurface';
+import { DragCreateMenu } from './DragCreateMenu';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import type { CanvasKind, CanvasNode } from '../types';
 
@@ -137,5 +138,31 @@ describe('CanvasSurface onConnect — duplicate guard', () => {
     act(() => onConnect(conn));
     act(() => onConnect(conn)); // identical second attempt
     expect(useCanvasCoreStore.getState().connections).toHaveLength(1);
+  });
+});
+
+
+describe('DragCreateMenu — lite kind (IC four cards)', () => {
+  it('pane menu on a lite canvas offers only Upload/Group/Prompt/Loop', () => {
+    seed('lite', []);
+    render(
+      <DragCreateMenu
+        screenPosition={{ x: 0, y: 0 }}
+        flowPosition={{ x: 0, y: 0 }}
+        fromNodeId={null}
+        fromHandle={null}
+        onClose={() => {}}
+      />,
+    );
+    const names = screen
+      .getAllByRole('menuitem')
+      .map((el) => el.textContent ?? '');
+    expect(names.some((n) => n.includes('Upload'))).toBe(true);
+    expect(names.some((n) => n.includes('Group'))).toBe(true);
+    expect(names.some((n) => n.includes('Prompt'))).toBe(true);
+    expect(names.some((n) => n.includes('Loop'))).toBe(true);
+    expect(names.some((n) => n.includes('Shot'))).toBe(false);
+    expect(names.some((n) => n.includes('Timeline'))).toBe(false);
+    expect(names.some((n) => n.includes('Output'))).toBe(false);
   });
 });
