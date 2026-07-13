@@ -84,6 +84,38 @@ def _compose_system_message(agent_id: Optional[str]) -> str:
     return SYSTEM_MESSAGE
 
 
+async def _compose_system_message_with_agent(agent_id: Optional[str]) -> str:
+    """Real per-agent persona injection (character canvas CC3 — the Phase 4.5
+    slot the placeholder always pointed at).
+
+    When ``agent_id`` resolves to an ai_agents row, its IDENTITY + SOUL are
+    prepended so the run actually speaks as that agent (AGENT.md is the
+    task-protocol doc — the canvas prompt body carries the task here, so it
+    is deliberately not injected). Any miss (non-UUID id, unknown agent, repo
+    error) degrades to the legacy placeholder — never fails the run.
+    """
+    if not agent_id:
+        return SYSTEM_MESSAGE
+    try:
+        from uuid import UUID
+
+        from app.repositories.agent_repository import AgentRepository
+
+        agent = await AgentRepository().get_by_id(UUID(str(agent_id)))
+    except Exception:  # noqa: BLE001 — resolution is best-effort
+        agent = None
+    if not agent:
+        return _compose_system_message(agent_id)
+    parts = [
+        str(agent.get("identity_md") or "").strip(),
+        str(agent.get("soul_md") or "").strip(),
+    ]
+    persona = "\n\n".join(p for p in parts if p)
+    if not persona:
+        return _compose_system_message(agent_id)
+    return f"{persona}\n\n{SYSTEM_MESSAGE}"
+
+
 # Data-payload keys (snake + camel) for image_gen params. The node's domain
 # payload nests under ``data`` in a React Flow node; we also accept a flat dict.
 _IMAGE_GEN_PROMPT_KEYS = ("prompt",)
@@ -278,7 +310,7 @@ class CanvasRunService:
 
         # Empty parse → DB catalog default (never a hardcoded slug).
         model = _resolve_model(provider_slug) or await self._default_text_model()
-        system_message = _compose_system_message(agent_id)
+        system_message = await _compose_system_message_with_agent(agent_id)
 
         try:
             adapter = await self._get_adapter(model)

@@ -39,6 +39,7 @@ vi.mock('react-i18next', () => ({
 // The text prompt's provider dropdown is now sourced from the platform DB
 // catalog (P0-1). Stub the hook with fixed llm rows so the dropdown has
 // selectable options without a network fetch.
+vi.mock('./useAgents', () => ({ useAgents: () => [] }));
 vi.mock('./useTextModels', () => ({
   useTextModels: () => [
     { name: 'mediahub-doubao-llm', display_name: 'Doubao LLM', type: 'llm', actual_provider: 'doubao' },

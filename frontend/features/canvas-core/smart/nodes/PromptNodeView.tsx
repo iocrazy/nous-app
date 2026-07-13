@@ -5,6 +5,7 @@ import type { PromptGenSettings, PromptNodeData, PromptResourceRef } from '../ty
 import { RUN_STATUS_TONE, SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { useGenerationModels } from './useGenerationModels';
 import { useTextModels } from './useTextModels';
+import { useAgents } from './useAgents';
 import { useNodeDataPatch } from './useNodeDataPatch';
 import { rerunPrompt } from '../regenerate';
 import { RunStatusBadge } from './RunStatusBadge';
@@ -25,6 +26,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   const {
     body,
     provider_slug,
+    agent_id = null,
     run_status,
     run_error,
     run_started_at = null,
@@ -38,6 +40,9 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   // Text-mode model options come from the platform DB catalog (same source as
   // genModels), never a hardcoded list (P0-1).
   const textModels = useTextModels();
+  // Agent picker (CC3) — writes the pre-plumbed agent_id channel; the run
+  // injects the agent's IDENTITY/SOUL server-side.
+  const agents = useAgents();
 
   // Kind filter for the @-mention picker tabs (All / Video / Image / Doc …)
   const [activeKind, setActiveKind] = useState<ActiveKind>('');
@@ -183,20 +188,36 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
 
         <div className="mt-2 flex items-center justify-between gap-2 text-xs">
           {!gen && (
-            <select
-              className="nodrag flex-1 truncate rounded-full border border-canvas-line bg-transparent px-2.5 py-0.5 text-xs text-canvas-text outline-none focus:ring-1 focus:ring-canvas-strong/40"
-              value={provider_slug}
-              onChange={(e) => patch({ provider_slug: e.target.value })}
-              aria-label="Prompt provider"
-            >
-              {/* Empty value → backend resolves the DB catalog default. */}
-              <option value="">Catalog default</option>
-              {textModels.map((m) => (
-                <option key={m.name} value={m.name}>
-                  {m.display_name || m.name}
-                </option>
-              ))}
-            </select>
+            <div className="flex flex-1 items-center gap-1.5">
+              <select
+                className="nodrag min-w-0 flex-1 truncate rounded-full border border-canvas-line bg-transparent px-2.5 py-0.5 text-xs text-canvas-text outline-none focus:ring-1 focus:ring-canvas-strong/40"
+                value={provider_slug}
+                onChange={(e) => patch({ provider_slug: e.target.value })}
+                aria-label="Prompt provider"
+              >
+                {/* Empty value → backend resolves the DB catalog default. */}
+                <option value="">Catalog default</option>
+                {textModels.map((m) => (
+                  <option key={m.name} value={m.name}>
+                    {m.display_name || m.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="nodrag min-w-0 flex-1 truncate rounded-full border border-canvas-line bg-transparent px-2.5 py-0.5 text-xs text-canvas-text outline-none focus:ring-1 focus:ring-canvas-strong/40"
+                value={agent_id ?? ''}
+                onChange={(e) => patch({ agent_id: e.target.value || null })}
+                aria-label="Prompt agent"
+              >
+                {/* Empty → plain runner (no persona injected). */}
+                <option value="">No agent</option>
+                {agents.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           )}
           {gen && (
             <div className="flex flex-1 items-center gap-1.5">
