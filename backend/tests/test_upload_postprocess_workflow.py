@@ -26,7 +26,8 @@ Cases:
 from __future__ import annotations
 
 import inspect
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -196,3 +197,87 @@ async def test_thumbnail_raises_workflow_still_completes():
     update_resource.assert_any_await(_RID, _META)
     generate_thumbnail.assert_awaited_once()
     manager.complete.assert_awaited_once()
+
+
+# ─── Task 2.4 — @DBOS.step probes read via materialize(), not a raw ────────
+# ─── DOWNLOAD_PATH join. Drives the two step functions directly (unwrapped ─
+# ─── past @DBOS.step, same approach the workflow-body tests above use for ──
+# ─── @DBOS.workflow), with `materialize` swapped for a fake async context ──
+# ─── manager so an sb:// file_path never touches the real object store. ────
+
+
+def _fake_materialize(seen: dict, fixture: Path):
+    @asynccontextmanager
+    async def _materialize(file_path: str):
+        seen["file_path"] = file_path
+        yield fixture
+
+    return _materialize
+
+
+async def test_probe_step_video_reads_via_materialize(tmp_path):
+    from app.services.library.resources_service import ResourcesService
+    from app.workflows import upload_postprocess as m
+
+    fixture = tmp_path / "materialized-source.mp4"
+    fixture.write_bytes(b"fake video bytes")
+    seen: dict = {}
+    extract_video = AsyncMock(return_value=dict(_META))
+
+    with (
+        patch.object(m, "materialize", _fake_materialize(seen, fixture)),
+        patch.object(ResourcesService, "_extract_video_metadata", extract_video),
+    ):
+        step = inspect.unwrap(m.upload_postprocess_probe_step)
+        result = await step("sb://library/t1/ab/cd/deadbeef.mp4", "video")
+
+    # materialize() got the RAW sb:// file_path — no Path(DOWNLOAD_PATH)/
+    # file_path join happened in the step body.
+    assert seen["file_path"] == "sb://library/t1/ab/cd/deadbeef.mp4"
+    # The metadata extractor received the materialized (real, local) path.
+    extract_video.assert_awaited_once_with(str(fixture))
+    assert result == _META
+
+
+async def test_probe_step_image_reads_via_materialize(tmp_path):
+    from app.services.library.resources_service import ResourcesService
+    from app.workflows import upload_postprocess as m
+
+    fixture = tmp_path / "materialized-source.png"
+    fixture.write_bytes(b"fake png bytes")
+    seen: dict = {}
+    extract_image = AsyncMock(return_value={"width": 100, "height": 200})
+
+    with (
+        patch.object(m, "materialize", _fake_materialize(seen, fixture)),
+        patch.object(ResourcesService, "_extract_image_metadata", extract_image),
+    ):
+        step = inspect.unwrap(m.upload_postprocess_probe_step)
+        result = await step("teams/1/uploads/9/v1/photo.png", "image")
+
+    assert seen["file_path"] == "teams/1/uploads/9/v1/photo.png"
+    extract_image.assert_awaited_once_with(str(fixture))
+    assert result == {"width": 100, "height": 200}
+
+
+async def test_png_prompt_step_reads_via_materialize(tmp_path):
+    from app.workflows import upload_postprocess as m
+
+    fixture = tmp_path / "materialized-source.png"
+    fixture.write_bytes(b"fake png bytes")
+    seen: dict = {}
+    extract_prompt = MagicMock(return_value="a cat riding a bike")
+
+    with (
+        patch.object(m, "materialize", _fake_materialize(seen, fixture)),
+        patch(
+            "app.services.library.png_prompt_extractor.extract_png_prompt",
+            extract_prompt,
+        ),
+    ):
+        step = inspect.unwrap(m.upload_postprocess_png_prompt_step)
+        result = await step("sb://library/t1/ab/cd/deadbeef.png")
+
+    assert seen["file_path"] == "sb://library/t1/ab/cd/deadbeef.png"
+    extract_prompt.assert_called_once_with(fixture)
+    assert result == "a cat riding a bike"

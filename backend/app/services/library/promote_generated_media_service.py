@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import os
 import shutil
 from pathlib import Path
@@ -14,7 +13,11 @@ from app.core.config import settings
 from app.repositories.conversation_repository import get_conversation_repository
 from app.repositories.generated_media_repository import GeneratedMediaRepository
 from app.repositories.resources_repository import ResourcesRepository
-from app.services.library.media_storage import ObjectStore, resolve_media_source
+from app.services.library.media_storage import (
+    materialize,
+    sha256_file,
+    store_local_file,
+)
 from app.services.library.resources_service import _resolve_personal_team_id
 
 
@@ -71,62 +74,87 @@ class PromoteGeneratedMediaService:
         mime = gen.get("mime") or (
             "video/mp4" if media_kind == "video" else "image/png"
         )
-        # Source bytes come from whichever backend holds the generation.
-        # Object-store sources are fetched into memory (small images);
-        # filesystem sources keep the zero-copy path (read size/hash in place,
-        # copy2 later). `src_bytes` is populated only for the object-store case.
-        loc = resolve_media_source(gen["file_path"])
-        src_bytes: bytes | None = None
-        if loc.is_object_store:
-            try:
-                src_bytes = await ObjectStore(loc.bucket).get_bytes(loc.key)
-            except Exception as exc:
-                raise ValueError("generation file missing") from exc
-            src_abs = None
-            size = len(src_bytes)
-            file_hash = hashlib.sha256(src_bytes).hexdigest()
-        else:
-            src_abs = os.path.join(settings.DOWNLOAD_PATH, gen["file_path"])
-            if not os.path.isfile(src_abs):
+
+        # Source bytes come from whichever backend holds the generation —
+        # materialize() hides the fs-vs-sb:// split behind a real local
+        # path, deleted on exit for sb:// rows. Entry (the download/lookup)
+        # is isolated in its own try/except so a missing/unfetchable source
+        # always raises the same ValueError regardless of backend; the
+        # manual __aenter__/__aexit__ protocol (instead of a plain `async
+        # with`) is needed because the materialized path has to stay alive
+        # across BOTH the resource-row creation below (needs size/hash
+        # first) AND the destination write further down.
+        materialized = materialize(gen["file_path"])
+        try:
+            src = await materialized.__aenter__()
+        except Exception as exc:
+            raise ValueError("generation file missing") from exc
+
+        try:
+            if not src.exists():
                 raise ValueError("generation file missing")
-            size = os.path.getsize(src_abs)
-            file_hash = await asyncio.to_thread(_sha256, src_abs)
-        ext = os.path.splitext(gen["file_path"])[1] or (
-            ".mp4" if media_kind == "video" else ".png"
-        )
-        filename = f"generated-{media_kind}{ext}"
+            size = src.stat().st_size
+            file_hash = await asyncio.to_thread(sha256_file, str(src))
+            ext = os.path.splitext(gen["file_path"])[1] or (
+                ".mp4" if media_kind == "video" else ".png"
+            )
+            filename = f"generated-{media_kind}{ext}"
 
-        # 1) resource row. `resources` has NO metadata column (prod schema —
-        # inserting one 500s with PGRST204). Provenance stays queryable on the
-        # generated_media row itself (prompt/model/provider/origin_kind + the
-        # promoted_resource_id backlink written by mark_promoted below); only
-        # the prompt is denormalised into the existing gen_prompt column.
-        resource = await self.res_repo.create_resource(
-            {
-                "creator_id": user_id,
-                "source_type": "generated",
-                "filename": filename,
-                "file_type": media_kind,
-                "mime_type": mime,
-                "file_size_bytes": size,
-                "current_version": 1,
-                "file_hash": file_hash,
-                "gen_prompt": gen.get("prompt"),
-            }
-        )
-        resource_id = str(resource["id"])
+            # 1) resource row. `resources` has NO metadata column (prod
+            # schema — inserting one 500s with PGRST204). Provenance stays
+            # queryable on the generated_media row itself
+            # (prompt/model/provider/origin_kind + the promoted_resource_id
+            # backlink written by mark_promoted below); only the prompt is
+            # denormalised into the existing gen_prompt column.
+            resource = await self.res_repo.create_resource(
+                {
+                    "creator_id": user_id,
+                    "source_type": "generated",
+                    "filename": filename,
+                    "file_type": media_kind,
+                    "mime_type": mime,
+                    "file_size_bytes": size,
+                    "current_version": 1,
+                    "file_hash": file_hash,
+                    "gen_prompt": gen.get("prompt"),
+                }
+            )
+            resource_id = str(resource["id"])
 
-        # Resources stay on the filesystem this phase, so the destination is
-        # always a local path — write the object-store bytes we buffered, or
-        # copy2 the local source.
-        rel = f"teams/{target_scope_id}/uploads/{resource_id}/v1/{filename}"
-        dst_abs = os.path.join(settings.DOWNLOAD_PATH, rel)
-        Path(dst_abs).parent.mkdir(parents=True, exist_ok=True)
-        if src_bytes is not None:
-            await asyncio.to_thread(Path(dst_abs).write_bytes, src_bytes)
-        else:
-            await asyncio.to_thread(shutil.copy2, src_abs, dst_abs)
-        await self.res_repo.update_resource(resource_id, {"file_path": rel})
+            # 2) write the file: dual-track, mirrors the resources upload
+            # dual-track write (Task 2.1) — unified storage first, fall
+            # back to the existing filesystem copy2 on flag-off or any
+            # storage failure.
+            stored = None
+            if settings.FEATURE_UNIFIED_STORAGE:
+                try:
+                    stored = await store_local_file(
+                        scope_id=int(target_scope_id),
+                        source_path=str(src),
+                        mime=mime,
+                        filename=filename,
+                        sha256=file_hash,
+                    )
+                except Exception as exc:
+                    logger.error(
+                        f"[promote] unified-storage write failed, falling "
+                        f"back to filesystem: scope={target_scope_id} "
+                        f"error={exc!r}"
+                    )
+            if stored is not None:
+                rel = stored.file_path
+            else:
+                rel = f"teams/{target_scope_id}/uploads/{resource_id}/v1/{filename}"
+                dst_abs = os.path.join(settings.DOWNLOAD_PATH, rel)
+                Path(dst_abs).parent.mkdir(parents=True, exist_ok=True)
+                await asyncio.to_thread(shutil.copy2, str(src), dst_abs)
+            await self.res_repo.update_resource(resource_id, {"file_path": rel})
+        finally:
+            # Passing (None, None, None) even when we're unwinding an
+            # exception is safe: materialize()'s cleanup is an unconditional
+            # finally-unlink — it never inspects the exc info, so the temp
+            # file is removed either way.
+            await materialized.__aexit__(None, None, None)
 
         # 3) version row
         await self.res_repo.create_version(
@@ -175,14 +203,6 @@ class PromoteGeneratedMediaService:
 
         await self.gen_repo.mark_promoted(int(gen["id"]), int(resource_id))
         return resource
-
-
-def _sha256(path: str) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as fp:
-        for chunk in iter(lambda: fp.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 __all__ = ["PromoteGeneratedMediaService"]

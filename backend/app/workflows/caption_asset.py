@@ -19,14 +19,13 @@ Design (mirrors analyze_l1 / upload_postprocess conventions):
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Optional
 
 from dbos import DBOS
 from loguru import logger
 
-from app.core.config import settings
 from app.db.scope import Scope, request_scope
+from app.services.library.media_storage import materialize
 
 
 @DBOS.step()
@@ -113,20 +112,20 @@ async def caption_asset_workflow(
             file_path = resource.get("file_path")
             if not file_path:
                 raise RuntimeError("resource has no stored file to caption")
-            abs_path = str(Path(settings.DOWNLOAD_PATH) / file_path)
 
             cfg = await resolve_caption_provider(user_id)
             await manager.update_progress(wf_id, 20, subtitle="Provider resolved")
 
-            result = await call_caption(
-                abs_path=abs_path,
-                user_id=user_id,
-                resource_id=str(resource_id),
-                provider_key=cfg["provider_key"],
-                provider_config=cfg["provider_config"],
-                agent_slug=cfg.get("agent_slug") or "caption",
-                wf_id=wf_id,
-            )
+            async with materialize(file_path) as local_path:
+                result = await call_caption(
+                    abs_path=str(local_path),
+                    user_id=user_id,
+                    resource_id=str(resource_id),
+                    provider_key=cfg["provider_key"],
+                    provider_config=cfg["provider_config"],
+                    agent_slug=cfg.get("agent_slug") or "caption",
+                    wf_id=wf_id,
+                )
 
             await manager.update_progress(wf_id, 85, subtitle="Saving prompt...")
             update: dict[str, str] = {}

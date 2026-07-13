@@ -12,6 +12,7 @@ import hashlib
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from starlette.requests import Request
 
 from app.services.media.nginx_direct import (
     DirectServeConfig,
@@ -20,6 +21,12 @@ from app.services.media.nginx_direct import (
     maybe_direct_redirect,
     sign_direct_url,
 )
+
+
+def _request() -> Request:
+    """Minimal ASGI Request for handlers routed through serve_stored_file."""
+    return Request({"type": "http", "method": "GET", "path": "/", "headers": []})
+
 
 CFG = DirectServeConfig(
     base_url="https://host:8081", ttl_seconds=86400, secret="s3cret"
@@ -123,7 +130,7 @@ async def test_cover_redirects_when_enabled(tmp_path, monkeypatch):
             new=AsyncMock(return_value=CFG),
         ),
     ):
-        resp = await serve_resource_cover("1")
+        resp = await serve_resource_cover("1", _request())
 
     assert resp.status_code == 302
     assert resp.headers["location"].startswith("https://host:8081/f/thumbs/t.webp?st=")
@@ -156,7 +163,7 @@ async def test_cover_falls_back_to_fileresponse_when_disabled(tmp_path):
             new=AsyncMock(return_value=None),
         ),
     ):
-        resp = await serve_resource_cover("1")
+        resp = await serve_resource_cover("1", _request())
 
     assert resp.__class__.__name__ == "FileResponse"
 

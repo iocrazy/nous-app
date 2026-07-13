@@ -366,16 +366,35 @@ async def serve_version_file(
         if not file_path:
             raise HTTPException(status_code=404, detail="No file available")
 
-        from app.core.config import settings
+        # Storage unification: version originals may be a legacy fs-relative
+        # path or an `sb://` object-store row (dual-track uploads). Route
+        # through the shared reader so both shapes work.
+        #
+        # Deliberately EXCLUDED from the P3 nginx direct-serve redirect:
+        # this endpoint forces `Content-Disposition: attachment` (browser
+        # download with the version's filename), but nginx's /f/ location
+        # sets no Content-Disposition — a P3 302 would silently open the
+        # file inline instead of downloading. The pre-port endpoint never
+        # consulted P3 either, so skipping it preserves exact behavior.
+        from urllib.parse import quote as urlquote
 
-        full_path = Path(settings.DOWNLOAD_PATH) / file_path
-        if not full_path.exists():
-            raise HTTPException(status_code=404, detail="File not found on disk")
+        from app.services.library.media_serving import serve_stored_file
 
-        return FileResponse(
-            path=str(full_path),
-            filename=version.get("filename", "download"),
-            media_type=version.get("mime_type", "application/octet-stream"),
+        # Mirror Starlette's FileResponse Content-Disposition formatting
+        # (filename= for ascii, filename*=utf-8''... otherwise) so the
+        # forced-download filename behaves the same as before the port.
+        filename = version.get("filename") or "download"
+        quoted = urlquote(filename)
+        if quoted != filename:
+            disposition = f"attachment; filename*=utf-8''{quoted}"
+        else:
+            disposition = f'attachment; filename="{filename}"'
+
+        return await serve_stored_file(
+            file_path,
+            mime=version.get("mime_type", "application/octet-stream"),
+            request=request,
+            disposition=disposition,
         )
     except HTTPException:
         raise

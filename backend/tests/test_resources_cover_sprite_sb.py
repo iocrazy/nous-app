@@ -1,0 +1,177 @@
+"""POST /cover + /preview-sprite behavior for sb:// rows (Task 2.4c).
+
+POST /cover used to derive the write dir from the ORIGINAL's parent — for an
+sb:// row that's a literal ``sb:/...`` directory on disk, and content-
+addressed dedup means two same-content resources share a fanout dir, so
+their covers would overwrite each other. sb rows now write to
+``derived/covers/{resource_id}/`` (legacy fs rows keep writing next to the
+source, byte-identical).
+
+/preview-sprite 404'd for sb rows: their sprite lives in
+``derived/thumbnails/{resource_id}/preview_sprite.jpg`` (where
+thumbnail_service writes it for sb sources) — that location is probed first,
+with the legacy next-to-source probe unchanged for fs rows.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from fastapi.responses import FileResponse
+
+from app.api.resources_crud_router import (
+    serve_preview_sprite,
+    serve_resource_cover,
+    upload_resource_cover,
+)
+
+pytestmark = pytest.mark.asyncio
+
+_RID = "9000000000000000001"
+SB_PATH = "sb://library/t42/ab/cd/abcdef1234.mp4"
+FS_PATH = "teams/9/uploads/RID/v1/video.mp4"
+
+
+class FakeUploadFile:
+    def __init__(self, filename: str, content: bytes, content_type: str):
+        self.filename = filename
+        self.content_type = content_type
+        self._content = content
+
+    async def read(self) -> bytes:
+        return self._content
+
+
+def _repo(resource: dict) -> MagicMock:
+    repo = MagicMock()
+    repo.get_resource_by_id = AsyncMock(return_value=resource)
+
+    async def _update(rid, data):
+        resource.update(data)
+        return dict(resource)
+
+    repo.update_resource = AsyncMock(side_effect=_update)
+    return repo
+
+
+def _patches(repo):
+    return (
+        patch("app.api.resources_crud_router.ResourcesRepository", return_value=repo),
+        patch(
+            "app.api.media_permissions.check_media_access",
+            new=AsyncMock(return_value=True),
+        ),
+    )
+
+
+async def test_cover_upload_sb_row_writes_derived_dir_and_serves_back(
+    tmp_path, monkeypatch
+):
+    from app.core.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "DOWNLOAD_PATH", str(tmp_path))
+    resource = {"id": _RID, "file_path": SB_PATH, "mime_type": "video/mp4"}
+    repo = _repo(resource)
+    p1, p2 = _patches(repo)
+
+    with p1, p2:
+        out = await upload_resource_cover(
+            _RID,
+            SimpleNamespace(user_id="u1"),
+            None,
+            file=FakeUploadFile("my-cover.png", b"cover-bytes", "image/png"),
+        )
+
+    assert out["success"] is True
+    expected_rel = f"derived/covers/{_RID}/cover.png"
+    assert resource["cover_image_path"] == expected_rel
+    on_disk = Path(tmp_path) / expected_rel
+    assert on_disk.read_bytes() == b"cover-bytes"
+    # No literal "sb:" directory was ever created on disk.
+    assert not (Path(tmp_path) / "sb:").exists()
+
+    # Read side: GET /cover serves exactly the stored cover_image_path.
+    with (
+        p1,
+        patch(
+            "app.services.media.nginx_direct.maybe_direct_redirect",
+            new=AsyncMock(return_value=None),
+        ),
+    ):
+        resp = await serve_resource_cover(_RID, MagicMock())
+    assert isinstance(resp, FileResponse)
+    assert resp.path == str(on_disk)
+
+
+async def test_cover_upload_legacy_fs_row_keeps_next_to_source(tmp_path, monkeypatch):
+    """Legacy fs row: byte-identical behavior — cover still lands next to
+    the original."""
+    from app.core.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "DOWNLOAD_PATH", str(tmp_path))
+    resource = {"id": _RID, "file_path": FS_PATH, "mime_type": "video/mp4"}
+    repo = _repo(resource)
+    p1, p2 = _patches(repo)
+
+    with p1, p2:
+        await upload_resource_cover(
+            _RID,
+            SimpleNamespace(user_id="u1"),
+            None,
+            file=FakeUploadFile("c.jpg", b"legacy-cover", "image/jpeg"),
+        )
+
+    expected_rel = "teams/9/uploads/RID/v1/cover.jpg"
+    assert resource["cover_image_path"] == expected_rel
+    assert (Path(tmp_path) / expected_rel).read_bytes() == b"legacy-cover"
+
+
+async def test_preview_sprite_sb_row_served_from_derived_dir(tmp_path, monkeypatch):
+    from app.core.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "DOWNLOAD_PATH", str(tmp_path))
+    sprite = Path(tmp_path) / "derived" / "thumbnails" / _RID / "preview_sprite.jpg"
+    sprite.parent.mkdir(parents=True, exist_ok=True)
+    sprite.write_bytes(b"sprite-bytes")
+
+    repo = _repo({"id": _RID, "file_path": SB_PATH})
+    p1, _ = _patches(repo)
+    with p1:
+        resp = await serve_preview_sprite(_RID)
+
+    assert isinstance(resp, FileResponse)
+    assert resp.path == str(sprite)
+
+
+async def test_preview_sprite_legacy_row_probe_unchanged(tmp_path, monkeypatch):
+    from app.core.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "DOWNLOAD_PATH", str(tmp_path))
+    legacy_sprite = Path(tmp_path) / "teams/9/uploads/RID/v1/preview_sprite.jpg"
+    legacy_sprite.parent.mkdir(parents=True, exist_ok=True)
+    legacy_sprite.write_bytes(b"legacy-sprite")
+
+    repo = _repo({"id": _RID, "file_path": FS_PATH})
+    p1, _ = _patches(repo)
+    with p1:
+        resp = await serve_preview_sprite(_RID)
+
+    assert isinstance(resp, FileResponse)
+    assert resp.path == str(legacy_sprite)
+
+
+async def test_preview_sprite_sb_row_404_when_no_derived_sprite(tmp_path, monkeypatch):
+    from fastapi import HTTPException
+
+    from app.core.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "DOWNLOAD_PATH", str(tmp_path))
+    repo = _repo({"id": _RID, "file_path": SB_PATH})
+    p1, _ = _patches(repo)
+    with p1:
+        with pytest.raises(HTTPException) as exc:
+            await serve_preview_sprite(_RID)
+    assert exc.value.status_code == 404

@@ -1,4 +1,6 @@
-from unittest.mock import AsyncMock
+from contextlib import asynccontextmanager
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -240,3 +242,225 @@ async def test_promote_rejects_target_without_membership(monkeypatch):
 
     with pytest.raises(PermissionError, match="target scope"):
         await svc.promote(gen_id=7, user_id="u-uuid", target_scope_id=42)
+
+
+# ─── Task 2.4 — source read via materialize() + dual-track destination ─────
+#
+# `promote()` used to hand-roll the fs-vs-object-store split with a direct
+# `ObjectStore(loc.bucket).get_bytes(...)` for sb:// sources and always wrote
+# the promoted resource straight to the filesystem. Now the source read goes
+# through `materialize()` uniformly (fs row: real path; sb:// row: streamed
+# temp file) and the destination write mirrors the resources-upload
+# dual-track pattern (Task 2.1): `FEATURE_UNIFIED_STORAGE` on + a successful
+# `store_local_file()` write lands an `sb://library/...` file_path; off, or
+# any storage failure, falls back to the pre-existing filesystem copy2 with
+# a `logger.error` (Task 2.4c: fallbacks must surface in the ERROR funnel).
+
+
+def _fake_materialize(seen: dict, fixture: Path):
+    @asynccontextmanager
+    async def _materialize(file_path: str):
+        seen["file_path"] = file_path
+        yield fixture
+
+    return _materialize
+
+
+@pytest.mark.asyncio
+async def test_promote_source_read_via_materialize_not_hand_rolled_object_store(
+    monkeypatch, tmp_path
+):
+    """A generation stored as sb:// (chat-media) is read through
+    materialize() — not a hand-rolled ObjectStore.get_bytes call — proving
+    the orchestration change, independent of the destination flag."""
+    import app.services.library.promote_generated_media_service as svc_mod
+
+    monkeypatch.setattr(svc_mod.settings, "DOWNLOAD_PATH", str(tmp_path))
+    monkeypatch.setattr(svc_mod.settings, "FEATURE_UNIFIED_STORAGE", False)
+
+    svc = svc_mod.PromoteGeneratedMediaService()
+    _patch_scope_auth(monkeypatch, svc_mod)
+
+    materialized_src = tmp_path.parent / "materialize-tmp" / "media.png"
+    materialized_src.parent.mkdir(parents=True, exist_ok=True)
+    materialized_src.write_bytes(b"sb-source-bytes")
+
+    seen: dict = {}
+    monkeypatch.setattr(
+        svc_mod, "materialize", _fake_materialize(seen, materialized_src)
+    )
+
+    async def _get_by_id(gen_id):
+        return _gen_row(file_path="sb://chat-media/t42/ab/cd/deadbeef.png")
+
+    async def _create_resource(data):
+        return {"id": 777}
+
+    async def _create_version(data):
+        return {"id": 1}
+
+    async def _create_item(data):
+        return {"id": 2}
+
+    updated = {}
+
+    async def _update_resource(resource_id, data):
+        updated["args"] = (resource_id, data)
+        return {}
+
+    async def _mark(gen_id, rid):
+        return _gen_row(promoted_resource_id=str(rid))
+
+    monkeypatch.setattr(svc.gen_repo, "get_by_id", _get_by_id)
+    monkeypatch.setattr(svc.gen_repo, "mark_promoted", _mark)
+    monkeypatch.setattr(svc.res_repo, "create_resource", _create_resource)
+    monkeypatch.setattr(svc.res_repo, "create_version", _create_version)
+    monkeypatch.setattr(svc.res_repo, "create_resource_item", _create_item)
+    monkeypatch.setattr(svc.res_repo, "update_resource", _update_resource)
+
+    out = await svc.promote(gen_id=7, user_id="u-uuid", target_scope_id=42)
+
+    assert seen["file_path"] == "sb://chat-media/t42/ab/cd/deadbeef.png"
+    assert out["id"] == 777
+    # flag off -> legacy fs copy landed under teams/42/uploads/777/v1/
+    dst_dir = tmp_path / "teams/42/uploads/777/v1"
+    files = list(dst_dir.iterdir())
+    assert len(files) == 1
+    assert files[0].read_bytes() == b"sb-source-bytes"
+    assert updated["args"] == (
+        "777",
+        {"file_path": f"teams/42/uploads/777/v1/{files[0].name}"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_promote_flag_on_writes_object_store_destination(monkeypatch, tmp_path):
+    """FEATURE_UNIFIED_STORAGE on + store_local_file succeeds -> resource
+    file_path is an sb://library/... value, no fs copy lands."""
+    import app.services.library.promote_generated_media_service as svc_mod
+    from app.services.library.media_storage import StoredObject
+
+    src = tmp_path / "teams/42/generations/abc/media.png"
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_bytes(b"imgbytes")
+    monkeypatch.setattr(svc_mod.settings, "DOWNLOAD_PATH", str(tmp_path))
+    monkeypatch.setattr(svc_mod.settings, "FEATURE_UNIFIED_STORAGE", True)
+
+    svc = svc_mod.PromoteGeneratedMediaService()
+    _patch_scope_auth(monkeypatch, svc_mod)
+
+    async def _get_by_id(gen_id):
+        return _gen_row()
+
+    async def _create_resource(data):
+        return {"id": 555}
+
+    async def _create_version(data):
+        return {"id": 1}
+
+    async def _create_item(data):
+        return {"id": 2}
+
+    updated = {}
+
+    async def _update_resource(resource_id, data):
+        updated["args"] = (resource_id, data)
+        return {}
+
+    async def _mark(gen_id, rid):
+        return _gen_row(promoted_resource_id=str(rid))
+
+    captured = {}
+
+    async def fake_store_local_file(
+        *, scope_id, source_path, mime, filename=None, sha256=None, store=None
+    ):
+        assert Path(source_path).exists()
+        captured["scope_id"] = scope_id
+        captured["source_path"] = source_path
+        return StoredObject(
+            file_path=f"sb://library/t{scope_id}/ab/cd/{sha256}.png",
+            size_bytes=Path(source_path).stat().st_size,
+            sha256=sha256,
+        )
+
+    monkeypatch.setattr(svc_mod, "store_local_file", fake_store_local_file)
+    monkeypatch.setattr(svc.gen_repo, "get_by_id", _get_by_id)
+    monkeypatch.setattr(svc.gen_repo, "mark_promoted", _mark)
+    monkeypatch.setattr(svc.res_repo, "create_resource", _create_resource)
+    monkeypatch.setattr(svc.res_repo, "create_version", _create_version)
+    monkeypatch.setattr(svc.res_repo, "create_resource_item", _create_item)
+    monkeypatch.setattr(svc.res_repo, "update_resource", _update_resource)
+
+    out = await svc.promote(gen_id=7, user_id="u-uuid", target_scope_id=42)
+
+    assert out["id"] == 555
+    assert captured["scope_id"] == 42
+    assert updated["args"][1]["file_path"].startswith("sb://library/t42/")
+    # No filesystem destination directory was ever created.
+    assert not (tmp_path / "teams/42/uploads/555").exists()
+
+
+@pytest.mark.asyncio
+async def test_promote_flag_on_store_failure_falls_back_to_filesystem(
+    monkeypatch, tmp_path
+):
+    """FEATURE_UNIFIED_STORAGE on but store_local_file raises -> falls back
+    to the pre-existing filesystem copy2, with a logger.error (same
+    fallback discipline as Tasks 2.1/2.2; ERROR level per Task 2.4c)."""
+    import app.services.library.promote_generated_media_service as svc_mod
+
+    src = tmp_path / "teams/42/generations/abc/media.png"
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_bytes(b"imgbytes")
+    monkeypatch.setattr(svc_mod.settings, "DOWNLOAD_PATH", str(tmp_path))
+    monkeypatch.setattr(svc_mod.settings, "FEATURE_UNIFIED_STORAGE", True)
+
+    svc = svc_mod.PromoteGeneratedMediaService()
+    _patch_scope_auth(monkeypatch, svc_mod)
+
+    async def _get_by_id(gen_id):
+        return _gen_row()
+
+    async def _create_resource(data):
+        return {"id": 555}
+
+    async def _create_version(data):
+        return {"id": 1}
+
+    async def _create_item(data):
+        return {"id": 2}
+
+    updated = {}
+
+    async def _update_resource(resource_id, data):
+        updated["args"] = (resource_id, data)
+        return {}
+
+    async def _mark(gen_id, rid):
+        return _gen_row(promoted_resource_id=str(rid))
+
+    async def failing_store_local_file(**kwargs):
+        raise RuntimeError("storage-api unreachable")
+
+    monkeypatch.setattr(svc_mod, "store_local_file", failing_store_local_file)
+    err_mock = MagicMock()
+    monkeypatch.setattr(svc_mod.logger, "error", err_mock)
+
+    monkeypatch.setattr(svc.gen_repo, "get_by_id", _get_by_id)
+    monkeypatch.setattr(svc.gen_repo, "mark_promoted", _mark)
+    monkeypatch.setattr(svc.res_repo, "create_resource", _create_resource)
+    monkeypatch.setattr(svc.res_repo, "create_version", _create_version)
+    monkeypatch.setattr(svc.res_repo, "create_resource_item", _create_item)
+    monkeypatch.setattr(svc.res_repo, "update_resource", _update_resource)
+
+    out = await svc.promote(gen_id=7, user_id="u-uuid", target_scope_id=42)
+
+    assert out["id"] == 555
+    expected_rel = "teams/42/uploads/555/v1/generated-image.png"
+    assert updated["args"] == ("555", {"file_path": expected_rel})
+    dst = tmp_path / expected_rel
+    assert dst.exists()
+    assert dst.read_bytes() == b"imgbytes"
+    err_mock.assert_called_once()
+    assert "unified-storage write failed" in err_mock.call_args[0][0]

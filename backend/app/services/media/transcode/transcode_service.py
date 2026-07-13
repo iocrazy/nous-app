@@ -22,6 +22,7 @@ from loguru import logger
 from app.agent_framework.process_lifecycle import safe_popen_kwargs
 from app.core.config import settings
 from app.repositories.resources_repository import ResourcesRepository
+from app.services.library.media_storage import materialize, resolve_media_source
 
 
 @dataclass
@@ -229,56 +230,209 @@ class TranscodeService:
         await self.repo.update_version(version_id, {"transcode_status": "processing"})
 
         base = Path(settings.DOWNLOAD_PATH)
-        source = base / file_path
-
-        if not source.exists():
-            logger.error(f"Source file not found: {source}")
-            await self.repo.update_version(version_id, {"transcode_status": "failed"})
-            return {"status": "failed", "reason": f"source file not found: {source}"}
-
-        # Determine HLS output directory: sibling hls/ folder next to the source file
-        hls_dir = source.parent / "hls"
+        loc = resolve_media_source(file_path)
 
         try:
-            # Probe video to get resolution and duration
-            width, height = await self._probe_resolution(str(source))
-            if not width or not height:
-                logger.warning(
-                    f"Could not probe resolution for {source}, skipping transcode"
-                )
-                await self.repo.update_version(
-                    version_id, {"transcode_status": "failed"}
-                )
-                return {
-                    "status": "failed",
-                    "reason": "could not probe video resolution",
-                }
+            async with materialize(file_path) as source:
+                if not source.exists():
+                    logger.error(f"Source file not found: {source}")
+                    await self.repo.update_version(
+                        version_id, {"transcode_status": "failed"}
+                    )
+                    return {
+                        "status": "failed",
+                        "reason": f"source file not found: {source}",
+                    }
 
-            total_duration = await self._probe_duration(str(source))
+                # Determine HLS output directory: legacy fs rows keep the
+                # sibling hls/ folder next to the source file (materialize
+                # yields the real on-disk path under DOWNLOAD_PATH for those
+                # rows). sb:// rows have no "next to it" directory --
+                # materialize streams them to a temp file that is deleted on
+                # exit -- so they land in a resource/version-keyed derived
+                # tree instead (same convention as
+                # ThumbnailService.generate_thumbnail's
+                # derived/thumbnails/{resource_id}). hls_path keeps storing
+                # an fs-relative path under DOWNLOAD_PATH either way. A large
+                # sb:// video pulls a full temp copy for the ffmpeg pass --
+                # acceptable by design (spec
+                # 2026-07-12-storage-unification-design.md).
+                if loc.is_object_store:
+                    hls_dir = (
+                        base / "derived" / "hls" / str(resource_id) / str(version_id)
+                    )
+                else:
+                    hls_dir = source.parent / "hls"
 
-            # Detect source codecs for fast-path decision
-            video_codec, audio_codec = await self._probe_codecs(str(source))
-            is_h264 = video_codec in ("h264",)
+                # Probe video to get resolution and duration
+                width, height = await self._probe_resolution(str(source))
+                if not width or not height:
+                    logger.warning(
+                        f"Could not probe resolution for {source}, skipping transcode"
+                    )
+                    await self.repo.update_version(
+                        version_id, {"transcode_status": "failed"}
+                    )
+                    return {
+                        "status": "failed",
+                        "reason": "could not probe video resolution",
+                    }
 
-            # Clean up old HLS if exists
-            if hls_dir.exists():
-                shutil.rmtree(hls_dir)
-            hls_dir.mkdir(parents=True, exist_ok=True)
+                total_duration = await self._probe_duration(str(source))
 
-            if is_h264:
+                # Detect source codecs for fast-path decision
+                video_codec, audio_codec = await self._probe_codecs(str(source))
+                is_h264 = video_codec in ("h264",)
+
+                # Clean up old HLS if exists
+                if hls_dir.exists():
+                    shutil.rmtree(hls_dir)
+                hls_dir.mkdir(parents=True, exist_ok=True)
+
+                if is_h264:
+                    # ============================================================
+                    # H.264 Fast Path: two-phase strategy
+                    # Phase 1: copy-only segmentation (seconds) → immediate playback
+                    # Phase 2: enhancement tiers (background) → rewrite playlist
+                    # ============================================================
+                    logger.info(
+                        f"[Transcode] H.264 fast path: {video_codec}/{audio_codec} "
+                        f"for version {version_id}"
+                    )
+
+                    # Phase 1: Fast copy-only segmentation
+                    if on_progress:
+                        await on_progress(10, "Fast segmenting (copy)...")
+                    source_bitrate = await self._probe_bitrate(str(source))
+                    passthrough_ok = await self._transcode_passthrough(
+                        str(source),
+                        hls_dir,
+                        audio_codec,
+                    )
+
+                    if not passthrough_ok:
+                        logger.warning(
+                            "[Transcode] H.264 passthrough failed, falling back to full encode"
+                        )
+                        # Fall through to standard encoding path below
+                    else:
+                        # Write initial master.m3u8 with source-only tier
+                        self._write_master_playlist(
+                            hls_dir,
+                            [],
+                            passthrough=True,
+                            source_width=width,
+                            source_height=height,
+                            source_bitrate=source_bitrate,
+                        )
+
+                        # Build relative path
+                        master_path = hls_dir / "master.m3u8"
+                        relative_hls = str(master_path.relative_to(base))
+
+                        # Mark as completed — user can play HLS immediately
+                        await self.repo.update_version(
+                            version_id,
+                            {
+                                "hls_path": relative_hls,
+                                "transcode_status": "completed",
+                                "transcode_at": datetime.now(timezone.utc),
+                            },
+                        )
+
+                        if on_progress:
+                            await on_progress(
+                                50, "HLS ready, encoding quality tiers..."
+                            )
+
+                        logger.success(
+                            f"[Transcode] H.264 fast path completed in seconds: "
+                            f"resource={resource_id}, version={version_id}"
+                        )
+
+                        # Phase 2: Enhancement tiers (non-blocking for user)
+                        applicable = await self._select_tiers(width, height)
+                        if applicable:
+                            try:
+                                for tier in applicable:
+                                    (hls_dir / tier.name).mkdir(
+                                        parents=True, exist_ok=True
+                                    )
+
+                                encoded_tiers = await self._encode_tiers(
+                                    str(source),
+                                    applicable,
+                                    hls_dir,
+                                    total_duration,
+                                    on_progress,
+                                    version_id,
+                                    progress_base=50,
+                                    progress_cap=95,
+                                )
+
+                                if encoded_tiers:
+                                    # Rewrite master.m3u8 with all tiers
+                                    self._write_master_playlist(
+                                        hls_dir,
+                                        encoded_tiers,
+                                        passthrough=True,
+                                        source_width=width,
+                                        source_height=height,
+                                        source_bitrate=source_bitrate,
+                                    )
+                                    logger.info(
+                                        f"[Transcode] Enhancement tiers added: "
+                                        f"{[t.name for t in encoded_tiers]}"
+                                    )
+                            except Exception as e:
+                                # Enhancement failure does NOT affect completed HLS
+                                logger.warning(
+                                    f"[Transcode] Enhancement tiers failed (non-fatal): {e}"
+                                )
+
+                        if on_progress:
+                            await on_progress(100, "Done")
+                        return {"status": "completed", "hls_path": relative_hls}
+
                 # ============================================================
-                # H.264 Fast Path: two-phase strategy
-                # Phase 1: copy-only segmentation (seconds) → immediate playback
-                # Phase 2: enhancement tiers (background) → rewrite playlist
+                # Standard Path: full encoding (non-H.264 or passthrough failed)
                 # ============================================================
-                logger.info(
-                    f"[Transcode] H.264 fast path: {video_codec}/{audio_codec} "
-                    f"for version {version_id}"
+                # Select applicable tiers
+                applicable = await self._select_tiers(width, height)
+                if not applicable:
+                    logger.info(f"No applicable tiers for {width}x{height}, skipping")
+                    await self.repo.update_version(
+                        version_id, {"transcode_status": "skipped"}
+                    )
+                    return {
+                        "status": "skipped",
+                        "reason": f"no applicable tiers for {width}x{height}",
+                    }
+
+                # Ensure tier directories exist
+                for tier in applicable:
+                    (hls_dir / tier.name).mkdir(parents=True, exist_ok=True)
+
+                encoded_tiers = await self._encode_tiers(
+                    str(source),
+                    applicable,
+                    hls_dir,
+                    total_duration,
+                    on_progress,
+                    version_id,
+                    progress_base=0,
+                    progress_cap=95,
                 )
 
-                # Phase 1: Fast copy-only segmentation
+                if not encoded_tiers:
+                    await self.repo.update_version(
+                        version_id, {"transcode_status": "failed"}
+                    )
+                    return {"status": "failed", "reason": "all tier encodings failed"}
+
+                # Add passthrough "Original" tier (copy codec, no re-encoding)
                 if on_progress:
-                    await on_progress(10, "Fast segmenting (copy)...")
+                    await on_progress(95, "Remuxing original...")
                 source_bitrate = await self._probe_bitrate(str(source))
                 passthrough_ok = await self._transcode_passthrough(
                     str(source),
@@ -286,166 +440,40 @@ class TranscodeService:
                     audio_codec,
                 )
 
-                if not passthrough_ok:
-                    logger.warning(
-                        "[Transcode] H.264 passthrough failed, falling back to full encode"
-                    )
-                    # Fall through to standard encoding path below
-                else:
-                    # Write initial master.m3u8 with source-only tier
-                    self._write_master_playlist(
-                        hls_dir,
-                        [],
-                        passthrough=True,
-                        source_width=width,
-                        source_height=height,
-                        source_bitrate=source_bitrate,
-                    )
-
-                    # Build relative path
-                    master_path = hls_dir / "master.m3u8"
-                    relative_hls = str(master_path.relative_to(base))
-
-                    # Mark as completed — user can play HLS immediately
-                    await self.repo.update_version(
-                        version_id,
-                        {
-                            "hls_path": relative_hls,
-                            "transcode_status": "completed",
-                            "transcode_at": datetime.now(timezone.utc),
-                        },
-                    )
-
-                    if on_progress:
-                        await on_progress(50, "HLS ready, encoding quality tiers...")
-
-                    logger.success(
-                        f"[Transcode] H.264 fast path completed in seconds: "
-                        f"resource={resource_id}, version={version_id}"
-                    )
-
-                    # Phase 2: Enhancement tiers (non-blocking for user)
-                    applicable = await self._select_tiers(width, height)
-                    if applicable:
-                        try:
-                            for tier in applicable:
-                                (hls_dir / tier.name).mkdir(parents=True, exist_ok=True)
-
-                            encoded_tiers = await self._encode_tiers(
-                                str(source),
-                                applicable,
-                                hls_dir,
-                                total_duration,
-                                on_progress,
-                                version_id,
-                                progress_base=50,
-                                progress_cap=95,
-                            )
-
-                            if encoded_tiers:
-                                # Rewrite master.m3u8 with all tiers
-                                self._write_master_playlist(
-                                    hls_dir,
-                                    encoded_tiers,
-                                    passthrough=True,
-                                    source_width=width,
-                                    source_height=height,
-                                    source_bitrate=source_bitrate,
-                                )
-                                logger.info(
-                                    f"[Transcode] Enhancement tiers added: "
-                                    f"{[t.name for t in encoded_tiers]}"
-                                )
-                        except Exception as e:
-                            # Enhancement failure does NOT affect completed HLS
-                            logger.warning(
-                                f"[Transcode] Enhancement tiers failed (non-fatal): {e}"
-                            )
-
-                    if on_progress:
-                        await on_progress(100, "Done")
-                    return {"status": "completed", "hls_path": relative_hls}
-
-            # ============================================================
-            # Standard Path: full encoding (non-H.264 or passthrough failed)
-            # ============================================================
-            # Select applicable tiers
-            applicable = await self._select_tiers(width, height)
-            if not applicable:
-                logger.info(f"No applicable tiers for {width}x{height}, skipping")
-                await self.repo.update_version(
-                    version_id, {"transcode_status": "skipped"}
+                # Generate master playlist
+                if on_progress:
+                    await on_progress(98, "Writing playlist...")
+                self._write_master_playlist(
+                    hls_dir,
+                    encoded_tiers,
+                    passthrough=passthrough_ok,
+                    source_width=width,
+                    source_height=height,
+                    source_bitrate=source_bitrate,
                 )
-                return {
-                    "status": "skipped",
-                    "reason": f"no applicable tiers for {width}x{height}",
-                }
 
-            # Ensure tier directories exist
-            for tier in applicable:
-                (hls_dir / tier.name).mkdir(parents=True, exist_ok=True)
+                # Build relative path
+                master_path = hls_dir / "master.m3u8"
+                relative_hls = str(master_path.relative_to(base))
 
-            encoded_tiers = await self._encode_tiers(
-                str(source),
-                applicable,
-                hls_dir,
-                total_duration,
-                on_progress,
-                version_id,
-                progress_base=0,
-                progress_cap=95,
-            )
-
-            if not encoded_tiers:
+                # Update DB
                 await self.repo.update_version(
-                    version_id, {"transcode_status": "failed"}
+                    version_id,
+                    {
+                        "hls_path": relative_hls,
+                        "transcode_status": "completed",
+                        "transcode_at": datetime.now(timezone.utc),
+                    },
                 )
-                return {"status": "failed", "reason": "all tier encodings failed"}
 
-            # Add passthrough "Original" tier (copy codec, no re-encoding)
-            if on_progress:
-                await on_progress(95, "Remuxing original...")
-            source_bitrate = await self._probe_bitrate(str(source))
-            passthrough_ok = await self._transcode_passthrough(
-                str(source),
-                hls_dir,
-                audio_codec,
-            )
+                if on_progress:
+                    await on_progress(100, "Done")
 
-            # Generate master playlist
-            if on_progress:
-                await on_progress(98, "Writing playlist...")
-            self._write_master_playlist(
-                hls_dir,
-                encoded_tiers,
-                passthrough=passthrough_ok,
-                source_width=width,
-                source_height=height,
-                source_bitrate=source_bitrate,
-            )
-
-            # Build relative path
-            master_path = hls_dir / "master.m3u8"
-            relative_hls = str(master_path.relative_to(base))
-
-            # Update DB
-            await self.repo.update_version(
-                version_id,
-                {
-                    "hls_path": relative_hls,
-                    "transcode_status": "completed",
-                    "transcode_at": datetime.now(timezone.utc),
-                },
-            )
-
-            if on_progress:
-                await on_progress(100, "Done")
-
-            logger.success(
-                f"Transcode completed: resource={resource_id}, version={version_id}, "
-                f"tiers={[t.name for t in encoded_tiers]}"
-            )
-            return {"status": "completed", "hls_path": relative_hls}
+                logger.success(
+                    f"Transcode completed: resource={resource_id}, version={version_id}, "
+                    f"tiers={[t.name for t in encoded_tiers]}"
+                )
+                return {"status": "completed", "hls_path": relative_hls}
 
         except Exception as e:
             logger.error(f"Transcode failed for version {version_id}: {e}")
