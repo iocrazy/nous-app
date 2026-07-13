@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ExternalLink } from 'lucide-react';
 import { useToast } from '../Toast';
+import { useTaskManager } from '../../contexts/TaskManagerContext';
 import {
   getShareSchema, listAccounts, listPublishTasks, retryPublishTask,
 } from '../../services/distributionService';
@@ -87,6 +88,40 @@ export const RecordsPage: React.FC = () => {
   }, [addToast, t]);
 
   useEffect(() => { void reload(); }, [reload]);
+
+  // ── DBOS-driven live sync (route C) ──
+  // task_tracking is the execution engine's single UI source of truth, and
+  // TaskManagerContext already subscribes to it over Supabase Realtime. When
+  // any publish workflow row changes phase (queued → processing → completed /
+  // failed / cancelled), the signature below changes and we re-pull the
+  // records — no page-level polling of the publish API while workflows run.
+  const { tasks: trackedTasks } = useTaskManager();
+  const publishSignature = useMemo(
+    () => trackedTasks
+      .filter((tk) => tk.task_type === 'publish')
+      .map((tk) => `${tk.id}:${tk.status}`)
+      .sort()
+      .join('|'),
+    [trackedTasks],
+  );
+  useEffect(() => {
+    if (publishSignature) void reload();
+  }, [publishSignature, reload]);
+
+  // H5 hand-off rows flip pending_share → success via the Douyin WEBHOOK,
+  // which writes business state only (publish_task_accounts) — task_tracking
+  // never changes, so Realtime can't observe it. Poll gently, and only while
+  // such rows exist.
+  const hasPendingShare = useMemo(
+    () => tasks.some((tk) => tk.status === 'pending_share'
+      || tk.accounts.some((a) => a.status === 'pending_share')),
+    [tasks],
+  );
+  useEffect(() => {
+    if (!hasPendingShare) return undefined;
+    const timer = window.setInterval(() => { void reload(); }, 15_000);
+    return () => window.clearInterval(timer);
+  }, [hasPendingShare, reload]);
 
   const platformFor = useCallback(
     (accountId: string): string | null => {

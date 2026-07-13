@@ -10,6 +10,7 @@ import {
   Music,
   RefreshCw,
   Search,
+  Send,
   Sparkles,
   Tag,
   Upload,
@@ -55,6 +56,8 @@ export const TaskTypeIcon: React.FC<{ type: TaskType; size?: number }> = ({
     case 'canvas_graph_run':
     case 'canvas_timeline':
       return <Frame size={size} />;
+    case 'publish':
+      return <Send size={size} />;
     default:
       return <Circle size={size} />;
   }
