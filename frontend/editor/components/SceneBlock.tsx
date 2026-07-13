@@ -53,6 +53,7 @@ import { CopilotCard, type CopilotPhase } from './CopilotCard';
 import { EmptySceneHint } from './EmptyStates';
 import { isTiptapEnabled } from '../tiptap/flag';
 import { TipTapSceneEditor, type TipTapSceneEditorHandle } from '../tiptap/TipTapSceneEditor';
+import type { MenuBridge } from '../tiptap/menuKeymap';
 import type { EditorFormat } from '../useEditorState';
 import type { SaveState } from '../useSceneSync';
 import { ScenePresenceBadge } from '../collab/ScenePresenceBadge';
@@ -694,8 +695,13 @@ export function SceneBlock({
       element_id: typeCommand.elementId,
       payload: { type: typeCommand.type },
     };
+    // TipTap mode: apply the attrs-only transaction immediately (caret-
+    // preserving) via the ref method; the ops dispatch below still lands
+    // (data plane unchanged) and the M1 applyExternalElements effect finds
+    // the doc already matches, so it no-ops rather than rebuilding.
+    if (tiptapOn) tiptapRef.current?.retypeElement(typeCommand.elementId, typeCommand.type);
     sync.dispatchOps([op], applyLocal(elementsRef.current, [op]));
-  }, [typeCommand, scene.id, sync]);
+  }, [typeCommand, scene.id, sync, tiptapOn]);
 
   // Lift this scene's save state to the shell whenever it changes.
   useEffect(() => {
@@ -748,6 +754,12 @@ export function SceneBlock({
     const id = newElementId();
     const op: ElementOp = { op: 'insert', element_id: id, payload: { type: 'action', text: '' } };
     sync.dispatchOps([op], applyLocal(sync.elements, [op]));
+    // M2 carry-over from M1: focus the freshly-seeded element. The editor
+    // doesn't exist yet on THIS render (EmptySceneHint→TipTapSceneEditor is
+    // a fresh mount triggered by `sync.elements` going non-empty) — rAF
+    // runs after React has committed the new mount (same pattern as the
+    // legacy machine's `applyResult` focus-the-new-cursor call below).
+    requestAnimationFrame(() => tiptapRef.current?.focusElement(id, true));
   }, [sync]);
 
   // TipTap mode: selection changes report the focused element up exactly
@@ -759,6 +771,137 @@ export function SceneBlock({
     },
     [onFocusElement, scene.id],
   );
+
+  // ── TipTap M2: slash menu ('/' at block start) ────────────────────────
+  // Mirrors legacy `handleInput`'s slash branch: a fresh '/' opens/updates
+  // the picker (position looked up via the SAME `data-el-id` DOM query
+  // legacy uses — the NodeViewContent div carries the identical attribute);
+  // anything else closes it, but only if IT was the one open.
+  const handleTiptapSlashChange = useCallback((elementId: string, query: string | null) => {
+    if (query !== null) {
+      const node = containerRef.current?.querySelector<HTMLElement>(`[data-el-id="${elementId}"]`);
+      const position = node
+        ? { top: node.offsetTop + node.offsetHeight, left: node.offsetLeft }
+        : undefined;
+      setSlashActive(0);
+      setSlash({ elementId, query, position });
+    } else if (slashRef.current?.elementId === elementId) {
+      setSlash(null);
+    }
+  }, []);
+
+  // Apply a slash pick in TipTap mode: an attrs+text-clear transaction for
+  // the immediate visual update (see TipTapSceneEditor's module doc) plus
+  // the SAME update op legacy dispatches (data plane unchanged).
+  const applySlashTiptap = useCallback(
+    (type: ElementType) => {
+      const s = slashRef.current;
+      if (!s) return;
+      const op: ElementOp = { op: 'update', element_id: s.elementId, payload: { type, text: '' } };
+      tiptapRef.current?.retypeElement(s.elementId, type, true);
+      sync.dispatchOps([op], applyLocal(elementsRef.current, [op]));
+      setSlash(null);
+    },
+    [sync],
+  );
+
+  const tiptapSlashMenu: MenuBridge | null = useMemo(() => {
+    if (!slash) return null;
+    return {
+      elementId: slash.elementId,
+      onArrowDown: () =>
+        setSlashActive((prev) => (slashFilteredRef.current.length > 0 ? (prev + 1) % slashFilteredRef.current.length : prev)),
+      onArrowUp: () =>
+        setSlashActive((prev) =>
+          slashFilteredRef.current.length > 0
+            ? (prev - 1 + slashFilteredRef.current.length) % slashFilteredRef.current.length
+            : prev,
+        ),
+      onApply: () => {
+        const filtered = slashFilteredRef.current;
+        const active = slashActiveRef.current;
+        if (filtered.length > 0 && active >= 0 && active < filtered.length) {
+          applySlashTiptap(filtered[active].type);
+        } else {
+          setSlash(null);
+        }
+      },
+      onEscape: () => setSlash(null),
+    };
+  }, [slash, applySlashTiptap]);
+
+  // ── TipTap M2: mentions + character-cue picker ────────────────────────
+  const handleTiptapMentionOpen = useCallback(
+    (elementId: string, kind: 'inline' | 'character', query: string) => {
+      const node = containerRef.current?.querySelector<HTMLElement>(`[data-el-id="${elementId}"]`);
+      const position = node
+        ? { top: node.offsetTop + node.offsetHeight, left: node.offsetLeft }
+        : undefined;
+      setMention({ elementId, kind, query, position });
+    },
+    [],
+  );
+  const handleTiptapMentionClose = useCallback(() => setMention(null), []);
+
+  const handleTiptapMentionSelect = useCallback(
+    (name: string) => {
+      const m = mentionRef.current;
+      if (!m) return;
+      let newText: string;
+      if (m.kind === 'character') {
+        // A character cue IS the name — replace the whole line.
+        newText = name;
+      } else {
+        const el = elementsRef.current.find((e) => e.id === m.elementId);
+        const text = el?.text ?? '';
+        const at = text.lastIndexOf('@');
+        newText =
+          at >= 0
+            ? `${text.slice(0, at)}@${name} ${text.slice(at + 1 + m.query.length)}`
+            : `${text}@${name} `;
+      }
+      const op: ElementOp = { op: 'update', element_id: m.elementId, payload: { text: newText } };
+      tiptapRef.current?.replaceElementText(m.elementId, newText);
+      sync.dispatchOps([op], applyLocal(elementsRef.current, [op]));
+      setMention(null);
+    },
+    [sync],
+  );
+
+  const tiptapMentionMenu: MenuBridge | null = useMemo(() => {
+    if (!mention) return null;
+    return {
+      elementId: mention.elementId,
+      onArrowDown: () =>
+        setMentionActive((prev) =>
+          mentionFilteredRef.current.length > 0 ? (prev + 1) % mentionFilteredRef.current.length : prev,
+        ),
+      onArrowUp: () =>
+        setMentionActive((prev) =>
+          mentionFilteredRef.current.length > 0
+            ? (prev - 1 + mentionFilteredRef.current.length) % mentionFilteredRef.current.length
+            : prev,
+        ),
+      onApply: () => {
+        const filtered = mentionFilteredRef.current;
+        const active = mentionActiveRef.current;
+        if (filtered.length > 0 && active >= 0 && active < filtered.length) {
+          handleTiptapMentionSelect(filtered[active]);
+        } else {
+          setMention(null);
+        }
+      },
+      onTab: () => {
+        if (mention.kind === 'character') {
+          const op: ElementOp = { op: 'update', element_id: mention.elementId, payload: { type: 'action' } };
+          tiptapRef.current?.retypeElement(mention.elementId, 'action');
+          sync.dispatchOps([op], applyLocal(elementsRef.current, [op]));
+        }
+        setMention(null);
+      },
+      onEscape: () => setMention(null),
+    };
+  }, [mention, handleTiptapMentionSelect, sync]);
 
   // Lift optimistic elements to the shell for live Statistics + rail entities
   // (Task 6 ⑥). STRUCTURAL changes (a block created/deleted/moved/retyped —
@@ -932,8 +1075,15 @@ export function SceneBlock({
       sync.dispatchOps([op], applyLocal(sync.elements, [op]));
       onCrossSceneDelete?.(fromSceneId, element.id);
       onElementDragDone?.();
+      // TipTap mode (M2 item 6): focus the newly-landed element once the M1
+      // applyExternalElements effect (triggered by the `sync.elements`
+      // change above) has rebuilt the doc — rAF runs after React commits.
+      if (tiptapOn) {
+        const droppedId = element.id;
+        requestAnimationFrame(() => tiptapRef.current?.focusElement(droppedId));
+      }
     },
-    [externalDrag, sync, onCrossSceneDelete, onElementDragDone],
+    [externalDrag, sync, onCrossSceneDelete, onElementDragDone, tiptapOn],
   );
   const handleElementDrop = useCallback(
     (targetId: string, edge: 'top' | 'bottom') => {
@@ -1273,21 +1423,44 @@ export function SceneBlock({
       </div>
 
       {tiptapOn ? (
-        // TipTap surface (M1, flag-on): the PM schema requires at least one
-        // node, so an empty scene renders EmptySceneHint instead of mounting
-        // the editor — same nudge as the legacy path, wired to an anchored
-        // insert op instead of the machine's onEnter. Gutter drag / slash /
-        // mentions are M2 scope; they simply don't attach here yet.
+        // TipTap surface (M1 sync core + M2 block UX, flag-on): the PM
+        // schema requires at least one node, so an empty scene renders
+        // EmptySceneHint instead of mounting the editor — same nudge as the
+        // legacy path, wired to an anchored insert op instead of the
+        // machine's onEnter. Drag/tick/slash/mention wiring below reuses
+        // the SAME callbacks/state the legacy engines use (see
+        // TipTapSceneEditor's module doc) — one behavior, two surfaces.
         sync.elements.length === 0 ? (
           <EmptySceneHint onSeed={handleTiptapSeed} />
         ) : (
           <TipTapSceneEditor
+            // M3: format is a mount-time snapshot (see TipTapSceneEditor's
+            // module doc, "format switch recreates the editor") — keying on
+            // it forces a full remount (flushing any pending debounce first)
+            // whenever the script-wide Hollywood/Asian toggle flips, instead
+            // of trying to live-patch the NodeView's structural DOM change.
+            key={format}
             ref={tiptapRef}
             initialElements={sync.elements}
             format={format}
             blockIndexBase={blockIndexBase}
             dispatchOps={sync.dispatchOps}
             onFocusCursor={handleTiptapFocusCursor}
+            onTickClick={handleTickClick}
+            selectedElementIds={copilotSelectedIds}
+            draggingElementId={draggingElementId ?? externalDrag?.element.id ?? null}
+            dropElementEdge={elementDropTarget}
+            onElementDragStart={handleElementDragStart}
+            onElementDragOver={handleElementDragOver}
+            onElementDrop={handleElementDrop}
+            onElementDragEnd={handleElementDragEnd}
+            onSlashChange={handleTiptapSlashChange}
+            slashMenu={tiptapSlashMenu}
+            onMentionOpen={handleTiptapMentionOpen}
+            onMentionClose={handleTiptapMentionClose}
+            mentionMenu={tiptapMentionMenu}
+            pageSeams={pageSeams}
+            mentionCandidates={mentionCandidates}
           />
         )
       ) : (
@@ -1342,7 +1515,12 @@ export function SceneBlock({
           listboxId={mentionListId}
           activeIndex={mentionActive}
           position={mention.position}
-          onSelect={handleMentionSelect}
+          // Mouse-click selection must route through the SAME apply path as
+          // keyboard Enter for this mode: legacy's `handleMentionSelect`
+          // writes the contentEditable DOM node directly, which would
+          // corrupt a PM-managed node — TipTap mode uses the transaction-
+          // based `handleTiptapMentionSelect` instead.
+          onSelect={tiptapOn ? handleTiptapMentionSelect : handleMentionSelect}
           onHover={setMentionActive}
         />
       )}
@@ -1353,7 +1531,7 @@ export function SceneBlock({
           activeIndex={slashActive}
           listboxId={slashListId}
           position={slash.position}
-          onSelect={applySlash}
+          onSelect={tiptapOn ? applySlashTiptap : applySlash}
           onHover={setSlashActive}
         />
       )}

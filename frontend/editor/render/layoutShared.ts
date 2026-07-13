@@ -60,26 +60,40 @@ function matchKnownName(after: string, knownLongestFirst: string[]): string | nu
   return null;
 }
 
+/** One `@name` run found in a plain-text string — a character-offset span
+ *  (`[start, end)`, `start` at the `@`) plus the matched name and whether it
+ *  is a known CAST name. Shared by `buildElementHtml` (HTML-string chips, the
+ *  legacy contentEditable renderer) and the TipTap mention decoration plugin
+ *  (M3 — inline `Decoration`s over the SAME ranges, never mutating text) so
+ *  both surfaces chip identically by construction instead of two hand-kept
+ *  copies of the greedy-match rules drifting apart. */
+export interface MentionRun {
+  /** Character offset of the `@`. */
+  start: number;
+  /** Character offset one past the matched name (exclusive). */
+  end: number;
+  /** The matched name, original casing, WITHOUT the leading `@`. */
+  name: string;
+  isKnown: boolean;
+}
+
 /**
- * Build the inner HTML for an element line: escaped text with any `@name`
- * tokens wrapped as chips. A name present in `mentionNames` (case-insensitive)
- * is a known chip — matched greedily so multi-word CAST names (`@John Smith`)
- * chip whole; an unknown name is a greyed-out fallback chip that stops at the
- * first word (never an error).
+ * Scan `text` for `@name` runs. A name present in `mentionNames`
+ * (case-insensitive) is a known run — matched greedily so multi-word CAST
+ * names (`@John Smith`) chip whole; an unknown name still chips, but stops at
+ * the first word (never an error — mirrors `buildElementHtml`'s legacy
+ * fallback so an in-progress `@partial` still gets a (grey) chip while
+ * typing). A lone `@` with nothing after it is not a run.
  */
-export function buildElementHtml(text: string, mentionNames: string[]): string {
+export function scanMentionRuns(text: string, mentionNames: string[]): MentionRun[] {
   const known = new Set(mentionNames.map((n) => n.toLowerCase()));
   // Longest-first so a multi-word name wins over a shorter one it contains.
   const knownLongestFirst = [...mentionNames].sort((a, b) => b.length - a.length);
-  let out = '';
+  const runs: MentionRun[] = [];
   let i = 0;
   while (i < text.length) {
     const at = text.indexOf('@', i);
-    if (at === -1) {
-      out += escapeHtml(text.slice(i));
-      break;
-    }
-    out += escapeHtml(text.slice(i, at));
+    if (at === -1) break;
     const after = text.slice(at + 1);
     let name = matchKnownName(after, knownLongestFirst);
     let isKnown = name != null;
@@ -89,16 +103,33 @@ export function buildElementHtml(text: string, mentionNames: string[]): string {
       isKnown = name.length > 0 && known.has(name.toLowerCase());
     }
     if (name.length === 0) {
-      // A lone `@` with nothing after it — emit it literally, keep scanning.
-      out += '@';
+      // A lone `@` with nothing after it — not a run, keep scanning past it.
       i = at + 1;
       continue;
     }
-    out +=
-      `<span data-mention="${escapeHtml(name)}" ` +
-      `class="mh-mention${isKnown ? '' : ' unknown'}">@${escapeHtml(name)}</span>`;
+    runs.push({ start: at, end: at + 1 + name.length, name, isKnown });
     i = at + 1 + name.length;
   }
+  return runs;
+}
+
+/**
+ * Build the inner HTML for an element line: escaped text with any `@name`
+ * tokens wrapped as chips (via `scanMentionRuns` — see its doc for the match
+ * rules).
+ */
+export function buildElementHtml(text: string, mentionNames: string[]): string {
+  const runs = scanMentionRuns(text, mentionNames);
+  let out = '';
+  let i = 0;
+  for (const run of runs) {
+    out += escapeHtml(text.slice(i, run.start));
+    out +=
+      `<span data-mention="${escapeHtml(run.name)}" ` +
+      `class="mh-mention${run.isKnown ? '' : ' unknown'}">@${escapeHtml(run.name)}</span>`;
+    i = run.end;
+  }
+  out += escapeHtml(text.slice(i));
   return out;
 }
 

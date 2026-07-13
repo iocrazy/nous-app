@@ -407,3 +407,70 @@ async def test_chat_wiring_mcp_repo_failure_isolated():
             settings=MagicMock(),
         )
     assert captured_kwargs.get("mcp_registry") is None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_platform_catalog_hit_dispatches_on_actual_provider():
+    """Catalog hits dispatch on the row's admin-named ``actual_provider`` —
+    NEVER a prefix guess on ``actual_model`` (#1279 contract; this call site
+    was missed). Regression (prod 2026-07-06→13): the user's agent override
+    pointed at ``nous-qwen3-llm`` → catalog resolves actual_model
+    ``qwen3-6-35b`` → prefix rule raises "unsupported model" → EVERY chat
+    turn for EVERY agent died at stack-build time.
+    """
+    from app.services.ai.adapters.openai import OpenAIAdapter
+
+    hit = (
+        "openai",
+        {"api_key": "platform-key", "base_url": "https://nous.example.com/v1"},
+        "qwen3-6-35b",  # prefix the factory does NOT know
+    )
+    with patch(
+        "app.services.ai.providers.ai_provider_helpers.resolve_mediahub_model",
+        new=AsyncMock(return_value=hit),
+    ):
+        stack = await build_agent_runner_stack(
+            agent=_agent(model="nous-qwen3-llm"),
+            skill_repo=MagicMock(),
+            user_id=uuid4(),
+            session_id=uuid4(),
+            user_query="hello",
+            settings=MagicMock(),
+        )
+
+    assert stack.runner is not None
+    # The pre-resolved platform adapter must be the one actual_provider
+    # names (openai), not a prefix-guess crash.
+    adapter = stack.runner.adapter.adapter_factory("nous-qwen3-llm")
+    assert isinstance(adapter, OpenAIAdapter)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_platform_catalog_unknown_provider_label_degrades_to_openai_compatible():
+    """An unknown actual_provider label + unknown model prefix must fall back
+    to the OpenAI-compatible QwenAdapter (the contract the admin health probe
+    validates) instead of raising."""
+    from app.services.ai.adapters.qwen import QwenAdapter
+
+    hit = (
+        "nous",  # not a buildable provider key
+        {"api_key": "platform-key", "base_url": "https://nous.example.com/v1"},
+        "qwen3-6-35b",
+    )
+    with patch(
+        "app.services.ai.providers.ai_provider_helpers.resolve_mediahub_model",
+        new=AsyncMock(return_value=hit),
+    ):
+        stack = await build_agent_runner_stack(
+            agent=_agent(model="nous-qwen3-llm"),
+            skill_repo=MagicMock(),
+            user_id=uuid4(),
+            session_id=uuid4(),
+            user_query="hello",
+            settings=MagicMock(),
+        )
+
+    adapter = stack.runner.adapter.adapter_factory("nous-qwen3-llm")
+    assert isinstance(adapter, QwenAdapter)
