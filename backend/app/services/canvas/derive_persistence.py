@@ -22,7 +22,7 @@ from typing import Optional, Protocol
 from loguru import logger
 
 from app.core.config import settings
-from app.services.library.media_storage import store_local_file
+from app.services.library.media_storage import materialize, store_local_file
 
 
 class DeriveError(Exception):
@@ -64,25 +64,39 @@ class SourceImage:
         return str(self.resource.get("filename") or "")
 
 
-def _resolve_source_bytes(file_path: str) -> bytes:
-    """Read source resource bytes from the configured download root."""
-    base = Path(settings.DOWNLOAD_PATH)
-    abs_path = (base / file_path).resolve()
-    # Defence in depth: ensure the resolved path is still under the
-    # configured root. Stops a malformed `file_path` (e.g. ``../``) from
-    # reading anything outside the resources volume.
+async def _resolve_source_bytes(file_path: str) -> bytes:
+    """Read source resource bytes for either storage shape.
+
+    ``sb://`` rows stream from the object store; filesystem rows read from
+    under DOWNLOAD_PATH. Both go through ``materialize()``, which enforces
+    the same containment guard the old fs-only reader had (a malformed
+    ``../`` rel_path can never escape the resources volume).
+    """
+    import httpx
+
     try:
-        abs_path.relative_to(base.resolve())
-    except ValueError as exc:
+        async with materialize(file_path) as abs_path:
+            if not abs_path.exists():
+                raise FileNotFoundError(file_path)
+            return abs_path.read_bytes()
+    except ValueError as exc:  # materialize containment guard
         raise DeriveError(
             status_code=400,
             detail="resource file_path escapes the download root",
         ) from exc
-    if not abs_path.exists():
+    except FileNotFoundError as exc:
         raise DeriveError(
             status_code=404, detail="source resource file is missing on disk"
-        )
-    return abs_path.read_bytes()
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        # Object missing in the store (404) reads the same as a missing fs
+        # file; any other storage-api failure is a real 5xx — let it
+        # propagate to the router's generic 500 handler.
+        if exc.response.status_code == 404:
+            raise DeriveError(
+                status_code=404, detail="source resource file is missing on disk"
+            ) from exc
+        raise
 
 
 def _is_image(resource: dict) -> bool:
@@ -126,7 +140,7 @@ async def load_source_image(
         scope_id=scope_id,
         folder_id=item.get("folder_id"),
         library_id=item.get("library_id"),
-        file_bytes=_resolve_source_bytes(source_file_path),
+        file_bytes=await _resolve_source_bytes(source_file_path),
         mime_type=source.get("mime_type") or None,
     )
 
