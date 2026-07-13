@@ -508,7 +508,9 @@ class ResourcesService:
             resource_id,
             {
                 "is_trashed": True,
-                "trashed_at": datetime.now(timezone.utc).isoformat(),
+                # datetime OBJECT, not .isoformat() — asyncpg refuses str
+                # for a timestamptz bind and the whole UPDATE would fail.
+                "trashed_at": datetime.now(timezone.utc),
                 "last_scope_type": "personal",
                 "last_scope_id": last_scope_id,
             },
