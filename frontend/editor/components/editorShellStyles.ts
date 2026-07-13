@@ -591,57 +591,55 @@ export const EDITOR_SHELL_STYLES = `
   box-decoration-break:clone; -webkit-box-decoration-break:clone;
 }
 .mh-mention.unknown{ color:var(--ink-faint); background:var(--surface-2); font-weight:500; }
-/* Unified with the APP-WIDE dropdown (UiSelect in ui/primitives.tsx — the AI
-   model selector): same always-dark panel tokens (--ui-surface-panel /
-   --ui-border-soft / --ui-shadow-panel, defined once at :root), 6px radius,
-   px-3 py-2 text-sm options, accent-filled active row. User rule: every
-   floating option list in the product shares ONE look. */
+/* Editor popups follow the LIGHT model-filter dropdown (the "Filter models…"
+   panel the user pinned as the reference): white panel, hairline border, soft
+   shadow, quiet gray hover — a light page gets a light popup. Active row uses
+   the sheet's indigo-soft accent so keyboard position stays visible. */
 .mh-mention-pop{
-  z-index:20; min-width:190px; max-width:280px; margin-top:2px;
-  background:var(--ui-surface-panel); border:1px solid var(--ui-border-soft);
-  border-radius:6px; box-shadow:var(--ui-shadow-panel);
+  z-index:20; min-width:200px; max-width:300px; margin-top:2px;
+  background:#fff; border:1px solid var(--sheet-border);
+  border-radius:8px; box-shadow:0 10px 28px rgba(35,20,90,0.14);
   padding:4px; font-family:var(--sans);
 }
 .mh-mention-list{ list-style:none; margin:0; padding:0; max-height:228px; overflow-y:auto; }
 .mh-mention-opt{
-  padding:8px 12px; border-radius:4px; font-size:13px;
-  color:#e4e4e7; cursor:pointer; white-space:nowrap;
+  padding:8px 12px; border-radius:5px; font-size:13px;
+  color:var(--sheet-ink); cursor:pointer; white-space:nowrap;
   overflow:hidden; text-overflow:ellipsis;
   transition:background 0.12s ease;
 }
-.mh-mention-opt:hover{ background:rgba(255,255,255,0.08); }
-.mh-mention-opt.active{ background:var(--accent); color:#fff; }
+.mh-mention-opt:hover{ background:var(--surface-2); }
+.mh-mention-opt.active{ background:var(--indigo-soft); color:var(--indigo-deep); }
 .mh-mention-opt[aria-selected='true']{ font-weight:600; }
-.mh-mention-empty{ padding:8px 12px; font-size:12.5px; color:var(--text-muted); }
+.mh-mention-empty{ padding:8px 12px; font-size:12.5px; color:var(--sheet-ink-soft); }
 /* Embedded search row (character-cue picker, laper parity): full-bleed strip
-   at the panel top, separated by the soft border. The input is chromeless —
-   the strip IS the field. */
+   at the panel top, separated by a hairline. The input is chromeless — the
+   strip IS the field. */
 .mh-mention-search{
   display:flex; align-items:center; gap:8px;
   margin:-4px -4px 4px; padding:9px 12px;
-  border-bottom:1px solid var(--ui-border-soft);
-  color:var(--text-muted);
+  border-bottom:1px solid var(--sheet-border);
+  color:var(--sheet-ink-soft);
 }
 .mh-mention-search input{
   flex:1; min-width:0; background:none; border:none; outline:none;
-  font-family:var(--sans); font-size:13px; color:#e4e4e7; padding:0;
+  font-family:var(--sans); font-size:13px; color:var(--sheet-ink); padding:0;
 }
-.mh-mention-search input::placeholder{ color:var(--text-muted); }
-/* kbd-hint footer — mirrors the sheet's .mh-keyboard-hint affordance but in
-   the dark panel palette. */
+.mh-mention-search input::placeholder{ color:var(--sheet-ink-soft); }
+/* kbd-hint footer — same affordance as the sheet's .mh-keyboard-hint. */
 .mh-mention-hints{
   display:flex; gap:14px; margin:4px -4px -4px; padding:8px 12px;
-  border-top:1px solid var(--ui-border-soft);
+  border-top:1px solid var(--sheet-border);
 }
 .mh-mention-hint{
   display:flex; align-items:center; gap:6px;
-  font-size:11.5px; color:var(--text-muted); white-space:nowrap;
+  font-size:11.5px; color:var(--sheet-ink-soft); white-space:nowrap;
 }
 .mh-pop-kbd{
   font-family:var(--mono); font-size:10px; line-height:1; font-weight:600;
   padding:3px 5px; border-radius:4px;
-  background:rgba(255,255,255,0.07); border:1px solid var(--ui-border-soft);
-  color:#d4d4d8;
+  background:var(--surface-2); border:1px solid var(--sheet-border);
+  color:var(--sheet-ink-soft);
 }
 
 /* Outline / Cover placeholders (read-only in Phase 1) */
@@ -1554,28 +1552,28 @@ export const EDITOR_SHELL_STYLES = `
 /* ── Slash menu (the "/" block-type picker) ── mirrors the mention popup.
    NOTE: never put backticks inside this template literal — one terminated the
    string early and the whole stylesheet evaluated to NaN (total unstyle). */
-/* Unified with the app-wide dropdown (UiSelect) — same DNA as .mh-mention-pop
-   above: one look for every floating option list in the product. */
+/* Same light dropdown DNA as .mh-mention-pop above (the model-filter
+   reference): one look for every floating option list on the sheet. */
 .mh-slash-menu{
   position:absolute; z-index:30; min-width:190px;
-  background:var(--ui-surface-panel); border:1px solid var(--ui-border-soft);
-  border-radius:6px; box-shadow:var(--ui-shadow-panel); padding:4px;
+  background:#fff; border:1px solid var(--sheet-border);
+  border-radius:8px; box-shadow:0 10px 28px rgba(35,20,90,0.14); padding:4px;
   font-family:var(--sans);
 }
 .mh-slash-item{
   display:flex; align-items:center; gap:9px; width:100%; text-align:left;
-  padding:8px 12px; border:none; border-radius:4px; background:none;
-  font-size:13px; color:#e4e4e7; cursor:pointer;
+  padding:8px 12px; border:none; border-radius:5px; background:none;
+  font-size:13px; color:var(--sheet-ink); cursor:pointer;
   transition:background 0.12s ease;
 }
-.mh-slash-item:hover{ background:rgba(255,255,255,0.08); }
-.mh-slash-item.active{ background:var(--accent); color:#fff; }
+.mh-slash-item:hover{ background:var(--surface-2); }
+.mh-slash-item.active{ background:var(--indigo-soft); color:var(--indigo-deep); }
 .mh-slash-glyph{
   width:18px; text-align:center; font-family:var(--mono); font-size:11px;
-  color:var(--text-muted); flex-shrink:0;
+  color:var(--sheet-ink-soft); flex-shrink:0;
 }
-.mh-slash-item.active .mh-slash-glyph{ color:#fff; }
-.mh-slash-empty{ padding:8px 12px; font-size:12.5px; color:var(--text-muted); }
+.mh-slash-item.active .mh-slash-glyph{ color:var(--indigo-deep); }
+.mh-slash-empty{ padding:8px 12px; font-size:12.5px; color:var(--sheet-ink-soft); }
 
 /* ── Paged mode v2: real page seams. An IN-FLOW band between rows: filler pads
    the current page to fixed height, then paper-bottom edge, an inter-page gap
@@ -1635,6 +1633,13 @@ export const EDITOR_SHELL_STYLES = `
   width:42px; margin-left:-51px; /* 42px box + the row's 9px flex gap */
   flex-shrink:0; align-self:flex-start; height:1.7em;
   display:flex; align-items:center; justify-content:flex-end; gap:4px;
+  /* The 1.7em box must equal the TEXT line box (13.5px × 1.7). Legacy
+     inherited 13.5px from the row it sat inside; the TipTap NodeView makes
+     the gutter a SIBLING of the content div, where it inherits the browser
+     default 16px instead — 1.7em became 27.2px and every number sat ~3px
+     below its first text line. Pin the font-size so both engines share the
+     text's line box. */
+  font-size:13.5px;
 }
 .mh-scene-gutter{
   width:42px; margin-left:-50px; /* 42px box + the headrow's 8px flex gap */
@@ -1655,4 +1660,26 @@ export const EDITOR_SHELL_STYLES = `
 .mh-scene-block:focus-within .mh-drag-handle{ opacity:1; }
 .mh-scene-num-badge{ position:static; left:auto; top:auto; transform:none; width:auto; min-width:0; }
 .mh-drag-handle{ position:static; left:auto; top:auto; transform:none; }
+
+/* ── VERSION RAIL — history floats in the empty margin right of the sheet ──
+   A zero-height sticky wrapper keeps the card in view while the paper
+   scrolls; the inner card sits just right of the 780px sheet, clamped so a
+   narrow container pins it to its own right edge instead of overflowing
+   (sheet 780/2 = 390 + 16px gap). Hidden entirely on viewports too narrow
+   to have a margin at all. */
+.mh-version-rail{
+  position:sticky; top:56px; z-index:6;
+  width:100%; height:0; overflow:visible;
+  pointer-events:none; align-self:stretch;
+}
+.mh-version-rail-inner{
+  position:absolute; top:0;
+  left:min(calc(50% + 406px), calc(100% - 232px));
+  width:224px; pointer-events:auto;
+  background:rgba(255,255,255,0.6); backdrop-filter:blur(8px);
+  border:1px solid var(--surface-border); border-radius:10px;
+  box-shadow:0 6px 18px rgba(35,20,90,0.06);
+  padding:12px; max-height:calc(100vh - 240px); overflow-y:auto;
+}
+@media (max-width:1180px){ .mh-version-rail{ display:none; } }
 `;
