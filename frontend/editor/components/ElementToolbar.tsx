@@ -49,7 +49,9 @@ const OUTLINE_ITEMS: { key: string; labelKey: string; glyph: string }[] = [
 
 export interface ElementToolbarProps {
   mode: EditorMode;
-  activeType: ElementType | null;
+  /** The focused block's type; the sentinel 'scene' = a scene HEADING is
+   *  focused (slug button or its edit fields) and the Scene pill lights up. */
+  activeType: ElementType | 'scene' | null;
   onSelectType: (type: ElementType) => void;
   onInsertScene: () => void;
 }
@@ -108,7 +110,10 @@ export function ElementToolbar({
   return (
     <div className="mh-h-toolbar" role="toolbar" aria-label={t('editor.toolbar')}>
       {SCRIPT_ITEMS.map((item, i) => {
-        const isActive = item.type != null && item.type === activeType;
+        const isActive =
+          item.type != null
+            ? item.type === activeType
+            : item.key === 'scene' && activeType === 'scene';
         return (
           <button
             type="button"
@@ -117,7 +122,7 @@ export function ElementToolbar({
               itemsRef.current[i] = el;
             }}
             className={`mh-h-item${isActive ? ' active' : ''}`}
-            aria-pressed={item.type != null ? isActive : undefined}
+            aria-pressed={isActive || undefined}
             tabIndex={i === rovingIndex ? 0 : -1}
             onKeyDown={(e) => onKeyDown(e, i)}
             onClick={() => {
