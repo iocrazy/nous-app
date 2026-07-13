@@ -66,6 +66,9 @@ from app.workflows.soda_download import (  # noqa: F401
     soda_download_workflow,
 )
 from app.workflows.soda_ugc_download import soda_ugc_download_workflow  # noqa: F401
+from app.workflows.storage_migration import (  # noqa: F401
+    storage_migration_workflow,
+)
 from app.workflows.storyboard import (  # noqa: F401
     storyboard_annotation_workflow,
     storyboard_export_workflow,
