@@ -16,6 +16,15 @@ describe('canConnectSmart', () => {
     expect(canConnectSmart('prompt', 'prompt')).toBe(true);
   });
 
+  it('media cards are sources: media → prompt/loop only, nothing → media', () => {
+    expect(canConnectSmart('media', 'prompt')).toBe(true);
+    expect(canConnectSmart('media', 'loop')).toBe(true);
+    expect(canConnectSmart('media', 'output')).toBe(false);
+    expect(canConnectSmart('media', 'media')).toBe(false);
+    expect(canConnectSmart('prompt', 'media')).toBe(false);
+    expect(canConnectSmart('shot', 'media')).toBe(false);
+  });
+
   it('rejects shot → output (must go through a prompt)', () => {
     expect(canConnectSmart('shot', 'output')).toBe(false);
   });
@@ -42,6 +51,7 @@ describe('isSmartNode', () => {
     expect(isSmartNode({ id: 'a', type: 'shot' })).toBe(true);
     expect(isSmartNode({ id: 'b', type: 'prompt' })).toBe(true);
     expect(isSmartNode({ id: 'c', type: 'output' })).toBe(true);
+    expect(isSmartNode({ id: 'm', type: 'media' })).toBe(true);
   });
 
   it('rejects unknown types', () => {

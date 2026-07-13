@@ -1731,14 +1731,16 @@
         "prompt": "提示词",
         "output": "输出",
         "loop": "循环",
-        "timeline": "时间线"
+        "timeline": "时间线",
+        "media": "上传"
       },
       "desc": {
         "shot": "分镜卡——承载一拍的媒体素材",
         "prompt": "手写或用 LLM 生成文本并运行",
         "output": "承接生成结果",
         "loop": "控制运行轮数、批次和变量",
-        "timeline": "多段成片按序拼接"
+        "timeline": "多段成片按序拼接",
+        "media": "把图片或视频导入画布"
       }
     },
     "toolbar": {
@@ -1749,6 +1751,13 @@
       "unlock": "解锁画布",
       "snapGrid": "对齐网格",
       "delete": "清空画布"
+    },
+    "mediaNode": {
+      "title": "媒体",
+      "add": "+ 添加",
+      "emptyHint": "点击或拖入图片 / 视频",
+      "rejected": "仅支持 50MB 以内的图片/视频",
+      "uploadFailed": "上传失败"
     }
   },
   "modelParams": {

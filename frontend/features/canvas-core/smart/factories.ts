@@ -13,6 +13,8 @@
 
 import type {
   SmartNode,
+  MediaNode,
+  MediaNodeData,
   OutputKind,
   OutputNode,
   PromptNode,
@@ -71,6 +73,22 @@ export function createShotNode(
       title: data.title ?? 'New shot',
       reference_resource_ids: data.reference_resource_ids ?? [],
       notes: data.notes ?? '',
+    },
+  };
+}
+
+export function createMediaNode(
+  data: Partial<MediaNodeData> = {},
+  opts: FactoryOptions = {},
+): MediaNode {
+  const random = opts.randomSuffix ?? DEFAULT_RANDOM_SUFFIX;
+  return {
+    id: makeId('media', random),
+    type: 'media',
+    position: opts.position ?? DEFAULT_POSITION,
+    data: {
+      title: data.title ?? 'Media',
+      items: data.items ?? [],
     },
   };
 }

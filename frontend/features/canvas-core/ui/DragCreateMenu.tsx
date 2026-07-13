@@ -14,6 +14,7 @@ import {
   MonitorPlay,
   Repeat2,
   TextCursorInput,
+  UploadCloud,
   type LucideIcon,
 } from 'lucide-react';
 import { isSmartFamily } from '../types';
@@ -25,6 +26,7 @@ import { CLASSIC_NODE_DEFINITIONS, getClassicNodeDefinition } from '../classic/r
 import { canConnectSmart } from '../smart/types';
 import {
   createLoopNode,
+  createMediaNode,
   createOutputNode,
   createPromptNode,
   createShotNode,
@@ -54,6 +56,15 @@ interface MenuItem {
 }
 
 const SMART_ITEMS: MenuItem[] = [
+  {
+    type: 'media',
+    label: 'Upload',
+    targetHandle: null,
+    make: (p) => createMediaNode({}, { position: p }) as CanvasNode,
+    icon: UploadCloud,
+    descKey: 'canvas.dragCreate.desc.media',
+    descDefault: 'Import images or video onto the canvas',
+  },
   {
     type: 'shot',
     label: 'Shot',
