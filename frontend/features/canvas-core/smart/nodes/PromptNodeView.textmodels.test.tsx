@@ -19,6 +19,7 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string) => k }),
 }));
 vi.mock('./useGenerationModels', () => ({ useGenerationModels: () => [] }));
+vi.mock('./useAgents', () => ({ useAgents: () => [] }));
 vi.mock('./useTextModels', () => ({
   useTextModels: () => [
     { name: 'mediahub-doubao-llm', display_name: 'Doubao LLM', type: 'llm', actual_provider: 'doubao' },
