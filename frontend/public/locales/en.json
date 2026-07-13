@@ -1529,7 +1529,8 @@
         "locations": "Locations",
         "files": "Files",
         "trash": "Trash",
-        "settings": "Settings"
+        "settings": "Settings",
+        "props": "Props"
       },
       "publish": {
         "comingSoon": "Publishing arrives with Distribution D2"
@@ -3048,6 +3049,30 @@
       "lead": "Lead",
       "support": "Support",
       "antagonist": "Antagonist"
+    }
+  },
+  "libEntities": {
+    "extract": "Extract from script",
+    "extractFailed": "Failed to extract from script",
+    "createFailed": "Failed to create",
+    "updateFailed": "Failed to save",
+    "openCanvasFailed": "Failed to open canvas",
+    "nameLabel": "Name",
+    "bioLabel": "Description",
+    "bioPlaceholder": "Look, mood, period, materials…",
+    "assetsHint": "Generated assets appear here",
+    "openCanvas": "Open in Canvas",
+    "location": {
+      "label": "location",
+      "untitled": "New Location",
+      "emptyTitle": "No locations yet",
+      "add": "Add Location"
+    },
+    "prop": {
+      "label": "prop",
+      "untitled": "New Prop",
+      "emptyTitle": "No props yet",
+      "add": "Add Prop"
     }
   }
 }
