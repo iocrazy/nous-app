@@ -9,6 +9,7 @@
  */
 import { useCallback, useEffect, useMemo } from 'react';
 import {
+  BotMessageSquare,
   Clapperboard,
   Film,
   Group as GroupIcon,
@@ -26,6 +27,7 @@ import type { CanvasConnection, CanvasNode } from '../types';
 import { canConnectSmart } from '../smart/types';
 import { createEmptyGroup } from '../smart/grouping';
 import {
+  createLlmNode,
   createLoopNode,
   createMediaNode,
   createOutputNode,
@@ -92,6 +94,15 @@ const SMART_ITEMS: MenuItem[] = [
     icon: TextCursorInput,
     descKey: 'canvas.dragCreate.desc.prompt',
     descDefault: 'Write or AI-generate text, then run it',
+  },
+  {
+    type: 'llm',
+    label: 'LLM',
+    targetHandle: null,
+    make: (p) => createLlmNode({}, { position: p }) as CanvasNode,
+    icon: BotMessageSquare,
+    descKey: 'canvas.dragCreate.desc.llm',
+    descDefault: 'Chat model in a node — text in, text out',
   },
   {
     type: 'output',

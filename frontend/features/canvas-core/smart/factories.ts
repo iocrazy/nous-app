@@ -13,6 +13,7 @@
 
 import type {
   SmartNode,
+  LlmNodeData,
   MediaNode,
   MediaNodeData,
   OutputKind,
@@ -89,6 +90,26 @@ export function createMediaNode(
     data: {
       title: data.title ?? 'Media',
       items: data.items ?? [],
+    },
+  };
+}
+
+export function createLlmNode(
+  data: Partial<LlmNodeData> = {},
+  opts: FactoryOptions = {},
+): SmartNode<LlmNodeData> {
+  const random = opts.randomSuffix ?? DEFAULT_RANDOM_SUFFIX;
+  return {
+    id: makeId('llm', random),
+    type: 'llm',
+    position: opts.position ?? DEFAULT_POSITION,
+    data: {
+      provider_slug: data.provider_slug ?? '',
+      agent_id: data.agent_id ?? null,
+      input_text: data.input_text ?? '',
+      output_text: data.output_text ?? '',
+      run_status: data.run_status ?? 'idle',
+      run_error: data.run_error ?? null,
     },
   };
 }

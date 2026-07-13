@@ -16,6 +16,17 @@ describe('canConnectSmart', () => {
     expect(canConnectSmart('prompt', 'prompt')).toBe(true);
   });
 
+  it('llm cards take text upstreams only and feed text consumers', () => {
+    expect(canConnectSmart('prompt', 'llm')).toBe(true);
+    expect(canConnectSmart('llm', 'llm')).toBe(true);
+    expect(canConnectSmart('llm', 'prompt')).toBe(true);
+    expect(canConnectSmart('llm', 'loop')).toBe(true);
+    expect(canConnectSmart('shot', 'llm')).toBe(false);
+    expect(canConnectSmart('media', 'llm')).toBe(false);
+    expect(canConnectSmart('llm', 'output')).toBe(false);
+    expect(canConnectSmart('llm', 'media')).toBe(false);
+  });
+
   it('media cards are sources: media → prompt/loop only, nothing → media', () => {
     expect(canConnectSmart('media', 'prompt')).toBe(true);
     expect(canConnectSmart('prompt', 'group')).toBe(false);
