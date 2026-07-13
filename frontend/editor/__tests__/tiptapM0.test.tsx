@@ -6,9 +6,17 @@
  *    [.mh-el-num + .mh-el-drag[.mh-el-dot x4]] + .mh-el-tick + the
  *    contentEditable line with hw-<type> / data-el-<attr> attrs.
  *  - continuous numbering (blockIndexBase + 2 + sibling index).
- *  - typing drives a real onUpdate → mapDocChange → onOps whose applyLocal
- *    result matches (the golden law, exercised end-to-end through a mounted
- *    editor instead of just the pure functions in tiptapM0.test.ts).
+ *  - typing drives a real onUpdate → mapDocChange → dispatchOps (past the
+ *    M1 text debounce) whose applyLocal result matches (the golden law,
+ *    exercised end-to-end through a mounted editor instead of just the pure
+ *    functions in tiptapM0.test.ts).
+ *
+ * NOTE: this file exercises the SAME `TipTapSceneEditor` M1 evolved in
+ * place (props renamed `elements`→`initialElements`, `onOps`→`dispatchOps`
+ * per the M1 task's explicit prop-contract change, plus the new debounce
+ * pipeline) — updated here to keep it green, not left as a stale duplicate.
+ * `tiptapM1*.test.tsx` covers the M1-specific surface (keymap parity,
+ * debounce timing, external apply, flag wiring) in depth.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { act, render, waitFor } from '@testing-library/react';
@@ -49,9 +57,13 @@ function getEditor(): Editor {
   return (window as unknown as Record<string, unknown>).__tipTapSceneEditorInstance as Editor;
 }
 
+const noopDispatch = () => {};
+
 describe('TipTapSceneEditor (M0 smoke)', () => {
   it("renders today's row DOM with continuous numbering", async () => {
-    render(<TipTapSceneEditor elements={elements} format="hollywood" />);
+    render(
+      <TipTapSceneEditor initialElements={elements} format="hollywood" dispatchOps={noopDispatch} />,
+    );
     await waitFor(() => expect(document.querySelectorAll('.mh-el-row').length).toBe(3));
 
     expect(document.querySelectorAll('.mh-el-row')).toHaveLength(3);
@@ -76,33 +88,53 @@ describe('TipTapSceneEditor (M0 smoke)', () => {
   });
 
   it('offsets numbering by blockIndexBase', async () => {
-    render(<TipTapSceneEditor elements={elements} format="hollywood" blockIndexBase={10} />);
+    render(
+      <TipTapSceneEditor
+        initialElements={elements}
+        format="hollywood"
+        blockIndexBase={10}
+        dispatchOps={noopDispatch}
+      />,
+    );
     await waitFor(() => expect(document.querySelectorAll('.mh-el-row').length).toBe(3));
     const nums = Array.from(document.querySelectorAll('.mh-el-num')).map((n) => n.textContent);
     expect(nums).toEqual(['12', '13', '14']);
   });
 
   it('renders Asian-format classes when format="asian"', async () => {
-    render(<TipTapSceneEditor elements={elements} format="asian" />);
+    render(<TipTapSceneEditor initialElements={elements} format="asian" dispatchOps={noopDispatch} />);
     await waitFor(() => expect(document.querySelectorAll('.mh-el-row').length).toBe(3));
     const editables = document.querySelectorAll('.mh-el-editable.mh-el-line');
     expect(editables[0].className).toContain('as-action');
     expect(editables[1].className).toContain('as-character');
   });
 
-  it('typing emits ops through onOps whose applyLocal matches the edit', async () => {
-    const onOps = vi.fn();
-    render(<TipTapSceneEditor elements={elements} format="hollywood" onOps={onOps} />);
+  it('typing emits ops through dispatchOps (after the debounce) whose applyLocal matches the edit', async () => {
+    const dispatchOps = vi.fn();
+    render(
+      <TipTapSceneEditor initialElements={elements} format="hollywood" dispatchOps={dispatchOps} />,
+    );
     await waitFor(() => expect(getEditor()).toBeTruthy());
 
-    act(() => {
-      // Position 1 = the very start of the first scriptElement's text content
-      // (position 0 is before the node itself opens).
-      getEditor().commands.insertContentAt(1, '!! ');
-    });
+    vi.useFakeTimers();
+    try {
+      act(() => {
+        // Position 1 = the very start of the first scriptElement's text
+        // content (position 0 is before the node itself opens).
+        getEditor().commands.insertContentAt(1, '!! ');
+      });
 
-    await waitFor(() => expect(onOps).toHaveBeenCalled());
-    const emittedOps: ElementOp[] = onOps.mock.calls.flatMap(
+      // A pure text edit debounces 500ms (M1) — nothing dispatched yet.
+      expect(dispatchOps).not.toHaveBeenCalled();
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(dispatchOps).toHaveBeenCalled();
+    const emittedOps: ElementOp[] = dispatchOps.mock.calls.flatMap(
       (call) => call[0] as ElementOp[],
     );
     expect(emittedOps.length).toBeGreaterThan(0);

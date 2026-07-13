@@ -51,6 +51,8 @@ import { MentionCombobox, filterMentionCandidates } from './MentionCombobox';
 import { SlashMenu, SLASH_ITEMS, filterSlashItems, type SlashItem } from './SlashMenu';
 import { CopilotCard, type CopilotPhase } from './CopilotCard';
 import { EmptySceneHint } from './EmptyStates';
+import { isTiptapEnabled } from '../tiptap/flag';
+import { TipTapSceneEditor, type TipTapSceneEditorHandle } from '../tiptap/TipTapSceneEditor';
 import type { EditorFormat } from '../useEditorState';
 import type { SaveState } from '../useSceneSync';
 import { ScenePresenceBadge } from '../collab/ScenePresenceBadge';
@@ -285,6 +287,10 @@ export function SceneBlock({
   const headingDisplayRef = useRef<HTMLButtonElement | null>(null);
   const intExtSelectRef = useRef<HTMLSelectElement | null>(null);
   const composingRef = useRef(false);
+  // TipTap editing surface (flag-dark, spec D7): re-read per render (not a
+  // frozen module const) so tests can `vi.stubEnv` it — see tiptap/flag.ts.
+  const tiptapOn = isTiptapEnabled();
+  const tiptapRef = useRef<TipTapSceneEditorHandle>(null);
   const elementsRef = useRef<ScriptElement[]>(sync.elements);
   const inputTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   // Text buffered behind each input debounce — flushed (not dropped) on unmount
@@ -719,6 +725,40 @@ export function SceneBlock({
     sync.reconcile();
     onRemoteStaleHandled?.(String(scene.id)); // string key — matches droppedScenes
   }, [remoteStale, scene.id, sync.reconcile, onRemoteStaleHandled]);
+
+  // TipTap mode (M1): route every `sync.elements` change (remote splice,
+  // reconcile, conflict resolution, 409 replay) through the imperative
+  // applyExternalElements API. This ALSO fires after our own local edits
+  // (dispatchOps → useSceneSync's setElements), but that's harmless —
+  // applyExternalElements' own field-wise equality check makes those calls a
+  // no-op (the doc already shows exactly what `sync.elements` now says,
+  // since the edit originated FROM the editor), which is the loop guard.
+  useEffect(() => {
+    if (!tiptapOn) return;
+    tiptapRef.current?.applyExternalElements(sync.elements);
+  }, [tiptapOn, sync.elements]);
+
+  // EmptySceneHint's seed action in TipTap mode: the PM schema requires
+  // `scriptElement+` (at least one node), so an empty scene can never mount
+  // a TipTapSceneEditor — seed the first element via the same anchored
+  // insert op the legacy path's onEnter(…, {elementId: null}) issues, and
+  // the effect above hands the freshly non-empty `sync.elements` to a
+  // freshly-mounted editor.
+  const handleTiptapSeed = useCallback(() => {
+    const id = newElementId();
+    const op: ElementOp = { op: 'insert', element_id: id, payload: { type: 'action', text: '' } };
+    sync.dispatchOps([op], applyLocal(sync.elements, [op]));
+  }, [sync]);
+
+  // TipTap mode: selection changes report the focused element up exactly
+  // like the legacy handleFocus does (toolbar follow / Statistics cursor).
+  const handleTiptapFocusCursor = useCallback(
+    (elementId: string | null) => {
+      setFocusedElementId(elementId);
+      onFocusElement?.({ sceneId: scene.id, elementId, field: 'element' });
+    },
+    [onFocusElement, scene.id],
+  );
 
   // Lift optimistic elements to the shell for live Statistics + rail entities
   // (Task 6 ⑥). STRUCTURAL changes (a block created/deleted/moved/retyped —
@@ -1232,45 +1272,67 @@ export function SceneBlock({
         <ScenePresenceBadge users={focusPresence ?? []} />
       </div>
 
-      <MentionNamesContext.Provider value={mentionCandidates}>
-        <LayoutEngine
-          elements={sync.elements}
-          blockIndexBase={blockIndexBase}
-          pageSeams={pageSeams}
-          focusedElementId={focusedElementId}
-          mention={lineMention}
-          selectedIds={copilotSelectedIds}
-          onTickClick={handleTickClick}
-          elementReorder={{
-            // An external (cross-scene) drag arms this scene's rows as drop
-            // targets exactly like a local drag would — the rows only gate on
-            // a non-null dragging id.
-            draggingElementId: draggingElementId ?? externalDrag?.element.id ?? null,
-            dropTarget: elementDropTarget,
-            onDragStart: handleElementDragStart,
-            onDragOver: handleElementDragOver,
-            onDrop: handleElementDrop,
-            onDragEnd: handleElementDragEnd,
-          }}
-          handlers={{
-            onInput: handleInput,
-            onKeyDown: handleKeyDown,
-            onFocus: handleFocus,
-            onPaste: handlePaste,
-            onCompositionStart,
-            onCompositionEnd,
-          }}
-        />
-      </MentionNamesContext.Provider>
+      {tiptapOn ? (
+        // TipTap surface (M1, flag-on): the PM schema requires at least one
+        // node, so an empty scene renders EmptySceneHint instead of mounting
+        // the editor — same nudge as the legacy path, wired to an anchored
+        // insert op instead of the machine's onEnter. Gutter drag / slash /
+        // mentions are M2 scope; they simply don't attach here yet.
+        sync.elements.length === 0 ? (
+          <EmptySceneHint onSeed={handleTiptapSeed} />
+        ) : (
+          <TipTapSceneEditor
+            ref={tiptapRef}
+            initialElements={sync.elements}
+            format={format}
+            blockIndexBase={blockIndexBase}
+            dispatchOps={sync.dispatchOps}
+            onFocusCursor={handleTiptapFocusCursor}
+          />
+        )
+      ) : (
+        <>
+          <MentionNamesContext.Provider value={mentionCandidates}>
+            <LayoutEngine
+              elements={sync.elements}
+              blockIndexBase={blockIndexBase}
+              pageSeams={pageSeams}
+              focusedElementId={focusedElementId}
+              mention={lineMention}
+              selectedIds={copilotSelectedIds}
+              onTickClick={handleTickClick}
+              elementReorder={{
+                // An external (cross-scene) drag arms this scene's rows as drop
+                // targets exactly like a local drag would — the rows only gate on
+                // a non-null dragging id.
+                draggingElementId: draggingElementId ?? externalDrag?.element.id ?? null,
+                dropTarget: elementDropTarget,
+                onDragStart: handleElementDragStart,
+                onDragOver: handleElementDragOver,
+                onDrop: handleElementDrop,
+                onDragEnd: handleElementDragEnd,
+              }}
+              handlers={{
+                onInput: handleInput,
+                onKeyDown: handleKeyDown,
+                onFocus: handleFocus,
+                onPaste: handlePaste,
+                onCompositionStart,
+                onCompositionEnd,
+              }}
+            />
+          </MentionNamesContext.Provider>
 
-      {sync.elements.length === 0 && (
-        <EmptySceneHint
-          onSeed={() =>
-            applyResult(
-              onEnter(sync.elements, { sceneId: scene.id, elementId: null, field: 'element' }),
-            )
-          }
-        />
+          {sync.elements.length === 0 && (
+            <EmptySceneHint
+              onSeed={() =>
+                applyResult(
+                  onEnter(sync.elements, { sceneId: scene.id, elementId: null, field: 'element' }),
+                )
+              }
+            />
+          )}
+        </>
       )}
 
       {mention && (
