@@ -245,6 +245,47 @@ async def test_upload_file_missing_project_raises(service):
         await service.upload_file(project_id="999", user_id="u1", file=file)
 
 
+@pytest.mark.asyncio
+async def test_upload_file_scope_resolution_failure_falls_back_to_filesystem(
+    service, monkeypatch
+):
+    """PIN (review fix): scope resolution is part of the storage track. A
+    personal project (team_id NULL) whose owner has no personal-team row
+    raises ValueError from _resolve_personal_team_id — that must degrade to
+    the fs fallback, NOT escape as a bogus router-level "404 Project not
+    found"."""
+    monkeypatch.setattr(ps.settings, "FEATURE_UNIFIED_STORAGE", True)
+    _seed_project(service.repo, 6, team_id=None, owner_id="orphan-owner")
+
+    async def failing_resolve_personal_team_id(user_id):
+        raise ValueError(f"No personal team found for user {user_id}")
+
+    monkeypatch.setattr(
+        ps, "_resolve_personal_team_id", failing_resolve_personal_team_id
+    )
+
+    store_mock = MagicMock()
+    monkeypatch.setattr(ps, "store_local_file", store_mock)
+    err_mock = MagicMock()
+    monkeypatch.setattr(ps.logger, "error", err_mock)
+
+    file = FakeUploadFile("orphan.txt", b"scope-failure bytes", "text/plain")
+    created = await service.upload_file(project_id="6", user_id="u1", file=file)
+
+    # No exception escaped; the file landed on the legacy mediatrack path.
+    expected = "mediatrack/6/orphan.txt"
+    assert created["file_path"] == expected
+    on_disk = Path(ps.settings.DOWNLOAD_PATH) / expected
+    assert on_disk.exists()
+    assert on_disk.read_bytes() == b"scope-failure bytes"
+
+    # The object-store write was never attempted (scope resolution raised
+    # first), and the fallback was logged at ERROR with the standard shape.
+    store_mock.assert_not_called()
+    err_mock.assert_called_once()
+    assert "unified-storage write failed" in err_mock.call_args[0][0]
+
+
 # ── Task 3.2: upload_new_version dual-track (the "另一子路径" write point) ──
 
 
@@ -384,6 +425,60 @@ async def test_new_version_store_failure_falls_back_to_filesystem(service, monke
     assert on_disk.exists()
     assert on_disk.read_bytes() == b"fallback v2 bytes"
 
+    err_mock.assert_called_once()
+    assert "unified-storage write failed" in err_mock.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_new_version_scope_resolution_failure_falls_back_to_filesystem(
+    service, monkeypatch
+):
+    """PIN (review fix): same contract as upload_file — a scope-resolution
+    raise inside the flag-on track degrades to the fs fallback instead of
+    escaping the dual-track boundary."""
+    monkeypatch.setattr(ps.settings, "FEATURE_UNIFIED_STORAGE", True)
+    _seed_project(service.repo, 13, team_id=None, owner_id="orphan-owner")
+
+    service.repo.files[503] = {
+        "id": 503,
+        "project_id": 13,
+        "filename": "orig.txt",
+        "file_path": "mediatrack/13/orig.txt",
+        "current_version": 1,
+    }
+    service.repo.versions.append(
+        {
+            "file_id": "503",
+            "version_number": 1,
+            "filename": "orig.txt",
+            "file_path": "mediatrack/13/orig.txt",
+        }
+    )
+
+    async def failing_resolve_personal_team_id(user_id):
+        raise ValueError(f"No personal team found for user {user_id}")
+
+    monkeypatch.setattr(
+        ps, "_resolve_personal_team_id", failing_resolve_personal_team_id
+    )
+
+    store_mock = MagicMock()
+    monkeypatch.setattr(ps, "store_local_file", store_mock)
+    err_mock = MagicMock()
+    monkeypatch.setattr(ps.logger, "error", err_mock)
+
+    file = FakeUploadFile("orphan-v2.txt", b"scope-failure v2 bytes", "text/plain")
+    version = await service.upload_new_version(
+        project_id="13", file_id="503", user_id="u1", file=file
+    )
+
+    expected = "mediatrack/13/versions/503/v2_orphan-v2.txt"
+    assert version["file_path"] == expected
+    on_disk = Path(ps.settings.DOWNLOAD_PATH) / expected
+    assert on_disk.exists()
+    assert on_disk.read_bytes() == b"scope-failure v2 bytes"
+
+    store_mock.assert_not_called()
     err_mock.assert_called_once()
     assert "unified-storage write failed" in err_mock.call_args[0][0]
 

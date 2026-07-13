@@ -601,8 +601,13 @@ class ProjectsService:
 
             stored = None
             if settings.FEATURE_UNIFIED_STORAGE:
-                scope_id = await self._resolve_project_scope_id(project)
+                # Scope resolution lives INSIDE the try: it can raise (a
+                # personal project whose owner lacks a personal-team row)
+                # and ANY storage-track failure must degrade to the fs
+                # fallback — never escape as a bogus "Project not found"
+                # 404 via the router's generic ValueError handler.
                 try:
+                    scope_id = await self._resolve_project_scope_id(project)
                     stored = await store_local_file(
                         scope_id=scope_id,
                         source_path=str(tmp_path),
@@ -784,8 +789,11 @@ class ProjectsService:
 
             stored = None
             if settings.FEATURE_UNIFIED_STORAGE:
-                scope_id = await self._resolve_project_scope_id(project)
+                # Scope resolution lives INSIDE the try (same contract as
+                # upload_file): a scope-resolution failure is a storage-
+                # track failure and must degrade to the fs fallback.
                 try:
+                    scope_id = await self._resolve_project_scope_id(project)
                     stored = await store_local_file(
                         scope_id=scope_id,
                         source_path=str(tmp_path),
