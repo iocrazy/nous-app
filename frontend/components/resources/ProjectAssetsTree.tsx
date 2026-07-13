@@ -11,6 +11,8 @@ import {
   type ProjectAssetTreeNode,
 } from '../../services/projectAssetsService';
 import { createCanvas } from '../../features/canvas-core/services/canvasService';
+import { NewCanvasDialog } from '../../features/canvas-core/ui/NewCanvasDialog';
+import type { CanvasKind } from '../../features/canvas-core/types';
 import { useToast } from '../Toast';
 
 export type ProjectAssetsSelection =
@@ -55,16 +57,23 @@ export const ProjectAssetsTree: React.FC<Props> = ({ selection, onSelect, chatUp
       return next;
     });
 
+  // Which project the NewCanvasDialog is creating for (null = closed). The
+  // dialog is the shared IC-style name + Smart/Classic picker — this entry
+  // used to silently default every canvas to smart.
+  const [dialogProjectId, setDialogProjectId] = useState<string | null>(null);
+
   // Create a fresh (empty) canvas and drop the user straight into the editor.
   // The new canvas has no nodes yet, so batch A's orphan filter keeps it out
   // of THIS tree until a node is added — that's why we navigate rather than
   // refresh the tree in place.
-  const handleCreateCanvas = async (projectId: string) => {
-    if (creatingProjectId) return;
+  const handleCreateCanvas = async ({ name, kind }: { name: string; kind: CanvasKind }) => {
+    const projectId = dialogProjectId;
+    if (!projectId || creatingProjectId) return;
     setCreatingProjectId(projectId);
     try {
       const canvas = await createCanvas(projectId, {
-        name: t('projectAssets.untitledCanvas', 'Untitled Canvas'),
+        name: name || t('projectAssets.untitledCanvas', 'Untitled Canvas'),
+        kind,
       });
       navigate(`/team/${teamId}/canvas/${canvas.id}`);
     } catch (err) {
@@ -72,6 +81,7 @@ export const ProjectAssetsTree: React.FC<Props> = ({ selection, onSelect, chatUp
       addToast(t('projectAssets.createFailed', 'Failed to create canvas'), 'error');
     } finally {
       setCreatingProjectId(null);
+      setDialogProjectId(null);
     }
   };
 
@@ -119,7 +129,7 @@ export const ProjectAssetsTree: React.FC<Props> = ({ selection, onSelect, chatUp
               <span className="flex-1 truncate text-left font-medium">{project.name}</span>
             </button>
             <button
-              onClick={() => handleCreateCanvas(project.project_id)}
+              onClick={() => setDialogProjectId(project.project_id)}
               disabled={creatingProjectId === project.project_id}
               title={t('projectAssets.newCanvas', 'New Canvas')}
               aria-label={t('projectAssets.newCanvas', 'New Canvas')}
@@ -149,7 +159,7 @@ export const ProjectAssetsTree: React.FC<Props> = ({ selection, onSelect, chatUp
 
           {expanded.has(project.project_id) && project.canvases.length === 0 && (
             <button
-              onClick={() => handleCreateCanvas(project.project_id)}
+              onClick={() => setDialogProjectId(project.project_id)}
               disabled={creatingProjectId === project.project_id}
               aria-label={t('projectAssets.newCanvas', 'New Canvas')}
               className="flex items-center gap-1.5 w-full pl-7 pr-3 py-1 rounded-md text-xs text-content-3 hover:text-content-2 hover:bg-island-2 disabled:opacity-40"
@@ -160,6 +170,13 @@ export const ProjectAssetsTree: React.FC<Props> = ({ selection, onSelect, chatUp
           )}
         </div>
       ))}
+
+      <NewCanvasDialog
+        open={dialogProjectId !== null}
+        creating={creatingProjectId !== null}
+        onCancel={() => setDialogProjectId(null)}
+        onCreate={handleCreateCanvas}
+      />
     </div>
   );
 };

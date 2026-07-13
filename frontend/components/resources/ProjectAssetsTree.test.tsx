@@ -10,7 +10,7 @@
  */
 
 import React from 'react';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const navigate = vi.fn();
@@ -55,7 +55,7 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('ProjectAssetsTree New Canvas entry', () => {
-  it('creates a canvas from the project row and navigates into the editor', async () => {
+  it('opens the kind dialog and creates with the chosen kind (IC-style)', async () => {
     fetchProjectAssetsTree.mockResolvedValue([
       {
         project_id: 'proj-1',
@@ -69,19 +69,30 @@ describe('ProjectAssetsTree New Canvas entry', () => {
 
     render(<ProjectAssetsTree {...baseProps} />);
 
-    // Project with canvases auto-expands; the row's New Canvas button is present.
+    // Project with canvases auto-expands; the row's New Canvas button now
+    // opens the shared NewCanvasDialog instead of creating immediately.
     const btn = await screen.findByRole('button', { name: 'projectAssets.newCanvas' });
     fireEvent.click(btn);
+    expect(createCanvas).not.toHaveBeenCalled();
+
+    const dialog = await screen.findByRole('dialog');
+    // Pick Classic — the whole point of the dialog (three entries used to
+    // silently default every canvas to smart).
+    fireEvent.click(within(dialog).getByRole('button', { name: /canvasList\.kind\.classic/ }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'common.create' }));
 
     await waitFor(() => expect(createCanvas).toHaveBeenCalledTimes(1));
-    expect(createCanvas).toHaveBeenCalledWith('proj-1', { name: 'projectAssets.untitledCanvas' });
+    expect(createCanvas).toHaveBeenCalledWith('proj-1', {
+      name: 'projectAssets.untitledCanvas',
+      kind: 'classic',
+    });
     await waitFor(() =>
       expect(navigate).toHaveBeenCalledWith('/team/t1/canvas/c-new'),
     );
     expect(addToast).not.toHaveBeenCalled();
   });
 
-  it('offers a New Canvas entry in the empty (no-canvas) project state', async () => {
+  it('offers the dialog from the empty (no-canvas) project state, default smart', async () => {
     fetchProjectAssetsTree.mockResolvedValue([
       { project_id: 'proj-2', name: 'Empty Proj', canvases: [] },
     ]);
@@ -96,7 +107,16 @@ describe('ProjectAssetsTree New Canvas entry', () => {
     const entries = await screen.findAllByRole('button', { name: 'projectAssets.newCanvas' });
     fireEvent.click(entries[entries.length - 1]);
 
-    await waitFor(() => expect(createCanvas).toHaveBeenCalledWith('proj-2', { name: 'projectAssets.untitledCanvas' }));
+    const dialog = await screen.findByRole('dialog');
+    // Just hit Create — kind defaults to smart, matching the old behavior.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'common.create' }));
+
+    await waitFor(() =>
+      expect(createCanvas).toHaveBeenCalledWith('proj-2', {
+        name: 'projectAssets.untitledCanvas',
+        kind: 'smart',
+      }),
+    );
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/team/t1/canvas/c-empty-new'));
   });
 
@@ -115,6 +135,8 @@ describe('ProjectAssetsTree New Canvas entry', () => {
     render(<ProjectAssetsTree {...baseProps} />);
     const btn = await screen.findByRole('button', { name: 'projectAssets.newCanvas' });
     fireEvent.click(btn);
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'common.create' }));
 
     await waitFor(() => expect(addToast).toHaveBeenCalledWith('projectAssets.createFailed', 'error'));
     expect(navigate).not.toHaveBeenCalled();
