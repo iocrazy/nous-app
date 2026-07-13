@@ -6,8 +6,10 @@ Provides three export formats for Storyboard Workbench projects:
 - PDF  : per-frame pages with metadata tables, built from Pillow images
 - ZIP  : full project archive (JSON data + all media files)
 
-NAS layout assumed:
-    <NAS_BASE_PATH>/teams/<team_id>/storyboard/<project_id>/
+Exports (PNG/PDF/ZIP archives) are regenerable derivatives — same policy as
+thumbnails/HLS elsewhere — and always land on the local filesystem, never
+the unified-storage `library` bucket:
+    <settings.DOWNLOAD_PATH>/teams/<team_id>/storyboard/<project_id>/
         frames/
         thumbnails/
         characters/
@@ -21,7 +23,6 @@ Timestamp format:  %Y%m%d_%H%M%S
 import asyncio
 import json
 import logging
-import os
 import re
 import zipfile
 from datetime import datetime
@@ -30,6 +31,7 @@ from typing import Any, Dict, List, Optional
 
 from PIL import Image, ImageDraw, ImageFont
 
+from app.core.config import settings
 from app.repositories.storyboard_repository import (
     get_storyboard_asset_repository,
     get_storyboard_character_repository,
@@ -44,8 +46,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-
-NAS_BASE_PATH = os.environ.get("NAS_BASE_PATH", "/app/downloads")
 
 _PLACEHOLDER_COLOR = (40, 40, 40)  # dark grey for missing-frame cells
 _PDF_PAGE_W = 1240  # A4-ish at 150 dpi
@@ -96,10 +96,21 @@ def _load_font(paths: List[str], size: int) -> ImageFont.FreeTypeFont:
 
 
 def _project_root(project: Dict[str, Any]) -> Path:
-    """Resolve the NAS root directory for a project."""
+    """Resolve the export root directory for a project.
+
+    Exports are regenerable derivatives (PNG grid / PDF / ZIP archive) and
+    always live on the local filesystem under settings.DOWNLOAD_PATH — read
+    live (not cached at import time) so tests can monkeypatch it.
+    """
     team_id = project.get("team_id", "unknown")
     project_id = project.get("id", "unknown")
-    return Path(NAS_BASE_PATH) / "teams" / team_id / "storyboard" / project_id
+    return (
+        Path(settings.DOWNLOAD_PATH)
+        / "teams"
+        / str(team_id)
+        / "storyboard"
+        / str(project_id)
+    )
 
 
 def _exports_dir(project: Dict[str, Any]) -> Path:
