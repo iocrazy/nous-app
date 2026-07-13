@@ -96,6 +96,39 @@ async def test_migrate_row_missing_local_file(monkeypatch, tmp_path):
     assert outcome == "missing"
 
 
+# ── 1b. containment: traversal file_path → row failed, nothing touched ──
+
+
+async def test_migrate_row_traversal_path_raises_nothing_deleted(monkeypatch, tmp_path):
+    from app.core.config import settings
+
+    downloads = tmp_path / "downloads"
+    downloads.mkdir()
+    monkeypatch.setattr(settings, "DOWNLOAD_PATH", str(downloads))
+
+    # A real file OUTSIDE DOWNLOAD_PATH that the poisoned row points at.
+    victim = tmp_path / "secret.txt"
+    victim.write_text("do not delete me")
+
+    async def _boom(*a, **kw):  # store must never be reached
+        raise AssertionError("store_local_file must not run for a traversal row")
+
+    monkeypatch.setattr(media_storage, "store_local_file", _boom)
+    update_row = AsyncMock(return_value=None)
+
+    for poisoned in ("../secret.txt", "../../etc/passwd", "a/../../secret.txt"):
+        with pytest.raises(RuntimeError, match="escapes DOWNLOAD_PATH"):
+            await sm._migrate_row(
+                {"id": 1, "file_path": poisoned},
+                _module_cfg(update_row=update_row),
+                dry_run=False,
+                delete_source=True,
+            )
+
+    update_row.assert_not_awaited()
+    assert victim.exists()  # nothing deleted
+
+
 # ── 2. dry_run: PUT may happen, zero UPDATE, zero delete ────────────────
 
 
@@ -225,6 +258,7 @@ def _make_manager() -> MagicMock:
     mgr.update_progress = AsyncMock(return_value=None)
     mgr.complete = AsyncMock(return_value=None)
     mgr.fail = AsyncMock(return_value=None)
+    mgr.patch_metadata = AsyncMock(return_value=None)
     return mgr
 
 
@@ -301,12 +335,25 @@ async def test_workflow_row_failure_does_not_abort_but_batch_raises(
     # row 1 migrated despite row 2 failing later in the same batch.
     update_row.assert_awaited_once()
     manager.complete.assert_not_awaited()
+    # Failed-run observability: partial counts landed in task metadata
+    # BEFORE the raise (patch_metadata — unthrottled, metadata-only).
+    manager.patch_metadata.assert_awaited_once()
+    patched = manager.patch_metadata.await_args.args[1]
+    assert patched["failed"] == 1
+    assert patched["migrated"] == 1
+    assert patched["total"] == 2
 
 
 # ── 8. current_version parent-sync (real module update_row closures) ────
+#
+# Atomicity pin: child UPDATE + parent sync must be ONE statement (one
+# db_engine.execute call = one implicit transaction — db_engine has no
+# cross-statement transaction API). Two autocommit UPDATEs left a crash
+# window that permanently orphaned the parent's file_path (replay excludes
+# the already-sb child). The parent leg is gated by :sync_parent.
 
 
-async def test_uploads_update_row_syncs_resources_on_current_version(monkeypatch):
+def _record_execute(monkeypatch) -> list[tuple[str, dict]]:
     calls: list[tuple[str, dict]] = []
 
     async def fake_execute(sql, params=None):
@@ -314,63 +361,55 @@ async def test_uploads_update_row_syncs_resources_on_current_version(monkeypatch
         return 1
 
     monkeypatch.setattr(sm.db_engine, "execute", fake_execute)
+    return calls
+
+
+async def test_uploads_update_row_syncs_resources_on_current_version(monkeypatch):
+    calls = _record_execute(monkeypatch)
 
     row = {"id": 10, "resource_id": 100, "version_number": 2, "current_version": 2}
     await sm._uploads_update_row(row, "sb://library/t1/ab/cd/x.mp4", "deadbeef")
 
-    assert len(calls) == 2
-    assert "resource_versions" in calls[0][0]
-    assert calls[0][1]["id"] == 10
-    assert "resources" in calls[1][0]
-    assert calls[1][1]["id"] == 100
+    # ONE statement covering both tables — child + parent same transaction.
+    assert len(calls) == 1
+    sql, params = calls[0]
+    assert "WITH" in sql
+    assert "resource_versions" in sql
+    assert "UPDATE resources" in sql
+    assert params["id"] == 10
+    assert params["sync_parent"] is True
 
 
 async def test_uploads_update_row_skips_resources_when_not_current(monkeypatch):
-    calls: list[tuple[str, dict]] = []
-
-    async def fake_execute(sql, params=None):
-        calls.append((sql, params or {}))
-        return 1
-
-    monkeypatch.setattr(sm.db_engine, "execute", fake_execute)
+    calls = _record_execute(monkeypatch)
 
     row = {"id": 10, "resource_id": 100, "version_number": 1, "current_version": 2}
     await sm._uploads_update_row(row, "sb://library/t1/ab/cd/x.mp4", "deadbeef")
 
     assert len(calls) == 1
-    assert "resource_versions" in calls[0][0]
+    assert calls[0][1]["sync_parent"] is False  # parent leg gated off
 
 
 async def test_project_files_update_row_syncs_on_current_version(monkeypatch):
-    calls: list[tuple[str, dict]] = []
-
-    async def fake_execute(sql, params=None):
-        calls.append((sql, params or {}))
-        return 1
-
-    monkeypatch.setattr(sm.db_engine, "execute", fake_execute)
+    calls = _record_execute(monkeypatch)
 
     row = {"id": 20, "file_id": 200, "version_number": 3, "current_version": 3}
     await sm._project_files_update_row(row, "sb://library/t1/ab/cd/y.mp4", "cafebabe")
 
-    assert len(calls) == 2
-    assert "file_versions" in calls[0][0]
-    assert calls[0][1]["id"] == 20
-    assert "project_files" in calls[1][0]
-    assert calls[1][1]["id"] == 200
+    assert len(calls) == 1
+    sql, params = calls[0]
+    assert "WITH" in sql
+    assert "file_versions" in sql
+    assert "UPDATE project_files" in sql
+    assert params["id"] == 20
+    assert params["sync_parent"] is True
 
 
 async def test_project_files_update_row_skips_parent_when_not_current(monkeypatch):
-    calls: list[tuple[str, dict]] = []
-
-    async def fake_execute(sql, params=None):
-        calls.append((sql, params or {}))
-        return 1
-
-    monkeypatch.setattr(sm.db_engine, "execute", fake_execute)
+    calls = _record_execute(monkeypatch)
 
     row = {"id": 20, "file_id": 200, "version_number": 1, "current_version": 3}
     await sm._project_files_update_row(row, "sb://library/t1/ab/cd/y.mp4", "cafebabe")
 
     assert len(calls) == 1
-    assert "file_versions" in calls[0][0]
+    assert calls[0][1]["sync_parent"] is False

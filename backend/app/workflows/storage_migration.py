@@ -48,6 +48,7 @@ to migrate; wiring it up would just be dead SQL against renamed tables.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
@@ -145,18 +146,38 @@ def _uploads_extract(row: dict) -> RowExtract:
     )
 
 
+# Child + parent sync as ONE data-modifying CTE statement → one implicit
+# transaction (db_engine has no cross-statement transaction helper; every
+# db_engine.execute opens its own engine.begin()). Two separate autocommit
+# UPDATEs left a crash window that permanently orphaned the parent's
+# file_path: the replayed batch SELECT excludes the already-sb child, so
+# the parent would never get synced. ``:sync_parent`` gates the parent leg
+# (false → the outer UPDATE matches nothing; the CTE still runs).
+_UPLOADS_UPDATE_SQL = """
+    WITH v AS (
+        UPDATE resource_versions
+        SET file_path = :file_path, file_hash = :sha256
+        WHERE id = :id
+        RETURNING resource_id
+    )
+    UPDATE resources r
+    SET file_path = :file_path, file_hash = :sha256
+    FROM v
+    WHERE r.id = v.resource_id
+      AND :sync_parent::boolean
+"""
+
+
 async def _uploads_update_row(row: dict, file_path: str, sha256: Optional[str]) -> None:
     await db_engine.execute(
-        "UPDATE resource_versions SET file_path = :file_path, file_hash = :sha256 "
-        "WHERE id = :id",
-        {"file_path": file_path, "sha256": sha256, "id": row["id"]},
+        _UPLOADS_UPDATE_SQL,
+        {
+            "file_path": file_path,
+            "sha256": sha256,
+            "id": row["id"],
+            "sync_parent": row.get("version_number") == row.get("current_version"),
+        },
     )
-    if row.get("version_number") == row.get("current_version"):
-        await db_engine.execute(
-            "UPDATE resources SET file_path = :file_path, file_hash = :sha256 "
-            "WHERE id = :id",
-            {"file_path": file_path, "sha256": sha256, "id": row["resource_id"]},
-        )
 
 
 # ── project_files: file_versions (+ project_files.file_path sync) ──────
@@ -208,18 +229,33 @@ def _project_files_extract(row: dict) -> RowExtract:
     )
 
 
+# Same single-statement CTE atomicity rationale as _UPLOADS_UPDATE_SQL.
+_PROJECT_FILES_UPDATE_SQL = """
+    WITH v AS (
+        UPDATE file_versions
+        SET file_path = :file_path
+        WHERE id = :id
+        RETURNING file_id
+    )
+    UPDATE project_files pf
+    SET file_path = :file_path
+    FROM v
+    WHERE pf.id = v.file_id
+      AND :sync_parent::boolean
+"""
+
+
 async def _project_files_update_row(
     row: dict, file_path: str, sha256: Optional[str]
 ) -> None:
     await db_engine.execute(
-        "UPDATE file_versions SET file_path = :file_path WHERE id = :id",
-        {"file_path": file_path, "id": row["id"]},
+        _PROJECT_FILES_UPDATE_SQL,
+        {
+            "file_path": file_path,
+            "id": row["id"],
+            "sync_parent": row.get("version_number") == row.get("current_version"),
+        },
     )
-    if row.get("version_number") == row.get("current_version"):
-        await db_engine.execute(
-            "UPDATE project_files SET file_path = :file_path WHERE id = :id",
-            {"file_path": file_path, "id": row["file_id"]},
-        )
 
 
 # storyboard: SKIPPED — see module docstring above. Do not add an entry.
@@ -258,7 +294,17 @@ async def _migrate_row(
     if loc.is_object_store:
         return "skipped"  # already migrated — idempotent replay
 
-    local = Path(settings.DOWNLOAD_PATH) / (loc.rel_path or "")
+    # Containment guard (mirrors materialize()'s in media_storage.py): a
+    # poisoned legacy file_path with ".." segments or symlink tricks must
+    # never resolve outside DOWNLOAD_PATH. This path gets stat'd, PUT and
+    # — with delete_source — unlink'd; without this check a hostile row
+    # value is an arbitrary-file-delete primitive. Raise → the caller's
+    # per-row try/except counts the row failed, nothing mutated.
+    base = os.path.realpath(settings.DOWNLOAD_PATH)
+    real = os.path.realpath(os.path.join(base, loc.rel_path or ""))
+    if not (real == base or real.startswith(base + os.sep)):
+        raise RuntimeError(f"file_path escapes DOWNLOAD_PATH: {file_path!r}")
+    local = Path(real)
     if not local.exists():
         logger.warning(f"[storage-migration] missing local file, skip: {file_path}")
         return "missing"
@@ -385,6 +431,16 @@ async def storage_migration_workflow(
     result: dict[str, Any] = {"module": module, "total": total, **counts}
 
     if counts["failed"] > 0:
+        # Persist the partial counts into task metadata BEFORE raising so a
+        # failed run is still observable (patch_metadata is the unthrottled
+        # business-decoration API — metadata jsonb only, never the phase
+        # columns, so it's route-C compliant on the failure path too).
+        try:
+            await manager.patch_metadata(task_id, result)
+        except Exception as e:
+            logger.warning(
+                f"[storage-migration] failed-run metadata patch (non-fatal): {e}"
+            )
         # CLAUDE.md 路线 C rule 4: raise, never return a failed dict. DBOS
         # marks the workflow ERROR and mirror_dbos_lifecycle_to_tracking
         # writes phase=failed for us — calling manager.fail() here too
