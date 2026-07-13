@@ -178,17 +178,3 @@ describe('CanvasSurface drag-snap-connect (smart)', () => {
     expect(useCanvasCoreStore.getState().connections).toHaveLength(0);
   });
 });
-
-describe('CanvasSurface drag-snap-connect (classic keeps old behavior)', () => {
-  it('classic mode never snap-connects', () => {
-    seed('classic', [
-      { id: 'img', type: 'image', position: { x: 0, y: 0 }, data: {} },
-      { id: 'out', type: 'output', position: { x: 600, y: 0 }, data: {} },
-    ]);
-    render(<CanvasSurface />);
-
-    dragNode({ id: 'img', type: 'image', from: { x: 0, y: 0 }, to: { x: 650, y: 10 }, altKey: true });
-
-    expect(useCanvasCoreStore.getState().connections).toHaveLength(0);
-  });
-});

@@ -3,7 +3,7 @@
  *
  * In smart mode the edges CanvasSurface hands to the engine carry a
  * run-state className derived from the adjacent prompt's run_status, so a
- * cascade run visibly flows along the wires. Classic mode is untouched.
+ * cascade run visibly flows along the wires.
  */
 
 import { render, cleanup, act } from '@testing-library/react';
@@ -58,24 +58,6 @@ describe('CanvasSurface run-state edge colouring', () => {
     const edges = capturedProps.edges as Array<{ id: string; className?: string }>;
     expect(edges.find((e) => e.id === 'e1')?.className).toContain('mh-edge-active');
     expect(edges.find((e) => e.id === 'e2')?.className).toContain('mh-edge-active');
-  });
-
-  it('classic edges stay undecorated', () => {
-    useCanvasCoreStore.setState({
-      kind: 'classic',
-      nodes: [
-        { id: 'img', type: 'image', position: { x: 0, y: 0 }, data: {} },
-        { id: 'out', type: 'output', position: { x: 300, y: 0 }, data: { run_status: 'running' } },
-      ],
-      connections: [
-        { id: 'e1', source: 'img', target: 'out', sourceHandle: 'image-out', targetHandle: 'image-in' },
-      ],
-      selection: [],
-    });
-    render(<CanvasSurface />);
-
-    const edges = capturedProps.edges as Array<{ id: string; className?: string }>;
-    expect(edges[0].className ?? '').not.toContain('mh-edge');
   });
 
   it('keeps edge identity stable across drag ticks when statuses are unchanged', () => {

@@ -1723,6 +1723,7 @@
       "hint": "It doesn't have any content yet."
     },
     "backToList": "Back to canvases",
+    "classicRetired": "Classic canvases have been retired",
     "dragCreate": {
       "title": "Add node",
       "noCompatible": "No compatible node",

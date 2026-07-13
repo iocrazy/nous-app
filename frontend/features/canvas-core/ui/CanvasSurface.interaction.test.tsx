@@ -57,7 +57,7 @@ function findChild(type: unknown): React.ReactElement | undefined {
 
 describe('CanvasSurface — adopted interaction props', () => {
   it('wires snap grid, Shift box-select, platform additive key, and a guide overlay', () => {
-    seed('classic', [{ id: 'a', type: 'output', position: { x: 0, y: 0 }, data: {} }]);
+    seed('smart', [{ id: 'a', type: 'output', position: { x: 0, y: 0 }, data: {} }]);
     render(<CanvasSurface />);
     expect(capturedProps.snapGrid).toEqual([8, 8]);
     // P2-6: the smart canvas opts OUT of the drag lattice (Infinite's free
@@ -77,7 +77,7 @@ describe('CanvasSurface — solo-drop alignment snap', () => {
   it('snaps a solo-dropped node to a neighbour edge via the store setNodes action', () => {
     // Node b sits at x=3; dropping a with its left edge at x=1 is within the 5px
     // tolerance, so a should snap to x=3.
-    seed('classic', [
+    seed('smart', [
       { id: 'a', type: 'output', position: { x: 0, y: 0 }, data: {} },
       { id: 'b', type: 'output', position: { x: 3, y: 500 }, data: {} },
     ]);
@@ -96,7 +96,7 @@ describe('CanvasSurface — solo-drop alignment snap', () => {
 
   it('skips the snap for a node dropped as part of a multi-selection', () => {
     seed(
-      'classic',
+      'smart',
       [
         { id: 'a', type: 'output', position: { x: 0, y: 0 }, data: {} },
         { id: 'b', type: 'output', position: { x: 3, y: 500 }, data: {} },
@@ -117,7 +117,7 @@ describe('CanvasSurface — solo-drop alignment snap', () => {
 
 describe('CanvasSurface — onNodesChange persistence hygiene', () => {
   it('routes select/dimensions changes through the transient path (no dirty, no history)', () => {
-    seed('classic', [{ id: 'a', type: 'output', position: { x: 0, y: 0 }, data: {} }]);
+    seed('smart', [{ id: 'a', type: 'output', position: { x: 0, y: 0 }, data: {} }]);
     render(<CanvasSurface />);
     const onNodesChange = capturedProps.onNodesChange as (c: unknown[]) => void;
     const rev0 = useCanvasCoreStore.getState().revision;
@@ -134,7 +134,7 @@ describe('CanvasSurface — onNodesChange persistence hygiene', () => {
   });
 
   it('routes a committed position change through setNodes (dirty + history base)', () => {
-    seed('classic', [{ id: 'a', type: 'output', position: { x: 0, y: 0 }, data: {} }]);
+    seed('smart', [{ id: 'a', type: 'output', position: { x: 0, y: 0 }, data: {} }]);
     render(<CanvasSurface />);
     const onNodesChange = capturedProps.onNodesChange as (c: unknown[]) => void;
     const rev0 = useCanvasCoreStore.getState().revision;

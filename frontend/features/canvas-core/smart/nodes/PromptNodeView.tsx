@@ -13,7 +13,7 @@ import {
   elapsedSeconds,
   formatElapsed,
   useElapsedSeconds,
-} from '../../classic/nodes/elapsed';
+} from './elapsed';
 import { useCanvasMentionPicker } from './useCanvasMentionPicker';
 import { CanvasMentionPicker } from './CanvasMentionPicker';
 import { useResourceSearch } from '../../../../hooks/useResourceSearch';
@@ -48,13 +48,11 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   const [activeKind, setActiveKind] = useState<ActiveKind>('');
 
   // Smart nodes keep the tone's border colour but drop the whole-card
-  // animate-pulse — the status badge's dot carries the motion (P1-5;
-  // classic mode still uses the full tone string).
+  // animate-pulse — the status badge's dot carries the motion (P1-5).
   const haloTone = RUN_STATUS_TONE[run_status].replace('animate-pulse', '').trim();
 
   // Run-time pill (P1-2, Infinite's .run-time-pill): live seconds while
-  // running, final duration pinned in green once succeeded. The elapsed
-  // helpers are mode-agnostic despite living under classic/ (Phase 5a B4).
+  // running, final duration pinned in green once succeeded.
   const running = run_status === 'running';
   const liveElapsed = useElapsedSeconds(running ? run_started_at : null, running);
   const finalElapsed =

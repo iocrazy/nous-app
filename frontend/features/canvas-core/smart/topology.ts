@@ -122,14 +122,14 @@ export function topoSortPrompts(
   }
 
   // Kahn on the collapsed prompt-only graph — shared core (DRY with the
-  // generic ClassicMode topoSort).
+  // generic topoSort).
   return kahnSort(promptIds, promptAdj);
 }
 
 /**
  * Kahn's algorithm over a prebuilt adjacency map. Shared core behind both
  * {@link topoSortPrompts} (SmartMode, prompt-only collapsed graph) and
- * {@link topoSort} (ClassicMode, all node ids).
+ * {@link topoSort} (generic, all node ids).
  *
  * Tie-break is alphabetical — the initial `queue.sort()` plus sorted-position
  * insertion on each indegree-zero release — so the output order is
@@ -179,14 +179,14 @@ function kahnSort(ids: Iterable<string>, adj: Map<string, Set<string>>): TopoRes
 }
 
 /**
- * Generic topological sort over ALL node ids (ClassicMode). Unlike
+ * Generic topological sort over ALL node ids. Unlike
  * {@link topoSortPrompts} there is no prompt-only collapse — every node id
  * participates, so a ComfyUI-style heterogeneous DAG (image → llm → comfy →
  * output) sorts directly.
  *
  *   - Edges whose source or target is not in `nodeIds` are ignored.
- *   - Self-edges (source === target) are skipped — ClassicMode rejects them
- *     at connect time (`canConnectClassic`), so they never reach here.
+ *   - Self-edges (source === target) are skipped — the connection validator
+ *     rejects them at connect time, so they never reach here.
  *   - Nodes in a cycle land in `cyclic`, not `order`.
  */
 export function topoSort(

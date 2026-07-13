@@ -86,14 +86,14 @@ describe('CanvasListPage', () => {
     const CanvasListPage = await loadPage();
     render(<CanvasListPage />);
 
-    // The tile opens the IC-style dialog; Create submits name + kind.
+    // The tile opens the IC-style dialog; Create submits the name only —
+    // the backend defaults the kind (classic is retired).
     fireEvent.click(await screen.findByRole('button', { name: /New Canvas/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
 
     await waitFor(() => {
       expect(createCanvas).toHaveBeenCalledWith('p1', {
         name: 'Untitled Canvas',
-        kind: 'smart',
       });
       expect(mockNavigate).toHaveBeenCalledWith('/team/team-1/canvas/c-new');
     });

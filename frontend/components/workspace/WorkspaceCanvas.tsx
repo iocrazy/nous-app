@@ -22,7 +22,7 @@ import {
   createCanvas,
   listCanvases,
 } from '../../features/canvas-core/services/canvasService';
-import type { Canvas, CanvasKind } from '../../features/canvas-core/types';
+import type { Canvas } from '../../features/canvas-core/types';
 import { NewCanvasDialog } from '../../features/canvas-core/ui/NewCanvasDialog';
 import { formatRelativeTime } from '../../utils/relativeTime';
 import { CanvasCardPreview } from './CanvasCardPreview';
@@ -66,15 +66,14 @@ export function WorkspaceCanvas({ projectId, teamId }: WorkspaceCanvasProps) {
   const editorPath = (canvasId: string) =>
     teamId ? `/team/${teamId}/canvas/${canvasId}` : `/canvas/${canvasId}`;
 
-  // IC-style create dialog (name + kind choice) — the actual POST happens
-  // here once the dialog submits.
-  const handleCreate = async ({ name, kind }: { name: string; kind: CanvasKind }) => {
+  // IC-style create dialog (name only) — the actual POST happens here once
+  // the dialog submits; the backend defaults the kind to smart.
+  const handleCreate = async ({ name }: { name: string }) => {
     if (creating) return;
     setCreating(true);
     try {
       const canvas = await createCanvas(projectId, {
         name: name || t('canvasList.untitled', 'Untitled Canvas'),
-        kind,
       });
       navigate(editorPath(String(canvas.id)));
     } catch (err) {

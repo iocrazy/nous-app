@@ -12,7 +12,6 @@ import {
 } from '../../services/projectAssetsService';
 import { createCanvas } from '../../features/canvas-core/services/canvasService';
 import { NewCanvasDialog } from '../../features/canvas-core/ui/NewCanvasDialog';
-import type { CanvasKind } from '../../features/canvas-core/types';
 import { useToast } from '../Toast';
 
 export type ProjectAssetsSelection =
@@ -58,22 +57,21 @@ export const ProjectAssetsTree: React.FC<Props> = ({ selection, onSelect, chatUp
     });
 
   // Which project the NewCanvasDialog is creating for (null = closed). The
-  // dialog is the shared IC-style name + Smart/Classic picker — this entry
-  // used to silently default every canvas to smart.
+  // dialog is the shared IC-style name prompt; the backend defaults the
+  // kind to smart (classic is retired).
   const [dialogProjectId, setDialogProjectId] = useState<string | null>(null);
 
   // Create a fresh (empty) canvas and drop the user straight into the editor.
   // The new canvas has no nodes yet, so batch A's orphan filter keeps it out
   // of THIS tree until a node is added — that's why we navigate rather than
   // refresh the tree in place.
-  const handleCreateCanvas = async ({ name, kind }: { name: string; kind: CanvasKind }) => {
+  const handleCreateCanvas = async ({ name }: { name: string }) => {
     const projectId = dialogProjectId;
     if (!projectId || creatingProjectId) return;
     setCreatingProjectId(projectId);
     try {
       const canvas = await createCanvas(projectId, {
         name: name || t('projectAssets.untitledCanvas', 'Untitled Canvas'),
-        kind,
       });
       navigate(`/team/${teamId}/canvas/${canvas.id}`);
     } catch (err) {

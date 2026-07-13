@@ -27,7 +27,6 @@ import { isSmartFamily } from '../types';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { SMART_NODE_TYPES } from '../smart/nodes/registry';
 import { SMART_EDGE_TYPES } from '../smart/edges/registry';
-import { CLASSIC_NODE_TYPES } from '../classic/ClassicNodeViews';
 import { toReactFlowEdges, validateCanvasConnection } from './connectionMapping';
 import { edgeRunStateClass } from '../smart/edgeRunState';
 import { applyDropMembership } from '../smart/grouping';
@@ -312,7 +311,7 @@ export function CanvasSurface() {
   );
 
   // Commit a dragged wire. We re-run the SAME validator as the live hint
-  // (smart → canConnectSmart, classic → typed-port canConnectClassic). Valid
+  // (canConnectSmart). Valid
   // wires are appended to the store with a generated id + handle ids (the
   // cascade + multi-port validation address ports by handle, and
   // `toReactFlowEdges` round-trips them). Invalid wires are dropped silently.
@@ -395,14 +394,8 @@ export function CanvasSurface() {
     [],
   );
 
-  const nodeTypes =
-    isSmartFamily(kind)
-      ? SMART_NODE_TYPES
-      : kind === 'classic'
-        ? CLASSIC_NODE_TYPES
-        : undefined;
-  // Smart mode swaps the default edge for the scissors edge (G6 conn-cut);
-  // classic keeps the stock bezier so nothing else changes.
+  const nodeTypes = isSmartFamily(kind) ? SMART_NODE_TYPES : undefined;
+  // Smart mode swaps the default edge for the scissors edge (G6 conn-cut).
   const edgeTypes = isSmartFamily(kind) ? SMART_EDGE_TYPES : undefined;
 
   return (

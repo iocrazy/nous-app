@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import pytest
+from pydantic import ValidationError
 
 from app.schemas.canvas import CanvasCreate, CanvasUpdate
 from app.services.canvas import CanvasConflict, CanvasService
@@ -194,17 +195,23 @@ class TestCanvasCreate:
         assert row["created_by"] == "u-1"
 
     @pytest.mark.asyncio
-    async def test_create_classic_with_viewport(self, svc):
+    async def test_create_character_with_viewport(self, svc):
         service, _ = svc
         data = CanvasCreate(
             name="My Board",
-            kind="classic",
+            kind="character",
             viewport_json={"x": 100, "y": 50, "zoom": 1.5},
         )
         row = await service.create_in_project("8888", data, created_by="u-2")
-        assert row["kind"] == "classic"
+        assert row["kind"] == "character"
         assert row["name"] == "My Board"
         assert row["viewport_json"]["zoom"] == 1.5
+
+    def test_create_rejects_retired_classic_kind(self):
+        # Classic (canvas 1.0 engine) is retired — new canvases must not be
+        # created with it (mig 361 soft-deleted the remaining rows).
+        with pytest.raises(ValidationError):
+            CanvasCreate(name="Old Board", kind="classic")
 
 
 # ============================================================
