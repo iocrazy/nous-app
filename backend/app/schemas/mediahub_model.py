@@ -2,7 +2,7 @@
 
 """Pydantic schemas for Nous models API."""
 
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel
 
@@ -111,3 +111,18 @@ class MediahubModelTestResponse(BaseModel):
     # ISO timestamp the result was persisted at (lets the UI show "tested just
     # now" without re-fetching the whole list).
     tested_at: Optional[str] = None
+
+
+class ProviderProtocolItem(BaseModel):
+    """One provider protocol for the admin dropdown."""
+
+    key: str
+    label: str
+    description: str
+    model_types: List[str]
+    aliases: List[str]
+    is_default: bool
+
+
+class ProviderProtocolListResponse(BaseModel):
+    protocols: List[ProviderProtocolItem]

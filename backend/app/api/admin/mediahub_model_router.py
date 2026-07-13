@@ -18,6 +18,8 @@ from app.schemas.mediahub_model import (
     MediahubModelResponse,
     MediahubModelTestResponse,
     MediahubModelUpdate,
+    ProviderProtocolItem,
+    ProviderProtocolListResponse,
 )
 
 # Shared probe — same implementation the scheduled health poll uses. Aliased to
@@ -70,6 +72,27 @@ async def list_mediahub_models(auth: AdminAuthDep):
     repo = get_mediahub_model_repository()
     rows = await repo.list_all()
     return [_to_response(r) for r in rows]
+
+
+@router.get("/protocols", response_model=ProviderProtocolListResponse)
+async def list_provider_protocols(auth: AdminAuthDep):
+    """Provider protocols the platform can dispatch to (single source of
+    truth for the admin ``actual_provider`` dropdown). Read-only."""
+    from app.services.ai.provider_protocols import all_protocols
+
+    return ProviderProtocolListResponse(
+        protocols=[
+            ProviderProtocolItem(
+                key=p.key,
+                label=p.label,
+                description=p.description,
+                model_types=list(p.model_types),
+                aliases=list(p.aliases),
+                is_default=p.is_default,
+            )
+            for p in all_protocols()
+        ]
+    )
 
 
 @router.post("/probe-models", response_model=TestConnectionResponse)
