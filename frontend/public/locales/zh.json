@@ -1529,7 +1529,8 @@
         "locations": "场景库",
         "files": "文件",
         "trash": "回收站",
-        "settings": "设置"
+        "settings": "设置",
+        "props": "道具"
       },
       "publish": {
         "comingSoon": "发布功能将随 Distribution D2 上线"
@@ -3048,6 +3049,30 @@
       "lead": "主角",
       "support": "配角",
       "antagonist": "反派"
+    }
+  },
+  "libEntities": {
+    "extract": "从剧本提取",
+    "extractFailed": "从剧本提取失败",
+    "createFailed": "创建失败",
+    "updateFailed": "保存失败",
+    "openCanvasFailed": "打开画布失败",
+    "nameLabel": "名称",
+    "bioLabel": "描述",
+    "bioPlaceholder": "外观、氛围、年代、材质……",
+    "assetsHint": "生成的资产会出现在这里",
+    "openCanvas": "在画布中打开",
+    "location": {
+      "label": "场景",
+      "untitled": "New Location",
+      "emptyTitle": "还没有场景",
+      "add": "添加场景"
+    },
+    "prop": {
+      "label": "道具",
+      "untitled": "New Prop",
+      "emptyTitle": "还没有道具",
+      "add": "添加道具"
     }
   }
 }

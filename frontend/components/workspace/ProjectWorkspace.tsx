@@ -418,8 +418,8 @@ export function ProjectWorkspace({
                 onOpenEpisode={handleOpenEpisode}
               />
             )}
-            {(activeModule === 'characters' || activeModule === 'locations') && (
-              <WorkspaceEntities kind={activeModule} projectId={project.id} episodes={episodes} />
+            {(activeModule === 'characters' || activeModule === 'locations' || activeModule === 'props') && (
+              <WorkspaceEntities kind={activeModule} projectId={project.id} />
             )}
             {activeModule === 'files' && (
               <WorkspaceFiles

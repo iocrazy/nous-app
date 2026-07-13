@@ -6,7 +6,8 @@
  */
 
 import type { ComponentType } from 'react';
-import { LayoutDashboard, Frame, ListVideo, Users, MapPin, FolderOpen, Trash2, Settings } from 'lucide-react';
+import { LayoutDashboard, Frame, ListVideo, Users, MapPin,
+  Package, FolderOpen, Trash2, Settings } from 'lucide-react';
 
 export type WorkspaceModule =
   | 'overview'
@@ -15,6 +16,7 @@ export type WorkspaceModule =
   | 'script'
   | 'characters'
   | 'locations'
+  | 'props'
   | 'files'
   | 'trash'
   | 'settings';
@@ -36,6 +38,7 @@ export const TOP_MODULES: WorkspaceModuleDef[] = [
 export const ASSET_MODULES: WorkspaceModuleDef[] = [
   { key: 'characters', labelKey: 'projects.workspace.modules.characters', icon: Users },
   { key: 'locations', labelKey: 'projects.workspace.modules.locations', icon: MapPin },
+  { key: 'props', labelKey: 'projects.workspace.modules.props', icon: Package },
   { key: 'files', labelKey: 'projects.workspace.modules.files', icon: FolderOpen },
 ];
 
