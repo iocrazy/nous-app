@@ -74,6 +74,12 @@ export function withGenerationRunner(
       const params: Record<string, unknown> = {};
       if (gen.kind === 'image' && gen.ratio) params.ratio = gen.ratio;
       if (gen.kind === 'video' && gen.aspect) params.aspect = gen.aspect;
+      if (ctx.entity_ref) {
+        // CC5 asset backlink: params land verbatim in generated_media.params,
+        // which the library asset strips query by entity.
+        params.entity_kind = ctx.entity_ref.kind;
+        params.entity_id = ctx.entity_ref.id;
+      }
 
       const taskIds = await dispatchGenerations(deps.canvasId, {
         node_id: ctx.promptId,

@@ -41,6 +41,7 @@ import {
   markGenerationRecover,
   settleGenerationSlot,
 } from './genSlots';
+import { resolveEntityRef } from './entityRef';
 import { resolveSourceUrl } from './promptInputs';
 import { withGenerationRunner } from './generationRunner';
 import { createBackendRunner } from './runner.backend';
@@ -205,6 +206,7 @@ export function CanvasComposer({
             agent_id: data.agent_id,
             gen: data.gen ?? null,
             source_url: resolveSourceUrl(id, nodes, connections),
+            entity_ref: resolveEntityRef(id, nodes, connections),
           };
         })
         .filter((v): v is RunnerContext => v !== null);
