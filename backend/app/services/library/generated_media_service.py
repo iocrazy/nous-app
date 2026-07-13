@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import mimetypes
 import os
@@ -28,6 +27,7 @@ from app.services.library.media_storage import (
     content_key,
     content_key_from_sha,
     resolve_media_source,
+    sha256_file,
     to_file_path,
 )
 
@@ -147,15 +147,6 @@ def _read_file_capped(path: str, max_bytes: int) -> bytes:
         return fp.read()
 
 
-def _sha256_file(path: str) -> str:
-    """Stream-hash a file (no full read into memory) — for video blobs."""
-    h = hashlib.sha256()
-    with open(path, "rb") as fp:
-        for chunk in iter(lambda: fp.read(1024 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
 # Object-store caps: generated images buffer in memory (small); generated
 # short videos stream via a temp file (no memory blowup). Over-cap → filesystem.
 _OBJECT_STORE_IMAGE_MAX_BYTES = 16 * 1024 * 1024
@@ -180,7 +171,7 @@ async def _write_generation_to_object_store(
             size = await _download_to(
                 tmp, source_url, max_bytes=_OBJECT_STORE_VIDEO_MAX_BYTES
             )
-            sha = await asyncio.to_thread(_sha256_file, tmp)
+            sha = await asyncio.to_thread(sha256_file, tmp)
             key = content_key_from_sha(scope_id=scope_id, sha=sha, mime=mime)
             if not await store.exists(key):
                 await store.put_file(key, tmp, mime)
@@ -207,7 +198,7 @@ async def _write_local_generation_to_object_store(
     disk; image: read bytes + put_bytes). Same dedup + return contract."""
     store = chat_media_store()
     if kind == "video":
-        sha = await asyncio.to_thread(_sha256_file, source_path)
+        sha = await asyncio.to_thread(sha256_file, source_path)
         key = content_key_from_sha(scope_id=scope_id, sha=sha, mime=mime)
         size = os.path.getsize(source_path)
         if not await store.exists(key):
