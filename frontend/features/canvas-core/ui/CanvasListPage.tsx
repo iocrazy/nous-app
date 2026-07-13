@@ -16,6 +16,8 @@ import { PageHeader } from '../../../components/AILibrary/PageHeader';
 import { useToast } from '../../../components/Toast';
 import { CANVAS_NAV_ENABLED } from '../flags';
 import { CanvasTrashSection } from './CanvasTrashSection';
+import { NewCanvasDialog } from './NewCanvasDialog';
+import type { CanvasKind } from '../types';
 import {
   createCanvas,
   deleteCanvas,
@@ -35,6 +37,8 @@ export default function CanvasListPage() {
   const [groups, setGroups] = useState<TeamCanvasProject[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [creatingProjectId, setCreatingProjectId] = useState<string | null>(null);
+  // Which project the IC-style create dialog is open for (null = closed).
+  const [dialogProjectId, setDialogProjectId] = useState<string | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
   const reload = useCallback(() => setReloadTick((n) => n + 1), []);
 
@@ -86,20 +90,23 @@ export default function CanvasListPage() {
     }
   };
 
-  // Mirrors ProjectAssetsTree.handleCreateCanvas: create empty, then drop
-  // the user straight into the editor.
-  const handleCreateCanvas = async (projectId: string) => {
+  // Create with the dialog's name/kind choice, then drop the user straight
+  // into the editor.
+  const handleCreateCanvas = async (
+    projectId: string,
+    payload: { name: string; kind: CanvasKind },
+  ) => {
     if (creatingProjectId) return;
     setCreatingProjectId(projectId);
     try {
       const canvas = await createCanvas(projectId, {
-        name: t('canvasList.untitled', 'Untitled Canvas'),
+        name: payload.name || t('canvasList.untitled', 'Untitled Canvas'),
+        kind: payload.kind,
       });
       navigate(`/team/${teamId}/canvas/${canvas.id}`);
     } catch (err) {
       console.error('[CanvasListPage] create canvas failed:', err);
       addToast(t('canvasList.createFailed', 'Failed to create canvas'), 'error');
-    } finally {
       setCreatingProjectId(null);
     }
   };
@@ -181,7 +188,7 @@ export default function CanvasListPage() {
                     </div>
                   ))}
                   <button
-                    onClick={() => handleCreateCanvas(project_id)}
+                    onClick={() => setDialogProjectId(project_id)}
                     disabled={creatingProjectId !== null}
                     className={`flex min-h-[76px] items-center justify-center gap-2 rounded-2xl border border-dashed border-line p-4 text-sm text-content-3 transition-all duration-200 hover:border-indigo-500/40 hover:text-content disabled:opacity-50 ${FOCUS_RING}`}
                   >
@@ -202,6 +209,14 @@ export default function CanvasListPage() {
           <CanvasTrashSection key={teamId} teamId={teamId} onRestored={reload} />
         )}
       </div>
+      <NewCanvasDialog
+        open={dialogProjectId !== null}
+        creating={creatingProjectId !== null}
+        onCancel={() => setDialogProjectId(null)}
+        onCreate={(payload) => {
+          if (dialogProjectId) void handleCreateCanvas(dialogProjectId, payload);
+        }}
+      />
     </div>
   );
 }

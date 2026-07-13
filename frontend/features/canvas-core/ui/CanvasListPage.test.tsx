@@ -86,11 +86,15 @@ describe('CanvasListPage', () => {
     const CanvasListPage = await loadPage();
     render(<CanvasListPage />);
 
-    const newButton = await screen.findByText('New Canvas');
-    fireEvent.click(newButton);
+    // The tile opens the IC-style dialog; Create submits name + kind.
+    fireEvent.click(await screen.findByRole('button', { name: /New Canvas/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
 
     await waitFor(() => {
-      expect(createCanvas).toHaveBeenCalledWith('p1', { name: 'Untitled Canvas' });
+      expect(createCanvas).toHaveBeenCalledWith('p1', {
+        name: 'Untitled Canvas',
+        kind: 'smart',
+      });
       expect(mockNavigate).toHaveBeenCalledWith('/team/team-1/canvas/c-new');
     });
   });
@@ -102,7 +106,8 @@ describe('CanvasListPage', () => {
     const CanvasListPage = await loadPage();
     render(<CanvasListPage />);
 
-    fireEvent.click(await screen.findByText('New Canvas'));
+    fireEvent.click(await screen.findByRole('button', { name: /New Canvas/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
 
     await waitFor(() => {
       expect(mockAddToast).toHaveBeenCalledWith('Failed to create canvas', 'error');
@@ -134,7 +139,7 @@ describe('CanvasListPage', () => {
     expect(newIndex).toBeLessThan(oldIndex);
   });
 
-  it('ignores a second click while a create is already in flight', async () => {
+  it('ignores a second submit while a create is already in flight', async () => {
     vi.stubEnv('VITE_FEATURE_CANVAS_NAV', 'true');
     listTeamCanvases.mockResolvedValue([{ project_id: 'p1', project_name: 'Demo Project', canvases: [] }]);
     let resolveCreate: (value: unknown) => void = () => {};
@@ -144,9 +149,10 @@ describe('CanvasListPage', () => {
     const CanvasListPage = await loadPage();
     render(<CanvasListPage />);
 
-    const newButton = await screen.findByText('New Canvas');
-    fireEvent.click(newButton);
-    fireEvent.click(newButton);
+    fireEvent.click(await screen.findByRole('button', { name: /New Canvas/ }));
+    const createButton = screen.getByRole('button', { name: 'Create' });
+    fireEvent.click(createButton);
+    fireEvent.click(createButton);
     expect(createCanvas).toHaveBeenCalledTimes(1);
 
     resolveCreate({ ...CANVAS, id: 'c-new' });

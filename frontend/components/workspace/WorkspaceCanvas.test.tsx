@@ -22,6 +22,11 @@ vi.mock('react-i18next', () => ({
 vi.mock('../Toast', () => ({
   useToast: () => ({ addToast: vi.fn() }),
 }));
+// relativeTime pulls in the real i18n module chain (HTTP backend init) —
+// stub it so the test env stays hermetic.
+vi.mock('../../utils/relativeTime', () => ({
+  formatRelativeTime: () => '3d ago',
+}));
 
 const mockService = vi.hoisted(() => ({
   listCanvases: vi.fn(),
@@ -58,15 +63,20 @@ describe('WorkspaceCanvas', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/canvas/c1');
   });
 
-  it('New Canvas creates and drops into the editor', async () => {
+  it('New Canvas opens the kind dialog, then creates and drops into the editor', async () => {
     mockService.listCanvases.mockResolvedValue([]);
     mockService.createCanvas.mockResolvedValue({ id: 'c9' });
     render(<WorkspaceCanvas projectId="p1" teamId="t1" />);
     await screen.findByRole('button', { name: /New Canvas/ });
 
+    // The tile opens the IC-style dialog; Create submits name + kind.
     fireEvent.click(screen.getByRole('button', { name: /New Canvas/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
     await waitFor(() => {
-      expect(mockService.createCanvas).toHaveBeenCalledWith('p1', expect.anything());
+      expect(mockService.createCanvas).toHaveBeenCalledWith(
+        'p1',
+        expect.objectContaining({ kind: 'smart' }),
+      );
       expect(mockNavigate).toHaveBeenCalledWith('/team/t1/canvas/c9');
     });
   });
