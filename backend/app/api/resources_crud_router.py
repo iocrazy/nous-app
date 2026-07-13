@@ -764,9 +764,26 @@ async def serve_preview_sprite(resource_id: str):
 
         from app.core.config import settings
 
-        sprite_path = (
-            Path(settings.DOWNLOAD_PATH) / Path(file_path).parent / "preview_sprite.jpg"
+        # Storage unification: sb:// sources have no on-disk parent dir —
+        # thumbnail_service writes their sprite to
+        # derived/thumbnails/{resource_id}/preview_sprite.jpg. Probe that
+        # first; legacy fs rows never have the derived dir today, so their
+        # probe order is effectively unchanged (next-to-source still decides).
+        derived_sprite = (
+            Path(settings.DOWNLOAD_PATH)
+            / "derived"
+            / "thumbnails"
+            / str(resource_id)
+            / "preview_sprite.jpg"
         )
+        if derived_sprite.exists():
+            sprite_path = derived_sprite
+        else:
+            sprite_path = (
+                Path(settings.DOWNLOAD_PATH)
+                / Path(file_path).parent
+                / "preview_sprite.jpg"
+            )
         if not sprite_path.exists():
             raise HTTPException(status_code=404, detail="Preview sprite not found")
 
@@ -821,10 +838,21 @@ async def upload_resource_cover(
     _scope: ScopedRequestDep,
     file: UploadFile = File(...),
 ):
-    """Upload/replace the cover image for a resource. Stores next to the source
-    file and sets cover_image_path."""
+    """Upload/replace the cover image for a resource. Sets cover_image_path.
+
+    Legacy filesystem originals keep writing next to the source file
+    (byte-identical to pre-storage-unification behavior). Object-store
+    (``sb://``) originals write into a resource_id-keyed derived tree
+    instead — the original's "parent dir" for an sb:// row is a literal
+    non-existent ``sb:/...`` path on disk, and content-addressed dedup means
+    two resources can point at the same fanout dir, so writing "next to the
+    original" there would let two unrelated resources' covers overwrite each
+    other. Mirrors thumbnail_service's ``derived/thumbnails/{resource_id}/``
+    choice for the same reason.
+    """
     from app.api.media_permissions import check_media_access
     from app.core.config import settings
+    from app.services.library.media_storage import resolve_media_source
 
     if not (file.content_type or "").startswith("image/"):
         raise HTTPException(status_code=400, detail="Cover must be an image")
@@ -840,8 +868,19 @@ async def upload_resource_cover(
     ext = (file.filename or "cover").rsplit(".", 1)[-1].lower()
     if ext not in {"jpg", "jpeg", "png", "webp", "gif"}:
         ext = "jpg"
-    abs_src = Path(settings.DOWNLOAD_PATH) / resource["file_path"]
-    cover_abs = abs_src.parent / f"cover.{ext}"
+
+    loc = resolve_media_source(resource["file_path"])
+    if loc.is_object_store:
+        cover_abs = (
+            Path(settings.DOWNLOAD_PATH)
+            / "derived"
+            / "covers"
+            / str(resource_id)
+            / f"cover.{ext}"
+        )
+    else:
+        abs_src = Path(settings.DOWNLOAD_PATH) / resource["file_path"]
+        cover_abs = abs_src.parent / f"cover.{ext}"
     cover_abs.parent.mkdir(parents=True, exist_ok=True)
     data = await file.read()
     cover_abs.write_bytes(data)

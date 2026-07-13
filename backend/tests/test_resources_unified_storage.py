@@ -165,8 +165,9 @@ async def test_flag_on_store_failure_falls_back_to_filesystem(service, monkeypat
 
     monkeypatch.setattr(rs, "store_local_file", failing_store_local_file)
 
-    warn_mock = MagicMock()
-    monkeypatch.setattr(rs.logger, "warning", warn_mock)
+    # Task 2.4c: fallback logs at ERROR (spec §8 — visible in the ERROR funnel)
+    err_mock = MagicMock()
+    monkeypatch.setattr(rs.logger, "error", err_mock)
 
     file = FakeUploadFile("photo.png", b"fallback-bytes", "image/png")
     resource = await service.upload_resource(
@@ -181,8 +182,8 @@ async def test_flag_on_store_failure_falls_back_to_filesystem(service, monkeypat
     assert on_disk.exists()
     assert on_disk.read_bytes() == b"fallback-bytes"
 
-    warn_mock.assert_called_once()
-    assert "unified-storage write failed" in warn_mock.call_args[0][0]
+    err_mock.assert_called_once()
+    assert "unified-storage write failed" in err_mock.call_args[0][0]
 
 
 # ── Task 2.2: upload_new_version dual-track ─────────────────────────────────
@@ -308,8 +309,9 @@ async def test_new_version_store_failure_falls_back_to_filesystem(service, monke
 
     monkeypatch.setattr(rs, "store_local_file", failing_store_local_file)
 
-    warn_mock = MagicMock()
-    monkeypatch.setattr(rs.logger, "warning", warn_mock)
+    # Task 2.4c: fallback logs at ERROR (spec §8 — visible in the ERROR funnel)
+    err_mock = MagicMock()
+    monkeypatch.setattr(rs.logger, "error", err_mock)
 
     rid = await _seed_resource(
         service.repo, scope_id="9", file_path="teams/9/uploads/RID/v1/orig.txt"
@@ -327,8 +329,8 @@ async def test_new_version_store_failure_falls_back_to_filesystem(service, monke
     assert on_disk.exists()
     assert on_disk.read_bytes() == b"fallback v2 bytes"
 
-    warn_mock.assert_called_once()
-    assert "unified-storage write failed" in warn_mock.call_args[0][0]
+    err_mock.assert_called_once()
+    assert "unified-storage write failed" in err_mock.call_args[0][0]
 
 
 @pytest.mark.asyncio
@@ -354,3 +356,46 @@ async def test_new_version_on_sb_resource_flag_off_uses_scope_branch(
     on_disk = Path(rs.settings.DOWNLOAD_PATH) / expected
     assert on_disk.exists()
     assert on_disk.read_bytes() == b"post-sb version bytes"
+
+
+@pytest.mark.asyncio
+async def test_new_version_flag_on_item_none_skips_storage_without_failure_log(
+    service, monkeypatch
+):
+    """Task 2.4c: no resource_item is NOT a storage failure. Before the
+    guard, ``item["scope_id"]`` raised TypeError inside the try, which was
+    swallowed as a misleading "unified-storage write failed" warning. Now
+    the object-store attempt is skipped quietly and the fs branch raises the
+    legit "Resource has no scope association" ValueError."""
+    monkeypatch.setattr(rs.settings, "FEATURE_UNIFIED_STORAGE", True)
+
+    store_mock = MagicMock()
+    monkeypatch.setattr(rs, "store_local_file", store_mock)
+    err_mock = MagicMock()
+    monkeypatch.setattr(rs.logger, "error", err_mock)
+
+    # Seed a resource with NO resource_item and no "/v" dir semantics in its
+    # file_path (sb:// shape), so BOTH branches need the item row.
+    resource = await service.repo.create_resource(
+        {
+            "creator_id": "u1",
+            "source_type": "upload",
+            "filename": "orig.bin",
+            "file_type": "document",
+            "mime_type": "application/octet-stream",
+            "file_size_bytes": 3,
+            "current_version": 1,
+            "file_hash": "x",
+            "file_path": "sb://library/t13/ab/cd/abcdef0123456789.bin",
+        }
+    )
+    rid = str(resource["id"])
+
+    file = FakeUploadFile("v2.bin", b"v2 bytes", "application/octet-stream")
+    with pytest.raises(ValueError, match="no scope association"):
+        await service.upload_new_version(resource_id=rid, user_id="u1", file=file)
+
+    # The object-store write was never attempted …
+    store_mock.assert_not_called()
+    # … and no misleading storage-failure line was emitted.
+    err_mock.assert_not_called()

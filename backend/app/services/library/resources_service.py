@@ -155,7 +155,7 @@ class ResourcesService:
                         sha256=file_hash,
                     )
                 except Exception as exc:
-                    logger.warning(
+                    logger.error(
                         f"[upload_resource] unified-storage write failed, falling "
                         f"back to filesystem: scope={scope_id} error={exc!r}"
                     )
@@ -258,25 +258,35 @@ class ResourcesService:
 
             stored = None
             if settings.FEATURE_UNIFIED_STORAGE:
-                try:
-                    # The resource's scope comes from resource_items — an
-                    # sb:// (or missing) file_path has no directory to
-                    # derive it from, so the item row is the one
-                    # authoritative source for the object key's t{scope}.
-                    item = await self.repo.get_first_resource_item(resource_id)
-                    stored = await store_local_file(
-                        scope_id=int(item["scope_id"]),
-                        source_path=str(tmp_path),
-                        mime=mime,
-                        filename=safe_name,
-                        sha256=file_hash,
+                # The resource's scope comes from resource_items — an
+                # sb:// (or missing) file_path has no directory to
+                # derive it from, so the item row is the one
+                # authoritative source for the object key's t{scope}.
+                item = await self.repo.get_first_resource_item(resource_id)
+                if item is None:
+                    # Not a storage failure — the resource has no scope
+                    # association at all. Skip the object-store attempt
+                    # quietly; the fs branch below raises the legit
+                    # "Resource has no scope association" ValueError.
+                    logger.debug(
+                        f"[upload_new_version] no resource_item for "
+                        f"resource={resource_id} — skipping object-store write"
                     )
-                except Exception as exc:
-                    logger.warning(
-                        f"[upload_new_version] unified-storage write failed, "
-                        f"falling back to filesystem: resource={resource_id} "
-                        f"error={exc!r}"
-                    )
+                else:
+                    try:
+                        stored = await store_local_file(
+                            scope_id=int(item["scope_id"]),
+                            source_path=str(tmp_path),
+                            mime=mime,
+                            filename=safe_name,
+                            sha256=file_hash,
+                        )
+                    except Exception as exc:
+                        logger.error(
+                            f"[upload_new_version] unified-storage write failed, "
+                            f"falling back to filesystem: resource={resource_id} "
+                            f"error={exc!r}"
+                        )
             if stored is not None:
                 relative_path = stored.file_path
             else:

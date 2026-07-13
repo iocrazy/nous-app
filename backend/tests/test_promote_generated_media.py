@@ -254,7 +254,7 @@ async def test_promote_rejects_target_without_membership(monkeypatch):
 # dual-track pattern (Task 2.1): `FEATURE_UNIFIED_STORAGE` on + a successful
 # `store_local_file()` write lands an `sb://library/...` file_path; off, or
 # any storage failure, falls back to the pre-existing filesystem copy2 with
-# a `logger.warning`.
+# a `logger.error` (Task 2.4c: fallbacks must surface in the ERROR funnel).
 
 
 def _fake_materialize(seen: dict, fixture: Path):
@@ -406,8 +406,8 @@ async def test_promote_flag_on_store_failure_falls_back_to_filesystem(
     monkeypatch, tmp_path
 ):
     """FEATURE_UNIFIED_STORAGE on but store_local_file raises -> falls back
-    to the pre-existing filesystem copy2, with a logger.warning (same
-    fallback discipline as Tasks 2.1/2.2)."""
+    to the pre-existing filesystem copy2, with a logger.error (same
+    fallback discipline as Tasks 2.1/2.2; ERROR level per Task 2.4c)."""
     import app.services.library.promote_generated_media_service as svc_mod
 
     src = tmp_path / "teams/42/generations/abc/media.png"
@@ -444,8 +444,8 @@ async def test_promote_flag_on_store_failure_falls_back_to_filesystem(
         raise RuntimeError("storage-api unreachable")
 
     monkeypatch.setattr(svc_mod, "store_local_file", failing_store_local_file)
-    warn_mock = MagicMock()
-    monkeypatch.setattr(svc_mod.logger, "warning", warn_mock)
+    err_mock = MagicMock()
+    monkeypatch.setattr(svc_mod.logger, "error", err_mock)
 
     monkeypatch.setattr(svc.gen_repo, "get_by_id", _get_by_id)
     monkeypatch.setattr(svc.gen_repo, "mark_promoted", _mark)
@@ -462,5 +462,5 @@ async def test_promote_flag_on_store_failure_falls_back_to_filesystem(
     dst = tmp_path / expected_rel
     assert dst.exists()
     assert dst.read_bytes() == b"imgbytes"
-    warn_mock.assert_called_once()
-    assert "unified-storage write failed" in warn_mock.call_args[0][0]
+    err_mock.assert_called_once()
+    assert "unified-storage write failed" in err_mock.call_args[0][0]

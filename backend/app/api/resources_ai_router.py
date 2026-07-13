@@ -298,12 +298,11 @@ async def export_training_set(
     """
     import io
     import zipfile
-    from pathlib import Path
 
     from fastapi.responses import StreamingResponse
 
     from app.api.media_permissions import check_media_access
-    from app.core.config import settings
+    from app.services.library.media_storage import materialize, resolve_media_source
 
     repo = ResourcesRepository()
     buffer = io.BytesIO()
@@ -327,18 +326,43 @@ async def export_training_set(
                 continue
             if not await check_media_access(resource_id, auth.user_id, None):
                 continue
-            abs_path = Path(settings.DOWNLOAD_PATH) / resource["file_path"]
-            if not abs_path.is_file():
+            file_path = resource.get("file_path")
+            if not file_path:
                 logger.warning(
-                    f"[TrainingExport] file missing on disk for {resource_id}"
+                    f"[TrainingExport] resource {resource_id} has no file_path "
+                    "— skipped"
                 )
                 continue
 
-            filename = resource.get("filename") or abs_path.name
-            if "." not in filename and abs_path.suffix:
-                filename = f"{filename}{abs_path.suffix}"
-            arcname = _unique_arcname(filename, str(resource_id))
-            zf.write(abs_path, arcname=arcname)
+            try:
+                async with materialize(file_path) as local_path:
+                    if not local_path.is_file():
+                        logger.warning(
+                            f"[TrainingExport] file missing on disk for "
+                            f"{resource_id} (file_path={file_path!r})"
+                        )
+                        continue
+
+                    filename = resource.get("filename") or local_path.name
+                    if "." not in filename and local_path.suffix:
+                        filename = f"{filename}{local_path.suffix}"
+                    arcname = _unique_arcname(filename, str(resource_id))
+                    zf.write(local_path, arcname=arcname)
+            except Exception as exc:  # noqa: BLE001
+                # Distinguish storage-down (object-store fetch failed) from a
+                # plain missing-file so on-call can tell the two apart without
+                # re-deriving the file_path shape from the raw log line.
+                shape = (
+                    "object-store"
+                    if resolve_media_source(file_path).is_object_store
+                    else "filesystem"
+                )
+                logger.warning(
+                    f"[TrainingExport] {shape} read failed for {resource_id} "
+                    f"(file_path={file_path!r}): {exc}"
+                )
+                continue
+
             added += 1
 
             primary = "gen_prompt_zh" if data.lang == "zh" else "gen_prompt"

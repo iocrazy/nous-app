@@ -136,7 +136,7 @@ class PromoteGeneratedMediaService:
                         sha256=file_hash,
                     )
                 except Exception as exc:
-                    logger.warning(
+                    logger.error(
                         f"[promote] unified-storage write failed, falling "
                         f"back to filesystem: scope={target_scope_id} "
                         f"error={exc!r}"
@@ -150,6 +150,10 @@ class PromoteGeneratedMediaService:
                 await asyncio.to_thread(shutil.copy2, str(src), dst_abs)
             await self.res_repo.update_resource(resource_id, {"file_path": rel})
         finally:
+            # Passing (None, None, None) even when we're unwinding an
+            # exception is safe: materialize()'s cleanup is an unconditional
+            # finally-unlink — it never inspects the exc info, so the temp
+            # file is removed either way.
             await materialized.__aexit__(None, None, None)
 
         # 3) version row
