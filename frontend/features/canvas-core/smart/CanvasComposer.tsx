@@ -84,6 +84,10 @@ export function CanvasComposer({
   teamId,
 }: CanvasComposerOptions = {}) {
   const viewport = useCanvasCoreStore((s) => s.viewport);
+  // Lite ("Smart") canvases hide the workflow-only add buttons — the IC
+  // four-card create menu is their primary surface.
+  const canvasKind = useCanvasCoreStore((s) => s.kind);
+  const isLite = canvasKind === 'lite';
   const nodes = useCanvasCoreStore((s) => s.nodes);
   const connections = useCanvasCoreStore((s) => s.connections);
   const selection = useCanvasCoreStore((s) => s.selection);
@@ -465,11 +469,17 @@ export function CanvasComposer({
       // overflow visible at 1280px).
       className="canvas-island pointer-events-auto absolute inset-x-0 bottom-4 mx-auto flex w-fit max-w-[calc(100%-2rem)] gap-1 overflow-x-auto p-1.5"
     >
-      <ComposerButton onClick={() => addNode('shot')}>+ Shot</ComposerButton>
+      {!isLite && (
+        <ComposerButton onClick={() => addNode('shot')}>+ Shot</ComposerButton>
+      )}
       <ComposerButton onClick={() => addNode('prompt')}>+ Prompt</ComposerButton>
-      <ComposerButton onClick={() => addNode('output')}>+ Output</ComposerButton>
+      {!isLite && (
+        <ComposerButton onClick={() => addNode('output')}>+ Output</ComposerButton>
+      )}
       <ComposerButton onClick={() => addNode('loop')}>+ Loop</ComposerButton>
-      <ComposerButton onClick={() => addNode('timeline')}>+ Timeline</ComposerButton>
+      {!isLite && (
+        <ComposerButton onClick={() => addNode('timeline')}>+ Timeline</ComposerButton>
+      )}
       <Divider />
       <ComposerButton onClick={onArrange} disabled={nodes.length === 0}>
         Arrange

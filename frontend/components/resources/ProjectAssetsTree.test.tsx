@@ -83,6 +83,7 @@ describe('ProjectAssetsTree New Canvas entry', () => {
     await waitFor(() => expect(createCanvas).toHaveBeenCalledTimes(1));
     expect(createCanvas).toHaveBeenCalledWith('proj-1', {
       name: 'projectAssets.untitledCanvas',
+      kind: 'smart',
     });
     await waitFor(() =>
       expect(navigate).toHaveBeenCalledWith('/team/t1/canvas/c-new'),
@@ -112,6 +113,7 @@ describe('ProjectAssetsTree New Canvas entry', () => {
     await waitFor(() =>
       expect(createCanvas).toHaveBeenCalledWith('proj-2', {
         name: 'projectAssets.untitledCanvas',
+        kind: 'smart',
       }),
     );
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/team/t1/canvas/c-empty-new'));
