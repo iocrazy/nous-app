@@ -613,6 +613,36 @@ export const EDITOR_SHELL_STYLES = `
 .mh-mention-opt.active{ background:var(--accent); color:#fff; }
 .mh-mention-opt[aria-selected='true']{ font-weight:600; }
 .mh-mention-empty{ padding:8px 12px; font-size:12.5px; color:var(--text-muted); }
+/* Embedded search row (character-cue picker, laper parity): full-bleed strip
+   at the panel top, separated by the soft border. The input is chromeless —
+   the strip IS the field. */
+.mh-mention-search{
+  display:flex; align-items:center; gap:8px;
+  margin:-4px -4px 4px; padding:9px 12px;
+  border-bottom:1px solid var(--ui-border-soft);
+  color:var(--text-muted);
+}
+.mh-mention-search input{
+  flex:1; min-width:0; background:none; border:none; outline:none;
+  font-family:var(--sans); font-size:13px; color:#e4e4e7; padding:0;
+}
+.mh-mention-search input::placeholder{ color:var(--text-muted); }
+/* kbd-hint footer — mirrors the sheet's .mh-keyboard-hint affordance but in
+   the dark panel palette. */
+.mh-mention-hints{
+  display:flex; gap:14px; margin:4px -4px -4px; padding:8px 12px;
+  border-top:1px solid var(--ui-border-soft);
+}
+.mh-mention-hint{
+  display:flex; align-items:center; gap:6px;
+  font-size:11.5px; color:var(--text-muted); white-space:nowrap;
+}
+.mh-pop-kbd{
+  font-family:var(--mono); font-size:10px; line-height:1; font-weight:600;
+  padding:3px 5px; border-radius:4px;
+  background:rgba(255,255,255,0.07); border:1px solid var(--ui-border-soft);
+  color:#d4d4d8;
+}
 
 /* Outline / Cover placeholders (read-only in Phase 1) */
 .mh-doc-outline{ font-family:var(--sans); color:var(--sheet-ink); }
@@ -1433,6 +1463,18 @@ export const EDITOR_SHELL_STYLES = `
 .mh-el-editable[data-el-type='comment']:has(br.ProseMirror-trailingBreak):focus::before{ content:'Comment'; }
 .mh-el-editable[data-el-type='subtitle']:empty:focus::before,
 .mh-el-editable[data-el-type='subtitle']:has(br.ProseMirror-trailingBreak):focus::before{ content:'Subtitle'; }
+/* TipTap mode: Chrome paints its UA focus ring (outline:auto, the blue ring)
+   around a focused contenteditable — AND a separate ring segment around every
+   contenteditable=false island inside it. Our per-block gutters are exactly
+   such islands whose content is hover-revealed (opacity 0), so the rings read
+   as a big blue frame plus a column of EMPTY blue boxes. Kill the outline on
+   the per-scene ProseMirror container in every state (a focused
+   contenteditable is ALWAYS :focus-visible in Chrome — see
+   bug_contenteditable_focus_visible_ring); the caret + focused-row placeholder
+   already convey focus. */
+.mh-editor-shell .mh-tiptap-scene-editor,
+.mh-editor-shell .mh-tiptap-scene-editor:focus,
+.mh-editor-shell .mh-tiptap-scene-editor:focus-visible{ outline:none; }
 /* laper's kbd hint rows — now rendered INSIDE the sheet top, only while the
    script has no typed text (EditorShell gates it), so a real script page stays
    pure. Overrides the earlier display:none chrome-kill. */
