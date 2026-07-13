@@ -23,8 +23,15 @@ from __future__ import annotations
 
 import hashlib
 import mimetypes
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import AsyncIterator, Optional
+from typing import TYPE_CHECKING, AsyncIterator, Optional
+
+if TYPE_CHECKING:
+    # Only for the `materialize` forward-ref annotation below — pathlib is
+    # stdlib (zero external deps), so this doesn't reintroduce the heavy
+    # import-time dependency this module otherwise avoids.
+    from pathlib import Path
 
 _SB_SCHEME = "sb://"
 
@@ -137,6 +144,10 @@ class ObjectStore:
 
     def __init__(self, bucket: str) -> None:
         self._bucket = bucket
+
+    @property
+    def bucket(self) -> str:
+        return self._bucket
 
     async def _proxy(self):
         # Imported lazily so this module has no import-time Supabase dependency
@@ -277,3 +288,100 @@ CHAT_MEDIA_BUCKET = "chat-media"
 
 def chat_media_store() -> ObjectStore:
     return ObjectStore(CHAT_MEDIA_BUCKET)
+
+
+# Canonical bucket for the unified library (spec 2026-07-12): resource
+# uploads, project_files, storyboard originals. chat-media stays separate.
+LIBRARY_BUCKET = "library"
+
+
+def library_store() -> ObjectStore:
+    return ObjectStore(LIBRARY_BUCKET)
+
+
+def sha256_file(path: str) -> str:
+    """Streaming sha256 of a local file (sync — wrap in asyncio.to_thread)."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+@dataclass(frozen=True)
+class StoredObject:
+    """Result of a unified-storage write: the sb:// value to persist + facts."""
+
+    file_path: str
+    size_bytes: int
+    sha256: str
+
+
+async def store_local_file(
+    *,
+    scope_id: int,
+    source_path: str,
+    mime: str,
+    filename: Optional[str] = None,
+    sha256: Optional[str] = None,
+    store: Optional[ObjectStore] = None,
+) -> StoredObject:
+    """Content-address a local file into the library bucket (dedup PUT).
+
+    The ONE write entrypoint for unified storage: sha256 (reuse the caller's
+    precomputed hash when given — uploads already hash while streaming) →
+    content key → skip-PUT if present → return the sb:// file_path to persist.
+    Raises on storage failure; the CALLER owns the filesystem fallback.
+    """
+    import asyncio
+    import os
+
+    target = store or library_store()
+    sha = sha256 or await asyncio.to_thread(sha256_file, source_path)
+    key = content_key_from_sha(scope_id=scope_id, sha=sha, mime=mime, filename=filename)
+    size = os.path.getsize(source_path)
+    if not await target.exists(key):
+        await target.put_file(key, source_path, mime)
+    return StoredObject(
+        file_path=to_file_path(target.bucket, key), size_bytes=size, sha256=sha
+    )
+
+
+@asynccontextmanager
+async def materialize(file_path: str) -> AsyncIterator["Path"]:
+    """Yield a REAL local Path for any file_path shape (the ffmpeg adapter).
+
+    filesystem row → the actual path under DOWNLOAD_PATH (not cleaned up);
+    sb:// row → streamed to a temp file, deleted on exit. Tooling (ffprobe,
+    HLS transcode, thumbnails, promote) uses this instead of touching
+    DOWNLOAD_PATH directly, so it works for both shapes.
+    """
+    import os
+    import tempfile
+    from pathlib import Path
+
+    from app.core.config import settings
+
+    loc = resolve_media_source(file_path)
+    if not loc.is_object_store:
+        # Containment guard (mirrors resolve_generated_media_local_path): a
+        # corrupt/hostile rel_path with ".." segments or symlink tricks must
+        # never escape DOWNLOAD_PATH.
+        base = os.path.realpath(settings.DOWNLOAD_PATH)
+        real = os.path.realpath(os.path.join(base, loc.rel_path or ""))
+        if not (real == base or real.startswith(base + os.sep)):
+            raise ValueError(f"file_path escapes DOWNLOAD_PATH: {file_path!r}")
+        yield Path(real)
+        return
+    store = ObjectStore(loc.bucket)
+    fd, tmp = tempfile.mkstemp(suffix=Path(loc.key).suffix)
+    os.close(fd)
+    try:
+        import aiofiles
+
+        async with aiofiles.open(tmp, "wb") as out:
+            async for chunk in store.get_stream(loc.key):
+                await out.write(chunk)
+        yield Path(tmp)
+    finally:
+        Path(tmp).unlink(missing_ok=True)

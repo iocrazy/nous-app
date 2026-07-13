@@ -13,15 +13,17 @@ Scope = caller's personal team resolved via _resolve_personal_team_id.
 
 from __future__ import annotations
 
-import os
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import Response
 
-from app.core.config import settings
 from app.core.deps import AuthDep
 from app.repositories.generated_media_repository import GeneratedMediaRepository
+from app.services.library.media_serving import (
+    filesystem_response,
+    range_stream_response,
+)
 from app.services.library.media_storage import ObjectStore, resolve_media_source
 from app.services.library.promote_generated_media_service import (
     PromoteGeneratedMediaService,
@@ -29,60 +31,6 @@ from app.services.library.promote_generated_media_service import (
 from app.services.library.resources_service import _resolve_personal_team_id
 
 router = APIRouter(prefix="/generated-media", tags=["generated-media"])
-
-
-class _RangeNotSatisfiable(Exception):
-    """A syntactically valid byte-range that falls outside the object (→ 416)."""
-
-
-def _parse_byte_range(
-    range_header: Optional[str], size: int
-) -> Optional[tuple[int, int]]:
-    """Parse a single HTTP byte-range against a known object ``size``.
-
-    Returns an inclusive ``(start, end)`` pair, or ``None`` when there is no
-    usable range and the full object should be served (200). A malformed or
-    multi-range header is ignored per RFC 7233 (serve full), but a well-formed
-    range that lies outside the object raises ``_RangeNotSatisfiable`` (416).
-    """
-    if not range_header:
-        return None
-    header = range_header.strip()
-    if not header.startswith("bytes="):
-        return None  # unknown unit → ignore
-    spec = header[len("bytes=") :].strip()
-    if "," in spec or "-" not in spec:
-        return None  # multi-range unsupported / malformed → serve full
-    start_s, _, end_s = spec.partition("-")
-    try:
-        if start_s == "":
-            # suffix range: bytes=-N → last N bytes
-            n = int(end_s)
-            if n <= 0:
-                raise _RangeNotSatisfiable
-            start, end = max(0, size - n), size - 1
-        else:
-            start = int(start_s)
-            end = int(end_s) if end_s != "" else size - 1
-    except ValueError:
-        return None  # non-integer bounds → ignore
-    if size == 0 or start > end or start >= size:
-        raise _RangeNotSatisfiable
-    return start, min(end, size - 1)
-
-
-def _filesystem_response(loc, mime: str, headers: Optional[dict]):
-    """Serve a filesystem-backed media file (FileResponse; Range-capable).
-
-    Guards against path traversal escaping DOWNLOAD_PATH. 404 on escape/miss.
-    """
-    base = os.path.realpath(settings.DOWNLOAD_PATH)
-    real = os.path.realpath(os.path.join(settings.DOWNLOAD_PATH, loc.rel_path))
-    if not (real == base or real.startswith(base + os.sep)):
-        raise HTTPException(status_code=404, detail="not found")
-    if not os.path.isfile(real):
-        raise HTTPException(status_code=404, detail="file missing")
-    return FileResponse(real, media_type=mime, headers=headers)
 
 
 async def _serve_media_row(row: dict, *, headers: Optional[dict] = None):
@@ -102,7 +50,7 @@ async def _serve_media_row(row: dict, *, headers: Optional[dict] = None):
         except Exception:
             raise HTTPException(status_code=404, detail="file missing")
         return Response(content=data, media_type=mime, headers=headers)
-    return _filesystem_response(loc, mime, headers)
+    return filesystem_response(loc.rel_path or "", mime, headers)
 
 
 async def _serve_video_stream(
@@ -110,54 +58,17 @@ async def _serve_video_stream(
 ):
     """Serve a video row with HTTP Range support (progress-bar seeking).
 
-    Filesystem rows keep FileResponse (Starlette already answers Range with
-    206). Object-store rows are streamed chunk-by-chunk with the request's
-    Range header passed through to storage — no full-file memory spike, and a
-    ``<video>`` can seek. A well-formed but out-of-bounds range yields 416.
+    Delegates to the shared media_serving helpers. Deliberately does NOT use
+    serve_stored_file's 302 branch: STORAGE_SIGNED_URL_PUBLIC_BASE may be set
+    for agent vision, and generated-media endpoints must keep their current
+    stream-proxy behavior until the unified-storage rollout revisits them.
     """
     mime = row.get("mime") or "application/octet-stream"
     loc = resolve_media_source(row["file_path"])
-    headers = dict(headers or {})
     if not loc.is_object_store:
-        return _filesystem_response(loc, mime, headers)
-
-    store = ObjectStore(loc.bucket)
-    try:
-        size = await store.get_size(loc.key)
-    except Exception:
-        raise HTTPException(status_code=404, detail="file missing")
-
-    try:
-        byte_range = _parse_byte_range(request.headers.get("range"), size)
-    except _RangeNotSatisfiable:
-        return Response(
-            status_code=416,
-            headers={"Content-Range": f"bytes */{size}", "Accept-Ranges": "bytes"},
-        )
-
-    if byte_range is None:
-        return StreamingResponse(
-            store.get_stream(loc.key),
-            status_code=200,
-            media_type=mime,
-            headers={
-                **headers,
-                "Accept-Ranges": "bytes",
-                "Content-Length": str(size),
-            },
-        )
-
-    start, end = byte_range
-    return StreamingResponse(
-        store.get_stream(loc.key, start=start, end=end),
-        status_code=206,
-        media_type=mime,
-        headers={
-            **headers,
-            "Accept-Ranges": "bytes",
-            "Content-Range": f"bytes {start}-{end}/{size}",
-            "Content-Length": str(end - start + 1),
-        },
+        return filesystem_response(loc.rel_path or "", mime, dict(headers or {}))
+    return await range_stream_response(
+        ObjectStore(loc.bucket), loc.key, mime, request, headers
     )
 
 

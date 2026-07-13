@@ -11,9 +11,10 @@
  * edits.
  */
 
-import { useEffect, useRef, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { ArrowLeft } from 'lucide-react';
 
 import { ClassicPalette } from '../classic/ui/ClassicPalette';
 import { ClassicRunBar } from '../classic/ui/ClassicRunBar';
@@ -38,11 +39,26 @@ export default function CanvasPage() {
   const saveStatus = useCanvasCoreStore((s) => s.saveStatus);
   const saveError = useCanvasCoreStore((s) => s.saveError);
   const kind = useCanvasCoreStore((s) => s.kind);
+  const name = useCanvasCoreStore((s) => s.name);
   const nodeCount = useCanvasCoreStore((s) => s.nodes.length);
   const loadCanvas = useCanvasCoreStore((s) => s.loadCanvas);
   const flushSave = useCanvasCoreStore((s) => s.flushSave);
   const reset = useCanvasCoreStore((s) => s.reset);
   const { t } = useTranslation();
+  const navigate = useNavigate();
+
+  // Back to the canvas list (Infinite's 返回画布列表): prefer real history
+  // (returns to whichever list the user came from — workspace module or the
+  // landing page); a deep link with no in-app history falls back to the
+  // team canvas list.
+  const handleBack = useCallback(() => {
+    const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+    if (idx > 0) {
+      navigate(-1);
+    } else {
+      navigate(teamId ? `/team/${teamId}/canvas` : '/', { replace: true });
+    }
+  }, [navigate, teamId]);
 
   // Cmd+K palette + ? help — canvas-only scope, active only when ready.
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -137,6 +153,21 @@ export default function CanvasPage() {
   return (
     <div ref={surfaceRef} className="relative h-full w-full">
       <CanvasSurface />
+      {/* Back-to-list pill + canvas name (Infinite parity) — top-left, above
+          the surface; ClassicPalette sits below it (top offset). */}
+      <div className="pointer-events-none absolute left-4 top-4 z-30 flex flex-col gap-1">
+        <button
+          type="button"
+          onClick={handleBack}
+          className="canvas-island pointer-events-auto flex w-fit items-center gap-2 rounded-full px-3.5 py-2 text-xs font-medium text-ink-200 transition-colors hover:text-ink-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
+        >
+          <ArrowLeft size={14} />
+          {t('canvas.backToList', 'Back to canvases')}
+        </button>
+        {name && (
+          <div className="max-w-[16rem] truncate px-2 text-xs text-ink-500">{name}</div>
+        )}
+      </div>
       {/* Empty-canvas hint floats OVER the live surface instead of replacing
           it: the palette/composer are the only way to add a first node, so a
           full-screen empty state would dead-end a freshly created canvas
