@@ -116,6 +116,10 @@ export interface NodeDragStopContext {
   isGroupDrop: boolean;
   /** Alignment-snap target for a solo drop, or null when nothing snapped. */
   snappedPosition: { x: number; y: number } | null;
+  /** True when this drop committed a snap-connect (Ctrl-drop wiring) — the
+   *  node's position is being restored, so drop-position side effects
+   *  (e.g. group membership) must not run. */
+  snapConnected?: boolean;
   /** The full rendered node list (snapshot at drop). */
   nodes: AnyNode[];
 }
@@ -421,6 +425,7 @@ export function CanvasEngine({
         onNodeDragStop?.(node, {
           isGroupDrop: false,
           snappedPosition: null,
+          snapConnected: true,
           nodes: rfNodesRef.current,
         });
         return;

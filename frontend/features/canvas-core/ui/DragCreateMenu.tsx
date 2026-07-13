@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo } from 'react';
 import {
   Clapperboard,
   Film,
+  Group as GroupIcon,
   MonitorPlay,
   Repeat2,
   TextCursorInput,
@@ -24,6 +25,7 @@ import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import type { CanvasConnection, CanvasNode } from '../types';
 import { CLASSIC_NODE_DEFINITIONS, getClassicNodeDefinition } from '../classic/registry';
 import { canConnectSmart } from '../smart/types';
+import { createEmptyGroup } from '../smart/grouping';
 import {
   createLoopNode,
   createMediaNode,
@@ -64,6 +66,15 @@ const SMART_ITEMS: MenuItem[] = [
     icon: UploadCloud,
     descKey: 'canvas.dragCreate.desc.media',
     descDefault: 'Import images or video onto the canvas',
+  },
+  {
+    type: 'group',
+    label: 'Group',
+    targetHandle: null,
+    make: (p) => createEmptyGroup(p),
+    icon: GroupIcon,
+    descKey: 'canvas.dragCreate.desc.group',
+    descDefault: 'Collect media, prompts and loops together',
   },
   {
     type: 'shot',

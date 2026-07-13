@@ -254,6 +254,8 @@ export function canConnectSmart(
   if (targetType === 'shot') return false;
   // Media cards are sources like shot: they feed prompts/loops only.
   if (targetType === 'media') return false;
+  // Group containers hold members via parentId, never via wires.
+  if (targetType === 'group') return false;
   if (sourceType === 'media' && targetType !== 'prompt' && targetType !== 'loop')
     return false;
   // Entity cards (character/location/prop) are SOURCE cards like shot:

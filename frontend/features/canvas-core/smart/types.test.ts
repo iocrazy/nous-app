@@ -18,6 +18,8 @@ describe('canConnectSmart', () => {
 
   it('media cards are sources: media → prompt/loop only, nothing → media', () => {
     expect(canConnectSmart('media', 'prompt')).toBe(true);
+    expect(canConnectSmart('prompt', 'group')).toBe(false);
+    expect(canConnectSmart('media', 'group')).toBe(false);
     expect(canConnectSmart('media', 'loop')).toBe(true);
     expect(canConnectSmart('media', 'output')).toBe(false);
     expect(canConnectSmart('media', 'media')).toBe(false);
