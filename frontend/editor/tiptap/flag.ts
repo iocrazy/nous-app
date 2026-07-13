@@ -10,17 +10,27 @@
  * `vi.stubEnv('VITE_FEATURE_SCRIPT_TIPTAP', 'true')` + a normal render just
  * work.
  */
-export function isTiptapEnabled(): boolean {
-  // Per-browser dogfood escape hatch (M4 cutover): VITE_ env is baked at
-  // build time, so flipping it on Vercel flips EVERYONE. localStorage lets a
-  // single browser opt in ('on') or back out ('off', overriding the env) on
-  // prod without a deploy. Guarded for non-browser (test/SSR) contexts.
+/** Per-browser EMERGENCY override ('on'/'off' in localStorage) — null when
+ *  unset. Kept strictly as an escape hatch; the OFFICIAL switch is the admin
+ *  module registry (system_settings['editor.tiptap_surface'], fetched via
+ *  sceneService.fetchTiptapModuleStatus — the project's single toggle
+ *  convention). Guarded for non-browser (test/SSR) contexts. */
+export function readTiptapOverride(): boolean | null {
   try {
     const override = localStorage.getItem('editor.tiptap');
     if (override === 'on') return true;
     if (override === 'off') return false;
   } catch {
-    /* no localStorage (non-browser) — fall through to the env flag */
+    /* no localStorage (non-browser) — no override */
   }
+  return null;
+}
+
+/** Resolve the surface: localStorage emergency override → admin DB switch
+ *  (when the caller has fetched it) → build-time env (dev fallback only). */
+export function isTiptapEnabled(dbEnabled?: boolean | null): boolean {
+  const override = readTiptapOverride();
+  if (override !== null) return override;
+  if (dbEnabled != null) return dbEnabled;
   return import.meta.env.VITE_FEATURE_SCRIPT_TIPTAP === 'true';
 }

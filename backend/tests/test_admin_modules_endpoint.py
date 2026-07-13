@@ -19,9 +19,10 @@ from fastapi import HTTPException
 
 
 @pytest.mark.asyncio
-async def test_get_modules_lists_both():
-    """With no stored rows, GET /modules returns both registered modules with
-    their own registry defaults (topic fails open, distribution fails closed)."""
+async def test_get_modules_lists_all_registered():
+    """With no stored rows, GET /modules returns every registered module with
+    its own registry defaults (topic fails open; distribution and the TipTap
+    editor surface fail closed)."""
     from app.api.admin.settings_router import get_modules
     from app.schemas.admin import ModuleSummaryResponse
 
@@ -34,7 +35,7 @@ async def test_get_modules_lists_both():
         result = await get_modules(fake_auth)
 
     ids = {m.id for m in result}
-    assert ids == {"topic-inspiration", "distribution"}
+    assert ids == {"topic-inspiration", "distribution", "script-tiptap"}
     for m in result:
         assert isinstance(m, ModuleSummaryResponse)
         assert set(m.model_dump().keys()) == {
