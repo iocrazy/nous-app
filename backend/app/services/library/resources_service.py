@@ -238,44 +238,89 @@ class ResourcesService:
 
         safe_name = sanitize_filename(file.filename)
 
-        # Determine storage base path from existing file_path or resource_items
-        existing_path = resource.get("file_path", "")
-        if existing_path and "/v" in existing_path:
-            # Extract base path before /v{n}/
-            parts = existing_path.split("/")
-            # Find the vN segment and take everything before it
-            base_parts = []
-            for p in parts:
-                if p.startswith("v") and p[1:].isdigit():
-                    break
-                base_parts.append(p)
-            base_relative = "/".join(base_parts)
-        else:
-            # Fallback: use resource_items scope
-            item = await self.repo.get_first_resource_item(resource_id)
-            if not item:
-                raise ValueError("Resource has no scope association")
-            base_relative = f"teams/{item['scope_id']}/uploads/{resource_id}"
+        # Stream to a temp file first (mirrors upload_resource): the final
+        # location depends on the storage track, and the object-store PUT
+        # needs a local source file either way.
+        tmp_fd, tmp_name = tempfile.mkstemp()
+        os.close(tmp_fd)
+        tmp_path = Path(tmp_name)
+        try:
+            file_size, file_hash = await stream_upload_to_disk(
+                file, tmp_path, MAX_UPLOAD_SIZE
+            )
 
-        save_dir = Path(settings.DOWNLOAD_PATH) / base_relative / f"v{next_version}"
-        save_dir.mkdir(parents=True, exist_ok=True)
-        target = save_dir / safe_name
-        file_size, file_hash = await stream_upload_to_disk(
-            file, target, MAX_UPLOAD_SIZE
-        )
+            mime = (
+                sniff_mime(tmp_path)
+                or file.content_type
+                or mimetypes.guess_type(safe_name)[0]
+                or ""
+            )
 
-        mime = (
-            sniff_mime(target)
-            or file.content_type
-            or mimetypes.guess_type(safe_name)[0]
-            or ""
-        )
+            stored = None
+            if settings.FEATURE_UNIFIED_STORAGE:
+                try:
+                    # The resource's scope comes from resource_items — an
+                    # sb:// (or missing) file_path has no directory to
+                    # derive it from, so the item row is the one
+                    # authoritative source for the object key's t{scope}.
+                    item = await self.repo.get_first_resource_item(resource_id)
+                    stored = await store_local_file(
+                        scope_id=int(item["scope_id"]),
+                        source_path=str(tmp_path),
+                        mime=mime,
+                        filename=safe_name,
+                        sha256=file_hash,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        f"[upload_new_version] unified-storage write failed, "
+                        f"falling back to filesystem: resource={resource_id} "
+                        f"error={exc!r}"
+                    )
+            if stored is not None:
+                relative_path = stored.file_path
+            else:
+                # Determine the storage base path from the existing
+                # file_path or resource_items — fs-fallback only: sb://
+                # rows have no directory semantics ("/v" never matches an
+                # sb:// value — bucket/key segments are hash-hex — so they
+                # fall through to the resource_items scope branch).
+                existing_path = resource.get("file_path", "")
+                if existing_path and "/v" in existing_path:
+                    # Extract base path before /v{n}/
+                    parts = existing_path.split("/")
+                    # Find the vN segment and take everything before it
+                    base_parts = []
+                    for p in parts:
+                        if p.startswith("v") and p[1:].isdigit():
+                            break
+                        base_parts.append(p)
+                    base_relative = "/".join(base_parts)
+                else:
+                    # Fallback: use resource_items scope
+                    item = await self.repo.get_first_resource_item(resource_id)
+                    if not item:
+                        raise ValueError("Resource has no scope association")
+                    base_relative = f"teams/{item['scope_id']}/uploads/{resource_id}"
+
+                save_dir = (
+                    Path(settings.DOWNLOAD_PATH) / base_relative / f"v{next_version}"
+                )
+                save_dir.mkdir(parents=True, exist_ok=True)
+                target = save_dir / safe_name
+                await asyncio.to_thread(shutil.move, str(tmp_path), str(target))
+                relative_path = f"{base_relative}/v{next_version}/{safe_name}"
+        finally:
+            # No-op if the move succeeded (tmp_path no longer exists); when
+            # the object-store write succeeded, this is what cleans up the
+            # tmp file (store_local_file only reads it, never deletes it).
+            tmp_path.unlink(missing_ok=True)
+
         # NOTE: metadata (ffprobe/Pillow), thumbnail, and HLS transcode are
         # deferred to upload_postprocess_workflow (dispatched by the router) so
         # the upload request returns as soon as the bytes are written. The
         # version/resource rows are created with file_path now; metadata fills
         # in asynchronously and the frontend refreshes via resources Realtime.
-        relative_path = f"{base_relative}/v{next_version}/{safe_name}"
         version_data = {
             "resource_id": resource_id,
             "version_number": next_version,
