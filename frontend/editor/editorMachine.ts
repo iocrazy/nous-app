@@ -17,6 +17,7 @@
 import type { ElementOp, ElementType, ScriptElement } from './types';
 import { newElementId } from './sceneService';
 import { applyLocal } from './opBuilder';
+import { cycleType, TAB_TYPE, SHIFT_TAB_TYPE, ENTER_NEW_TYPE } from './machineTables';
 
 export interface CursorState {
   sceneId: string;
@@ -30,63 +31,11 @@ export interface MachineResult {
   localElements: ScriptElement[];
 }
 
-/**
- * Type ring for Tab cycling and the toolbar. NOTE this is deliberately a
- * different order from ELEMENT_TYPES: the spec's cycle is
- * action→character→dialogue→paren→transition→comment→subtitle→action.
- */
-const CYCLE: ElementType[] = [
-  'action',
-  'character',
-  'dialogue',
-  'paren',
-  'transition',
-  'comment',
-  'subtitle',
-];
-
-export function cycleType(t: ElementType): ElementType {
-  const i = CYCLE.indexOf(t);
-  return CYCLE[(i + 1) % CYCLE.length];
-}
-
-function cyclePrev(t: ElementType): ElementType {
-  const i = CYCLE.indexOf(t);
-  return CYCLE[(i - 1 + CYCLE.length) % CYCLE.length];
-}
-
-/** Tab: type change per current element type (spec §3.2 D7, Tab column). */
-const TAB_TYPE: Record<ElementType, ElementType> = {
-  action: 'character',
-  character: 'paren',
-  dialogue: 'paren',
-  paren: 'transition',
-  transition: 'comment',
-  comment: cycleType('comment'), // subtitle
-  subtitle: cycleType('subtitle'), // action
-};
-
-/** Shift-Tab: type change per current element type (dialogue is special). */
-const SHIFT_TAB_TYPE: Record<ElementType, ElementType> = {
-  action: cyclePrev('action'), // subtitle
-  character: 'action',
-  dialogue: 'character', // fallback only — see onShiftTab
-  paren: 'dialogue',
-  transition: 'paren',
-  comment: cyclePrev('comment'), // transition
-  subtitle: cyclePrev('subtitle'), // comment
-};
-
-/** Enter: element type to create per current type (paren is special). */
-const ENTER_NEW_TYPE: Record<ElementType, ElementType> = {
-  action: 'action',
-  character: 'dialogue',
-  dialogue: 'dialogue',
-  paren: 'dialogue', // used only when no following dialogue exists
-  transition: 'action',
-  comment: 'action',
-  subtitle: 'action',
-};
+// Type-derivation tables (CYCLE / TAB_TYPE / SHIFT_TAB_TYPE / ENTER_NEW_TYPE)
+// live in `./machineTables` — shared verbatim with the TipTap keymap
+// extension (`tiptap/keymap.ts`) so both engines stay in lockstep by
+// construction. `cycleType` is re-exported here for existing callers.
+export { cycleType };
 
 /** Forward ring for heading-field navigation; last stop enters the elements. */
 const HEADING_RING: CursorState['field'][] = [
