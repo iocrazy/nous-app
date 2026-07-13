@@ -134,7 +134,7 @@ class Settings(BaseSettings):
         "stays on the filesystem (current behavior). Readers auto-resolve both "
         "path shapes via resolve_media_source, so flipping on is forward-only "
         "and rollback (flag off) keeps already-written sb:// rows readable. "
-        "Flip only after OPS-0 (GLOBAL_S3_BUCKET=nous rename) and mig 358 are "
+        "Flip only after OPS-0 (GLOBAL_S3_BUCKET=nous rename) and mig 359 are "
         "done on the target stack.",
     )
     FEATURE_SHOT_GENERATE: bool = Field(

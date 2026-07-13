@@ -27,7 +27,7 @@
 | 序 | 内容 | 闸门 |
 |---|---|---|
 | **OPS-0** | NAS：`GLOBAL_S3_BUCKET` `media`→`nous` 改名 | 必须先于任何 flag 开启 |
-| **PR-1** | 地基：mig 358 + flag + `store_local_file`/`materialize` + `media_serving.py`（flag-dark，行为零变化） | — |
+| **PR-1** | 地基：mig 359 + flag + `store_local_file`/`materialize` + `media_serving.py`（flag-dark，行为零变化） | — |
 | **PR-2** | uploads 写路径 + resources 读端 + postprocess 适配 | dev 冒烟后才开 dev flag |
 | **PR-3** | project_files + storyboard 写路径与读端（废 `NAS_BASE_PATH`） | 同上 |
 | **PR-4** | 存量迁移 DBOS workflow + admin 触发端点 | dry-run 先行 |
@@ -55,10 +55,10 @@ sudo docker compose up -d --no-deps storage                   # 铁律 --no-deps
 
 ## PR-1：地基（flag-dark）
 
-### Task 1.1: migration 358 — `library` 桶 + 清理 `thumbnails` 休眠桶
+### Task 1.1: migration 359 — `library` 桶 + 清理 `thumbnails` 休眠桶
 
 **Files:**
-- Create: `supabase/migrations/358_library_bucket.sql`
+- Create: `supabase/migrations/359_library_bucket.sql`
 
 **Interfaces:**
 - Produces: `storage.buckets` 中 id=`library` 的 private 桶（后续所有任务的 PUT 目标）。
@@ -66,7 +66,7 @@ sudo docker compose up -d --no-deps storage                   # 铁律 --no-deps
 - [ ] **Step 1: 写 migration**
 
 ```sql
--- 358_library_bucket.sql
+-- 359_library_bucket.sql
 -- Storage unification (spec 2026-07-12): one master bucket for uploads /
 -- project_files / storyboard originals. Private — service key only.
 INSERT INTO storage.buckets (id, name, public)
@@ -84,7 +84,7 @@ WHERE b.id = 'thumbnails'
 
 ```bash
 psql -h 127.0.0.1 -p 54322 -U postgres -d postgres \
-  -f supabase/migrations/358_library_bucket.sql
+  -f supabase/migrations/359_library_bucket.sql
 psql -h 127.0.0.1 -p 54322 -U postgres -d postgres \
   -c "SELECT id, public FROM storage.buckets ORDER BY id;"
 ```
@@ -108,7 +108,7 @@ Expected: `library | f` 存在；`thumbnails` 不在（本地为空桶）。
         "stays on the filesystem (current behavior). Readers auto-resolve both "
         "path shapes via resolve_media_source, so flipping on is forward-only "
         "and rollback (flag off) keeps already-written sb:// rows readable. "
-        "Flip only after OPS-0 (GLOBAL_S3_BUCKET=nous rename) and mig 358 are "
+        "Flip only after OPS-0 (GLOBAL_S3_BUCKET=nous rename) and mig 359 are "
         "done on the target stack.",
     )
 ```
@@ -666,7 +666,7 @@ async def _migrate_row(row, module_cfg, *, dry_run: bool, delete_source: bool) -
 
 ## OPS-1：上线序列（NAS + prod）
 
-- [ ] 前置核对：OPS-0 已完成（`GLOBAL_S3_BUCKET=nous`）；mig 358 已随 CI apply（`SELECT id FROM storage.buckets WHERE id='library'`）
+- [ ] 前置核对：OPS-0 已完成（`GLOBAL_S3_BUCKET=nous`）；mig 359 已随 CI apply（`SELECT id FROM storage.buckets WHERE id='library'`）
 - [ ] dev 栈：flag on → PR-2/PR-3 冒烟清单全绿
 - [ ] prod：host `docker/.env` 加 `FEATURE_UNIFIED_STORAGE=true` → `stop -t0`/`start`（Watchtower 不读 compose）
 - [ ] canary：上传→播放→storyboard 生成→project 传文件；错误漏斗 `SELECT module,message,COUNT(*) FROM application_logs WHERE level='ERROR' AND logged_at>=NOW()-INTERVAL '1 day' GROUP BY 1,2 ORDER BY 3 DESC`

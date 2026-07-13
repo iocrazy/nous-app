@@ -1,4 +1,4 @@
--- 358_library_bucket.sql
+-- 359_library_bucket.sql
 -- Storage unification (spec 2026-07-12): one master bucket for uploads /
 -- project_files / storyboard originals. Private — service key only.
 INSERT INTO storage.buckets (id, name, public)
