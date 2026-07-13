@@ -8,6 +8,14 @@
  * setSelection), never bypassing them. Escape or a backdrop click dismisses.
  */
 import { useCallback, useEffect, useMemo } from 'react';
+import {
+  Clapperboard,
+  Film,
+  MonitorPlay,
+  Repeat2,
+  TextCursorInput,
+  type LucideIcon,
+} from 'lucide-react';
 import { isSmartFamily } from '../types';
 import { useTranslation } from 'react-i18next';
 
@@ -39,14 +47,58 @@ interface MenuItem {
   /** Input handle to wire the incoming edge into (null for smart nodes). */
   targetHandle: string | null;
   make: (position: { x: number; y: number }) => CanvasNode;
+  /** Card chrome (smart only) — Infinite-style icon + one-line description. */
+  icon?: LucideIcon;
+  descKey?: string;
+  descDefault?: string;
 }
 
 const SMART_ITEMS: MenuItem[] = [
-  { type: 'shot', label: 'Shot', targetHandle: null, make: (p) => createShotNode({}, { position: p }) as CanvasNode },
-  { type: 'prompt', label: 'Prompt', targetHandle: null, make: (p) => createPromptNode({}, { position: p }) as CanvasNode },
-  { type: 'output', label: 'Output', targetHandle: null, make: (p) => createOutputNode({}, { position: p }) as CanvasNode },
-  { type: 'loop', label: 'Loop', targetHandle: null, make: (p) => createLoopNode({}, { position: p }) as CanvasNode },
-  { type: 'timeline', label: 'Timeline', targetHandle: null, make: (p) => createTimelineNode({}, { position: p }) as CanvasNode },
+  {
+    type: 'shot',
+    label: 'Shot',
+    targetHandle: null,
+    make: (p) => createShotNode({}, { position: p }) as CanvasNode,
+    icon: Clapperboard,
+    descKey: 'canvas.dragCreate.desc.shot',
+    descDefault: 'Shot card — media for one storyboard beat',
+  },
+  {
+    type: 'prompt',
+    label: 'Prompt',
+    targetHandle: null,
+    make: (p) => createPromptNode({}, { position: p }) as CanvasNode,
+    icon: TextCursorInput,
+    descKey: 'canvas.dragCreate.desc.prompt',
+    descDefault: 'Write or AI-generate text, then run it',
+  },
+  {
+    type: 'output',
+    label: 'Output',
+    targetHandle: null,
+    make: (p) => createOutputNode({}, { position: p }) as CanvasNode,
+    icon: MonitorPlay,
+    descKey: 'canvas.dragCreate.desc.output',
+    descDefault: 'Collects generated results',
+  },
+  {
+    type: 'loop',
+    label: 'Loop',
+    targetHandle: null,
+    make: (p) => createLoopNode({}, { position: p }) as CanvasNode,
+    icon: Repeat2,
+    descKey: 'canvas.dragCreate.desc.loop',
+    descDefault: 'Controls rounds, batches and variables',
+  },
+  {
+    type: 'timeline',
+    label: 'Timeline',
+    targetHandle: null,
+    make: (p) => createTimelineNode({}, { position: p }) as CanvasNode,
+    icon: Film,
+    descKey: 'canvas.dragCreate.desc.timeline',
+    descDefault: 'Multi-segment film, stitched in order',
+  },
 ];
 
 /**
@@ -157,29 +209,65 @@ export function DragCreateMenu({
       <div
         role="menu"
         aria-label={t('canvas.dragCreate.title', 'Add node')}
-        className="mh-pop-in absolute z-50 min-w-[9rem] rounded-lg border border-ink-700 bg-ink-900/95 p-1 shadow-xl backdrop-blur"
+        className={`mh-pop-in absolute z-50 rounded-xl border border-ink-700 bg-ink-900/95 shadow-xl backdrop-blur ${
+          isSmartFamily(kind) ? 'w-[22rem] max-w-[90vw] p-1.5' : 'min-w-[9rem] p-1'
+        }`}
         style={{ left: screenPosition.x, top: screenPosition.y }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-ink-400">
-          {t('canvas.dragCreate.title', 'Add node')}
-        </div>
         {items.length === 0 ? (
           <div className="px-2 py-1 text-xs text-ink-500">
             {t('canvas.dragCreate.noCompatible', 'No compatible node')}
           </div>
+        ) : isSmartFamily(kind) ? (
+          /* Infinite-style card grid: icon + title + one-line description. */
+          <div className="grid grid-cols-2 gap-1">
+            {items.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.type}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => create(item)}
+                  className="flex items-start gap-2.5 rounded-lg p-2.5 text-left transition-colors hover:bg-ink-800"
+                >
+                  {Icon && (
+                    <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-ink-700 bg-ink-950/40 text-ink-300">
+                      <Icon size={15} />
+                    </span>
+                  )}
+                  <span className="min-w-0">
+                    <span className="block text-xs font-semibold text-ink-100">
+                      {t(`canvas.dragCreate.node.${item.type}`, item.label)}
+                    </span>
+                    {item.descKey && (
+                      <span className="mt-0.5 block text-[11px] leading-snug text-ink-500">
+                        {t(item.descKey, item.descDefault ?? '')}
+                      </span>
+                    )}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         ) : (
-          items.map((item) => (
-            <button
-              key={item.type}
-              type="button"
-              role="menuitem"
-              onClick={() => create(item)}
-              className="block w-full rounded-md px-2 py-1 text-left text-xs font-medium text-ink-100 hover:bg-ink-800 hover:text-white"
-            >
-              {item.label}
-            </button>
-          ))
+          <>
+            <div className="px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-ink-400">
+              {t('canvas.dragCreate.title', 'Add node')}
+            </div>
+            {items.map((item) => (
+              <button
+                key={item.type}
+                type="button"
+                role="menuitem"
+                onClick={() => create(item)}
+                className="block w-full rounded-md px-2 py-1 text-left text-xs font-medium text-ink-100 hover:bg-ink-800 hover:text-white"
+              >
+                {item.label}
+              </button>
+            ))}
+          </>
         )}
       </div>
     </>
