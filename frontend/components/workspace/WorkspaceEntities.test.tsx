@@ -30,6 +30,13 @@ const mockService = vi.hoisted(() => ({
   fetchProjectEntities: vi.fn(),
 }));
 vi.mock('../../services/projectsService', () => mockService);
+// characters now renders the authored bible-card library (PR-CC4) — mock it;
+// its own behavior is covered in CharacterLibrary.test.tsx.
+vi.mock('./CharacterLibrary', () => ({
+  CharacterLibrary: ({ projectId }: { projectId: string }) => (
+    <div data-testid="character-library-mock" data-project={projectId} />
+  ),
+}));
 
 const EPISODES: EpisodeProgress[] = [
   {
@@ -57,11 +64,11 @@ const EPISODES: EpisodeProgress[] = [
 ];
 
 const ENTITIES: ProjectEntities = {
-  characters: [
-    { name: 'CLIENT', cue_count: 12, episode_ids: ['1', '2'] },
-    { name: 'DEV', cue_count: 7, episode_ids: ['1'] },
+  characters: [],
+  locations: [
+    { name: 'Radio Booth', scene_count: 3, episode_ids: ['1', '2'] },
+    { name: 'Diner', scene_count: 1, episode_ids: ['1'] },
   ],
-  locations: [{ name: 'Radio Booth', scene_count: 3, episode_ids: ['1'] }],
 };
 
 beforeEach(() => {
@@ -71,41 +78,43 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('WorkspaceEntities', () => {
-  it('renders character rows with cue counts and episode badges', async () => {
+  it('characters kind renders the bible-card library (PR-CC4)', () => {
     render(<WorkspaceEntities kind="characters" projectId="p1" episodes={EPISODES} />);
-
-    expect(await screen.findByTestId('ws-entities-row-0')).toHaveTextContent('CLIENT');
-    expect(screen.getByTestId('ws-entities-count-0')).toHaveTextContent('12 cues');
-    expect(screen.getByTestId('ws-entities-badge-0-1')).toHaveTextContent('Ep 1');
-    expect(screen.getByTestId('ws-entities-badge-0-2')).toHaveTextContent('Ep 2');
-    expect(screen.getByTestId('ws-entities-row-1')).toHaveTextContent('DEV');
-    expect(screen.getByTestId('ws-entities-count-1')).toHaveTextContent('7 cues');
+    const lib = screen.getByTestId('character-library-mock');
+    expect(lib).toBeInTheDocument();
+    expect(lib.getAttribute('data-project')).toBe('p1');
+    // The derived-list machinery must not fetch for characters anymore.
+    expect(mockService.fetchProjectEntities).not.toHaveBeenCalled();
   });
 
-  it('renders location rows with scene counts', async () => {
+  it('renders location rows with scene counts and episode badges', async () => {
     render(<WorkspaceEntities kind="locations" projectId="p1" episodes={EPISODES} />);
     expect(await screen.findByTestId('ws-entities-row-0')).toHaveTextContent('Radio Booth');
     expect(screen.getByTestId('ws-entities-count-0')).toHaveTextContent('3 scenes');
+    expect(screen.getByTestId('ws-entities-badge-0-1')).toHaveTextContent('Ep 1');
+    expect(screen.getByTestId('ws-entities-badge-0-2')).toHaveTextContent('Ep 2');
+    expect(screen.getByTestId('ws-entities-row-1')).toHaveTextContent('Diner');
+    expect(screen.getByTestId('ws-entities-count-1')).toHaveTextContent('1 scene');
   });
 
   it('filters rows by episode via the dropdown', async () => {
-    render(<WorkspaceEntities kind="characters" projectId="p1" episodes={EPISODES} />);
+    render(<WorkspaceEntities kind="locations" projectId="p1" episodes={EPISODES} />);
     await screen.findByTestId('ws-entities-row-0');
-    expect(screen.getByTestId('ws-entities-row-1')).toBeTruthy(); // DEV visible before filter
+    expect(screen.getByTestId('ws-entities-row-1')).toBeTruthy(); // Diner visible before filter
 
     fireEvent.click(screen.getByTestId('ws-entities-filter'));
     fireEvent.click(screen.getByTestId('ws-entities-filter-2'));
 
     await waitFor(() => {
-      // Only CLIENT (episode_ids includes '2') should remain.
-      expect(screen.getByTestId('ws-entities-row-0')).toHaveTextContent('CLIENT');
-      expect(screen.queryByText('DEV')).toBeNull();
+      // Only Radio Booth (episode_ids includes '2') should remain.
+      expect(screen.getByTestId('ws-entities-row-0')).toHaveTextContent('Radio Booth');
+      expect(screen.queryByText('Diner')).toBeNull();
     });
   });
 
   it('renders the empty state when there are no rows', async () => {
     mockService.fetchProjectEntities.mockResolvedValue({ characters: [], locations: [] });
-    render(<WorkspaceEntities kind="characters" projectId="p1" episodes={EPISODES} />);
+    render(<WorkspaceEntities kind="locations" projectId="p1" episodes={EPISODES} />);
     expect(await screen.findByTestId('ws-entities-empty')).toBeTruthy();
   });
 });

@@ -3017,5 +3017,26 @@
     "diffKindMoved": "移动",
     "diffEmptyLine": "（空行）",
     "switchEpisode": "切换剧集"
+  },
+  "characters": {
+    "extractFailed": "提取角色失败",
+    "createFailed": "创建角色失败",
+    "updateFailed": "保存角色失败",
+    "openCanvasFailed": "打开人物画布失败",
+    "untitled": "New Character",
+    "emptyTitle": "还没有角色",
+    "emptyHint": "从剧本提取角色，或手动添加。",
+    "extract": "从剧本提取",
+    "add": "添加角色",
+    "nameLabel": "角色名",
+    "bioLabel": "角色小传",
+    "bioPlaceholder": "背景、外形、性情……",
+    "assetsHint": "生成的资产会出现在这里",
+    "openCanvas": "在画布中打开",
+    "role": {
+      "lead": "主角",
+      "support": "配角",
+      "antagonist": "反派"
+    }
   }
 }
