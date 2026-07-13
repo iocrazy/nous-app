@@ -16,7 +16,14 @@ i18n
     // without a version param, newly added keys render as raw key paths on
     // prod until the cache expires (seen live: editor.cueHintEnter).
     backend: {
-      loadPath: `/locales/{{lng}}.json?v=${__APP_VERSION__}`,
+      // typeof-guard mirrors hooks/useVersionCheck.ts: vitest's transform of
+      // some suites (ProjectsListView / InspirationPage.*) misses the vite
+      // `define`, so a bare __APP_VERSION__ throws ReferenceError at import
+      // time and fails those files in CI. Real builds always have the define,
+      // so prod/dev behavior is unchanged.
+      loadPath: `/locales/{{lng}}.json?v=${
+        typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev'
+      }`,
     },
     lng: savedLang,
     fallbackLng: 'en',

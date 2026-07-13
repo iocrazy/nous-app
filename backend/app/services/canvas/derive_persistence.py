@@ -19,7 +19,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Protocol
 
+from loguru import logger
+
 from app.core.config import settings
+from app.services.library.media_storage import store_local_file
 
 
 class DeriveError(Exception):
@@ -161,24 +164,50 @@ async def persist_derived_image(
     )
     new_resource_id = str(new_resource["id"])
 
-    relative_path = f"teams/{scope_id}/derived/{new_resource_id}/v1/{filename}"
-    save_dir = Path(settings.DOWNLOAD_PATH) / Path(relative_path).parent
-    save_dir.mkdir(parents=True, exist_ok=True)
-    target = save_dir / filename
-    # Atomic write: tmp + rename. Keeps a half-written file from being
-    # observed if we crash mid-write.
-    tmp_fd, tmp_name = tempfile.mkstemp(dir=str(save_dir))
+    # Dual-track write (storage unification, mirrors upload_resource): the
+    # derived bytes are staged to a tmp file first — flag on tries the
+    # object store (store_local_file sha256-hashes the tmp internally for
+    # its content KEY; we deliberately still don't write file_hash to the
+    # row, see create_resource above), flag off / storage failure keeps the
+    # legacy atomic tmp + os.replace filesystem write byte-identical.
+    base = Path(settings.DOWNLOAD_PATH)
+    base.mkdir(parents=True, exist_ok=True)
+    # Tmp lives under DOWNLOAD_PATH so the fallback os.replace stays a
+    # same-filesystem atomic rename.
+    tmp_fd, tmp_name = tempfile.mkstemp(dir=str(base))
     try:
         with os.fdopen(tmp_fd, "wb") as fh:
             fh.write(image_bytes)
-        os.replace(tmp_name, target)
-    except Exception:
-        # Best-effort cleanup of the temp blob.
-        try:
-            Path(tmp_name).unlink(missing_ok=True)
-        except Exception:
-            pass
-        raise
+
+        stored = None
+        if settings.FEATURE_UNIFIED_STORAGE:
+            try:
+                stored = await store_local_file(
+                    scope_id=int(scope_id),
+                    source_path=tmp_name,
+                    mime=mime_type or "image/png",
+                    filename=filename,
+                )
+            except Exception as exc:
+                logger.error(
+                    f"[persist_derived_image] unified-storage write failed, "
+                    f"falling back to filesystem: scope={scope_id} "
+                    f"resource={new_resource_id} error={exc!r}"
+                )
+        if stored is not None:
+            relative_path = stored.file_path
+        else:
+            relative_path = f"teams/{scope_id}/derived/{new_resource_id}/v1/{filename}"
+            save_dir = base / Path(relative_path).parent
+            save_dir.mkdir(parents=True, exist_ok=True)
+            # Atomic write: tmp + rename. Keeps a half-written file from
+            # being observed if we crash mid-write.
+            os.replace(tmp_name, save_dir / filename)
+    finally:
+        # No-op when os.replace consumed the tmp; when the object-store
+        # write succeeded (or anything raised), this cleans up the blob
+        # (store_local_file only reads it, never deletes it).
+        Path(tmp_name).unlink(missing_ok=True)
 
     new_resource = await repo.update_resource(
         new_resource_id, {"file_path": relative_path}

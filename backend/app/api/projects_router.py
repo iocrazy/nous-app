@@ -10,7 +10,15 @@ Requires authentication (JWT or API Key).
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from loguru import logger
 
 from app.core.config import settings
@@ -793,6 +801,66 @@ async def get_file_info(
     except Exception as e:
         logger.error(f"Failed to get file {file_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to get file info")
+
+
+@router.get("/{project_id}/files/{file_id}/download")
+async def download_file(
+    project_id: str,
+    file_id: str,
+    request: Request,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_read_access),
+):
+    """Download a project file's current content, forcing a browser download.
+
+    Storage unification: ``project_files.file_path`` may be a legacy
+    filesystem-relative path OR an ``sb://`` object-store row (dual-track
+    uploads post-epic) — ``serve_stored_file`` is the ONE reader that
+    handles both, so this endpoint never special-cases the shape.
+
+    Deliberately EXCLUDED from the P3 nginx direct-serve redirect (no
+    ``maybe_direct_redirect`` consult): this endpoint forces
+    ``Content-Disposition: attachment``, but nginx's ``/f/`` location sets
+    no Content-Disposition — a P3 302 there would silently open the file
+    inline instead of downloading. Same exemption as
+    ``resources_versions_router.py::serve_version_file``.
+    """
+    from urllib.parse import quote as urlquote
+
+    from app.services.library.media_serving import serve_stored_file
+
+    try:
+        svc = ProjectsService()
+        file_record = await svc.get_file_info(project_id, file_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    file_path = file_record.get("file_path")
+    if not file_path:
+        raise HTTPException(status_code=404, detail="No file available")
+
+    # Mirror Starlette's FileResponse Content-Disposition formatting
+    # (filename= for ascii, filename*=utf-8''... otherwise) — same helper
+    # used by the version-download endpoint.
+    filename = file_record.get("filename") or "download"
+    quoted = urlquote(filename)
+    if quoted != filename:
+        disposition = f"attachment; filename*=utf-8''{quoted}"
+    else:
+        disposition = f'attachment; filename="{filename}"'
+
+    try:
+        return await serve_stored_file(
+            file_path,
+            mime=file_record.get("mime_type", "application/octet-stream"),
+            request=request,
+            disposition=disposition,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to serve file {file_id} for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to serve file")
 
 
 @router.put("/{project_id}/files/{file_id}")

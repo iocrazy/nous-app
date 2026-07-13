@@ -25,7 +25,14 @@ export async function fetchTiptapModuleStatus(): Promise<boolean> {
     const data = await unwrapResponse<{ enabled?: boolean }>(res);
     return data.enabled === true;
   } catch (err) {
-    console.error('[editor] tiptap module-status load failed (fail-closed)', err);
+    // Skip the log under vitest: jsdom fetch always rejects here, so every
+    // EditorShell mount emits this asynchronously — often AFTER the test
+    // file's teardown, which kills the worker with "Closing rpc while
+    // onUserConsoleLog was pending" (the recurring CI flake, #1260 class).
+    // Prod behavior is unchanged: fail-closed with a loud log.
+    if (import.meta.env.MODE !== 'test') {
+      console.error('[editor] tiptap module-status load failed (fail-closed)', err);
+    }
     return false;
   }
 }
