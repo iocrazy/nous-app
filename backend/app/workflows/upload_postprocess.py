@@ -44,14 +44,13 @@ Design (mirrors extract_audio / thumbnail conventions)
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Optional
 
 from dbos import DBOS
 from loguru import logger
 
-from app.core.config import settings
 from app.db.scope import Scope, request_scope
+from app.services.library.media_storage import materialize
 
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
@@ -71,12 +70,12 @@ async def upload_postprocess_probe_step(
     from app.services.library.resources_service import ResourcesService
 
     svc = ResourcesService()
-    abs_path = Path(settings.DOWNLOAD_PATH) / file_path
-    if file_type in ("video", "audio"):
-        return await svc._extract_video_metadata(str(abs_path))
-    if file_type == "image":
-        return await svc._extract_image_metadata(str(abs_path))
-    return {}
+    async with materialize(file_path) as local_path:
+        if file_type in ("video", "audio"):
+            return await svc._extract_video_metadata(str(local_path))
+        if file_type == "image":
+            return await svc._extract_image_metadata(str(local_path))
+        return {}
 
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
@@ -86,8 +85,8 @@ async def upload_postprocess_png_prompt_step(file_path: str) -> Optional[str]:
     I/O — returns the prompt text or None; the body persists it."""
     from app.services.library.png_prompt_extractor import extract_png_prompt
 
-    abs_path = Path(settings.DOWNLOAD_PATH) / file_path
-    return extract_png_prompt(abs_path)
+    async with materialize(file_path) as local_path:
+        return extract_png_prompt(local_path)
 
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
