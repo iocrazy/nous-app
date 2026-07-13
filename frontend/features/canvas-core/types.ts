@@ -8,13 +8,20 @@
 
 // 'character' (mig 357) reuses the smart pipeline with the CharacterNode +
 // preset agent workflow on top (character canvas epic).
-export type CanvasKind = 'smart' | 'classic' | 'character';
+export type CanvasKind = 'smart' | 'classic' | 'character' | 'location' | 'prop';
 
 /** kinds that render the smart surface (composer, smart node set, generation
  *  pipeline). 'character' is smart + CharacterNode + a preset workflow.
  *  Accepts null (store kind before load) for call-site convenience. */
 export const isSmartFamily = (kind: CanvasKind | null | undefined): boolean =>
-  kind === 'smart' || kind === 'character';
+  kind === 'smart' || kind === 'character' || kind === 'location' || kind === 'prop';
+
+/** The library-entity canvas kinds — each seeds its own preset workflow. */
+export type EntityCanvasKind = 'character' | 'location' | 'prop';
+export const isEntityCanvas = (
+  kind: CanvasKind | null | undefined,
+): kind is EntityCanvasKind =>
+  kind === 'character' || kind === 'location' || kind === 'prop';
 
 export interface CanvasViewport {
   x: number;

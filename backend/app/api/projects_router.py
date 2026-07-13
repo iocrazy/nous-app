@@ -24,6 +24,11 @@ from app.schemas.project_character import (
     ProjectCharacterCreate,
     ProjectCharacterUpdate,
 )
+from app.schemas.project_lib_entity import (
+    LibEntityCreate,
+    LibEntityType,
+    LibEntityUpdate,
+)
 from app.schemas.projects import (
     AddMemberRequest,
     CreateCollectionRequest,
@@ -519,6 +524,138 @@ async def extract_project_characters(
     except Exception as e:
         logger.error(f"Failed to extract characters for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to extract characters")
+
+
+# ============================================
+# Project library — locations + props (mig 358, SP1)
+# ============================================
+
+
+@router.get("/{project_id}/lib/{entity_type}")
+async def list_lib_entities(
+    project_id: str,
+    entity_type: LibEntityType,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_read_access),
+):
+    """Authored location/prop rows — the generalized sibling of the character
+    library (one table keyed by entity_type)."""
+    from app.repositories.project_lib_entity_repository import (
+        get_project_lib_entity_repository,
+    )
+
+    try:
+        rows = await get_project_lib_entity_repository().list_by_project(
+            project_id, entity_type
+        )
+        return {"success": True, "data": rows}
+    except Exception as e:
+        logger.error(f"Failed to list {entity_type}s for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list library entities")
+
+
+@router.post("/{project_id}/lib/{entity_type}")
+async def create_lib_entity(
+    project_id: str,
+    entity_type: LibEntityType,
+    payload: LibEntityCreate,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
+    from app.repositories.project_lib_entity_repository import (
+        get_project_lib_entity_repository,
+    )
+
+    try:
+        row = await get_project_lib_entity_repository().create(
+            project_id, entity_type, payload.model_dump()
+        )
+        return {"success": True, "data": row}
+    except Exception as e:
+        logger.error(f"Failed to create {entity_type} for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create library entity")
+
+
+@router.patch("/{project_id}/lib/{entity_type}/{entity_id}")
+async def update_lib_entity(
+    project_id: str,
+    entity_type: LibEntityType,
+    entity_id: str,
+    payload: LibEntityUpdate,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
+    from app.repositories.project_lib_entity_repository import (
+        get_project_lib_entity_repository,
+    )
+
+    fields = payload.model_dump(exclude_none=True)
+    try:
+        row = await get_project_lib_entity_repository().update(
+            project_id, entity_type, entity_id, fields
+        )
+    except Exception as e:
+        logger.error(f"Failed to update {entity_type} {entity_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update library entity")
+    if row is None:
+        raise HTTPException(status_code=404, detail="Library entity not found")
+    return {"success": True, "data": row}
+
+
+@router.delete("/{project_id}/lib/{entity_type}/{entity_id}")
+async def delete_lib_entity(
+    project_id: str,
+    entity_type: LibEntityType,
+    entity_id: str,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
+    from app.repositories.project_lib_entity_repository import (
+        get_project_lib_entity_repository,
+    )
+
+    try:
+        deleted = await get_project_lib_entity_repository().delete(
+            project_id, entity_type, entity_id
+        )
+    except Exception as e:
+        logger.error(f"Failed to delete {entity_type} {entity_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete library entity")
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Library entity not found")
+    return {"success": True}
+
+
+@router.post("/{project_id}/lib/{entity_type}/extract")
+async def extract_lib_entities(
+    project_id: str,
+    entity_type: LibEntityType,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
+    """Materialize script-derived names into authored rows. Only locations
+    have a derivation source (scene headers); props are manual-only."""
+    from app.repositories.project_lib_entity_repository import (
+        get_project_lib_entity_repository,
+    )
+
+    if entity_type != "location":
+        raise HTTPException(
+            status_code=400, detail="Only locations can be extracted from scripts"
+        )
+    try:
+        svc = ProjectsService()
+        entities = await svc.get_project_entities(project_id)
+        names = [c.get("name", "") for c in entities.get("locations", [])]
+        rows = await get_project_lib_entity_repository().upsert_by_name(
+            project_id, entity_type, names
+        )
+        return {"success": True, "data": rows}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to extract locations for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to extract locations")
 
 
 # ============================================

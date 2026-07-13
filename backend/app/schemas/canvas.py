@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field, field_validator
 
 # 'character' (mig 357) reuses the smart pipeline with the CharacterNode +
 # preset agent workflow on top (character canvas epic 2026-07-13).
-CanvasKind = Literal["smart", "classic", "character"]
+CanvasKind = Literal["smart", "classic", "character", "location", "prop"]
 
 
 class CanvasViewport(BaseModel):
