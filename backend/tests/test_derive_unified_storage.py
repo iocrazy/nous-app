@@ -189,3 +189,104 @@ async def test_flag_on_non_numeric_scope_falls_back_not_crashes(repo, monkeypatc
     assert resource["file_path"] == f"teams/scope-1/derived/{rid}/v1/crop-orig.png"
     store_mock.assert_not_called()  # int('scope-1') raised before the call
     err_mock.assert_called_once()
+
+
+# ─── load_source_image read side (sb:// dual-track) ──────────────────
+#
+# 1333 dual-tracked the WRITE half only; the read half kept joining
+# file_path under DOWNLOAD_PATH, so deriving FROM an sb:// source 404'd
+# with the flag on. Reads now go through materialize() for both shapes.
+
+
+class ReadFakeRepo(FakeRepo):
+    """FakeRepo whose source lookup returns a real image resource row."""
+
+    def __init__(self, file_path: str):
+        super().__init__()
+        self._file_path = file_path
+
+    async def get_resource_by_id(self, resource_id: str):
+        return {
+            "id": resource_id,
+            "file_type": "image",
+            "mime_type": "image/png",
+            "filename": "src.png",
+            "file_path": self._file_path,
+        }
+
+    async def get_first_resource_item(self, resource_id: str):
+        return {"scope_id": "42", "folder_id": None, "library_id": None}
+
+
+@pytest.mark.asyncio
+async def test_load_source_reads_sb_row_via_materialize(repo, monkeypatch, tmp_path):
+    from contextlib import asynccontextmanager
+
+    src = tmp_path / "materialized.png"
+    src.write_bytes(PNG_BYTES)
+    seen = {}
+
+    @asynccontextmanager
+    async def fake_materialize(file_path: str):
+        seen["file_path"] = file_path
+        yield src
+
+    monkeypatch.setattr(dp, "materialize", fake_materialize)
+
+    frepo = ReadFakeRepo("sb://library/t42/ab/cd/deadbeef.png")
+    source = await dp.load_source_image(frepo, "123")
+
+    assert source.file_bytes == PNG_BYTES
+    assert seen["file_path"] == "sb://library/t42/ab/cd/deadbeef.png"
+
+
+@pytest.mark.asyncio
+async def test_load_source_sb_missing_object_maps_to_404(repo, monkeypatch):
+    from contextlib import asynccontextmanager
+
+    import httpx
+
+    @asynccontextmanager
+    async def fake_materialize(file_path: str):
+        req = httpx.Request("GET", "http://storage/object")
+        raise httpx.HTTPStatusError(
+            "not found", request=req, response=httpx.Response(404, request=req)
+        )
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(dp, "materialize", fake_materialize)
+
+    frepo = ReadFakeRepo("sb://library/t42/ab/cd/gone.png")
+    with pytest.raises(dp.DeriveError) as exc:
+        await dp.load_source_image(frepo, "123")
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_load_source_fs_row_unchanged(repo, monkeypatch, tmp_path):
+    # No materialize stub: exercises the REAL fs branch under DOWNLOAD_PATH
+    # (repo fixture already points settings.DOWNLOAD_PATH at tmp_path).
+    rel = "teams/42/src.png"
+    abs_path = tmp_path / rel
+    abs_path.parent.mkdir(parents=True)
+    abs_path.write_bytes(PNG_BYTES)
+
+    frepo = ReadFakeRepo(rel)
+    source = await dp.load_source_image(frepo, "123")
+    assert source.file_bytes == PNG_BYTES
+
+
+@pytest.mark.asyncio
+async def test_load_source_fs_missing_is_404(repo):
+    frepo = ReadFakeRepo("teams/42/nope.png")
+    with pytest.raises(dp.DeriveError) as exc:
+        await dp.load_source_image(frepo, "123")
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_load_source_escape_is_400(repo):
+    frepo = ReadFakeRepo("../../etc/passwd")
+    with pytest.raises(dp.DeriveError) as exc:
+        await dp.load_source_image(frepo, "123")
+    assert exc.value.status_code == 400

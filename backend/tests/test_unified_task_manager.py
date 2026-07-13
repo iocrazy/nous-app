@@ -7,6 +7,7 @@ phase→legacy-status mapping.
 
 from __future__ import annotations
 
+import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -170,6 +171,10 @@ class TestBuildRow:
         row = UnifiedTaskManager._build_row(
             user_id="u1", task_type="parse", title="Hello"
         )
+        # PK is synthesized when the caller has no engine workflow id (see
+        # test_synthesizes_workflow_id_when_absent); the rest are defaults.
+        synthesized = row.pop("dbos_workflow_id")
+        assert uuid.UUID(synthesized)
         assert row == {
             "user_id": "u1",
             "task_type": "parse",
@@ -178,6 +183,18 @@ class TestBuildRow:
             "phase": TaskPhase.QUEUED.value,
             "progress": 0,
         }
+
+    def test_synthesizes_workflow_id_when_absent(self) -> None:
+        """task_tracking's PK (dbos_workflow_id) is NOT NULL with no DB
+        default — non-DBOS tasks (uploads) must get a synthetic UUID or the
+        INSERT 23502s and the task never reaches the Task Center."""
+        row = UnifiedTaskManager._build_row(user_id="u1", task_type="upload", title="t")
+        assert uuid.UUID(row["dbos_workflow_id"])  # valid, non-empty
+        # Distinct per call — content-addressed rows must not collide.
+        row2 = UnifiedTaskManager._build_row(
+            user_id="u1", task_type="upload", title="t"
+        )
+        assert row["dbos_workflow_id"] != row2["dbos_workflow_id"]
 
     def test_title_truncated_to_200(self) -> None:
         row = UnifiedTaskManager._build_row(

@@ -210,6 +210,21 @@ def _coerce_temporal(data: Dict[str, Any], kinds: Dict[str, str]) -> Dict[str, A
     return out
 
 
+def _coerce_id_ints(values: Dict[str, Any], keys: tuple[str, ...]) -> Dict[str, Any]:
+    """Coerce Snowflake-id values to native ``int`` for asyncpg BIGINT binding.
+
+    Routers and services carry ids as ``str`` end-to-end (JS precision), but
+    asyncpg binds BIGINT params strictly — a str raises ``DataError`` instead
+    of coercing (the exact failure that left ``project_files`` empty in prod:
+    every ``create_file`` since the ORM cutover 500'd on ``$2::BIGINT``).
+    Returns a NEW dict (no mutation)."""
+    out = dict(values)
+    for key in keys:
+        if out.get(key) is not None:
+            out[key] = int(out[key])
+    return out
+
+
 def _parity(out: Dict[str, Any]) -> Dict[str, Any]:
     """Apply strategy-C value-type parity IN PLACE on a SELECT *-shaped dict:
 
@@ -642,7 +657,10 @@ class ProjectsRepository:
             Created file row dict.
         """
         try:
-            values = _known_only(data, _FILES_ATTRS, _FILES_TEMPORAL)
+            values = _coerce_id_ints(
+                _known_only(data, _FILES_ATTRS, _FILES_TEMPORAL),
+                ("project_id", "folder_id", "media_id"),
+            )
             async with write_scope() as session:
                 result = await session.execute(
                     insert(ProjectFiles).values(**values).returning(ProjectFiles)
@@ -670,7 +688,10 @@ class ProjectsRepository:
             Updated file row dict.
         """
         try:
-            values = _known_only(data, _FILES_ATTRS, _FILES_TEMPORAL)
+            values = _coerce_id_ints(
+                _known_only(data, _FILES_ATTRS, _FILES_TEMPORAL),
+                ("project_id", "folder_id", "media_id"),
+            )
             if not values:
                 current = await self.get_file_by_id(file_id)
                 return current or {}
@@ -795,7 +816,10 @@ class ProjectsRepository:
     async def create_version(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Create a new file version record."""
         try:
-            values = _known_only(data, _VERSIONS_ATTRS, _VERSIONS_TEMPORAL)
+            values = _coerce_id_ints(
+                _known_only(data, _VERSIONS_ATTRS, _VERSIONS_TEMPORAL),
+                ("file_id",),
+            )
             async with write_scope() as session:
                 result = await session.execute(
                     insert(FileVersions).values(**values).returning(FileVersions)
@@ -842,10 +866,9 @@ class ProjectsRepository:
     async def create_comment(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Create a new project-file comment."""
         try:
-            values = _known_only(data, _COMMENTS_ATTRS)
-            for key in ("file_id", "version_id"):
-                if values.get(key) is not None:
-                    values[key] = int(values[key])
+            values = _coerce_id_ints(
+                _known_only(data, _COMMENTS_ATTRS), ("file_id", "version_id")
+            )
             async with write_scope() as session:
                 result = await session.execute(
                     insert(ProjectFileComments)
@@ -959,7 +982,10 @@ class ProjectsRepository:
     async def create_folder(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Create a new folder."""
         try:
-            values = _known_only(data, _FOLDERS_ATTRS, _FOLDERS_TEMPORAL)
+            values = _coerce_id_ints(
+                _known_only(data, _FOLDERS_ATTRS, _FOLDERS_TEMPORAL),
+                ("project_id", "parent_id"),
+            )
             async with write_scope() as session:
                 result = await session.execute(
                     insert(ProjectFolders).values(**values).returning(ProjectFolders)
@@ -975,7 +1001,10 @@ class ProjectsRepository:
     ) -> Optional[Dict[str, Any]]:
         """Update a folder, scoped to project."""
         try:
-            values = _known_only(data, _FOLDERS_ATTRS, _FOLDERS_TEMPORAL)
+            values = _coerce_id_ints(
+                _known_only(data, _FOLDERS_ATTRS, _FOLDERS_TEMPORAL),
+                ("parent_id",),
+            )
             if not values:
                 return await self.get_folder(folder_id, project_id)
             async with write_scope() as session:

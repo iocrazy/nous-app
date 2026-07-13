@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+import uuid
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -355,8 +356,11 @@ class UnifiedTaskManager:
             row["media_id"] = media_id
         if group_id:
             row["group_id"] = group_id
-        if dbos_workflow_id:
-            row["dbos_workflow_id"] = dbos_workflow_id
+        # task_tracking's PK is dbos_workflow_id (NOT NULL, no DB default).
+        # Non-DBOS tasks (e.g. synchronous uploads) have no engine workflow
+        # id, so synthesize one — without it the INSERT 23502s and the task
+        # silently never reaches the Task Center.
+        row["dbos_workflow_id"] = dbos_workflow_id or str(uuid.uuid4())
         if total_bytes is not None:
             row["total_bytes"] = total_bytes
         if subtitle:
