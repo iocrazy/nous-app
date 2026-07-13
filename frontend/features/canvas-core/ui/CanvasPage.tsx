@@ -26,6 +26,7 @@ import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { useCanvasRealtime } from '../realtime/useCanvasRealtime';
 import { CanvasConflictDialog } from './CanvasConflictDialog';
 import { CanvasSurface } from './CanvasSurface';
+import { TopNodeBar } from './TopNodeBar';
 import { ShortcutHelpPanel } from './ShortcutHelpPanel';
 import { useCanvasShortcuts } from './useCanvasShortcuts';
 
@@ -188,6 +189,8 @@ export default function CanvasPage() {
           </div>
         </div>
       )}
+      {/* IC 普通画布's top node strip — Standard canvases only. */}
+      {kind === 'smart' && <TopNodeBar surfaceRef={surfaceRef} />}
       {isSmartFamily(kind) && <CanvasComposer surfaceRef={surfaceRef} teamId={teamId} />}
       <CanvasConflictDialog />
       <SaveBadge status={saveStatus} error={saveError} />
