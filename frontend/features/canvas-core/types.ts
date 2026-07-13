@@ -6,7 +6,9 @@
  * `number`.
  */
 
-export type CanvasKind = 'smart' | 'classic';
+// 'character' (mig 357) reuses the smart pipeline with the CharacterNode +
+// preset agent workflow on top (character canvas epic).
+export type CanvasKind = 'smart' | 'classic' | 'character';
 
 export interface CanvasViewport {
   x: number;

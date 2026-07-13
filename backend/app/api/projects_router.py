@@ -20,6 +20,10 @@ from app.core.scope_guards import (
     verify_project_write_access,
 )
 from app.repositories.generated_media_repository import GeneratedMediaRepository
+from app.schemas.project_character import (
+    ProjectCharacterCreate,
+    ProjectCharacterUpdate,
+)
 from app.schemas.projects import (
     AddMemberRequest,
     CreateCollectionRequest,
@@ -393,6 +397,128 @@ async def get_project_entities(
     except Exception as e:
         logger.error(f"Failed to get entities for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to get project entities")
+
+
+# ============================================
+# Project characters — authored character library (mig 357, character canvas)
+# ============================================
+
+
+@router.get("/{project_id}/characters")
+async def list_project_characters(
+    project_id: str,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_read_access),
+):
+    """Authored character rows the bible cards / character canvas bind to.
+    Distinct from GET /{id}/entities (read-only script derivation) — these
+    are curated rows; Extract materializes derived names into them."""
+    from app.repositories.project_character_repository import (
+        get_project_character_repository,
+    )
+
+    try:
+        rows = await get_project_character_repository().list_by_project(project_id)
+        return {"success": True, "data": rows}
+    except Exception as e:
+        logger.error(f"Failed to list characters for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list characters")
+
+
+@router.post("/{project_id}/characters")
+async def create_project_character(
+    project_id: str,
+    payload: ProjectCharacterCreate,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
+    from app.repositories.project_character_repository import (
+        get_project_character_repository,
+    )
+
+    try:
+        row = await get_project_character_repository().create(
+            project_id, payload.model_dump()
+        )
+        return {"success": True, "data": row}
+    except Exception as e:
+        logger.error(f"Failed to create character for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create character")
+
+
+@router.patch("/{project_id}/characters/{character_id}")
+async def update_project_character(
+    project_id: str,
+    character_id: str,
+    payload: ProjectCharacterUpdate,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
+    from app.repositories.project_character_repository import (
+        get_project_character_repository,
+    )
+
+    fields = payload.model_dump(exclude_none=True)
+    try:
+        row = await get_project_character_repository().update(
+            project_id, character_id, fields
+        )
+    except Exception as e:
+        logger.error(f"Failed to update character {character_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update character")
+    if row is None:
+        raise HTTPException(status_code=404, detail="Character not found")
+    return {"success": True, "data": row}
+
+
+@router.delete("/{project_id}/characters/{character_id}")
+async def delete_project_character(
+    project_id: str,
+    character_id: str,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
+    from app.repositories.project_character_repository import (
+        get_project_character_repository,
+    )
+
+    try:
+        deleted = await get_project_character_repository().delete(
+            project_id, character_id
+        )
+    except Exception as e:
+        logger.error(f"Failed to delete character {character_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete character")
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Character not found")
+    return {"success": True}
+
+
+@router.post("/{project_id}/characters/extract")
+async def extract_project_characters(
+    project_id: str,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
+    """Materialize script-derived character names into authored rows.
+
+    Idempotent: upsert by (project_id, name) with ignore_duplicates, so
+    re-running never clobbers curated rows. Returns the full library."""
+    from app.repositories.project_character_repository import (
+        get_project_character_repository,
+    )
+
+    try:
+        svc = ProjectsService()
+        entities = await svc.get_project_entities(project_id)
+        names = [c.get("name", "") for c in entities.get("characters", [])]
+        rows = await get_project_character_repository().upsert_by_name(
+            project_id, names
+        )
+        return {"success": True, "data": rows}
+    except Exception as e:
+        logger.error(f"Failed to extract characters for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to extract characters")
 
 
 # ============================================
