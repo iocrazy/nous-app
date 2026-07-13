@@ -25,6 +25,7 @@ from app.main import app
 
 # Must use sys.modules — __init__.py rebinds the attribute name to the APIRouter.
 r = sys.modules["app.api.generated_media_router"]
+serving = sys.modules["app.services.library.media_serving"]
 
 FAKE_USER_ID = "00000000-0000-0000-0000-000000000042"
 
@@ -192,7 +193,7 @@ async def test_get_file_404_when_file_missing_on_disk(monkeypatch, tmp_path, cli
     fake_settings = types.SimpleNamespace(DOWNLOAD_PATH=str(tmp_path))
     monkeypatch.setattr(r, "_resolve_personal_team_id", _fake_scope)
     monkeypatch.setattr(r.GeneratedMediaRepository, "get", _fake_get)
-    monkeypatch.setattr(r, "settings", fake_settings)
+    monkeypatch.setattr(serving, "settings", fake_settings)
 
     resp = await client.get("/api/v1/generated-media/10/file")
     assert resp.status_code == 404
@@ -217,7 +218,7 @@ async def test_get_file_happy_path(monkeypatch, tmp_path, client):
     fake_settings = types.SimpleNamespace(DOWNLOAD_PATH=str(tmp_path))
     monkeypatch.setattr(r, "_resolve_personal_team_id", _fake_scope)
     monkeypatch.setattr(r.GeneratedMediaRepository, "get", _fake_get)
-    monkeypatch.setattr(r, "settings", fake_settings)
+    monkeypatch.setattr(serving, "settings", fake_settings)
 
     resp = await client.get("/api/v1/generated-media/20/file")
     assert resp.status_code == 200, resp.text
@@ -257,7 +258,7 @@ async def test_cover_404_when_file_missing_on_disk(monkeypatch, tmp_path, client
 
     fake_settings = types.SimpleNamespace(DOWNLOAD_PATH=str(tmp_path))
     monkeypatch.setattr(r.GeneratedMediaRepository, "get_by_id", _fake_get_by_id)
-    monkeypatch.setattr(r, "settings", fake_settings)
+    monkeypatch.setattr(serving, "settings", fake_settings)
 
     resp = await client.get("/api/v1/generated-media/11/cover")
     assert resp.status_code == 404
@@ -290,7 +291,7 @@ async def test_cover_happy_path_no_auth(monkeypatch, tmp_path):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         monkeypatch.setattr(r.GeneratedMediaRepository, "get_by_id", _fake_get_by_id)
-        monkeypatch.setattr(r, "settings", fake_settings)
+        monkeypatch.setattr(serving, "settings", fake_settings)
 
         resp = await ac.get("/api/v1/generated-media/30/cover")
 
@@ -324,7 +325,7 @@ async def test_cover_404_for_non_image_media_kind(monkeypatch, tmp_path, client)
 
     fake_settings = types.SimpleNamespace(DOWNLOAD_PATH=str(tmp_path))
     monkeypatch.setattr(r.GeneratedMediaRepository, "get_by_id", _fake_get_by_id)
-    monkeypatch.setattr(r, "settings", fake_settings)
+    monkeypatch.setattr(serving, "settings", fake_settings)
 
     resp = await client.get("/api/v1/generated-media/77/cover")
     assert resp.status_code == 404
@@ -368,7 +369,7 @@ async def test_stream_404_for_non_video_media_kind(monkeypatch, tmp_path, client
 
     fake_settings = types.SimpleNamespace(DOWNLOAD_PATH=str(tmp_path))
     monkeypatch.setattr(r.GeneratedMediaRepository, "get_by_id", _fake_get_by_id)
-    monkeypatch.setattr(r, "settings", fake_settings)
+    monkeypatch.setattr(serving, "settings", fake_settings)
 
     resp = await client.get("/api/v1/generated-media/77/stream")
     assert resp.status_code == 404
@@ -400,7 +401,7 @@ async def test_stream_happy_path_no_auth(monkeypatch, tmp_path):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         monkeypatch.setattr(r.GeneratedMediaRepository, "get_by_id", _fake_get_by_id)
-        monkeypatch.setattr(r, "settings", fake_settings)
+        monkeypatch.setattr(serving, "settings", fake_settings)
 
         resp = await ac.get("/api/v1/generated-media/30/stream")
 
@@ -590,7 +591,7 @@ async def test_stream_filesystem_range_206_no_regression(monkeypatch, tmp_path, 
 
     fake_settings = types.SimpleNamespace(DOWNLOAD_PATH=str(tmp_path))
     monkeypatch.setattr(r.GeneratedMediaRepository, "get_by_id", _fake_get_by_id)
-    monkeypatch.setattr(r, "settings", fake_settings)
+    monkeypatch.setattr(serving, "settings", fake_settings)
 
     resp = await client.get(
         "/api/v1/generated-media/40/stream", headers={"Range": "bytes=0-49"}
@@ -618,7 +619,7 @@ async def test_cover_404_for_path_traversal(monkeypatch, tmp_path, client):
 
     fake_settings = types.SimpleNamespace(DOWNLOAD_PATH=str(tmp_path))
     monkeypatch.setattr(r.GeneratedMediaRepository, "get_by_id", _fake_get_by_id)
-    monkeypatch.setattr(r, "settings", fake_settings)
+    monkeypatch.setattr(serving, "settings", fake_settings)
 
     resp = await client.get("/api/v1/generated-media/88/cover")
     assert resp.status_code == 404
