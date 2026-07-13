@@ -30,6 +30,7 @@ export interface PromptResourceRef {
 
 export type SmartNodeType =
   | 'shot'
+  | 'media'
   | 'prompt'
   | 'output'
   | 'loop'
@@ -113,6 +114,16 @@ export interface LoopSlotTag {
   round_index: number;
 }
 
+/** User-uploaded media card (Infinite's 上传 node) — a SOURCE like shot,
+ *  but its items are durable /generated-media/ URLs minted by the import
+ *  endpoint, so connected prompts can use them as i2i/i2v sources. */
+export interface MediaNodeData {
+  title: string;
+  items: GeneratedImageRef[];
+  /** In-flight upload count — rendered as shimmer cells. */
+  uploading?: number;
+}
+
 export interface GroupNodeData {
   /** User-editable caption shown in the container corner (②-3). */
   label?: string;
@@ -179,11 +190,18 @@ export interface SmartNode<T> extends Record<string, unknown> {
 }
 
 export type ShotNode = SmartNode<ShotNodeData>;
+export type MediaNode = SmartNode<MediaNodeData>;
 export type PromptNode = SmartNode<PromptNodeData>;
 export type OutputNode = SmartNode<OutputNodeData>;
 export type LoopNode = SmartNode<LoopNodeData>;
 export type CharacterNode = SmartNode<CharacterNodeData>;
-export type AnySmartNode = ShotNode | PromptNode | OutputNode | LoopNode | CharacterNode;
+export type AnySmartNode =
+  | ShotNode
+  | MediaNode
+  | PromptNode
+  | OutputNode
+  | LoopNode
+  | CharacterNode;
 
 /** Character canvas (kind='character'): the bible-card node the preset agent
  *  workflow hangs off. Binds a project_characters row when opened from the
@@ -212,6 +230,8 @@ export interface LibEntityNodeData {
  *
  *   shot   → prompt          ✓
  *   shot   → loop            ✓ (loop fans out a shot collection)
+ *   media  → prompt / loop   ✓ (uploaded media feeds generation as source)
+ *   *      → media           ✗ (media cards are sources only)
  *   prompt → output          ✓
  *   prompt → prompt          ✓ (chain: one prompt feeds the next)
  *   prompt → loop            ✓ (prompt output can drive a loop)
@@ -232,6 +252,10 @@ export function canConnectSmart(
   if (!sourceType || !targetType) return true;
   if (sourceType === 'output') return false;
   if (targetType === 'shot') return false;
+  // Media cards are sources like shot: they feed prompts/loops only.
+  if (targetType === 'media') return false;
+  if (sourceType === 'media' && targetType !== 'prompt' && targetType !== 'loop')
+    return false;
   // Entity cards (character/location/prop) are SOURCE cards like shot:
   // they feed prompts only and take nothing.
   const ENTITY = new Set(['character', 'location', 'prop']);
@@ -247,6 +271,7 @@ export function canConnectSmart(
 /** Default min-width per node type. Used by the renderer + factory. */
 export const SMART_NODE_DEFAULT_WIDTH: Record<SmartNodeType, number> = {
   shot: 240,
+  media: 240,
   prompt: 280,
   output: 260,
   loop: 200,
@@ -281,6 +306,7 @@ export function isSmartNode(node: CanvasNode): node is AnySmartNode {
     typeof obj.id === 'string' &&
     typeof obj.type === 'string' &&
     (obj.type === 'shot' ||
+      obj.type === 'media' ||
       obj.type === 'prompt' ||
       obj.type === 'output' ||
       obj.type === 'loop')

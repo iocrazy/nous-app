@@ -8,27 +8,38 @@
 // (resource_refs 打通 stays parked until a resource_id bridge exists).
 
 import type { CanvasConnection, CanvasNode } from '../types';
-import type { GeneratedImageRef, OutputNodeData } from './types';
+import type { GeneratedImageRef, MediaNodeData, OutputNodeData } from './types';
 
 const DURABLE_PREFIX = '/api/v1/generated-media/';
 
 const asObj = (n: unknown) => n as Record<string, unknown>;
 
+function durableUrls(candidates: Array<string | null | undefined>): string[] {
+  return candidates.filter(
+    (url): url is string => typeof url === 'string' && url.startsWith(DURABLE_PREFIX),
+  );
+}
+
 function durableImagesOf(node: CanvasNode): string[] {
-  if (asObj(node).type !== 'output') return [];
+  const type = asObj(node).type;
+  if (type === 'media') {
+    // Upload cards (the media node) mint durable URLs via the import
+    // endpoint — same i2i eligibility as generated outputs.
+    const data = (asObj(node).data ?? {}) as MediaNodeData;
+    const items: GeneratedImageRef[] = Array.isArray(data.items) ? data.items : [];
+    return durableUrls(items.filter((i) => i.kind !== 'video').map((i) => i.url));
+  }
+  if (type !== 'output') return [];
   const data = (asObj(node).data ?? {}) as OutputNodeData;
   const refs: GeneratedImageRef[] = Array.isArray(data.images)
     ? (data.images as GeneratedImageRef[])
     : [];
-  const candidates: Array<string | null | undefined> = [
+  return durableUrls([
     // Video refs are excluded: they are neither i2i sources nor <img>-able
     // compare underlays.
     ...refs.filter((i) => i.kind !== 'video').map((i) => i.url),
     data.preview_url,
-  ];
-  return candidates.filter(
-    (url): url is string => typeof url === 'string' && url.startsWith(DURABLE_PREFIX),
-  );
+  ]);
 }
 
 /** Every durable generated image feeding into a prompt, in connection
