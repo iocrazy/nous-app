@@ -124,6 +124,56 @@ async def test_list_resources_folder_id_binds(
 
 
 @pytest.mark.asyncio
+async def test_list_resources_all_folders_drops_root_predicate(
+    repo: ResourcesRepository, cap_session: _CapSession
+) -> None:
+    """all_folders=True must list scope-wide (no folder predicate at all) —
+    the Distribution Publish picker relies on this to see videos filed into
+    folders, not just root-level items."""
+    await repo.get_resource_items(
+        scope_type="personal", scope_id="user-1", all_folders=True
+    )
+    sql, params = _main_call(cap_session)
+    assert "i.folder_id IS NULL" not in sql
+    assert "i.folder_id = :folder_id" not in sql
+    assert "folder_id" not in params
+
+
+@pytest.mark.asyncio
+async def test_list_resources_folder_id_wins_over_all_folders(
+    repo: ResourcesRepository, cap_session: _CapSession
+) -> None:
+    """An explicit folder_id still narrows to that folder even when
+    all_folders is (nonsensically) passed alongside it."""
+    await repo.get_resource_items(
+        scope_type="personal", scope_id="user-1", folder_id="42", all_folders=True
+    )
+    sql, params = _main_call(cap_session)
+    assert "i.folder_id = :folder_id" in sql
+    assert params["folder_id"] == 42
+
+
+@pytest.mark.asyncio
+async def test_list_resources_limit_binds_and_caps(
+    repo: ResourcesRepository, cap_session: _CapSession
+) -> None:
+    await repo.get_resource_items(scope_type="personal", scope_id="user-1", limit=500)
+    sql, params = _main_call(cap_session)
+    assert sql.rstrip().endswith("LIMIT :limit")
+    assert params["limit"] == 500
+
+
+@pytest.mark.asyncio
+async def test_list_resources_no_limit_by_default(
+    repo: ResourcesRepository, cap_session: _CapSession
+) -> None:
+    await repo.get_resource_items(scope_type="personal", scope_id="user-1")
+    sql, params = _main_call(cap_session)
+    assert "LIMIT" not in sql
+    assert "limit" not in params
+
+
+@pytest.mark.asyncio
 async def test_list_resources_include_trashed_drops_default_filter(
     repo: ResourcesRepository, cap_session: _CapSession
 ) -> None:

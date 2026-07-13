@@ -78,12 +78,16 @@ export const getShareSchema = (
  * Content source for the Publish page — recent video resources from the
  * Library. Goes through `request` (reuses auth headers) and hops out of the
  * /distribution prefix via `/../resources` (standards-compliant URL path
- * normalization → /api/v1/resources). Fails soft to [] so the page renders.
+ * normalization → /api/v1/resources). `all_folders=true` because the picker
+ * is scope-wide — without it the endpoint returns ROOT-level items only and
+ * silently misses every video the user filed into a folder. Capped at the
+ * newest 500 so huge libraries can't flood the response (search happens
+ * client-side within that window). Fails soft to [] so the page renders.
  */
 export const listLibraryVideos = async (scopeId: string): Promise<LibraryVideo[]> => {
   try {
     const res = await request<{ success: boolean; data: Array<Record<string, unknown>> }>(
-      `/../resources?scope_id=${encodeURIComponent(scopeId)}&types=video`,
+      `/../resources?scope_id=${encodeURIComponent(scopeId)}&types=video&all_folders=true&limit=500`,
     );
     const rows = res?.data ?? [];
     return rows.map((r) => ({

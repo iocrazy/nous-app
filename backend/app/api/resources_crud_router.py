@@ -67,6 +67,20 @@ async def list_resources(
     scope_id: str = Query(...),
     _scope_guard: None = Depends(verify_scope_access),
     folder_id: Optional[str] = Query(None),
+    all_folders: bool = Query(
+        False,
+        description=(
+            "When true (and folder_id is absent), list items across ALL "
+            "folders in the scope instead of root-level only. Used by "
+            "scope-wide pickers (e.g. Distribution Publish)."
+        ),
+    ),
+    limit: Optional[int] = Query(
+        None,
+        ge=1,
+        le=1000,
+        description="Cap the number of returned items (newest first).",
+    ),
     tag_ids: Optional[List[str]] = Query(
         None,
         description=(
@@ -263,6 +277,8 @@ async def list_resources(
         items = await repo.get_resource_items(
             scope_id=scope_id,
             folder_id=folder_id,
+            all_folders=all_folders,
+            limit=limit,
             tag_ids=tag_ids or None,
             min_rating=min_rating,
             types=normalised_types,
