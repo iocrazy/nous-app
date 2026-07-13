@@ -103,3 +103,30 @@ class ProviderProtocol:
 - admin Models 弹窗按 type 显示协议下拉且可自定义输入;
 - `grep -rn "_PROVIDER_KEYS = frozenset" factory.py` 不再有字面集合;
 - 契约测试红线:任何人往 factory/db_registry 加协议而不更新注册表 → CI 红。
+
+---
+
+## Phase 2 — 协议策略模式类化(2026-07-13 追加,用户批准)
+
+Phase 1 让协议**元数据**收敛到单一注册表;Phase 2 让协议**行为**(adapter/provider 构造)也收敛——每协议一个自包含模块,自己拥有 `build_*` 方法,`factory` 和 `db_registry` 的两条 if/elif 分发链收进各协议类。加新协议 = 加一个 `<key>.py`,分发层零改动。
+
+### 目录:`provider_protocols.py` → 包 `provider_protocols/`
+
+`__init__.py` 重导出全部 Phase 1 公共 API(`all_protocols`/`chat_provider_keys`/`generation_keys_for`/`default_chat_key`/`ProviderProtocol`)+ 新增 `get_chat_protocol` / `resolve_generation_protocol` + `ProviderNotConfiguredError`(从 factory 迁来),所有现有 `from app.services.ai.provider_protocols import ...` 保持可用。
+
+- `base.py` — `ProviderProtocol` 基类(元数据 class-attr + 3 个 build 钩子,默认抛 `ProtocolCapabilityError`)+ `ProviderNotConfiguredError`(迁自 factory)。
+- `_registry.py` — 组装 `PROTOCOLS` 实例元组 + 查询函数(`chat_provider_keys` 等)+ `get_chat_protocol(key)`(未知 key → 默认 qwen 协议,复刻 factory 现有 else 分支)+ `resolve_generation_protocol(actual_provider)`。
+- `<key>.py`(qwen/openai/claude/deepseek/doubao/modelscope/ark/jimeng)— 每协议一个类,元数据在顶部、adapter 类**惰性 import 在 build 方法内**(零 load-time cycle,复刻现有 modelscope/RotatingAdapter 惰性 import 范式)。
+
+### 契约保持(铁律)
+
+- 行为**逐字节不变**:`factory.get_adapter_for_key/get_adapter_for_user/get_adapter/resolve_provider_key/provider_key_for_model/_PROVIDER_KEYS/ProviderNotConfiguredError` 全部保签名/保语义。
+- 多 key `RotatingAdapter` 逻辑留在 `factory._build_adapter_for_key`(跨协议共享),只把单 key 的 per-provider 构造委托给 `protocol.build_chat_adapter(model, creds)`。
+- `db_registry` 保留选行(jimeng-first)+ enabled-rows,构造委托给协议;`_ARK_PROVIDERS/_JIMENG_PROVIDERS` 退役(改用协议 `generation_family` 判定)。
+- 回归网证明零漂移:`test_catalog_provider_dispatch` / `test_adapter_factory_byo` / `test_ai_library_chat_wiring` / `test_script_ai_adapter_dispatch` / image·video 测试全部保持绿,外加每协议 build 方法单测。
+
+### Phase 2 验收
+
+- `grep -n "if provider_key ==" factory.py` 不再有 per-provider 分支;
+- 加一个新协议只需新增 `provider_protocols/<key>.py` + 注册,`factory.py`/`db_registry.py` 不改;
+- 全部既有 AI 分发测试保持绿(证明行为不变)。
