@@ -62,6 +62,13 @@ interface UiSelectOptionItem {
   value: string;
   label: ReactNode;
   disabled: boolean;
+  /** Muted second line under the label (nous-style two-line rows). */
+  description?: string;
+  /** Colored status dot on the leading edge (e.g. per-provider hue). */
+  dot?: string;
+  /** Tri-state: undefined = no load semantics; true/false → green "loaded"
+   *  dot + enables the "Only loaded" filter at the top of the menu. */
+  loaded?: boolean;
 }
 
 interface UiSelectGroupItem {
@@ -219,6 +226,7 @@ export function UiSelect({ className = '', triggerClassName, children, ...props 
   const hiddenSelectRef = useRef<HTMLSelectElement | null>(null);
   const listboxIdRef = useRef(`ui-select-${Math.random().toString(36).slice(2, 10)}`);
   const [isOpen, setIsOpen] = useState(false);
+  const [onlyLoaded, setOnlyLoaded] = useState(false);
   const [menuStyle, setMenuStyle] = useState<{ left: number; top: number; width: number }>({
     left: 0,
     top: 0,
@@ -235,11 +243,16 @@ export function UiSelect({ className = '', triggerClassName, children, ...props 
       }
 
       const optionValue = child.props.value ?? child.props.children;
+      const rawLoaded = child.props['data-loaded'];
       return {
         kind: 'option',
         value: String(optionValue ?? ''),
         label: child.props.children,
         disabled: Boolean(child.props.disabled),
+        description: child.props['data-description'] || undefined,
+        dot: child.props['data-dot'] || undefined,
+        loaded:
+          rawLoaded === undefined ? undefined : rawLoaded === true || rawLoaded === 'true',
       };
     };
 
@@ -285,6 +298,30 @@ export function UiSelect({ className = '', triggerClassName, children, ...props 
     parsedOptions.find((option) => option.value === selectedValue) ??
     parsedOptions.find((option) => !option.disabled) ??
     null;
+  // Rich mode (nous parity): any option carrying a description / dot / load
+  // state promotes the whole menu to two-line rows with a leading indicator.
+  const hasLoadedInfo = parsedOptions.some((option) => option.loaded !== undefined);
+  const loadedCount = parsedOptions.filter((option) => option.loaded).length;
+  const richMode = parsedOptions.some(
+    (option) => option.description || option.dot || option.loaded !== undefined
+  );
+  const shownItems = useMemo(() => {
+    if (!(onlyLoaded && hasLoadedInfo)) {
+      return parsedItems;
+    }
+    // Keep the current selection visible even when unloaded, then drop any
+    // group header left without options under it.
+    const kept = parsedItems.filter(
+      (item) => item.kind !== 'option' || item.loaded || item.value === selectedValue
+    );
+    return kept.filter((item, index) => {
+      if (item.kind !== 'group') {
+        return true;
+      }
+      const next = kept[index + 1];
+      return next != null && next.kind === 'option';
+    });
+  }, [onlyLoaded, hasLoadedInfo, parsedItems, selectedValue]);
 
   useEffect(() => {
     if (!isControlled) {
@@ -474,13 +511,33 @@ export function UiSelect({ className = '', triggerClassName, children, ...props 
               }}
             >
               <div className="ui-scrollbar max-h-[228px] overflow-y-auto">
-                {parsedItems.map((item) => {
+                {hasLoadedInfo ? (
+                  <button
+                    type="button"
+                    className="mb-1 flex w-full items-center gap-2 rounded-[6px] border border-ink-700 px-2.5 py-1.5 text-xs text-content transition-colors hover:bg-ink-700"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setOnlyLoaded((current) => !current);
+                    }}
+                  >
+                    <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
+                    <span className="flex-1 text-left">Only loaded</span>
+                    <span className="tabular-nums text-content-3">{loadedCount}</span>
+                    {onlyLoaded ? (
+                      <Check className="h-3.5 w-3.5 shrink-0 text-[color:var(--accent-text)]" />
+                    ) : null}
+                  </button>
+                ) : null}
+                {shownItems.length === 0 ? (
+                  <div className="px-3 py-6 text-center text-xs text-content-3">No matches</div>
+                ) : null}
+                {shownItems.map((item) => {
                   if (item.kind === 'group') {
                     return (
                       <div
                         key={item.key}
                         role="presentation"
-                        className="truncate px-3 pt-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-content-3 first:pt-1"
+                        className="truncate px-2.5 pt-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-content-3 first:pt-1"
                       >
                         {item.label}
                       </div>
@@ -495,11 +552,11 @@ export function UiSelect({ className = '', triggerClassName, children, ...props 
                       role="option"
                       aria-selected={isSelected}
                       disabled={item.disabled}
-                      className={`flex w-full items-center justify-between rounded-[6px] px-3 py-2 text-sm transition-colors ${
+                      className={`flex w-full items-start gap-2.5 rounded-[6px] px-2.5 py-2 text-left text-sm transition-colors ${
                         item.disabled
                           ? 'cursor-not-allowed opacity-40'
                           : isSelected
-                            ? 'bg-[color-mix(in_srgb,var(--accent)_13%,transparent)] text-content'
+                            ? 'bg-ink-700 font-medium text-content'
                             : 'text-content hover:bg-ink-700'
                       }`}
                       onClick={() => {
@@ -511,9 +568,27 @@ export function UiSelect({ className = '', triggerClassName, children, ...props 
                         triggerRef.current?.focus();
                       }}
                     >
-                      <span className="truncate">{item.label}</span>
-                      {isSelected ? (
-                        <Check className="ml-3 h-3.5 w-3.5 shrink-0 text-[color:var(--accent-text)]" />
+                      {richMode ? (
+                        <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">
+                          {isSelected ? (
+                            <Check className="h-3.5 w-3.5 text-[color:var(--accent-text)]" />
+                          ) : item.loaded ? (
+                            <span className="h-2 w-2 rounded-full bg-emerald-500" title="Loaded" />
+                          ) : item.dot ? (
+                            <span className="h-2 w-2 rounded-full" style={{ background: item.dot }} />
+                          ) : null}
+                        </span>
+                      ) : null}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate">{item.label}</span>
+                        {item.description ? (
+                          <span className="mt-0.5 block truncate text-[11px] font-normal text-content-3">
+                            {item.description}
+                          </span>
+                        ) : null}
+                      </span>
+                      {!richMode && isSelected ? (
+                        <Check className="ml-3 mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--accent-text)]" />
                       ) : null}
                     </button>
                   );
