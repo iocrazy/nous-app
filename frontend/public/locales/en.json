@@ -1769,6 +1769,10 @@
       "emptyHint": "Click or drop images / video",
       "rejected": "Only images/videos up to 50MB",
       "uploadFailed": "Upload failed"
+    },
+    "groupNode": {
+      "title": "Group",
+      "dropHint": "Drop images to auto-collect"
     }
   },
   "modelParams": {

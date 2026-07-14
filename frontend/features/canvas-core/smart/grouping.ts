@@ -137,8 +137,8 @@ export function releaseChildrenOf(
 
 // ---- Drop membership (IC parity 1b — Infinite's 拖入自动收进分组) --------
 
-const EMPTY_GROUP_W = 320;
-const EMPTY_GROUP_H = 220;
+const EMPTY_GROUP_W = 220;
+const EMPTY_GROUP_H = 150;
 
 export interface NodeSize {
   width: number;
@@ -291,11 +291,10 @@ export function absorbMediaIntoGroup(
     ...mediaItems.filter((i) => !seen.has(String(i.url))),
   ];
 
-  // Grid space: header + rows of GRID_CELL thumbs (max GRID_COLS per row,
-  // capped preview at GRID_MAX) — grow the group if it is too short.
-  const shown = Math.min(merged.length, GRID_MAX);
-  const rows = Math.max(1, Math.ceil(shown / GRID_COLS));
-  const minH = 44 + rows * (GRID_CELL + 6) + 16;
+  // Grow the group to fit the adaptive thumbnail grid (IC parity): never
+  // shrink below the user's current box, but ensure the grid fits.
+  const minH = groupGridHeight(merged.length);
+  const minW = groupGridWidth(merged.length);
   const g = rectOfGroup(group);
 
   const nextNodes = nodes
@@ -307,7 +306,7 @@ export function absorbMediaIntoGroup(
         data: { ...groupData, items: merged },
         style: {
           ...((asObj(n).style as object) ?? {}),
-          width: g.w,
+          width: Math.max(g.w, minW),
           height: Math.max(g.h, minH),
         },
       } as CanvasNode;
@@ -327,9 +326,33 @@ export function absorbMediaIntoGroup(
   return { nodes: nextNodes, connections: nextConnections };
 }
 
-export const GRID_COLS = 4;
+// Thumbnail-grid geometry, IC parity (smartGroupThumbLayout js:1456).
 export const GRID_CELL = 44;
-export const GRID_MAX = 8;
+export const GRID_GAP = 6;
+export const GRID_MAX = 12;
+export const GROUP_OUTER_PAD = 16;
+export const GROUP_HEADER = 28;
+
+/** IC's adaptive column count: min 2, max 4, ceil(sqrt(n)). */
+export function gridColsFor(count: number): number {
+  if (count <= 1) return 1;
+  return Math.min(4, Math.max(2, Math.ceil(Math.sqrt(count))));
+}
+
+/** Group box height that fits `count` thumbs at the adaptive column count. */
+export function groupGridHeight(count: number): number {
+  const shown = Math.min(count, GRID_MAX);
+  const cols = gridColsFor(shown);
+  const rows = Math.max(1, Math.ceil(shown / cols));
+  return GROUP_HEADER + rows * (GRID_CELL + GRID_GAP) + GROUP_OUTER_PAD;
+}
+
+/** Group box width that fits the adaptive column count. */
+export function groupGridWidth(count: number): number {
+  const shown = Math.min(count, GRID_MAX);
+  const cols = gridColsFor(shown);
+  return GROUP_OUTER_PAD * 2 + cols * GRID_CELL + (cols - 1) * GRID_GAP;
+}
 
 export function applyDropMembership(
   nodes: CanvasNode[],

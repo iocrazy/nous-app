@@ -781,6 +781,17 @@ body {
 [data-theme="light"] .mh-node {
   --mh-node-shadow: 0 16px 42px rgba(15, 23, 42, 0.08);
 }
+/* Group container (IC's .image-node.group-node): a frosted-glass card —
+   solid hairline (the dashed affordance lives in the empty drop-zone),
+   translucent fill + blur so members read as "inside" it. */
+.mh-group-node {
+  background: color-mix(in srgb, var(--canvas-card) 46%, transparent);
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+  backdrop-filter: blur(12px);
+}
+[data-theme="dark"] .mh-group-node {
+  background: color-mix(in srgb, var(--canvas-card) 28%, transparent);
+}
 /* Selection ring: a box-shadow spread FOLLOWS border-radius, so the ring
    hugs the node's rounded corners — an `outline` is always rectangular and
    left a square frame around the rounded card (screenshot-reported). */
