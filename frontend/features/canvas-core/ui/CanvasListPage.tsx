@@ -17,6 +17,7 @@ import { useToast } from '../../../components/Toast';
 import { CANVAS_NAV_ENABLED } from '../flags';
 import { CanvasTrashSection } from './CanvasTrashSection';
 import { NewCanvasDialog } from './NewCanvasDialog';
+import { CanvasCardMenu } from './CanvasCardMenu';
 import type { CreatableCanvasKind } from '../types';
 import {
   createCanvas,
@@ -177,14 +178,24 @@ export default function CanvasListPage() {
                           <span>{new Date(canvas.updated_at).toLocaleDateString()}</span>
                         </div>
                       </button>
-                      <button
-                        aria-label={t('canvasList.moveToTrash', 'Move to trash')}
-                        title={t('canvasList.moveToTrash', 'Move to trash')}
-                        onClick={() => void handleDeleteCanvas(canvas.id)}
-                        className={`absolute right-2.5 top-2.5 rounded-lg p-1.5 text-content-4 opacity-0 transition-opacity hover:bg-rose-500/10 hover:text-rose-400 focus-visible:opacity-100 group-hover:opacity-100 ${FOCUS_RING}`}
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                      <div className="absolute right-2 top-2 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+                        <CanvasCardMenu
+                          canvasId={canvas.id}
+                          canvasName={canvas.name || t('canvasList.untitled', 'Untitled Canvas')}
+                          onRenamed={(name) =>
+                            setGroups(
+                              (prev) =>
+                                prev?.map((g) => ({
+                                  ...g,
+                                  canvases: g.canvases.map((c) =>
+                                    c.id === canvas.id ? { ...c, name } : c,
+                                  ),
+                                })) ?? prev,
+                            )
+                          }
+                          onDelete={() => void handleDeleteCanvas(canvas.id)}
+                        />
+                      </div>
                     </div>
                   ))}
                   <button

@@ -15,6 +15,7 @@
  */
 
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
 import {
@@ -96,7 +97,30 @@ export function ProjectWorkspace({
   // — the inline-mounted EditorShell needs it for collaboration presence.
   const { currentUserId, userProfile } = useAuth();
 
-  const [activeModule, setActiveModule] = useState<WorkspaceModule>('overview');
+  // Module state lives in the URL (?module=canvas): entering the canvas
+  // editor and coming BACK (history/back-pill) must land on the same
+  // module — a plain useState reset to Overview on every return.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialModule = ((): WorkspaceModule => {
+    const q = searchParams.get('module');
+    const valid: WorkspaceModule[] = [
+      'overview', 'canvas', 'episodes', 'script', 'characters',
+      'locations', 'props', 'files', 'trash', 'settings',
+    ];
+    return valid.includes(q as WorkspaceModule) ? (q as WorkspaceModule) : 'overview';
+  })();
+  const [activeModule, setActiveModule] = useState<WorkspaceModule>(initialModule);
+  useEffect(() => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (activeModule === 'overview') next.delete('module');
+        else next.set('module', activeModule);
+        return next;
+      },
+      { replace: true },
+    );
+  }, [activeModule, setSearchParams]);
 
   // ── SOP stage (catalog + current, READ-ONLY here) ─────────────────────
   const [catalog, setCatalog] = useState<ProjectStage[]>([]);

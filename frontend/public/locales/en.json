@@ -1713,7 +1713,11 @@
     "deleteForever": "Delete Forever",
     "confirmDelete": "Confirm delete",
     "purged": "Canvas permanently deleted",
-    "purgeFailed": "Failed to delete canvas"
+    "purgeFailed": "Failed to delete canvas",
+    "cardMenu": "Canvas actions",
+    "rename": "Rename",
+    "renameLabel": "Canvas name",
+    "export": "Export canvas"
   },
   "canvas": {
     "addImage": "+ Add Image",

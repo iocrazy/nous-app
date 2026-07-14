@@ -24,6 +24,8 @@ import {
 } from '../../features/canvas-core/services/canvasService';
 import type { Canvas, CreatableCanvasKind } from '../../features/canvas-core/types';
 import { NewCanvasDialog } from '../../features/canvas-core/ui/NewCanvasDialog';
+import { CanvasCardMenu } from '../../features/canvas-core/ui/CanvasCardMenu';
+import { deleteCanvas } from '../../features/canvas-core/services/canvasService';
 import { formatRelativeTime } from '../../utils/relativeTime';
 import { CanvasCardPreview } from './CanvasCardPreview';
 
@@ -85,6 +87,17 @@ export function WorkspaceCanvas({ projectId, teamId }: WorkspaceCanvasProps) {
     }
   };
 
+  const handleDelete = async (canvasId: string) => {
+    try {
+      await deleteCanvas(canvasId);
+      setCanvases((prev) => prev?.filter((c) => String(c.id) !== canvasId) ?? prev);
+      addToast(t('canvasList.movedToTrash', 'Moved to trash'), 'info');
+    } catch (err) {
+      console.error('[WorkspaceCanvas] delete failed:', err);
+      addToast(t('canvasList.deleteFailed', 'Failed to delete canvas'), 'error');
+    }
+  };
+
   if (loadFailed) {
     return (
       <div className="flex h-40 items-center justify-center text-sm text-red-400">
@@ -123,10 +136,25 @@ export function WorkspaceCanvas({ projectId, teamId }: WorkspaceCanvasProps) {
       )}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {canvases.map((canvas) => (
+          <div key={String(canvas.id)} className="group relative">
+            <div className="absolute right-2 top-2 z-10 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+              <CanvasCardMenu
+                canvasId={String(canvas.id)}
+                canvasName={canvas.name || t('canvasList.untitled', 'Untitled Canvas')}
+                onRenamed={(name) =>
+                  setCanvases(
+                    (prev) =>
+                      prev?.map((c) =>
+                        c.id === canvas.id ? { ...c, name } : c,
+                      ) ?? prev,
+                  )
+                }
+                onDelete={() => void handleDelete(String(canvas.id))}
+              />
+            </div>
           <button
-            key={String(canvas.id)}
             onClick={() => navigate(editorPath(String(canvas.id)))}
-            className={`group flex flex-col overflow-hidden rounded-xl border border-ink-800 bg-ink-900 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-indigo-500/50 hover:shadow-lg hover:shadow-indigo-500/10 ${FOCUS_RING}`}
+            className={`flex w-full flex-col overflow-hidden rounded-xl border border-ink-800 bg-ink-900 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-indigo-500/50 hover:shadow-lg hover:shadow-indigo-500/10 ${FOCUS_RING}`}
           >
             <CanvasCardPreview
               nodes={canvas.nodes_json}
@@ -163,6 +191,7 @@ export function WorkspaceCanvas({ projectId, teamId }: WorkspaceCanvasProps) {
               </div>
             </div>
           </button>
+          </div>
         ))}
         <button
           onClick={() => setDialogOpen(true)}
