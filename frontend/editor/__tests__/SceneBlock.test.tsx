@@ -83,10 +83,14 @@ describe('SceneBlock head row + structure', () => {
   it('writes scene meta through updateSceneMeta after the debounce', () => {
     vi.useFakeTimers();
     render(<SceneBlock scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])} index={0} />);
-    // Head row starts as a typographic slug — click it to reveal the selects.
+    // Head row starts as a typographic slug — click it to reveal the fields.
     fireEvent.click(screen.getByRole('button', { name: 'editor.editSceneHeading' }));
-    const locationInput = screen.getByLabelText('editor.location');
-    fireEvent.change(locationInput, { target: { value: 'Rooftop Access' } });
+    // The location field is a search-or-create combobox: open it, type a new
+    // location, and Enter creates/commits it.
+    fireEvent.click(screen.getByLabelText('editor.location'));
+    const search = screen.getByLabelText('editor.locationSearchPlaceholder');
+    fireEvent.change(search, { target: { value: 'Rooftop Access' } });
+    fireEvent.keyDown(search, { key: 'Enter' });
 
     expect(svc.updateSceneMeta).not.toHaveBeenCalled();
     vi.advanceTimersByTime(600);
@@ -134,9 +138,12 @@ describe('SceneBlock typographic head row (Task 4.5)', () => {
   it('reflects edited meta in the read-mode slug', () => {
     render(<SceneBlock scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])} index={0} />);
     fireEvent.click(screen.getByRole('button', { name: 'editor.editSceneHeading' }));
-    fireEvent.change(screen.getByLabelText('editor.location'), {
-      target: { value: 'Rooftop Access' },
-    });
+    // Open the search-or-create location combobox, type + Enter to commit.
+    fireEvent.click(screen.getByLabelText('editor.location'));
+    const search = screen.getByLabelText('editor.locationSearchPlaceholder');
+    fireEvent.change(search, { target: { value: 'Rooftop Access' } });
+    fireEvent.keyDown(search, { key: 'Enter' });
+    // Leaving the head row returns to the read-mode slug.
     fireEvent.blur(screen.getByLabelText('editor.location'), { relatedTarget: document.body });
 
     expect(screen.getByRole('button', { name: 'editor.editSceneHeading' })).toHaveTextContent(

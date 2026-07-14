@@ -401,6 +401,20 @@ export const EDITOR_SHELL_STYLES = `
 .mh-heading-opt:hover{ background:var(--surface-2); }
 .mh-heading-opt.active{ background:var(--indigo-soft); color:var(--indigo-deep); }
 .mh-heading-opt[aria-selected='true']{ font-weight:800; }
+/* Searchable location picker: a chromeless search-or-create input at the top of
+   the popup (mirrors the cue picker's mh-mention-search). */
+.mh-heading-search{
+  margin:-4px -4px 4px; padding:8px 11px;
+  border-bottom:1px solid var(--sheet-border);
+}
+.mh-heading-search input{
+  width:100%; background:none; border:none; outline:none;
+  font-family:var(--sans); font-size:13px; color:var(--sheet-ink); padding:0;
+}
+.mh-heading-search input::placeholder{ color:var(--sheet-ink-soft); }
+/* The Create row reads as an action, not a location — sans, not mono. */
+.mh-heading-opt.create{ font-family:var(--sans); font-weight:600; color:var(--indigo-deep); }
+.mh-heading-empty{ padding:8px 12px; font-size:12.5px; color:var(--sheet-ink-soft); }
 /* laper's "Tab — Switch to location" hint at the top of the open picker. */
 .mh-heading-hint{
   display:flex; align-items:center; gap:7px; margin:0 2px 4px;
