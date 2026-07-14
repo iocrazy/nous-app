@@ -5,8 +5,9 @@
 // fabricated `nous/storyboard` slug the platform doesn't carry.
 
 import { ReactFlowProvider } from '@xyflow/react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { changeUiSelect, uiSelectMirror } from '../../../../tests/uiSelect';
 
 vi.mock('../../../../hooks/useResourceSearch', () => ({
   useResourceSearch: vi.fn().mockReturnValue({
@@ -81,7 +82,7 @@ afterEach(() => {
 describe('PromptNodeView text-model dropdown (P0-1)', () => {
   it('renders the catalog default plus DB llm rows — no hardcoded slugs', () => {
     seedAndRender(TEXT_DATA);
-    const select = screen.getByLabelText('Prompt provider') as HTMLSelectElement;
+    const select = uiSelectMirror('Prompt provider');
     const options = Array.from(select.options).map((o) => ({ value: o.value, label: o.textContent }));
     expect(options).toEqual([
       { value: '', label: 'Catalog default' },
@@ -96,14 +97,12 @@ describe('PromptNodeView text-model dropdown (P0-1)', () => {
 
   it('defaults to the empty catalog-default value', () => {
     seedAndRender(TEXT_DATA);
-    expect((screen.getByLabelText('Prompt provider') as HTMLSelectElement).value).toBe('');
+    expect(uiSelectMirror('Prompt provider').value).toBe('');
   });
 
   it('selecting a model persists its bare catalog name into provider_slug', () => {
     seedAndRender(TEXT_DATA);
-    fireEvent.change(screen.getByLabelText('Prompt provider'), {
-      target: { value: 'mediahub-deepseek' },
-    });
+    changeUiSelect('Prompt provider', 'mediahub-deepseek');
     expect(nodeData().provider_slug).toBe('mediahub-deepseek');
   });
 });

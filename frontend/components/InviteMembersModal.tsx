@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Copy, Check, Loader2, Link2, Clock, Users, Trash2 } from 'lucide-react';
 import { TeamInvite, ExpiryOption, createInvite, fetchInvites, deleteInvite, getInviteLink } from '../services/inviteService';
+import { UiSelect } from './ui';
 
 interface InviteMembersModalProps {
   isOpen: boolean;
@@ -151,15 +152,15 @@ export const InviteMembersModal: React.FC<InviteMembersModalProps> = ({
                     <Clock size={12} />
                     Expires after
                   </label>
-                  <select
+                  <UiSelect
                     value={expiresIn}
                     onChange={(e) => setExpiresIn(e.target.value as ExpiryOption)}
-                    className="w-full bg-ink-900 border border-ink-700 rounded-lg px-3 py-2 text-sm text-ink-200 focus:outline-none focus:border-indigo-500"
+                    className="w-full"
                   >
                     {expiryOptions.map((opt) => (
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
                     ))}
-                  </select>
+                  </UiSelect>
                 </div>
 
                 <div className="space-y-2">
@@ -167,17 +168,17 @@ export const InviteMembersModal: React.FC<InviteMembersModalProps> = ({
                     <Users size={12} />
                     Max uses
                   </label>
-                  <select
+                  <UiSelect
                     value={maxUses === null ? 'null' : maxUses.toString()}
                     onChange={(e) => setMaxUses(e.target.value === 'null' ? null : parseInt(e.target.value) as MaxUsesOption)}
-                    className="w-full bg-ink-900 border border-ink-700 rounded-lg px-3 py-2 text-sm text-ink-200 focus:outline-none focus:border-indigo-500"
+                    className="w-full"
                   >
                     {maxUsesOptions.map((opt) => (
                       <option key={opt.value === null ? 'null' : opt.value} value={opt.value === null ? 'null' : opt.value}>
                         {opt.label}
                       </option>
                     ))}
-                  </select>
+                  </UiSelect>
                 </div>
               </div>
             )}

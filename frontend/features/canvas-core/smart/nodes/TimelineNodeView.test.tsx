@@ -57,7 +57,10 @@ afterEach(() => {
 describe('TimelineNodeView', () => {
   it('aspect dropdown offers Auto + the shared composer presets (P2 unify)', () => {
     renderTimeline();
-    const select = screen.getByLabelText('Aspect ratio') as HTMLSelectElement;
+    // UiSelect renders a trigger button (labelled) + a hidden native <select>
+    // carrying the same <option> children; read the option set off that select.
+    const trigger = screen.getByLabelText('Aspect ratio');
+    const select = trigger.parentElement!.querySelector('select') as HTMLSelectElement;
     const values = Array.from(select.options).map((o) => o.value);
     // Auto + the shared ASPECT_RATIOS — previously Timeline lacked 4:3/3:4.
     expect(values).toEqual(['', '1:1', '16:9', '9:16', '4:3', '3:4']);

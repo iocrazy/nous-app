@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Tag as TagIcon, FolderOpen, Check, Flame, Plus, X } from 'lucide-react';
+import { UiSelect } from '../components/ui';
 
 interface Tag {
   id: string;
@@ -384,16 +385,16 @@ export const ShortcutsTagsPage: React.FC = () => {
               <span className="text-indigo-400">{translatedName}</span>
             </div>
           )}
-          <select
+          <UiSelect
             value={newTagGroupId}
             onChange={(e) => setNewTagGroupId(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-ink-800 border border-ink-700 text-sm text-ink-50 outline-none focus:border-indigo-500"
+            className="w-full"
           >
             <option value="">{lang === 'zh' ? '选择分组 (可选)' : 'Select group (optional)'}</option>
             {tagGroups.map((g) => (
               <option key={g.id} value={g.id}>{g.name}</option>
             ))}
-          </select>
+          </UiSelect>
           {createError && (
             <p className="text-xs text-red-400">{createError}</p>
           )}

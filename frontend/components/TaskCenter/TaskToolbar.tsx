@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import type { TaskStatus, TaskType } from '../../contexts/TaskManagerContext';
 import type { GroupBy, SortBy } from '../../utils/taskDisplay';
+import { UiSelect } from '../ui';
 
 export type ViewMode = 'list' | 'kanban';
 
@@ -163,16 +164,16 @@ export const TaskToolbar: React.FC<TaskToolbarProps> = ({
         </div>
 
         <div className="flex items-center gap-1">
-          <select
+          <UiSelect
             value={sortBy}
             onChange={(e) => onSortByChange(e.target.value as SortBy)}
-            className="text-xs bg-ink-900 border border-ink-800 rounded px-2 py-1 text-ink-300"
+            className="h-8 text-xs"
             title="Sort"
           >
             {SORT_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
-          </select>
+          </UiSelect>
           <GroupByPicker value={groupBy} onChange={onGroupByChange} />
         </div>
 

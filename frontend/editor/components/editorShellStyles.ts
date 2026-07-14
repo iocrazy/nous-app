@@ -234,6 +234,7 @@ export const EDITOR_SHELL_STYLES = `
 .mh-rail-module:hover:not(:disabled){ background:var(--surface-2); }
 .mh-rail-module:disabled{ opacity:0.5; cursor:default; }
 .mh-rail-module.active{ background:var(--indigo-soft); color:var(--indigo-deep); border-color:var(--surface-border); }
+.mh-rail-module.active:hover:not(:disabled){ background:var(--indigo-soft); }
 .mh-rail-module-glyph{
   width:16px; text-align:center; flex-shrink:0;
   font-family:var(--mono); font-size:12px; color:var(--ink-faint);
@@ -459,6 +460,12 @@ export const EDITOR_SHELL_STYLES = `
 .hw-character{ padding-left:22ch; text-transform:uppercase; font-weight:700; letter-spacing:0.03em; color:var(--tick-character); }
 .hw-dialogue{ padding-left:10ch; padding-right:15ch; }
 .hw-paren{ padding-left:16ch; padding-right:17ch; font-style:italic; color:var(--sheet-ink-soft); }
+/* A parenthetical WEARS its parentheses (laper/industry): rendered as pseudo
+   content so the stored text stays clean — no byte ever changes. Suppressed
+   while the block is empty (legacy :empty / PM's trailing-break marker) so
+   the type-whisper placeholder never reads "(Parenthetical)". */
+.hw-paren:not(:empty):not(:has(br.ProseMirror-trailingBreak))::before{ content:'('; }
+.hw-paren:not(:empty):not(:has(br.ProseMirror-trailingBreak))::after{ content:')'; }
 .hw-transition{ text-align:right; text-transform:uppercase; font-weight:700; letter-spacing:0.04em; color:var(--sheet-ink-soft); }
 /* Superimpose is a flush-left action line (SUPER: …) per industry standard —
    NOT centred. The gutter tick colour is what distinguishes it. */
@@ -532,6 +539,11 @@ export const EDITOR_SHELL_STYLES = `
 .mh-h-item:hover:not(:disabled){ background:var(--surface-2); }
 .mh-h-item:disabled{ opacity:0.5; cursor:default; }
 .mh-h-item.active{ background:var(--indigo); color:var(--accent-on); }
+/* :hover:not(:disabled) is (0,3,0) and BEATS .active's (0,2,0) while the
+   pointer is still on the just-clicked button — the active pill degraded to
+   surface-2 with white text (invisible). Re-assert the active look at hover
+   specificity. Same guard applied to every state-class button in this sheet. */
+.mh-h-item.active:hover:not(:disabled){ background:var(--indigo); color:var(--accent-on); }
 .mh-h-glyph{
   width:16px; height:16px; display:inline-flex; align-items:center; justify-content:center;
   font-size:9.5px; font-family:var(--mono); font-weight:700; color:var(--ink-faint); flex-shrink:0;
@@ -597,7 +609,9 @@ export const EDITOR_SHELL_STYLES = `
    the sheet's indigo-soft accent so keyboard position stays visible. */
 .mh-mention-pop{
   z-index:20; min-width:200px; max-width:300px; margin-top:2px;
-  background:#fff; border:1px solid var(--sheet-border);
+  /* Elevated chrome surface (not the hardcoded #fff it used to be) so the cue
+     picker flips with the editor theme instead of flashing white on dark paper. */
+  background:var(--surface); border:1px solid var(--sheet-border);
   border-radius:8px; box-shadow:0 10px 28px rgba(35,20,90,0.14);
   padding:4px; font-family:var(--sans);
 }
@@ -1164,6 +1178,7 @@ export const EDITOR_SHELL_STYLES = `
 .mh-version-action:hover:not(:disabled){ background:var(--indigo-soft); color:var(--indigo-deep); border-color:var(--indigo); }
 .mh-version-action:disabled{ opacity:0.5; cursor:default; }
 .mh-version-action.confirming{ background:var(--indigo); color:var(--accent-on); border-color:transparent; }
+.mh-version-action.confirming:hover:not(:disabled){ background:var(--indigo); color:var(--accent-on); border-color:transparent; }
 .mh-version-action.danger:hover:not(:disabled){ background:var(--red); color:#fff; border-color:transparent; }
 .mh-version-action.danger.confirming{ background:var(--red); color:#fff; border-color:transparent; }
 .mh-version-partial{
@@ -1367,8 +1382,13 @@ export const EDITOR_SHELL_STYLES = `
    weight — everything is uniform Courier. Drop the bold to match a real page. */
 .hw-character{ color:var(--sheet-ink); font-weight:normal; letter-spacing:0; }
 .hw-transition{ color:var(--sheet-ink); font-weight:normal; letter-spacing:0; }
-.hw-paren{ color:var(--sheet-ink); font-style:normal; }
+/* Parenthetical stays ITALIC + soft even on the clean page (laper reference:
+   "(dry…)" renders gray italic under the cue) — position AND voice carry it. */
+.hw-paren{ color:var(--sheet-ink-soft); }
 .hw-subtitle{ color:var(--sheet-ink); }
+/* Comment on the clean page: laper renders it as a quiet gray italic line —
+   the colored left border read as a form element on printed paper. */
+.hw-comment{ border-left:none; padding-left:0; color:var(--sheet-ink-soft); }
 
 /* ==================================================================
    EMPTY-STATE POLISH — the 16-point audit (empty scenes read like a
@@ -1456,9 +1476,17 @@ export const EDITOR_SHELL_STYLES = `
 .mh-el-editable[data-el-type='paren']:empty:focus::before,
 .mh-el-editable[data-el-type='paren']:has(br.ProseMirror-trailingBreak):focus::before{ content:'Parenthetical'; }
 .mh-el-editable[data-el-type='transition']:empty:focus::before,
-.mh-el-editable[data-el-type='transition']:has(br.ProseMirror-trailingBreak):focus::before{ content:'Transition'; }
+.mh-el-editable[data-el-type='transition']:has(br.ProseMirror-trailingBreak):focus::before{ content:'TRANS'; }
 .mh-el-editable[data-el-type='comment']:empty:focus::before,
 .mh-el-editable[data-el-type='comment']:has(br.ProseMirror-trailingBreak):focus::before{ content:'Comment'; }
+/* laper renders the empty-transition whisper as a ghost CHIP pinned to the
+   right column (where the transition text will land), not plain prose. */
+.mh-el-editable[data-el-type='transition']:empty::before,
+.mh-el-editable[data-el-type='transition']:has(br.ProseMirror-trailingBreak)::before{
+  display:inline-block; padding:0 7px; border-radius:4px;
+  background:color-mix(in srgb, var(--sheet-ink) 7%, transparent);
+  letter-spacing:0.08em; font-style:normal;
+}
 .mh-el-editable[data-el-type='subtitle']:empty:focus::before,
 .mh-el-editable[data-el-type='subtitle']:has(br.ProseMirror-trailingBreak):focus::before{ content:'Subtitle'; }
 /* TipTap mode: Chrome paints its UA focus ring (outline:auto, the blue ring)
@@ -1537,7 +1565,7 @@ export const EDITOR_SHELL_STYLES = `
 .mh-el-editable[data-el-type='paren']:empty::before,
 .mh-el-editable[data-el-type='paren']:has(br.ProseMirror-trailingBreak)::before{ content:'Parenthetical'; }
 .mh-el-editable[data-el-type='transition']:empty::before,
-.mh-el-editable[data-el-type='transition']:has(br.ProseMirror-trailingBreak)::before{ content:'Transition'; }
+.mh-el-editable[data-el-type='transition']:has(br.ProseMirror-trailingBreak)::before{ content:'TRANS'; }
 .mh-el-editable[data-el-type='comment']:empty::before,
 .mh-el-editable[data-el-type='comment']:has(br.ProseMirror-trailingBreak)::before{ content:'Comment'; }
 .mh-el-editable[data-el-type='subtitle']:empty::before,

@@ -5,6 +5,7 @@
 import React from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { UiSelect } from '../ui';
 import { TASK_PAGE_SIZE_OPTIONS } from './useTaskPage';
 
 /** Windowed page list: always show first + last + a span around current,
@@ -63,11 +64,11 @@ export const TaskPagination: React.FC<TaskPaginationProps> = ({
         {t('taskCenter.pagination.total', { count: total })}
       </span>
       <label className="flex items-center gap-1 text-ink-500">
-        <select
+        <UiSelect
           value={pageSize}
           onChange={(e) => onPageSize(Number(e.target.value))}
           disabled={disabled}
-          className="bg-ink-800/80 border border-ink-700 rounded px-1.5 py-0.5 text-ink-300 text-xs outline-none focus:border-indigo-500 disabled:opacity-40 cursor-pointer"
+          className="h-8 text-xs disabled:opacity-40"
           aria-label={t('taskCenter.pagination.perPage') ?? 'Per page'}
         >
           {TASK_PAGE_SIZE_OPTIONS.map((n) => (
@@ -75,7 +76,7 @@ export const TaskPagination: React.FC<TaskPaginationProps> = ({
               {t('taskCenter.pagination.perPage', { count: n })}
             </option>
           ))}
-        </select>
+        </UiSelect>
       </label>
       <div className="flex-1" />
       <button

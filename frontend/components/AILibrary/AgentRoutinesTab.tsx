@@ -7,6 +7,7 @@ import {
   type ScheduleResponse,
 } from '../../services/schedulesService';
 import { useToast } from '../Toast';
+import { UiSelect } from '../ui';
 
 // Agent Routines tab (paperclip R1). A routine is a user_schedules row with
 // task_type='agent_routine': on each cron fire the master scheduler creates
@@ -74,13 +75,13 @@ const RoutineForm: React.FC<{
           <span className="font-medium text-ink-400">
             {t('aiLibrary.agents.routines.scheduleLabel', 'Schedule')}
           </span>
-          <select
+          <UiSelect
             value={isPreset ? form.cron_expr : '__custom__'}
             onChange={(e) => {
               const v = e.target.value;
               if (v !== '__custom__') setForm((f) => ({ ...f, cron_expr: v }));
             }}
-            className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
+            className="mt-1 w-full"
           >
             {CRON_PRESETS.map((p) => (
               <option key={p.expr} value={p.expr}>{p.label}</option>
@@ -88,7 +89,7 @@ const RoutineForm: React.FC<{
             <option value="__custom__">
               {t('aiLibrary.agents.routines.customCron', 'Custom cron…')}
             </option>
-          </select>
+          </UiSelect>
           <input
             type="text"
             value={form.cron_expr}
@@ -108,7 +109,7 @@ const RoutineForm: React.FC<{
           <span className="font-medium text-ink-400">
             {t('aiLibrary.agents.routines.policyLabel', 'If previous run still open')}
           </span>
-          <select
+          <UiSelect
             value={form.delivery_policy}
             onChange={(e) =>
               setForm((f) => ({
@@ -116,7 +117,7 @@ const RoutineForm: React.FC<{
                 delivery_policy: e.target.value as RoutineFormState['delivery_policy'],
               }))
             }
-            className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
+            className="mt-1 w-full"
           >
             <option value="skip_if_active">
               {t('aiLibrary.agents.routines.policySkip', 'Skip this fire (recommended)')}
@@ -124,7 +125,7 @@ const RoutineForm: React.FC<{
             <option value="always">
               {t('aiLibrary.agents.routines.policyAlways', 'Fire anyway')}
             </option>
-          </select>
+          </UiSelect>
         </label>
       </div>
 

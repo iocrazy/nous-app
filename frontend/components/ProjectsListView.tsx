@@ -13,6 +13,7 @@ import { ProjectContextMenu } from './ProjectContextMenu';
 import { ProjectSettingsPanel } from './ProjectSettingsPanel';
 import { ProjectMembersPanel } from './ProjectMembersPanel';
 import { ProjectsQueueView } from './ProjectsQueueView';
+import { UiSelect } from './ui';
 
 interface ProjectsListViewProps {
   projects: Project[];
@@ -235,13 +236,12 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
         {homeView === 'grid' && (
           <div className="flex items-center gap-2">
             {/* Sort */}
-            <select value={sortBy} onChange={e => setSortBy(e.target.value as SortKey)}
-              className="text-xs bg-ink-800 border border-ink-700/50 rounded-lg px-2 py-1.5 text-ink-300
-                         focus:outline-none focus:border-indigo-500 cursor-pointer">
+            <UiSelect value={sortBy} onChange={e => setSortBy(e.target.value as SortKey)}
+              className="h-8 text-xs">
               <option value="updated_at">{t('projects.sortUpdatedAt', 'Last active')}</option>
               <option value="created_at">{t('projects.sortCreatedAt', 'Created')}</option>
               <option value="name">{t('projects.sortName', 'Name')}</option>
-            </select>
+            </UiSelect>
             <button
               onClick={() => setSortDir(d => d === 'desc' ? 'asc' : 'desc')}
               className="p-1.5 text-ink-400 hover:text-ink-200 hover:bg-ink-800 rounded-lg transition-colors"

@@ -13,7 +13,6 @@ import {
   WifiOff,
   Settings,
   Save,
-  ChevronDown,
   ToggleLeft,
   ToggleRight,
   Sparkles,
@@ -48,6 +47,7 @@ import { NousCenterVerifyPanel } from '../features/canvas-core/smart/NousCenterV
 import { MemoryPanel } from './MemoryPanel';
 import { AgentMemoriesPanel } from './AgentMemoriesPanel';
 import { AIHealthBoard } from './AIHealthBoard';
+import { UiSelect } from './ui';
 
 interface AISettingsProps {
   settings: AISettingsType;
@@ -774,12 +774,11 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
     const isLegacy = currentValue !== '' && !knownSlugs.has(currentValue);
 
     return (
-      <div className="relative">
-        <select
-          value={currentValue}
-          onChange={(e) => updateTaskAssignment(taskKey, e.target.value)}
-          className="appearance-none bg-ink-800 border border-ink-700 rounded-lg px-4 py-2 pr-8 text-sm text-ink-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer min-w-[220px]"
-        >
+      <UiSelect
+        value={currentValue}
+        onChange={(e) => updateTaskAssignment(taskKey, e.target.value)}
+        className="min-w-[220px]"
+      >
           {options.length === 0 && (
             <option value="">No Agents Available</option>
           )}
@@ -807,9 +806,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
               ))}
             </optgroup>
           )}
-        </select>
-        <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-500 pointer-events-none" />
-      </div>
+      </UiSelect>
     );
   };
 
@@ -879,21 +876,17 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
           <div className={`space-y-4 transition-opacity ${localSettings.ai_enabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
             <div className="flex items-center justify-between py-2">
               <span className="text-sm text-ink-300">Preferred Language</span>
-              <div className="relative">
-                <select
-                  value={localSettings.preferred_language}
-                  onChange={(e) => setPreferredLanguage(e.target.value)}
-                  disabled={!localSettings.ai_enabled}
-                  className="appearance-none bg-ink-800 border border-ink-700 rounded-lg px-4 py-2 pr-8 text-sm text-ink-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer"
-                >
-                  {LANGUAGE_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-500 pointer-events-none" />
-              </div>
+              <UiSelect
+                value={localSettings.preferred_language}
+                onChange={(e) => setPreferredLanguage(e.target.value)}
+                disabled={!localSettings.ai_enabled}
+              >
+                {LANGUAGE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </UiSelect>
             </div>
           </div>
         </div>
@@ -951,18 +944,15 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
               <FileText size={16} className="text-ink-400" />
               <span className="text-sm font-medium text-ink-300">Transcription</span>
             </div>
-            <div className="relative">
-              <select
-                value={localSettings.task_assignment.transcription}
-                onChange={(e) => updateTaskAssignment('transcription', e.target.value)}
-                className="appearance-none bg-ink-800 border border-ink-700 rounded-lg px-4 py-2 pr-8 text-sm text-ink-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer min-w-[220px]"
-              >
-                {getTranscriptionOptions().map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-              <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-500 pointer-events-none" />
-            </div>
+            <UiSelect
+              value={localSettings.task_assignment.transcription}
+              onChange={(e) => updateTaskAssignment('transcription', e.target.value)}
+              className="min-w-[220px]"
+            >
+              {getTranscriptionOptions().map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </UiSelect>
           </div>
           ) : (
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -1251,50 +1241,41 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                       <>
                         <div className="space-y-1.5">
                           <label className="text-xs font-medium text-ink-400">Whisper Model</label>
-                          <div className="relative">
-                            <select
-                              value={config.selected_model?.startsWith('whisper') ? config.selected_model : 'whisper-1'}
-                              onChange={(e) => updateProviderField(providerKey, 'selected_model', e.target.value)}
-                              className="w-full appearance-none bg-ink-950 border border-ink-800 rounded-lg px-4 py-2.5 pr-8 text-sm text-ink-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer"
-                            >
-                              {(meta.whisperModels || []).map((m) => (
-                                <option key={m} value={m}>{m}</option>
-                              ))}
-                            </select>
-                            <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-500 pointer-events-none" />
-                          </div>
+                          <UiSelect
+                            value={config.selected_model?.startsWith('whisper') ? config.selected_model : 'whisper-1'}
+                            onChange={(e) => updateProviderField(providerKey, 'selected_model', e.target.value)}
+                            className="w-full"
+                          >
+                            {(meta.whisperModels || []).map((m) => (
+                              <option key={m} value={m}>{m}</option>
+                            ))}
+                          </UiSelect>
                         </div>
 
                         <div className="space-y-1.5">
                           <label className="text-xs font-medium text-ink-400">Summary Model</label>
-                          <div className="relative">
-                            <select
-                              value={config.summary_model || 'gpt-4o-mini'}
-                              onChange={(e) => updateProviderField(providerKey, 'summary_model' as keyof AIProviderConfig, e.target.value)}
-                              className="w-full appearance-none bg-ink-950 border border-ink-800 rounded-lg px-4 py-2.5 pr-8 text-sm text-ink-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer"
-                            >
-                              {(meta.summaryModels || []).map((m) => (
-                                <option key={m} value={m}>{m}</option>
-                              ))}
-                            </select>
-                            <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-500 pointer-events-none" />
-                          </div>
+                          <UiSelect
+                            value={config.summary_model || 'gpt-4o-mini'}
+                            onChange={(e) => updateProviderField(providerKey, 'summary_model' as keyof AIProviderConfig, e.target.value)}
+                            className="w-full"
+                          >
+                            {(meta.summaryModels || []).map((m) => (
+                              <option key={m} value={m}>{m}</option>
+                            ))}
+                          </UiSelect>
                         </div>
 
                         <div className="space-y-1.5">
                           <label className="text-xs font-medium text-ink-400">Analysis Model</label>
-                          <div className="relative">
-                            <select
-                              value={config.analysis_model || 'gpt-4o'}
-                              onChange={(e) => updateProviderField(providerKey, 'analysis_model' as keyof AIProviderConfig, e.target.value)}
-                              className="w-full appearance-none bg-ink-950 border border-ink-800 rounded-lg px-4 py-2.5 pr-8 text-sm text-ink-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer"
-                            >
-                              {(meta.analysisModels || []).map((m) => (
-                                <option key={m} value={m}>{m}</option>
-                              ))}
-                            </select>
-                            <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-500 pointer-events-none" />
-                          </div>
+                          <UiSelect
+                            value={config.analysis_model || 'gpt-4o'}
+                            onChange={(e) => updateProviderField(providerKey, 'analysis_model' as keyof AIProviderConfig, e.target.value)}
+                            className="w-full"
+                          >
+                            {(meta.analysisModels || []).map((m) => (
+                              <option key={m} value={m}>{m}</option>
+                            ))}
+                          </UiSelect>
                         </div>
                       </>
                     )}

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X, Trash2, Loader2 } from 'lucide-react';
 import { Project } from '../types';
+import { UiSelect } from './ui';
 import { updateProject, deleteProject } from '../services/projectsService';
 
 interface ProjectSettingsPanelProps {
@@ -152,15 +153,15 @@ export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
             <label className="block text-sm font-medium text-ink-300 mb-2">
               {t('projects.settings.type', 'Project Type')}
             </label>
-            <select
+            <UiSelect
               value={projectType}
               onChange={(e) => setProjectType(e.target.value as any)}
-              className="w-full px-3 py-2.5 bg-ink-800 border border-ink-700 rounded-lg text-sm text-ink-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="w-full"
             >
               <option value="internal">{t('projects.settings.typeInternal', 'Internal')}</option>
               <option value="external">{t('projects.settings.typeExternal', 'External')}</option>
               <option value="personal">{t('projects.settings.typePersonal', 'Personal')}</option>
-            </select>
+            </UiSelect>
           </div>
 
           {/* Project Group */}

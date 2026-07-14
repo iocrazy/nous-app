@@ -7,6 +7,7 @@ import { clampRoundStart, clampRounds } from '../loopVars';
 import { startLoopRun } from '../loopRun';
 import { useLoopRunStore } from '../loopRunStore';
 import { useNodeDataPatch } from './useNodeDataPatch';
+import { UiSelect } from '../../../../components/ui';
 
 const MODE_OPTIONS: ReadonlyArray<{ value: LoopMode; label: string }> = [
   { value: 'serial', label: 'Serial' },
@@ -42,8 +43,8 @@ export function LoopNodeView({ id, data, selected }: NodeProps) {
       <div className="mh-node-head">
         <div className="mh-node-title">Loop</div>
         <div className="flex items-center gap-1">
-          <select
-            className="nodrag mh-chip outline-none focus:ring-1 focus:ring-canvas-strong/40"
+          <UiSelect
+            triggerClassName="nodrag mh-chip outline-none focus-visible:ring-1 focus-visible:ring-canvas-strong/40"
             value={mode}
             onChange={(e) => patch({ mode: e.target.value as LoopMode })}
             aria-label="Loop mode"
@@ -53,7 +54,7 @@ export function LoopNodeView({ id, data, selected }: NodeProps) {
                 {opt.label}
               </option>
             ))}
-          </select>
+          </UiSelect>
           {/* Infinite's loop-smart-run: Run ↔ Stop, disabled while stopping. */}
           <button
             type="button"

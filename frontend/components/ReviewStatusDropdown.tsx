@@ -61,7 +61,7 @@ export const ReviewStatusDropdown: React.FC<ReviewStatusDropdownProps> = ({ curr
       </button>
 
       {isOpen && (
-        <div className="absolute top-full left-0 mt-1 w-56 rounded-lg bg-ink-900 border border-ink-700 shadow-xl z-50 py-1">
+        <div className="absolute top-full left-0 z-50 mt-1 w-56 rounded-[8px] border border-ink-700 bg-card p-1 shadow-[0_12px_34px_rgba(0,0,0,0.22)]">
           {STATUS_ORDER.map((status) => {
             const config = STATUS_CONFIG[status];
             const isActive = currentStatus === status;
@@ -70,11 +70,15 @@ export const ReviewStatusDropdown: React.FC<ReviewStatusDropdownProps> = ({ curr
               <button
                 key={status}
                 onClick={() => handleSelect(status)}
-                className="w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-ink-800 transition-colors text-left"
+                className={`w-full flex items-center gap-2.5 rounded-[6px] px-3 py-2 text-sm transition-colors text-left ${
+                  isActive
+                    ? 'bg-[color-mix(in_srgb,var(--accent)_13%,transparent)]'
+                    : 'hover:bg-ink-700'
+                }`}
               >
                 <span className={`w-2 h-2 rounded-full flex-shrink-0 ${config.color}`} />
-                <span className="text-ink-200 flex-1">{t(config.label)}</span>
-                {isActive && <Check className="w-4 h-4 text-ink-400 flex-shrink-0" />}
+                <span className="text-content flex-1">{t(config.label)}</span>
+                {isActive && <Check className="w-4 h-4 text-[color:var(--accent-text)] flex-shrink-0" />}
               </button>
             );
           })}
@@ -83,10 +87,10 @@ export const ReviewStatusDropdown: React.FC<ReviewStatusDropdownProps> = ({ curr
 
           <button
             onClick={() => handleSelect(null)}
-            className="w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-ink-800 transition-colors text-left"
+            className="w-full flex items-center gap-2.5 rounded-[6px] px-3 py-2 text-sm hover:bg-ink-700 transition-colors text-left"
           >
-            <X className="w-3.5 h-3.5 text-ink-500 flex-shrink-0" />
-            <span className="text-ink-400 flex-1">{t('mediatrack.review.removeStatus')}</span>
+            <X className="w-3.5 h-3.5 text-content-3 flex-shrink-0" />
+            <span className="text-content-3 flex-1">{t('mediatrack.review.removeStatus')}</span>
           </button>
         </div>
       )}

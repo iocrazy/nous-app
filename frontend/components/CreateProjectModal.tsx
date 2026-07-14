@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { createProject } from '../services/projectsService';
 import { fetchMyTeams } from '../services/teamService';
 import { Project, Team } from '../types';
+import { UiSelect } from './ui';
 
 interface CreateProjectModalProps {
   isOpen: boolean;
@@ -179,15 +180,15 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
               <label className="block text-sm font-medium text-ink-300 mb-2">
                 {t('mediatrack.projectType', 'Type')}
               </label>
-              <select
+              <UiSelect
                 value={projectType}
                 onChange={(e) => setProjectType(e.target.value as 'personal' | 'internal' | 'external')}
-                className="w-full px-4 py-3 bg-ink-800 border border-ink-700 rounded-xl text-ink-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all appearance-none cursor-pointer"
+                className="w-full"
               >
                 <option value="personal">{t('mediatrack.personal')}</option>
                 <option value="internal">{t('mediatrack.internal')}</option>
                 <option value="external">{t('mediatrack.external')}</option>
-              </select>
+              </UiSelect>
             </div>
             <div>
               <label className="block text-sm font-medium text-ink-300 mb-2">
@@ -208,16 +209,16 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
             <label className="block text-sm font-medium text-ink-300 mb-2">
               {t('mediatrack.selectTeam')}
             </label>
-            <select
+            <UiSelect
               value={teamId}
               onChange={(e) => setTeamId(e.target.value)}
-              className="w-full px-4 py-3 bg-ink-800 border border-ink-700 rounded-xl text-ink-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all appearance-none cursor-pointer"
+              className="w-full"
             >
               <option value="">{t('mediatrack.personal')}</option>
               {teams.map(team => (
                 <option key={team.id} value={team.id}>{team.name}</option>
               ))}
-            </select>
+            </UiSelect>
           </div>
 
           {error && (

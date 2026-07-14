@@ -21,8 +21,14 @@ import { RunStatusBadge } from './RunStatusBadge';
 import { useAgents } from './useAgents';
 import { useNodeDataPatch } from './useNodeDataPatch';
 import { useTextModels } from './useTextModels';
+import { UiSelect } from '../../../../components/ui';
 
 const asObj = (n: unknown) => n as Record<string, unknown>;
+
+// Canvas pill trigger — keeps the node's ghost/rounded look while borrowing the
+// shared UiSelect portal menu (fixes the native popup covering the trigger).
+const CANVAS_PILL_TRIGGER =
+  'nodrag rounded-full border border-canvas-line bg-transparent px-2.5 py-0.5 text-xs text-canvas-text outline-none focus-visible:ring-1 focus-visible:ring-canvas-strong/40';
 
 /** Text from wired upstream prompt/llm nodes, in connection order. */
 export function upstreamTextFor(
@@ -102,8 +108,9 @@ export function LlmNodeView({ id, data, selected }: NodeProps) {
       </div>
       <div className="p-3">
         <div className="flex items-center gap-1.5">
-          <select
-            className="nodrag min-w-0 flex-1 truncate rounded-full border border-canvas-line bg-transparent px-2.5 py-0.5 text-xs text-canvas-text outline-none focus:ring-1 focus:ring-canvas-strong/40"
+          <UiSelect
+            triggerClassName={CANVAS_PILL_TRIGGER}
+            className="min-w-0 flex-1 truncate"
             value={d.provider_slug}
             onChange={(e) => patch({ provider_slug: e.target.value })}
             aria-label="LLM provider"
@@ -114,9 +121,10 @@ export function LlmNodeView({ id, data, selected }: NodeProps) {
                 {m.display_name || m.name}
               </option>
             ))}
-          </select>
-          <select
-            className="nodrag min-w-0 flex-1 truncate rounded-full border border-canvas-line bg-transparent px-2.5 py-0.5 text-xs text-canvas-text outline-none focus:ring-1 focus:ring-canvas-strong/40"
+          </UiSelect>
+          <UiSelect
+            triggerClassName={CANVAS_PILL_TRIGGER}
+            className="min-w-0 flex-1 truncate"
             value={d.agent_id ?? ''}
             onChange={(e) => patch({ agent_id: e.target.value || null })}
             aria-label="LLM agent"
@@ -127,7 +135,7 @@ export function LlmNodeView({ id, data, selected }: NodeProps) {
                 {a.name}
               </option>
             ))}
-          </select>
+          </UiSelect>
         </div>
 
         <div className="mt-2 text-[10px] font-semibold uppercase tracking-wide text-canvas-muted">
