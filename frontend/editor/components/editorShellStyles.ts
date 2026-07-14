@@ -463,7 +463,13 @@ export const EDITOR_SHELL_STYLES = `
 /* A parenthetical WEARS its parentheses (laper/industry): rendered as pseudo
    content so the stored text stays clean — no byte ever changes. Suppressed
    while the block is empty (legacy :empty / PM's trailing-break marker) so
-   the type-whisper placeholder never reads "(Parenthetical)". */
+   the type-whisper placeholder never reads "(Parenthetical)". display:flex
+   keeps '(' + content + ')' on ONE line in TipTap, where NodeViewContent
+   interposes a BLOCK wrapper div that would otherwise push each pseudo onto
+   its own line (legacy holds text directly, where inline pseudos flow fine
+   either way). */
+.hw-paren:not(:empty):not(:has(br.ProseMirror-trailingBreak)){ display:flex; align-items:baseline; }
+.hw-paren:not(:empty):not(:has(br.ProseMirror-trailingBreak)) > *{ min-width:0; }
 .hw-paren:not(:empty):not(:has(br.ProseMirror-trailingBreak))::before{ content:'('; }
 .hw-paren:not(:empty):not(:has(br.ProseMirror-trailingBreak))::after{ content:')'; }
 .hw-transition{ text-align:right; text-transform:uppercase; font-weight:700; letter-spacing:0.04em; color:var(--sheet-ink-soft); }
