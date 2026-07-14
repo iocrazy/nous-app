@@ -2875,6 +2875,8 @@
     "cueHintTab": "切换为动作",
     "mentionHintEnter": "插入",
     "cueCreateHint": "回车新建 \"{{name}}\"",
+    "transHintTab": "下一类型",
+    "transNoMatch": "没有匹配的预设",
     "modulesLabel": "视图",
     "moduleScript": "剧本",
     "moduleBeats": "节拍",
