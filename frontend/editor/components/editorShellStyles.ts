@@ -320,8 +320,12 @@ export const EDITOR_SHELL_STYLES = `
 .mh-sheet-scroll{
   flex:1; min-height:0; min-width:0; overflow-y:auto;
   display:flex; flex-direction:column; align-items:center; gap:16px;
-  background:var(--surface-2); border:1px solid var(--surface-border);
-  border-radius:var(--radius-lg); padding:20px 26px 22px;
+  /* laper parity: the script is a SHEET OF PAPER, not a UI card. Drop the
+     surrounding gray-lavender card (bg + border + radius) so the paper sits
+     cleanly on the workspace background — the paper keeps its own border +
+     shadow (.mh-sheet) so it still reads as a sheet. */
+  background:transparent; border:none; border-radius:0;
+  padding:20px 26px 22px;
 }
 .mh-sheet{
   width:820px; max-width:100%;
@@ -362,8 +366,34 @@ export const EDITOR_SHELL_STYLES = `
 .mh-scene-select{
   font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:0.03em;
   padding:4px 8px; border-radius:6px; border:1px solid var(--sheet-border);
-  background:var(--surface-2); color:var(--sheet-ink-soft); cursor:pointer;
+  background:var(--surface-2); color:var(--sheet-ink); cursor:pointer;
+  white-space:nowrap;
 }
+.mh-scene-select[data-placeholder]{ color:var(--sheet-ink-soft); }
+.mh-scene-select:hover{ border-color:var(--indigo); }
+.mh-scene-select:focus-visible{ outline:2px solid var(--indigo); outline-offset:1px; }
+/* HeadingSelect: a chip trigger over a LIGHT popup (the .mh-mention-pop DNA) so
+   the INT/EXT + time menus size to their OWN content and never clip labels the
+   way UiSelect's trigger-width menu did on the short heading triggers. */
+.mh-heading-select{ position:relative; display:inline-flex; }
+.mh-heading-pop{
+  position:absolute; top:calc(100% + 3px); left:0; z-index:20;
+  min-width:150px; max-width:280px;
+  /* #fff to match .mh-mention-pop / .mh-slash-menu exactly — one light DNA for
+     every editor popup, never a theme-dependent --surface shade. */
+  background:#fff; border:1px solid var(--sheet-border);
+  border-radius:8px; box-shadow:0 10px 28px rgba(35,20,90,0.14);
+  padding:4px; font-family:var(--sans);
+}
+.mh-heading-opt{
+  padding:8px 12px; border-radius:5px; font-size:13px;
+  font-family:var(--mono); font-weight:700; letter-spacing:0.03em;
+  color:var(--sheet-ink); cursor:pointer; white-space:nowrap;
+  transition:background 0.12s ease;
+}
+.mh-heading-opt:hover{ background:var(--surface-2); }
+.mh-heading-opt.active{ background:var(--indigo-soft); color:var(--indigo-deep); }
+.mh-heading-opt[aria-selected='true']{ font-weight:800; }
 .mh-scene-loc-input{
   font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:0.03em;
   padding:4px 9px; border-radius:6px; border:1px solid var(--sheet-border);

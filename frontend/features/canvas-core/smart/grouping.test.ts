@@ -266,3 +266,23 @@ describe('hitGroupIdFor', () => {
     expect(hitGroupIdFor(far, 'm2')).toBeNull();
   });
 });
+
+import { gridColsFor, groupGridHeight, groupGridWidth } from './grouping';
+
+describe('adaptive thumbnail grid geometry (IC smartGroupThumbLayout)', () => {
+  it('columns: 1 for a single, then min 2 / max 4 by ceil(sqrt(n))', () => {
+    expect(gridColsFor(1)).toBe(1);
+    expect(gridColsFor(2)).toBe(2);
+    expect(gridColsFor(3)).toBe(2);
+    expect(gridColsFor(4)).toBe(2);
+    expect(gridColsFor(5)).toBe(3);
+    expect(gridColsFor(9)).toBe(3);
+    expect(gridColsFor(10)).toBe(4);
+    expect(gridColsFor(50)).toBe(4);
+  });
+
+  it('width/height grow with the item count', () => {
+    expect(groupGridWidth(8)).toBeGreaterThan(groupGridWidth(2));
+    expect(groupGridHeight(8)).toBeGreaterThan(groupGridHeight(2));
+  });
+});

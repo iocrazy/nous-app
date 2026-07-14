@@ -1776,6 +1776,10 @@
       "emptyHint": "点击或拖入图片 / 视频",
       "rejected": "仅支持 50MB 以内的图片/视频",
       "uploadFailed": "上传失败"
+    },
+    "groupNode": {
+      "title": "分组",
+      "dropHint": "拖入图片自动收进分组"
     }
   },
   "modelParams": {
