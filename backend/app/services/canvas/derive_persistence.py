@@ -19,7 +19,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Protocol
 
+from loguru import logger
+
 from app.core.config import settings
+from app.services.library.media_storage import materialize, store_local_file
+from app.services.library.storage_flag import unified_storage_enabled
 
 
 class DeriveError(Exception):
@@ -61,25 +65,39 @@ class SourceImage:
         return str(self.resource.get("filename") or "")
 
 
-def _resolve_source_bytes(file_path: str) -> bytes:
-    """Read source resource bytes from the configured download root."""
-    base = Path(settings.DOWNLOAD_PATH)
-    abs_path = (base / file_path).resolve()
-    # Defence in depth: ensure the resolved path is still under the
-    # configured root. Stops a malformed `file_path` (e.g. ``../``) from
-    # reading anything outside the resources volume.
+async def _resolve_source_bytes(file_path: str) -> bytes:
+    """Read source resource bytes for either storage shape.
+
+    ``sb://`` rows stream from the object store; filesystem rows read from
+    under DOWNLOAD_PATH. Both go through ``materialize()``, which enforces
+    the same containment guard the old fs-only reader had (a malformed
+    ``../`` rel_path can never escape the resources volume).
+    """
+    import httpx
+
     try:
-        abs_path.relative_to(base.resolve())
-    except ValueError as exc:
+        async with materialize(file_path) as abs_path:
+            if not abs_path.exists():
+                raise FileNotFoundError(file_path)
+            return abs_path.read_bytes()
+    except ValueError as exc:  # materialize containment guard
         raise DeriveError(
             status_code=400,
             detail="resource file_path escapes the download root",
         ) from exc
-    if not abs_path.exists():
+    except FileNotFoundError as exc:
         raise DeriveError(
             status_code=404, detail="source resource file is missing on disk"
-        )
-    return abs_path.read_bytes()
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        # Object missing in the store (404) reads the same as a missing fs
+        # file; any other storage-api failure is a real 5xx — let it
+        # propagate to the router's generic 500 handler.
+        if exc.response.status_code == 404:
+            raise DeriveError(
+                status_code=404, detail="source resource file is missing on disk"
+            ) from exc
+        raise
 
 
 def _is_image(resource: dict) -> bool:
@@ -123,7 +141,7 @@ async def load_source_image(
         scope_id=scope_id,
         folder_id=item.get("folder_id"),
         library_id=item.get("library_id"),
-        file_bytes=_resolve_source_bytes(source_file_path),
+        file_bytes=await _resolve_source_bytes(source_file_path),
         mime_type=source.get("mime_type") or None,
     )
 
@@ -161,24 +179,50 @@ async def persist_derived_image(
     )
     new_resource_id = str(new_resource["id"])
 
-    relative_path = f"teams/{scope_id}/derived/{new_resource_id}/v1/{filename}"
-    save_dir = Path(settings.DOWNLOAD_PATH) / Path(relative_path).parent
-    save_dir.mkdir(parents=True, exist_ok=True)
-    target = save_dir / filename
-    # Atomic write: tmp + rename. Keeps a half-written file from being
-    # observed if we crash mid-write.
-    tmp_fd, tmp_name = tempfile.mkstemp(dir=str(save_dir))
+    # Dual-track write (storage unification, mirrors upload_resource): the
+    # derived bytes are staged to a tmp file first — flag on tries the
+    # object store (store_local_file sha256-hashes the tmp internally for
+    # its content KEY; we deliberately still don't write file_hash to the
+    # row, see create_resource above), flag off / storage failure keeps the
+    # legacy atomic tmp + os.replace filesystem write byte-identical.
+    base = Path(settings.DOWNLOAD_PATH)
+    base.mkdir(parents=True, exist_ok=True)
+    # Tmp lives under DOWNLOAD_PATH so the fallback os.replace stays a
+    # same-filesystem atomic rename.
+    tmp_fd, tmp_name = tempfile.mkstemp(dir=str(base))
     try:
         with os.fdopen(tmp_fd, "wb") as fh:
             fh.write(image_bytes)
-        os.replace(tmp_name, target)
-    except Exception:
-        # Best-effort cleanup of the temp blob.
-        try:
-            Path(tmp_name).unlink(missing_ok=True)
-        except Exception:
-            pass
-        raise
+
+        stored = None
+        if await unified_storage_enabled():
+            try:
+                stored = await store_local_file(
+                    scope_id=int(scope_id),
+                    source_path=tmp_name,
+                    mime=mime_type or "image/png",
+                    filename=filename,
+                )
+            except Exception as exc:
+                logger.error(
+                    f"[persist_derived_image] unified-storage write failed, "
+                    f"falling back to filesystem: scope={scope_id} "
+                    f"resource={new_resource_id} error={exc!r}"
+                )
+        if stored is not None:
+            relative_path = stored.file_path
+        else:
+            relative_path = f"teams/{scope_id}/derived/{new_resource_id}/v1/{filename}"
+            save_dir = base / Path(relative_path).parent
+            save_dir.mkdir(parents=True, exist_ok=True)
+            # Atomic write: tmp + rename. Keeps a half-written file from
+            # being observed if we crash mid-write.
+            os.replace(tmp_name, save_dir / filename)
+    finally:
+        # No-op when os.replace consumed the tmp; when the object-store
+        # write succeeded (or anything raised), this cleans up the blob
+        # (store_local_file only reads it, never deletes it).
+        Path(tmp_name).unlink(missing_ok=True)
 
     new_resource = await repo.update_resource(
         new_resource_id, {"file_path": relative_path}

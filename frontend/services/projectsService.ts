@@ -14,6 +14,7 @@ import {
   RenderItemPage,
 } from '../types';
 import { apiClient, apiFetch } from './apiClient';
+import { getApiUrl } from '../utils/apiConfig';
 
 interface Envelope<T> {
   data?: T;
@@ -135,6 +136,16 @@ export const getFileInfo = async (
   if (!response.data) throw new Error('Empty response from getFileInfo');
   return response.data;
 };
+
+// Absolute download URL for a project file's current content — the
+// backend serves it through `serve_stored_file` (legacy fs path OR
+// `sb://` object-store row) and forces `Content-Disposition: attachment`,
+// so callers must fetch+blob (see downloadWithAuth) rather than parse this
+// as JSON. Mirrors resourceService.ts::getVersionFileUrl.
+export const getProjectFileDownloadUrl = (
+  projectId: string,
+  fileId: string,
+): string => `${getApiUrl()}/api/v1/projects/${projectId}/files/${fileId}/download`;
 
 export const updateFile = async (
   projectId: string,

@@ -16,6 +16,7 @@ import {
   fetchProjectFolders,
   fetchProjectMembers,
   fetchProjects,
+  getProjectFileDownloadUrl,
   linkVideoToProject,
   moveFileToFolder,
   updateProject,
@@ -188,6 +189,15 @@ describe('file operations', () => {
     stubResponse({});
     await deleteFile('p1', 'f1');
     // ApiClient no-throw means success; nothing else to assert
+  });
+
+  it('getProjectFileDownloadUrl builds the dedicated download endpoint (not the raw storage path)', () => {
+    // Regression: handleDownload used to fetch() file.file_path directly —
+    // a storage-internal relative/sb:// path, not a servable URL. The
+    // helper must point at the backend endpoint instead.
+    expect(getProjectFileDownloadUrl('p1', 'f1')).toBe(
+      'https://api.test/api/v1/projects/p1/files/f1/download',
+    );
   });
 
   it('moveFileToFolder sends folder_id (null allowed)', async () => {

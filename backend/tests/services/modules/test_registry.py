@@ -17,7 +17,12 @@ def _mod(module_id):
 
 def test_registry_lists_all_modules_with_correct_defaults():
     ids = {m.id for m in MODULES}
-    assert ids == {"topic-inspiration", "distribution", "script-tiptap"}
+    assert ids == {
+        "topic-inspiration",
+        "distribution",
+        "script-tiptap",
+        "unified-storage",
+    }
 
     topic = MODULES_BY_ID["topic-inspiration"]
     assert topic.key == "topics.module"
@@ -34,10 +39,16 @@ def test_registry_lists_all_modules_with_correct_defaults():
     assert tiptap.enabled_default is False
     assert tiptap.visible_default is False  # fail-closed (legacy engine)
 
+    storage = MODULES_BY_ID["unified-storage"]
+    assert storage.key == "storage.unified_storage"
+    assert storage.enabled_default is False
+    assert storage.visible_default is False  # fail-closed (filesystem track)
+
     # by-key index is consistent with by-id
     assert MODULES_BY_KEY["topics.module"] is topic
     assert MODULES_BY_KEY["distribution.module"] is dist
     assert MODULES_BY_KEY["editor.tiptap_surface"] is tiptap
+    assert MODULES_BY_KEY["storage.unified_storage"] is storage
 
 
 def test_parse_dict_value_reads_both_fields():

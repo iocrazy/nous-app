@@ -19,6 +19,7 @@ from app.services.library.media_storage import (
     store_local_file,
 )
 from app.services.library.resources_service import _resolve_personal_team_id
+from app.services.library.storage_flag import unified_storage_enabled
 
 
 class PromoteGeneratedMediaService:
@@ -126,7 +127,7 @@ class PromoteGeneratedMediaService:
             # back to the existing filesystem copy2 on flag-off or any
             # storage failure.
             stored = None
-            if settings.FEATURE_UNIFIED_STORAGE:
+            if await unified_storage_enabled():
                 try:
                     stored = await store_local_file(
                         scope_id=int(target_scope_id),

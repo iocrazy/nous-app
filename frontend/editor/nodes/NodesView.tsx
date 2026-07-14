@@ -123,7 +123,14 @@ export function NodesView({
             const withImage = shots.find((shot) => !!shot.image_url);
             return [sceneId, withImage?.image_url ?? null];
           } catch (err) {
-            console.error('[NodesView] failed to load shot covers for scene', sceneId, err);
+            // Guard the log too, not just the setState below: a rejection
+            // that lands after unmount would console.error into a torn-down
+            // vitest worker ("Closing rpc while onUserConsoleLog was
+            // pending") and fail CI as an unhandled teardown error (#1260
+            // class).
+            if (!cancelled) {
+              console.error('[NodesView] failed to load shot covers for scene', sceneId, err);
+            }
             return [sceneId, null];
           }
         }),
