@@ -582,7 +582,10 @@ export function UiSelect({ className = '', triggerClassName, children, ...props 
                       <span className="min-w-0 flex-1">
                         <span className="block truncate">{item.label}</span>
                         {item.description ? (
-                          <span className="mt-0.5 block truncate text-[11px] font-normal text-content-3">
+                          <span
+                            aria-hidden="true"
+                            className="mt-0.5 block truncate text-[11px] font-normal text-content-3"
+                          >
                             {item.description}
                           </span>
                         ) : null}
