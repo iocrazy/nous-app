@@ -1177,15 +1177,36 @@ export const EDITOR_SHELL_STYLES = `
   color:var(--indigo); background:none; border:none; padding:2px 0;
 }
 .mh-version-showall:hover{ text-decoration:underline; }
+/* COMPACT single-row cards (user: a tall card per version stretches the
+   island): message + time on one line; the action pills float in over the
+   row's right side only on hover/focus (absolutely positioned with the
+   row's own background, so revealing them never shifts layout and the row
+   stays one line tall even in a fully expanded list). */
 .mh-version-item{
-  display:flex; flex-direction:column; gap:6px; padding:8px 10px;
+  display:flex; flex-direction:row; align-items:center; flex-wrap:wrap;
+  gap:8px; padding:5px 10px; min-height:32px;
   border:1px solid var(--surface-border); border-radius:var(--radius-sm);
   background:var(--surface-2);
+  position:relative;
 }
-.mh-version-item-main{ display:flex; flex-direction:column; gap:2px; }
-.mh-version-msg{ font-size:12.5px; font-weight:600; color:var(--ink); word-break:break-word; }
-.mh-version-time{ font-family:var(--mono); font-size:10.5px; color:var(--ink-faint); }
-.mh-version-actions{ display:flex; flex-wrap:wrap; gap:5px; }
+.mh-version-item-main{
+  display:flex; flex-direction:row; align-items:baseline; gap:8px;
+  flex:1; min-width:0;
+}
+.mh-version-msg{
+  font-size:12.5px; font-weight:600; color:var(--ink);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.mh-version-time{ font-family:var(--mono); font-size:10.5px; color:var(--ink-faint); flex-shrink:0; }
+.mh-version-actions{
+  display:flex; flex-wrap:nowrap; gap:5px;
+  position:absolute; top:4px; right:5px; padding-left:14px;
+  background:linear-gradient(90deg, transparent, var(--surface-2) 12px);
+  opacity:0; pointer-events:none; transition:opacity 0.12s ease;
+}
+.mh-version-item:hover .mh-version-actions,
+.mh-version-item:focus-within .mh-version-actions{ opacity:1; pointer-events:auto; }
+.mh-version-partial{ width:100%; }
 .mh-version-action{
   font-family:var(--sans); font-size:11px; font-weight:600; cursor:pointer;
   padding:3px 9px; border-radius:999px;
