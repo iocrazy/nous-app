@@ -2877,6 +2877,8 @@
     "cueCreateHint": "Press Enter to create \"{{name}}\"",
     "transHintTab": "Next type",
     "transNoMatch": "No matching preset",
+    "versionShowAll": "Show all ({{count}})",
+    "versionShowLess": "Show less",
     "modulesLabel": "Views",
     "moduleScript": "Script",
     "moduleBeats": "Beats",

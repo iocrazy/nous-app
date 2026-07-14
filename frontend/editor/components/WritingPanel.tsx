@@ -17,6 +17,8 @@ import { useTranslation } from 'react-i18next';
 import type { SceneDoc } from '../types';
 import type { EditorFormat } from '../useEditorState';
 import type { PaginationMode } from '../paginationStorage';
+import type { ScriptCommit } from '../sceneService';
+import { VersionPanel } from '../versions/VersionPanel';
 
 export const CAST_COLORS = [
   'var(--red)',
@@ -73,6 +75,13 @@ export interface WritingPanelProps {
    *  renders standalone in stats-only tests. */
   pagination?: PaginationMode;
   onPaginationChange?: (mode: PaginationMode) => void;
+  // Version history (Phase B P4). Optional so the panel renders standalone
+  // (statistics-only) when no script is bound — e.g. the deriveStatistics
+  // tests. Compare renders in the margin rail BESIDE the sheet (EditorShell's
+  // .mh-diff-rail) so the live text stays visible — only the LIST lives here.
+  scriptId?: string;
+  onCompareCommit?: (commit: ScriptCommit) => void;
+  onRolledBack?: () => void;
 }
 
 export function WritingPanel({
@@ -81,15 +90,26 @@ export function WritingPanel({
   onFormatChange,
   pagination,
   onPaginationChange,
+  scriptId,
+  onCompareCommit,
+  onRolledBack,
 }: WritingPanelProps) {
   const { t } = useTranslation();
   const stats = deriveStatistics(scenes);
 
   return (
     <div className="mh-panel-body">
-      {/* Version history lives beside the sheet now (EditorShell's
-          .mh-version-rail) — versions belong next to the text, not in a
-          separate island section. */}
+      {scriptId && onCompareCommit && onRolledBack && (
+        <>
+          <VersionPanel
+            scriptId={scriptId}
+            onCompare={onCompareCommit}
+            onRolledBack={onRolledBack}
+          />
+          <div className="mh-divider" />
+        </>
+      )}
+
       {pagination && onPaginationChange && (
         <>
           <div>

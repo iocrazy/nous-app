@@ -31,6 +31,11 @@ import { useToast } from '../../components/Toast';
 /** How long an armed inline "Confirm?" stays live before auto-disarming. */
 const CONFIRM_WINDOW_MS = 3000;
 
+/** Collapsed view shows only the newest few versions — a long history must
+ *  never stretch the Writing island (user direction: 防止版本多拉的很长).
+ *  "Show all (N)" expands into a capped, internally-scrolling list. */
+const COLLAPSED_COUNT = 3;
+
 type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
 
 /**
@@ -65,6 +70,7 @@ export function VersionPanel({ scriptId, onCompare, onRolledBack }: VersionPanel
   const { addToast } = useToast();
 
   const [commits, setCommits] = useState<ScriptCommit[]>([]);
+  const [expanded, setExpanded] = useState(false);
   const [showInput, setShowInput] = useState(false);
   const [message, setMessage] = useState('');
   const [saving, setSaving] = useState(false);
@@ -254,8 +260,8 @@ export function VersionPanel({ scriptId, onCompare, onRolledBack }: VersionPanel
       {commits.length === 0 ? (
         <div className="mh-panel-hint">{t('editor.versionEmpty')}</div>
       ) : (
-        <ul className="mh-version-list">
-          {commits.map((commit) => {
+        <ul className={`mh-version-list${expanded ? ' expanded' : ''}`}>
+          {(expanded ? commits : commits.slice(0, COLLAPSED_COUNT)).map((commit) => {
             const id = String(commit.id);
             const busy = busyId === id;
             return (
@@ -319,6 +325,17 @@ export function VersionPanel({ scriptId, onCompare, onRolledBack }: VersionPanel
             );
           })}
         </ul>
+      )}
+      {commits.length > COLLAPSED_COUNT && (
+        <button
+          type="button"
+          className="mh-version-showall"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded
+            ? t('editor.versionShowLess')
+            : t('editor.versionShowAll', { count: commits.length })}
+        </button>
       )}
     </section>
   );

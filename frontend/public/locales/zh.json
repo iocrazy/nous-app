@@ -2877,6 +2877,8 @@
     "cueCreateHint": "回车新建 \"{{name}}\"",
     "transHintTab": "下一类型",
     "transNoMatch": "没有匹配的预设",
+    "versionShowAll": "全部 {{count}} 个版本",
+    "versionShowLess": "收起",
     "modulesLabel": "视图",
     "moduleScript": "剧本",
     "moduleBeats": "节拍",
