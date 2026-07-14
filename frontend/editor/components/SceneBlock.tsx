@@ -503,10 +503,16 @@ export function SceneBlock({
   // anything else closes it, but only if IT was the one open.
   const handleTiptapSlashChange = useCallback((elementId: string, query: string | null) => {
     if (query !== null) {
-      const node = containerRef.current?.querySelector<HTMLElement>(`[data-el-id="${elementId}"]`);
-      const position = node
-        ? { top: node.offsetTop + node.offsetHeight, left: node.offsetLeft }
-        : undefined;
+      const container = containerRef.current;
+      const node = container?.querySelector<HTMLElement>(`[data-el-id="${elementId}"]`);
+      // Measure relative to the scene block (the popup's positioning context) —
+      // see handleTiptapMentionOpen for why offsetTop (row-relative) is wrong.
+      let position: { top: number; left: number } | undefined;
+      if (node && container) {
+        const nodeRect = node.getBoundingClientRect();
+        const contRect = container.getBoundingClientRect();
+        position = { top: nodeRect.bottom - contRect.top, left: nodeRect.left - contRect.left };
+      }
       setSlashActive(0);
       setSlash({ elementId, query, position });
     } else if (slashRef.current?.elementId === elementId) {
@@ -557,26 +563,30 @@ export function SceneBlock({
   // ── TipTap M2: mentions + character-cue picker ────────────────────────
   const handleTiptapMentionOpen = useCallback(
     (elementId: string, kind: 'inline' | 'character' | 'transition', query: string) => {
-      const node = containerRef.current?.querySelector<HTMLElement>(`[data-el-id="${elementId}"]`);
+      const container = containerRef.current;
+      const node = container?.querySelector<HTMLElement>(`[data-el-id="${elementId}"]`);
       let position: { top: number; left: number } | undefined;
-      if (node) {
-        const top = node.offsetTop + node.offsetHeight;
-        let left = node.offsetLeft;
+      if (node && container) {
+        // The popup is absolutely positioned relative to `.mh-scene-block`
+        // (containerRef). The line's own `offsetTop` is relative to its
+        // `.mh-el-row` (which is position:relative), NOT the scene block — so
+        // using it placed the picker near the TOP of the block, ON TOP of the
+        // cue being typed. Measure the line's box relative to the container so
+        // the picker always sits just BELOW it, wherever the row is.
+        const nodeRect = node.getBoundingClientRect();
+        const contRect = container.getBoundingClientRect();
+        const top = nodeRect.bottom - contRect.top;
+        let left = nodeRect.left - contRect.left;
         if (kind === 'character') {
-          // A Hollywood character cue is indented (`.hw-character` has
-          // padding-left:22ch), so the row's left edge (offsetLeft) sits far to
-          // the left of the visible, centered cue text. Anchor the picker UNDER
-          // the cue by adding the line's own left padding. Clamp so a ~300px
-          // panel never spills past the sheet's right edge.
-          const padLeft = parseFloat(getComputedStyle(node).paddingLeft) || 0;
-          left += padLeft;
-          const POPUP_WIDTH = 300;
-          const parent = node.offsetParent as HTMLElement | null;
-          if (parent) {
-            const maxLeft = parent.clientWidth - POPUP_WIDTH;
-            if (left > maxLeft) left = Math.max(0, maxLeft);
-          }
+          // A Hollywood character cue is indented (.hw-character padding-left:
+          // 22ch); anchor the picker under the visible cue text, not the row's
+          // left edge, by adding the line's own left padding.
+          left += parseFloat(getComputedStyle(node).paddingLeft) || 0;
         }
+        // Clamp so a ~300px panel never spills past the sheet's right edge.
+        const POPUP_WIDTH = 300;
+        const maxLeft = container.clientWidth - POPUP_WIDTH;
+        if (left > maxLeft) left = Math.max(0, maxLeft);
         position = { top, left };
       }
       setMention({ elementId, kind, query, position });
