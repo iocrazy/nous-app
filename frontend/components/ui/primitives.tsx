@@ -46,13 +46,31 @@ interface UiCheckboxProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 
   onCheckedChange?: (checked: boolean) => void;
 }
 
-interface UiSelectProps extends SelectHTMLAttributes<HTMLSelectElement> {}
+interface UiSelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
+  /**
+   * Fully replaces the default trigger surface/size classes (border, bg, height,
+   * padding, text). Structural layout + open/disabled behaviour are kept. Use for
+   * contexts with their own visual language (e.g. canvas pill controls) that still
+   * want the shared portal menu, keyboard nav, and checkmark. `className` is always
+   * appended after, so callers can still tweak layout (width, margins).
+   */
+  triggerClassName?: string;
+}
 
-interface UiSelectOption {
+interface UiSelectOptionItem {
+  kind: 'option';
   value: string;
   label: ReactNode;
   disabled: boolean;
 }
+
+interface UiSelectGroupItem {
+  kind: 'group';
+  key: string;
+  label: ReactNode;
+}
+
+type UiSelectItem = UiSelectOptionItem | UiSelectGroupItem;
 
 interface UiModalProps {
   isOpen: boolean;
@@ -184,7 +202,7 @@ export const UiCheckbox = forwardRef<HTMLButtonElement, UiCheckboxProps>(
 
 UiCheckbox.displayName = 'UiCheckbox';
 
-export function UiSelect({ className = '', children, ...props }: UiSelectProps) {
+export function UiSelect({ className = '', triggerClassName, children, ...props }: UiSelectProps) {
   const {
     value,
     defaultValue,
@@ -193,6 +211,7 @@ export function UiSelect({ className = '', children, ...props }: UiSelectProps) 
     onFocus,
     disabled,
     name,
+    autoFocus,
     'aria-label': ariaLabel,
     ...selectProps
   } = props;
@@ -209,22 +228,45 @@ export function UiSelect({ className = '', children, ...props }: UiSelectProps) 
     isOpen,
     UI_POPOVER_TRANSITION_MS
   );
-  const parsedOptions = useMemo<UiSelectOption[]>(() => {
-    return Children.toArray(children).flatMap((child) => {
+  const parsedItems = useMemo<UiSelectItem[]>(() => {
+    const toOption = (child: unknown): UiSelectOptionItem | null => {
       if (!isValidElement(child) || child.type !== 'option') {
-        return [];
+        return null;
       }
 
       const optionValue = child.props.value ?? child.props.children;
-      return [
-        {
-          value: String(optionValue ?? ''),
-          label: child.props.children,
-          disabled: Boolean(child.props.disabled),
-        },
-      ];
+      return {
+        kind: 'option',
+        value: String(optionValue ?? ''),
+        label: child.props.children,
+        disabled: Boolean(child.props.disabled),
+      };
+    };
+
+    return Children.toArray(children).flatMap((child, index) => {
+      if (isValidElement(child) && child.type === 'optgroup') {
+        const groupOptions = Children.toArray(child.props.children)
+          .map(toOption)
+          .filter((option): option is UiSelectOptionItem => option !== null);
+        if (groupOptions.length === 0) {
+          return [];
+        }
+        const groupItem: UiSelectGroupItem = {
+          kind: 'group',
+          key: `group-${index}`,
+          label: child.props.label ?? '',
+        };
+        return [groupItem, ...groupOptions];
+      }
+
+      const option = toOption(child);
+      return option ? [option] : [];
     });
   }, [children]);
+  const parsedOptions = useMemo<UiSelectOptionItem[]>(
+    () => parsedItems.filter((item): item is UiSelectOptionItem => item.kind === 'option'),
+    [parsedItems]
+  );
   const initialValue = useMemo(() => {
     if (value != null) {
       return String(value);
@@ -250,6 +292,16 @@ export function UiSelect({ className = '', children, ...props }: UiSelectProps) 
     }
   }, [initialValue, isControlled]);
 
+  // autoFocus lands focus on the trigger (not the aria-hidden native select) on
+  // mount — mirrors the native <select autoFocus> affordance for callers that
+  // render this conditionally when a field should take focus (e.g. edit mode).
+  useEffect(() => {
+    if (autoFocus) {
+      triggerRef.current?.focus();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (!isOpen) {
       return;
@@ -263,7 +315,7 @@ export function UiSelect({ className = '', children, ...props }: UiSelectProps) 
 
       const rect = trigger.getBoundingClientRect();
       const viewportHeight = window.innerHeight;
-      const estimatedMenuHeight = Math.min(Math.max(parsedOptions.length * 38 + 12, 60), 240);
+      const estimatedMenuHeight = Math.min(Math.max(parsedItems.length * 36 + 12, 60), 280);
       const openAbove = rect.bottom + 8 + estimatedMenuHeight > viewportHeight && rect.top > estimatedMenuHeight;
       setMenuStyle({
         left: rect.left,
@@ -279,7 +331,7 @@ export function UiSelect({ className = '', children, ...props }: UiSelectProps) 
       window.removeEventListener('resize', updatePosition);
       window.removeEventListener('scroll', updatePosition, true);
     };
-  }, [isOpen, parsedOptions.length]);
+  }, [isOpen, parsedItems.length]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -370,7 +422,7 @@ export function UiSelect({ className = '', children, ...props }: UiSelectProps) 
         name={name}
         disabled={disabled}
         className="pointer-events-none absolute inset-0 opacity-0"
-        onChange={() => undefined}
+        onChange={(event) => commitValue(event.target.value)}
         {...selectProps}
       >
         {children}
@@ -383,7 +435,10 @@ export function UiSelect({ className = '', children, ...props }: UiSelectProps) 
         aria-expanded={isOpen}
         aria-controls={listboxIdRef.current}
         disabled={disabled}
-        className={`group inline-flex h-8 w-full items-center justify-between rounded-[6px] border border-[color:var(--ui-border-soft)] bg-[var(--ui-surface-field)] px-3 text-left text-xs font-medium text-text-dark outline-none transition-[border-color,background-color,box-shadow,color] hover:border-[color:var(--ui-border-strong)] focus-visible:border-accent focus-visible:shadow-[0_0_0_2px_rgba(var(--accent-rgb),0.12)] disabled:cursor-not-allowed disabled:opacity-55 ${className}`}
+        className={`group inline-flex items-center justify-between text-left outline-none transition-[border-color,background-color,box-shadow,color] disabled:cursor-not-allowed disabled:opacity-55 ${
+          triggerClassName ??
+          'h-9 w-full rounded-[8px] border border-ink-700 bg-ink-800 px-3 text-sm font-medium text-content hover:border-ink-600 focus-visible:border-ink-500 focus-visible:shadow-[0_0_0_2px_color-mix(in_srgb,var(--content-3)_34%,transparent)]'
+        } ${className}`}
         onClick={() => {
           if (!disabled && parsedOptions.length > 0) {
             setIsOpen((current) => !current);
@@ -394,7 +449,7 @@ export function UiSelect({ className = '', children, ...props }: UiSelectProps) 
         onFocus={(event) => onFocus?.(event as never)}
       >
         <span className="min-w-0 truncate pr-3">{selectedOption?.label ?? ''}</span>
-        <span className="flex h-4 w-4 shrink-0 items-center justify-center text-text-muted transition-colors group-hover:text-text-dark group-focus-visible:text-accent">
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center text-content-3 transition-colors group-hover:text-content group-focus-visible:text-accent">
           <ChevronDown
             className={`h-3.5 w-3.5 transition-transform ${isOpen ? 'rotate-180' : ''}`}
             style={{ transitionDuration: `${UI_POPOVER_TRANSITION_MS}ms` }}
@@ -407,7 +462,7 @@ export function UiSelect({ className = '', children, ...props }: UiSelectProps) 
               id={listboxIdRef.current}
               role="listbox"
               aria-label={ariaLabel}
-              className={`fixed z-[140] overflow-hidden rounded-[6px] border border-[color:var(--ui-border-soft)] bg-[var(--ui-surface-panel)] p-1 shadow-[var(--ui-shadow-panel)] transition-[opacity,transform] ease-out ${
+              className={`fixed z-[140] overflow-hidden rounded-[8px] border border-ink-700 bg-card p-1 shadow-[0_12px_34px_rgba(0,0,0,0.22)] transition-[opacity,transform] ease-out ${
                 isMenuVisible ? 'opacity-100 translate-y-0' : 'pointer-events-none opacity-0 -translate-y-1'
               }`}
               style={{
@@ -419,33 +474,47 @@ export function UiSelect({ className = '', children, ...props }: UiSelectProps) 
               }}
             >
               <div className="ui-scrollbar max-h-[228px] overflow-y-auto">
-                {parsedOptions.map((option) => {
-                  const isSelected = option.value === selectedValue;
+                {parsedItems.map((item) => {
+                  if (item.kind === 'group') {
+                    return (
+                      <div
+                        key={item.key}
+                        role="presentation"
+                        className="truncate px-3 pt-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-content-3 first:pt-1"
+                      >
+                        {item.label}
+                      </div>
+                    );
+                  }
+
+                  const isSelected = item.value === selectedValue;
                   return (
                     <button
-                      key={option.value}
+                      key={item.value}
                       type="button"
                       role="option"
                       aria-selected={isSelected}
-                      disabled={option.disabled}
-                      className={`flex w-full items-center justify-between rounded-[4px] px-3 py-2 text-sm transition-colors ${
-                        option.disabled
+                      disabled={item.disabled}
+                      className={`flex w-full items-center justify-between rounded-[6px] px-3 py-2 text-sm transition-colors ${
+                        item.disabled
                           ? 'cursor-not-allowed opacity-40'
                           : isSelected
-                            ? 'bg-accent text-white'
-                            : 'text-text-dark hover:bg-[rgba(255,255,255,0.08)] dark:hover:bg-white/[0.06]'
+                            ? 'bg-[color-mix(in_srgb,var(--accent)_13%,transparent)] text-content'
+                            : 'text-content hover:bg-ink-700'
                       }`}
                       onClick={() => {
-                        if (option.disabled) {
+                        if (item.disabled) {
                           return;
                         }
-                        commitValue(option.value);
+                        commitValue(item.value);
                         setIsOpen(false);
                         triggerRef.current?.focus();
                       }}
                     >
-                      <span className="truncate">{option.label}</span>
-                      {isSelected ? <Check className="ml-3 h-3.5 w-3.5 shrink-0 text-white" /> : null}
+                      <span className="truncate">{item.label}</span>
+                      {isSelected ? (
+                        <Check className="ml-3 h-3.5 w-3.5 shrink-0 text-[color:var(--accent-text)]" />
+                      ) : null}
                     </button>
                   );
                 })}
