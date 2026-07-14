@@ -128,14 +128,14 @@ class Settings(BaseSettings):
     )
     FEATURE_UNIFIED_STORAGE: bool = Field(
         default=False,
-        description="Route new library writes (resource uploads, project_files, "
-        "storyboard originals) to the Supabase Storage `library` bucket "
-        "(sb:// paths) instead of the filesystem. Off (default) = every write "
-        "stays on the filesystem (current behavior). Readers auto-resolve both "
-        "path shapes via resolve_media_source, so flipping on is forward-only "
-        "and rollback (flag off) keeps already-written sb:// rows readable. "
-        "Flip only after OPS-0 (GLOBAL_S3_BUCKET=nous rename) and mig 359 are "
-        "done on the target stack.",
+        description="Dev/test SHORT-CIRCUIT for the unified-storage write "
+        "path — true forces new library writes to the `library` bucket "
+        "without a DB read. The REAL control is the admin Module Control "
+        "Center switch (`storage.unified_storage`, Admin → System → Modules) "
+        "consulted per write via storage_flag.unified_storage_enabled(); "
+        "prod never sets this env var. Readers auto-resolve both path shapes "
+        "via resolve_media_source, so flipping is forward-only and rollback "
+        "keeps already-written sb:// rows readable.",
     )
     FEATURE_SHOT_GENERATE: bool = Field(
         default=False,

@@ -29,6 +29,7 @@ from app.repositories.storyboard_repository import (
 )
 from app.schemas.storyboard import CanvasSyncRequest
 from app.services.library.media_storage import materialize, store_local_file
+from app.services.library.storage_flag import unified_storage_enabled
 
 # NAS directory sub-structure created for every new storyboard project
 _PROJECT_SUBDIRS = [
@@ -135,7 +136,7 @@ class StoryboardService:
             # fallback track: unified storage needs no directories for
             # originals, and derived-artifact write sites (previews/splits/
             # exports) already mkdir(parents=True, exist_ok=True) on demand.
-            if project_id and not settings.FEATURE_UNIFIED_STORAGE:
+            if project_id and not await unified_storage_enabled():
                 self._ensure_nas_directories(team_id, project_id)
 
             logger.info(
@@ -623,7 +624,7 @@ class StoryboardService:
         # already content-addressed by file_hash, so no dedup-suffix logic
         # is needed on the fs fallback either.
         stored = None
-        if settings.FEATURE_UNIFIED_STORAGE:
+        if await unified_storage_enabled():
             tmp_fd, tmp_name = tempfile.mkstemp(suffix=ext)
             os.close(tmp_fd)
             tmp_path = Path(tmp_name)

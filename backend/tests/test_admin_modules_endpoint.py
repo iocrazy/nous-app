@@ -35,7 +35,12 @@ async def test_get_modules_lists_all_registered():
         result = await get_modules(fake_auth)
 
     ids = {m.id for m in result}
-    assert ids == {"topic-inspiration", "distribution", "script-tiptap"}
+    assert ids == {
+        "topic-inspiration",
+        "distribution",
+        "script-tiptap",
+        "unified-storage",
+    }
     for m in result:
         assert isinstance(m, ModuleSummaryResponse)
         assert set(m.model_dump().keys()) == {

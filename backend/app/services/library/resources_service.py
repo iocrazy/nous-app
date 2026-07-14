@@ -34,6 +34,7 @@ from app.repositories.resources_repository import (
     ResourcesRepository,
 )
 from app.services.library.media_storage import resolve_media_source, store_local_file
+from app.services.library.storage_flag import unified_storage_enabled
 
 
 async def _resolve_personal_team_id(user_id: str) -> str:
@@ -145,7 +146,7 @@ class ResourcesService:
             resource_id = str(resource["id"])
 
             stored = None
-            if settings.FEATURE_UNIFIED_STORAGE:
+            if await unified_storage_enabled():
                 try:
                     stored = await store_local_file(
                         scope_id=int(scope_id),
@@ -257,7 +258,7 @@ class ResourcesService:
             )
 
             stored = None
-            if settings.FEATURE_UNIFIED_STORAGE:
+            if await unified_storage_enabled():
                 # The resource's scope comes from resource_items — an
                 # sb:// (or missing) file_path has no directory to
                 # derive it from, so the item row is the one
