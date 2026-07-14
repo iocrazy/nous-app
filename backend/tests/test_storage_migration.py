@@ -454,3 +454,14 @@ def test_update_sql_compiles_with_expected_binds():
         compiled = _compilable(sql)
         stray = re.findall(r"(?<!:):[a-z_]+", compiled)
         assert not stray, f"unparsed binds {stray} in\n{compiled}"
+
+
+def test_uploads_select_excludes_download_pipeline():
+    """Spec decision (2026-07-12): the download pipeline (source_type='web')
+    does NOT migrate — its files are shared/deduped on POSIX and album rows
+    point at directories. The first prod dry-run missed this filter and 70
+    rows failed with IsADirectoryError."""
+    from app.workflows import storage_migration as sm
+
+    sql = sm._UPLOADS_SELECT_SQL
+    assert "r.source_type IN ('upload', 'generated', 'derived')" in sql
