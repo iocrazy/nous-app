@@ -720,6 +720,8 @@ export function EditorShell({
   // Rail entity sections (laper info architecture) — Characters + Locations.
   const railCharacters = useMemo(() => deriveRailCharacters(statsScenes), [statsScenes]);
   const railLocations = useMemo(() => deriveRailLocations(statsScenes), [statsScenes]);
+  // Distinct location names for the heading's search-or-create location picker.
+  const locationCandidates = useMemo(() => railLocations.map((l) => l.name), [railLocations]);
 
   // Legacy chapters with no scene pointing at them → read-only prose fallbacks.
   const orphanChapters = useMemo(() => {
@@ -1342,6 +1344,7 @@ export function EditorShell({
                             blockIndexBase={blockBases[i]}
                             format={state.format}
                             mentionCandidates={mentionCandidates}
+                            locationCandidates={locationCandidates}
                             onFocusElement={handleFocusElement}
                             onSyncStateChange={handleSyncStateChange}
                             onExitEditing={handleExitEditing}

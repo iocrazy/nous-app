@@ -142,6 +142,9 @@ export interface SceneBlockProps {
   format?: EditorFormat;
   /** Distinct CAST names for the @-mention / character-cue picker (script-wide). */
   mentionCandidates?: string[];
+  /** Distinct location names (script-wide) for the heading's search-or-create
+   *  location picker. */
+  locationCandidates?: string[];
   /** Reports this scene's save state up so the shell can aggregate it. */
   onSyncStateChange?: (sceneId: string, status: SceneSyncStatus) => void;
   /** Drag/keyboard reorder wiring (Task 10); absent = reorder disabled. */
@@ -199,6 +202,7 @@ export function SceneBlock({
   typeCommand,
   format = 'hollywood',
   mentionCandidates = [],
+  locationCandidates = [],
   onSyncStateChange,
   reorder,
   onExitEditing,
@@ -277,8 +281,13 @@ export function SceneBlock({
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const headRowRef = useRef<HTMLDivElement | null>(null);
+  // Tab flow across the head-row pickers (INT/EXT → location → time): focus the
+  // Nth `.mh-scene-select` trigger (all three HeadingSelects render one).
+  const focusHeadField = useCallback((idx: number) => {
+    const triggers = headRowRef.current?.querySelectorAll<HTMLElement>('.mh-scene-select');
+    triggers?.[idx]?.focus();
+  }, []);
   const headingDisplayRef = useRef<HTMLButtonElement | null>(null);
-  const locInputRef = useRef<HTMLInputElement | null>(null);
   const tiptapRef = useRef<TipTapSceneEditorHandle>(null);
   const elementsRef = useRef<ScriptElement[]>(sync.elements);
   const inputTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -1117,15 +1126,17 @@ export function SceneBlock({
               ariaLabel={t('editor.intExt')}
               tabHint={t('editor.headingTabLocation')}
               onChange={(v) => commitMeta({ heading_int_ext: v })}
-              onTabNext={() => locInputRef.current?.focus()}
+              onTabNext={() => focusHeadField(1)}
             />
-            <input
-              ref={locInputRef}
-              className="mh-scene-loc-input"
-              aria-label={t('editor.location')}
+            <HeadingSelect
+              searchable
+              candidates={locationCandidates}
               value={meta.location_text}
               placeholder={t('editor.locationPlaceholder')}
-              onChange={(e) => commitMeta({ location_text: e.target.value })}
+              ariaLabel={t('editor.location')}
+              tabHint={t('editor.headingTabTime')}
+              onChange={(v) => commitMeta({ location_text: v })}
+              onTabNext={() => focusHeadField(2)}
             />
             <HeadingSelect
               value={meta.time_of_day}
