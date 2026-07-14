@@ -948,7 +948,14 @@
     "temp": "Temp",
     "projectAssets": "Project Assets",
     "tempEmpty": "No chat uploads yet — files you paste or drop into the chat composer land here for 24h before being moved or expired.",
-    "sectionLocations": "Locations"
+    "sectionLocations": "Locations",
+    "edit": "Edit",
+    "saveAsNewVersion": "Save as new version",
+    "overwriteCurrentVersion": "Overwrite current version",
+    "saved": "Saved",
+    "saveFailed": "Failed to save",
+    "textTooLargeToEdit": "File is too large to preview or edit inline.",
+    "previewFailed": "Failed to load preview"
   },
   "smartFolder": {
     "createTitle": "Create Smart Folder",
