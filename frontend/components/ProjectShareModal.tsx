@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X, Copy, Check, Link2, Lock, Clock, Download } from 'lucide-react';
 import { ProjectFile } from '../types';
+import { UiSelect } from './ui';
 import { useToast } from './Toast';
 
 interface ProjectShareModalProps {
@@ -173,17 +174,17 @@ export const ProjectShareModal: React.FC<ProjectShareModalProps> = ({
                     {t('projects.share.expiration', 'Expiration')}
                   </label>
                 </div>
-                <select
+                <UiSelect
                   value={expiresHours ?? ''}
                   onChange={(e) => setExpiresHours(e.target.value ? Number(e.target.value) : null)}
-                  className="w-full bg-ink-800 border border-ink-700 rounded-lg px-3 py-2 text-sm text-ink-200 focus:outline-none focus:border-indigo-500"
+                  className="w-full"
                 >
                   <option value="">{t('projects.share.noExpiry', 'Never')}</option>
                   <option value="24">{t('projects.share.expiry24h', '24 hours')}</option>
                   <option value="72">{t('projects.share.expiry3d', '3 days')}</option>
                   <option value="168">{t('projects.share.expiry7d', '7 days')}</option>
                   <option value="720">{t('projects.share.expiry30d', '30 days')}</option>
-                </select>
+                </UiSelect>
               </div>
 
               {/* Create button */}

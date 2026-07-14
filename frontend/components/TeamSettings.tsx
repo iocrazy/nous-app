@@ -3,6 +3,7 @@ import { Loader2, UserPlus, Trash2, LogOut, Shield, User, Crown, AlertTriangle, 
 import { TeamMember } from '../types';
 import { fetchTeamMembers, updateTeam, updateMemberRole, removeMember, deleteTeam, leaveTeam } from '../services/teamService';
 import { fetchUsageStats, fetchPointsBalance } from '../services/pointsService';
+import { UiSelect } from './ui';
 
 interface TeamSettingsProps {
   teamId: string;
@@ -370,15 +371,15 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
                       {isOwner && member.role !== 'owner' ? (
                         <div className="flex items-center gap-2">
                           {getRoleIcon(member.role)}
-                          <select
+                          <UiSelect
                             value={member.role}
                             onChange={(e) => handleRoleChange(member.user_id, e.target.value as 'admin' | 'member')}
                             disabled={updatingRoleFor === member.user_id}
-                            className="bg-ink-800 border border-ink-700 rounded px-2 py-1 text-sm text-ink-300 focus:outline-none focus:border-indigo-500 cursor-pointer disabled:opacity-50"
+                            className="w-32 h-8 text-xs"
                           >
                             <option value="member">Member</option>
                             <option value="admin">Admin</option>
-                          </select>
+                          </UiSelect>
                           {updatingRoleFor === member.user_id && (
                             <Loader2 size={12} className="animate-spin text-ink-500" />
                           )}

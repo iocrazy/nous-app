@@ -45,6 +45,7 @@ interface LogsResponse {
 import { getAuthHeaders } from '../services/parserService';
 import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
 import { getApiUrl } from '../utils/apiConfig';
+import { UiSelect } from './ui';
 
 // Level options
 const LEVEL_OPTIONS = [
@@ -276,30 +277,30 @@ export const LogsPanel: React.FC = () => {
       <div className="flex flex-wrap items-center gap-3">
         {/* Level Filter */}
         <div className="relative">
-          <Filter size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-500" />
-          <select
+          <Filter size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-500 z-10 pointer-events-none" />
+          <UiSelect
             value={level}
             onChange={(e) => setLevel(e.target.value)}
-            className="bg-ink-950 border border-ink-800 rounded-lg pl-9 pr-8 py-2 text-sm text-ink-300 outline-none focus:border-indigo-500 transition-colors appearance-none cursor-pointer"
+            className="pl-9"
           >
             {LEVEL_OPTIONS.map(opt => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
-          </select>
+          </UiSelect>
         </div>
 
         {/* Date Range Filter */}
         <div className="relative">
-          <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-500" />
-          <select
+          <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-500 z-10 pointer-events-none" />
+          <UiSelect
             value={dateRange}
             onChange={(e) => setDateRange(e.target.value)}
-            className="bg-ink-950 border border-ink-800 rounded-lg pl-9 pr-8 py-2 text-sm text-ink-300 outline-none focus:border-indigo-500 transition-colors appearance-none cursor-pointer"
+            className="pl-9"
           >
             {DATE_RANGE_OPTIONS.map(opt => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
-          </select>
+          </UiSelect>
         </div>
 
         {/* Custom Date Range */}
@@ -436,15 +437,14 @@ export const LogsPanel: React.FC = () => {
         {/* Page Size */}
         <div className="flex items-center gap-2">
           <span className="text-sm text-ink-500">Per page:</span>
-          <select
+          <UiSelect
             value={pageSize}
             onChange={(e) => setPageSize(Number(e.target.value))}
-            className="bg-ink-950 border border-ink-800 rounded-lg px-3 py-1.5 text-sm text-ink-300 outline-none focus:border-indigo-500 transition-colors"
           >
             {PAGE_SIZE_OPTIONS.map(size => (
               <option key={size} value={size}>{size}</option>
             ))}
-          </select>
+          </UiSelect>
         </div>
 
         {/* Pagination */}

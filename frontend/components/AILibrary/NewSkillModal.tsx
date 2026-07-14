@@ -13,6 +13,7 @@ import type { AILibrarySkill, Team, Project } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { fetchMyTeams } from '../../services/teamService';
 import { fetchProjects } from '../../services/projectsService';
+import { UiSelect } from '../ui';
 
 interface NewSkillModalProps {
   existingSkills: AILibrarySkill[];
@@ -244,10 +245,10 @@ export const NewSkillModal: React.FC<NewSkillModalProps> = ({
               />
             </div>
             {scopeKind === 'team' && (
-              <select
+              <UiSelect
                 value={teamId}
                 onChange={(e) => setTeamId(e.target.value)}
-                className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
+                className="mt-1 w-full"
                 disabled={submitting || scopeLoading}
                 required
               >
@@ -261,13 +262,13 @@ export const NewSkillModal: React.FC<NewSkillModalProps> = ({
                     {tm.name}
                   </option>
                 ))}
-              </select>
+              </UiSelect>
             )}
             {scopeKind === 'project' && (
-              <select
+              <UiSelect
                 value={projectId}
                 onChange={(e) => setProjectId(e.target.value)}
-                className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
+                className="mt-1 w-full"
                 disabled={submitting || scopeLoading}
                 required
               >
@@ -281,7 +282,7 @@ export const NewSkillModal: React.FC<NewSkillModalProps> = ({
                     {p.name}
                   </option>
                 ))}
-              </select>
+              </UiSelect>
             )}
             <p className="text-xs text-ink-500">
               {t(
@@ -298,10 +299,10 @@ export const NewSkillModal: React.FC<NewSkillModalProps> = ({
                 ({t('common.optional', 'optional')})
               </span>
             </label>
-            <select
+            <UiSelect
               value={forkFrom}
               onChange={(e) => setForkFrom(e.target.value)}
-              className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
+              className="mt-1 w-full"
               disabled={submitting}
             >
               <option value="">
@@ -314,7 +315,7 @@ export const NewSkillModal: React.FC<NewSkillModalProps> = ({
                     {s.name} {s.is_public && !s.project_id ? '(preset)' : ''}
                   </option>
                 ))}
-            </select>
+            </UiSelect>
             <p className="mt-1 text-xs text-ink-500">
               {t(
                 'aiLibrary.skills.forkFromHint',

@@ -19,8 +19,14 @@ import { CanvasMentionPicker } from './CanvasMentionPicker';
 import { useResourceSearch } from '../../../../hooks/useResourceSearch';
 import type { ResourceSearchResult } from '../../../../types';
 import { ASPECT_RATIOS } from '../aspectPresets';
+import { UiSelect } from '../../../../components/ui';
 
 type ActiveKind = '' | 'video' | 'image' | 'doc' | 'audio' | 'pdf';
+
+// Canvas pill trigger — keeps the node's ghost/rounded look while borrowing the
+// shared UiSelect portal menu (fixes the native popup covering the trigger).
+const CANVAS_PILL_TRIGGER =
+  'nodrag rounded-full border border-canvas-line bg-transparent px-2.5 py-0.5 text-xs text-canvas-text hover:border-canvas-strong/50 focus-visible:ring-1 focus-visible:ring-canvas-strong/40';
 
 export function PromptNodeView({ id, data, selected }: NodeProps) {
   const {
@@ -120,8 +126,8 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
         <div className="flex items-center gap-1.5">
           {/* Text stays the legacy LLM path; Image/Video route Run through
               the G4-B1 generation tasks (Infinite composer's kind toggle). */}
-          <select
-            className="nodrag mh-chip outline-none focus:ring-1 focus:ring-canvas-strong/40"
+          <UiSelect
+            triggerClassName="nodrag mh-chip focus-visible:ring-1 focus-visible:ring-canvas-strong/40"
             value={genKind}
             onChange={(e) => {
               const next = e.target.value;
@@ -140,7 +146,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             <option value="text">Text</option>
             <option value="image">Image</option>
             <option value="video">Video</option>
-          </select>
+          </UiSelect>
           {pillText && (
             <span
               data-testid="prompt-elapsed"
@@ -187,8 +193,9 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
         <div className="mt-2 flex items-center justify-between gap-2 text-xs">
           {!gen && (
             <div className="flex flex-1 items-center gap-1.5">
-              <select
-                className="nodrag min-w-0 flex-1 truncate rounded-full border border-canvas-line bg-transparent px-2.5 py-0.5 text-xs text-canvas-text outline-none focus:ring-1 focus:ring-canvas-strong/40"
+              <UiSelect
+                triggerClassName={CANVAS_PILL_TRIGGER}
+                className="min-w-0 flex-1 truncate"
                 value={provider_slug}
                 onChange={(e) => patch({ provider_slug: e.target.value })}
                 aria-label="Prompt provider"
@@ -200,9 +207,10 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                     {m.display_name || m.name}
                   </option>
                 ))}
-              </select>
-              <select
-                className="nodrag min-w-0 flex-1 truncate rounded-full border border-canvas-line bg-transparent px-2.5 py-0.5 text-xs text-canvas-text outline-none focus:ring-1 focus:ring-canvas-strong/40"
+              </UiSelect>
+              <UiSelect
+                triggerClassName={CANVAS_PILL_TRIGGER}
+                className="min-w-0 flex-1 truncate"
                 value={agent_id ?? ''}
                 onChange={(e) => patch({ agent_id: e.target.value || null })}
                 aria-label="Prompt agent"
@@ -214,13 +222,14 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                     {a.name}
                   </option>
                 ))}
-              </select>
+              </UiSelect>
             </div>
           )}
           {gen && (
             <div className="flex flex-1 items-center gap-1.5">
-              <select
-                className="nodrag min-w-0 flex-1 truncate rounded-full border border-canvas-line bg-transparent px-2.5 py-0.5 text-xs text-canvas-text outline-none focus:ring-1 focus:ring-canvas-strong/40"
+              <UiSelect
+                triggerClassName={CANVAS_PILL_TRIGGER}
+                className="min-w-0 flex-1 truncate"
                 value={gen.model}
                 onChange={(e) => patch({ gen: { ...gen, model: e.target.value } })}
                 aria-label="Generation model"
@@ -231,11 +240,11 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                     {m.display_name || m.name}
                   </option>
                 ))}
-              </select>
+              </UiSelect>
               {gen.kind === 'image' && (
                 <>
-                  <select
-                    className="nodrag rounded-full border border-canvas-line bg-transparent px-2.5 py-0.5 text-xs text-canvas-text outline-none focus:ring-1 focus:ring-canvas-strong/40"
+                  <UiSelect
+                    triggerClassName={CANVAS_PILL_TRIGGER}
                     value={gen.ratio ?? '1:1'}
                     onChange={(e) => patch({ gen: { ...gen, ratio: e.target.value } })}
                     aria-label="Aspect ratio"
@@ -245,7 +254,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                         {r}
                       </option>
                     ))}
-                  </select>
+                  </UiSelect>
                   <input
                     type="number"
                     min={1}
@@ -265,8 +274,8 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                 </>
               )}
               {gen.kind === 'video' && (
-                <select
-                  className="nodrag rounded-full border border-canvas-line bg-transparent px-2.5 py-0.5 text-xs text-canvas-text outline-none focus:ring-1 focus:ring-canvas-strong/40"
+                <UiSelect
+                  triggerClassName={CANVAS_PILL_TRIGGER}
                   value={gen.aspect ?? '16:9'}
                   onChange={(e) => patch({ gen: { ...gen, aspect: e.target.value } })}
                   aria-label="Video aspect"
@@ -276,7 +285,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                       {r}
                     </option>
                   ))}
-                </select>
+                </UiSelect>
               )}
             </div>
           )}

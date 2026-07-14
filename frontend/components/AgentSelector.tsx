@@ -63,27 +63,34 @@ export function AgentSelector({
       </button>
 
       {open && (
-        <div className="absolute top-full right-0 mt-1 w-52 bg-ink-800 border border-ink-700 rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+        <div className="absolute top-full right-0 z-50 mt-1 w-56 overflow-hidden rounded-[8px] border border-ink-700 bg-card p-1 shadow-[0_12px_34px_rgba(0,0,0,0.22)]">
           {agents.length === 0 ? (
-            <p className="px-3 py-2 text-xs text-ink-500">No agents available</p>
+            <p className="px-3 py-2 text-xs text-content-3">No agents available</p>
           ) : (
-            agents.map((agent) => (
-              <button
-                key={agent.id}
-                type="button"
-                onClick={() => handleSelect(agent.id)}
-                className={`w-full flex flex-col items-start px-3 py-2 text-left transition-colors hover:bg-ink-700 ${
-                  agent.id === selectedId ? 'bg-ink-700' : ''
-                }`}
-              >
-                <span className="text-sm text-ink-200 truncate w-full">{agent.name}</span>
-                {agent.description && (
-                  <span className="text-[11px] text-ink-500 mt-0.5 line-clamp-1">
-                    {agent.description}
+            agents.map((agent) => {
+              const isSelected = agent.id === selectedId;
+              return (
+                <button
+                  key={agent.id}
+                  type="button"
+                  onClick={() => handleSelect(agent.id)}
+                  className={`flex w-full flex-col items-start rounded-[6px] px-3 py-2 text-left transition-colors ${
+                    isSelected
+                      ? 'bg-[color-mix(in_srgb,var(--accent)_13%,transparent)]'
+                      : 'hover:bg-ink-700'
+                  }`}
+                >
+                  <span className="w-full truncate text-sm text-content">
+                    {agent.name}
                   </span>
-                )}
-              </button>
-            ))
+                  {agent.description && (
+                    <span className="mt-0.5 line-clamp-1 text-[11px] text-content-3">
+                      {agent.description}
+                    </span>
+                  )}
+                </button>
+              );
+            })
           )}
         </div>
       )}

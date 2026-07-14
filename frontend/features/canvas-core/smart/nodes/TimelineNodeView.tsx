@@ -30,6 +30,7 @@ import {
 import { startTimelineRun, useTimelineRunStore } from '../timelineRun';
 import { ASPECT_RATIOS } from '../aspectPresets';
 import { useNodeDataPatch } from './useNodeDataPatch';
+import { UiSelect } from '../../../../components/ui';
 
 /** Movement below this many px stays a click (select-to-edit). */
 const REORDER_THRESHOLD_PX = 6;
@@ -166,8 +167,8 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
         <div className="mh-node-title">Timeline</div>
         <div className="flex items-center gap-1.5">
           <RunStatusBadge status={run_status} />
-          <select
-            className="nodrag mh-chip outline-none focus:ring-1 focus:ring-canvas-strong/40"
+          <UiSelect
+            triggerClassName="nodrag mh-chip outline-none focus-visible:ring-1 focus-visible:ring-canvas-strong/40"
             value={aspect}
             onChange={(e) => patch({ aspect: e.target.value })}
             aria-label="Aspect ratio"
@@ -180,7 +181,7 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
                 {r}
               </option>
             ))}
-          </select>
+          </UiSelect>
         </div>
       </div>
 

@@ -7,6 +7,7 @@ import { X, Send } from 'lucide-react';
 import type { AgentRef } from './types';
 import type { IssuePriority, IssueCreatePayload } from '../../services/issuesService';
 import { PRIORITY_LABEL, PRIORITY_ORDER, PriorityIcon } from './IssueStatusIcon';
+import { UiSelect } from '../ui';
 
 interface NewIssueDialogProps {
   agents: AgentRef[];
@@ -84,25 +85,25 @@ export const NewIssueDialog: React.FC<NewIssueDialogProps> = ({
             className="w-full bg-transparent text-sm text-ink-300 placeholder-ink-600 focus:outline-none resize-none"
           />
           <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-ink-800/80">
-            <select
+            <UiSelect
               value={agentId ?? ''}
               onChange={(e) => setAgentId(e.target.value || null)}
-              className="text-[11px] bg-ink-900 border border-ink-800 rounded px-2 py-1 text-ink-300"
+              className="h-8 text-xs"
             >
               <option value="">Unassigned</option>
               {agents.map((a) => (
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
-            </select>
-            <select
+            </UiSelect>
+            <UiSelect
               value={priority}
               onChange={(e) => setPriority(e.target.value as IssuePriority)}
-              className="text-[11px] bg-ink-900 border border-ink-800 rounded px-2 py-1 text-ink-300"
+              className="h-8 text-xs"
             >
               {PRIORITY_ORDER.map((p) => (
                 <option key={p} value={p}>{PRIORITY_LABEL[p]}</option>
               ))}
-            </select>
+            </UiSelect>
             <span className="ml-1"><PriorityIcon priority={priority} /></span>
           </div>
         </div>

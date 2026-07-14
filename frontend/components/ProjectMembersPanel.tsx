@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X, UserPlus, Loader2, Crown, Pencil, Eye, Trash2 } from 'lucide-react';
 import { Project, ProjectMember } from '../types';
+import { UiSelect } from './ui';
 import { fetchProjectMembers, addProjectMember, updateMemberRole, removeProjectMember } from '../services/projectsService';
 
 interface ProjectMembersPanelProps {
@@ -158,15 +159,14 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
                 className="flex-1 px-3 py-2 bg-ink-800 border border-ink-700 rounded-lg text-sm text-ink-200 placeholder-ink-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 onKeyDown={(e) => e.key === 'Enter' && handleInvite()}
               />
-              <select
+              <UiSelect
                 value={inviteRole}
                 onChange={(e) => setInviteRole(e.target.value)}
-                className="px-2 py-2 bg-ink-800 border border-ink-700 rounded-lg text-sm text-ink-300 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               >
                 <option value="viewer">{t('projects.members.roleViewer', 'Viewer')}</option>
                 <option value="editor">{t('projects.members.roleEditor', 'Editor')}</option>
                 <option value="manager">{t('projects.members.roleManager', 'Manager')}</option>
-              </select>
+              </UiSelect>
             </div>
             <button
               onClick={handleInvite}
@@ -216,15 +216,15 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
                         </span>
                       </div>
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <select
+                        <UiSelect
                           value={member.role}
                           onChange={(e) => handleRoleChange(member.user_id, e.target.value)}
-                          className="text-xs bg-ink-700 border border-ink-600 rounded px-1.5 py-1 text-ink-300 focus:outline-none"
+                          className="h-8 text-xs"
                         >
                           <option value="viewer">Viewer</option>
                           <option value="editor">Editor</option>
                           <option value="manager">Manager</option>
-                        </select>
+                        </UiSelect>
                         <button
                           onClick={() => handleRemove(member.user_id)}
                           className="p-1 text-ink-500 hover:text-red-400 transition-colors"

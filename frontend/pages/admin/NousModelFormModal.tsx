@@ -1,5 +1,6 @@
 import React from 'react';
 import { X, Loader2, ToggleLeft, ToggleRight } from 'lucide-react';
+import { UiSelect } from '../../components/ui';
 
 // ---------------------------------------------------------------------------
 // Shared types & constants
@@ -91,10 +92,6 @@ const inputClass =
   'w-full bg-ink-800 border border-ink-700 rounded-lg px-3 py-2 text-sm text-ink-200 ' +
   'placeholder-ink-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500';
 
-const selectClass =
-  'w-full bg-ink-800 border border-ink-700 rounded-lg px-3 py-2 text-sm text-ink-200 ' +
-  'focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500';
-
 // ---------------------------------------------------------------------------
 // Modal
 // ---------------------------------------------------------------------------
@@ -138,12 +135,12 @@ export const NousModelFormModal: React.FC<NousModelFormModalProps> = ({
 
         <div className="grid grid-cols-2 gap-4">
           <Field label="Category">
-            <select className={selectClass} value={form.category}
+            <UiSelect className="w-full" value={form.category}
               onChange={(e) => onFormChange({ category: e.target.value as ModelFormData['category'] })}>
               <option value="transcription">Transcription</option>
               <option value="summarization">Summarization</option>
               <option value="analysis">Analysis</option>
-            </select>
+            </UiSelect>
           </Field>
           <Field label="Sort Order">
             <input type="number" className={inputClass} value={form.sort_order}
@@ -181,12 +178,12 @@ export const NousModelFormModal: React.FC<NousModelFormModalProps> = ({
 
         <div className="grid grid-cols-2 gap-4">
           <Field label="Pricing Type">
-            <select className={selectClass} value={form.pricing_type}
+            <UiSelect className="w-full" value={form.pricing_type}
               onChange={(e) => onFormChange({ pricing_type: e.target.value as ModelFormData['pricing_type'] })}>
               <option value="per_hour">Per Hour</option>
               <option value="per_request">Per Request</option>
               <option value="per_token">Per Token</option>
-            </select>
+            </UiSelect>
           </Field>
           <Field label="Pricing Value (points)">
             <input type="number" className={inputClass} value={form.pricing_value} min={0}

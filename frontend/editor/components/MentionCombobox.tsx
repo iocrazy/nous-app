@@ -40,9 +40,10 @@ export interface MentionComboboxProps {
   /** Optional caret-anchored position; omitted in tests (jsdom has no layout). */
   position?: { top: number; left: number };
   /** Picker flavour: 'character' renders the embedded search input + Tab hint;
-   *  'inline' keeps line-driven filtering (query typed after `@` in the line).
+   *  'inline' keeps line-driven filtering (query typed after `@` in the line);
+   *  'transition' lists the industry presets (line text filters, Enter picks).
    *  Omitted (legacy callers/tests) → plain list, no search, no footer. */
-  kind?: 'inline' | 'character';
+  kind?: 'inline' | 'character' | 'transition';
   /** Search-input edits (character kind) — SceneBlock mirrors them into the
    *  shared mention.query so line-typing and box-typing stay one state. */
   onQueryChange?: (query: string) => void;
@@ -136,7 +137,9 @@ export function MentionCombobox({
         <div className="mh-mention-empty" role="note">
           {searchable && query.trim()
             ? t('editor.cueCreateHint', { name: query.trim() })
-            : t('editor.mentionNoMatch')}
+            : kind === 'transition'
+              ? t('editor.transNoMatch')
+              : t('editor.mentionNoMatch')}
         </div>
       ) : (
         <ul
@@ -174,6 +177,12 @@ export function MentionCombobox({
             <span className="mh-mention-hint">
               <kbd className="mh-pop-kbd">Tab</kbd>
               {t('editor.cueHintTab')}
+            </span>
+          )}
+          {kind === 'transition' && (
+            <span className="mh-mention-hint">
+              <kbd className="mh-pop-kbd">Tab</kbd>
+              {t('editor.transHintTab')}
             </span>
           )}
         </div>

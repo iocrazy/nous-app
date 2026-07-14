@@ -22,6 +22,7 @@ import {
   GripVertical,
 } from 'lucide-react';
 import type { Tag } from '../types';
+import { UiSelect } from './ui';
 import { mergeUpdatedTag } from './tagEditMerge';
 import {
   fetchAllTags as fetchTags,
@@ -1315,12 +1316,12 @@ export const TagsSettings: React.FC = () => {
                 <label className="text-sm font-medium text-ink-300">
                   {t('settings.tags.group', 'Group')}
                 </label>
-                <select
+                <UiSelect
                   value={editTagGroupId ?? ''}
                   onChange={(e) =>
                     setEditTagGroupId(e.target.value === '' ? null : e.target.value)
                   }
-                  className="w-full px-4 py-3 bg-ink-950 border border-ink-800 rounded-lg text-ink-200 focus:outline-none focus:border-indigo-500 transition-colors"
+                  className="w-full"
                 >
                   <option value="">
                     {t('settings.tags.uncategorized', 'Uncategorized')}
@@ -1330,7 +1331,7 @@ export const TagsSettings: React.FC = () => {
                       {g.name}
                     </option>
                   ))}
-                </select>
+                </UiSelect>
               </div>
               {/* Preview */}
               <div className="pt-2">

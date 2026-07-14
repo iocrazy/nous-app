@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from 'react';
 import { tempTtlService, ScopeType } from '../services/tempTtlService';
+import { UiSelect } from './ui';
 
 interface Props {
   scopeType: ScopeType;
@@ -66,9 +67,8 @@ export function ChatTempTtlPanel({ scopeType, scopeId, label }: Props) {
       >
         {label ? `Chat attachment TTL — ${label}` : `Chat attachment TTL (${scopeType})`}
       </label>
-      <select
+      <UiSelect
         id={`ttl-${scopeType}-${scopeId}`}
-        className="rounded border px-2 py-1 text-sm dark:bg-gray-800 dark:border-gray-600"
         value={ttl === null ? '' : String(ttl)}
         disabled={ttl === null || saving}
         onChange={(e) => void onChange(Number(e.target.value))}
@@ -79,7 +79,7 @@ export function ChatTempTtlPanel({ scopeType, scopeId, label }: Props) {
             {o.label}
           </option>
         ))}
-      </select>
+      </UiSelect>
       {error && (
         <span className="text-xs text-red-600 dark:text-red-400">{error}</span>
       )}

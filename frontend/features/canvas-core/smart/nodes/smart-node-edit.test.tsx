@@ -198,9 +198,10 @@ describe('PromptNodeView — edit affordances', () => {
         />
       </Wrap>,
     );
-    fireEvent.change(screen.getByLabelText('Prompt provider'), {
-      target: { value: 'mediahub-doubao-llm' },
-    });
+    // UiSelect: open the trigger, then pick the option (its onChange fires from
+    // the portal option click, not a native <select> change event).
+    fireEvent.click(screen.getByLabelText('Prompt provider'));
+    fireEvent.click(screen.getByRole('option', { name: 'Doubao LLM' }));
     const node = useCanvasCoreStore.getState().nodes[0] as Record<
       string,
       Record<string, unknown>
@@ -249,9 +250,10 @@ describe('LoopNodeView — edit affordances', () => {
         />
       </Wrap>,
     );
-    fireEvent.change(screen.getByLabelText('Loop mode'), {
-      target: { value: 'parallel' },
-    });
+    // UiSelect: open the trigger, then pick the option (its onChange fires from
+    // the portal option click, not a native <select> change event).
+    fireEvent.click(screen.getByLabelText('Loop mode'));
+    fireEvent.click(screen.getByRole('option', { name: 'Parallel' }));
     const node = useCanvasCoreStore.getState().nodes[0] as Record<
       string,
       Record<string, unknown>

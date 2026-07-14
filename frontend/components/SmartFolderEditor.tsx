@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { X, Plus, Minus, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { SmartFolderRules, SmartFolderCondition } from '../services/resourceService';
+import { UiSelect } from './ui';
 
 // ─── Field / Operator definitions ───────────────────────
 
@@ -216,23 +217,21 @@ export const SmartFolderEditor: React.FC<SmartFolderEditorProps> = ({
           {/* Rule header: Match [all|any] ... are [true|false] */}
           <div className="flex items-center gap-2 text-sm text-ink-300">
             <span>{t('smartFolder.matchPrefix')}</span>
-            <select
+            <UiSelect
               value={operator}
               onChange={(e) => setOperator(e.target.value as 'AND' | 'OR')}
-              className="bg-ink-800 border border-ink-700 rounded px-2 py-1 text-sm text-ink-200 focus:outline-none focus:border-indigo-500"
             >
               <option value="AND">{t('smartFolder.matchAll')}</option>
               <option value="OR">{t('smartFolder.matchAny')}</option>
-            </select>
+            </UiSelect>
             <span>{t('smartFolder.matchMiddle')}</span>
-            <select
+            <UiSelect
               value={match ? 'true' : 'false'}
               onChange={(e) => setMatch(e.target.value === 'true')}
-              className="bg-ink-800 border border-ink-700 rounded px-2 py-1 text-sm text-ink-200 focus:outline-none focus:border-indigo-500"
             >
               <option value="true">{t('smartFolder.matchTrue')}</option>
               <option value="false">{t('smartFolder.matchFalse')}</option>
-            </select>
+            </UiSelect>
           </div>
 
           {/* Condition rows */}
@@ -242,44 +241,44 @@ export const SmartFolderEditor: React.FC<SmartFolderEditorProps> = ({
               return (
                 <div key={idx} className="flex items-center gap-2">
                   {/* Field */}
-                  <select
+                  <UiSelect
                     value={cond.field}
                     onChange={(e) => handleFieldChange(idx, e.target.value)}
-                    className="bg-ink-800 border border-ink-700 rounded px-2 py-1.5 text-sm text-ink-200 focus:outline-none focus:border-indigo-500 min-w-[120px]"
+                    className="min-w-[120px]"
                   >
                     {FIELDS.map((f) => (
                       <option key={f.key} value={f.key}>
                         {t(f.labelKey)}
                       </option>
                     ))}
-                  </select>
+                  </UiSelect>
 
                   {/* Operator */}
-                  <select
+                  <UiSelect
                     value={cond.op}
                     onChange={(e) => updateCondition(idx, { op: e.target.value })}
-                    className="bg-ink-800 border border-ink-700 rounded px-2 py-1.5 text-sm text-ink-200 focus:outline-none focus:border-indigo-500 min-w-[100px]"
+                    className="min-w-[100px]"
                   >
                     {fieldDef.operators.map((op) => (
                       <option key={op.key} value={op.key}>
                         {t(op.labelKey)}
                       </option>
                     ))}
-                  </select>
+                  </UiSelect>
 
                   {/* Value */}
                   {fieldDef.inputType === 'select' && fieldDef.options ? (
-                    <select
+                    <UiSelect
                       value={cond.value}
                       onChange={(e) => updateCondition(idx, { value: e.target.value })}
-                      className="flex-1 bg-ink-800 border border-ink-700 rounded px-2 py-1.5 text-sm text-ink-200 focus:outline-none focus:border-indigo-500"
+                      className="flex-1"
                     >
                       {fieldDef.options.map((opt) => (
                         <option key={opt.value} value={opt.value}>
                           {t(opt.labelKey)}
                         </option>
                       ))}
-                    </select>
+                    </UiSelect>
                   ) : (
                     <input
                       type={fieldDef.inputType === 'number' ? 'number' : 'text'}

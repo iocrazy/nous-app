@@ -11,6 +11,7 @@ import { ProjectFileContextMenu } from './ProjectFileContextMenu';
 import { ProjectCollectModal } from './ProjectCollectModal';
 import { useToast } from './Toast';
 import { downloadWithAuth } from '../utils/download';
+import { UiSelect } from './ui';
 
 type SortField = 'updated_at' | 'filename' | 'file_size_bytes';
 type FilterType = 'all' | 'video' | 'image' | 'document' | 'audio';
@@ -302,34 +303,34 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
           <div></div>
           <div className="flex items-center gap-2">
             {/* Sort */}
-            <select
+            <UiSelect
               value={sortBy}
               onChange={e => setSortBy(e.target.value as SortField)}
-              className="text-xs bg-ink-800 border border-ink-700/50 rounded-lg px-2 py-1.5 text-ink-300 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="h-8 text-xs"
             >
               <option value="updated_at">{t('projects.toolbar.sortUpdated', 'Updated')}</option>
               <option value="filename">{t('projects.toolbar.sortName', 'Name')}</option>
               <option value="file_size_bytes">{t('projects.toolbar.sortSize', 'Size')}</option>
-            </select>
+            </UiSelect>
 
             {/* Filter */}
-            <select
+            <UiSelect
               value={filterType}
               onChange={e => setFilterType(e.target.value as FilterType)}
-              className="text-xs bg-ink-800 border border-ink-700/50 rounded-lg px-2 py-1.5 text-ink-300 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="h-8 text-xs"
             >
               <option value="all">{t('projects.toolbar.filterAll', 'All Types')}</option>
               <option value="video">{t('projects.toolbar.filterVideo', 'Video')}</option>
               <option value="image">{t('projects.toolbar.filterImage', 'Image')}</option>
               <option value="audio">{t('projects.toolbar.filterAudio', 'Audio')}</option>
               <option value="document">{t('projects.toolbar.filterDocument', 'Document')}</option>
-            </select>
+            </UiSelect>
 
             {/* Status filter */}
-            <select
+            <UiSelect
               value={statusFilter}
               onChange={e => setStatusFilter(e.target.value as StatusFilter)}
-              className="text-xs bg-ink-800 border border-ink-700/50 rounded-lg px-2 py-1.5 text-ink-300 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="h-8 text-xs"
             >
               <option value="all">{t('projects.toolbar.statusAll', 'All Status')}</option>
               <option value="pending_review">{t('projects.toolbar.statusPending', 'Pending Review')}</option>
@@ -337,7 +338,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
               <option value="feedback_collected">{t('projects.toolbar.statusFeedback', 'Feedback')}</option>
               <option value="approved">{t('projects.toolbar.statusApproved', 'Approved')}</option>
               <option value="no_status">{t('projects.toolbar.statusNone', 'No Status')}</option>
-            </select>
+            </UiSelect>
 
             {/* View toggle */}
             <div className="flex bg-ink-800 rounded-lg p-0.5">

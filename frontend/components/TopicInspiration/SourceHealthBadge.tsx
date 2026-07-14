@@ -12,6 +12,7 @@ import {
   type SourceKind,
 } from '../../services/topicService';
 import { summarizeSourceHealth } from './sourceHealthSummary';
+import { UiSelect } from '../ui';
 
 // Status → dot color. Read-only surface, so colors are the whole signal.
 const DOT: Record<SourceHealthStatus, string> = {
@@ -201,17 +202,17 @@ export const SourceHealthBadge: React.FC = () => {
           {adding && (
             <div className="mx-1 mb-2 p-2 rounded-lg border border-line-strong bg-island-2 space-y-1.5">
               <div className="flex gap-1.5">
-                <select
+                <UiSelect
                   value={fKind}
                   onChange={(e) => setFKind(e.target.value as SourceKind)}
-                  className="text-[12px] px-1.5 py-1 rounded-md bg-island border border-line-strong text-content"
+                  className="w-28 shrink-0 h-8 text-xs"
                 >
                   {KINDS.map((k) => (
                     <option key={k} value={k}>
                       {k}
                     </option>
                   ))}
-                </select>
+                </UiSelect>
                 <input
                   value={fName}
                   onChange={(e) => setFName(e.target.value)}

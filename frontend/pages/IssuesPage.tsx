@@ -28,6 +28,7 @@ import {
   transitionIssueStatus,
 } from '../services/issuesService';
 import { useDbosWorkflowStatus } from '../hooks/useDbosWorkflowStatus';
+import { UiSelect } from '../components/ui';
 
 // Tinted status chips — low-alpha semantic hues that read on both themes.
 // Hue meaning matches the canonical text-only scheme in
@@ -324,8 +325,8 @@ const IssueDetail: React.FC<{
       {/* Status transition */}
       <div className="mt-6 flex items-center gap-2">
         <label className="text-xs text-ink-500">Status:</label>
-        <select
-          className="text-sm border border-line bg-ink-900 text-ink-100 rounded px-2 py-1"
+        <UiSelect
+          className="h-8 text-xs"
           value={issue.status}
           onChange={(e) => onTransition(e.target.value as IssueStatus)}
         >
@@ -334,7 +335,7 @@ const IssueDetail: React.FC<{
               {STATUS_LABEL[s]}
             </option>
           ))}
-        </select>
+        </UiSelect>
       </div>
 
       {/* DBOS dispatch + live status */}

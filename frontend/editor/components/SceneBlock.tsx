@@ -58,6 +58,7 @@ import type { EditorFormat } from '../useEditorState';
 import type { SaveState } from '../useSceneSync';
 import { ScenePresenceBadge } from '../collab/ScenePresenceBadge';
 import type { PresenceUser } from '../collab/useScriptPresence';
+import { UiSelect } from '../../components/ui';
 
 /** A scene's save status lifted to the shell for the aggregate SaveIndicator. */
 export interface SceneSyncStatus {
@@ -82,14 +83,20 @@ export interface SceneReorderApi {
   onKeyboardMove: (sceneId: string, direction: 'up' | 'down') => void;
 }
 
-/** An open @-mention / character-cue picker anchored to one element line. */
+/** An open @-mention / character-cue / transition-preset picker anchored to
+ *  one element line. */
 interface MentionState {
   elementId: string;
-  /** 'inline' = typed `@` inside a line; 'character' = a focused character cue. */
-  kind: 'inline' | 'character';
+  /** 'inline' = typed `@` inside a line; 'character' = a focused character
+   *  cue; 'transition' = a focused transition line (preset picker). */
+  kind: 'inline' | 'character' | 'transition';
   query: string;
   position?: { top: number; left: number };
 }
+
+/** Industry transition presets (laper parity) — offered whenever a transition
+ *  line is focused; the line text filters and Enter replaces the whole line. */
+const TRANSITION_PRESETS = ['CUT TO:', 'FADE TO:', 'DISSOLVE TO:', 'FADE IN:', 'FADE OUT.'];
 
 /** A toolbar-issued retype of the focused element, routed to the owning scene. */
 export interface TypeCommand {
@@ -292,7 +299,6 @@ export function SceneBlock({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const headRowRef = useRef<HTMLDivElement | null>(null);
   const headingDisplayRef = useRef<HTMLButtonElement | null>(null);
-  const intExtSelectRef = useRef<HTMLSelectElement | null>(null);
   const composingRef = useRef(false);
   // TipTap editing surface (flag-dark, spec D7): re-read per render (not a
   // frozen module const) so tests can `vi.stubEnv` it — see tiptap/flag.ts.
@@ -316,9 +322,12 @@ export function SceneBlock({
 
   // Filtered candidates for the open picker; kept in a ref so the keydown
   // handler (a stable callback) reads the latest list without re-subscribing.
+  // The transition preset picker rides the same pipeline with its own list.
+  const activeMentionCandidates =
+    mention?.kind === 'transition' ? TRANSITION_PRESETS : mentionCandidates;
   const mentionFiltered = useMemo(
-    () => (mention ? filterMentionCandidates(mentionCandidates, mention.query) : []),
-    [mention, mentionCandidates],
+    () => (mention ? filterMentionCandidates(activeMentionCandidates, mention.query) : []),
+    [mention, activeMentionCandidates],
   );
   const mentionFilteredRef = useRef<string[]>(mentionFiltered);
   const mentionActiveRef = useRef(0);
@@ -439,8 +448,9 @@ export function SceneBlock({
       const m = mentionRef.current;
       if (!m) return;
       let newText: string;
-      if (m.kind === 'character') {
-        // A character cue IS the name — replace the whole line.
+      if (m.kind !== 'inline') {
+        // A character cue IS the name; a transition IS the preset — either
+        // way the picked option replaces the whole line.
         newText = name;
       } else {
         const el = elementsRef.current.find((e) => e.id === m.elementId);
@@ -518,7 +528,10 @@ export function SceneBlock({
           setMention(null);
           return;
         }
-        if (e.key === 'Tab') {
+        // Transition preset picker: Tab keeps its REAL type-cycle semantics —
+        // don't consume it here; the machine handler below retypes the block
+        // and this picker closes on the resulting focus/type change.
+        if (e.key === 'Tab' && mentionOpen.kind !== 'transition') {
           e.preventDefault();
           // Character-cue selector: Tab abandons the cue and reverts to action
           // (spec §3.2 laper behaviour); inline mention just closes.
@@ -683,6 +696,8 @@ export function SceneBlock({
       const el = elementsRef.current.find((e) => e.id === elementId);
       if (el?.type === 'character') {
         openMention(elementId, 'character');
+      } else if (el?.type === 'transition') {
+        openMention(elementId, 'transition');
       } else {
         setMention((prev) => (prev && prev.elementId !== elementId ? null : prev));
       }
@@ -710,6 +725,18 @@ export function SceneBlock({
     // the doc already matches, so it no-ops rather than rebuilding.
     if (tiptapOn) tiptapRef.current?.retypeElement(typeCommand.elementId, typeCommand.type);
     sync.dispatchOps([op], applyLocal(elementsRef.current, [op]));
+    // The toolbar button stole focus on click — hand it straight back to the
+    // retyped line so the writer keeps typing (and the type-driven pickers,
+    // e.g. the transition presets, open on the resulting selection update).
+    if (tiptapOn) {
+      tiptapRef.current?.focusElement(typeCommand.elementId);
+    } else {
+      requestAnimationFrame(() => {
+        containerRef.current
+          ?.querySelector<HTMLElement>(`[data-el-id="${typeCommand.elementId}"]`)
+          ?.focus();
+      });
+    }
   }, [typeCommand, scene.id, sync, tiptapOn]);
 
   // Lift this scene's save state to the shell whenever it changes.
@@ -841,7 +868,7 @@ export function SceneBlock({
 
   // ── TipTap M2: mentions + character-cue picker ────────────────────────
   const handleTiptapMentionOpen = useCallback(
-    (elementId: string, kind: 'inline' | 'character', query: string) => {
+    (elementId: string, kind: 'inline' | 'character' | 'transition', query: string) => {
       const node = containerRef.current?.querySelector<HTMLElement>(`[data-el-id="${elementId}"]`);
       const position = node
         ? { top: node.offsetTop + node.offsetHeight, left: node.offsetLeft }
@@ -857,8 +884,9 @@ export function SceneBlock({
       const m = mentionRef.current;
       if (!m) return;
       let newText: string;
-      if (m.kind === 'character') {
-        // A character cue IS the name — replace the whole line.
+      if (m.kind !== 'inline') {
+        // A character cue IS the name; a transition IS the preset — either
+        // way the picked option replaces the whole line.
         newText = name;
       } else {
         const el = elementsRef.current.find((e) => e.id === m.elementId);
@@ -947,6 +975,9 @@ export function SceneBlock({
         }
       },
       onTab: () => {
+        // Transition preset picker: decline the key so Tab falls through to
+        // the ScriptKeymap's real type-cycle (see MenuBridge.onTab contract).
+        if (mention.kind === 'transition') return false;
         if (mention.kind === 'character') {
           const op: ElementOp = { op: 'update', element_id: mention.elementId, payload: { type: 'action' } };
           tiptapRef.current?.retypeElement(mention.elementId, 'action');
@@ -1000,11 +1031,6 @@ export function SceneBlock({
     },
     [scene.id],
   );
-
-  // On entering edit mode, land the caret on the first control (INT/EXT).
-  useEffect(() => {
-    if (headingEditing) intExtSelectRef.current?.focus();
-  }, [headingEditing]);
 
   const enterHeadingEdit = useCallback(() => setHeadingEditing(true), []);
 
@@ -1417,9 +1443,9 @@ export function SceneBlock({
         </span>
         {headingEditing ? (
           <>
-            <select
-              ref={intExtSelectRef}
-              className="mh-scene-select"
+            <UiSelect
+              autoFocus
+              triggerClassName="mh-scene-select"
               aria-label={t('editor.intExt')}
               value={meta.heading_int_ext}
               onChange={(e) => commitMeta({ heading_int_ext: e.target.value })}
@@ -1430,7 +1456,7 @@ export function SceneBlock({
                   {o}
                 </option>
               ))}
-            </select>
+            </UiSelect>
             <input
               className="mh-scene-loc-input"
               aria-label={t('editor.location')}
@@ -1438,8 +1464,8 @@ export function SceneBlock({
               placeholder={t('editor.locationPlaceholder')}
               onChange={(e) => commitMeta({ location_text: e.target.value })}
             />
-            <select
-              className="mh-scene-select"
+            <UiSelect
+              triggerClassName="mh-scene-select"
               aria-label={t('editor.timeOfDay')}
               value={meta.time_of_day}
               onChange={(e) => commitMeta({ time_of_day: e.target.value })}
@@ -1450,7 +1476,7 @@ export function SceneBlock({
                   {o}
                 </option>
               ))}
-            </select>
+            </UiSelect>
           </>
         ) : (
           <button
@@ -1565,7 +1591,7 @@ export function SceneBlock({
 
       {mention && (
         <MentionCombobox
-          candidates={mentionCandidates}
+          candidates={activeMentionCandidates}
           query={mention.query}
           listboxId={mentionListId}
           activeIndex={mentionActive}

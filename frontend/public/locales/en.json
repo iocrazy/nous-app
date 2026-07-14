@@ -2875,6 +2875,8 @@
     "cueHintTab": "To action",
     "mentionHintEnter": "Insert",
     "cueCreateHint": "Press Enter to create \"{{name}}\"",
+    "transHintTab": "Next type",
+    "transNoMatch": "No matching preset",
     "modulesLabel": "Views",
     "moduleScript": "Script",
     "moduleBeats": "Beats",

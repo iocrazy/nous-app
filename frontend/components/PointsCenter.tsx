@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Coins, Package, ArrowUpRight, ArrowDownRight, TrendingUp, HardDrive, Search, Filter, ExternalLink } from 'lucide-react';
+import { Coins, Package, ArrowUpRight, ArrowDownRight, TrendingUp, HardDrive, Search, ExternalLink } from 'lucide-react';
+import { UiSelect } from './ui';
 import { TeamQuota, PointTransaction, PointPricing, PointPackage } from '../types';
 import {
   fetchPointsBalance,
@@ -261,29 +262,24 @@ export const PointsCenter: React.FC<PointsCenterProps> = ({ teamId, onBuyPackage
           </div>
 
           {/* Action type filter */}
-          <div className="relative">
-            <Filter size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-500 pointer-events-none" />
-            <select
-              value={referenceTypeFilter}
-              onChange={(e) => setReferenceTypeFilter(e.target.value)}
-              className="pl-8 pr-8 py-2 bg-ink-800 border border-ink-700 rounded-lg text-sm text-ink-200 focus:outline-none focus:border-amber-500/50 appearance-none cursor-pointer transition-colors"
-            >
-              {REFERENCE_TYPE_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-          </div>
+          <UiSelect
+            value={referenceTypeFilter}
+            onChange={(e) => setReferenceTypeFilter(e.target.value)}
+          >
+            {REFERENCE_TYPE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </UiSelect>
 
           {/* Date range filter */}
-          <select
+          <UiSelect
             value={daysFilter}
             onChange={(e) => setDaysFilter(Number(e.target.value))}
-            className="px-3 py-2 bg-ink-800 border border-ink-700 rounded-lg text-sm text-ink-200 focus:outline-none focus:border-amber-500/50 appearance-none cursor-pointer transition-colors"
           >
             {DATE_RANGE_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
-          </select>
+          </UiSelect>
         </div>
 
         {txLoading ? (

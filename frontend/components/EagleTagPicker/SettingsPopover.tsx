@@ -1,5 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import { List, LayoutGrid } from 'lucide-react';
+import { UiSelect } from '../ui';
 import type { PickerSettings } from '../../services/tagPreferencesService';
 
 interface SettingsPopoverProps {
@@ -71,15 +72,15 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
       {/* Column Width */}
       <div className="flex items-center justify-between py-1">
         <span className="text-xs text-ink-300">Column Width</span>
-        <select
+        <UiSelect
           value={settings.columnWidth}
           onChange={(e) => onUpdate({ columnWidth: e.target.value as any })}
-          className="bg-ink-800 border border-ink-700 rounded px-2 py-0.5 text-xs text-ink-300"
+          className="h-8 text-xs"
         >
           <option value="small">Small</option>
           <option value="medium">Medium</option>
           <option value="large">Large</option>
-        </select>
+        </UiSelect>
       </div>
 
       <div className="border-t border-ink-800 my-1" />

@@ -6,6 +6,7 @@
 import { ReactFlowProvider } from '@xyflow/react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { changeUiSelect, uiSelectMirror } from '../../../../tests/uiSelect';
 
 vi.mock('../../../../hooks/useResourceSearch', () => ({
   useResourceSearch: vi.fn().mockReturnValue({
@@ -81,13 +82,13 @@ afterEach(() => {
 describe('PromptNodeView generation settings', () => {
   it('defaults to Text and keeps the provider select', () => {
     seedAndRender(TEXT_DATA);
-    expect((screen.getByLabelText('Prompt kind') as HTMLSelectElement).value).toBe('text');
+    expect(uiSelectMirror('Prompt kind').value).toBe('text');
     expect(screen.getByLabelText('Prompt provider')).toBeTruthy();
   });
 
   it('switching to Image writes data.gen and shows model + ratio + count', () => {
     seedAndRender(TEXT_DATA);
-    fireEvent.change(screen.getByLabelText('Prompt kind'), { target: { value: 'image' } });
+    changeUiSelect('Prompt kind', 'image');
     expect((nodeData().gen as { kind: string }).kind).toBe('image');
   });
 
@@ -95,12 +96,12 @@ describe('PromptNodeView generation settings', () => {
     const data = { ...TEXT_DATA, gen: { kind: 'image', model: '', ratio: '16:9', count: 1 } };
     seedAndRender(data);
 
-    const model = screen.getByLabelText('Generation model') as HTMLSelectElement;
+    const model = uiSelectMirror('Generation model');
     expect(model.options.length).toBeGreaterThan(0);
-    fireEvent.change(model, { target: { value: 'jimeng-cli-image' } });
+    changeUiSelect('Generation model', 'jimeng-cli-image');
     expect((nodeData().gen as { model: string }).model).toBe('jimeng-cli-image');
 
-    fireEvent.change(screen.getByLabelText('Aspect ratio'), { target: { value: '9:16' } });
+    changeUiSelect('Aspect ratio', '9:16');
     expect((nodeData().gen as { ratio: string }).ratio).toBe('9:16');
 
     fireEvent.change(screen.getByLabelText('Image count'), { target: { value: '4' } });
@@ -117,7 +118,7 @@ describe('PromptNodeView generation settings', () => {
   it('switching back to Text clears gen', () => {
     const data = { ...TEXT_DATA, gen: { kind: 'image', model: '', count: 1 } };
     seedAndRender(data);
-    fireEvent.change(screen.getByLabelText('Prompt kind'), { target: { value: 'text' } });
+    changeUiSelect('Prompt kind', 'text');
     expect(nodeData().gen).toBeNull();
   });
 });

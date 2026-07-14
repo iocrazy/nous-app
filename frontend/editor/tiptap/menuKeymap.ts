@@ -33,8 +33,11 @@ export interface MenuBridge {
   /** Enter (and Tab, unless `onTab` is given) applies the active option. */
   onApply: () => void;
   /** Tab's behaviour when it differs from Enter (the mention combobox's
-   *  character-cue "abandon" semantics) — defaults to `onApply`. */
-  onTab?: () => void;
+   *  character-cue "abandon" semantics) — defaults to `onApply`. Return
+   *  `false` to DECLINE the key: Tab then falls through to the real
+   *  ScriptKeymap (the transition preset menu does this — Tab must keep its
+   *  type-cycle semantics there). */
+  onTab?: () => boolean | void;
   onEscape: () => void;
 }
 
@@ -86,7 +89,8 @@ export function createMenuBridgeKeymap(refs: MenuBridgeRefs) {
         Tab: () => {
           const menu = resolve();
           if (!menu) return false;
-          (menu.onTab ?? menu.onApply)();
+          if (menu.onTab) return menu.onTab() !== false;
+          menu.onApply();
           return true;
         },
         Escape: () => {

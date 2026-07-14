@@ -133,9 +133,14 @@ export interface TipTapSceneEditorProps {
   /** The currently-open slash menu's keyboard-nav bridge, or null. */
   slashMenu?: MenuBridge | null;
   // ── M2: mentions + character-cue picker ───────────────────────────────
-  /** Fires when an inline `@token` is being typed, or a character-cue line
-   *  is focused/edited — `kind` distinguishes the two trigger paths. */
-  onMentionOpen?: (elementId: string, kind: 'inline' | 'character', query: string) => void;
+  /** Fires when an inline `@token` is being typed, or a character-cue /
+   *  transition line is focused/edited — `kind` distinguishes the trigger
+   *  paths (transition opens the preset picker: CUT TO: / FADE TO: / …). */
+  onMentionOpen?: (
+    elementId: string,
+    kind: 'inline' | 'character' | 'transition',
+    query: string,
+  ) => void;
   /** Fires when the open mention/cue picker should close (focus left its
    *  element, or the `@` run was deleted). Safe to call when nothing is open. */
   onMentionClose?: () => void;
@@ -650,6 +655,11 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
         // same-value state bailout when nothing was open).
         if (ctx && (ctx.node.attrs.elType as ElementType) === 'character') {
           onMentionOpenRef.current?.(id as string, 'character', ctx.node.textContent);
+        } else if (ctx && (ctx.node.attrs.elType as ElementType) === 'transition') {
+          // Transition preset picker (laper parity): a focused transition line
+          // offers CUT TO: / FADE TO: / … — same open/filter/replace contract
+          // as the character cue, so it rides the whole mention pipeline.
+          onMentionOpenRef.current?.(id as string, 'transition', ctx.node.textContent);
         } else {
           onMentionCloseRef.current?.();
         }

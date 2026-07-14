@@ -3,8 +3,9 @@
 // pre-plumbed agent_id channel (server injects the agent's IDENTITY/SOUL).
 
 import { ReactFlowProvider } from '@xyflow/react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { changeUiSelect, uiSelectMirror } from '../../../../tests/uiSelect';
 
 vi.mock('../../../../hooks/useResourceSearch', () => ({
   useResourceSearch: vi.fn().mockReturnValue({
@@ -68,7 +69,7 @@ afterEach(() => useCanvasCoreStore.getState().reset());
 describe('PromptNodeView agent picker (CC3)', () => {
   it('lists No agent + the AI Library agents', () => {
     seedAndRender();
-    const select = screen.getByLabelText('Prompt agent') as HTMLSelectElement;
+    const select = uiSelectMirror('Prompt agent');
     expect(Array.from(select.options).map((o) => o.textContent)).toEqual([
       'No agent',
       'Character Persona',
@@ -79,9 +80,9 @@ describe('PromptNodeView agent picker (CC3)', () => {
 
   it('selecting an agent persists its id; clearing writes null', () => {
     seedAndRender();
-    fireEvent.change(screen.getByLabelText('Prompt agent'), { target: { value: 'a1' } });
+    changeUiSelect('Prompt agent', 'a1');
     expect(nodeData().agent_id).toBe('a1');
-    fireEvent.change(screen.getByLabelText('Prompt agent'), { target: { value: '' } });
+    changeUiSelect('Prompt agent', '');
     expect(nodeData().agent_id).toBeNull();
   });
 

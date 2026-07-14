@@ -137,8 +137,11 @@ describe('BeatsView scene links', () => {
     svc.listBeats.mockResolvedValue([beat({ id: 'a', scene_ids: [] })]);
     renderView([scene({ id: 's1' })]);
 
-    const select = await screen.findByTestId('beat-link-scene');
-    fireEvent.change(select, { target: { value: 's1' } });
+    // UiSelect: open the trigger, then pick the scene option (its onChange fires
+    // from the portal option click, not a native <select> change event).
+    const trigger = await screen.findByLabelText('editor.beatLinkScene');
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole('option', { name: 'INT · Room · DAY' }));
     expect(svc.updateBeat).toHaveBeenCalledWith('a', { scene_ids: ['s1'] });
   });
 });

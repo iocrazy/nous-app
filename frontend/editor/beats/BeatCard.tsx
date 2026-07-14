@@ -18,6 +18,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { Beat, BeatInput } from '../sceneService';
 import type { SceneDoc } from '../types';
+import { UiSelect } from '../../components/ui';
 
 /** `INT · Location · TIME`, empty parts dropped (mirrors OutlineView's head). */
 function sceneLabel(scene: SceneDoc, fallback: string): string {
@@ -203,8 +204,8 @@ export function BeatCard({
           );
         })}
         {unlinkedScenes.length > 0 && (
-          <select
-            className="mh-beat-link-select"
+          <UiSelect
+            triggerClassName="mh-beat-link-select"
             data-testid="beat-link-scene"
             aria-label={t('editor.beatLinkScene')}
             value=""
@@ -219,7 +220,7 @@ export function BeatCard({
                 {sceneLabel(s, t('editor.untitledScene'))}
               </option>
             ))}
-          </select>
+          </UiSelect>
         )}
       </div>
     </div>
