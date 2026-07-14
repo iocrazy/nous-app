@@ -124,7 +124,7 @@ _UPLOADS_SELECT_SQL = """
     ) ri ON true
     WHERE rv.file_path IS NOT NULL
       AND rv.file_path NOT LIKE 'sb://%'
-      AND (:scope_id::bigint IS NULL OR ri.scope_id = :scope_id)
+      AND (CAST(:scope_id AS bigint) IS NULL OR ri.scope_id = :scope_id)
     ORDER BY rv.id
     LIMIT :limit
 """
@@ -164,7 +164,7 @@ _UPLOADS_UPDATE_SQL = """
     SET file_path = :file_path, file_hash = :sha256
     FROM v
     WHERE r.id = v.resource_id
-      AND :sync_parent::boolean
+      AND CAST(:sync_parent AS boolean)
 """
 
 
@@ -207,7 +207,7 @@ _PROJECT_FILES_SELECT_SQL = """
     JOIN project_files pf ON pf.id = fv.file_id
     WHERE fv.file_path IS NOT NULL
       AND fv.file_path NOT LIKE 'sb://%'
-      AND (:scope_id::bigint IS NULL OR pf.project_id = :scope_id)
+      AND (CAST(:scope_id AS bigint) IS NULL OR pf.project_id = :scope_id)
     ORDER BY fv.id
     LIMIT :limit
 """
@@ -241,7 +241,7 @@ _PROJECT_FILES_UPDATE_SQL = """
     SET file_path = :file_path
     FROM v
     WHERE pf.id = v.file_id
-      AND :sync_parent::boolean
+      AND CAST(:sync_parent AS boolean)
 """
 
 
