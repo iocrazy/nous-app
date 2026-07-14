@@ -1435,7 +1435,8 @@
       "deletedAt": "删除时间",
       "actions": "操作",
       "restore": "恢复",
-      "deletePermanently": "永久删除"
+      "deletePermanently": "永久删除",
+      "canvases": "画布"
     },
     "shares": {
       "empty": "暂无分享",

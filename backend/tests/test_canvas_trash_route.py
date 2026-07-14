@@ -140,3 +140,44 @@ class TestTeamTrashList:
         )
         resp = await client.get("/api/v1/canvases/team/900/trash")
         assert resp.status_code == 403
+
+
+class TestProjectTrashList:
+    """GET /projects/{id}/canvases/trash — the workspace Trash module's
+    project-scoped list (avoids the team-id sentinel)."""
+
+    @pytest.mark.asyncio
+    async def test_lists_project_trash(self, client, monkeypatch):
+        monkeypatch.setattr(
+            canvases_router, "verify_project_read_access", AsyncMock(return_value=None)
+        )
+        svc = SimpleNamespace(
+            list_trashed_for_project=AsyncMock(
+                return_value=[
+                    {
+                        "id": 7,
+                        "project_id": 11,
+                        "name": "Board",
+                        "kind": "lite",
+                        "updated_at": "2026-01-02T00:00:00Z",
+                        "deleted_at": "2026-01-03T00:00:00Z",
+                    }
+                ]
+            )
+        )
+        monkeypatch.setattr(canvases_router, "CanvasService", lambda: svc)
+
+        resp = await client.get("/api/v1/projects/11/canvases/trash")
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert data == [
+            {
+                "id": "7",
+                "name": "Board",
+                "kind": "lite",
+                "updated_at": "2026-01-02T00:00:00Z",
+                "deleted_at": "2026-01-03T00:00:00Z",
+                "project_id": "11",
+            }
+        ]
+        svc.list_trashed_for_project.assert_awaited_once_with("11")

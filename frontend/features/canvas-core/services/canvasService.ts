@@ -330,6 +330,15 @@ export async function listTeamCanvasTrash(teamId: string): Promise<TrashedCanvas
   return readEnvelope<TrashedCanvas[]>(response);
 }
 
+/** A project's trashed canvases (workspace Trash module) — project-scoped
+ *  so it works for personal projects without the team-id sentinel. */
+export async function listProjectCanvasTrash(
+  projectId: string,
+): Promise<TrashedCanvas[]> {
+  const response = await apiFetch(`/api/v1/projects/${projectId}/canvases/trash`);
+  return readEnvelope<TrashedCanvas[]>(response);
+}
+
 /** Bring a trashed canvas back to life. */
 export async function restoreCanvas(canvasId: string): Promise<void> {
   await apiFetch(`/api/v1/canvases/${canvasId}/restore`, { method: 'POST' });

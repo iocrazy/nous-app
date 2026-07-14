@@ -1435,7 +1435,8 @@
       "deletedAt": "Deleted",
       "actions": "Actions",
       "restore": "Restore",
-      "deletePermanently": "Delete"
+      "deletePermanently": "Delete",
+      "canvases": "Canvases"
     },
     "shares": {
       "empty": "No Shares Yet",

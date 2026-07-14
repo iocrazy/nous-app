@@ -75,6 +75,25 @@ class CanvasRepository:
             logger.error(f"canvas list_for_project({project_id}) failed: {e}")
             return []
 
+    async def list_trashed_for_project(self, project_id: str) -> List[Dict[str, Any]]:
+        """A project's trashed canvases (summary columns), newest-trashed
+        first — the project-scoped mirror of list_trashed_for_team, used by
+        the workspace Trash module (avoids the team-id sentinel)."""
+        try:
+            client = await self._client()
+            result = (
+                await client.table(self.TABLE)
+                .select("id, project_id, name, kind, updated_at, deleted_at")
+                .eq("project_id", _bigint(project_id))
+                .not_.is_("deleted_at", "null")
+                .order("deleted_at", desc=True)
+                .execute()
+            )
+            return list(result.data or [])
+        except Exception as e:
+            logger.error(f"canvas list_trashed_for_project({project_id}) failed: {e}")
+            return []
+
     async def list_team_tree(self, team_id: str) -> List[Dict[str, Any]]:
         """Every project in the team with its canvases embedded as SUMMARY
         columns (no nodes_json/connections_json — the landing page renders

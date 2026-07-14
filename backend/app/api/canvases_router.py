@@ -433,6 +433,30 @@ async def list_project_canvases(
     return {"success": True, "data": [_to_response(r) for r in rows]}
 
 
+@router.get("/projects/{project_id}/canvases/trash")
+async def list_project_canvas_trash(
+    auth: AuthDep,
+    project_id: str = Path(..., description="Snowflake project ID"),
+) -> dict:
+    """A project's trashed canvases (workspace Trash module). Project-scoped
+    so it never needs the team-id sentinel the team trash endpoint carries."""
+    await verify_project_read_access(project_id=project_id, auth=auth)
+    svc = CanvasService()
+    rows = await svc.list_trashed_for_project(project_id)
+    data = [
+        {
+            "id": str(r.get("id")),
+            "name": r.get("name") or "",
+            "kind": r.get("kind") or "smart",
+            "updated_at": r.get("updated_at"),
+            "deleted_at": r.get("deleted_at"),
+            "project_id": str(r.get("project_id")),
+        }
+        for r in rows
+    ]
+    return {"success": True, "data": data}
+
+
 @router.post("/projects/{project_id}/canvases")
 async def create_project_canvas(
     auth: AuthDep,

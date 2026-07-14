@@ -50,6 +50,9 @@ class CanvasService:
     async def list_for_project(self, project_id: str) -> List[Dict[str, Any]]:
         return await self.repo.list_for_project(project_id)
 
+    async def list_trashed_for_project(self, project_id: str) -> List[Dict[str, Any]]:
+        return await self.repo.list_trashed_for_project(project_id)
+
     async def get_project_id(self, canvas_id: str) -> Optional[str]:
         return await self.repo.get_project_id(canvas_id)
 
