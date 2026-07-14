@@ -320,8 +320,12 @@ export const EDITOR_SHELL_STYLES = `
 .mh-sheet-scroll{
   flex:1; min-height:0; min-width:0; overflow-y:auto;
   display:flex; flex-direction:column; align-items:center; gap:16px;
-  background:var(--surface-2); border:1px solid var(--surface-border);
-  border-radius:var(--radius-lg); padding:20px 26px 22px;
+  /* laper parity: the script is a SHEET OF PAPER, not a UI card. Drop the
+     surrounding gray-lavender card (bg + border + radius) so the paper sits
+     cleanly on the workspace background — the paper keeps its own border +
+     shadow (.mh-sheet) so it still reads as a sheet. */
+  background:transparent; border:none; border-radius:0;
+  padding:20px 26px 22px;
 }
 .mh-sheet{
   width:820px; max-width:100%;
