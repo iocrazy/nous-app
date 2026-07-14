@@ -20,7 +20,6 @@ def test_registry_lists_all_modules_with_correct_defaults():
     assert ids == {
         "topic-inspiration",
         "distribution",
-        "script-tiptap",
         "unified-storage",
     }
 
@@ -34,11 +33,6 @@ def test_registry_lists_all_modules_with_correct_defaults():
     assert dist.enabled_default is False
     assert dist.visible_default is False  # fail-closed
 
-    tiptap = MODULES_BY_ID["script-tiptap"]
-    assert tiptap.key == "editor.tiptap_surface"
-    assert tiptap.enabled_default is False
-    assert tiptap.visible_default is False  # fail-closed (legacy engine)
-
     storage = MODULES_BY_ID["unified-storage"]
     assert storage.key == "storage.unified_storage"
     assert storage.enabled_default is False
@@ -47,7 +41,6 @@ def test_registry_lists_all_modules_with_correct_defaults():
     # by-key index is consistent with by-id
     assert MODULES_BY_KEY["topics.module"] is topic
     assert MODULES_BY_KEY["distribution.module"] is dist
-    assert MODULES_BY_KEY["editor.tiptap_surface"] is tiptap
     assert MODULES_BY_KEY["storage.unified_storage"] is storage
 
 

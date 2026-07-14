@@ -21,8 +21,8 @@ from fastapi import HTTPException
 @pytest.mark.asyncio
 async def test_get_modules_lists_all_registered():
     """With no stored rows, GET /modules returns every registered module with
-    its own registry defaults (topic fails open; distribution and the TipTap
-    editor surface fail closed)."""
+    its own registry defaults (topic fails open; distribution and unified
+    storage fail closed)."""
     from app.api.admin.settings_router import get_modules
     from app.schemas.admin import ModuleSummaryResponse
 
@@ -38,7 +38,6 @@ async def test_get_modules_lists_all_registered():
     assert ids == {
         "topic-inspiration",
         "distribution",
-        "script-tiptap",
         "unified-storage",
     }
     for m in result:

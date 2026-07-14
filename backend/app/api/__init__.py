@@ -54,7 +54,6 @@ from app.api.script_export_router import router as script_export_router
 from app.api.script_import_router import router as script_import_router
 from app.api.script_import_scenes_router import router as script_import_scenes_router
 from app.api.script_projects_router import router as script_projects_router
-from app.api.editor_modules_router import router as editor_modules_router
 from app.api.script_scenes_router import router as script_scenes_router
 from app.api.script_shots_router import router as script_shots_router
 from app.api.script_versions_router import router as script_versions_router
@@ -194,7 +193,6 @@ api_router.include_router(router=script_import_router, tags=["Script Import"])
 api_router.include_router(router=script_import_scenes_router, tags=["Script Import"])
 api_router.include_router(router=script_export_router, tags=["Script Export"])
 api_router.include_router(router=script_scenes_router, tags=["Script Scenes"])
-api_router.include_router(router=editor_modules_router, tags=["Editor Modules"])
 api_router.include_router(router=script_shots_router, tags=["Script Shots"])
 api_router.include_router(router=script_beats_router, tags=["Script Beats"])
 api_router.include_router(router=script_versions_router, tags=["Script Versions"])

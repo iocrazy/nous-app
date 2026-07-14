@@ -49,19 +49,6 @@ MODULES: list[ModuleDef] = [
         visible_default=False,
     ),
     ModuleDef(
-        # TipTap editing surface for the script editor (migration epic M4
-        # cutover switch). `enabled` = serve the TipTap surface instead of the
-        # legacy contentEditable engine; `visible` is unused for this module
-        # (no nav entry) and mirrors `enabled` in practice. Opt-in, fails
-        # CLOSED: while unset / on read error the editor stays on the proven
-        # legacy engine.
-        id="script-tiptap",
-        key="editor.tiptap_surface",
-        label="Script Editor (TipTap Surface)",
-        enabled_default=False,
-        visible_default=False,
-    ),
-    ModuleDef(
         # Storage-unification write switch (OPS-1 go-live gate). `enabled` =
         # route new library writes (resource uploads, project_files, canvas
         # derives, promote) to the Supabase Storage `library` bucket (sb://
