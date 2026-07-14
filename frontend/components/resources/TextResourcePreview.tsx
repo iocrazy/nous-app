@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Download, Pencil, Save, X } from 'lucide-react';
 import type { Resource } from '../../types';
-import { classifyTextResource, TEXT_EDIT_MAX_BYTES } from '../../utils/textResourceMode';
+import { classifyTextResource } from '../../utils/textResourceMode';
 import {
   saveTextAsNewVersion,
   overwriteVersionContent,

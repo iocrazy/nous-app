@@ -433,9 +433,7 @@ class ResourcesService:
                 )
                 save_dir.mkdir(parents=True, exist_ok=True)
                 target = save_dir / safe_name
-                import shutil
-
-                shutil.move(str(tmp_path), str(target))
+                await asyncio.to_thread(shutil.move, str(tmp_path), str(target))
                 relative_path = str(target.relative_to(Path(settings.DOWNLOAD_PATH)))
         finally:
             tmp_path.unlink(missing_ok=True)
@@ -447,8 +445,25 @@ class ResourcesService:
                 "file_size_bytes": file_size,
                 "mime_type": mime,
                 "filename": safe_name,
+                "file_hash": file_hash,
             },
         )
+
+        # The detail page + downloads read the denormalized resources.file_path,
+        # not the version row — so when overwriting the CURRENT version we must
+        # repoint the parent row too, or the edit reverts on reload. (Mirrors
+        # upload_new_version; current_version is unchanged by an overwrite.)
+        if str(version.get("version_number")) == str(resource.get("current_version")):
+            await self.repo.update_resource(
+                resource_id,
+                {
+                    "file_path": relative_path,
+                    "file_size_bytes": file_size,
+                    "mime_type": mime,
+                    "filename": safe_name,
+                    "file_hash": file_hash,
+                },
+            )
         return updated
 
     # ------------------------------------------------------------------ #
