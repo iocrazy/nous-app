@@ -44,7 +44,7 @@ import type { EditorFormat } from '../useEditorState';
 import type { SaveState } from '../useSceneSync';
 import { ScenePresenceBadge } from '../collab/ScenePresenceBadge';
 import type { PresenceUser } from '../collab/useScriptPresence';
-import { UiSelect } from '../../components/ui';
+import { HeadingSelect } from './HeadingSelect';
 
 /** A scene's save status lifted to the shell for the aggregate SaveIndicator. */
 export interface SceneSyncStatus {
@@ -278,6 +278,7 @@ export function SceneBlock({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const headRowRef = useRef<HTMLDivElement | null>(null);
   const headingDisplayRef = useRef<HTMLButtonElement | null>(null);
+  const locInputRef = useRef<HTMLInputElement | null>(null);
   const tiptapRef = useRef<TipTapSceneEditorHandle>(null);
   const elementsRef = useRef<ScriptElement[]>(sync.elements);
   const inputTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -548,9 +549,27 @@ export function SceneBlock({
   const handleTiptapMentionOpen = useCallback(
     (elementId: string, kind: 'inline' | 'character' | 'transition', query: string) => {
       const node = containerRef.current?.querySelector<HTMLElement>(`[data-el-id="${elementId}"]`);
-      const position = node
-        ? { top: node.offsetTop + node.offsetHeight, left: node.offsetLeft }
-        : undefined;
+      let position: { top: number; left: number } | undefined;
+      if (node) {
+        const top = node.offsetTop + node.offsetHeight;
+        let left = node.offsetLeft;
+        if (kind === 'character') {
+          // A Hollywood character cue is indented (`.hw-character` has
+          // padding-left:22ch), so the row's left edge (offsetLeft) sits far to
+          // the left of the visible, centered cue text. Anchor the picker UNDER
+          // the cue by adding the line's own left padding. Clamp so a ~300px
+          // panel never spills past the sheet's right edge.
+          const padLeft = parseFloat(getComputedStyle(node).paddingLeft) || 0;
+          left += padLeft;
+          const POPUP_WIDTH = 300;
+          const parent = node.offsetParent as HTMLElement | null;
+          if (parent) {
+            const maxLeft = parent.clientWidth - POPUP_WIDTH;
+            if (left > maxLeft) left = Math.max(0, maxLeft);
+          }
+        }
+        position = { top, left };
+      }
       setMention({ elementId, kind, query, position });
     },
     [],
@@ -1090,40 +1109,30 @@ export function SceneBlock({
         </span>
         {headingEditing ? (
           <>
-            <UiSelect
+            <HeadingSelect
               autoFocus
-              triggerClassName="mh-scene-select"
-              aria-label={t('editor.intExt')}
               value={meta.heading_int_ext}
-              onChange={(e) => commitMeta({ heading_int_ext: e.target.value })}
-            >
-              <option value="">—</option>
-              {INT_EXT_OPTIONS.map((o) => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
-            </UiSelect>
+              options={INT_EXT_OPTIONS}
+              placeholder="INT/EXT"
+              ariaLabel={t('editor.intExt')}
+              onChange={(v) => commitMeta({ heading_int_ext: v })}
+              onTabNext={() => locInputRef.current?.focus()}
+            />
             <input
+              ref={locInputRef}
               className="mh-scene-loc-input"
               aria-label={t('editor.location')}
               value={meta.location_text}
               placeholder={t('editor.locationPlaceholder')}
               onChange={(e) => commitMeta({ location_text: e.target.value })}
             />
-            <UiSelect
-              triggerClassName="mh-scene-select"
-              aria-label={t('editor.timeOfDay')}
+            <HeadingSelect
               value={meta.time_of_day}
-              onChange={(e) => commitMeta({ time_of_day: e.target.value })}
-            >
-              <option value="">—</option>
-              {TIME_OPTIONS.map((o) => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
-            </UiSelect>
+              options={TIME_OPTIONS}
+              placeholder="DAY/NIGHT"
+              ariaLabel={t('editor.timeOfDay')}
+              onChange={(v) => commitMeta({ time_of_day: v })}
+            />
           </>
         ) : (
           <button
