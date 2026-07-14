@@ -314,15 +314,31 @@ export function CanvasComposer({
       typeof (n as Record<string, unknown>).parentId === 'string';
     const topLevel = nodes.filter((n) => !isChild(n));
     const children = nodes.filter(isChild);
+    // Arrange-SELECTED (IC's 整理选中): with 2+ top-level nodes selected,
+    // lay out only that subset in place (arrangeLayout re-centres on the
+    // subset's own centroid) and leave everything else untouched.
+    const sel = new Set(selection);
+    const scoped =
+      selection.length >= 2
+        ? topLevel.filter((n) => sel.has((n as Record<string, unknown>).id as string))
+        : topLevel;
+    if (scoped.length < 2 && selection.length >= 2) return;
+    const scopedIds = new Set(
+      scoped.map((n) => (n as Record<string, unknown>).id as string),
+    );
+    const rest = topLevel.filter(
+      (n) => !scopedIds.has((n as Record<string, unknown>).id as string),
+    );
     // setNodes (not patchNode) so one layout pass = one undoable edit.
     setNodes([
+      ...rest,
       ...arrangeLayout(
-        topLevel as Parameters<typeof arrangeLayout>[0],
+        scoped as Parameters<typeof arrangeLayout>[0],
         connections as Parameters<typeof arrangeLayout>[1],
       ),
       ...children,
     ]);
-  }, [nodes, connections, setNodes]);
+  }, [nodes, connections, selection, setNodes]);
 
   const selectedGroupId = useMemo(() => {
     const sel = new Set(selection);
