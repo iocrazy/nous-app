@@ -209,6 +209,24 @@ describe('TipTap M2 — slash menu', () => {
     expect(editor.state.doc.firstChild!.attrs.elType).toBe('action'); // unchanged
   });
 
+  it('closes on an OUTSIDE click without applying anything', async () => {
+    const editor = await mountTiptap([{ id: 'el_a', type: 'action', text: '' }]);
+    act(() => {
+      editor.commands.setTextSelection(1);
+      editor.commands.insertContent('/char');
+    });
+    await waitFor(() => expect(document.querySelector('[data-testid="slash-menu"]')).not.toBeNull());
+    sync.dispatch.mockClear();
+
+    // A mousedown outside the scene block (empty paper, elsewhere) dismisses it.
+    act(() => {
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    await waitFor(() => expect(document.querySelector('[data-testid="slash-menu"]')).toBeNull());
+    expect(sync.dispatch).not.toHaveBeenCalled();
+    expect(editor.state.doc.firstChild!.attrs.elType).toBe('action'); // unchanged
+  });
+
   it('clicking a menu option applies it via the SAME transaction-based path (not a raw DOM write)', async () => {
     const editor = await mountTiptap([{ id: 'el_a', type: 'action', text: '' }]);
     act(() => {
