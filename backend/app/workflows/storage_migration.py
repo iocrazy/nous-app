@@ -124,6 +124,13 @@ _UPLOADS_SELECT_SQL = """
     ) ri ON true
     WHERE rv.file_path IS NOT NULL
       AND rv.file_path NOT LIKE 'sb://%'
+      -- Library assets only. source_type='web' rows are the DOWNLOAD
+      -- pipeline (global/resources/web/... and the legacy date-bucket
+      -- layout) — explicitly out of migration scope per the spec decision
+      -- (2026-07-12 "下载先不动"): their files are shared/deduped on POSIX
+      -- and some are album DIRECTORIES, not files. The first prod dry-run
+      -- pulled them in and 70/880 rows failed with IsADirectoryError.
+      AND r.source_type IN ('upload', 'generated', 'derived')
       AND (CAST(:scope_id AS bigint) IS NULL OR ri.scope_id = :scope_id)
     ORDER BY rv.id
     LIMIT :limit
