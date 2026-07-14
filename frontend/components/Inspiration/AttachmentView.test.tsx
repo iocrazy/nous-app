@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 vi.mock('../../services/inspirationService', () => ({
   attachmentUrlWithToken: (id: string, token?: string) =>
@@ -24,12 +24,18 @@ describe('AttachmentView', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('renders images as token-authed thumbnails linking to source', () => {
+  it('renders images as token-authed thumbnails that open an in-place lightbox', () => {
     render(<AttachmentView attachments={[att('1', 'image/png', 'pic.png')]} />);
     const img = screen.getByRole('img');
     expect(img.getAttribute('src')).toBe('http://api.test/att/1?token=tok');
-    const link = img.closest('a');
-    expect(link?.getAttribute('href')).toBe('http://api.test/att/1?token=tok');
+    // No navigation away: the thumbnail is a button, not a link.
+    expect(img.closest('a')).toBeNull();
+    fireEvent.click(img.closest('button')!);
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).not.toBeNull();
+    // Escape closes the lightbox in place.
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('renders audio with native controls', () => {

@@ -1,7 +1,7 @@
 // Renders a note's attachments by mime family (spec §2.2 #5):
 // image grid / inline audio / video card / typed download chip.
-import React, { useMemo } from 'react';
-import { FileText } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { FileText, X } from 'lucide-react';
 import {
   attachmentUrlWithToken,
   type NoteAttachment,
@@ -37,11 +37,69 @@ function useAttachmentUrls(
   );
 }
 
+/**
+ * In-place image lightbox: click a thumbnail to enlarge over the page
+ * (no navigation away), click the image to toggle fit ↔ full size,
+ * click the backdrop / press Escape to close.
+ */
+const ImageLightbox: React.FC<{
+  src: string;
+  alt: string;
+  onClose: () => void;
+}> = ({ src, alt, onClose }) => {
+  const [zoomed, setZoomed] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label={alt}
+    >
+      <button
+        type="button"
+        aria-label="Close"
+        className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
+        onClick={onClose}
+      >
+        <X size={18} />
+      </button>
+      <div
+        className={zoomed ? 'max-h-full max-w-full overflow-auto' : 'contents'}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <img
+          src={src}
+          alt={alt}
+          onClick={() => setZoomed((z) => !z)}
+          className={
+            zoomed
+              ? 'max-w-none cursor-zoom-out'
+              : 'max-h-[90vh] max-w-[92vw] cursor-zoom-in object-contain'
+          }
+        />
+      </div>
+    </div>
+  );
+};
+
 export const AttachmentView: React.FC<{ attachments: NoteAttachment[] }> = ({
   attachments,
 }) => {
   const { mediaToken } = useAuth();
   const urls = useAttachmentUrls(attachments, mediaToken ?? undefined);
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(
+    null,
+  );
+  const closeLightbox = useCallback(() => setLightbox(null), []);
   if (!attachments.length) return null;
   const images = attachments.filter((a) => a.mime.startsWith('image/'));
   const audios = attachments.filter((a) => a.mime.startsWith('audio/'));
@@ -58,12 +116,14 @@ export const AttachmentView: React.FC<{ attachments: NoteAttachment[] }> = ({
       {images.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {images.map((a) => (
-            <a
+            <button
               key={a.id}
-              href={urls[a.id] ?? ''}
-              target="_blank"
-              rel="noreferrer"
-              className="block"
+              type="button"
+              className="block cursor-zoom-in"
+              aria-label={`View ${a.original_name}`}
+              onClick={() =>
+                setLightbox({ src: urls[a.id] ?? '', alt: a.original_name })
+              }
             >
               <img
                 src={urls[a.id] ?? ''}
@@ -71,9 +131,16 @@ export const AttachmentView: React.FC<{ attachments: NoteAttachment[] }> = ({
                 loading="lazy"
                 className="h-24 w-32 rounded-lg object-cover bg-island-2"
               />
-            </a>
+            </button>
           ))}
         </div>
+      )}
+      {lightbox && (
+        <ImageLightbox
+          src={lightbox.src}
+          alt={lightbox.alt}
+          onClose={closeLightbox}
+        />
       )}
       {videos.map((a) => (
         <video
