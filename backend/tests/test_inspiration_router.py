@@ -1,7 +1,7 @@
 """Router-layer tests: guard clauses + service exception mapping."""
 
 from io import BytesIO
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -137,29 +137,49 @@ async def test_upload_maps_storage_failed_to_502():
 
 
 @pytest.mark.asyncio
-async def test_get_attachment_with_valid_token_query_redirects():
+async def test_get_attachment_with_valid_token_query_streams():
     """Browser <img>/<video>/<audio>/<a> src cannot send Authorization headers.
     A validated ?token= (media/temp token) must be enough to authorize a GET,
     matching resources_crud_router.serve_resource_file's dual-channel pattern.
+
+    The response streams through serve_stored_file rather than 302-ing to a
+    signed storage URL: that URL was built from the backend's SUPABASE_URL —
+    the LAN address on prod — so every public-internet browser got an
+    unreachable redirect (white page).
     """
     repo = AsyncMock()
-    repo.get_by_id.return_value = {"id": 7, "user_id": "u1"}
-    att_svc = AsyncMock()
-    att_svc.sign_get.return_value = "https://storage.example/signed-url"
+    repo.get_by_id.return_value = {
+        "id": 7,
+        "user_id": "u1",
+        "bucket": "inspiration",
+        "path": "2026/07/14/abc/image.png",
+        "mime": "image/png",
+    }
+    served = MagicMock(name="streamed-response")
+    serve_mock = AsyncMock(return_value=served)
+    fake_request = MagicMock()
     with (
         patch(
             "app.api.inspiration_router.get_inspiration_attachments_repository",
             return_value=repo,
         ),
-        patch("app.api.inspiration_router._attachments", return_value=att_svc),
+        patch(
+            "app.services.library.media_serving.serve_stored_file",
+            serve_mock,
+        ),
         patch(
             "app.api.media_auth.validate_media_cookie",
             AsyncMock(return_value="u1"),
         ),
     ):
-        resp = await get_attachment("7", authorization=None, token="signed-media-tok")
-    assert resp.status_code == 302
-    assert resp.headers["location"] == "https://storage.example/signed-url"
+        resp = await get_attachment(
+            "7", fake_request, authorization=None, token="signed-media-tok"
+        )
+    assert resp is served
+    args, kwargs = serve_mock.call_args
+    assert args[0] == "sb://inspiration/2026/07/14/abc/image.png"
+    assert kwargs["mime"] == "image/png"
+    assert kwargs["request"] is fake_request
 
 
 @pytest.mark.asyncio
@@ -167,7 +187,7 @@ async def test_get_attachment_without_credentials_rejected():
     """No Authorization header and no ?token= must be rejected outright —
     never fall through to an unauthenticated repo lookup."""
     with pytest.raises(HTTPException) as exc:
-        await get_attachment("7", authorization=None, token=None)
+        await get_attachment("7", MagicMock(), authorization=None, token=None)
     assert exc.value.status_code == 401
 
 

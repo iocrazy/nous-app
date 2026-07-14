@@ -555,6 +555,25 @@ try:
         )
         file_path, creator_id, team_ids = await _resolve_file_path(media_id, "file")
         await _check_permissions(media_id, user_id, share_token, creator_id, team_ids)
+
+        # Storage unification: migrated/new uploads carry an sb:// object-store
+        # path — _serve_file is filesystem-only and would 404 them (the exact
+        # detail-page "broken original" symptom; the versions/file routes got
+        # this dual-track in PR-2, this catch-all was missed). Legacy fs rows
+        # keep the original FileResponse path byte-for-byte.
+        from app.services.library.media_storage import resolve_media_source
+
+        if resolve_media_source(file_path).is_object_store:
+            import mimetypes
+
+            from app.services.library.media_serving import serve_stored_file
+
+            return await serve_stored_file(
+                file_path,
+                mime=mimetypes.guess_type(file_path)[0] or "application/octet-stream",
+                request=request,
+                extra_headers={"Referrer-Policy": "no-referrer"},
+            )
         return _serve_file(file_path)
 
     @app.get("/media/{media_id}/cover")

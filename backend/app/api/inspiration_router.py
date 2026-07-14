@@ -11,10 +11,10 @@ from fastapi import (
     Header,
     HTTPException,
     Query,
+    Request,
     UploadFile,
     status,
 )
-from fastapi.responses import RedirectResponse
 
 from app.core.deps import get_current_user
 from app.repositories.inspiration_attachments_repository import (
@@ -198,10 +198,19 @@ async def upload_attachment(
 @router.get("/attachments/{attachment_id}")
 async def get_attachment(
     attachment_id: str,
+    request: Request,
     authorization: Optional[str] = Header(None),
     token: Optional[str] = Query(None),
 ):
-    """Serve (redirect to) an attachment's signed storage URL.
+    """Stream an attachment's bytes through the backend.
+
+    Previously this 302-redirected to a signed storage URL — but that URL
+    is built from the backend's SUPABASE_URL, which on prod is the LAN
+    address (http://192.168.50.9:9082): every public-internet browser got
+    an unreachable redirect and a white page. Streaming through
+    serve_stored_file (the storage-unification shared reader, Range-aware
+    for audio/video scrubbing) works from anywhere and matches how every
+    other media route serves object-store bytes.
 
     Browser-native loads (`<img src>`, `<video src>`, `<audio src>`,
     `<a href>` downloads) cannot attach an Authorization header, so this
@@ -234,11 +243,16 @@ async def get_attachment(
     att = await get_inspiration_attachments_repository().get_by_id(attachment_id)
     if not att or str(att.get("user_id")) != user_id:
         raise HTTPException(status_code=404, detail="attachment not found")
-    try:
-        url = await _attachments().sign_get(att)
-    except AttachmentStorageFailed:
-        raise HTTPException(status_code=502, detail="attachment storage unavailable")
-    return RedirectResponse(url, status_code=302)
+
+    from app.services.library.media_serving import serve_stored_file
+
+    bucket = att.get("bucket") or "inspiration"
+    return await serve_stored_file(
+        f"sb://{bucket}/{att['path']}",
+        mime=att.get("mime") or "application/octet-stream",
+        request=request,
+        extra_headers={"Cache-Control": "private, no-store"},
+    )
 
 
 @router.delete("/attachments/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)
