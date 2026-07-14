@@ -77,12 +77,12 @@ import { useIslandWork } from '../contexts/IslandWorkContext';
 import { CometBack } from './CometBack';
 import { ShareModal } from './ShareModal';
 import { VersionManagerModal } from './VersionManagerModal';
+import { FilePreview } from './resources/FilePreview';
 import VideoPlayer from './VideoPlayer';
 import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog';
 import { ResourceReviewPanel } from './ResourceReviewPanel';
 import { useResizablePanel, ResizeHandle, detailCardClass, DetailBadge, RatingStars, AiIntentBadges } from './detail/DetailCardKit';
 import { ResourceAnnotationOverlay, NormalizedAnnotation } from './ResourceAnnotationOverlay';
-import { AudioHero } from './AudioHero';
 import { AudioWaveformPlayer } from './AudioWaveformPlayer';
 import { AudioOverviewSide } from './AudioOverviewSide';
 import { AudioStageIsland } from './AudioStageIsland';
@@ -188,150 +188,6 @@ function getAIStatusIndicator(status?: string) {
       return null;
   }
 }
-
-// ─── FilePreview ─────────────────────────────────────────
-
-const FilePreview: React.FC<{
-  resource: Resource;
-  fileUrl: string | null;
-  onCoverUpdated?: (updated: Resource) => void;
-}> = ({ resource, fileUrl, onCoverUpdated }) => {
-  const { t } = useTranslation();
-  const { addToast } = useToast();
-  const mime = resource.mime_type || '';
-  const coverInputRef = useRef<HTMLInputElement>(null);
-
-  const handleCoverFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    e.target.value = ''; // allow re-selecting the same file
-    if (!f) return;
-    try {
-      const updated = await uploadResourceCover(resource.id, f);
-      onCoverUpdated?.(updated);
-      addToast(t('resources.detail.coverUpdated', 'Cover updated'), 'success');
-    } catch (err) {
-      console.error('Failed to upload cover:', err);
-      addToast('Failed to upload cover', 'error');
-    }
-  };
-
-  if (!fileUrl) {
-    const { icon: IconComponent, color } = getFileIcon(mime);
-    return (
-      <div className="flex flex-col items-center gap-4 text-center">
-        <IconComponent size={64} className={`${color} opacity-60`} />
-        <p className="text-content-2 text-sm">{resource.filename}</p>
-        <p className="text-content-3 text-xs">{t('resources.noPreview')}</p>
-      </div>
-    );
-  }
-
-  if (mime.startsWith('video/')) {
-    return (
-      <video
-        src={fileUrl}
-        controls
-        className="max-w-full max-h-[calc(100vh-13rem)] rounded-lg object-contain"
-        poster={resource.thumbnail_path || undefined}
-      />
-    );
-  }
-
-  if (mime.startsWith('audio/')) {
-    const isUpload = resource.source_type === 'upload';
-    return (
-      <div className="w-full h-full">
-        <AudioHero
-          src={fileUrl}
-          title={resource.filename}
-          coverUrl={
-            resource.cover_image_path && resource.id
-              ? getResourceCoverUrl(String(resource.id), undefined, resource.updated_at)
-              : resource.thumbnail_path || undefined
-          }
-          duration={resource.duration_seconds ?? undefined}
-          onCoverClick={isUpload ? () => coverInputRef.current?.click() : undefined}
-          chorusStartSec={
-            resource.chorus_start_ms != null ? resource.chorus_start_ms / 1000 : undefined
-          }
-          chorusEditable={isUpload}
-          setChorusLabel={t('resources.detail.setChorus', 'Set chorus')}
-          clearChorusLabel={t('resources.detail.clearChorus', 'Clear')}
-          onChorusChange={
-            isUpload
-              ? async (sec) => {
-                  try {
-                    const ms = sec == null ? null : Math.round(sec * 1000);
-                    const updated = await setResourceChorus(resource.id, ms);
-                    onCoverUpdated?.(updated);
-                    addToast(
-                      t(
-                        ms == null
-                          ? 'resources.detail.chorusCleared'
-                          : 'resources.detail.chorusSet',
-                        ms == null ? 'Chorus removed' : 'Chorus marked',
-                      ),
-                      'success',
-                    );
-                  } catch (err) {
-                    console.error('Failed to set chorus:', err);
-                    addToast('Failed to set chorus', 'error');
-                  }
-                }
-              : undefined
-          }
-        />
-        {isUpload && (
-          <input
-            ref={coverInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={handleCoverFile}
-          />
-        )}
-      </div>
-    );
-  }
-
-  if (mime.startsWith('image/')) {
-    return (
-      <img
-        src={fileUrl}
-        alt={resource.filename}
-        className="max-w-full max-h-[calc(100vh-13rem)] object-contain rounded-lg"
-      />
-    );
-  }
-
-  if (mime === 'application/pdf') {
-    return (
-      <iframe
-        src={fileUrl}
-        className="w-full h-[calc(100vh-13rem)] rounded-lg"
-        title={resource.filename}
-      />
-    );
-  }
-
-  // Default: icon + download
-  const { icon: IconComponent, color } = getFileIcon(mime);
-  return (
-    <div className="flex flex-col items-center gap-4 text-center">
-      <IconComponent size={64} className={`${color} opacity-60`} />
-      <p className="text-content-2 font-medium">{resource.filename}</p>
-      <p className="text-content-3 text-sm">{t('resources.noPreview')}</p>
-      <a
-        href={fileUrl}
-        download
-        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm transition-colors"
-      >
-        <Download size={16} />
-        {t('resources.download')}
-      </a>
-    </div>
-  );
-};
 
 // ─── Main Component ──────────────────────────────────────
 
@@ -1733,11 +1589,11 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             </div>
           ) : isAudio && fileUrl ? (
             <div className="w-full h-full">
-              <FilePreview resource={resource} fileUrl={fileUrl} onCoverUpdated={setResource} />
+              <FilePreview resource={resource} fileUrl={fileUrl} currentUserId={currentUserId} onCoverUpdated={setResource} />
             </div>
           ) : (
             <div className="p-6">
-              <FilePreview resource={resource} fileUrl={fileUrl} onCoverUpdated={setResource} />
+              <FilePreview resource={resource} fileUrl={fileUrl} currentUserId={currentUserId} onCoverUpdated={setResource} />
             </div>
           )}
           </div>
