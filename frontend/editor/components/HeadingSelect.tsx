@@ -39,6 +39,9 @@ export interface HeadingSelectProps {
   autoFocus?: boolean;
   /** Called after Tab commits from the open popup — advance to the next field. */
   onTabNext?: () => void;
+  /** laper-parity hint shown at the top of the open popup, e.g. "Switch to
+   *  location" — paired with a [Tab] key glyph. Omitted → no hint row. */
+  tabHint?: string;
 }
 
 export function HeadingSelect({
@@ -49,6 +52,7 @@ export function HeadingSelect({
   onChange,
   autoFocus,
   onTabNext,
+  tabHint,
 }: HeadingSelectProps) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
@@ -146,6 +150,12 @@ export function HeadingSelect({
       </button>
       {open && (
         <div className="mh-heading-pop" role="listbox" aria-label={ariaLabel}>
+          {tabHint && (
+            <div className="mh-heading-hint" aria-hidden="true">
+              <kbd className="mh-pop-kbd">Tab</kbd>
+              <span>{tabHint}</span>
+            </div>
+          )}
           {entries.map((opt, i) => (
             <div
               key={opt || '__unset__'}
