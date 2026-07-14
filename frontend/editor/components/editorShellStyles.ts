@@ -1167,6 +1167,16 @@ export const EDITOR_SHELL_STYLES = `
 }
 .mh-version-input-cancel:hover:not(:disabled){ background:var(--surface-2); color:var(--ink); }
 .mh-version-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
+/* A long history must never stretch the Writing island: collapsed shows the
+   newest COLLAPSED_COUNT; "Show all" expands into an internally-scrolling
+   capped list. */
+.mh-version-list.expanded{ max-height:300px; overflow-y:auto; }
+.mh-version-showall{
+  align-self:flex-start; margin-top:2px; cursor:pointer;
+  font-family:var(--sans); font-size:11.5px; font-weight:600;
+  color:var(--indigo); background:none; border:none; padding:2px 0;
+}
+.mh-version-showall:hover{ text-decoration:underline; }
 .mh-version-item{
   display:flex; flex-direction:column; gap:6px; padding:8px 10px;
   border:1px solid var(--surface-border); border-radius:var(--radius-sm);
@@ -1695,12 +1705,13 @@ export const EDITOR_SHELL_STYLES = `
 .mh-scene-num-badge{ position:static; left:auto; top:auto; transform:none; width:auto; min-width:0; }
 .mh-drag-handle{ position:static; left:auto; top:auto; transform:none; }
 
-/* ── VERSION RAIL — history floats in the empty margin right of the sheet ──
+/* ── DIFF RAIL — version COMPARE floats in the margin right of the sheet ──
    A zero-height sticky wrapper keeps the card in view while the paper
-   scrolls; the inner card sits just right of the 780px sheet, clamped so a
-   narrow container pins it to its own right edge instead of overflowing
-   (sheet 780/2 = 390 + 16px gap). Hidden entirely on viewports too narrow
-   to have a margin at all. */
+   scrolls, so the live text and the diff are visible SIDE BY SIDE (the
+   version LIST stays in the Writing island). The inner card sits just right
+   of the 780px sheet (780/2 = 390 + 16px gap), clamped so a narrow container
+   pins it to its own right edge instead of overflowing. Hidden entirely on
+   viewports too narrow to have a margin at all. */
 .mh-version-rail{
   position:sticky; top:56px; z-index:6;
   width:100%; height:0; overflow:visible;
@@ -1708,12 +1719,18 @@ export const EDITOR_SHELL_STYLES = `
 }
 .mh-version-rail-inner{
   position:absolute; top:0;
-  left:min(calc(50% + 406px), calc(100% - 232px));
-  width:224px; pointer-events:auto;
-  background:rgba(255,255,255,0.6); backdrop-filter:blur(8px);
+  left:min(calc(50% + 406px), calc(100% - 356px));
+  width:340px; pointer-events:auto;
+  background:rgba(255,255,255,0.72); backdrop-filter:blur(8px);
   border:1px solid var(--surface-border); border-radius:10px;
-  box-shadow:0 6px 18px rgba(35,20,90,0.06);
-  padding:12px; max-height:calc(100vh - 240px); overflow-y:auto;
+  box-shadow:0 6px 18px rgba(35,20,90,0.08);
+  overflow:hidden; display:flex;
 }
+/* The diff view fills the card and scrolls INSIDE it (its own topbar stays
+   pinned) — compacted from its old centre-pane sizing. */
+.mh-diff-rail .mh-version-diff{ height:auto; max-height:calc(100vh - 240px); flex:1; min-width:0; }
+.mh-diff-rail .mh-diff-topbar{ padding:8px 12px; gap:8px; }
+.mh-diff-rail .mh-diff-scroll{ padding:12px; gap:12px; }
+.mh-diff-rail .mh-diff-text{ font-size:12px; }
 @media (max-width:1180px){ .mh-version-rail{ display:none; } }
 `;

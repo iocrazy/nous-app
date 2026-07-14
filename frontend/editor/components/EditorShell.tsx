@@ -73,7 +73,6 @@ import { BeatsView } from '../beats/BeatsView';
 import { NodesView } from '../nodes/NodesView';
 import { StoryboardView } from '../storyboard/StoryboardView';
 import { VersionDiff } from '../versions/VersionDiff';
-import { VersionPanel } from '../versions/VersionPanel';
 import { OutlineView } from './OutlineView';
 import { EpisodePanel } from './EpisodePanel';
 import { RailEntities } from './RailEntities';
@@ -1202,14 +1201,7 @@ export function EditorShell({
         </div>
 
         <div className="mh-page-frame">
-          {diffCommit ? (
-            <VersionDiff
-              scriptId={scriptId}
-              commit={diffCommit}
-              scenes={scenes}
-              onBack={() => setDiffCommit(null)}
-            />
-          ) : railView === 'nodes' ? (
+          {railView === 'nodes' ? (
             <ScenePresenceContext.Provider value={presenceByScene}>
               <NodesView
                 scenes={scenes}
@@ -1251,17 +1243,20 @@ export function EditorShell({
                 onSelectType={handleSelectType}
                 onInsertScene={handleInsertScene}
               />
-              {/* Version history floats in the empty margin RIGHT OF the sheet
-                  (user direction: versions live next to the text, not in the
-                  Writing island). Sticky zero-height wrapper so the card stays
-                  in view while the paper scrolls beneath it. */}
-              {state.mode !== 'outline' && (
-                <div className="mh-version-rail" data-testid="version-rail">
+              {/* Version COMPARE floats in the empty margin RIGHT OF the sheet
+                  (user direction: the diff sits next to the live text so both
+                  are visible at once — no centre-pane takeover). Sticky
+                  zero-height wrapper keeps the card in view while the paper
+                  scrolls; Back closes it. The version LIST lives in the
+                  Writing island (WritingPanel). */}
+              {state.mode !== 'outline' && diffCommit && (
+                <div className="mh-version-rail mh-diff-rail" data-testid="diff-rail">
                   <div className="mh-version-rail-inner">
-                    <VersionPanel
+                    <VersionDiff
                       scriptId={scriptId}
-                      onCompare={handleCompareCommit}
-                      onRolledBack={handleRolledBack}
+                      commit={diffCommit}
+                      scenes={scenes}
+                      onBack={() => setDiffCommit(null)}
                     />
                   </div>
                 </div>
@@ -1421,6 +1416,9 @@ export function EditorShell({
               onFormatChange={handleFormatChange}
               pagination={paginationMode}
               onPaginationChange={handlePaginationChange}
+              scriptId={scriptId}
+              onCompareCommit={handleCompareCommit}
+              onRolledBack={handleRolledBack}
             />
           </>
         )}
