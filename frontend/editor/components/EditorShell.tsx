@@ -38,6 +38,7 @@ import {
 } from '../sceneService';
 import { fetchScriptProject } from '../../services/scriptService';
 import { fetchProjectEntities } from '../../services/projectsService';
+import { extractLibEntitiesFromScript } from '../../services/libEntitiesService';
 import { useToast } from '../../components/Toast';
 import { mergeProjectMentionCandidates } from '../mentionCandidates';
 import type { CursorState, ElementOp, ElementType, ScriptElement, SceneDoc } from '../types';
@@ -722,6 +723,29 @@ export function EditorShell({
   const railLocations = useMemo(() => deriveRailLocations(statsScenes), [statsScenes]);
   // Distinct location names for the heading's search-or-create location picker.
   const locationCandidates = useMemo(() => railLocations.map((l) => l.name), [railLocations]);
+
+  // Auto-sync locations to the project Scene Library (场景库): whenever the set
+  // of distinct location names changes, re-run the idempotent extract so a
+  // location created in a scene heading shows up in the library WITHOUT the
+  // manual "Extract from script" step (user request). Debounced so it fires
+  // once the meta write (updateSceneMeta, 600ms) has persisted the header the
+  // extract reads server-side; best-effort (a background sync, no toast).
+  const locationSyncKey = useMemo(
+    () => [...locationCandidates].map((n) => n.toUpperCase()).sort().join('|'),
+    [locationCandidates],
+  );
+  const lastLocationSyncRef = useRef<string>('');
+  useEffect(() => {
+    if (!workspaceProjectId) return;
+    if (locationSyncKey === lastLocationSyncRef.current) return;
+    const id = setTimeout(() => {
+      lastLocationSyncRef.current = locationSyncKey;
+      extractLibEntitiesFromScript(workspaceProjectId, 'location').catch((err) =>
+        console.error('[EditorShell] auto-sync locations to Scene Library failed', err),
+      );
+    }, 1500);
+    return () => clearTimeout(id);
+  }, [locationSyncKey, workspaceProjectId]);
 
   // Legacy chapters with no scene pointing at them → read-only prose fallbacks.
   const orphanChapters = useMemo(() => {
