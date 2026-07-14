@@ -1713,7 +1713,11 @@
     "deleteForever": "永久删除",
     "confirmDelete": "确认删除",
     "purged": "画布已永久删除",
-    "purgeFailed": "永久删除失败"
+    "purgeFailed": "永久删除失败",
+    "cardMenu": "画布操作",
+    "rename": "重命名",
+    "renameLabel": "画布名称",
+    "export": "导出画布"
   },
   "canvas": {
     "addImage": "+ 添加图片",

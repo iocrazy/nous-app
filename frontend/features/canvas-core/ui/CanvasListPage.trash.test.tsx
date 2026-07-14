@@ -75,7 +75,9 @@ describe('CanvasListPage — trash (G9)', () => {
     deleteCanvas.mockResolvedValue(undefined);
     await renderPage();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Move to trash' }));
+    // Delete now lives in the card's ··· menu (IC card menu).
+    fireEvent.click(screen.getByRole('button', { name: 'Canvas actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move to trash' }));
     await waitFor(() => {
       expect(deleteCanvas).toHaveBeenCalledWith('c1');
       expect(screen.queryByText('Hero Canvas')).toBeNull();
