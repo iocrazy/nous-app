@@ -339,6 +339,25 @@ export function SceneBlock({
     setMentionActive(0);
   }, [mention?.elementId, mention?.query, mentionCandidates]);
 
+  // Dismiss the slash / @-mention / cue pickers on an OUTSIDE click. The legacy
+  // engine closed them when the contentEditable blurred; TipTap only blurs the
+  // editor (which doesn't touch this scene's picker state), so a click on empty
+  // paper or elsewhere used to leave the popup floating. Both the editor and the
+  // popups live inside `containerRef`, so any mousedown whose target is NOT in
+  // there is an outside click. (Clicking a popup option lands inside the
+  // container, so its own onMouseDown→select still runs and wins.)
+  useEffect(() => {
+    if (!mention && !slash) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      if (!containerRef.current?.contains(e.target as Node)) {
+        setMention(null);
+        setSlash(null);
+      }
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    return () => document.removeEventListener('mousedown', onDocMouseDown);
+  }, [mention, slash]);
+
   useEffect(() => {
     const inputTimers = inputTimersRef.current;
     return () => {
