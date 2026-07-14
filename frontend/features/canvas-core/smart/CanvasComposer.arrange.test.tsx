@@ -48,3 +48,32 @@ describe('CanvasComposer — Arrange', () => {
     expect(state.canUndo()).toBe(true);
   });
 });
+
+
+describe('CanvasComposer — Arrange selected (IC 整理选中)', () => {
+  it('with 2+ selected, only the selected top-level nodes move', () => {
+    useCanvasCoreStore.setState({
+      nodes: [
+        { id: 'a', type: 'prompt', position: { x: 0, y: 0 }, data: {}, measured: { width: 100, height: 50 } },
+        { id: 'b', type: 'prompt', position: { x: 0, y: 300 }, data: {}, measured: { width: 100, height: 50 } },
+        { id: 'c', type: 'prompt', position: { x: 900, y: 900 }, data: {}, measured: { width: 100, height: 50 } },
+      ],
+      connections: [
+        { id: 'e1', source: 'a', target: 'b', sourceHandle: null, targetHandle: null },
+      ],
+      selection: ['a', 'b'],
+    } as never);
+    render(<CanvasComposer />);
+    fireEvent.click(screen.getByRole('button', { name: 'Arrange' }));
+    const after = useCanvasCoreStore.getState().nodes as Array<{
+      id: string;
+      position: { x: number; y: number };
+    }>;
+    const c = after.find((n) => n.id === 'c')!;
+    expect(c.position).toEqual({ x: 900, y: 900 }); // untouched
+    const a = after.find((n) => n.id === 'a')!;
+    const b = after.find((n) => n.id === 'b')!;
+    // a→b laid out left-to-right on one rank
+    expect(b.position.x).toBeGreaterThan(a.position.x);
+  });
+});
