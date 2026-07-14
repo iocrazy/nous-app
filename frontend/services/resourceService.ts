@@ -1302,6 +1302,53 @@ export async function uploadNewVersion(
   return json.data;
 }
 
+/**
+ * Save edited text as a NEW version. Builds a File from the string and reuses
+ * the existing multipart version-upload endpoint (content-addressed under
+ * unified storage). Used by the text-resource editor's "Save as new version".
+ */
+export async function saveTextAsNewVersion(
+  resourceId: string,
+  text: string,
+  filename: string,
+  mime: string,
+  notes?: string,
+): Promise<ResourceVersion> {
+  const file = new File([text], filename, { type: mime || 'text/plain' });
+  return uploadNewVersion(resourceId, file, notes);
+}
+
+/**
+ * OVERWRITE the current version's bytes in place (no new version row).
+ * Used by the text-resource editor's "Overwrite current version".
+ */
+export async function overwriteVersionContent(
+  resourceId: string,
+  versionId: string,
+  text: string,
+  filename: string,
+  mime: string,
+): Promise<ResourceVersion> {
+  const apiUrl = getApiUrl();
+  const file = new File([text], filename, { type: mime || 'text/plain' });
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const headers: Record<string, string> = {};
+  const authHeaders = await getAuthHeaders();
+  Object.entries(authHeaders).forEach(([k, v]) => {
+    if (k.toLowerCase() !== 'content-type') headers[k] = v as string;
+  });
+
+  const response = await fetch(
+    `${apiUrl}/api/v1/resources/${resourceId}/versions/${versionId}/content`,
+    { method: 'PUT', headers, body: formData },
+  );
+  if (!response.ok) throw new Error('Failed to overwrite version');
+  const json = await response.json();
+  return json.data;
+}
+
 export async function setCurrentVersion(
   resourceId: string,
   versionNumber: number,
