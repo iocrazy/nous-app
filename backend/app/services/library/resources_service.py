@@ -76,6 +76,18 @@ async def _scope_type_for(scope_id: str) -> str:
     return "personal" if (row and row["kind"] == "personal") else "team"
 
 
+def _invalidate_media_path_cache(resource_id: str) -> None:
+    """Drop the /media/{id} path cache for a resource after its current bytes
+    change (overwrite / new version / set-current). Fail-safe: cache
+    invalidation must never break a write — swallow any error."""
+    try:
+        from app.services.media import media_path_cache
+
+        media_path_cache.invalidate(resource_id)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[media-cache] invalidate failed for {resource_id}: {e}")
+
+
 class ResourcesService:
     """Resource library business logic"""
 
@@ -356,6 +368,7 @@ class ResourcesService:
         }
         await self.repo.update_resource(resource_id, update_data)
 
+        _invalidate_media_path_cache(resource_id)
         return version
 
     async def overwrite_version_content(
@@ -464,6 +477,7 @@ class ResourcesService:
                     "file_hash": file_hash,
                 },
             )
+        _invalidate_media_path_cache(resource_id)
         return updated
 
     # ------------------------------------------------------------------ #
@@ -497,6 +511,7 @@ class ResourcesService:
             update_data["thumbnail_path"] = version["thumbnail_path"]
 
         await self.repo.update_resource(resource_id, update_data)
+        _invalidate_media_path_cache(resource_id)
         return version
 
     async def delete_version(

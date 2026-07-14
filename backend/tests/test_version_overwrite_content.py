@@ -147,3 +147,55 @@ async def test_overwrite_rejects_version_from_other_resource():
         await svc.overwrite_version_content(
             resource_id="10", version_id="77", user_id="u1", file=file
         )
+
+
+async def test_overwrite_invalidates_media_path_cache(tmp_path):
+    """After overwrite, the /media/{id} path cache entry must be dropped so the
+    detail page shows the new bytes immediately instead of after the TTL."""
+    from app.services.media import media_path_cache
+
+    media_path_cache.clear()
+    media_path_cache.put("10", "file", "sb://old", "u1", ())
+
+    svc = _svc()
+    svc.repo = MagicMock()
+    svc.repo.get_resource_by_id = AsyncMock(
+        return_value={"id": "10", "filename": "n.md", "current_version": 1}
+    )
+    svc.repo.get_version_by_id = AsyncMock(
+        return_value={"id": "77", "resource_id": "10", "version_number": 1}
+    )
+    svc.repo.get_first_resource_item = AsyncMock(return_value={"scope_id": "42"})
+    svc.repo.update_version = AsyncMock(
+        side_effect=lambda vid, data: {"id": vid, **data}
+    )
+    svc.repo.update_resource = AsyncMock(
+        side_effect=lambda rid, data: {"id": rid, **data}
+    )
+
+    stored = SimpleNamespace(file_path="sb://library/t42/ab/cd/new.md", size_bytes=5)
+    file = SimpleNamespace(filename="n.md", content_type="text/markdown", size=5)
+    with (
+        patch(
+            "app.services.library.resources_service.unified_storage_enabled",
+            AsyncMock(return_value=True),
+        ),
+        patch(
+            "app.services.library.resources_service.stream_upload_to_disk",
+            AsyncMock(return_value=(5, "newhash")),
+        ),
+        patch(
+            "app.services.library.resources_service.sniff_mime",
+            return_value="text/markdown",
+        ),
+        patch(
+            "app.services.library.resources_service.store_local_file",
+            AsyncMock(return_value=stored),
+        ),
+    ):
+        await svc.overwrite_version_content(
+            resource_id="10", version_id="77", user_id="u1", file=file
+        )
+
+    assert media_path_cache.get("10", "file") is None
+    media_path_cache.clear()
