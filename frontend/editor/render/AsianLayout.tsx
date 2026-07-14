@@ -1,26 +1,14 @@
 /**
- * Asian layout engine (spec v3 §3.3 / D8 column 2).
+ * Asian typeset class map + ornament marks (spec v3 §3.3 / D8 column 2).
  *
- * A sibling of HollywoodLayout: it consumes the SAME ordered ScriptElement[]
- * and reuses the SAME editable row (ElementLine) — only the per-type typeset
- * differs. Where the Hollywood engine centres cues and right-aligns transitions,
- * the Asian engine lays the page out as a numbered manuscript: action lines get
- * a `△` prefix, character cues become a left-aligned `Name:` label, dialogue is
- * indented under that label, parens are inline italics, transitions right-align,
- * comments are a vertical-bar quote and subtitles are centred italics.
- *
- * The `△` prefix and the character `:` label are the only two rows that need a
- * decoration node; both are rendered as aria-hidden spans (screen readers read
- * the element text, not the typeset ornament). Everything else is pure CSS keyed
- * off the `as-*` classes in editorShellStyles.ts. All interaction (keydown
- * machine, debounced input, paste, IME) stays in SceneBlock and flows down
- * through `handlers`, so this component is purely presentational.
+ * The TipTap NodeView (`TipTapSceneEditor`, M3 spec D5) is the sole consumer:
+ * it reads `ASIAN_LINE_CLASS[type]` to class each row, and renders the leading
+ * `△` (action) / trailing `：` (character cue) ornaments from `ASIAN_PREFIX` /
+ * `ASIAN_SUFFIX` — one source, no hand-kept copy. The legacy contentEditable
+ * layout-engine component that used to live here was retired when TipTap became
+ * the only editing surface.
  */
-import { Fragment } from 'react';
-import { ElementLine, type ElementReorderApi, type LineMention } from './layoutShared';
-import type { LayoutHandlers } from './HollywoodLayout';
-import { PageSeam } from '../components/PageSeam';
-import type { ElementType, ScriptElement } from '../types';
+import type { ElementType } from '../types';
 
 export const ASIAN_LINE_CLASS: Record<ElementType, string> = {
   action: 'as-action',
@@ -32,9 +20,7 @@ export const ASIAN_LINE_CLASS: Record<ElementType, string> = {
   subtitle: 'as-subtitle',
 };
 
-/** Rows that carry a leading ornament (rendered before the editable line).
- *  Exported so the TipTap NodeView (M3, spec D5) can render the SAME marks
- *  from one source instead of a second hand-kept copy. */
+/** Rows that carry a leading ornament (rendered before the editable line). */
 export const ASIAN_PREFIX: Partial<Record<ElementType, string>> = {
   action: '△',
 };
@@ -45,90 +31,3 @@ export const ASIAN_PREFIX: Partial<Record<ElementType, string>> = {
 export const ASIAN_SUFFIX: Partial<Record<ElementType, string>> = {
   character: '：',
 };
-
-export interface AsianLayoutProps {
-  elements: ScriptElement[];
-  focusedElementId: string | null;
-  handlers: LayoutHandlers;
-  /** The open mention picker (if any) — its ARIA is applied to the matching line. */
-  mention?: LineMention | null;
-  /** Copilot-selected element ids (their gutter ticks render pressed). */
-  selectedIds?: Set<string>;
-  /** Gutter-tick click → copilot selection (Task 11). */
-  onTickClick?: (elementId: string, shiftKey: boolean) => void;
-  /** Hover-gutter drag-to-reorder wiring; absent = element reorder disabled. */
-  elementReorder?: ElementReorderApi;
-  /** A1 continuous numbering: this scene's cumulative block-index base (from
-   *  `sceneBlockBases`). The heading consumed `blockIndexBase + 1`, so the
-   *  first element here is `blockIndexBase + 2`. Defaults to 0. */
-  blockIndexBase?: number;
-  /** Paged mode v2: a seam rendered BEFORE the element with the matching id. */
-  pageSeams?: Map<string, { page: number; filler: number }>;
-}
-
-export function AsianLayout({
-  elements,
-  focusedElementId,
-  handlers,
-  mention,
-  selectedIds,
-  onTickClick,
-  elementReorder,
-  blockIndexBase = 0,
-  pageSeams,
-}: AsianLayoutProps) {
-  return (
-    <>
-      {elements.map((el, i) => {
-        const prefix = ASIAN_PREFIX[el.type];
-        const suffix = ASIAN_SUFFIX[el.type];
-        const seam = pageSeams?.get(el.id);
-        return (
-          <Fragment key={el.id}>
-          {seam && <PageSeam page={seam.page} filler={seam.filler} />}
-          <div className={`as-row as-row-${el.type}`} data-el-type={el.type}>
-            {prefix && (
-              <span className="as-mark as-prefix" aria-hidden="true">
-                {prefix}
-              </span>
-            )}
-            <ElementLine
-              element={el}
-              index={blockIndexBase + 1 + i}
-              lineClass={ASIAN_LINE_CLASS[el.type]}
-              focused={focusedElementId === el.id}
-              selected={selectedIds?.has(el.id)}
-              onTickClick={onTickClick}
-              draggingElementId={elementReorder?.draggingElementId ?? null}
-              dropElementEdge={
-                elementReorder?.dropTarget && elementReorder.dropTarget.elementId === el.id
-                  ? elementReorder.dropTarget.edge
-                  : null
-              }
-              onElementDragStart={elementReorder?.onDragStart}
-              onElementDragOver={elementReorder?.onDragOver}
-              onElementDrop={elementReorder?.onDrop}
-              onElementDragEnd={elementReorder?.onDragEnd}
-              mentionAria={
-                mention && mention.elementId === el.id
-                  ? {
-                      listboxId: mention.listboxId,
-                      activeOptionId: mention.activeOptionId,
-                      expanded: mention.expanded,
-                    }
-                  : undefined
-              }
-              {...handlers}
-            />
-            {suffix && (
-              <span className="as-mark as-suffix" aria-hidden="true">
-                {suffix}
-              </span>
-            )}
-          </div>
-          </Fragment>
-        );
-      })}
-    </>
-  );
-}

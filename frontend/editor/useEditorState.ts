@@ -15,7 +15,7 @@
  * 'editor.theme' default did exactly that). Everything else is session state.
  */
 import { useMemo, useReducer } from 'react';
-import type { CursorState } from './editorMachine';
+import type { CursorState } from './types';
 import type { ElementType } from './types';
 
 export type EditorMode = 'script' | 'outline' | 'cover';

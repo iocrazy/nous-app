@@ -11,6 +11,28 @@ import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-li
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ElementOp, ScriptElement, SceneDoc } from '../types';
 
+// TipTap mounts its ProseMirror view asynchronously and reads layout/selection
+// geometry jsdom lacks — mirror the tiptap suites' polyfill so the copilot
+// gutter ticks (NodeView buttons) render cleanly.
+const zeroRect = {
+  bottom: 0,
+  height: 0,
+  left: 0,
+  right: 0,
+  toJSON: () => ({}),
+  top: 0,
+  width: 0,
+  x: 0,
+  y: 0,
+};
+Element.prototype.getClientRects = () => [] as unknown as DOMRectList;
+Element.prototype.getBoundingClientRect = () => zeroRect as DOMRect;
+Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+Range.prototype.getBoundingClientRect = () => zeroRect as DOMRect;
+if (typeof document.elementFromPoint !== 'function') {
+  document.elementFromPoint = () => null;
+}
+
 // i18n: echo the key, appending interpolation values so counts are observable.
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -68,6 +90,11 @@ const makeScene = (elements: ScriptElement[]): SceneDoc => ({
 const clickTick = (id: string, shiftKey = false) =>
   fireEvent.click(document.querySelector(`[data-tick-id="${id}"]`) as HTMLElement, { shiftKey });
 
+// The gutter ticks live inside the async-mounted TipTap NodeView — wait for the
+// row's tick to exist before interacting with it.
+const waitTick = (id: string) =>
+  waitFor(() => expect(document.querySelector(`[data-tick-id="${id}"]`)).not.toBeNull());
+
 const typeInstruction = (value: string) =>
   fireEvent.change(screen.getByPlaceholderText('editor.copilotRequestPlaceholder'), {
     target: { value },
@@ -91,6 +118,7 @@ describe('SceneBlock copilot free-text', () => {
       summary: 'Tightened.',
     });
     render(<SceneBlock scene={oneScene()} index={0} />);
+    await waitTick('el_a');
     clickTick('el_a');
     typeInstruction('make it punchier');
     submit();
@@ -107,6 +135,7 @@ describe('SceneBlock copilot free-text', () => {
       summary: 'Tightened the action.',
     });
     render(<SceneBlock scene={oneScene()} index={0} />);
+    await waitTick('el_a');
     clickTick('el_a');
     typeInstruction('x');
     submit();
@@ -140,6 +169,7 @@ describe('SceneBlock copilot free-text', () => {
       summary: 'Reviewed against the current scene.',
     });
     render(<SceneBlock scene={oneScene()} index={0} />);
+    await waitTick('el_a');
     clickTick('el_a');
     typeInstruction('rewrite it');
     submit();
@@ -163,6 +193,7 @@ describe('SceneBlock copilot free-text', () => {
       summary: 's',
     });
     render(<SceneBlock scene={oneScene()} index={0} />);
+    await waitTick('el_a');
     clickTick('el_a');
     typeInstruction('rewrite it');
     submit();
@@ -180,6 +211,7 @@ describe('SceneBlock copilot free-text', () => {
       new OpRejectedError('missing_anchor', 'before_id el_x not found'),
     );
     render(<SceneBlock scene={oneScene()} index={0} />);
+    await waitTick('el_a');
     clickTick('el_a');
     typeInstruction('do the thing');
     submit();
@@ -192,6 +224,7 @@ describe('SceneBlock copilot free-text', () => {
   it('disables the free-text box on 404 and does not re-probe', async () => {
     copilotApi.requestCopilotOps.mockRejectedValueOnce(new CopilotDisabledError());
     render(<SceneBlock scene={oneScene()} index={0} />);
+    await waitTick('el_a');
     clickTick('el_a');
     typeInstruction('anything');
     submit();

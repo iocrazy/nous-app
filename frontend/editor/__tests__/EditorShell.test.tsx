@@ -272,9 +272,11 @@ describe('EditorShell', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'editor.asian' }));
 
-    // Engine switches and the choice is persisted under the per-script key.
-    expect(container.querySelector('.as-prefix')).toBeInTheDocument();
+    // The format flip re-keys each scene's TipTap editor, which remounts its
+    // ProseMirror view asynchronously — wait for the asian typeset to render.
+    await waitFor(() => expect(container.querySelector('.as-prefix')).toBeInTheDocument());
     expect(container.querySelector('.hw-action')).toBeNull();
+    // Choice persisted under the per-script key.
     expect(localStorage.getItem('editor.format.42')).toBe('asian');
   });
 });
