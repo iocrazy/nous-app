@@ -78,3 +78,12 @@ export const ELEMENT_TYPES: ElementType[] = [
 export function isElementType(value: unknown): value is ElementType {
   return typeof value === 'string' && (ELEMENT_TYPES as string[]).includes(value);
 }
+
+/** A caret position in the editor: which scene, which element (or a heading
+ *  field). The shell tracks it to follow the cursor (toolbar active pill,
+ *  type commands). Formerly lived in the retired `editorMachine`. */
+export interface CursorState {
+  sceneId: string;
+  elementId: string | null;
+  field: 'element' | 'heading_int_ext' | 'location' | 'time';
+}

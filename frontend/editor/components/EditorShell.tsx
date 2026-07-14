@@ -40,8 +40,7 @@ import { fetchScriptProject } from '../../services/scriptService';
 import { fetchProjectEntities } from '../../services/projectsService';
 import { useToast } from '../../components/Toast';
 import { mergeProjectMentionCandidates } from '../mentionCandidates';
-import type { CursorState } from '../editorMachine';
-import type { ElementOp, ElementType, ScriptElement, SceneDoc } from '../types';
+import type { CursorState, ElementOp, ElementType, ScriptElement, SceneDoc } from '../types';
 import type { ScriptChapter } from '../../types';
 import { useEditorState, type EditorFormat, type EditorMode } from '../useEditorState';
 import type { SaveState } from '../useSceneSync';
@@ -58,8 +57,6 @@ import {
   type SceneWindow,
 } from '../windowing';
 import { EDITOR_SHELL_STYLES } from './editorShellStyles';
-import { isTiptapEnabled } from '../tiptap/flag';
-import { fetchTiptapModuleStatus } from '../tiptap/moduleStatus';
 import { sceneBlockBases } from './blockNumbering';
 import {
   SceneBlock,
@@ -749,26 +746,6 @@ export function EditorShell({
     [scenes],
   );
 
-  // ── TipTap surface switch (M4 cutover) ────────────────────────────────────
-  // The OFFICIAL toggle is the admin module registry (system_settings
-  // ['editor.tiptap_surface'], the project's single toggle convention),
-  // fetched once per mount and fail-closed. localStorage 'editor.tiptap'
-  // stays as a per-browser emergency override; env is a dev-only fallback.
-  // Until the fetch resolves (null) the resolver falls back to override/env —
-  // i.e. legacy by default, with at most one surface swap shortly after load
-  // when the admin switch is ON.
-  const [tiptapDb, setTiptapDb] = useState<boolean | null>(null);
-  useEffect(() => {
-    let alive = true;
-    fetchTiptapModuleStatus().then((enabled) => {
-      if (alive) setTiptapDb(enabled);
-    });
-    return () => {
-      alive = false;
-    };
-  }, []);
-  const tiptapSurface = isTiptapEnabled(tiptapDb);
-
   // ── Paged-mode page seams (v2 — real page look) ───────────────────────────
   // Measure the sheet's rows after layout, subtract any already-rendered seam
   // heights to get stable CONTENT coordinates (one-pass fixed point: inserting
@@ -1050,14 +1027,27 @@ export function EditorShell({
     scenes.length === 0 &&
     orphanChapters.length === 0;
 
-  // Focus the seeded row once the new scene has rendered (cold start).
+  // Focus the seeded row once the new scene has rendered (cold start). The
+  // TipTap editor builds its ProseMirror view in an effect, so the row may not
+  // be in the DOM on the same commit the scene lands — poll a few frames until
+  // it appears rather than firing once and missing.
   useEffect(() => {
     if (!pendingFocusId) return;
-    const node = shellRef.current?.querySelector<HTMLElement>(`[data-el-id="${pendingFocusId}"]`);
-    if (node) {
-      node.focus();
-      setPendingFocusId(null);
-    }
+    let raf = 0;
+    let tries = 0;
+    const tryFocus = () => {
+      const node = shellRef.current?.querySelector<HTMLElement>(
+        `[data-el-id="${pendingFocusId}"]`,
+      );
+      if (node) {
+        node.focus();
+        setPendingFocusId(null);
+        return;
+      }
+      if (tries++ < 30) raf = requestAnimationFrame(tryFocus);
+    };
+    tryFocus();
+    return () => cancelAnimationFrame(raf);
   }, [pendingFocusId, scenes]);
 
   const tabLabel: Record<EditorMode, string> = {
@@ -1368,7 +1358,6 @@ export function EditorShell({
                             onCrossSceneDelete={handleCrossSceneDelete}
                             onRegisterExternalOps={handleRegisterExternalOps}
                             pageSeams={pageSeams}
-                            tiptapSurface={tiptapSurface}
                             onRegisterRemoteApply={
                               COLLAB_ENABLED ? registerRemoteApply : undefined
                             }

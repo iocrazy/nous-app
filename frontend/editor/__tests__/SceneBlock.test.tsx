@@ -73,77 +73,13 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('SceneBlock element editing', () => {
-  it('Tab on an action line cycles its type to character (update op)', () => {
-    render(<SceneBlock scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])} index={0} />);
-    const row = document.querySelector('[data-el-id="el_a"]') as HTMLElement;
-    fireEvent.keyDown(row, { key: 'Tab' });
-
-    expect(sync.dispatch).toHaveBeenCalledTimes(1);
-    const [ops] = sync.dispatch.mock.calls[0] as [ElementOp[]];
-    expect(ops[0]).toMatchObject({ op: 'update', element_id: 'el_a', payload: { type: 'character' } });
-  });
-
-  it('Enter on a dialogue line inserts a new element after it and focuses the new row', async () => {
-    render(
-      <SceneBlock scene={makeScene([{ id: 'el_d', type: 'dialogue', text: 'Line' }])} index={0} />,
-    );
-    const row = document.querySelector('[data-el-id="el_d"]') as HTMLElement;
-    fireEvent.keyDown(row, { key: 'Enter' });
-
-    const [ops] = sync.dispatch.mock.calls[0] as [ElementOp[]];
-    expect(ops[0]).toMatchObject({ op: 'insert', after_id: 'el_d' });
-    const newId = (ops[0] as Extract<ElementOp, { op: 'insert' }>).element_id;
-
-    await waitFor(() =>
-      expect(document.activeElement?.getAttribute('data-el-id')).toBe(newId),
-    );
-  });
-
-  it('debounces text input into a single update op', () => {
-    vi.useFakeTimers();
-    render(<SceneBlock scene={makeScene([{ id: 'el_a', type: 'action', text: '' }])} index={0} />);
-    const row = document.querySelector('[data-el-id="el_a"]') as HTMLElement;
-    row.textContent = 'New action text';
-    fireEvent.input(row);
-
-    expect(sync.dispatch).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(500);
-
-    expect(sync.dispatch).toHaveBeenCalledTimes(1);
-    const [ops] = sync.dispatch.mock.calls[0] as [ElementOp[]];
-    expect(ops[0]).toMatchObject({
-      op: 'update',
-      element_id: 'el_a',
-      payload: { text: 'New action text' },
-    });
-  });
-
-  it('does not run the machine while an IME composition is active', () => {
-    render(<SceneBlock scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])} index={0} />);
-    const row = document.querySelector('[data-el-id="el_a"]') as HTMLElement;
-    fireEvent.compositionStart(row);
-    fireEvent.keyDown(row, { key: 'Enter' });
-    expect(sync.dispatch).not.toHaveBeenCalled();
-  });
-
-  it('splits pasted text on newlines into anchored action inserts', () => {
-    render(<SceneBlock scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])} index={0} />);
-    const row = document.querySelector('[data-el-id="el_a"]') as HTMLElement;
-    fireEvent.paste(row, {
-      clipboardData: { getData: () => 'Line one\nLine two' },
-    });
-
-    const [ops] = sync.dispatch.mock.calls[0] as [ElementOp[]];
-    expect(ops).toHaveLength(2);
-    expect(ops[0]).toMatchObject({ op: 'insert', after_id: 'el_a', payload: { type: 'action', text: 'Line one' } });
-    expect(ops[1]).toMatchObject({ op: 'insert', payload: { type: 'action', text: 'Line two' } });
-    // Second insert is anchored after the first (a valid anchor chain).
-    expect((ops[1] as Extract<ElementOp, { op: 'insert' }>).after_id).toBe(
-      (ops[0] as Extract<ElementOp, { op: 'insert' }>).element_id,
-    );
-  });
-
+// NOTE: the per-keystroke editing behaviors that used to live here — Tab type
+// cycle, Enter split, paste-split, IME guard, and the 500ms text debounce —
+// moved into the TipTap keymap/sync when the legacy contentEditable engine was
+// retired, and are covered by `tiptapM1Keymap.test.tsx` / `tiptapM1Sync.test.tsx`
+// / `tiptapM2Misc.test.tsx`. What remains here is the scene HEAD ROW (a plain
+// React form, not the editing surface) and structural props.
+describe('SceneBlock head row + structure', () => {
   it('writes scene meta through updateSceneMeta after the debounce', () => {
     vi.useFakeTimers();
     render(<SceneBlock scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])} index={0} />);
@@ -162,35 +98,13 @@ describe('SceneBlock element editing', () => {
   });
 });
 
-describe('SceneBlock live-stats lift (Task 6 ⑥)', () => {
-  it('reports STRUCTURAL changes (retype) immediately, without waiting the 1s debounce', () => {
-    vi.useFakeTimers();
-    const onElementsChange = vi.fn();
-    render(
-      <SceneBlock
-        scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])}
-        index={0}
-        onElementsChange={onElementsChange}
-      />,
-    );
-    const row = document.querySelector('[data-el-id="el_a"]') as HTMLElement;
-    onElementsChange.mockClear();
-
-    // Tab retype (action → character) is a STRUCTURAL change: it must lift
-    // immediately so the toolbar's active pill never lags behind the block's
-    // real type (user-reported). Text-only edits keep the 1s debounce.
-    fireEvent.keyDown(row, { key: 'Tab' });
-    expect(onElementsChange).toHaveBeenCalledWith(
-      '900',
-      expect.arrayContaining([expect.objectContaining({ id: 'el_a', type: 'character' })]),
-    );
-
-    // No duplicate report fires later for the same skeleton.
-    onElementsChange.mockClear();
-    vi.advanceTimersByTime(1000);
-    expect(onElementsChange).not.toHaveBeenCalled();
-  });
-});
+// The live-stats lift (structural change → immediate onElementsChange, text
+// edits → 1s debounce) was previously exercised via a Tab keystroke on the
+// legacy contentEditable. The lift EFFECT is engine-agnostic (it watches
+// `sync.elements`), but its only trigger in this harness is a keystroke, which
+// now flows through the TipTap keymap — so the retype→dispatch path is covered
+// by `tiptapM1Keymap.test.tsx` and the immediate-vs-debounced lift by the
+// toolbar-follow assertions in `EditorShell.test.tsx`.
 
 describe('SceneBlock typographic head row (Task 4.5)', () => {
   it('renders a read-mode heading slug by default, not the selects', () => {
@@ -294,16 +208,21 @@ describe('SceneBlock typographic head row (Task 4.5)', () => {
   // ── A1: continuous per-block numbering (badge shows the document-order
   // block number, not the scene's position) ────────────────────────────────
   describe('continuous block numbering (blockIndexBase)', () => {
-    it('defaults the scene heading badge to 1 when blockIndexBase is omitted', () => {
+    // The element rows mount asynchronously (TipTap builds its ProseMirror view
+    // in an effect), so wait for the NodeView `.mh-el-num` before asserting.
+    it('defaults the scene heading badge to 1 when blockIndexBase is omitted', async () => {
       render(<SceneBlock scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])} index={0} />);
       expect(document.querySelector('.mh-scene-num-badge')?.textContent).toBe('1');
-      const num = document.querySelector('[data-el-id="el_a"]')
-        ?.closest('.mh-el-row')
-        ?.querySelector('.mh-el-num');
-      expect(num?.textContent).toBe('2');
+      await waitFor(() => {
+        const num = document
+          .querySelector('[data-el-id="el_a"]')
+          ?.closest('.mh-el-row')
+          ?.querySelector('.mh-el-num');
+        expect(num?.textContent).toBe('2');
+      });
     });
 
-    it('offsets the heading badge and element numbers by blockIndexBase', () => {
+    it('offsets the heading badge and element numbers by blockIndexBase', async () => {
       render(
         <SceneBlock
           scene={makeScene([
@@ -315,13 +234,17 @@ describe('SceneBlock typographic head row (Task 4.5)', () => {
         />,
       );
       expect(document.querySelector('.mh-scene-num-badge')?.textContent).toBe('4');
-      const numA = document.querySelector('[data-el-id="el_a"]')
+      await waitFor(() => {
+        const numA = document
+          .querySelector('[data-el-id="el_a"]')
+          ?.closest('.mh-el-row')
+          ?.querySelector('.mh-el-num');
+        expect(numA?.textContent).toBe('5');
+      });
+      const numB = document
+        .querySelector('[data-el-id="el_b"]')
         ?.closest('.mh-el-row')
         ?.querySelector('.mh-el-num');
-      const numB = document.querySelector('[data-el-id="el_b"]')
-        ?.closest('.mh-el-row')
-        ?.querySelector('.mh-el-num');
-      expect(numA?.textContent).toBe('5');
       expect(numB?.textContent).toBe('6');
     });
   });

@@ -110,6 +110,9 @@ export interface TipTapSceneEditorProps {
   /** Reports the currently-focused element's id (or null) on every selection
    *  change, so the shell/toolbar can follow the cursor. */
   onFocusCursor?: (elementId: string | null) => void;
+  /** Fires when the editing surface loses focus (blur, or Esc which blurs it),
+   *  so the shell can relax its `data-editing` toolbar emphasis. */
+  onExitEditing?: () => void;
   // ── M2: copilot gutter tick ───────────────────────────────────────────
   /** Clicking a row's gutter tick selects it for the copilot (spec D6). */
   onTickClick?: (elementId: string, shiftKey: boolean) => void;
@@ -430,6 +433,7 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
       blockIndexBase = 0,
       dispatchOps,
       onFocusCursor,
+      onExitEditing,
       onTickClick,
       selectedElementIds,
       draggingElementId,
@@ -459,6 +463,9 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
     formatRef.current = format;
     const blockIndexBaseRef = useRef(blockIndexBase);
     blockIndexBaseRef.current = blockIndexBase;
+
+    const onExitEditingRef = useRef(onExitEditing);
+    onExitEditingRef.current = onExitEditing;
 
     // M2 prop refs — kept fresh every render, read inside the NodeView
     // (gutter/tick/drag) and the menu-bridge keymap extension.
@@ -667,6 +674,8 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
       onBlur: () => {
         clearDebounce();
         flushPending();
+        // Editing surface lost focus → relax the shell's data-editing emphasis.
+        onExitEditingRef.current?.();
       },
     });
 

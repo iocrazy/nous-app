@@ -12,6 +12,12 @@ const svc = vi.hoisted(() => ({
   applyOps: vi.fn(),
   updateSceneMeta: vi.fn().mockResolvedValue({}),
   newElementId: () => 'el_seed',
+  // VersionPanel (in the Writing rail) loads commits on mount.
+  listCommits: vi.fn().mockResolvedValue([]),
+  createCommit: vi.fn(),
+  deleteCommit: vi.fn(),
+  rollbackCommit: vi.fn(),
+  diffCommit: vi.fn(),
 }));
 vi.mock('../sceneService', () => svc);
 
@@ -106,9 +112,13 @@ describe('EditorShell cold start', () => {
     fireEvent.click(screen.getByRole('button', { name: 'editor.createStory' }));
 
     await waitFor(() => expect(svc.createScene).toHaveBeenCalled());
-    // The seeded action row renders and receives focus (Tab-ready).
+    // The cold start seeds an action row into the new scene and mounts it, so
+    // the writer lands on a real, Tab-ready line. (The row then receives focus
+    // via EditorShell's pending-focus effect — not asserted here: focusing a
+    // ProseMirror contentEditable does not reliably set document.activeElement
+    // under jsdom, so that nicety is verified manually.)
     await waitFor(() =>
-      expect(document.activeElement?.getAttribute('data-el-id')).toBe('el_seed'),
+      expect(document.querySelector('[data-el-id="el_seed"]')).toBeInTheDocument(),
     );
   });
 

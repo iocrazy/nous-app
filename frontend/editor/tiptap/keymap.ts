@@ -229,6 +229,12 @@ export const ScriptKeymap = Extension.create({
       Tab: () => handleTab(this.editor),
       'Shift-Tab': () => handleShiftTab(this.editor),
       Backspace: () => handleBackspace(this.editor),
+      // Esc leaves the editing surface (legacy parity): blur the view so the
+      // shell's onBlur → onExitEditing relaxes the data-editing toolbar hook.
+      Escape: () => {
+        this.editor.commands.blur();
+        return true;
+      },
     };
   },
 });

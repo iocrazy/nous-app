@@ -1,19 +1,17 @@
 /**
  * SceneBlock — one scene's container + live element editing (spec v3 §3.2/§3.3).
  *
- * Owns exactly one scene's write path via `useSceneSync(scene)` and turns
- * keystrokes into anchored ops through the pure editorMachine:
- *  - Tab / Shift-Tab cycle the element type (update op)
- *  - Enter inserts the next element (anchored after the current id)
- *  - Backspace at the start of an EMPTY line deletes it and pulls the cursor up
- * After each transition the optimistic elements are dispatched and, on the next
- * frame, focus jumps to the new cursor's `[data-el-id]`. IME composition is
- * respected (the machine never fires mid-composition), and paste splits plain
- * text on newlines into a chain of anchored action inserts.
+ * Owns exactly one scene's write path via `useSceneSync(scene)` and renders the
+ * scene's elements through the TipTap editing surface (`TipTapSceneEditor`).
+ * Keystroke semantics (Tab/Shift-Tab type cycle, Enter split, Backspace merge,
+ * IME) live in the TipTap keymap; this component owns the surrounding UX — the
+ * scene head row, the slash / @-mention / character-cue / transition-preset
+ * pickers, the copilot card, and same/cross-scene element drag — feeding it all
+ * to the editor through props and reflecting `sync.elements` changes back in via
+ * `applyExternalElements`.
  *
  * The scene head row (INT/EXT · location · time) writes through updateSceneMeta,
- * debounced 600ms; text input debounces 500ms. The `::` drag handle is a
- * render-only placeholder here — real reordering is Task 10.
+ * debounced 600ms; text input debounces 500ms inside the editor.
  */
 import {
   useCallback,
@@ -26,14 +24,6 @@ import {
   type KeyboardEvent,
 } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  onBackspaceAtStart,
-  onEnter,
-  onShiftTab,
-  onTab,
-  type CursorState,
-  type MachineResult,
-} from '../editorMachine';
 import { applyLocal, buildInverse } from '../opBuilder';
 import { newElementId, updateSceneMeta } from '../sceneService';
 import {
@@ -42,16 +32,12 @@ import {
   CopilotDisabledError,
   OpRejectedError,
 } from '../copilotService';
-import type { ElementOp, ElementType, ScriptElement, SceneDoc } from '../types';
+import type { CursorState, ElementOp, ElementType, ScriptElement, SceneDoc } from '../types';
 import { useSceneSync, type RemoteOpRow } from '../useSceneSync';
-import { HollywoodLayout } from '../render/HollywoodLayout';
-import { AsianLayout } from '../render/AsianLayout';
-import { MentionNamesContext, type LineMention } from '../render/layoutShared';
 import { MentionCombobox, filterMentionCandidates } from './MentionCombobox';
 import { SlashMenu, SLASH_ITEMS, filterSlashItems, type SlashItem } from './SlashMenu';
 import { CopilotCard, type CopilotPhase } from './CopilotCard';
 import { EmptySceneHint } from './EmptyStates';
-import { isTiptapEnabled } from '../tiptap/flag';
 import { TipTapSceneEditor, type TipTapSceneEditorHandle } from '../tiptap/TipTapSceneEditor';
 import type { MenuBridge } from '../tiptap/menuKeymap';
 import type { EditorFormat } from '../useEditorState';
@@ -197,11 +183,6 @@ export interface SceneBlockProps {
   onRegisterExternalOps?: (sceneId: string, fn: ((ops: ElementOp[]) => void) | null) => void;
   /** Paged mode v2: page seams keyed by element id (rendered before that row). */
   pageSeams?: Map<string, { page: number; filler: number }>;
-  /** TipTap surface switch RESOLVED BY THE SHELL (admin module registry →
-   *  localStorage emergency override → env dev fallback). When omitted the
-   *  block resolves locally (override/env only) — keeps standalone renders
-   *  and existing tests working. */
-  tiptapSurface?: boolean;
 }
 
 /** Which half of a block the pointer is over → the drop edge. */
@@ -235,11 +216,9 @@ export function SceneBlock({
   onCrossSceneDelete,
   onRegisterExternalOps,
   pageSeams,
-  tiptapSurface,
 }: SceneBlockProps) {
   const { t } = useTranslation();
   const sync = useSceneSync(scene, { selfActorId });
-  const [focusedElementId, setFocusedElementId] = useState<string | null>(null);
   const [mention, setMention] = useState<MentionState | null>(null);
   // Mention nav state owned HERE (the combobox is presentational): the active
   // option index + the shared listbox id feed both the popup and the ARIA
@@ -299,10 +278,6 @@ export function SceneBlock({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const headRowRef = useRef<HTMLDivElement | null>(null);
   const headingDisplayRef = useRef<HTMLButtonElement | null>(null);
-  const composingRef = useRef(false);
-  // TipTap editing surface (flag-dark, spec D7): re-read per render (not a
-  // frozen module const) so tests can `vi.stubEnv` it — see tiptap/flag.ts.
-  const tiptapOn = tiptapSurface ?? isTiptapEnabled();
   const tiptapRef = useRef<TipTapSceneEditorHandle>(null);
   const elementsRef = useRef<ScriptElement[]>(sync.elements);
   const inputTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -399,312 +374,6 @@ export function SceneBlock({
     };
   }, []);
 
-  // Apply a machine result: dispatch its ops (if any) and move focus to the new
-  // cursor's element on the next frame, once the optimistic row has rendered.
-  const applyResult = useCallback(
-    (result: MachineResult) => {
-      if (result.ops.length > 0) sync.dispatchOps(result.ops, result.localElements);
-      const targetId = result.cursor.elementId;
-      setFocusedElementId(targetId);
-      if (targetId) {
-        requestAnimationFrame(() => {
-          const node = containerRef.current?.querySelector<HTMLElement>(
-            `[data-el-id="${targetId}"]`,
-          );
-          node?.focus();
-        });
-      }
-    },
-    [sync],
-  );
-
-  // Caret-safe imperative write: the focused row is never repainted by React
-  // (protects the caret), so a mention insertion writes the DOM node directly
-  // and drops the caret at the end. Chips render when the row later settles.
-  const setNodeText = useCallback((elementId: string, text: string) => {
-    const node = containerRef.current?.querySelector<HTMLElement>(`[data-el-id="${elementId}"]`);
-    if (!node) return;
-    node.textContent = text;
-    // A select made from the popup's embedded search input leaves focus in
-    // that input — reclaim it so the caret placement below lands visibly.
-    node.focus();
-    const sel = window.getSelection();
-    if (!sel) return;
-    const range = document.createRange();
-    range.selectNodeContents(node);
-    range.collapse(false);
-    sel.removeAllRanges();
-    sel.addRange(range);
-  }, []);
-
-  const openMention = useCallback((elementId: string, kind: MentionState['kind']) => {
-    const node = containerRef.current?.querySelector<HTMLElement>(`[data-el-id="${elementId}"]`);
-    const position = node ? { top: node.offsetTop + node.offsetHeight, left: node.offsetLeft } : undefined;
-    setMention({ elementId, kind, query: '', position });
-  }, []);
-
-  const handleMentionSelect = useCallback(
-    (name: string) => {
-      const m = mentionRef.current;
-      if (!m) return;
-      let newText: string;
-      if (m.kind !== 'inline') {
-        // A character cue IS the name; a transition IS the preset — either
-        // way the picked option replaces the whole line.
-        newText = name;
-      } else {
-        const el = elementsRef.current.find((e) => e.id === m.elementId);
-        const text = el?.text ?? '';
-        const at = text.lastIndexOf('@');
-        newText =
-          at >= 0
-            ? `${text.slice(0, at)}@${name} ${text.slice(at + 1 + m.query.length)}`
-            : `${text}@${name} `;
-      }
-      const op: ElementOp = { op: 'update', element_id: m.elementId, payload: { text: newText } };
-      sync.dispatchOps([op], applyLocal(elementsRef.current, [op]));
-      setNodeText(m.elementId, newText);
-      setMention(null);
-    },
-    [sync, setNodeText],
-  );
-
-  // Apply a slash-menu pick: retype the CURRENT block and clear the `/query`
-  // text (both the model, via one update op, and the live DOM node — the
-  // focused row is never repainted by React, same caret rule as mentions).
-  const applySlash = useCallback(
-    (type: ElementType) => {
-      const s = slashRef.current;
-      if (!s) return;
-      const op: ElementOp = {
-        op: 'update',
-        element_id: s.elementId,
-        payload: { type, text: '' },
-      };
-      sync.dispatchOps([op], applyLocal(elementsRef.current, [op]));
-      setNodeText(s.elementId, '');
-      setSlash(null);
-    },
-    [sync, setNodeText],
-  );
-
-  const handleKeyDown = useCallback(
-    (elementId: string, e: KeyboardEvent<HTMLDivElement>) => {
-      // Never intervene mid-IME-composition — let the browser compose.
-      if (composingRef.current || e.nativeEvent.isComposing) return;
-      const cursor: CursorState = { sceneId: scene.id, elementId, field: 'element' };
-      const els = elementsRef.current;
-
-      // While the mention picker is open on this line, it owns the nav keys.
-      const mentionOpen = mentionRef.current;
-      if (mentionOpen && mentionOpen.elementId === elementId) {
-        const filtered = mentionFilteredRef.current;
-        if (e.key === 'ArrowDown') {
-          e.preventDefault();
-          if (filtered.length > 0) {
-            setMentionActive((prev) => (prev + 1 + filtered.length) % filtered.length);
-          }
-          return;
-        }
-        if (e.key === 'ArrowUp') {
-          e.preventDefault();
-          if (filtered.length > 0) {
-            setMentionActive((prev) => (prev - 1 + filtered.length) % filtered.length);
-          }
-          return;
-        }
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          const active = mentionActiveRef.current;
-          if (filtered.length > 0 && active >= 0 && active < filtered.length) {
-            handleMentionSelect(filtered[active]);
-          } else {
-            setMention(null);
-          }
-          return;
-        }
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          setMention(null);
-          return;
-        }
-        // Transition preset picker: Tab keeps its REAL type-cycle semantics —
-        // don't consume it here; the machine handler below retypes the block
-        // and this picker closes on the resulting focus/type change.
-        if (e.key === 'Tab' && mentionOpen.kind !== 'transition') {
-          e.preventDefault();
-          // Character-cue selector: Tab abandons the cue and reverts to action
-          // (spec §3.2 laper behaviour); inline mention just closes.
-          if (mentionOpen.kind === 'character') {
-            const op: ElementOp = {
-              op: 'update',
-              element_id: elementId,
-              payload: { type: 'action' },
-            };
-            sync.dispatchOps([op], applyLocal(elementsRef.current, [op]));
-          }
-          setMention(null);
-          return;
-        }
-      }
-
-      // While the slash menu is open on this line, it owns the nav keys.
-      const slashOpen = slashRef.current;
-      if (slashOpen && slashOpen.elementId === elementId) {
-        const filtered = slashFilteredRef.current;
-        if (e.key === 'ArrowDown') {
-          e.preventDefault();
-          if (filtered.length > 0) setSlashActive((prev) => (prev + 1) % filtered.length);
-          return;
-        }
-        if (e.key === 'ArrowUp') {
-          e.preventDefault();
-          if (filtered.length > 0) {
-            setSlashActive((prev) => (prev - 1 + filtered.length) % filtered.length);
-          }
-          return;
-        }
-        if (e.key === 'Enter' || e.key === 'Tab') {
-          e.preventDefault();
-          const active = slashActiveRef.current;
-          if (filtered.length > 0 && active >= 0 && active < filtered.length) {
-            applySlash(filtered[active].type);
-          } else {
-            setSlash(null);
-          }
-          return;
-        }
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          setSlash(null);
-          return;
-        }
-      }
-
-      // Typing `@` opens the inline picker; let the character itself be typed.
-      if (e.key === '@') {
-        openMention(elementId, 'inline');
-        return;
-      }
-
-      // Esc leaves the element line: blur so Tab resumes the page's normal
-      // (native) focus order, and tell the shell to clear its data-editing
-      // styling hook that emphasizes the toolbar while a line is focused.
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        e.currentTarget.blur();
-        onExitEditing?.();
-        return;
-      }
-
-      if (e.key === 'Tab') {
-        e.preventDefault();
-        applyResult(e.shiftKey ? onShiftTab(els, cursor) : onTab(els, cursor));
-        return;
-      }
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        applyResult(onEnter(els, cursor));
-        return;
-      }
-      if (e.key === 'Backspace') {
-        const sel = window.getSelection();
-        const atStart = !!sel && sel.isCollapsed && sel.anchorOffset === 0;
-        if (!atStart) return;
-        const result = onBackspaceAtStart(els, cursor);
-        if (result.ops.length === 0) return; // non-empty line: browser deletes a char
-        e.preventDefault();
-        applyResult(result);
-      }
-    },
-    [scene.id, applyResult, sync, openMention, handleMentionSelect, applySlash, onExitEditing],
-  );
-
-  const handleInput = useCallback(
-    (elementId: string, text: string) => {
-      // Keep the open picker's filter in sync with the line as the writer types.
-      const m = mentionRef.current;
-      if (m && m.elementId === elementId) {
-        if (m.kind === 'inline') {
-          const at = text.lastIndexOf('@');
-          if (at === -1) setMention(null);
-          else setMention({ ...m, query: text.slice(at + 1) });
-        } else {
-          setMention({ ...m, query: text });
-        }
-      }
-
-      // Slash menu: `/` at the START of a block opens the type picker; the
-      // text after the slash is the live filter. Anything else closes it.
-      if (text.startsWith('/')) {
-        const node = containerRef.current?.querySelector<HTMLElement>(
-          `[data-el-id="${elementId}"]`,
-        );
-        const position = node
-          ? { top: node.offsetTop + node.offsetHeight, left: node.offsetLeft }
-          : undefined;
-        setSlashActive(0);
-        setSlash({ elementId, query: text.slice(1), position });
-      } else if (slashRef.current?.elementId === elementId) {
-        setSlash(null);
-      }
-
-      const timers = inputTimersRef.current;
-      pendingInputRef.current[elementId] = text;
-      if (timers[elementId]) clearTimeout(timers[elementId]);
-      timers[elementId] = setTimeout(() => {
-        const op: ElementOp = { op: 'update', element_id: elementId, payload: { text } };
-        const optimistic = applyLocal(elementsRef.current, [op]);
-        sync.dispatchOps([op], optimistic);
-        delete timers[elementId];
-        delete pendingInputRef.current[elementId];
-      }, INPUT_DEBOUNCE_MS);
-    },
-    [sync],
-  );
-
-  const handlePaste = useCallback(
-    (elementId: string, e: React.ClipboardEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      const raw = e.clipboardData.getData('text/plain');
-      const lines = raw.split(/\r?\n/).filter((l) => l.trim() !== '');
-      if (lines.length === 0) return;
-      const ops: ElementOp[] = [];
-      let anchor = elementId;
-      for (const line of lines) {
-        const id = newElementId();
-        ops.push({
-          op: 'insert',
-          element_id: id,
-          after_id: anchor,
-          payload: { type: 'action', text: line },
-        });
-        anchor = id;
-      }
-      const optimistic = applyLocal(elementsRef.current, ops);
-      sync.dispatchOps(ops, optimistic);
-    },
-    [sync],
-  );
-
-  const handleFocus = useCallback(
-    (elementId: string) => {
-      setFocusedElementId(elementId);
-      onFocusElement?.({ sceneId: scene.id, elementId, field: 'element' });
-      // Focusing a character cue opens the same picker (laper behaviour);
-      // focusing any other row dismisses a picker left open elsewhere.
-      const el = elementsRef.current.find((e) => e.id === elementId);
-      if (el?.type === 'character') {
-        openMention(elementId, 'character');
-      } else if (el?.type === 'transition') {
-        openMention(elementId, 'transition');
-      } else {
-        setMention((prev) => (prev && prev.elementId !== elementId ? null : prev));
-      }
-    },
-    [onFocusElement, scene.id, openMention],
-  );
-
   // Toolbar retype: when a command targets this scene, update the focused
   // element's type in place (only if it still exists in the optimistic view).
   const lastCommandNonceRef = useRef(0);
@@ -719,25 +388,17 @@ export function SceneBlock({
       element_id: typeCommand.elementId,
       payload: { type: typeCommand.type },
     };
-    // TipTap mode: apply the attrs-only transaction immediately (caret-
-    // preserving) via the ref method; the ops dispatch below still lands
-    // (data plane unchanged) and the M1 applyExternalElements effect finds
-    // the doc already matches, so it no-ops rather than rebuilding.
-    if (tiptapOn) tiptapRef.current?.retypeElement(typeCommand.elementId, typeCommand.type);
+    // Apply the attrs-only transaction immediately (caret-preserving) via the
+    // ref method; the ops dispatch below still lands (data plane unchanged) and
+    // the applyExternalElements effect finds the doc already matches, so it
+    // no-ops rather than rebuilding.
+    tiptapRef.current?.retypeElement(typeCommand.elementId, typeCommand.type);
     sync.dispatchOps([op], applyLocal(elementsRef.current, [op]));
     // The toolbar button stole focus on click — hand it straight back to the
     // retyped line so the writer keeps typing (and the type-driven pickers,
     // e.g. the transition presets, open on the resulting selection update).
-    if (tiptapOn) {
-      tiptapRef.current?.focusElement(typeCommand.elementId);
-    } else {
-      requestAnimationFrame(() => {
-        containerRef.current
-          ?.querySelector<HTMLElement>(`[data-el-id="${typeCommand.elementId}"]`)
-          ?.focus();
-      });
-    }
-  }, [typeCommand, scene.id, sync, tiptapOn]);
+    tiptapRef.current?.focusElement(typeCommand.elementId);
+  }, [typeCommand, scene.id, sync]);
 
   // Lift this scene's save state to the shell whenever it changes.
   useEffect(() => {
@@ -768,17 +429,16 @@ export function SceneBlock({
     onRemoteStaleHandled?.(String(scene.id)); // string key — matches droppedScenes
   }, [remoteStale, scene.id, sync.reconcile, onRemoteStaleHandled]);
 
-  // TipTap mode (M1): route every `sync.elements` change (remote splice,
-  // reconcile, conflict resolution, 409 replay) through the imperative
-  // applyExternalElements API. This ALSO fires after our own local edits
-  // (dispatchOps → useSceneSync's setElements), but that's harmless —
-  // applyExternalElements' own field-wise equality check makes those calls a
-  // no-op (the doc already shows exactly what `sync.elements` now says,
-  // since the edit originated FROM the editor), which is the loop guard.
+  // Route every `sync.elements` change (remote splice, reconcile, conflict
+  // resolution, 409 replay) through the imperative applyExternalElements API.
+  // This ALSO fires after our own local edits (dispatchOps → useSceneSync's
+  // setElements), but that's harmless — applyExternalElements' own field-wise
+  // equality check makes those calls a no-op (the doc already shows exactly
+  // what `sync.elements` now says, since the edit originated FROM the editor),
+  // which is the loop guard.
   useEffect(() => {
-    if (!tiptapOn) return;
     tiptapRef.current?.applyExternalElements(sync.elements);
-  }, [tiptapOn, sync.elements]);
+  }, [sync.elements]);
 
   // EmptySceneHint's seed action in TipTap mode: the PM schema requires
   // `scriptElement+` (at least one node), so an empty scene can never mount
@@ -798,11 +458,10 @@ export function SceneBlock({
     requestAnimationFrame(() => tiptapRef.current?.focusElement(id, true));
   }, [sync]);
 
-  // TipTap mode: selection changes report the focused element up exactly
-  // like the legacy handleFocus does (toolbar follow / Statistics cursor).
+  // Selection changes report the focused element up to the shell (toolbar
+  // follow / Statistics cursor).
   const handleTiptapFocusCursor = useCallback(
     (elementId: string | null) => {
-      setFocusedElementId(elementId);
       onFocusElement?.({ sceneId: scene.id, elementId, field: 'element' });
     },
     [onFocusElement, scene.id],
@@ -913,16 +572,9 @@ export function SceneBlock({
   // ── Popup-embedded search input paths (laper cue picker) ───────────────
   // The character-cue popup carries its own input; these mirror the line's
   // keyboard semantics for keystrokes that happen INSIDE that input.
-  const refocusMentionLine = useCallback(
-    (elementId: string) => {
-      if (tiptapOn) {
-        tiptapRef.current?.focusElement(elementId);
-      } else {
-        containerRef.current?.querySelector<HTMLElement>(`[data-el-id="${elementId}"]`)?.focus();
-      }
-    },
-    [tiptapOn],
-  );
+  const refocusMentionLine = useCallback((elementId: string) => {
+    tiptapRef.current?.focusElement(elementId);
+  }, []);
 
   const handleMentionQueryChange = useCallback((q: string) => {
     setMention((prev) => (prev ? { ...prev, query: q } : prev));
@@ -935,12 +587,12 @@ export function SceneBlock({
     if (!m) return;
     if (m.kind === 'character') {
       const op: ElementOp = { op: 'update', element_id: m.elementId, payload: { type: 'action' } };
-      if (tiptapOn) tiptapRef.current?.retypeElement(m.elementId, 'action');
+      tiptapRef.current?.retypeElement(m.elementId, 'action');
       sync.dispatchOps([op], applyLocal(elementsRef.current, [op]));
     }
     refocusMentionLine(m.elementId);
     setMention(null);
-  }, [sync, tiptapOn, refocusMentionLine]);
+  }, [sync, refocusMentionLine]);
 
   // Escape in the popup input: close and hand focus back to the line. Refocus
   // FIRST — its selection-update may re-open the picker, and the close below
@@ -1008,12 +660,6 @@ export function SceneBlock({
     return () => clearTimeout(id);
   }, [sync.elements, scene.id, onElementsChange]);
 
-  const onCompositionStart = useCallback(() => {
-    composingRef.current = true;
-  }, []);
-  const onCompositionEnd = useCallback(() => {
-    composingRef.current = false;
-  }, []);
 
   const commitMeta = useCallback(
     (patch: Partial<SceneMeta>) => {
@@ -1053,22 +699,6 @@ export function SceneBlock({
   }, []);
 
   const displayHeading = formatSceneHeading(meta, format);
-
-  const LayoutEngine = format === 'asian' ? AsianLayout : HollywoodLayout;
-
-  // The focused line IS the ARIA combobox when a picker is open — feed the layout
-  // engine the listbox id + active option id so it wires them onto that line.
-  const lineMention: LineMention | null = mention
-    ? {
-        elementId: mention.elementId,
-        listboxId: mentionListId,
-        // No matches → collapsed combobox: no active option, aria-expanded=false
-        // (Task 6 ③ — drop the dangling activedescendant / controls refs).
-        expanded: mentionFiltered.length > 0,
-        activeOptionId:
-          mentionFiltered.length > 0 ? `${mentionListId}-opt-${mentionActive}` : undefined,
-      }
-    : null;
 
   // ── Reorder wiring (Task 10) ──────────────────────────────────────────────
   const isDragging = reorder?.draggingId === scene.id;
@@ -1156,15 +786,13 @@ export function SceneBlock({
       sync.dispatchOps([op], applyLocal(sync.elements, [op]));
       onCrossSceneDelete?.(fromSceneId, element.id);
       onElementDragDone?.();
-      // TipTap mode (M2 item 6): focus the newly-landed element once the M1
-      // applyExternalElements effect (triggered by the `sync.elements`
-      // change above) has rebuilt the doc — rAF runs after React commits.
-      if (tiptapOn) {
-        const droppedId = element.id;
-        requestAnimationFrame(() => tiptapRef.current?.focusElement(droppedId));
-      }
+      // Focus the newly-landed element once the applyExternalElements effect
+      // (triggered by the `sync.elements` change above) has rebuilt the doc —
+      // rAF runs after React commits.
+      const droppedId = element.id;
+      requestAnimationFrame(() => tiptapRef.current?.focusElement(droppedId));
     },
-    [externalDrag, sync, onCrossSceneDelete, onElementDragDone, tiptapOn],
+    [externalDrag, sync, onCrossSceneDelete, onElementDragDone],
   );
   const handleElementDrop = useCallback(
     (targetId: string, edge: 'top' | 'bottom') => {
@@ -1503,90 +1131,42 @@ export function SceneBlock({
         <ScenePresenceBadge users={focusPresence ?? []} />
       </div>
 
-      {tiptapOn ? (
-        // TipTap surface (M1 sync core + M2 block UX, flag-on): the PM
-        // schema requires at least one node, so an empty scene renders
-        // EmptySceneHint instead of mounting the editor — same nudge as the
-        // legacy path, wired to an anchored insert op instead of the
-        // machine's onEnter. Drag/tick/slash/mention wiring below reuses
-        // the SAME callbacks/state the legacy engines use (see
-        // TipTapSceneEditor's module doc) — one behavior, two surfaces.
-        sync.elements.length === 0 ? (
-          <EmptySceneHint onSeed={handleTiptapSeed} />
-        ) : (
-          <TipTapSceneEditor
-            // M3: format is a mount-time snapshot (see TipTapSceneEditor's
-            // module doc, "format switch recreates the editor") — keying on
-            // it forces a full remount (flushing any pending debounce first)
-            // whenever the script-wide Hollywood/Asian toggle flips, instead
-            // of trying to live-patch the NodeView's structural DOM change.
-            key={format}
-            ref={tiptapRef}
-            initialElements={sync.elements}
-            format={format}
-            blockIndexBase={blockIndexBase}
-            dispatchOps={sync.dispatchOps}
-            onFocusCursor={handleTiptapFocusCursor}
-            onTickClick={handleTickClick}
-            selectedElementIds={copilotSelectedIds}
-            draggingElementId={draggingElementId ?? externalDrag?.element.id ?? null}
-            dropElementEdge={elementDropTarget}
-            onElementDragStart={handleElementDragStart}
-            onElementDragOver={handleElementDragOver}
-            onElementDrop={handleElementDrop}
-            onElementDragEnd={handleElementDragEnd}
-            onSlashChange={handleTiptapSlashChange}
-            slashMenu={tiptapSlashMenu}
-            onMentionOpen={handleTiptapMentionOpen}
-            onMentionClose={handleTiptapMentionClose}
-            mentionMenu={tiptapMentionMenu}
-            pageSeams={pageSeams}
-            mentionCandidates={mentionCandidates}
-          />
-        )
+      {/* The PM schema requires at least one node, so an empty scene renders
+          EmptySceneHint instead of mounting the editor, wired to an anchored
+          insert op. */}
+      {sync.elements.length === 0 ? (
+        <EmptySceneHint onSeed={handleTiptapSeed} />
       ) : (
-        <>
-          <MentionNamesContext.Provider value={mentionCandidates}>
-            <LayoutEngine
-              elements={sync.elements}
-              blockIndexBase={blockIndexBase}
-              pageSeams={pageSeams}
-              focusedElementId={focusedElementId}
-              mention={lineMention}
-              selectedIds={copilotSelectedIds}
-              onTickClick={handleTickClick}
-              elementReorder={{
-                // An external (cross-scene) drag arms this scene's rows as drop
-                // targets exactly like a local drag would — the rows only gate on
-                // a non-null dragging id.
-                draggingElementId: draggingElementId ?? externalDrag?.element.id ?? null,
-                dropTarget: elementDropTarget,
-                onDragStart: handleElementDragStart,
-                onDragOver: handleElementDragOver,
-                onDrop: handleElementDrop,
-                onDragEnd: handleElementDragEnd,
-              }}
-              handlers={{
-                onInput: handleInput,
-                onKeyDown: handleKeyDown,
-                onFocus: handleFocus,
-                onPaste: handlePaste,
-                onCompositionStart,
-                onCompositionEnd,
-              }}
-            />
-          </MentionNamesContext.Provider>
-
-          {sync.elements.length === 0 && (
-            <EmptySceneHint
-              onSeed={() =>
-                applyResult(
-                  onEnter(sync.elements, { sceneId: scene.id, elementId: null, field: 'element' }),
-                )
-              }
-            />
-          )}
-        </>
+        <TipTapSceneEditor
+          // Format is a mount-time snapshot (see TipTapSceneEditor's module
+          // doc, "format switch recreates the editor") — keying on it forces a
+          // full remount (flushing any pending debounce first) whenever the
+          // script-wide Hollywood/Asian toggle flips, instead of trying to
+          // live-patch the NodeView's structural DOM change.
+          key={format}
+          ref={tiptapRef}
+          initialElements={sync.elements}
+          format={format}
+          blockIndexBase={blockIndexBase}
+          dispatchOps={sync.dispatchOps}
+          onFocusCursor={handleTiptapFocusCursor}
+          onExitEditing={onExitEditing}
+          onTickClick={handleTickClick}
+          selectedElementIds={copilotSelectedIds}
+          draggingElementId={draggingElementId ?? externalDrag?.element.id ?? null}
+          dropElementEdge={elementDropTarget}
+          onElementDragStart={handleElementDragStart}
+          onElementDragOver={handleElementDragOver}
+          onElementDrop={handleElementDrop}
+          onElementDragEnd={handleElementDragEnd}
+          onSlashChange={handleTiptapSlashChange}
+          slashMenu={tiptapSlashMenu}
+          onMentionOpen={handleTiptapMentionOpen}
+          onMentionClose={handleTiptapMentionClose}
+          mentionMenu={tiptapMentionMenu}
+          pageSeams={pageSeams}
+          mentionCandidates={mentionCandidates}
+        />
       )}
 
       {mention && (
@@ -1596,12 +1176,7 @@ export function SceneBlock({
           listboxId={mentionListId}
           activeIndex={mentionActive}
           position={mention.position}
-          // Mouse-click selection must route through the SAME apply path as
-          // keyboard Enter for this mode: legacy's `handleMentionSelect`
-          // writes the contentEditable DOM node directly, which would
-          // corrupt a PM-managed node — TipTap mode uses the transaction-
-          // based `handleTiptapMentionSelect` instead.
-          onSelect={tiptapOn ? handleTiptapMentionSelect : handleMentionSelect}
+          onSelect={handleTiptapMentionSelect}
           onHover={setMentionActive}
           kind={mention.kind}
           onQueryChange={handleMentionQueryChange}
@@ -1616,7 +1191,7 @@ export function SceneBlock({
           activeIndex={slashActive}
           listboxId={slashListId}
           position={slash.position}
-          onSelect={tiptapOn ? applySlashTiptap : applySlash}
+          onSelect={applySlashTiptap}
           onHover={setSlashActive}
         />
       )}

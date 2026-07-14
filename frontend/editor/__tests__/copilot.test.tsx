@@ -1,6 +1,28 @@
-import { render, screen, cleanup, fireEvent, within } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ElementOp, ScriptElement, SceneDoc } from '../types';
+
+// TipTap mounts its ProseMirror view asynchronously and reads layout/selection
+// geometry jsdom lacks — mirror the tiptap suites' polyfill so the copilot
+// gutter ticks (NodeView buttons) render cleanly.
+const zeroRect = {
+  bottom: 0,
+  height: 0,
+  left: 0,
+  right: 0,
+  toJSON: () => ({}),
+  top: 0,
+  width: 0,
+  x: 0,
+  y: 0,
+};
+Element.prototype.getClientRects = () => [] as unknown as DOMRectList;
+Element.prototype.getBoundingClientRect = () => zeroRect as DOMRect;
+Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+Range.prototype.getBoundingClientRect = () => zeroRect as DOMRect;
+if (typeof document.elementFromPoint !== 'function') {
+  document.elementFromPoint = () => null;
+}
 
 // i18n: echo the key AND append option values so count/scene interpolation is
 // observable in assertions (the real strings are {{scene}}/{{count}} templates).
@@ -66,6 +88,11 @@ const makeScene = (elements: ScriptElement[]): SceneDoc => ({
 
 const clickTick = (id: string, shiftKey = false) =>
   fireEvent.click(document.querySelector(`[data-tick-id="${id}"]`) as HTMLElement, { shiftKey });
+
+// The gutter ticks live inside the async-mounted TipTap NodeView — wait for the
+// row's tick to exist before interacting with it.
+const waitTick = (id: string) =>
+  waitFor(() => expect(document.querySelector(`[data-tick-id="${id}"]`)).not.toBeNull());
 
 afterEach(() => {
   cleanup();
@@ -148,15 +175,16 @@ describe('CopilotCard', () => {
 // ─── SceneBlock summon + apply integration ───────────────────────────────────
 
 describe('SceneBlock copilot integration', () => {
-  it('renders no card until an element is selected', () => {
+  it('renders no card until an element is selected', async () => {
     render(<SceneBlock scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])} index={0} />);
+    await waitTick('el_a');
     expect(screen.queryByTestId('copilot-card')).toBeNull();
 
     clickTick('el_a');
     expect(screen.getByTestId('copilot-card')).toBeInTheDocument();
   });
 
-  it('summons the card titled with the scene number and selected count (shift-range)', () => {
+  it('summons the card titled with the scene number and selected count (shift-range)', async () => {
     render(
       <SceneBlock
         scene={makeScene([
@@ -166,6 +194,7 @@ describe('SceneBlock copilot integration', () => {
         index={0}
       />,
     );
+    await waitTick('el_a');
     clickTick('el_a');
     clickTick('el_b', true); // shift-click extends the range → 2 elements
 
@@ -174,7 +203,7 @@ describe('SceneBlock copilot integration', () => {
     expect(target.textContent).toContain('2'); // 2 elements
   });
 
-  it('Polish dispatches update ops only for changed elements', () => {
+  it('Polish dispatches update ops only for changed elements', async () => {
     render(
       <SceneBlock
         scene={makeScene([
@@ -186,6 +215,7 @@ describe('SceneBlock copilot integration', () => {
         index={0}
       />,
     );
+    await waitTick('el_a');
     clickTick('el_a');
     clickTick('el_d', true); // range el_a..el_d = all four selected
 
@@ -202,7 +232,7 @@ describe('SceneBlock copilot integration', () => {
     expect(ops).toContainEqual({ op: 'update', element_id: 'el_c', payload: { text: 'CLIENT' } });
   });
 
-  it('shows the applied-edit count after Polish', () => {
+  it('shows the applied-edit count after Polish', async () => {
     render(
       <SceneBlock
         scene={makeScene([
@@ -212,6 +242,7 @@ describe('SceneBlock copilot integration', () => {
         index={0}
       />,
     );
+    await waitTick('el_a');
     clickTick('el_a');
     clickTick('el_b', true);
     fireEvent.click(screen.getByText('editor.copilotPolish'));
@@ -220,13 +251,14 @@ describe('SceneBlock copilot integration', () => {
     expect(result.textContent).toContain('2'); // 2 edits this turn
   });
 
-  it('Undo dispatches the inverse batch, restoring original text', () => {
+  it('Undo dispatches the inverse batch, restoring original text', async () => {
     render(
       <SceneBlock
         scene={makeScene([{ id: 'el_c', type: 'character', text: 'client' }])}
         index={0}
       />,
     );
+    await waitTick('el_c');
     clickTick('el_c');
     fireEvent.click(screen.getByText('editor.copilotPolish'));
 
