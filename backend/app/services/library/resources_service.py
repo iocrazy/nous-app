@@ -358,6 +358,99 @@ class ResourcesService:
 
         return version
 
+    async def overwrite_version_content(
+        self,
+        resource_id: str,
+        version_id: str,
+        user_id: str,
+        file,
+    ) -> dict:
+        """Replace the bytes of an existing version in place (text editing).
+
+        Unlike ``upload_new_version`` this does NOT create a new
+        ``resource_versions`` row — it content-addresses the new bytes and
+        repoints the given version's ``file_path`` / ``file_size_bytes`` /
+        ``mime_type``. The previous object may become orphaned; that is
+        harmless and dedup-safe under content addressing (a future GC
+        reclaims it). Creator-only enforcement lives in the router guard.
+        """
+        resource = await self.repo.get_resource_by_id(resource_id)
+        if not resource:
+            raise ValueError("Resource not found")
+
+        version = await self.repo.get_version_by_id(version_id)
+        if not version or str(version.get("resource_id")) != str(resource_id):
+            raise ValueError("Version not found")
+
+        safe_name = sanitize_filename(file.filename)
+
+        tmp_fd, tmp_name = tempfile.mkstemp()
+        os.close(tmp_fd)
+        tmp_path = Path(tmp_name)
+        try:
+            file_size, file_hash = await stream_upload_to_disk(
+                file, tmp_path, MAX_UPLOAD_SIZE
+            )
+            mime = (
+                sniff_mime(tmp_path)
+                or file.content_type
+                or mimetypes.guess_type(safe_name)[0]
+                or ""
+            )
+
+            stored = None
+            if await unified_storage_enabled():
+                item = await self.repo.get_first_resource_item(resource_id)
+                if item is not None:
+                    try:
+                        stored = await store_local_file(
+                            scope_id=int(item["scope_id"]),
+                            source_path=str(tmp_path),
+                            mime=mime,
+                            filename=safe_name,
+                            sha256=file_hash,
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.error(
+                            f"[overwrite_version_content] unified-storage write "
+                            f"failed, falling back to filesystem: "
+                            f"resource={resource_id} error={exc!r}"
+                        )
+
+            if stored is not None:
+                relative_path = stored.file_path
+            else:
+                # Filesystem fallback: keep the file next to the resource's
+                # existing versioned tree. Content addressing has no name
+                # collisions, but the fs path needs a version-scoped folder.
+                from app.core.config import settings
+
+                save_dir = (
+                    Path(settings.DOWNLOAD_PATH)
+                    / "resources"
+                    / str(resource_id)
+                    / f"v{version.get('version_number', 1)}"
+                )
+                save_dir.mkdir(parents=True, exist_ok=True)
+                target = save_dir / safe_name
+                import shutil
+
+                shutil.move(str(tmp_path), str(target))
+                relative_path = str(target.relative_to(Path(settings.DOWNLOAD_PATH)))
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+        updated = await self.repo.update_version(
+            version_id,
+            {
+                "file_path": relative_path,
+                "file_size_bytes": file_size,
+                "mime_type": mime,
+                "filename": safe_name,
+            },
+        )
+        return updated
+
     # ------------------------------------------------------------------ #
     # Version management
     # ------------------------------------------------------------------ #

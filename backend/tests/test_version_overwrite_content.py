@@ -1,0 +1,85 @@
+"""Overwrite-current-version content endpoint (text resource editing).
+
+Pure unit tests: the service's repo + storage helpers are mocked, so no DB.
+Mirrors test_version_service.py conventions (patch collaborators, call the
+service method directly)."""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+pytestmark = pytest.mark.asyncio
+
+
+def _svc():
+    from app.services.library.resources_service import ResourcesService
+
+    svc = ResourcesService()
+    return svc
+
+
+async def test_overwrite_updates_current_version_row(tmp_path):
+    svc = _svc()
+    svc.repo = MagicMock()
+    svc.repo.get_resource_by_id = AsyncMock(
+        return_value={"id": "10", "filename": "notes.md"}
+    )
+    svc.repo.get_version_by_id = AsyncMock(
+        return_value={"id": "77", "resource_id": "10", "version_number": 1}
+    )
+    svc.repo.get_first_resource_item = AsyncMock(return_value={"scope_id": "42"})
+    svc.repo.update_version = AsyncMock(
+        side_effect=lambda vid, data: {"id": vid, **data}
+    )
+
+    stored = SimpleNamespace(
+        file_path="sb://library/t42/ab/cd/deadbeef.md", size_bytes=12
+    )
+    file = SimpleNamespace(filename="notes.md", content_type="text/markdown", size=12)
+
+    with (
+        patch(
+            "app.services.library.resources_service.unified_storage_enabled",
+            AsyncMock(return_value=True),
+        ),
+        patch(
+            "app.services.library.resources_service.stream_upload_to_disk",
+            AsyncMock(return_value=(12, "deadbeef")),
+        ),
+        patch(
+            "app.services.library.resources_service.sniff_mime",
+            return_value="text/markdown",
+        ),
+        patch(
+            "app.services.library.resources_service.store_local_file",
+            AsyncMock(return_value=stored),
+        ),
+    ):
+        result = await svc.overwrite_version_content(
+            resource_id="10", version_id="77", user_id="u1", file=file
+        )
+
+    svc.repo.update_version.assert_awaited_once()
+    called_vid, called_data = svc.repo.update_version.await_args.args
+    assert called_vid == "77"
+    assert called_data["file_path"] == "sb://library/t42/ab/cd/deadbeef.md"
+    assert called_data["file_size_bytes"] == 12
+    assert result["file_path"] == "sb://library/t42/ab/cd/deadbeef.md"
+
+
+async def test_overwrite_rejects_version_from_other_resource():
+    svc = _svc()
+    svc.repo = MagicMock()
+    svc.repo.get_resource_by_id = AsyncMock(return_value={"id": "10"})
+    svc.repo.get_version_by_id = AsyncMock(
+        return_value={"id": "77", "resource_id": "999"}
+    )
+
+    file = SimpleNamespace(filename="x", content_type="text/plain", size=1)
+    with pytest.raises(ValueError):
+        await svc.overwrite_version_content(
+            resource_id="10", version_id="77", user_id="u1", file=file
+        )
