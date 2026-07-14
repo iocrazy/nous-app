@@ -413,3 +413,44 @@ async def test_project_files_update_row_skips_parent_when_not_current(monkeypatc
 
     assert len(calls) == 1
     assert calls[0][1]["sync_parent"] is False
+
+
+# ─── SQL bind-compilation tripwire ───────────────────────────────────
+#
+# The first prod dispatch died with PostgresSyntaxError: SQLAlchemy text()
+# mis-parses a bind param immediately followed by a `::` cast
+# (`:scope_id::bigint`), leaking a bare `:` to Postgres. The unit tests
+# mocked db_engine so nothing ever compiled the SQL. Compile every module
+# statement against the real asyncpg dialect so a reintroduced param-cast
+# can never reach prod again.
+
+
+def _compilable(sql: str) -> str:
+    from sqlalchemy import text
+    from sqlalchemy.dialects import postgresql
+
+    return str(text(sql).compile(dialect=postgresql.asyncpg.dialect()))
+
+
+def test_module_select_sql_compiles_with_expected_binds():
+    from app.workflows import storage_migration as sm
+
+    for name, cfg in sm._MODULES.items():
+        compiled = _compilable(cfg.select_sql)
+        # asyncpg dialect renders binds as $n — a surviving bare `:word`
+        # means text() failed to recognize a param (the prod failure shape).
+        import re
+
+        stray = re.findall(r"(?<!:):[a-z_]+", compiled)
+        assert not stray, f"{name}: unparsed binds {stray} in\n{compiled}"
+
+
+def test_update_sql_compiles_with_expected_binds():
+    import re
+
+    from app.workflows import storage_migration as sm
+
+    for sql in (sm._UPLOADS_UPDATE_SQL, sm._PROJECT_FILES_UPDATE_SQL):
+        compiled = _compilable(sql)
+        stray = re.findall(r"(?<!:):[a-z_]+", compiled)
+        assert not stray, f"unparsed binds {stray} in\n{compiled}"
