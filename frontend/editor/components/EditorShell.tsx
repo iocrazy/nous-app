@@ -300,9 +300,18 @@ export function EditorShell({
 
   // A rollback wrote new ops server-side — drop the stale optimistic overlay and
   // re-fetch the scenes so the sheet reflects the rolled-back content.
+  // rollbackNonce keys the scene subtree: useSceneSync only reseeds when
+  // scene.id CHANGES (its stale-scene guard), so a reload returning the SAME
+  // scene ids with different elements would leave every editor showing the
+  // pre-rollback text (seen live: toast fired, sheet unchanged). Bumping the
+  // key remounts the blocks and they seed from the fresh fetch — rollback is
+  // rare, so a full remount (caret reset) is the right trade.
+  const [rollbackNonce, setRollbackNonce] = useState(0);
   const handleRolledBack = useCallback(() => {
     setLiveElements({});
-    void reload();
+    // Bump AFTER the re-fetch lands — remounting first would seed the fresh
+    // blocks from the still-stale scenes prop and change nothing.
+    void reload().finally(() => setRollbackNonce((n) => n + 1));
   }, [reload]);
 
   const selectRailView = useCallback((view: RailView) => {
@@ -1333,7 +1342,7 @@ export function EditorShell({
                           );
                         }
                         return (
-                          <Fragment key={s.id}>
+                          <Fragment key={`${s.id}:${rollbackNonce}`}>
                           {sceneSeam && (
                             <PageSeam page={sceneSeam.page} filler={sceneSeam.filler} />
                           )}
