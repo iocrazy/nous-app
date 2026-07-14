@@ -363,14 +363,21 @@ export const EDITOR_SHELL_STYLES = `
 .mh-scene-block:hover .mh-drag-handle,
 .mh-scene-block:focus-within .mh-drag-handle{ opacity:1; }
 .mh-scene-headrow{ display:flex; align-items:center; gap:8px; margin-bottom:13px; flex-wrap:wrap; }
+/* laper parity: the edit-mode heading fields read as FLAT chips (same token as
+   the read-mode .mh-heading-chip), not bordered white form boxes — so
+   entering edit mode never jars the heading's look. Hover/focus lift the tint
+   so it's clearly interactive. */
 .mh-scene-select{
-  font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:0.03em;
-  padding:4px 8px; border-radius:6px; border:1px solid var(--sheet-border);
-  background:var(--surface-2); color:var(--sheet-ink); cursor:pointer;
-  white-space:nowrap;
+  font-family:var(--mono); font-size:12px; font-weight:700; letter-spacing:0.03em;
+  padding:2px 8px; border-radius:4px; border:1px solid transparent;
+  background:color-mix(in srgb, var(--sheet-ink) 7%, transparent);
+  color:var(--sheet-ink); cursor:pointer; white-space:nowrap;
 }
 .mh-scene-select[data-placeholder]{ color:var(--sheet-ink-soft); }
-.mh-scene-select:hover{ border-color:var(--indigo); }
+.mh-scene-select:hover,
+.mh-scene-select[aria-expanded='true']{
+  background:color-mix(in srgb, var(--sheet-ink) 12%, transparent);
+}
 .mh-scene-select:focus-visible{ outline:2px solid var(--indigo); outline-offset:1px; }
 /* HeadingSelect: a chip trigger over a LIGHT popup (the .mh-mention-pop DNA) so
    the INT/EXT + time menus size to their OWN content and never clip labels the
@@ -394,11 +401,23 @@ export const EDITOR_SHELL_STYLES = `
 .mh-heading-opt:hover{ background:var(--surface-2); }
 .mh-heading-opt.active{ background:var(--indigo-soft); color:var(--indigo-deep); }
 .mh-heading-opt[aria-selected='true']{ font-weight:800; }
-.mh-scene-loc-input{
-  font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:0.03em;
-  padding:4px 9px; border-radius:6px; border:1px solid var(--sheet-border);
-  background:var(--surface-2); color:var(--sheet-ink); min-width:130px;
+/* laper's "Tab — Switch to location" hint at the top of the open picker. */
+.mh-heading-hint{
+  display:flex; align-items:center; gap:7px; margin:0 2px 4px;
+  padding:5px 8px; border-bottom:1px solid var(--sheet-border);
+  font-family:var(--sans); font-size:11.5px; color:var(--sheet-ink-soft);
+  white-space:nowrap;
 }
+/* Location input: flat chip to match .mh-scene-select, not a bordered box. */
+.mh-scene-loc-input{
+  font-family:var(--mono); font-size:12px; font-weight:700; letter-spacing:0.03em;
+  padding:2px 8px; border-radius:4px; border:1px solid transparent;
+  background:color-mix(in srgb, var(--sheet-ink) 7%, transparent);
+  color:var(--sheet-ink); min-width:130px;
+}
+.mh-scene-loc-input::placeholder{ color:var(--sheet-ink-soft); }
+.mh-scene-loc-input:hover{ background:color-mix(in srgb, var(--sheet-ink) 12%, transparent); }
+.mh-scene-loc-input:focus-visible{ outline:2px solid var(--indigo); outline-offset:1px; }
 /* Read-mode scene heading (Task 4.5): a typographic slug that reads like a
    script heading, not a form. Clicking it reveals the selects above. */
 .mh-scene-heading-display{

@@ -2858,6 +2858,7 @@
     "location": "地点",
     "locationPlaceholder": "地点",
     "timeOfDay": "时间",
+    "headingTabLocation": "切换到地点",
     "toolbar": "元素工具条",
     "toolbarScene": "场景",
     "toolbarAction": "动作",

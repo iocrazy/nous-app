@@ -1115,6 +1115,7 @@ export function SceneBlock({
               options={INT_EXT_OPTIONS}
               placeholder="INT/EXT"
               ariaLabel={t('editor.intExt')}
+              tabHint={t('editor.headingTabLocation')}
               onChange={(v) => commitMeta({ heading_int_ext: v })}
               onTabNext={() => locInputRef.current?.focus()}
             />
