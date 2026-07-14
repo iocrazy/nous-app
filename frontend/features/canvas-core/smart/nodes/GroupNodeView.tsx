@@ -10,7 +10,8 @@
 
 import { useCallback, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Plus } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import {
@@ -18,11 +19,12 @@ import {
   importCanvasMedia,
   isImportableCanvasFile,
 } from '../mediaImport';
-import { GRID_CELL, GRID_COLS, GRID_MAX } from '../grouping';
+import { GRID_CELL, GRID_MAX, gridColsFor } from '../grouping';
 import type { GeneratedImageRef, GroupNodeData } from '../types';
 import { useNodeDataPatch } from './useNodeDataPatch';
 
 export function GroupNodeView({ id, data, selected }: NodeProps) {
+  const { t } = useTranslation();
   const { label, items, uploading } = data as unknown as GroupNodeData;
   const patch = useNodeDataPatch(id);
   const canvasId = useCanvasCoreStore((s) => s.canvasId);
@@ -61,14 +63,18 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
   const shown = (items ?? []).slice(0, GRID_MAX);
   const overflow = (items?.length ?? 0) - shown.length;
   const pending = Math.max(0, uploading ?? 0);
+  const isEmpty = shown.length === 0 && pending === 0;
+  // Adaptive column count (IC smartGroupThumbLayout): min 2, max 4, √n.
+  const cols = gridColsFor(shown.length + pending);
 
   return (
     <div
       data-testid="smart-group-node"
-      className={`h-full w-full rounded-[var(--canvas-r-node)] border border-dashed ${
+      // IC's group-node: a frosted-glass card (solid hairline, not dashed) —
+      // the dashed affordance moves INTO the empty drop-zone below.
+      className={`mh-group-node flex h-full w-full flex-col rounded-[var(--canvas-r-node)] border p-3 ${
         selected ? 'mh-node-selected border-canvas-line-strong' : 'border-canvas-line'
       } ${dragOver ? 'ring-2 ring-indigo-500/50' : ''}`}
-      style={{ background: 'color-mix(in srgb, var(--canvas-card) 42%, transparent)' }}
       onDragOver={(e) => {
         if (e.dataTransfer.types.includes('Files')) {
           e.preventDefault();
@@ -85,17 +91,28 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
       }}
     >
       <input
-        className="nodrag absolute left-3 top-2 w-32 bg-transparent text-[11px] font-bold uppercase tracking-[0.12em] text-canvas-muted outline-none placeholder:text-canvas-muted/60 focus:text-canvas-text"
+        className="nodrag mb-1.5 w-32 shrink-0 bg-transparent text-[11px] font-bold uppercase tracking-[0.12em] text-canvas-muted outline-none placeholder:text-canvas-muted/60 focus:text-canvas-text"
         value={label ?? ''}
-        placeholder="Group"
+        placeholder={t('canvas.groupNode.title', 'Group')}
         onChange={(e) => patch({ label: e.target.value })}
         aria-label="Group label"
       />
-      {(shown.length > 0 || pending > 0) && (
+      {isEmpty ? (
+        // IC's smart-group-empty: dashed drop-zone + "拖入图片自动收进分组".
+        <div
+          data-testid="group-empty"
+          className="flex flex-1 flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-canvas-line bg-canvas-card/30 px-2 py-3 text-center"
+        >
+          <Plus size={14} className="text-canvas-muted" />
+          <span className="text-[10px] font-semibold leading-snug text-canvas-muted">
+            {t('canvas.groupNode.dropHint', 'Drop images to auto-collect')}
+          </span>
+        </div>
+      ) : (
         <div
           data-testid="group-media-grid"
-          className="absolute left-3 top-8 flex flex-wrap gap-1.5"
-          style={{ maxWidth: GRID_COLS * (GRID_CELL + 6) }}
+          className="grid flex-1 content-start gap-1.5"
+          style={{ gridTemplateColumns: `repeat(${cols}, ${GRID_CELL}px)` }}
         >
           {shown.map((item, i) => (
             <div
@@ -104,19 +121,9 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
               style={{ width: GRID_CELL, height: GRID_CELL }}
             >
               {item.kind === 'video' ? (
-                <video
-                  src={item.url}
-                  preload="metadata"
-                  muted
-                  className="h-full w-full object-cover"
-                />
+                <video src={item.url} preload="metadata" muted className="h-full w-full object-cover" />
               ) : (
-                <img
-                  src={item.url}
-                  alt={item.name ?? ''}
-                  loading="lazy"
-                  className="h-full w-full object-cover"
-                />
+                <img src={item.url} alt={item.name ?? ''} loading="lazy" className="h-full w-full object-cover" />
               )}
             </div>
           ))}
