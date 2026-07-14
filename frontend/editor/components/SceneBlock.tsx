@@ -58,7 +58,7 @@ import type { EditorFormat } from '../useEditorState';
 import type { SaveState } from '../useSceneSync';
 import { ScenePresenceBadge } from '../collab/ScenePresenceBadge';
 import type { PresenceUser } from '../collab/useScriptPresence';
-import { UiSelect } from '../../components/ui';
+import { SceneHeadingSelect } from './SceneHeadingSelect';
 
 /** A scene's save status lifted to the shell for the aggregate SaveIndicator. */
 export interface SceneSyncStatus {
@@ -1443,20 +1443,13 @@ export function SceneBlock({
         </span>
         {headingEditing ? (
           <>
-            <UiSelect
+            <SceneHeadingSelect
               autoFocus
-              triggerClassName="mh-scene-select"
-              aria-label={t('editor.intExt')}
+              ariaLabel={t('editor.intExt')}
               value={meta.heading_int_ext}
-              onChange={(e) => commitMeta({ heading_int_ext: e.target.value })}
-            >
-              <option value="">—</option>
-              {INT_EXT_OPTIONS.map((o) => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
-            </UiSelect>
+              options={INT_EXT_OPTIONS}
+              onChange={(v) => commitMeta({ heading_int_ext: v })}
+            />
             <input
               className="mh-scene-loc-input"
               aria-label={t('editor.location')}
@@ -1464,19 +1457,12 @@ export function SceneBlock({
               placeholder={t('editor.locationPlaceholder')}
               onChange={(e) => commitMeta({ location_text: e.target.value })}
             />
-            <UiSelect
-              triggerClassName="mh-scene-select"
-              aria-label={t('editor.timeOfDay')}
+            <SceneHeadingSelect
+              ariaLabel={t('editor.timeOfDay')}
               value={meta.time_of_day}
-              onChange={(e) => commitMeta({ time_of_day: e.target.value })}
-            >
-              <option value="">—</option>
-              {TIME_OPTIONS.map((o) => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
-            </UiSelect>
+              options={TIME_OPTIONS}
+              onChange={(v) => commitMeta({ time_of_day: v })}
+            />
           </>
         ) : (
           <button

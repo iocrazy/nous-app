@@ -359,11 +359,21 @@ export const EDITOR_SHELL_STYLES = `
 .mh-scene-block:hover .mh-drag-handle,
 .mh-scene-block:focus-within .mh-drag-handle{ opacity:1; }
 .mh-scene-headrow{ display:flex; align-items:center; gap:8px; margin-bottom:13px; flex-wrap:wrap; }
+.mh-scene-select-wrap{ position:relative; display:inline-flex; }
 .mh-scene-select{
+  display:inline-flex; align-items:center; gap:5px;
   font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:0.03em;
   padding:4px 8px; border-radius:6px; border:1px solid var(--sheet-border);
-  background:var(--surface-2); color:var(--sheet-ink-soft); cursor:pointer;
+  background:var(--surface-2); color:var(--sheet-ink-soft); cursor:pointer; outline:none;
+  transition:border-color 0.15s;
 }
+.mh-scene-select:hover{ border-color:var(--ink-faint); }
+.mh-scene-select:focus-visible{ border-color:var(--indigo); }
+.mh-scene-select-value{ white-space:nowrap; }
+.mh-scene-select-chev{ color:var(--sheet-ink-soft); flex-shrink:0; }
+/* Popup rides .mh-mention-pop DNA; positioned in-editor below the trigger so it
+   never renders with the wrong tokens the way a portalled UiSelect menu did. */
+.mh-scene-select-pop{ position:absolute; top:calc(100% + 3px); left:0; z-index:30; min-width:132px; }
 .mh-scene-loc-input{
   font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:0.03em;
   padding:4px 9px; border-radius:6px; border:1px solid var(--sheet-border);
