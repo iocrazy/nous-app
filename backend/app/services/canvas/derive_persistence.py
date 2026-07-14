@@ -23,6 +23,7 @@ from loguru import logger
 
 from app.core.config import settings
 from app.services.library.media_storage import materialize, store_local_file
+from app.services.library.storage_flag import unified_storage_enabled
 
 
 class DeriveError(Exception):
@@ -194,7 +195,7 @@ async def persist_derived_image(
             fh.write(image_bytes)
 
         stored = None
-        if settings.FEATURE_UNIFIED_STORAGE:
+        if await unified_storage_enabled():
             try:
                 stored = await store_local_file(
                     scope_id=int(scope_id),

@@ -61,6 +61,21 @@ MODULES: list[ModuleDef] = [
         enabled_default=False,
         visible_default=False,
     ),
+    ModuleDef(
+        # Storage-unification write switch (OPS-1 go-live gate). `enabled` =
+        # route new library writes (resource uploads, project_files, canvas
+        # derives, promote) to the Supabase Storage `library` bucket (sb://
+        # content-addressed paths) instead of the filesystem. Readers resolve
+        # both shapes, so flipping is forward-only and rollback keeps sb://
+        # rows readable. `visible` is unused (no nav surface) and mirrors
+        # `enabled` in practice. Opt-in, fails CLOSED: unset / read error
+        # keeps every write on the proven filesystem track.
+        id="unified-storage",
+        key="storage.unified_storage",
+        label="Unified Storage (library bucket)",
+        enabled_default=False,
+        visible_default=False,
+    ),
 ]
 
 MODULES_BY_ID: dict[str, ModuleDef] = {m.id: m for m in MODULES}

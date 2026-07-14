@@ -33,6 +33,7 @@ from app.services.infra.dbos_orchestrator import start_workflow_routed
 from app.services.infra.unified_task_manager import get_task_manager
 from app.services.library.media_storage import store_local_file
 from app.services.library.resources_service import _resolve_personal_team_id
+from app.services.library.storage_flag import unified_storage_enabled
 
 # Card enrichment defaults when a project has no stage/members/history rows
 # (or the batch lookups failed) — the frontend renders the base card.
@@ -600,7 +601,7 @@ class ProjectsService:
                 metadata = await self._extract_video_metadata(str(tmp_path))
 
             stored = None
-            if settings.FEATURE_UNIFIED_STORAGE:
+            if await unified_storage_enabled():
                 # Scope resolution lives INSIDE the try: it can raise (a
                 # personal project whose owner lacks a personal-team row)
                 # and ANY storage-track failure must degrade to the fs
@@ -788,7 +789,7 @@ class ProjectsService:
                 metadata = await self._extract_video_metadata(str(tmp_path))
 
             stored = None
-            if settings.FEATURE_UNIFIED_STORAGE:
+            if await unified_storage_enabled():
                 # Scope resolution lives INSIDE the try (same contract as
                 # upload_file): a scope-resolution failure is a storage-
                 # track failure and must degrade to the fs fallback.
