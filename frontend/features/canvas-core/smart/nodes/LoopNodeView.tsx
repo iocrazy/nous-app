@@ -49,16 +49,6 @@ export function LoopNodeView({ id, data, selected }: NodeProps) {
       <Handle type="target" position={Position.Left} />
 
       <div className="mh-loop-card">
-        {/* Optional label */}
-        <input
-          type="text"
-          className="nodrag mh-loop-label"
-          placeholder={t('canvas.loopLabelPlaceholder')}
-          value={d.label ?? ''}
-          onChange={(e) => patch({ label: e.target.value })}
-          aria-label="Loop label"
-        />
-
         {/* Run mode segmented control */}
         <div className="mh-loop-seg">
           <button
