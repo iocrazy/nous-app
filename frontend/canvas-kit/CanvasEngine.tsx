@@ -564,15 +564,26 @@ export function CanvasEngine({
     },
     [paneCreateMenu, openPaneCreateMenu],
   );
-  const onPaneContextMenu = useCallback(
-    (e: React.MouseEvent | MouseEvent) => {
-      e.preventDefault();
-      openPaneCreateMenu(
-        (e as MouseEvent).clientX,
-        (e as MouseEvent).clientY,
-      );
+  // Container-level right-click so the native browser menu never leaks while
+  // the create menu is interacting (bug: right-clicking the open menu's
+  // backdrop is NOT on `.react-flow__pane`, so React Flow's onPaneContextMenu
+  // never fired → default menu popped). Handled at the container so it also
+  // covers the backdrop; form fields keep their native menu (right-click
+  // paste in a prompt textarea).
+  const onContainerContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      if (!paneCreateMenu) return;
+      const target = e.target as Element;
+      if (target.closest?.('input, textarea, [contenteditable="true"]')) return;
+      const onPane = target.classList?.contains('react-flow__pane');
+      const menuOpen = createMenu !== null;
+      if (onPane || menuOpen) {
+        // Empty pane → open; already-open menu → reposition to the new spot.
+        e.preventDefault();
+        openPaneCreateMenu(e.clientX, e.clientY);
+      }
     },
-    [openPaneCreateMenu],
+    [paneCreateMenu, createMenu, openPaneCreateMenu],
   );
 
   // Drag a wire off a source handle → magnetic snap to a nearby port (routed
@@ -636,6 +647,7 @@ export function CanvasEngine({
       tabIndex={0}
       className={`${themedChrome ? 'mh-canvas ' : ''}relative h-full w-full outline-none`}
       onDoubleClick={onContainerDoubleClick}
+      onContextMenu={paneCreateMenu ? onContainerContextMenu : undefined}
     >
       <ReactFlow
         nodes={displayNodes}
@@ -663,7 +675,6 @@ export function CanvasEngine({
         minZoom={minZoom}
         maxZoom={maxZoom}
         zoomOnDoubleClick={!paneCreateMenu}
-        onPaneContextMenu={paneCreateMenu ? onPaneContextMenu : undefined}
         proOptions={{ hideAttribution: true }}
         // 6b.1 — skip rendering nodes/edges whose bounding box lies outside
         // the current viewport.  React Flow re-checks on every pan/zoom so

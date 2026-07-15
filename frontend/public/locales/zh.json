@@ -948,7 +948,14 @@
     "temp": "临时",
     "projectAssets": "工程资产",
     "tempEmpty": "暂无聊天上传 — 在聊天框粘贴/拖入的文件会先落到这里，24h 内未处理会被自动清理",
-    "sectionLocations": "位置"
+    "sectionLocations": "位置",
+    "edit": "编辑",
+    "saveAsNewVersion": "存为新版本",
+    "overwriteCurrentVersion": "覆盖当前版本",
+    "saved": "已保存",
+    "saveFailed": "保存失败",
+    "textTooLargeToEdit": "文件过大，无法内联预览或编辑。",
+    "previewFailed": "预览加载失败"
   },
   "smartFolder": {
     "createTitle": "创建智能文件夹",
@@ -1773,7 +1780,8 @@
     "groupNode": {
       "title": "分组",
       "dropHint": "拖入图片自动收进分组"
-    }
+    },
+    "arrangeSelected": "整理选中"
   },
   "modelParams": {
     "otherParams": "参数设置",
@@ -2851,6 +2859,11 @@
     "location": "地点",
     "locationPlaceholder": "地点",
     "timeOfDay": "时间",
+    "headingTabLocation": "切换到地点",
+    "headingTabTime": "切换到时间",
+    "locationSearchPlaceholder": "搜索或创建地点...",
+    "locationNoMatch": "没有匹配的地点",
+    "locationCreate": "创建 \"{{name}}\"",
     "toolbar": "元素工具条",
     "toolbarScene": "场景",
     "toolbarAction": "动作",

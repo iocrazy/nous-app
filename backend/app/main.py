@@ -346,18 +346,12 @@ try:
         return user_id
 
     # In-memory cache for media ID → (file_path, creator_id, team_ids) lookups
-    # Avoids DB hit on every request. TTL = 5 minutes.
-    import time as _time
-    from typing import NamedTuple
-
-    class _MediaCacheEntry(NamedTuple):
-        file_path: str
-        creator_id: str | None
-        team_ids: tuple[str, ...]
-        cached_at: float
-
-    _media_path_cache: dict[tuple[str, str], _MediaCacheEntry] = {}
-    _CACHE_TTL = 300  # 5 minutes
+    # Avoids DB hit on every request. TTL = 5 minutes. Lives in a dedicated
+    # module so version-content write paths can invalidate a stale entry
+    # (resources_service.overwrite_version_content / upload_new_version /
+    # set_current_version) — otherwise an edit isn't visible via /media/{id}
+    # until the TTL lapses.
+    from app.services.media import media_path_cache
 
     async def _resolve_file_path(
         media_id: str, file_type: str = "file"
@@ -371,12 +365,9 @@ try:
         Uses a 5-minute in-memory cache to avoid DB queries on every media request.
         Returns (file_path, creator_id, team_ids) or raises 404.
         """
-        cache_key = (media_id, file_type)
-        cached = _media_path_cache.get(cache_key)
-        if cached and _time.time() - cached.cached_at < _CACHE_TTL:
+        cached = media_path_cache.get(media_id, file_type)
+        if cached is not None:
             return cached.file_path, cached.creator_id, cached.team_ids
-        if cached:
-            del _media_path_cache[cache_key]
 
         # Direct PG via the SQLAlchemy engine (Issue #199) — replaces the
         # supabase-py path whose maybe_single().execute() returned None (→
@@ -405,8 +396,9 @@ try:
                     creator_id = row.get("creator_id")
                     resource_id = row["id"]
                     team_ids = await _fetch_team_ids(resource_id)
-                    entry = _MediaCacheEntry(result, creator_id, team_ids, _time.time())
-                    _media_path_cache[cache_key] = entry
+                    entry = media_path_cache.put(
+                        media_id, file_type, result, creator_id, team_ids
+                    )
                     return entry.file_path, entry.creator_id, entry.team_ids
             except Exception as e:
                 logger.warning(f"Resource lookup failed for {media_id}: {e}")
@@ -420,8 +412,7 @@ try:
             )
             if row and row.get(media_col):
                 result = row[media_col]
-                entry = _MediaCacheEntry(result, None, (), _time.time())
-                _media_path_cache[cache_key] = entry
+                entry = media_path_cache.put(media_id, file_type, result, None, ())
                 return entry.file_path, entry.creator_id, entry.team_ids
         except Exception as e:
             logger.warning(f"ParsedMedia lookup failed for {media_id}: {e}")

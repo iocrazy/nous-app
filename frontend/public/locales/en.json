@@ -948,7 +948,14 @@
     "temp": "Temp",
     "projectAssets": "Project Assets",
     "tempEmpty": "No chat uploads yet — files you paste or drop into the chat composer land here for 24h before being moved or expired.",
-    "sectionLocations": "Locations"
+    "sectionLocations": "Locations",
+    "edit": "Edit",
+    "saveAsNewVersion": "Save as new version",
+    "overwriteCurrentVersion": "Overwrite current version",
+    "saved": "Saved",
+    "saveFailed": "Failed to save",
+    "textTooLargeToEdit": "File is too large to preview or edit inline.",
+    "previewFailed": "Failed to load preview"
   },
   "smartFolder": {
     "createTitle": "Create Smart Folder",
@@ -1773,7 +1780,8 @@
     "groupNode": {
       "title": "Group",
       "dropHint": "Drop images to auto-collect"
-    }
+    },
+    "arrangeSelected": "Arrange selected"
   },
   "modelParams": {
     "otherParams": "Parameters",
@@ -2851,6 +2859,11 @@
     "location": "Location",
     "locationPlaceholder": "Location",
     "timeOfDay": "Time of Day",
+    "headingTabLocation": "Switch to location",
+    "headingTabTime": "Switch to time",
+    "locationSearchPlaceholder": "Search or create location...",
+    "locationNoMatch": "No matching location",
+    "locationCreate": "Create \"{{name}}\"",
     "toolbar": "Element Toolbar",
     "toolbarScene": "Scene",
     "toolbarAction": "Action",

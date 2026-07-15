@@ -148,6 +148,46 @@ async def upload_version(
         raise HTTPException(status_code=500, detail="Failed to upload version")
 
 
+@router.put("/{resource_id}/versions/{version_id}/content")
+async def overwrite_version_content(
+    resource_id: str,
+    version_id: str,
+    auth: AuthDep,
+    _scope: ScopedRequestDep,
+    file: UploadFile = File(...),
+    _resource_guard: None = Depends(verify_resource_write_access),
+):
+    """Overwrite an existing version's bytes in place (text editing).
+
+    `_resource_guard` enforces creator-only, same as new-version upload.
+    Does not create a new version row — see
+    ResourcesService.overwrite_version_content.
+    """
+    try:
+        if file.size and file.size > MAX_UPLOAD_SIZE:
+            raise HTTPException(
+                status_code=413, detail="File too large. Maximum size is 500 MB."
+            )
+        svc = ResourcesService()
+        result = await svc.overwrite_version_content(
+            resource_id=resource_id,
+            version_id=version_id,
+            user_id=auth.user_id,
+            file=file,
+        )
+        return {"success": True, "data": result}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            f"Failed to overwrite version {version_id} of resource "
+            f"{resource_id}: {e}"
+        )
+        raise HTTPException(status_code=500, detail="Failed to overwrite version")
+
+
 @router.post("/{resource_id}/versions/{version_number}/set-current")
 async def set_current_version(
     resource_id: str,

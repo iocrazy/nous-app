@@ -96,27 +96,6 @@ export interface TypeCommand {
 const INT_EXT_OPTIONS = ['INT', 'EXT', 'INT/EXT'];
 const TIME_OPTIONS = ['DAY', 'NIGHT', 'DAWN', 'DUSK', 'CONTINUOUS'];
 
-/**
- * Compose the read-mode scene heading from the meta fields, per layout engine:
- *  - Hollywood: a slug line `INT. BLANK STUDIO - NIGHT` (uppercase location,
- *    dot after INT/EXT, dash before the time).
- *  - Asian: a middot-joined manuscript heading `内景 · 地点 · 夜` (no forced
- *    uppercasing — CJK has no case), sitting after the numbered badge.
- * Missing parts drop out cleanly; an all-empty heading returns '' so the caller
- * can render the "set heading" placeholder instead.
- */
-function formatSceneHeading(meta: SceneMeta, format: EditorFormat): string {
-  const ie = meta.heading_int_ext.trim();
-  const loc = meta.location_text.trim();
-  const time = meta.time_of_day.trim();
-  if (format === 'asian') {
-    return [ie, loc, time].filter((p) => p.length > 0).join(' · ');
-  }
-  const head = ie ? `${ie}.` : '';
-  const locTime = [loc.toUpperCase(), time].filter((p) => p.length > 0).join(' - ');
-  return [head, locTime].filter((p) => p.length > 0).join(' ');
-}
-
 const INPUT_DEBOUNCE_MS = 500;
 const META_DEBOUNCE_MS = 600;
 
@@ -142,6 +121,9 @@ export interface SceneBlockProps {
   format?: EditorFormat;
   /** Distinct CAST names for the @-mention / character-cue picker (script-wide). */
   mentionCandidates?: string[];
+  /** Distinct location names (script-wide) for the heading's search-or-create
+   *  location picker. */
+  locationCandidates?: string[];
   /** Reports this scene's save state up so the shell can aggregate it. */
   onSyncStateChange?: (sceneId: string, status: SceneSyncStatus) => void;
   /** Drag/keyboard reorder wiring (Task 10); absent = reorder disabled. */
@@ -199,6 +181,7 @@ export function SceneBlock({
   typeCommand,
   format = 'hollywood',
   mentionCandidates = [],
+  locationCandidates = [],
   onSyncStateChange,
   reorder,
   onExitEditing,
@@ -277,8 +260,13 @@ export function SceneBlock({
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const headRowRef = useRef<HTMLDivElement | null>(null);
+  // Tab flow across the head-row pickers (INT/EXT → location → time): focus the
+  // Nth `.mh-scene-select` trigger (all three HeadingSelects render one).
+  const focusHeadField = useCallback((idx: number) => {
+    const triggers = headRowRef.current?.querySelectorAll<HTMLElement>('.mh-scene-select');
+    triggers?.[idx]?.focus();
+  }, []);
   const headingDisplayRef = useRef<HTMLButtonElement | null>(null);
-  const locInputRef = useRef<HTMLInputElement | null>(null);
   const tiptapRef = useRef<TipTapSceneEditorHandle>(null);
   const elementsRef = useRef<ScriptElement[]>(sync.elements);
   const inputTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -494,10 +482,16 @@ export function SceneBlock({
   // anything else closes it, but only if IT was the one open.
   const handleTiptapSlashChange = useCallback((elementId: string, query: string | null) => {
     if (query !== null) {
-      const node = containerRef.current?.querySelector<HTMLElement>(`[data-el-id="${elementId}"]`);
-      const position = node
-        ? { top: node.offsetTop + node.offsetHeight, left: node.offsetLeft }
-        : undefined;
+      const container = containerRef.current;
+      const node = container?.querySelector<HTMLElement>(`[data-el-id="${elementId}"]`);
+      // Measure relative to the scene block (the popup's positioning context) —
+      // see handleTiptapMentionOpen for why offsetTop (row-relative) is wrong.
+      let position: { top: number; left: number } | undefined;
+      if (node && container) {
+        const nodeRect = node.getBoundingClientRect();
+        const contRect = container.getBoundingClientRect();
+        position = { top: nodeRect.bottom - contRect.top, left: nodeRect.left - contRect.left };
+      }
       setSlashActive(0);
       setSlash({ elementId, query, position });
     } else if (slashRef.current?.elementId === elementId) {
@@ -548,26 +542,30 @@ export function SceneBlock({
   // ── TipTap M2: mentions + character-cue picker ────────────────────────
   const handleTiptapMentionOpen = useCallback(
     (elementId: string, kind: 'inline' | 'character' | 'transition', query: string) => {
-      const node = containerRef.current?.querySelector<HTMLElement>(`[data-el-id="${elementId}"]`);
+      const container = containerRef.current;
+      const node = container?.querySelector<HTMLElement>(`[data-el-id="${elementId}"]`);
       let position: { top: number; left: number } | undefined;
-      if (node) {
-        const top = node.offsetTop + node.offsetHeight;
-        let left = node.offsetLeft;
+      if (node && container) {
+        // The popup is absolutely positioned relative to `.mh-scene-block`
+        // (containerRef). The line's own `offsetTop` is relative to its
+        // `.mh-el-row` (which is position:relative), NOT the scene block — so
+        // using it placed the picker near the TOP of the block, ON TOP of the
+        // cue being typed. Measure the line's box relative to the container so
+        // the picker always sits just BELOW it, wherever the row is.
+        const nodeRect = node.getBoundingClientRect();
+        const contRect = container.getBoundingClientRect();
+        const top = nodeRect.bottom - contRect.top;
+        let left = nodeRect.left - contRect.left;
         if (kind === 'character') {
-          // A Hollywood character cue is indented (`.hw-character` has
-          // padding-left:22ch), so the row's left edge (offsetLeft) sits far to
-          // the left of the visible, centered cue text. Anchor the picker UNDER
-          // the cue by adding the line's own left padding. Clamp so a ~300px
-          // panel never spills past the sheet's right edge.
-          const padLeft = parseFloat(getComputedStyle(node).paddingLeft) || 0;
-          left += padLeft;
-          const POPUP_WIDTH = 300;
-          const parent = node.offsetParent as HTMLElement | null;
-          if (parent) {
-            const maxLeft = parent.clientWidth - POPUP_WIDTH;
-            if (left > maxLeft) left = Math.max(0, maxLeft);
-          }
+          // A Hollywood character cue is indented (.hw-character padding-left:
+          // 22ch); anchor the picker under the visible cue text, not the row's
+          // left edge, by adding the line's own left padding.
+          left += parseFloat(getComputedStyle(node).paddingLeft) || 0;
         }
+        // Clamp so a ~300px panel never spills past the sheet's right edge.
+        const POPUP_WIDTH = 300;
+        const maxLeft = container.clientWidth - POPUP_WIDTH;
+        if (left > maxLeft) left = Math.max(0, maxLeft);
         position = { top, left };
       }
       setMention({ elementId, kind, query, position });
@@ -735,8 +733,6 @@ export function SceneBlock({
     setHeadingEditing(false);
     requestAnimationFrame(() => headingDisplayRef.current?.focus());
   }, []);
-
-  const displayHeading = formatSceneHeading(meta, format);
 
   // ── Reorder wiring (Task 10) ──────────────────────────────────────────────
   const isDragging = reorder?.draggingId === scene.id;
@@ -1115,16 +1111,19 @@ export function SceneBlock({
               options={INT_EXT_OPTIONS}
               placeholder="INT/EXT"
               ariaLabel={t('editor.intExt')}
+              tabHint={t('editor.headingTabLocation')}
               onChange={(v) => commitMeta({ heading_int_ext: v })}
-              onTabNext={() => locInputRef.current?.focus()}
+              onTabNext={() => focusHeadField(1)}
             />
-            <input
-              ref={locInputRef}
-              className="mh-scene-loc-input"
-              aria-label={t('editor.location')}
+            <HeadingSelect
+              searchable
+              candidates={locationCandidates}
               value={meta.location_text}
               placeholder={t('editor.locationPlaceholder')}
-              onChange={(e) => commitMeta({ location_text: e.target.value })}
+              ariaLabel={t('editor.location')}
+              tabHint={t('editor.headingTabTime')}
+              onChange={(v) => commitMeta({ location_text: v })}
+              onTabNext={() => focusHeadField(2)}
             />
             <HeadingSelect
               value={meta.time_of_day}
@@ -1142,18 +1141,37 @@ export function SceneBlock({
             aria-label={t('editor.editSceneHeading')}
             onClick={enterHeadingEdit}
           >
-            {displayHeading || (
-              // laper-parity: an unset heading renders as the slug's chip
-              // tokens (INT/EXT LOCATION - DAY/NIGHT), not a prose placeholder.
-              // Screplay tokens are English by convention; the button's
-              // aria-label above still announces the editable purpose.
-              <span className="mh-scene-heading-empty">
-                <span className="mh-heading-chip">INT/EXT</span>{' '}
-                <span className="mh-heading-chip">LOCATION</span>
-                {' - '}
-                <span className="mh-heading-chip">DAY/NIGHT</span>
-              </span>
-            )}
+            {(() => {
+              // Structured read heading: each part renders as clean slug text
+              // when set, or a muted placeholder chip when unset — so a
+              // partially-filled heading (e.g. only a location) still reads as a
+              // proper scene heading (INT/EXT · <loc> · DAY/NIGHT), never a bare
+              // location string. A fully-filled Hollywood heading is exactly the
+              // slug "INT. LOCATION - DAY" (tests assert this textContent).
+              const ie = meta.heading_int_ext.trim();
+              const loc = meta.location_text.trim();
+              const time = meta.time_of_day.trim();
+              const chip = (label: string) => <span className="mh-heading-chip">{label}</span>;
+              if (format === 'asian') {
+                return (
+                  <>
+                    {ie ? ie : chip('INT/EXT')}
+                    {' · '}
+                    {loc ? loc : chip('LOCATION')}
+                    {' · '}
+                    {time ? time : chip('DAY/NIGHT')}
+                  </>
+                );
+              }
+              return (
+                <>
+                  {ie ? `${ie}.` : chip('INT/EXT')}{' '}
+                  {loc ? loc.toUpperCase() : chip('LOCATION')}
+                  {' - '}
+                  {time ? time : chip('DAY/NIGHT')}
+                </>
+              );
+            })()}
           </button>
         )}
         <ScenePresenceBadge users={focusPresence ?? []} />
