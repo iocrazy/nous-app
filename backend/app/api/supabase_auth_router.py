@@ -15,7 +15,6 @@ from pydantic import BaseModel, EmailStr
 from app.api.media_auth import revoke_media_tokens
 from app.core.admin_deps import AdminAuthDep
 from app.core.deps import AuthDep
-from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.user_logs_repository import log_user_action
 from app.services.billing.points_service import PointsService
 from app.services.infra.supabase_auth_service import (
@@ -32,16 +31,21 @@ async def _require_admin(auth: AuthDep) -> None:
     Raises HTTP 403 if the user is not an admin/owner.
     """
     try:
-        client = await get_async_supabase_admin()
-        result = (
-            await client.table("team_members")
-            .select("role")
-            .eq("user_id", auth.user_id)
-            .in_("role", ["admin", "owner"])
-            .limit(1)
-            .execute()
-        )
-        if not result.data:
+        from sqlalchemy import select
+
+        from app.db.session import read_scope
+        from app.models import TeamMembers
+
+        async with read_scope() as session:
+            row = (
+                await session.execute(
+                    select(TeamMembers.role)
+                    .where(TeamMembers.user_id == auth.user_id)
+                    .where(TeamMembers.role.in_(["admin", "owner"]))
+                    .limit(1)
+                )
+            ).first()
+        if not row:
             logger.warning(
                 f"Admin endpoint access denied for user {auth.user_id}: no admin/owner role"
             )
@@ -83,48 +87,68 @@ async def _ensure_personal_team_bootstrap(user_id: str) -> Optional[str]:
     Returns the personal team_id, or None if the user genuinely doesn't
     exist in auth.users.
     """
-    client = await get_async_supabase_admin()
+    import json
 
-    # 1. Probe for an existing personal team via team_members.
-    member_result = (
-        await client.schema("public")
-        .table("team_members")
-        .select("team_id, teams!inner(id, kind)")
-        .eq("user_id", user_id)
-        .eq("teams.kind", "personal")
-        .limit(1)
-        .execute()
-    )
-    if member_result.data:
-        return str(member_result.data[0]["team_id"])
+    from sqlalchemy import insert, select, text
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from app.db.session import read_scope, write_scope
+    from app.models import TeamMembers, Teams, UserProfiles
+
+    # 1. Probe for an existing personal team via team_members ⋈ teams.
+    async with read_scope() as session:
+        member_team = (
+            await session.execute(
+                select(TeamMembers.team_id)
+                .join(Teams, Teams.id == TeamMembers.team_id)
+                .where(TeamMembers.user_id == user_id)
+                .where(Teams.kind == "personal")
+                .limit(1)
+            )
+        ).scalar()
+    if member_team is not None:
+        return str(member_team)
 
     # 2. No personal team — read the auth user to mirror handle_new_user's
-    #    username derivation.
-    auth_result = (
-        await client.schema("auth")
-        .table("users")
-        .select("id, email, raw_user_meta_data")
-        .eq("id", user_id)
-        .limit(1)
-        .execute()
-    )
-    if not auth_result.data:
+    #    username derivation. auth.users is GoTrue-managed (no ORM model), so
+    #    read it with a text() SELECT on the same session. jsonb may come back
+    #    as a str via the untyped text() path, so json.loads defensively.
+    async with read_scope() as session:
+        auth_row = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT id, email, raw_user_meta_data "
+                        "FROM auth.users WHERE id = CAST(:uid AS uuid) LIMIT 1"
+                    ),
+                    {"uid": user_id},
+                )
+            )
+            .mappings()
+            .first()
+        )
+    if not auth_row:
         logger.warning(f"[bootstrap] auth.users row missing for {user_id} — skipping")
         return None
-    user = auth_result.data[0]
-    raw = user.get("raw_user_meta_data") or {}
-    username = raw.get("username") or (user.get("email") or "").split("@")[0]
+    raw = auth_row.get("raw_user_meta_data")
+    if isinstance(raw, str):
+        raw = json.loads(raw)
+    raw = raw or {}
+    username = raw.get("username") or (auth_row.get("email") or "").split("@")[0]
     if not username:
         username = "user"
 
-    # 3. Backfill user_profiles (idempotent via PK).
+    # 3. Backfill user_profiles (idempotent via PK upsert).
     try:
-        await (
-            client.schema("public")
-            .table("user_profiles")
-            .upsert({"id": user_id, "username": username, "role": "user"})
-            .execute()
-        )
+        async with write_scope() as session:
+            stmt = pg_insert(UserProfiles).values(
+                id=user_id, username=username, role="user"
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[UserProfiles.id],
+                set_={"username": username, "role": "user"},
+            )
+            await session.execute(stmt)
     except Exception as e:  # noqa: BLE001
         logger.warning(f"[bootstrap] user_profiles upsert failed: {e}")
 
@@ -139,17 +163,20 @@ async def _ensure_personal_team_bootstrap(user_id: str) -> Optional[str]:
         "kind": "personal",
     }
     try:
-        team_insert = (
-            await client.schema("public").table("teams").insert(team_payload).execute()
-        )
+        async with write_scope() as session:
+            new_team_id = (
+                await session.execute(
+                    insert(Teams).values(**team_payload).returning(Teams.id)
+                )
+            ).scalar()
     except Exception as e:  # noqa: BLE001
         logger.warning(
             f"[bootstrap] teams INSERT failed (race or unique violation?): {e}"
         )
-        team_insert = None
+        new_team_id = None
 
-    if team_insert and team_insert.data:
-        team_id = str(team_insert.data[0]["id"])
+    if new_team_id is not None:
+        team_id = str(new_team_id)
         logger.info(
             f"[bootstrap] re-created personal team {team_id} for {user_id} "
             "(auth trigger had not fired)"
@@ -158,17 +185,17 @@ async def _ensure_personal_team_bootstrap(user_id: str) -> Optional[str]:
 
     # 5. INSERT raced or partially succeeded — re-query to pick up the
     #    row a parallel caller (or the trigger) wrote.
-    repick = (
-        await client.schema("public")
-        .table("teams")
-        .select("id")
-        .eq("owner_id", user_id)
-        .eq("kind", "personal")
-        .limit(1)
-        .execute()
-    )
-    if repick.data:
-        return str(repick.data[0]["id"])
+    async with read_scope() as session:
+        repick_id = (
+            await session.execute(
+                select(Teams.id)
+                .where(Teams.owner_id == user_id)
+                .where(Teams.kind == "personal")
+                .limit(1)
+            )
+        ).scalar()
+    if repick_id is not None:
+        return str(repick_id)
     return None
 
 

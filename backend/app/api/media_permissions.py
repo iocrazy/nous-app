@@ -16,8 +16,6 @@ from typing import Optional
 
 from loguru import logger
 
-from app.db.supabase_client import get_async_supabase_admin
-
 
 async def _validate_share_token(
     share_token: str,
@@ -31,19 +29,40 @@ async def _validate_share_token(
     NOT cached — must check status/expiry/view_count freshly every time.
     """
     try:
-        supabase = await get_async_supabase_admin()
-        res = (
-            await supabase.table("shares")
-            .select("id,resource_id,status,expires_at,max_views,view_count")
-            .eq("share_code", share_token)
-            .eq("status", "active")
-            .maybe_single()
-            .execute()
-        )
-        if not res.data:
+        from sqlalchemy import select
+
+        from app.db.session import read_scope
+        from app.models import Shares
+
+        async with read_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        select(
+                            Shares.id,
+                            Shares.resource_id,
+                            Shares.status,
+                            Shares.expires_at,
+                            Shares.max_views,
+                            Shares.view_count,
+                        )
+                        .where(Shares.share_code == share_token)
+                        .where(Shares.status == "active")
+                        .limit(1)
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        if not row:
             return False
 
-        share = res.data
+        share = dict(row)
+        # expires_at is a timestamptz → native datetime; the expiry check below
+        # treats it as an ISO string (.replace("Z", ...) + fromisoformat), so
+        # serialize it back to match the pre-ORM PostgREST shape.
+        if share.get("expires_at") is not None:
+            share["expires_at"] = share["expires_at"].isoformat()
 
         # Resource must match
         if str(share["resource_id"]) != str(resource_id):
@@ -81,41 +100,52 @@ async def _get_resource_ownership(
     Tries resources.id first, then resources.media_id (parsed_media FK).
     Returns (creator_id, team_ids) or None if not found.
     """
-    supabase = await get_async_supabase_admin()
+    from sqlalchemy import select
 
+    from app.db.session import read_scope
+    from app.models import ResourceItems, Resources
+
+    # resources.id / resources.media_id are both BIGINT → bind int (asyncpg
+    # is strict); a non-numeric media_id raises inside the try and falls
+    # through to the next column, same as the old bigint-coercion failure.
     for id_column in ("id", "media_id"):
         try:
-            # Get resource with creator
-            res = (
-                await supabase.table("resources")
-                .select("id,creator_id")
-                .eq(id_column, media_id)
-                .maybe_single()
-                .execute()
-            )
-            if not res.data or not res.data.get("creator_id"):
+            async with read_scope() as session:
+                res_row = (
+                    (
+                        await session.execute(
+                            select(Resources.id, Resources.creator_id)
+                            .where(getattr(Resources, id_column) == int(media_id))
+                            .limit(1)
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
+            if not res_row or not res_row.get("creator_id"):
                 continue
 
-            creator_id = res.data["creator_id"]
-            resource_id = res.data["id"]
+            creator_id = res_row["creator_id"]
+            resource_id = res_row["id"]
 
             # Get scopes from resource_items. PR-E 4c: no scope_type filter —
             # scope_id is always a teams.id snowflake and authz is team_members
             # membership (personal teams have only their owner).
             team_ids: list[str] = []
             try:
-                items_res = (
-                    await supabase.table("resource_items")
-                    .select("scope_id")
-                    .eq("resource_id", resource_id)
-                    .execute()
-                )
-                if items_res.data:
-                    team_ids = [
-                        str(item["scope_id"])
-                        for item in items_res.data
-                        if item.get("scope_id")
-                    ]
+                async with read_scope() as session:
+                    scope_ids = (
+                        (
+                            await session.execute(
+                                select(ResourceItems.scope_id).where(
+                                    ResourceItems.resource_id == resource_id
+                                )
+                            )
+                        )
+                        .scalars()
+                        .all()
+                    )
+                team_ids = [str(s) for s in scope_ids if s]
             except Exception as e:
                 logger.warning(
                     f"Team scope lookup failed for resource {resource_id}: {e}"
@@ -137,19 +167,23 @@ async def _get_resource_id_for_media(media_id: str) -> Optional[str]:
     Tries resources.id first (media_id might already be a resource ID),
     then resources.media_id (parsed_media FK).
     """
-    supabase = await get_async_supabase_admin()
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import Resources
 
     for id_column in ("id", "media_id"):
         try:
-            res = (
-                await supabase.table("resources")
-                .select("id")
-                .eq(id_column, media_id)
-                .maybe_single()
-                .execute()
-            )
-            if res.data:
-                return str(res.data["id"])
+            async with read_scope() as session:
+                rid = (
+                    await session.execute(
+                        select(Resources.id)
+                        .where(getattr(Resources, id_column) == int(media_id))
+                        .limit(1)
+                    )
+                ).scalar()
+            if rid is not None:
+                return str(rid)
         except Exception as e:
             logger.warning(f"Resource ID lookup ({id_column}={media_id}) failed: {e}")
 
@@ -197,16 +231,25 @@ async def check_media_access(
     # Priority 4: team member
     if team_ids:
         try:
-            supabase = await get_async_supabase_admin()
-            res = (
-                await supabase.table("team_members")
-                .select("id")
-                .eq("user_id", user_id)
-                .in_("team_id", team_ids)
-                .limit(1)
-                .execute()
-            )
-            if res.data:
+            from sqlalchemy import select
+
+            from app.db.session import read_scope
+            from app.models import TeamMembers
+
+            # team_members has a composite PK (team_id, user_id) and NO `id`
+            # column — the old .select("id") errored (42703) into this except,
+            # so team-member access never granted. Select a real column; team_id
+            # is BIGINT so bind ints. Behaviour change flagged (see B4b report).
+            async with read_scope() as session:
+                member = (
+                    await session.execute(
+                        select(TeamMembers.team_id)
+                        .where(TeamMembers.user_id == user_id)
+                        .where(TeamMembers.team_id.in_([int(t) for t in team_ids]))
+                        .limit(1)
+                    )
+                ).first()
+            if member:
                 return True
         except Exception as e:
             logger.error(f"Team membership check failed: {e}")

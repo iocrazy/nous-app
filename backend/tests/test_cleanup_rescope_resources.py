@@ -250,6 +250,25 @@ async def test_storage_breakdown_empty_when_user_owns_nothing():
     }
 
 
+def _scalar_read_scope(value):
+    """A ``read_scope()`` stand-in whose session.execute().scalar() returns
+    ``value`` — the parsed_media platform_id → id lookup is a scalar select."""
+
+    class _Result:
+        def scalar(self):
+            return value
+
+    class _Session:
+        async def execute(self, stmt, params=None):
+            return _Result()
+
+    @asynccontextmanager
+    async def _scope():
+        yield _Session()
+
+    return _scope
+
+
 # ── by-platform-id DELETE: never touches global parsed_media ────────────────
 
 
@@ -260,6 +279,7 @@ async def test_by_platform_id_404_when_caller_owns_nothing():
     from fastapi import HTTPException
 
     import app.api.resources_crud_router as rc
+    import app.db.session as db_session_mod
 
     auth = SimpleNamespace(user_id=_USER)
 
@@ -269,16 +289,11 @@ async def test_by_platform_id_404_when_caller_owns_nothing():
     svc.repo.get_first_resource_item = AsyncMock()
     svc.repo.delete_resource_item = AsyncMock()
 
-    # parsed_media lookup returns a row (media exists globally) but caller owns
+    # parsed_media lookup returns an id (media exists globally) but caller owns
     # no resource → must 404, never delete.
-    client = _FakeClient({"parsed_media": [{"id": "777"}]})
-
     with (
         patch.object(rc, "ResourcesService", return_value=svc),
-        patch(
-            "app.db.supabase_client.get_async_supabase_admin",
-            AsyncMock(return_value=client),
-        ),
+        patch.object(db_session_mod, "read_scope", _scalar_read_scope(777)),
     ):
         with pytest.raises(HTTPException) as exc:
             await rc.unlink_resource_by_platform_id(
@@ -294,6 +309,7 @@ async def test_by_platform_id_unlinks_caller_owned_resource_in_fallback():
     """No item in the requested scope, but the caller owns a resource for the
     media → unlink their first item (trigger GC). No global delete."""
     import app.api.resources_crud_router as rc
+    import app.db.session as db_session_mod
 
     auth = SimpleNamespace(user_id=_USER)
 
@@ -307,18 +323,13 @@ async def test_by_platform_id_unlinks_caller_owned_resource_in_fallback():
     svc.repo.get_first_resource_item = AsyncMock(return_value={"id": "item-5"})
     svc.repo.delete_resource_item = AsyncMock(return_value=True)
 
-    client = _FakeClient({"parsed_media": [{"id": "777"}]})
-
     with (
         patch.object(rc, "ResourcesService", return_value=svc),
         patch(
             "app.services.library.resources_service._resolve_personal_team_id",
             AsyncMock(return_value="team-1"),
         ),
-        patch(
-            "app.db.supabase_client.get_async_supabase_admin",
-            AsyncMock(return_value=client),
-        ),
+        patch.object(db_session_mod, "read_scope", _scalar_read_scope(777)),
     ):
         result = await rc.unlink_resource_by_platform_id(
             platform_id="abc", auth=auth, _scope=None, scope_id=None

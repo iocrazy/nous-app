@@ -49,30 +49,35 @@ async def _resolve_team_id(user_id: str, team_id_param: Optional[str] = None) ->
         return team_id_param
 
     try:
-        client = await get_async_supabase_admin()
+        from sqlalchemy import select
+
+        from app.db.session import read_scope
+        from app.models import TeamMembers, Teams
 
         # Prefer personal team
-        personal = (
-            await client.table("teams")
-            .select("id")
-            .eq("owner_id", user_id)
-            .eq("kind", "personal")
-            .limit(1)
-            .execute()
-        )
-        if personal.data:
-            return str(personal.data[0]["id"])
+        async with read_scope() as session:
+            personal_id = (
+                await session.execute(
+                    select(Teams.id)
+                    .where(Teams.owner_id == user_id)
+                    .where(Teams.kind == "personal")
+                    .limit(1)
+                )
+            ).scalar()
+        if personal_id is not None:
+            return str(personal_id)
 
         # Fallback: any team membership
-        result = (
-            await client.table("team_members")
-            .select("team_id")
-            .eq("user_id", user_id)
-            .limit(1)
-            .execute()
-        )
-        if result.data:
-            return str(result.data[0]["team_id"])
+        async with read_scope() as session:
+            member_team = (
+                await session.execute(
+                    select(TeamMembers.team_id)
+                    .where(TeamMembers.user_id == user_id)
+                    .limit(1)
+                )
+            ).scalar()
+        if member_team is not None:
+            return str(member_team)
     except Exception as e:
         logger.error(f"Failed to resolve team_id for user {user_id}: {e}")
 
@@ -91,19 +96,23 @@ async def _auto_create_personal_team(user_id: str) -> str:
     Returns:
         The new team ID as a string.
     """
-    client = await get_async_supabase_admin()
+    from sqlalchemy import insert, select
+
+    from app.db.session import read_scope, write_scope
+    from app.models import Teams, UserProfiles
 
     # Check if personal team already exists (prevent duplicates)
-    existing = (
-        await client.table("teams")
-        .select("id")
-        .eq("owner_id", user_id)
-        .eq("kind", "personal")
-        .limit(1)
-        .execute()
-    )
-    if existing.data:
-        team_id = str(existing.data[0]["id"])
+    async with read_scope() as session:
+        existing_id = (
+            await session.execute(
+                select(Teams.id)
+                .where(Teams.owner_id == user_id)
+                .where(Teams.kind == "personal")
+                .limit(1)
+            )
+        ).scalar()
+    if existing_id is not None:
+        team_id = str(existing_id)
         logger.info(f"Found existing personal team {team_id} for user {user_id}")
         svc = PointsService()
         await svc.ensure_team_quota(team_id, grant_free_points=True, user_id=user_id)
@@ -112,17 +121,20 @@ async def _auto_create_personal_team(user_id: str) -> str:
     # Get username for team name
     username = "User"
     try:
-        profile = (
-            await client.table("user_profiles")
-            .select("username")
-            .eq("id", user_id)
-            .limit(1)
-            .execute()
-        )
-        if profile.data:
-            username = profile.data[0].get("username") or "User"
+        async with read_scope() as session:
+            prof = (
+                await session.execute(
+                    select(UserProfiles.username)
+                    .where(UserProfiles.id == user_id)
+                    .limit(1)
+                )
+            ).first()
+        if prof is not None:
+            username = prof[0] or "User"
         else:
-            # user_profiles might be missing — try auth metadata
+            # user_profiles might be missing — try auth metadata. This is a
+            # GoTrue admin API call (NOT PostgREST), so it stays on the client.
+            client = await get_async_supabase_admin()
             user_resp = await client.auth.admin.get_user_by_id(user_id)
             if user_resp and user_resp.user:
                 meta = user_resp.user.user_metadata or {}
@@ -130,37 +142,47 @@ async def _auto_create_personal_team(user_id: str) -> str:
                     meta.get("username")
                     or (user_resp.user.email or "User").split("@")[0]
                 )
-                # Also create the missing user_profiles row
-                await client.table("user_profiles").upsert(
-                    {"id": user_id, "username": username, "role": "user"}
-                ).execute()
+                # Also create the missing user_profiles row (upsert on PK).
+                from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+                async with write_scope() as session:
+                    stmt = pg_insert(UserProfiles).values(
+                        id=user_id, username=username, role="user"
+                    )
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=[UserProfiles.id],
+                        set_={"username": username, "role": "user"},
+                    )
+                    await session.execute(stmt)
     except Exception as e:
         logger.warning(f"Failed to resolve username for {user_id}: {e}")
 
     # Generate a random invite code
     invite_code = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
 
-    # Insert team — id uses DEFAULT generate_snowflake_id()
-    team_result = (
-        await client.table("teams")
-        .insert(
-            {
-                "name": f"{username}'s Workspace",
-                "owner_id": user_id,
-                "invite_code": invite_code,
-                "kind": "personal",
-            }
-        )
-        .execute()
-    )
+    # Insert team — id uses DEFAULT generate_snowflake_id(). The
+    # add_owner_as_member() trigger fires on commit, same as before.
+    async with write_scope() as session:
+        new_team_id = (
+            await session.execute(
+                insert(Teams)
+                .values(
+                    name=f"{username}'s Workspace",
+                    owner_id=user_id,
+                    invite_code=invite_code,
+                    kind="personal",
+                )
+                .returning(Teams.id)
+            )
+        ).scalar()
 
-    if not team_result.data:
+    if new_team_id is None:
         raise HTTPException(
             status_code=500,
             detail="Failed to create personal team",
         )
 
-    team_id = str(team_result.data[0]["id"])
+    team_id = str(new_team_id)
     logger.info(f"Auto-created personal team {team_id} for user {user_id}")
 
     # The DB trigger add_owner_as_member() handles team_members insertion.
@@ -182,15 +204,19 @@ async def _check_admin_role(user_id: str) -> bool:
         True if the user is an admin, False otherwise.
     """
     try:
-        client = await get_async_supabase_admin()
-        result = (
-            await client.table("user_profiles")
-            .select("role")
-            .eq("id", user_id)
-            .execute()
-        )
-        if result.data:
-            return result.data[0].get("role") == "admin"
+        from sqlalchemy import select
+
+        from app.db.session import read_scope
+        from app.models import UserProfiles
+
+        async with read_scope() as session:
+            row = (
+                await session.execute(
+                    select(UserProfiles.role).where(UserProfiles.id == user_id).limit(1)
+                )
+            ).first()
+        if row is not None:
+            return row[0] == "admin"
     except Exception as e:
         logger.error(f"Failed to check admin role for user {user_id}: {e}")
     return False
