@@ -1,11 +1,17 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Optional
+import datetime
+import uuid
+from datetime import timezone
+from typing import Any, Dict, Optional
 
 from loguru import logger
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import insert, or_, select
+from sqlalchemy import update as sa_update
 
-from app.db.supabase_client import get_async_supabase_admin
+from app.db.session import read_scope, write_scope
+from app.models import SignalSources
 
 
 def compute_health(*, prev_failures: int, ok: bool, dead_threshold: int = 3) -> dict:
@@ -31,25 +37,47 @@ ALLOWED_KINDS = ("newsnow", "rss", "http_api", "custom")
 IMPLEMENTED_KINDS = ("newsnow", "rss")
 
 
+def _bigint(value: Any) -> int:
+    if isinstance(value, int):
+        return value
+    return int(str(value))
+
+
+def _serialize(row: Dict[str, Any]) -> Dict[str, Any]:
+    """REST-shaped dict matching the old PostgREST rendering: uuid → str,
+    datetime → ISO str. BIGINT id stays native int; ``config`` (jsonb) stays a
+    native dict; ``user_id`` NULL stays None."""
+    out: Dict[str, Any] = {}
+    for key, val in row.items():
+        if isinstance(val, uuid.UUID):
+            out[key] = str(val)
+        elif isinstance(val, datetime.datetime):
+            out[key] = val.isoformat()
+        else:
+            out[key] = val
+    return out
+
+
+def _row_dict(obj: SignalSources) -> Dict[str, Any]:
+    return {col.name: getattr(obj, col.name) for col in obj.__table__.columns}
+
+
 class SignalSourcesRepository:
     TABLE = "signal_sources"
-
-    async def _client(self):
-        return await get_async_supabase_admin()
 
     async def tier_map(self) -> dict[str, int]:
         """``{source_id(str): tier}`` for every source — the credibility prior
         the code scorer multiplies in. Missing/NULL tier defaults to 2."""
-        client = await self._client()
-        result = await client.table(self.TABLE).select("id, tier").execute()
-        return {str(r["id"]): int(r.get("tier") or 2) for r in (result.data or [])}
+        async with read_scope() as session:
+            result = await session.execute(select(SignalSources.id, SignalSources.tier))
+            return {str(sid): int(tier or 2) for sid, tier in result.all()}
 
     async def list_enabled(self) -> list[dict[str, Any]]:
-        client = await self._client()
-        result = (
-            await client.table(self.TABLE).select("*").eq("enabled", True).execute()
-        )
-        return result.data or []
+        async with read_scope() as session:
+            result = await session.execute(
+                select(SignalSources).where(SignalSources.enabled.is_(True))
+            )
+            return [_serialize(_row_dict(o)) for o in result.scalars().all()]
 
     async def list_all(self) -> list[dict[str, Any]]:
         """All sources (enabled + disabled) for the read-only health surface.
@@ -57,30 +85,31 @@ class SignalSourcesRepository:
         Ordered worst-health-first: 'dead' < 'degraded' < 'ok' sorts ascending,
         so failing sources surface at the top; ties broken by name.
         """
-        client = await self._client()
-        result = (
-            await client.table(self.TABLE)
-            .select("*")
-            .order("health")
-            .order("name")
-            .execute()
-        )
-        return result.data or []
+        async with read_scope() as session:
+            result = await session.execute(
+                select(SignalSources).order_by(SignalSources.health, SignalSources.name)
+            )
+            return [_serialize(_row_dict(o)) for o in result.scalars().all()]
 
     async def list_visible(self, user_id: str) -> list[dict[str, Any]]:
         """Sources this user may see/manage: system sources (user_id IS NULL)
         plus their own. Other users' private sources are excluded. Ordered
-        worst-health-first, then by name."""
-        client = await self._client()
-        result = (
-            await client.table(self.TABLE)
-            .select("*")
-            .or_(f"user_id.is.null,user_id.eq.{user_id}")
-            .order("health")
-            .order("name")
-            .execute()
-        )
-        return result.data or []
+        worst-health-first, then by name.
+
+        The owner filter is a parametrized ``OR`` (was a PostgREST filter
+        STRING that interpolated user_id — no injection surface here)."""
+        async with read_scope() as session:
+            result = await session.execute(
+                select(SignalSources)
+                .where(
+                    or_(
+                        SignalSources.user_id.is_(None),
+                        SignalSources.user_id == user_id,
+                    )
+                )
+                .order_by(SignalSources.health, SignalSources.name)
+            )
+            return [_serialize(_row_dict(o)) for o in result.scalars().all()]
 
     async def feed_source_ids(self, user_id: str, hidden_ids: list[str]) -> list[str]:
         """Source ids whose hotspots belong in this user's feed: ENABLED visible
@@ -97,15 +126,19 @@ class SignalSourcesRepository:
 
     async def get_source(self, source_id: str) -> dict | None:
         """A single source by id (any owner) — for ownership/existence checks."""
-        client = await self._client()
-        result = (
-            await client.table(self.TABLE)
-            .select("*")
-            .eq("id", source_id)
-            .limit(1)
-            .execute()
-        )
-        return (result.data or [None])[0]
+        async with read_scope() as session:
+            obj = (
+                (
+                    await session.execute(
+                        select(SignalSources)
+                        .where(SignalSources.id == _bigint(source_id))
+                        .limit(1)
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            return _serialize(_row_dict(obj)) if obj else None
 
     async def create_source(
         self,
@@ -119,17 +152,21 @@ class SignalSourcesRepository:
     ) -> dict[str, Any]:
         """Insert a user-owned source. Its hotspots are scoped to this user via
         the feed's source-id filter (other clients never see them)."""
-        client = await self._client()
-        row = {
-            "user_id": user_id,
-            "kind": kind,
-            "name": name,
-            "config": config or {},
-            "category": category,
-            "enabled": enabled,
-        }
-        result = await client.table(self.TABLE).insert(row).execute()
-        return (result.data or [row])[0]
+        async with write_scope() as session:
+            result = await session.execute(
+                insert(SignalSources)
+                .values(
+                    user_id=user_id,
+                    kind=kind,
+                    name=name,
+                    config=config or {},
+                    category=category,
+                    enabled=enabled,
+                )
+                .returning(*SignalSources.__table__.columns)
+            )
+            row = result.mappings().first()
+        return _serialize(dict(row))
 
     async def admin_create_source(
         self,
@@ -142,18 +179,22 @@ class SignalSourcesRepository:
     ) -> dict[str, Any]:
         """Create a SYSTEM source (user_id NULL → visible to everyone). Distinct
         from create_source, which makes a user-private source. Admin-only."""
-        client = await self._client()
-        row = {
-            "user_id": None,
-            "kind": kind,
-            "name": name,
-            "config": config or {},
-            "category": category,
-            "enabled": True,
-            "tier": int(tier),
-        }
-        result = await client.table(self.TABLE).insert(row).execute()
-        return (result.data or [row])[0]
+        async with write_scope() as session:
+            result = await session.execute(
+                insert(SignalSources)
+                .values(
+                    user_id=None,
+                    kind=kind,
+                    name=name,
+                    config=config or {},
+                    category=category,
+                    enabled=True,
+                    tier=int(tier),
+                )
+                .returning(*SignalSources.__table__.columns)
+            )
+            row = result.mappings().first()
+        return _serialize(dict(row))
 
     async def admin_update(
         self,
@@ -173,25 +214,30 @@ class SignalSourcesRepository:
             patch["tier"] = int(tier)
         if not patch:
             return await self.get_source(source_id)
-        client = await self._client()
-        result = (
-            await client.table(self.TABLE).update(patch).eq("id", source_id).execute()
-        )
-        return (result.data or [None])[0]
+        async with write_scope() as session:
+            result = await session.execute(
+                sa_update(SignalSources)
+                .where(SignalSources.id == _bigint(source_id))
+                .values(**patch)
+                .returning(*SignalSources.__table__.columns)
+            )
+            row = result.mappings().first()
+        return _serialize(dict(row)) if row else None
 
     async def delete_source(self, *, user_id: str, source_id: str) -> bool:
         """Delete a source the user OWNS (stops collection). Returns False when
         nothing was deleted (not found, or not owned by this user — the
         ``user_id`` predicate makes deleting others'/system sources a no-op)."""
-        client = await self._client()
-        result = (
-            await client.table(self.TABLE)
-            .delete()
-            .eq("id", source_id)
-            .eq("user_id", user_id)
-            .execute()
-        )
-        return bool(result.data)
+        async with write_scope() as session:
+            result = await session.execute(
+                sa_delete(SignalSources)
+                .where(
+                    SignalSources.id == _bigint(source_id),
+                    SignalSources.user_id == user_id,
+                )
+                .returning(SignalSources.id)
+            )
+            return result.first() is not None
 
     async def mark_health(
         self,
@@ -201,16 +247,17 @@ class SignalSourcesRepository:
         error: Optional[str] = None,
         dead_threshold: int = 3,
     ) -> dict:
-        client = await self._client()
-        cur = (
-            await client.table(self.TABLE)
-            .select("consecutive_failures")
-            .eq("id", source_id)
-            .execute()
-        )
-        prev = (cur.data[0]["consecutive_failures"] if cur.data else 0) or 0
+        async with read_scope() as session:
+            prev_row = (
+                await session.execute(
+                    select(SignalSources.consecutive_failures).where(
+                        SignalSources.id == _bigint(source_id)
+                    )
+                )
+            ).first()
+        prev = (prev_row[0] if prev_row else 0) or 0
         state = compute_health(prev_failures=prev, ok=ok, dead_threshold=dead_threshold)
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.datetime.now(timezone.utc)
         patch: dict[str, Any] = {
             "health": state["health"],
             "consecutive_failures": state["consecutive_failures"],
@@ -222,7 +269,12 @@ class SignalSourcesRepository:
         else:
             patch["last_error"] = (error or "")[:500]
         try:
-            await client.table(self.TABLE).update(patch).eq("id", source_id).execute()
+            async with write_scope() as session:
+                await session.execute(
+                    sa_update(SignalSources)
+                    .where(SignalSources.id == _bigint(source_id))
+                    .values(**patch)
+                )
         except Exception as e:  # noqa: BLE001
             logger.error(f"mark_health failed for {source_id}: {e}")
         return state

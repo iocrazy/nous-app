@@ -165,6 +165,7 @@ from app.models.teams import (  # noqa: F401
 )
 from app.models.topics import (  # noqa: F401
     HotspotUserState,
+    SignalSources,
     UserHiddenSources,
 )
 from app.models.users import (  # noqa: F401
@@ -312,6 +313,7 @@ __all__ = [
     "ProjectLibEntities",
     # topics / signal feed
     "HotspotUserState",
+    "SignalSources",
     "UserHiddenSources",
     # users
     "UserCookies",
