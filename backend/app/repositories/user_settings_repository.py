@@ -42,7 +42,6 @@ from typing import Any, Dict, Optional
 from loguru import logger
 
 from app.core.cache import user_settings_cache
-from app.db.supabase_client import get_async_supabase_admin
 
 
 def merge_settings_json(
@@ -95,17 +94,6 @@ class UserSettingsRepository:
             else:
                 out[key] = value
         return out
-
-    # ── supabase-py helpers (used by delete()) ──────────────────────
-
-    async def _get_client(self):
-        """Get async client (loop-aware, safe for Celery workers)."""
-        return await get_async_supabase_admin()
-
-    async def _get_table(self):
-        """获取表引用"""
-        client = await self._get_client()
-        return client.table("user_settings")
 
     async def _load_user_settings(self, user_id: str) -> Optional[Dict[str, Any]]:
         """SELECT * via the ORM read_scope() session. Returns the same dict
@@ -316,6 +304,11 @@ class UserSettingsRepository:
         """
         删除用户设置
 
+        Core DELETE inside the committing ``write_scope()`` session (the last
+        supabase-py ``.table()`` call in this repo — migrated to the ORM path).
+        Same contract as the legacy REST delete: True on success (whether or
+        not a row existed), False on error, never raises.
+
         Args:
             user_id: 用户 ID
 
@@ -323,8 +316,15 @@ class UserSettingsRepository:
             是否删除成功
         """
         try:
-            table = await self._get_table()
-            await table.delete().eq("user_id", user_id).execute()
+            from sqlalchemy import delete as sa_delete
+
+            from app.db.session import write_scope
+            from app.models import UserSettings
+
+            async with write_scope() as session:
+                await session.execute(
+                    sa_delete(UserSettings).where(UserSettings.user_id == user_id)
+                )
             user_settings_cache.invalidate(user_id)
             logger.info(f"用户设置已删除: user_id={user_id}")
             return True

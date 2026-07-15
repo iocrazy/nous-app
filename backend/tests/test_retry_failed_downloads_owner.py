@@ -283,53 +283,45 @@ async def test_dispatch_empty_specs():
 
 
 # --- repo method: get_media_owner_map -------------------------------------
+# The owner map is an ORM read now (warm-up migration retired the supabase-py
+# `_get_client` boundary) — stub the read_scope() session, not a REST client.
 
 
-class _FakeQuery:
+class _FakeOwnerMapSession:
     def __init__(self, rows):
         self._rows = rows
 
-    def select(self, *a, **k):
-        return self
-
-    def in_(self, *a, **k):
-        return self
-
-    def eq(self, *a, **k):
-        return self
-
-    async def execute(self):
+    async def execute(self, stmt, params=None):
         class _R:
-            data = self._rows
+            def __init__(self, rows):
+                self._rows = rows
 
-        return _R()
+            def all(self):
+                return self._rows
 
-
-class _FakeClient:
-    def __init__(self, rows):
-        self._rows = rows
-
-    def table(self, name):
-        assert name == "resources"
-        return _FakeQuery(self._rows)
+        return _R(self._rows)
 
 
 @pytest.mark.asyncio
 async def test_get_media_owner_map_dedups_and_stringifies(monkeypatch):
+    from contextlib import asynccontextmanager
+
+    from app.repositories import media_repository as mod
     from app.repositories.media_repository import get_media_repository
 
     repo = get_media_repository()
     rows = [
-        {"media_id": 111, "creator_id": "u1"},
-        {"media_id": 222, "creator_id": "u2"},
-        {"media_id": 111, "creator_id": "u9"},  # dup media_id → first wins
-        {"media_id": 333, "creator_id": None},  # no owner → omitted
+        (111, "u1"),
+        (222, "u2"),
+        (111, "u9"),  # dup media_id → first wins
+        (333, None),  # no owner → omitted
     ]
 
-    async def _fake_client():
-        return _FakeClient(rows)
+    @asynccontextmanager
+    async def _fake_read_scope():
+        yield _FakeOwnerMapSession(rows)
 
-    monkeypatch.setattr(repo, "_get_client", _fake_client)
+    monkeypatch.setattr(mod, "read_scope", _fake_read_scope)
 
     out = await repo.get_media_owner_map([111, 222, 333])
     assert out == {"111": "u1", "222": "u2"}
