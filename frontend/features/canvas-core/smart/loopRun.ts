@@ -18,6 +18,7 @@ import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import type { CanvasNode } from '../types';
 import { createOutputNode } from './factories';
 import type { OutputNodeData } from './types';
+import { withGenerationRunner } from './generationRunner';
 import { runLoopCascade, type LoopRunSummary } from './loopRunner';
 import { useLoopRunStore } from './loopRunStore';
 import { createBackendRunner } from './runner.backend';
@@ -39,13 +40,22 @@ function slotTagOf(node: unknown): LoopSlotTag | undefined {
   return data?.loop_slot;
 }
 
-function resolveCaller(): PromptCaller {
+function resolveCaller(loopId: string): PromptCaller {
   const override = useLoopRunStore.getState().runnerOverride;
   if (override) return override;
   const canvasId = useCanvasCoreStore.getState().canvasId;
-  if (canvasId) return createBackendRunner({ canvasId });
-  return mockRunner;
+  const base = canvasId ? createBackendRunner({ canvasId }) : mockRunner;
+  // Loop-driven image prompts carry `gen`+`source_url` in their round
+  // contexts (loopRunner). The text-only backend runner dropped them — wrap
+  // it so generation dispatches, exactly as the composer/regenerate do.
+  return withGenerationRunner(base, {
+    canvasId,
+    shouldStop: () => useLoopRunStore.getState().isStopRequested(loopId),
+  });
 }
+
+/** Test seam — exercises the non-override caller path. */
+export const __test_resolveCaller = resolveCaller;
 
 /** Create-or-update the output slot for one successful round. */
 function upsertRoundSlot(args: {
@@ -151,7 +161,7 @@ export async function startLoopRun(loopId: string): Promise<LoopRunSummary | nul
       loopId,
       nodes,
       connections,
-      caller: resolveCaller(),
+      caller: resolveCaller(loopId),
       handlers: {
         onStatusChange: (id, status, fields) => {
           if (!sameCanvas()) return;
