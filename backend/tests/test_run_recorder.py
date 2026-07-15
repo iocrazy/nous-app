@@ -8,12 +8,21 @@ Covers the contract callers rely on:
 - exception in with-body → status='failed' + error_code
 - AgentPausedError raised pre-insert when agent.paused_reason is set
 - cost_cents computed from snapshot rates
+
+RunRecorder now talks to Postgres via SQLAlchemy ORM sessions
+(``app.db.session.read_scope`` / ``write_scope``) instead of the old
+supabase-py fluent client. These fakes stand in for an AsyncSession:
+``execute()`` is dispatched by sniffing the compiled SQL text, and the
+INSERT / UPDATE calls are recorded so assertions can inspect the bound
+params (the ORM-era equivalent of the old ``insert_calls``/``update_calls``
+supabase fluent-builder lists).
 """
 
 from __future__ import annotations
 
 import time
-from unittest.mock import AsyncMock, patch
+from contextlib import asynccontextmanager
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -21,8 +30,105 @@ import pytest
 from app.services.ai.runner.run_recorder import AgentPausedError, RunRecorder, _truncate
 
 
+class _Row(tuple):
+    """Tuple subclass so ``row[0]`` access (the RETURNING id / scalar column
+    reads RunRecorder does) works exactly like a SQLAlchemy Row."""
+
+
+class _MappingsResult:
+    def __init__(self, mapping: dict | None) -> None:
+        self._mapping = mapping
+
+    def first(self):
+        return self._mapping
+
+    def all(self):
+        return [self._mapping] if self._mapping else []
+
+
+class _ExecResult:
+    def __init__(self, *, scalar=None, first_row=None, mapping=None) -> None:
+        self._scalar = scalar
+        self._first_row = first_row
+        self._mapping = mapping
+
+    def scalar(self):
+        return self._scalar
+
+    def first(self):
+        return self._first_row
+
+    def mappings(self):
+        return _MappingsResult(self._mapping)
+
+
+class _FakeSession:
+    """Stands in for an AsyncSession — dispatches ``execute()`` by sniffing
+    the compiled SQL text, and records every call (insert/update/select) so
+    tests can assert on the params that were bound."""
+
+    def __init__(self, table: "_FakeTable") -> None:
+        self._table = table
+
+    async def execute(self, stmt, params=None):
+        sql = str(stmt).lower()
+        bind_params = dict(params) if params else dict(stmt.compile().params)
+        # ORM-compiled statements carry a "public." schema prefix
+        # (Base.__table_args__ = {"schema": "public"}); the raw text()
+        # INSERTs in run_recorder.py do not. Dispatch on bare table-name
+        # substrings + statement verb so both shapes match.
+        is_insert = sql.lstrip().startswith("insert")
+        is_update = sql.lstrip().startswith("update")
+        is_select = sql.lstrip().startswith("select")
+
+        if is_insert and "agent_run_events" in sql:
+            self._table.event_inserts.append(dict(bind_params))
+            return _ExecResult()
+
+        if is_insert and "agent_runs" in sql:
+            self._table.insert_calls.append(dict(bind_params))
+            row_id = self._table._insert_id
+            return _ExecResult(first_row=_Row((row_id,)))
+
+        if is_select and "ai_agents" in sql:
+            return _ExecResult(
+                mapping={
+                    "paused_reason": self._table._paused_reason,
+                    "max_concurrent_runs": self._table._max_concurrent_runs,
+                }
+            )
+
+        if is_select and "count(" in sql and "agent_runs" in sql:
+            return _ExecResult(scalar=self._table._running_count)
+
+        if is_select and "ai_model_prices" in sql:
+            return _ExecResult(mapping=self._table._price_row)
+
+        if is_select and "cancel_requested" in sql:
+            return _ExecResult(
+                first_row=_Row((self._table._cancel_requested,))
+                if self._table._cancel_requested is not None
+                else None
+            )
+
+        if is_select and "task_tracking" in sql:
+            return _ExecResult(mapping={"metadata": self._table._task_metadata})
+
+        if is_update and "task_tracking" in sql:
+            self._table.update_calls.append(dict(bind_params))
+            return _ExecResult()
+
+        if is_update and "agent_runs" in sql:
+            self._table.update_calls.append(dict(bind_params))
+            return _ExecResult()
+
+        return _ExecResult()
+
+
 class _FakeTable:
-    """Minimal stand-in for the Supabase fluent builder — records each call."""
+    """Records every insert/update RunRecorder issues and answers the
+    handful of SELECTs it performs (pause/concurrency pre-flight, price
+    snapshot, cancel poll, task_tracking metadata read)."""
 
     def __init__(
         self,
@@ -30,77 +136,49 @@ class _FakeTable:
         paused_reason: str | None = None,
         price_row: dict | None = None,
         insert_result_data: list[dict] | None = None,
+        max_concurrent_runs: int | None = None,
+        running_count: int = 0,
+        cancel_requested: bool | None = False,
+        task_metadata: dict | None = None,
     ) -> None:
         self._paused_reason = paused_reason
         self._price_row = price_row
-        self._insert_result_data = insert_result_data or [{"id": str(uuid4())}]
-        self.update_calls: list[dict] = []
+        # agent_runs.id is a BIGINT Snowflake (mig 232); run_recorder does
+        # int(self.run_id) for every follow-up query (heartbeat/cancel/finish),
+        # so the default fixture id must be numeric, not a UUID string (the
+        # pre-mig-232 shape — see test_bigint_snowflake_id_finalises_run for
+        # the regression this guards).
+        insert_result_data = insert_result_data or [{"id": 900000000000001}]
+        self._insert_id = insert_result_data[0]["id"]
+        self._max_concurrent_runs = max_concurrent_runs
+        self._running_count = running_count
+        self._cancel_requested = cancel_requested
+        self._task_metadata = task_metadata if task_metadata is not None else {}
+
         self.insert_calls: list[dict] = []
-        self._cancel_requested = False
-        self._last_select: str | None = None
+        self.update_calls: list[dict] = []
+        self.event_inserts: list[dict] = []
 
     def set_cancel_requested(self, value: bool) -> None:
         self._cancel_requested = value
 
-    def select(self, columns: str):
-        self._last_select = columns
-        return self
+    def scopes(self):
+        """Return a (read_scope, write_scope) pair of asynccontextmanagers
+        yielding a _FakeSession bound to this table."""
 
-    def eq(self, *_args, **_kwargs):
-        return self
+        @asynccontextmanager
+        async def _scope():
+            yield _FakeSession(self)
 
-    def limit(self, _n: int):
-        return self
-
-    def order(self, *_args, **_kwargs):
-        return self
-
-    def maybe_single(self):
-        return self
-
-    def insert(self, payload: dict):
-        self.insert_calls.append(payload)
-        return _Executable({"data": self._insert_result_data})
-
-    def update(self, payload: dict):
-        self.update_calls.append(payload)
-        return _Executable({"data": None})
-
-    async def execute(self):
-        # Dispatch based on last select target
-        if self._last_select and "paused_reason" in self._last_select:
-            return _Result(
-                {
-                    "paused_reason": self._paused_reason,
-                    "max_concurrent_runs": getattr(self, "_max_concurrent_runs", None),
-                }
-            )
-        if self._last_select == "cancel_requested":
-            return _Result({"cancel_requested": self._cancel_requested})
-        if self._last_select and "prompt_cents_per_1k" in self._last_select:
-            return _Result([self._price_row] if self._price_row else [])
-        return _Result(None)
+        return _scope, _scope
 
 
-class _Executable:
-    def __init__(self, payload: dict) -> None:
-        self._payload = payload
-
-    async def execute(self):
-        return _Result(self._payload.get("data"))
-
-
-class _Result:
-    def __init__(self, data) -> None:
-        self.data = data
-
-
-class _FakeClient:
-    def __init__(self, table: _FakeTable) -> None:
-        self._table = table
-
-    def table(self, name: str):
-        return self._table
+def _patched(table: _FakeTable):
+    read_scope, write_scope = table.scopes()
+    return (
+        patch("app.db.session.read_scope", read_scope),
+        patch("app.db.session.write_scope", write_scope),
+    )
 
 
 @pytest.mark.asyncio
@@ -108,9 +186,9 @@ async def test_start_inserts_running_row_and_snapshots_price() -> None:
     table = _FakeTable(
         price_row={"prompt_cents_per_1k": 0.4, "completion_cents_per_1k": 1.2},
     )
-    client = _FakeClient(table)
+    p_read, p_write = _patched(table)
 
-    with patch("app.db.get_async_supabase_admin", AsyncMock(return_value=client)):
+    with p_read, p_write:
         rec = RunRecorder(
             agent_id=uuid4(),
             user_id=uuid4(),
@@ -132,9 +210,9 @@ async def test_start_inserts_running_row_and_snapshots_price() -> None:
 @pytest.mark.asyncio
 async def test_paused_agent_raises_before_insert() -> None:
     table = _FakeTable(paused_reason="budget")
-    client = _FakeClient(table)
+    p_read, p_write = _patched(table)
 
-    with patch("app.db.get_async_supabase_admin", AsyncMock(return_value=client)):
+    with p_read, p_write:
         rec = RunRecorder(
             agent_id=uuid4(),
             user_id=uuid4(),
@@ -151,9 +229,9 @@ async def test_paused_agent_raises_before_insert() -> None:
 @pytest.mark.asyncio
 async def test_exception_in_body_sets_failed() -> None:
     table = _FakeTable()
-    client = _FakeClient(table)
+    p_read, p_write = _patched(table)
 
-    with patch("app.db.get_async_supabase_admin", AsyncMock(return_value=client)):
+    with p_read, p_write:
         rec = RunRecorder(agent_id=uuid4(), user_id=uuid4(), trigger="chat")
         with pytest.raises(RuntimeError):
             async with rec:
@@ -171,9 +249,9 @@ async def test_completion_computes_cost_from_snapshot() -> None:
     table = _FakeTable(
         price_row={"prompt_cents_per_1k": 0.5, "completion_cents_per_1k": 2.0},
     )
-    client = _FakeClient(table)
+    p_read, p_write = _patched(table)
 
-    with patch("app.db.get_async_supabase_admin", AsyncMock(return_value=client)):
+    with p_read, p_write:
         rec = RunRecorder(
             agent_id=uuid4(),
             user_id=uuid4(),
@@ -194,11 +272,10 @@ async def test_completion_computes_cost_from_snapshot() -> None:
 
 @pytest.mark.asyncio
 async def test_cancel_observed_sets_cancelled_status() -> None:
-    table = _FakeTable()
-    client = _FakeClient(table)
-    table.set_cancel_requested(True)
+    table = _FakeTable(cancel_requested=True)
+    p_read, p_write = _patched(table)
 
-    with patch("app.db.get_async_supabase_admin", AsyncMock(return_value=client)):
+    with p_read, p_write:
         rec = RunRecorder(agent_id=uuid4(), user_id=uuid4(), trigger="chat")
         async with rec:
             observed = await rec.check_cancelled()
@@ -211,9 +288,9 @@ async def test_cancel_observed_sets_cancelled_status() -> None:
 @pytest.mark.asyncio
 async def test_heartbeat_rate_limited_to_15s() -> None:
     table = _FakeTable()
-    client = _FakeClient(table)
+    p_read, p_write = _patched(table)
 
-    with patch("app.db.get_async_supabase_admin", AsyncMock(return_value=client)):
+    with p_read, p_write:
         rec = RunRecorder(agent_id=uuid4(), user_id=uuid4(), trigger="chat")
         async with rec:
             # Simulate 10 tight iterations back-to-back
@@ -274,9 +351,9 @@ async def test_bigint_snowflake_id_finalises_run() -> None:
         price_row={"prompt_cents_per_1k": 0.4, "completion_cents_per_1k": 1.2},
         insert_result_data=[{"id": 310819108761487}],  # bigint snowflake, not UUID
     )
-    client = _FakeClient(table)
+    p_read, p_write = _patched(table)
 
-    with patch("app.db.get_async_supabase_admin", AsyncMock(return_value=client)):
+    with p_read, p_write:
         rec = RunRecorder(
             agent_id=uuid4(), user_id=uuid4(), trigger="chat", model="qwen-max"
         )
@@ -290,20 +367,6 @@ async def test_bigint_snowflake_id_finalises_run() -> None:
     assert table.update_calls[0]["status"] == "completed"
 
 
-class _FakeTableWithTaskRow(_FakeTable):
-    """Extends the fake to answer the task_tracking metadata read that
-    RunRecorder._link_task performs (mig 282 task ↔ run linkage)."""
-
-    def __init__(self, *, task_metadata: dict | None = None, **kw) -> None:
-        super().__init__(**kw)
-        self._task_metadata = task_metadata if task_metadata is not None else {}
-
-    async def execute(self):
-        if self._last_select == "metadata":
-            return _Result({"metadata": self._task_metadata})
-        return await super().execute()
-
-
 @pytest.mark.asyncio
 async def test_task_id_links_run_and_task_bidirectionally() -> None:
     """mig 282 paperclip-style linkage: when task_id is passed, the insert
@@ -311,13 +374,13 @@ async def test_task_id_links_run_and_task_bidirectionally() -> None:
     metadata.run_id back onto the task_tracking row (MERGING metadata,
     never replacing it — the shared-jsonb clobber lesson)."""
     agent = uuid4()
-    table = _FakeTableWithTaskRow(
+    table = _FakeTable(
         insert_result_data=[{"id": 310819108761487}],
         task_metadata={"media_id": "42"},
     )
-    client = _FakeClient(table)
+    p_read, p_write = _patched(table)
 
-    with patch("app.db.get_async_supabase_admin", AsyncMock(return_value=client)):
+    with p_read, p_write:
         rec = RunRecorder(
             agent_id=agent,
             user_id=uuid4(),
@@ -342,9 +405,9 @@ async def test_no_task_id_skips_linkage() -> None:
     """Without task_id the recorder behaves exactly as before — one insert,
     one finish update, no task_tracking writes."""
     table = _FakeTable(insert_result_data=[{"id": 310819108761487}])
-    client = _FakeClient(table)
+    p_read, p_write = _patched(table)
 
-    with patch("app.db.get_async_supabase_admin", AsyncMock(return_value=client)):
+    with p_read, p_write:
         rec = RunRecorder(agent_id=uuid4(), user_id=uuid4(), trigger="chat")
         async with rec:
             pass
@@ -354,42 +417,14 @@ async def test_no_task_id_skips_linkage() -> None:
     assert table.update_calls[0]["status"] == "completed"
 
 
-class _FakeTableWithEvents(_FakeTable):
-    """Routes agent_run_events inserts into a separate list so run-row
-    asserts stay untouched."""
-
-    def __init__(self, **kw) -> None:
-        super().__init__(**kw)
-        self.event_inserts: list[dict] = []
-        self._current_table = ""
-
-    def for_table(self, name: str) -> "_FakeTableWithEvents":
-        self._current_table = name
-        return self
-
-    def insert(self, payload: dict):
-        if self._current_table == "agent_run_events":
-            self.event_inserts.append(payload)
-            return _Executable({"data": [payload]})
-        return super().insert(payload)
-
-
-class _FakeClientRouting:
-    def __init__(self, table: _FakeTableWithEvents) -> None:
-        self._table = table
-
-    def table(self, name: str):
-        return self._table.for_table(name)
-
-
 @pytest.mark.asyncio
 async def test_record_event_appends_sequenced_truncated_rows() -> None:
     """mig 285 transcript: record_event auto-increments seq, truncates long
     payload values, and never writes before the run row exists."""
-    table = _FakeTableWithEvents(insert_result_data=[{"id": 310819108761487}])
-    client = _FakeClientRouting(table)
+    table = _FakeTable(insert_result_data=[{"id": 310819108761487}])
+    p_read, p_write = _patched(table)
 
-    with patch("app.db.get_async_supabase_admin", AsyncMock(return_value=client)):
+    with p_read, p_write:
         rec = RunRecorder(agent_id=uuid4(), user_id=uuid4(), trigger="chat")
         # Before start: run_id None → no-op, no insert.
         await rec.record_event("user", {"content": "early"})
@@ -404,34 +439,16 @@ async def test_record_event_appends_sequenced_truncated_rows() -> None:
 
     assert [e["seq"] for e in table.event_inserts] == [1, 2]
     assert table.event_inserts[0]["event_type"] == "user"
-    assert table.event_inserts[0]["payload"]["content"] == "hello"
+    import json as _json
+
+    payload0 = _json.loads(table.event_inserts[0]["payload"])
+    assert payload0["content"] == "hello"
     # Long string value truncated to the cap (+ ellipsis).
-    result_val = table.event_inserts[1]["payload"]["result"]
+    payload1 = _json.loads(table.event_inserts[1]["payload"])
+    result_val = payload1["result"]
     assert len(result_val) <= RunRecorder.EVENT_VALUE_MAX_CHARS + 3
     # Non-string values JSON-encoded.
-    assert "skill" in table.event_inserts[1]["payload"]["args"]
-
-
-class _FakeTableBusy(_FakeTable):
-    """Pre-flight returns a max_concurrent_runs limit; the agent_runs count
-    query (select id, count) returns `running_count`."""
-
-    def __init__(self, *, limit: int, running_count: int, **kw) -> None:
-        super().__init__(**kw)
-        self._max_concurrent_runs = limit
-        self._running_count = running_count
-
-    def select(self, columns: str, **kwargs):
-        self._last_select = columns
-        self._count_query = bool(kwargs.get("count"))
-        return self
-
-    async def execute(self):
-        if self._last_select == "id" and getattr(self, "_count_query", False):
-            r = _Result(None)
-            r.count = self._running_count
-            return r
-        return await super().execute()
+    assert "skill" in payload1["args"]
 
 
 @pytest.mark.asyncio
@@ -440,10 +457,10 @@ async def test_max_concurrent_runs_rejects_with_busy_error() -> None:
     AgentBusyError subclasses AgentPausedError so existing handlers cover it."""
     from app.services.ai.runner.run_recorder import AgentBusyError
 
-    table = _FakeTableBusy(limit=2, running_count=2)
-    client = _FakeClient(table)
+    table = _FakeTable(max_concurrent_runs=2, running_count=2)
+    p_read, p_write = _patched(table)
 
-    with patch("app.db.get_async_supabase_admin", AsyncMock(return_value=client)):
+    with p_read, p_write:
         rec = RunRecorder(agent_id=uuid4(), user_id=uuid4(), trigger="chat")
         with pytest.raises(AgentBusyError):
             async with rec:
@@ -455,12 +472,14 @@ async def test_max_concurrent_runs_rejects_with_busy_error() -> None:
 
 @pytest.mark.asyncio
 async def test_below_concurrency_cap_proceeds() -> None:
-    table = _FakeTableBusy(
-        limit=2, running_count=1, insert_result_data=[{"id": 310819108761487}]
+    table = _FakeTable(
+        max_concurrent_runs=2,
+        running_count=1,
+        insert_result_data=[{"id": 310819108761487}],
     )
-    client = _FakeClient(table)
+    p_read, p_write = _patched(table)
 
-    with patch("app.db.get_async_supabase_admin", AsyncMock(return_value=client)):
+    with p_read, p_write:
         rec = RunRecorder(agent_id=uuid4(), user_id=uuid4(), trigger="chat")
         async with rec:
             pass
