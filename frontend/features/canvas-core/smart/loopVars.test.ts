@@ -29,6 +29,12 @@ describe('injectLoopVariables', () => {
     expect(injectLoopVariables('[进度] of [总数]', { index: 1, total: 4 })).toBe('1/4 of 4');
   });
 
+  it('replaces the canonical {{计数}}/{{总数}}/{{进度}} placeholders', () => {
+    expect(
+      injectLoopVariables('第 {{计数}} 张 / {{总数}} · {{进度}}', { index: 2, total: 8 }),
+    ).toBe('第 2 张 / 8 · 2/8');
+  });
+
   it('trims and passes through text without tokens', () => {
     expect(injectLoopVariables('  plain text  ', { index: 1, total: 1 })).toBe('plain text');
   });

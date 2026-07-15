@@ -1790,9 +1790,9 @@
     "loopStart": "Start",
     "loopRounds": "Rounds",
     "loopRunAll": "Run all",
-    "loopCounterToken": "《Count》",
+    "loopCounterToken": "{{计数}}",
     "loopLabelPlaceholder": "Loop label (optional)",
-    "loopPromptPlaceholder": "Prompt for this round — 《Count》 = round index",
+    "loopPromptPlaceholder": "Prompt for this round — {{计数}} = round index",
     "loopImageWillOutput": "Will output {{n}} image(s)",
     "loopImageEmpty": "Connect an image or image group to the left port"
   },
