@@ -6,7 +6,6 @@ from fastapi import Depends, HTTPException, status
 from loguru import logger
 
 from app.core.deps import AuthContext, get_auth
-from app.db import get_async_supabase_admin
 
 
 async def get_admin_auth(
@@ -17,24 +16,22 @@ async def get_admin_auth(
 
     Raises HTTPException 403 if user is not an admin.
     """
-    try:
-        supabase = await get_async_supabase_admin()
-    except Exception as e:
-        logger.error(f"[AdminAuth] Failed to get Supabase admin client: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Admin service unavailable: {type(e).__name__}",
-        )
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import UserProfiles
 
     try:
-        # Get user profile to check role (use maybe_single to avoid exception on 0 rows)
-        result = (
-            await supabase.table("user_profiles")
-            .select("role")
-            .eq("id", auth.user_id)
-            .maybe_single()
-            .execute()
-        )
+        # first() → None on 0 rows (the maybe_single() semantics the REST path
+        # had); id is the PK so there is never more than one row.
+        async with read_scope() as session:
+            row = (
+                await session.execute(
+                    select(UserProfiles.role)
+                    .where(UserProfiles.id == auth.user_id)
+                    .limit(1)
+                )
+            ).first()
     except Exception as e:
         logger.error(
             f"[AdminAuth] Failed to query user profile for {auth.user_id}: {e}"
@@ -44,13 +41,14 @@ async def get_admin_auth(
             detail=f"Failed to verify admin access: {type(e).__name__}",
         )
 
-    if not result.data:
+    if row is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User profile not found",
         )
 
-    if result.data.get("role") != "admin":
+    # role is a UserRole(str, Enum) → ADMIN == "admin" as a plain str compare.
+    if row[0] != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required",

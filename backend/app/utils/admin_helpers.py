@@ -24,18 +24,21 @@ async def create_audit_log(
 
     This function is non-blocking - audit log failures don't affect the main operation.
     """
+    from app.db.session import write_scope
+    from app.models import AuditLogs
+
     try:
-        supabase = await get_async_supabase_admin()
-        await supabase.table("audit_logs").insert(
-            {
-                "admin_id": admin_id,
-                "action": action,
-                "target_type": target_type,
-                "target_id": target_id,
-                "details": details,
-                "ip_address": ip_address,
-            }
-        ).execute()
+        async with write_scope() as session:
+            session.add(
+                AuditLogs(
+                    admin_id=admin_id,
+                    action=action,
+                    target_type=target_type,
+                    target_id=target_id,
+                    details=details,
+                    ip_address=ip_address,
+                )
+            )
     except Exception as e:
         logger.error(f"Failed to create audit log: {e}")
 
@@ -60,17 +63,24 @@ async def get_user_email_by_id(user_id: str) -> Optional[str]:
 
 async def get_user_username_by_id(user_id: str) -> Optional[str]:
     """Get username from user_profiles."""
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import UserProfiles
+
     try:
-        supabase = await get_async_supabase_admin()
-        result = (
-            await supabase.table("user_profiles")
-            .select("username")
-            .eq("id", user_id)
-            .single()
-            .execute()
-        )
-        if result.data:
-            return result.data.get("username")
+        # The old .single() raised on 0 rows → except → None; first() → None on
+        # 0 rows reaches the same ``return None`` directly.
+        async with read_scope() as session:
+            row = (
+                await session.execute(
+                    select(UserProfiles.username)
+                    .where(UserProfiles.id == user_id)
+                    .limit(1)
+                )
+            ).first()
+        if row is not None:
+            return row[0]
         return None
     except Exception as e:
         logger.warning(f"Failed to get username for {user_id}: {e}")
@@ -190,32 +200,38 @@ async def batch_get_user_auth_info(
 
 
 async def get_user_video_count(user_id: str) -> int:
-    """Get video count for a user."""
-    try:
-        supabase = await get_async_supabase_admin()
-        result = (
-            await supabase.table("parsed_media")
-            .select("id", count="exact")
-            .eq("user_id", user_id)
-            .execute()
-        )
-        return result.count or 0
-    except Exception as e:
-        logger.warning(f"Failed to get video count for {user_id}: {e}")
-        return 0
+    """Get video count for a user.
+
+    Pre-existing broken behavior, preserved deliberately: ``parsed_media.user_id``
+    was dropped in migration 083, so the old PostgREST query raised a 42703
+    ("column does not exist") that the ``except`` swallowed → this counter has
+    returned a constant 0 in prod ever since. #527 fixed the stats surface but
+    missed this helper. The ORM has no ``ParsedMedia.user_id`` attribute to bind
+    against, so there is nothing to translate; a real fix is a resource-centric
+    rewrite that is a semantic change pending product decision — intentionally
+    NOT done in this transport-only refactor. Returning 0 replicates the exact
+    prior outcome without emitting a per-call warning for a known-dead query.
+    """
+    return 0
 
 
 async def get_user_team_count(user_id: str) -> int:
     """Get team membership count for a user."""
+    from sqlalchemy import func, select
+
+    from app.db.session import read_scope
+    from app.models import TeamMembers
+
     try:
-        supabase = await get_async_supabase_admin()
-        result = (
-            await supabase.table("team_members")
-            .select("team_id", count="exact")
-            .eq("user_id", user_id)
-            .execute()
-        )
-        return result.count or 0
+        async with read_scope() as session:
+            count = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(TeamMembers)
+                    .where(TeamMembers.user_id == user_id)
+                )
+            ).scalar()
+        return count or 0
     except Exception as e:
         logger.warning(f"Failed to get team count for {user_id}: {e}")
         return 0
@@ -223,15 +239,21 @@ async def get_user_team_count(user_id: str) -> int:
 
 async def get_team_member_count(team_id: str) -> int:
     """Get member count for a team."""
+    from sqlalchemy import func, select
+
+    from app.db.session import read_scope
+    from app.models import TeamMembers
+
     try:
-        supabase = await get_async_supabase_admin()
-        result = (
-            await supabase.table("team_members")
-            .select("user_id", count="exact")
-            .eq("team_id", team_id)
-            .execute()
-        )
-        return result.count or 0
+        async with read_scope() as session:
+            count = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(TeamMembers)
+                    .where(TeamMembers.team_id == int(str(team_id)))
+                )
+            ).scalar()
+        return count or 0
     except Exception as e:
         logger.warning(f"Failed to get member count for team {team_id}: {e}")
         return 0
