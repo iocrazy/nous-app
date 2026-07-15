@@ -103,6 +103,10 @@ from app.models.ops import (  # noqa: F401
     SystemStatus,
     TaskTracking,
 )
+from app.models.project_library import (  # noqa: F401
+    ProjectCharacters,
+    ProjectLibEntities,
+)
 from app.models.reviews import (  # noqa: F401
     IssueMessages,
     Issues,
@@ -294,6 +298,9 @@ __all__ = [
     "TeamPlans",
     "TeamQuotas",
     "Teams",
+    # project authored library
+    "ProjectCharacters",
+    "ProjectLibEntities",
     # topics / signal feed
     "HotspotUserState",
     "UserHiddenSources",
