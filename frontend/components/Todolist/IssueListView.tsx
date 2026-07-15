@@ -8,7 +8,7 @@
  *         applied client-side against the already-fetched UiIssue list.
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Plus, Search, Columns, Filter, ArrowUpDown, RotateCw } from 'lucide-react';
 
@@ -38,6 +38,7 @@ const BoardViewIcon: React.FC<{ size?: number }> = ({ size = 13 }) => (
 import type { UiIssue, AgentRef, ProjectRef } from './types';
 import type { IssueStatus } from '../../services/issuesService';
 import { IssueStatusIcon, STATUS_ORDER, STATUS_LABEL, PriorityIcon } from './IssueStatusIcon';
+import { STATUS_CONFIG, PIPELINE_ORDER } from './issueConfig';
 import { IssueBoardView } from './IssueBoardView';
 import {
   IssueColumnPicker,
@@ -83,6 +84,12 @@ const AgentAvatar: React.FC<{ initials: string; color?: string; size?: number }>
   </span>
 );
 
+const Kbd: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <kbd className="font-mono text-[10px] leading-none px-1 py-0.5 rounded border border-ink-700 bg-ink-800/50 text-ink-400">
+    {children}
+  </kbd>
+);
+
 interface IssueRowProps {
   issue: UiIssue;
   teamId: string;
@@ -93,6 +100,10 @@ interface IssueRowProps {
 const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentLookup }) => {
   const initials = issue.assignee?.name.slice(0, 2).toUpperCase() ?? (issue.assignee_user_label?.slice(0, 2).toUpperCase() ?? '·');
   const parent = issue.parent_id ? parentLookup.get(issue.parent_id) : null;
+  // An agent is actively working this issue: dispatched to a DBOS workflow and
+  // not yet in a terminal state. Surfaces as an amber pulse (data already on
+  // the row — no extra fetch).
+  const isLive = !!issue.raw.dbos_workflow_id && issue.status !== 'done' && issue.status !== 'cancelled';
   return (
     <Link
       to={`/team/${teamId}/todolist/${issue.identifier}`}
@@ -108,6 +119,12 @@ const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentL
         </span>
       )}
       <span className="flex-1 truncate text-[14px] text-ink-200 group-hover:text-ink-50">{issue.title}</span>
+      {isLive && (
+        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] text-amber-400 bg-amber-500/10 shrink-0" title="An agent is working on this">
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+          running
+        </span>
+      )}
       {visibleCols.has('parent') && parent && (
         <Link
           to={`/team/${teamId}/todolist/${parent.identifier}`}
@@ -192,6 +209,56 @@ function activeFilterCount(filters: IssueFilters): number {
   return n;
 }
 
+/**
+ * Workflow pipeline — the signature element. Status capsules chained in flow
+ * order (Backlog → Todo → In Progress → In Review → Done) with connectors
+ * that read as the direction issues move; Blocked hangs off the side because
+ * it's an incident, not a flow stop. Counts are always global (the pipeline
+ * is the map, the list is the filtered territory); clicking a capsule filters
+ * to that status.
+ */
+const IssuePipeline: React.FC<{
+  issues: UiIssue[];
+  activeStatus: IssueStatus | null;
+  onPick: (s: IssueStatus) => void;
+}> = ({ issues, activeStatus, onPick }) => {
+  const countOf = (s: IssueStatus) => issues.reduce((n, i) => (i.status === s ? n + 1 : n), 0);
+  const capsule = (s: IssueStatus, blocked = false) => {
+    const n = countOf(s);
+    const on = activeStatus === s;
+    const base = on
+      ? 'border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]'
+      : blocked
+        ? 'border-rose-500/30 bg-rose-500/5 text-ink-300 hover:border-rose-500/50 hover:text-ink-100'
+        : 'border-line-strong bg-island text-ink-300 hover:border-[var(--accent-border)] hover:text-ink-100';
+    return (
+      <button
+        key={s}
+        type="button"
+        onClick={() => onPick(s)}
+        title={`${STATUS_CONFIG[s].label} · ${n}`}
+        className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border transition shrink-0 ${base} ${n === 0 ? 'opacity-45' : ''}`}
+      >
+        <IssueStatusIcon status={s} size={12} />
+        <span className="hidden xl:inline">{STATUS_CONFIG[s].label}</span>
+        <span className="text-ink-500 tabular-nums">{n}</span>
+      </button>
+    );
+  };
+  return (
+    <div className="flex items-center min-w-0 flex-1 justify-end overflow-x-auto">
+      {PIPELINE_ORDER.map((s, i) => (
+        <React.Fragment key={s}>
+          {capsule(s)}
+          {i < PIPELINE_ORDER.length - 1 && <span className="w-3.5 h-px bg-line-strong shrink-0" />}
+        </React.Fragment>
+      ))}
+      <span className="w-3 shrink-0" />
+      {capsule('blocked', true)}
+    </div>
+  );
+};
+
 export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, error, viewMode, onViewModeChange, onNewIssue, onRefresh, agents, currentUserId }) => {
   const { teamId } = useParams<{ teamId: string }>();
   const [search, setSearch] = useState('');
@@ -200,6 +267,28 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
   const [filterOpen, setFilterOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
   const [sort, setSort] = useState<IssueSort>(DEFAULT_SORT);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // Keyboard: `C` opens New Issue, `/` focuses search. Guarded against typing
+  // contexts (inputs/textarea/contenteditable), IME composition, modifier
+  // combos, and already-handled events so it never hijacks real input.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
+      const el = document.activeElement as HTMLElement | null;
+      const typing = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+      if (typing) return;
+      if (e.key === '/') {
+        e.preventDefault();
+        searchRef.current?.focus();
+      } else if (e.key === 'c' || e.key === 'C') {
+        e.preventDefault();
+        onNewIssue();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onNewIssue]);
 
   const colScopeKey = teamId ?? 'global';
   const [visibleCols, setVisibleCols] = useState<Set<IssueColumnKey>>(() => loadVisibleColumns(colScopeKey));
@@ -278,25 +367,41 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
 
   const filterCount = activeFilterCount(filters);
 
+  // Pipeline capsule ↔ status filter: a single-status filter lights its
+  // capsule; clicking toggles that status as the sole filter.
+  const pipelineActive: IssueStatus | null =
+    filters.statuses.size === 1 ? Array.from(filters.statuses)[0] : null;
+  const pickStatus = (s: IssueStatus) =>
+    setFilters((prev) => {
+      const only = prev.statuses.size === 1 && prev.statuses.has(s);
+      return { ...prev, statuses: only ? new Set<IssueStatus>() : new Set<IssueStatus>([s]) };
+    });
+
   return (
     <div className={`flex flex-col bg-ink-950 h-full min-h-0`}>
       <div className="flex items-center gap-2 px-4 py-3 sticky top-0 z-10 bg-ink-950">
         <button
           type="button"
           onClick={onNewIssue}
-          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[13px] rounded bg-indigo-500/15 text-indigo-300 ring-1 ring-indigo-500/30 hover:bg-indigo-500/25"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[13px] rounded border transition"
+          style={{ background: 'var(--accent-soft)', color: 'var(--accent-text)', borderColor: 'var(--accent-border)' }}
         >
           <Plus size={13} /> New Issue
+          <Kbd>C</Kbd>
         </button>
         <div className="relative flex-1 max-w-md">
           <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-ink-500" />
           <input
+            ref={searchRef}
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search issues…"
-            className="w-full pl-7 pr-2 py-1.5 text-[13px] bg-ink-900/80 border border-ink-800 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500/40 text-ink-200 placeholder-ink-600"
+            className="w-full pl-7 pr-8 py-1.5 text-[13px] bg-ink-900/80 border border-ink-800 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500/40 text-ink-200 placeholder-ink-600"
           />
+          <span className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none">
+            <Kbd>/</Kbd>
+          </span>
         </div>
         <div className="ml-auto flex items-center gap-1">
           <div className="inline-flex rounded border border-ink-800 bg-ink-900/80 overflow-hidden">
@@ -406,42 +511,40 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5 px-4 py-1.5 text-[12px]">
-        <span className="text-ink-600 mr-1">Quick:</span>
-        {(['all', 'active', 'backlog', 'done'] as QuickFilter[]).map((q) => {
-          const matches = (() => {
-            if (q === 'all') return filters.statuses.size === 0;
-            if (q === 'active') return filters.statuses.size === 2 && filters.statuses.has('todo') && filters.statuses.has('in_progress');
-            if (q === 'backlog') return filters.statuses.size === 1 && filters.statuses.has('backlog');
-            return filters.statuses.size === 1 && filters.statuses.has('done');
-          })();
-          return (
-            <button
-              key={q}
-              type="button"
-              onClick={() => setQuick(q)}
-              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded transition ${
-                matches
-                  ? 'bg-indigo-500/20 text-indigo-200 ring-1 ring-indigo-500/40'
-                  : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800'
-              }`}
-            >
-              {q === 'all' ? 'All' : q === 'active' ? 'Active' : q === 'backlog' ? 'Backlog' : 'Done'}
-            </button>
-          );
-        })}
-        {filters.statuses.size > 0 && (
-          <span className="text-ink-600 ml-3">
-            ·  {Array.from(filters.statuses).map((s) => STATUS_LABEL[s]).join(', ')}
-          </span>
-        )}
+      <div className="flex items-center gap-2 px-4 py-1.5 text-[12px] border-b border-line">
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="text-ink-600">Quick:</span>
+          {(['all', 'active', 'backlog', 'done'] as QuickFilter[]).map((q) => {
+            const matches = (() => {
+              if (q === 'all') return filters.statuses.size === 0;
+              if (q === 'active') return filters.statuses.size === 2 && filters.statuses.has('todo') && filters.statuses.has('in_progress');
+              if (q === 'backlog') return filters.statuses.size === 1 && filters.statuses.has('backlog');
+              return filters.statuses.size === 1 && filters.statuses.has('done');
+            })();
+            return (
+              <button
+                key={q}
+                type="button"
+                onClick={() => setQuick(q)}
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full transition ${
+                  matches
+                    ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] ring-1 ring-[var(--accent-border)]'
+                    : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800'
+                }`}
+              >
+                {q === 'all' ? 'All' : q === 'active' ? 'Active' : q === 'backlog' ? 'Backlog' : 'Done'}
+              </button>
+            );
+          })}
+        </div>
+        <IssuePipeline issues={issues} activeStatus={pipelineActive} onPick={pickStatus} />
         {filterCount > 0 && (
           <button
             type="button"
             onClick={() => setFilters(EMPTY_FILTERS)}
-            className="ml-auto text-[12px] text-ink-500 hover:text-ink-200"
+            className="shrink-0 text-ink-500 hover:text-ink-200"
           >
-            Reset filters ({filterCount})
+            Reset ({filterCount})
           </button>
         )}
       </div>
@@ -459,18 +562,33 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
         ) : viewMode === 'board' ? (
           <IssueBoardView issues={flatSorted} />
         ) : grouped.length === 0 ? (
-          <div className="flex items-center justify-center py-24 text-sm text-ink-500 italic">
-            No issues match the current filters.
+          <div className="flex flex-col items-center justify-center py-24 gap-2 text-center">
+            <span className="w-9 h-9 rounded-xl border border-dashed border-line-strong grid place-items-center text-ink-500">
+              <Plus size={16} />
+            </span>
+            <span className="text-[13px] text-ink-300">No issues match your filters</span>
+            <span className="text-[12px] text-ink-500 inline-flex items-center gap-1">
+              Press <Kbd>C</Kbd> to create one, or adjust filters
+            </span>
           </div>
         ) : (
           grouped.map((g) => (
             <div key={g.status}>
-              <div className="flex items-center gap-2 px-4 pt-3 pb-1">
+              <div className="flex items-center gap-2 px-4 pt-3 pb-1 sticky top-0 z-[5] bg-ink-950 group/gh">
                 <IssueStatusIcon status={g.status} size={12} />
                 <span className="text-[12px] font-semibold text-ink-300 uppercase tracking-wider">
                   {STATUS_LABEL[g.status]}
                 </span>
-                <span className="text-[12px] text-ink-500 ml-auto">{g.items.length}</span>
+                <span className="text-[12px] text-ink-500 tabular-nums">{g.items.length}</span>
+                <span className="flex-1 h-px bg-line ml-1" />
+                <button
+                  type="button"
+                  onClick={onNewIssue}
+                  title="New issue"
+                  className="opacity-0 group-hover/gh:opacity-100 transition w-5 h-5 grid place-items-center rounded text-ink-600 hover:text-ink-300 hover:bg-ink-800"
+                >
+                  <Plus size={12} />
+                </button>
               </div>
               {g.items.map((issue) => (
                 <IssueRow
