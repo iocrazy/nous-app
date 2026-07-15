@@ -49,22 +49,49 @@ from loguru import logger
 DEFAULT_INTERVAL_SECONDS = 30
 
 
-def _write_heartbeat(workflow_id: str) -> None:
-    """Write `heartbeat_at = now()` for the task_tracking row keyed on
-    `dbos_workflow_id = workflow_id`. Errors are swallowed — a missed
-    heartbeat just means the next sweep sees an older timestamp; no
-    point taking the workflow down because of a transient PG hiccup.
+async def _awrite_heartbeat(workflow_id: str) -> None:
+    """Bump ``task_tracking.heartbeat_at`` for ``dbos_workflow_id`` via the ORM
+    write boundary. Errors are swallowed — a missed heartbeat just means the
+    next sweep sees an older timestamp; no point taking the workflow down over
+    a transient PG hiccup. ``heartbeat_at`` is a business-decoration column
+    (route-C rule 3), so a direct business-code PATCH is allowed.
 
-    Sync function on purpose so the daemon thread doesn't need an
-    asyncio loop.
+    Async callers (``async_heartbeat_loop``) await this directly; the sync
+    ``_write_heartbeat`` bridges to it via ``asyncio.run``.
     """
     try:
-        from app.db import get_supabase_admin
+        from sqlalchemy import update as sa_update
 
-        sb = get_supabase_admin()
-        sb.table("task_tracking").update(
-            {"heartbeat_at": datetime.now(timezone.utc).isoformat()}
-        ).eq("dbos_workflow_id", workflow_id).execute()
+        from app.db.session import write_scope
+        from app.models import TaskTracking
+
+        async with write_scope() as session:
+            await session.execute(
+                sa_update(TaskTracking)
+                .where(TaskTracking.dbos_workflow_id == workflow_id)
+                .values(heartbeat_at=datetime.now(timezone.utc))
+            )
+    except Exception as e:
+        logger.opt(exception=True).debug(
+            f"[heartbeat] write failed for workflow_id={workflow_id}: {e}"
+        )
+
+
+def _write_heartbeat(workflow_id: str) -> None:
+    """Sync entry point for the daemon-thread ``heartbeat_loop``. Bridges to
+    the async ORM write with ``asyncio.run`` — after B6 this is only ever
+    called from a thread with NO running loop (the heartbeat daemon thread and
+    the sync context-manager's finally, both sync @DBOS.step contexts). Each
+    tick gets a fresh event loop; NullPool means a fresh asyncpg connection
+    bound to that loop (no cross-loop connection reuse), and the tick interval
+    (30s) makes the per-loop overhead negligible. The async
+    ``async_heartbeat_loop`` awaits ``_awrite_heartbeat`` directly instead —
+    ``asyncio.run()`` would RuntimeError inside its already-running loop.
+    """
+    import asyncio
+
+    try:
+        asyncio.run(_awrite_heartbeat(workflow_id))
     except Exception as e:
         logger.opt(exception=True).debug(
             f"[heartbeat] write failed for workflow_id={workflow_id}: {e}"
@@ -143,13 +170,15 @@ async def async_heartbeat_loop(
     stop_event: Optional[asyncio.Event] = asyncio.Event()
 
     async def _runner() -> None:
-        _write_heartbeat(workflow_id)
+        # Await the async write directly — we are ON the event loop here, so
+        # asyncio.run() (what the sync _write_heartbeat uses) would RuntimeError.
+        await _awrite_heartbeat(workflow_id)
         while True:
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
                 return  # stop signalled
             except asyncio.TimeoutError:
-                _write_heartbeat(workflow_id)
+                await _awrite_heartbeat(workflow_id)
 
     task = asyncio.create_task(_runner(), name=f"heartbeat:{workflow_id[:8]}")
     try:
@@ -160,7 +189,7 @@ async def async_heartbeat_loop(
             await asyncio.wait_for(task, timeout=1.0)
         except asyncio.TimeoutError:
             task.cancel()
-        _write_heartbeat(workflow_id)
+        await _awrite_heartbeat(workflow_id)
 
 
 __all__ = [

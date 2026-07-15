@@ -101,24 +101,28 @@ async def maybe_chain_transcode(
 
 
 async def read_resource_tag_names(resource_id: str) -> set[str]:
-    """Tag names attached to a resource. Uses the supabase admin client
-    so RLS doesn't get in the way of chain helpers / workflow steps."""
-    from app.db.supabase_client import get_async_supabase_admin
+    """Tag names attached to a resource. Runs on the full-privilege ORM
+    session (write-role engine) so RLS doesn't get in the way of chain
+    helpers / workflow steps — same reach as the old admin client. Async, so
+    it is loop-safe under the run_async fresh-loop bridge (NullPool → a fresh
+    asyncpg connection bound to the current loop)."""
+    from sqlalchemy import select
 
-    client = await get_async_supabase_admin()
-    r = await (
-        client.table("resource_tags")
-        .select("tags(name)")
-        .eq("resource_id", resource_id)
-        .execute()
-    )
-    names: set[str] = set()
-    for row in r.data or []:
-        t = row.get("tags") or {}
-        n = t.get("name")
-        if n:
-            names.add(n)
-    return names
+    from app.db.session import read_scope
+    from app.models import ResourceTags, Tags
+
+    # resource_tags.tag_id → tags.id (both BIGINT, mig 078); resource_id BIGINT.
+    # The old PostgREST ``tags(name)`` embedding becomes an explicit join.
+    async with read_scope() as session:
+        rows = (
+            await session.execute(
+                select(Tags.name)
+                .select_from(ResourceTags)
+                .join(Tags, Tags.id == ResourceTags.tag_id)
+                .where(ResourceTags.resource_id == int(resource_id))
+            )
+        ).all()
+    return {r[0] for r in rows if r[0]}
 
 
 async def chain_transcript_summary_for_tags(
@@ -288,21 +292,28 @@ async def chain_summary_for_tags(parsed_media_id: int, user_id: str):
         # Inherit flow_id from the transcript task on the same chain so
         # the summary card lands in the same FlowGroupCard as parse →
         # download → extract_audio → transcript.
-        from app.db.supabase_client import get_async_supabase_admin
-
         async def _read_flow_id() -> str | None:
-            client = await get_async_supabase_admin()
-            r = await (
-                client.table("task_tracking")
-                .select("flow_id")
-                .eq("media_id", str(platform_id) if platform_id else "")
-                .eq("task_type", "ai_transcription")
-                .order("created_at", desc=True)
-                .limit(1)
-                .execute()
-            )
-            rows = r.data or []
-            return rows[0].get("flow_id") if rows else None
+            from sqlalchemy import select
+
+            from app.db.session import read_scope
+            from app.models import TaskTracking
+
+            async with read_scope() as session:
+                row = (
+                    await session.execute(
+                        select(TaskTracking.flow_id)
+                        .where(
+                            TaskTracking.media_id
+                            == (str(platform_id) if platform_id else "")
+                        )
+                        .where(TaskTracking.task_type == "ai_transcription")
+                        .order_by(TaskTracking.created_at.desc())
+                        .limit(1)
+                    )
+                ).first()
+            # flow_id is uuid → str to match the PostgREST value the caller fed
+            # into task_manager.create(flow_id=...).
+            return str(row[0]) if row and row[0] is not None else None
 
         flow_id = await _read_flow_id()
 
