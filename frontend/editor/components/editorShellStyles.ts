@@ -363,13 +363,11 @@ export const EDITOR_SHELL_STYLES = `
 .mh-scene-block:hover .mh-drag-handle,
 .mh-scene-block:focus-within .mh-drag-handle{ opacity:1; }
 .mh-scene-headrow{ display:flex; align-items:center; gap:8px; margin-bottom:13px; flex-wrap:wrap; }
-/* laper parity: entering edit mode must NOT resize the heading. The edit-mode
-   fields therefore share the read-mode slug's exact typographic metrics
-   (--script-mono / 13.5px / weight 400 / uppercase) — see .mh-scene-heading-display
-   at ~440 + the weight/ls override at ~1548. A FILLED token renders as plain
-   slug text (no pill); only an UNSET token gets the subtle chip tint, byte-for-
-   byte the same as the read-mode .mh-heading-chip — so a partially-filled
-   heading looks identical whether you're reading it or editing it. */
+/* laper parity: each heading token is a dropdown trigger that inherits the
+   .mh-scene-heading slug typography (--script-mono / 13.5px / weight 400 /
+   uppercase), so opening a token NEVER resizes the heading. A FILLED token
+   renders as plain slug text (no pill); only an UNSET token gets the subtle
+   chip tint — so a partially-filled heading still reads as a proper slug. */
 .mh-scene-select{
   font-family:var(--script-mono); font-size:13.5px; font-weight:400; letter-spacing:0.01em;
   text-transform:uppercase;
@@ -377,7 +375,7 @@ export const EDITOR_SHELL_STYLES = `
   background:transparent;
   color:var(--sheet-ink); cursor:pointer; white-space:nowrap; line-height:1.5;
 }
-/* Unset token = laper's subtle chip (identical to the read-mode .mh-heading-chip). */
+/* Unset token = laper's subtle chip. */
 .mh-scene-select[data-placeholder]{
   padding:0 7px;
   background:color-mix(in srgb, var(--sheet-ink) 7%, transparent);
@@ -388,7 +386,7 @@ export const EDITOR_SHELL_STYLES = `
   background:color-mix(in srgb, var(--sheet-ink) 12%, transparent);
 }
 .mh-scene-select:focus-visible{ outline:2px solid var(--indigo); outline-offset:1px; }
-/* Asian layout keeps its own script face + case, matching .mh-scene-heading-display.asian. */
+/* Asian layout keeps its own script face + case, matching .mh-scene-heading.asian. */
 .mh-scene-headrow.asian .mh-scene-select{
   font-family:var(--script-hei); font-size:14px; letter-spacing:0.02em; text-transform:none;
 }
@@ -445,21 +443,22 @@ export const EDITOR_SHELL_STYLES = `
 .mh-scene-loc-input::placeholder{ color:var(--sheet-ink-soft); }
 .mh-scene-loc-input:hover{ background:color-mix(in srgb, var(--sheet-ink) 12%, transparent); }
 .mh-scene-loc-input:focus-visible{ outline:2px solid var(--indigo); outline-offset:1px; }
-/* Read-mode scene heading (Task 4.5): a typographic slug that reads like a
-   script heading, not a form. Clicking it reveals the selects above. */
-.mh-scene-heading-display{
-  flex:1; min-width:0; text-align:left; background:none; border:1px solid transparent;
-  border-radius:6px; padding:4px 8px; cursor:text;
-  font-family:var(--script-mono); font-size:13.5px; font-weight:700; letter-spacing:0.04em;
-  text-transform:uppercase; color:var(--sheet-ink);
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+/* Scene heading (laper parity): a row of inline token dropdowns joined by static
+   .·- separators — NOT a read/edit mode swap. The container carries the slug
+   typography (script Courier, uppercase); the tokens (.mh-scene-select) and the
+   separators inherit it, so clicking a token opens its dropdown WITHOUT changing
+   the heading's size or position. */
+.mh-scene-heading{
+  flex:1; min-width:0;
+  font-family:var(--script-mono); font-size:13.5px; font-weight:400; letter-spacing:0.01em;
+  text-transform:uppercase; color:var(--sheet-ink); line-height:1.5;
 }
-.mh-scene-heading-display.asian{
+.mh-scene-heading.asian{
   font-family:var(--script-hei); font-size:14px; letter-spacing:0.02em; text-transform:none;
 }
-.mh-scene-heading-display:hover{ background:var(--surface-2); }
-.mh-scene-heading-display:focus-visible{ outline:2px solid var(--indigo); outline-offset:-2px; }
-.mh-scene-heading-empty{ color:var(--sheet-ink-soft); font-weight:600; text-transform:none; font-style:italic; }
+/* Decorative separators between tokens — keep their exact spaces (". " / " - " /
+   " · "), never interactive, slightly muted so the tokens read as the content. */
+.mh-heading-sep{ white-space:pre; color:var(--sheet-ink-soft); user-select:none; }
 
 /* ===== ELEMENT ROWS (Hollywood layout engine) ===== */
 .mh-el-row{ display:flex; align-items:flex-start; gap:9px; margin:0 0 7px; position:relative; }
@@ -1514,12 +1513,8 @@ export const EDITOR_SHELL_STYLES = `
 /* No focus box AND no focus tint — a real script line shows only the blinking
    caret. (The user explicitly rejected the box; a tint still reads as a box.) */
 .mh-el-row.focused{ background:none; }
-/* #9: slug and action share ONE left margin (flush), like a printed page —
-   drop the heading button's left padding that pushed the slug 8px right. */
-.mh-scene-heading-display{ padding-left:0; }
-/* #3,#11: an unset heading is a faint Courier slugline placeholder, not a
-   jarring italic-sans label. */
-.mh-scene-heading-empty{ font-family:var(--script-mono); font-style:normal; font-weight:600; text-transform:none; color:var(--sheet-ink-soft); opacity:0.5; }
+/* #9: slug and action share ONE left margin (flush) — the heading container has
+   no left padding, so its first token sits on the same column as the action text. */
 /* #5: scene number + block gutter reveal on HOVER of that row/scene ONLY.
    focus-within kept them lit across the whole scene while typing — hide them
    again when focused-but-not-hovered (higher specificity wins over the reveal). */
@@ -1556,16 +1551,8 @@ export const EDITOR_SHELL_STYLES = `
 /* A page, not a panel: screenplay margins (wide left like a bound page) and an
    A4-ish minimum height so even an empty script reads as a sheet of paper. */
 .mh-sheet{ width:780px; padding:56px 48px 72px 72px; min-height:1040px; }
-/* Slug is uppercase REGULAR weight on a printed page (laper too) — position
-   and case carry the meaning, not boldness. */
-.mh-scene-heading-display{ font-weight:400; letter-spacing:0.01em; }
-/* Unset heading = laper's chip tokens, not a prose placeholder. */
-.mh-heading-chip{
-  display:inline-block; padding:0 7px; border-radius:4px;
-  background:color-mix(in srgb, var(--sheet-ink) 7%, transparent);
-  color:var(--sheet-ink-soft);
-}
-.mh-scene-heading-empty{ opacity:0.65; }
+/* Slug is uppercase REGULAR weight on a printed page (laper too) — position and
+   case carry the meaning, not boldness. Weight/case live on .mh-scene-heading. */
 /* Focused empty block whispers its element type (laper/Notion affordance) —
    driven purely by the data-el-type attr, so no component plumbing.
    TipTap mode (M2): ProseMirror always renders a trailing break element
@@ -1684,9 +1671,8 @@ export const EDITOR_SHELL_STYLES = `
 .mh-el-editable[data-el-type='subtitle']:empty::before,
 .mh-el-editable[data-el-type='subtitle']:has(br.ProseMirror-trailingBreak)::before{ content:'Subtitle'; }
 /* 2) Hover tints were the COOL chrome surface (--surface-2, lavender) sitting
-      on the WARM paper — read as a wrong-coloured box around the heading.
-      Warm ink-mix tints instead. */
-.mh-scene-heading-display:hover{ background:color-mix(in srgb, var(--sheet-ink) 5%, transparent); }
+      on the WARM paper — read as a wrong-coloured box. Warm ink-mix tints
+      instead (the heading tokens carry their own hover — see .mh-scene-select). */
 .mh-el-drag:hover,
 .mh-drag-handle:hover{ background:color-mix(in srgb, var(--sheet-ink) 7%, transparent); }
 
@@ -1830,4 +1816,63 @@ export const EDITOR_SHELL_STYLES = `
 .mh-diff-rail .mh-diff-scroll{ padding:12px; gap:12px; }
 .mh-diff-rail .mh-diff-text{ font-size:12px; }
 @media (max-width:1180px){ .mh-version-rail{ display:none; } }
+
+/* ==================================================================
+   SCENE / ELEMENT DRAG HANDLES — bigger hit target + steadier reveal
+   (right-click menu is the other, more reliable entry point).
+   ================================================================== */
+/* The 4-dot grips were ~18×16 and hard to grab; enlarge the clickable box to
+   ~24×24 while keeping the 2×2 dots centred. Later rule → wins the cascade. */
+.mh-drag-handle,
+.mh-el-drag{
+  min-width:22px; min-height:22px; padding:5px 6px;
+  align-content:center; justify-content:center;
+}
+/* Keep the scene gutter up while its block is hovered / focused / being dragged /
+   move-armed — so the handle never vanishes the instant the pointer drifts to it. */
+.mh-scene-block:hover .mh-scene-gutter,
+.mh-scene-block:focus-within .mh-scene-gutter,
+.mh-scene-block.dragging .mh-scene-gutter,
+.mh-scene-block.move-armed .mh-scene-gutter{ opacity:1; }
+/* Element grip stays visible during a drag (the source row shouldn't flicker as
+   all rows arm as drop targets). :has matches the row wrapping the dragged grip. */
+.mh-el-row:has(.mh-el-drag.dragging) .mh-el-gutter{ opacity:1; pointer-events:auto; }
+
+/* ==================================================================
+   SCENE CONTEXT MENU (right-click) + whole-scene MOVE overlay
+   ================================================================== */
+/* Light popup DNA (matches .mh-slash-menu / .mh-heading-pop); fixed to the cursor
+   point (SceneContextMenu clamps it inside the viewport). */
+.mh-scene-ctx-menu{
+  position:fixed; z-index:50; min-width:172px;
+  background:#fff; border:1px solid var(--sheet-border);
+  border-radius:8px; box-shadow:0 12px 32px rgba(35,20,90,0.18);
+  padding:4px; font-family:var(--sans);
+}
+.mh-scene-ctx-item{
+  display:block; width:100%; text-align:left;
+  padding:7px 12px; border:none; background:none; border-radius:5px;
+  font-family:var(--sans); font-size:13px; color:var(--sheet-ink);
+  cursor:pointer; white-space:nowrap;
+}
+.mh-scene-ctx-item:hover{ background:var(--surface-2); }
+.mh-scene-ctx-item.danger{ color:#dc2626; }
+.mh-scene-ctx-item.danger:hover{ background:color-mix(in srgb, #dc2626 10%, transparent); }
+.mh-scene-ctx-divider{ height:1px; margin:4px 6px; background:var(--sheet-border); }
+
+/* Whole-scene move mode: a dashed overlay over the block; dragging it anywhere
+   moves the entire scene. Sits above the content but below any open menu. */
+.mh-scene-move-overlay{
+  position:absolute; inset:0; z-index:30;
+  display:flex; align-items:flex-start; justify-content:center; padding-top:6px;
+  border:2px dashed var(--indigo); border-radius:10px;
+  background:color-mix(in srgb, var(--indigo) 8%, transparent);
+  cursor:grab;
+}
+.mh-scene-move-overlay:active{ cursor:grabbing; }
+.mh-scene-move-hint{
+  font-family:var(--sans); font-size:12px; font-weight:600; color:#fff;
+  background:var(--indigo); padding:3px 10px; border-radius:999px;
+  box-shadow:0 4px 12px rgba(35,20,90,0.25); pointer-events:none;
+}
 `;

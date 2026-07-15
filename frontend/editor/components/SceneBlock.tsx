@@ -22,6 +22,7 @@ import {
   useState,
   type DragEvent,
   type KeyboardEvent,
+  type MouseEvent,
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { applyLocal, buildInverse } from '../opBuilder';
@@ -45,6 +46,7 @@ import type { SaveState } from '../useSceneSync';
 import { ScenePresenceBadge } from '../collab/ScenePresenceBadge';
 import type { PresenceUser } from '../collab/useScriptPresence';
 import { HeadingSelect } from './HeadingSelect';
+import { SceneContextMenu, type SceneContextMenuItem } from './SceneContextMenu';
 
 /** A scene's save status lifted to the shell for the aggregate SaveIndicator. */
 export interface SceneSyncStatus {
@@ -67,6 +69,8 @@ export interface SceneReorderApi {
   onDragOver: (sceneId: string, edge: 'before' | 'after') => void;
   onDrop: (sceneId: string, edge: 'before' | 'after') => void;
   onKeyboardMove: (sceneId: string, direction: 'up' | 'down') => void;
+  /** Delete a whole scene (heading + all its elements) — from the context menu. */
+  onDeleteScene: (sceneId: string) => void;
 }
 
 /** An open @-mention / character-cue / transition-preset picker anchored to
@@ -245,10 +249,9 @@ export function SceneBlock({
     location_text: scene.location_text ?? '',
     time_of_day: scene.time_of_day ?? '',
   });
-  // Head row is dual-state (Task 4.5): a typographic slug by default, the three
-  // selects only while editing. Entering focuses the INT/EXT select; blur out of
-  // the row (or Esc) drops back to the read-mode slug.
-  const [headingEditing, setHeadingEditing] = useState(false);
+  // Head row (laper parity): the three heading tokens (INT/EXT · location · time)
+  // are ALWAYS rendered inline — there is no read/edit mode swap. Clicking a token
+  // opens only that token's dropdown, so the slug never re-lays-out on click.
   // Element-level drag-to-reorder (hover-gutter 6-dot handle): the element being
   // dragged + the live drop target (which row + edge). Kept within this scene —
   // v1 does not support cross-scene element moves.
@@ -257,6 +260,17 @@ export function SceneBlock({
     elementId: string;
     edge: 'top' | 'bottom';
   } | null>(null);
+  // Right-click menu (heading or an element row): viewport point + which row was
+  // clicked (`elementId: null` = the scene heading itself).
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    elementId: string | null;
+  } | null>(null);
+  // "Move whole scene" mode (from the context menu): while armed, an overlay over
+  // the block is draggable and starts a WHOLE-SCENE drag (vs. a single-block drag
+  // from the element grip). Cleared on drop / dragend / Esc / outside click.
+  const [sceneMoveArmed, setSceneMoveArmed] = useState(false);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const headRowRef = useRef<HTMLDivElement | null>(null);
@@ -266,7 +280,6 @@ export function SceneBlock({
     const triggers = headRowRef.current?.querySelectorAll<HTMLElement>('.mh-scene-select');
     triggers?.[idx]?.focus();
   }, []);
-  const headingDisplayRef = useRef<HTMLButtonElement | null>(null);
   const tiptapRef = useRef<TipTapSceneEditorHandle>(null);
   const elementsRef = useRef<ScriptElement[]>(sync.elements);
   const inputTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -714,26 +727,6 @@ export function SceneBlock({
     [scene.id],
   );
 
-  const enterHeadingEdit = useCallback(() => setHeadingEditing(true), []);
-
-  // Leaving the head row entirely (focus moved outside it) returns to read mode.
-  const handleHeadRowBlur = useCallback((e: React.FocusEvent<HTMLDivElement>) => {
-    // A window/tab switch blurs the control without leaving the row — keep the
-    // edit state so the writer returns to the same selects, not a collapsed slug.
-    if (!document.hasFocus()) return;
-    const next = e.relatedTarget as Node | null;
-    if (next && headRowRef.current?.contains(next)) return;
-    setHeadingEditing(false);
-  }, []);
-
-  // Esc abandons heading editing and returns focus to the read-mode slug.
-  const handleHeadRowKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== 'Escape') return;
-    e.stopPropagation();
-    setHeadingEditing(false);
-    requestAnimationFrame(() => headingDisplayRef.current?.focus());
-  }, []);
-
   // ── Reorder wiring (Task 10) ──────────────────────────────────────────────
   const isDragging = reorder?.draggingId === scene.id;
   const dropEdge =
@@ -858,6 +851,79 @@ export function SceneBlock({
     const firstId = elementsRef.current[0]?.id;
     acceptExternalDrop(firstId ? { before_id: firstId } : {});
   }, [externalDrag, acceptExternalDrop]);
+
+  // ── Right-click context menu (delete block / delete scene / move scene) ─────
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+  // Heading right-click: elementId is null (the row IS the scene heading).
+  const openHeadingContextMenu = useCallback((e: MouseEvent) => {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY, elementId: null });
+  }, []);
+  // Element-row right-click, forwarded up from the TipTap NodeView.
+  const handleElementContextMenu = useCallback((elementId: string, x: number, y: number) => {
+    setContextMenu({ x, y, elementId });
+  }, []);
+  // Delete a single element (the right-clicked block). Idempotent delete op; if it
+  // was the scene's last element the scene collapses to the EmptySceneHint.
+  const deleteElement = useCallback(
+    (elementId: string) => {
+      const op: ElementOp = { op: 'delete', element_id: elementId };
+      sync.dispatchOps([op], applyLocal(elementsRef.current, [op]));
+    },
+    [sync],
+  );
+  // Arm whole-scene move mode — the drag overlay (rendered below) takes over.
+  const armSceneMove = useCallback(() => {
+    if (reorder) setSceneMoveArmed(true);
+  }, [reorder]);
+  const disarmSceneMove = useCallback(() => setSceneMoveArmed(false), []);
+
+  // The menu items depend on WHERE it opened: an element row can delete just that
+  // block; the heading can't (a scene must keep its heading). Both can delete the
+  // whole scene and enter move mode. Reorder-dependent items hide when reorder is
+  // unwired (e.g. read-only / storyboard embeds).
+  const contextMenuItems = useMemo<SceneContextMenuItem[]>(() => {
+    if (!contextMenu) return [];
+    const items: SceneContextMenuItem[] = [];
+    const elId = contextMenu.elementId;
+    if (elId) {
+      items.push({
+        key: 'delete-block',
+        label: t('editor.ctxDeleteBlock'),
+        danger: true,
+        onSelect: () => deleteElement(elId),
+      });
+    }
+    if (reorder) {
+      items.push({
+        key: 'delete-scene',
+        label: t('editor.ctxDeleteScene'),
+        danger: true,
+        onSelect: () => reorder.onDeleteScene(scene.id),
+      });
+      items.push({
+        key: 'move-scene',
+        label: t('editor.ctxMoveScene'),
+        dividerBefore: true,
+        onSelect: armSceneMove,
+      });
+    }
+    return items;
+  }, [contextMenu, reorder, scene.id, t, deleteElement, armSceneMove]);
+
+  // Esc / outside-click while move mode is armed cancels it (the overlay itself
+  // disarms on dragend/drop). Armed only ever true when reorder is present.
+  useEffect(() => {
+    if (!sceneMoveArmed) return;
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        disarmSceneMove();
+      }
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [sceneMoveArmed, disarmSceneMove]);
 
   // ── Copilot summon (Task 11) ──────────────────────────────────────────────
   const clearCopilot = useCallback(() => {
@@ -1031,7 +1097,9 @@ export function SceneBlock({
 
   return (
     <div
-      className={`mh-scene-block${isDragging ? ' dragging' : ''}`}
+      className={`mh-scene-block${isDragging ? ' dragging' : ''}${
+        sceneMoveArmed ? ' move-armed' : ''
+      }`}
       ref={containerRef}
       data-testid="scene-block"
       data-scene-id={scene.id}
@@ -1044,14 +1112,16 @@ export function SceneBlock({
       <div
         className={`mh-scene-headrow${format === 'asian' ? ' asian' : ''}`}
         ref={headRowRef}
-        onBlur={headingEditing ? handleHeadRowBlur : undefined}
-        onKeyDown={headingEditing ? handleHeadRowKeyDown : undefined}
-        // Focus anywhere in the heading row (read-mode slug button, the
-        // int/ext + time selects, the location input — focus bubbles) reports
-        // a HEADING cursor so the toolbar's active pill switches to Scene.
+        // Focus anywhere in the heading row (any of the three token selects —
+        // focus bubbles) reports a HEADING cursor so the toolbar's active pill
+        // switches to Scene.
         onFocus={() =>
           onFocusElement?.({ sceneId: scene.id, elementId: null, field: 'heading_int_ext' })
         }
+        // Right-click anywhere on the heading row (including a token chip) → the
+        // scene-level context menu (delete scene / move scene). preventDefault
+        // suppresses the browser menu.
+        onContextMenu={openHeadingContextMenu}
         // Cross-scene drop target: dropping a dragged paragraph on the heading
         // row lands it at the HEAD of this scene (works for empty scenes too).
         onDragOver={externalDrag ? (e) => e.preventDefault() : undefined}
@@ -1103,77 +1173,48 @@ export function SceneBlock({
             ))}
           </button>
         </span>
-        {headingEditing ? (
-          <>
-            <HeadingSelect
-              autoFocus
-              value={meta.heading_int_ext}
-              options={INT_EXT_OPTIONS}
-              placeholder="INT/EXT"
-              ariaLabel={t('editor.intExt')}
-              tabHint={t('editor.headingTabLocation')}
-              onChange={(v) => commitMeta({ heading_int_ext: v })}
-              onTabNext={() => focusHeadField(1)}
-            />
-            <HeadingSelect
-              searchable
-              candidates={locationCandidates}
-              value={meta.location_text}
-              placeholder={t('editor.locationPlaceholder')}
-              ariaLabel={t('editor.location')}
-              tabHint={t('editor.headingTabTime')}
-              onChange={(v) => commitMeta({ location_text: v })}
-              onTabNext={() => focusHeadField(2)}
-            />
-            <HeadingSelect
-              value={meta.time_of_day}
-              options={TIME_OPTIONS}
-              placeholder="DAY/NIGHT"
-              ariaLabel={t('editor.timeOfDay')}
-              onChange={(v) => commitMeta({ time_of_day: v })}
-            />
-          </>
-        ) : (
-          <button
-            type="button"
-            ref={headingDisplayRef}
-            className={`mh-scene-heading-display${format === 'asian' ? ' asian' : ''}`}
-            aria-label={t('editor.editSceneHeading')}
-            onClick={enterHeadingEdit}
-          >
-            {(() => {
-              // Structured read heading: each part renders as clean slug text
-              // when set, or a muted placeholder chip when unset — so a
-              // partially-filled heading (e.g. only a location) still reads as a
-              // proper scene heading (INT/EXT · <loc> · DAY/NIGHT), never a bare
-              // location string. A fully-filled Hollywood heading is exactly the
-              // slug "INT. LOCATION - DAY" (tests assert this textContent).
-              const ie = meta.heading_int_ext.trim();
-              const loc = meta.location_text.trim();
-              const time = meta.time_of_day.trim();
-              const chip = (label: string) => <span className="mh-heading-chip">{label}</span>;
-              if (format === 'asian') {
-                return (
-                  <>
-                    {ie ? ie : chip('INT/EXT')}
-                    {' · '}
-                    {loc ? loc : chip('LOCATION')}
-                    {' · '}
-                    {time ? time : chip('DAY/NIGHT')}
-                  </>
-                );
-              }
-              return (
-                <>
-                  {ie ? `${ie}.` : chip('INT/EXT')}{' '}
-                  {loc ? loc.toUpperCase() : chip('LOCATION')}
-                  {' - '}
-                  {time ? time : chip('DAY/NIGHT')}
-                </>
-              );
-            })()}
-          </button>
-        )}
+        {/* laper parity: the heading is ALWAYS three inline token dropdowns with
+         *  STATIC separators between them — no read/edit mode swap. Clicking a
+         *  token opens only that token's own dropdown; the slug never re-lays-out
+         *  on click. A filled token reads as plain uppercase slug text, an unset
+         *  one as a muted chip (see .mh-scene-select in editorShellStyles.ts) —
+         *  so a partially-filled heading still reads INT. LOCATION - DAY. The
+         *  separators (.·-) are decorative, so a fully-filled Hollywood heading
+         *  still reads as the slug "INT. LOCATION - DAY". */}
+        <span className={`mh-scene-heading${format === 'asian' ? ' asian' : ''}`}>
+          <HeadingSelect
+            value={meta.heading_int_ext}
+            options={INT_EXT_OPTIONS}
+            placeholder="INT/EXT"
+            ariaLabel={t('editor.intExt')}
+            tabHint={t('editor.headingTabLocation')}
+            onChange={(v) => commitMeta({ heading_int_ext: v })}
+            onTabNext={() => focusHeadField(1)}
+          />
+          <span className="mh-heading-sep" aria-hidden="true">
+            {format === 'asian' ? ' · ' : '. '}
+          </span>
+          <HeadingSelect
+            searchable
+            candidates={locationCandidates}
+            value={meta.location_text}
+            placeholder={t('editor.locationPlaceholder')}
+            ariaLabel={t('editor.location')}
+            tabHint={t('editor.headingTabTime')}
+            onChange={(v) => commitMeta({ location_text: v })}
+            onTabNext={() => focusHeadField(2)}
+          />
+          <span className="mh-heading-sep" aria-hidden="true">
+            {format === 'asian' ? ' · ' : ' - '}
+          </span>
+          <HeadingSelect
+            value={meta.time_of_day}
+            options={TIME_OPTIONS}
+            placeholder="DAY/NIGHT"
+            ariaLabel={t('editor.timeOfDay')}
+            onChange={(v) => commitMeta({ time_of_day: v })}
+          />
+        </span>
         <ScenePresenceBadge users={focusPresence ?? []} />
       </div>
 
@@ -1205,6 +1246,7 @@ export function SceneBlock({
           onElementDragOver={handleElementDragOver}
           onElementDrop={handleElementDrop}
           onElementDragEnd={handleElementDragEnd}
+          onElementContextMenu={handleElementContextMenu}
           onSlashChange={handleTiptapSlashChange}
           slashMenu={tiptapSlashMenu}
           onMentionOpen={handleTiptapMentionOpen}
@@ -1264,6 +1306,40 @@ export function SceneBlock({
 
       {dropEdge === 'after' && (
         <div className="mh-drop-indicator after" data-testid="drop-indicator" aria-hidden="true" />
+      )}
+
+      {/* Whole-scene move mode: a draggable overlay covers the block so dragging
+          ANYWHERE on it moves the entire scene (not a single block). It reuses the
+          existing scene-drag machinery (reorder.onDragStart + the block-level drop
+          targets). Disarms on dragend/drop; Esc/outside-click handled above. */}
+      {sceneMoveArmed && reorder && (
+        <div
+          className="mh-scene-move-overlay"
+          role="button"
+          aria-label={t('editor.ctxMoveScene')}
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', scene.id);
+            reorder.onDragStart(scene.id);
+          }}
+          onDragEnd={() => {
+            reorder.onDragEnd();
+            disarmSceneMove();
+          }}
+          onClick={disarmSceneMove}
+        >
+          <span className="mh-scene-move-hint">{t('editor.moveSceneHint')}</span>
+        </div>
+      )}
+
+      {contextMenu && contextMenuItems.length > 0 && (
+        <SceneContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenuItems}
+          onClose={closeContextMenu}
+        />
       )}
     </div>
   );

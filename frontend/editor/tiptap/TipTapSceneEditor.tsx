@@ -129,6 +129,8 @@ export interface TipTapSceneEditorProps {
   onElementDragOver?: (elementId: string, edge: 'top' | 'bottom') => void;
   onElementDrop?: (elementId: string, edge: 'top' | 'bottom') => void;
   onElementDragEnd?: () => void;
+  /** Right-click a row → open the scene context menu at the cursor. */
+  onElementContextMenu?: (elementId: string, x: number, y: number) => void;
   // ── M2: slash menu ('/' at block start) ───────────────────────────────
   /** Fires on every text change with the live filter (text after `/'), or
    *  `null` when this element's line no longer starts with `/`. */
@@ -258,6 +260,9 @@ interface ScriptElementViewRefs {
   onElementDragOverRef: MutableRefObject<((elementId: string, edge: 'top' | 'bottom') => void) | undefined>;
   onElementDropRef: MutableRefObject<((elementId: string, edge: 'top' | 'bottom') => void) | undefined>;
   onElementDragEndRef: MutableRefObject<(() => void) | undefined>;
+  onElementContextMenuRef: MutableRefObject<
+    ((elementId: string, x: number, y: number) => void) | undefined
+  >;
 }
 
 /** The row DOM (spec D5): gutter [num + 4-dot drag handle] + tick + content. */
@@ -332,6 +337,16 @@ function ScriptElementView({ node, editor, getPos }: NodeViewProps, refs: Script
     e.preventDefault();
     onDropCb(attrs.id, elementEdgeFromPointer(e.currentTarget, e.clientY));
   };
+  // Right-click a row → the scene editor's context menu (delete block / delete
+  // scene / move scene). Overrides the browser menu even inside the editable
+  // content so the writer can delete the block they clicked (matches the heading
+  // row). No-op when the callback is unwired (read-only embeds).
+  const onRowContextMenu = (e: ReactMouseEvent<HTMLDivElement>) => {
+    const cb = refs.onElementContextMenuRef.current;
+    if (!cb) return;
+    e.preventDefault();
+    cb(attrs.id, e.clientX, e.clientY);
+  };
 
   // Gutter + tick + content — the SAME three children in both formats;
   // what differs is what wraps them (see the isAsian branch below).
@@ -402,7 +417,12 @@ function ScriptElementView({ node, editor, getPos }: NodeViewProps, refs: Script
             {prefix}
           </span>
         )}
-        <div className={`mh-el-row${dropClass}`} onDragOver={onRowDragOver} onDrop={onRowDrop}>
+        <div
+          className={`mh-el-row${dropClass}`}
+          onDragOver={onRowDragOver}
+          onDrop={onRowDrop}
+          onContextMenu={onRowContextMenu}
+        >
           {gutter}
           {tick}
           {content}
@@ -417,7 +437,13 @@ function ScriptElementView({ node, editor, getPos }: NodeViewProps, refs: Script
   }
 
   return (
-    <NodeViewWrapper as="div" className={`mh-el-row${dropClass}`} onDragOver={onRowDragOver} onDrop={onRowDrop}>
+    <NodeViewWrapper
+      as="div"
+      className={`mh-el-row${dropClass}`}
+      onDragOver={onRowDragOver}
+      onDrop={onRowDrop}
+      onContextMenu={onRowContextMenu}
+    >
       {gutter}
       {tick}
       {content}
@@ -442,6 +468,7 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
       onElementDragOver,
       onElementDrop,
       onElementDragEnd,
+      onElementContextMenu,
       onSlashChange,
       slashMenu,
       onMentionOpen,
@@ -485,6 +512,8 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
     onElementDropRef.current = onElementDrop;
     const onElementDragEndRef = useRef(onElementDragEnd);
     onElementDragEndRef.current = onElementDragEnd;
+    const onElementContextMenuRef = useRef(onElementContextMenu);
+    onElementContextMenuRef.current = onElementContextMenu;
     const onSlashChangeRef = useRef(onSlashChange);
     onSlashChangeRef.current = onSlashChange;
     const onMentionOpenRef = useRef(onMentionOpen);
@@ -534,6 +563,7 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
         onElementDragOverRef,
         onElementDropRef,
         onElementDragEndRef,
+        onElementContextMenuRef,
       };
       const ViewNode = ScriptElementNode.extend({
         addNodeView() {
