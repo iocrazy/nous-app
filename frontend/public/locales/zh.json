@@ -1781,7 +1781,20 @@
       "title": "分组",
       "dropHint": "拖入图片自动收进分组"
     },
-    "arrangeSelected": "整理选中"
+    "arrangeSelected": "整理选中",
+    "loopModeSerial": "循环",
+    "loopModeParallel": "并发",
+    "loopToggleImage": "图片",
+    "loopTogglePrompt": "提示词",
+    "loopBatch": "批次",
+    "loopStart": "起始计数",
+    "loopRounds": "次数",
+    "loopRunAll": "一键运行",
+    "loopCounterToken": "《计数》",
+    "loopLabelPlaceholder": "循环标签（可选）",
+    "loopPromptPlaceholder": "本轮提示词 — 《计数》= 当前轮次",
+    "loopImageWillOutput": "将输出 {{n}} 张",
+    "loopImageEmpty": "把图片或图片组连接到左侧输入口"
   },
   "modelParams": {
     "otherParams": "参数设置",

@@ -44,13 +44,14 @@ afterEach(() => {
 });
 
 describe('LoopNodeView run affordance', () => {
-  it('uses the standard node header instead of the bespoke slate one (P3-B)', () => {
+  it('renders the IC loop card — no legacy select-based header, segmented control present', () => {
     const { container } = renderLoop();
-    const head = container.querySelector('.mh-node-head');
-    expect(head).toBeTruthy();
-    expect(head?.querySelector('.mh-node-title')?.textContent).toBe('Loop');
-    // The zinc-era hardcoded header title colour is gone from the header.
-    expect(head?.querySelector('.text-slate-500')).toBeNull();
+    // The IC parity rewrite (Task 5) dropped the bespoke slate `.mh-node-head`
+    // dropdown header entirely in favour of the segmented mode control.
+    expect(container.querySelector('.mh-node-head')).toBeNull();
+    expect(container.querySelector('.mh-loop-card')).toBeTruthy();
+    expect(screen.getByLabelText('Serial')).toBeInTheDocument();
+    expect(screen.getByLabelText('Parallel')).toBeInTheDocument();
   });
 
   it('idle: Run button starts the loop run', () => {
