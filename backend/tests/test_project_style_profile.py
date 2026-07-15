@@ -51,50 +51,75 @@ class TestSerialize:
 
 
 # ============================================================
-# Repository (engine helpers mocked)
+# Repository (session boundary stubbed; real statement construction)
 # ============================================================
 
 
+class _CaptureResult:
+    def __init__(self, row=None):
+        self._row = row
+
+    def mappings(self):
+        return self
+
+    def first(self):
+        return self._row
+
+
+class _CaptureSession:
+    def __init__(self, row=None) -> None:
+        self.calls: list = []
+        self._row = row
+
+    async def execute(self, stmt, params=None):
+        self.calls.append({"stmt": stmt, "params": params})
+        return _CaptureResult(self._row)
+
+
 @pytest.fixture
-def engine_calls(monkeypatch: pytest.MonkeyPatch) -> dict:
-    calls: dict = {"fetch_one": [], "execute_returning_one": []}
+def fake_session(monkeypatch: pytest.MonkeyPatch) -> _CaptureSession:
+    from contextlib import asynccontextmanager
 
-    async def fake_fetch_one(sql: str, params=None):
-        calls["fetch_one"].append({"sql": sql, "params": params})
-        return calls.get("fetch_one_result")
+    from app.repositories import project_style_profile_repository as mod
 
-    async def fake_execute_returning_one(sql: str, params=None):
-        calls["execute_returning_one"].append({"sql": sql, "params": params})
-        return calls.get("returning_result", {"project_id": params["pid"]})
+    session = _CaptureSession(row={"project_id": 777})
 
-    monkeypatch.setattr("app.db.engine.fetch_one", fake_fetch_one)
-    monkeypatch.setattr(
-        "app.db.engine.execute_returning_one", fake_execute_returning_one
-    )
-    return calls
+    @asynccontextmanager
+    async def _scope():
+        yield session
+
+    monkeypatch.setattr(mod, "read_scope", _scope)
+    monkeypatch.setattr(mod, "write_scope", _scope)
+    return session
 
 
 @pytest.mark.asyncio
-async def test_get_returns_none_when_unsaved(engine_calls: dict) -> None:
+async def test_get_returns_none_when_unsaved(
+    fake_session: _CaptureSession, monkeypatch
+) -> None:
+    fake_session._row = None
     repo = ProjectStyleProfileRepository()
     assert await repo.get(777) is None
+    stmt = fake_session.calls[0]["stmt"]
     # BIGINT column — the bind param must be an int.
-    assert engine_calls["fetch_one"][0]["params"] == {"pid": 777}
+    assert 777 in stmt.compile().params.values()
+    assert "FROM public.project_style_profile" in str(stmt)
 
 
 @pytest.mark.asyncio
 async def test_get_for_storyboard_project_binds_int_and_joins(
-    engine_calls: dict,
+    fake_session: _CaptureSession,
 ) -> None:
+    fake_session._row = None
     repo = ProjectStyleProfileRepository()
     assert await repo.get_for_storyboard_project(888) is None
-    call = engine_calls["fetch_one"][0]
-    assert call["params"] == {"sbid": 888}
-    assert "JOIN public.storyboard_projects" in call["sql"]
+    call = fake_session.calls[0]
+    assert 888 in call["stmt"].compile().params.values()
+    assert "JOIN public.storyboard_projects" in str(call["stmt"])
 
 
 @pytest.mark.asyncio
-async def test_upsert_serializes_jsonb_params(engine_calls: dict) -> None:
+async def test_upsert_serializes_jsonb_params(fake_session: _CaptureSession) -> None:
     repo = ProjectStyleProfileRepository()
     await repo.upsert(
         777,
@@ -103,21 +128,25 @@ async def test_upsert_serializes_jsonb_params(engine_calls: dict) -> None:
         reference_links=["res-1"],
         updated_by="00000000-0000-0000-0000-000000000001",
     )
-    params = engine_calls["execute_returning_one"][0]["params"]
+    # The COALESCE-merge upsert keeps its SQL body (text()) — params travel
+    # separately on the session.execute call.
+    params = fake_session.calls[0]["params"]
     assert params["pid"] == 777
     assert params["style_md"] == "noir look"
     # jsonb travels as JSON text (CAST(:x AS JSONB) in the SQL).
     assert params["visual_style"] == '{"palette": "muted"}'
     assert params["reference_links"] == '["res-1"]'
+    sql = str(fake_session.calls[0]["stmt"])
+    assert "ON CONFLICT (project_id) DO UPDATE" in sql
 
 
 @pytest.mark.asyncio
 async def test_upsert_absent_fields_stay_none_for_coalesce_merge(
-    engine_calls: dict,
+    fake_session: _CaptureSession,
 ) -> None:
     repo = ProjectStyleProfileRepository()
     await repo.upsert(777, style_md="only this")
-    params = engine_calls["execute_returning_one"][0]["params"]
+    params = fake_session.calls[0]["params"]
     # None binds → COALESCE keeps the stored value (never clobber).
     assert params["visual_style"] is None
     assert params["reference_links"] is None

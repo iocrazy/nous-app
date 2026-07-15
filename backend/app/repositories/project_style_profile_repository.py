@@ -4,9 +4,10 @@ One row per project: freeform style guidance (``style_md``), structured
 visual style (``visual_style`` jsonb), and reference links
 (``reference_links`` jsonb array).
 
-Uses the canonical SQLAlchemy-Core helpers in ``app.db.engine`` directly
-(the post-#199 backend DB layer) — this table is new, so there is no
-legacy REST path and no USE_ORM_* dual-track to maintain.
+ORM-model style (read_scope/write_scope + ``ProjectStyleProfile``), converged
+from the raw db_engine call style. The COALESCE-merge upsert keeps its SQL
+body (typed CASTs + column-referencing COALESCE are clearer as SQL) but runs
+on the committing ``write_scope()`` session.
 """
 
 from __future__ import annotations
@@ -14,28 +15,21 @@ from __future__ import annotations
 import json
 from typing import Any, Optional
 
+from sqlalchemy import select, text
+
+from app.db.session import read_scope, write_scope
+from app.models import ProjectStyleProfile, StoryboardProjects
+
 _SELECT_COLUMNS = (
     "project_id, style_md, visual_style, reference_links, "
     "updated_by, created_at, updated_at"
 )
 
-_GET_SQL = (
-    f"SELECT {_SELECT_COLUMNS} FROM public.project_style_profile "
-    "WHERE project_id = :pid"
-)
-
-# Storyboard nodes carry storyboard_projects.id; the profile is keyed on
-# canonical projects.id — bridge through the mig-110 link in one query.
-_GET_FOR_STORYBOARD_SQL = f"""
-    SELECT {', '.join('psp.' + c.strip() for c in _SELECT_COLUMNS.split(','))}
-    FROM public.project_style_profile psp
-    JOIN public.storyboard_projects sp ON sp.project_id = psp.project_id
-    WHERE sp.id = :sbid
-"""
-
 # COALESCE merge: absent (None) fields keep their stored value, so a PUT
 # carrying only style_md never clobbers visual_style / reference_links
 # (the user_settings.settings_json clobber lesson, applied at birth).
+# Kept as SQL (not ORM on_conflict_do_update): the typed CASTs + the
+# stored-column-referencing COALESCE are the whole semantics here.
 _UPSERT_SQL = f"""
     INSERT INTO public.project_style_profile
         (project_id, style_md, visual_style, reference_links, updated_by)
@@ -58,6 +52,16 @@ _UPSERT_SQL = f"""
         updated_by = CAST(:updated_by AS UUID)
     RETURNING {_SELECT_COLUMNS}
 """
+
+_PROFILE_COLS = (
+    ProjectStyleProfile.project_id,
+    ProjectStyleProfile.style_md,
+    ProjectStyleProfile.visual_style,
+    ProjectStyleProfile.reference_links,
+    ProjectStyleProfile.updated_by,
+    ProjectStyleProfile.created_at,
+    ProjectStyleProfile.updated_at,
+)
 
 
 def _serialize(row: dict[str, Any]) -> dict[str, Any]:
@@ -85,10 +89,19 @@ class ProjectStyleProfileRepository:
 
     async def get(self, project_id: int) -> Optional[dict[str, Any]]:
         """The project's profile, or None when none has been saved yet."""
-        from app.db import engine as db_engine
-
-        row = await db_engine.fetch_one(_GET_SQL, {"pid": int(project_id)})
-        return _serialize(row) if row else None
+        async with read_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        select(*_PROFILE_COLS).where(
+                            ProjectStyleProfile.project_id == int(project_id)
+                        )
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        return _serialize(dict(row)) if row else None
 
     async def get_for_storyboard_project(
         self, storyboard_project_id: int
@@ -96,13 +109,26 @@ class ProjectStyleProfileRepository:
         """Profile for the canonical project a storyboard project links to.
 
         None when the storyboard project is unlinked (legacy rows) or no
-        profile has been saved yet."""
-        from app.db import engine as db_engine
-
-        row = await db_engine.fetch_one(
-            _GET_FOR_STORYBOARD_SQL, {"sbid": int(storyboard_project_id)}
-        )
-        return _serialize(row) if row else None
+        profile has been saved yet. Bridges through the mig-110 link in one
+        query (storyboard_projects.project_id → project_style_profile)."""
+        async with read_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        select(*_PROFILE_COLS)
+                        .select_from(ProjectStyleProfile)
+                        .join(
+                            StoryboardProjects,
+                            StoryboardProjects.project_id
+                            == ProjectStyleProfile.project_id,
+                        )
+                        .where(StoryboardProjects.id == int(storyboard_project_id))
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        return _serialize(dict(row)) if row else None
 
     async def upsert(
         self,
@@ -115,27 +141,29 @@ class ProjectStyleProfileRepository:
     ) -> dict[str, Any]:
         """Create-or-merge the profile. ``None`` fields are left untouched
         on update (and take the column default on first insert)."""
-        from app.db import engine as db_engine
-
-        row = await db_engine.execute_returning_one(
-            _UPSERT_SQL,
-            {
-                "pid": int(project_id),
-                "style_md": style_md,
-                "visual_style": (
-                    json.dumps(visual_style) if visual_style is not None else None
-                ),
-                "reference_links": (
-                    json.dumps(reference_links) if reference_links is not None else None
-                ),
-                "updated_by": updated_by,
-            },
-        )
+        async with write_scope() as session:
+            result = await session.execute(
+                text(_UPSERT_SQL),
+                {
+                    "pid": int(project_id),
+                    "style_md": style_md,
+                    "visual_style": (
+                        json.dumps(visual_style) if visual_style is not None else None
+                    ),
+                    "reference_links": (
+                        json.dumps(reference_links)
+                        if reference_links is not None
+                        else None
+                    ),
+                    "updated_by": updated_by,
+                },
+            )
+            row = result.mappings().first()
         if row is None:  # pragma: no cover — RETURNING always yields the row
             raise RuntimeError(
                 f"style profile upsert returned no row (project {project_id})"
             )
-        return _serialize(row)
+        return _serialize(dict(row))
 
 
 _repository: Optional[ProjectStyleProfileRepository] = None

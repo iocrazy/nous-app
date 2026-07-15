@@ -1,8 +1,10 @@
 """Project authored-library ORM models (character canvas epic).
 
-  * ``ProjectCharacters``  — project_characters   (mig 357)
-  * ``ProjectLibEntities`` — project_lib_entities  (mig 358; locations + props
-    in one table, keyed by ``entity_type``)
+  * ``ProjectCharacters``     — project_characters    (mig 357)
+  * ``ProjectLibEntities``    — project_lib_entities  (mig 358; locations +
+    props in one table, keyed by ``entity_type``)
+  * ``ProjectStyleProfile``   — project_style_profile (Canvas+AI M8; one row
+    per project)
 
 Snowflake BIGINT ids ride as strings at the API boundary (bigIntSafeFetch);
 the repos ``str()`` ``id``/``project_id`` on the way out. No scope mixin:
@@ -13,6 +15,7 @@ method (service-role/RLS-bypass model), so the choke point stays inert.
 from __future__ import annotations
 
 import datetime
+import uuid
 
 from sqlalchemy import (
     BigInteger,
@@ -24,12 +27,114 @@ from sqlalchemy import (
     PrimaryKeyConstraint,
     String,
     Text,
+    UniqueConstraint,
+    Uuid,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.orm_base import Base
+
+
+class ProjectStages(Base):
+    """Global SOP lifecycle stage catalog (Phase 5b)."""
+
+    __tablename__ = "project_stages"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="project_stages_pkey"),
+        UniqueConstraint("slug", name="project_stages_slug_key"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_snowflake_id()"),
+    )
+    slug: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    tools_recommended: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+
+
+class ProjectStageHistory(Base):
+    """Append-only per-project stage transition history (Phase 5b)."""
+
+    __tablename__ = "project_stage_history"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["project_id"],
+            ["public.projects.id"],
+            ondelete="CASCADE",
+            name="project_stage_history_project_id_fkey",
+        ),
+        ForeignKeyConstraint(
+            ["stage_id"],
+            ["public.project_stages.id"],
+            name="project_stage_history_stage_id_fkey",
+        ),
+        PrimaryKeyConstraint("id", name="project_stage_history_pkey"),
+        Index("idx_project_stage_history_project", "project_id"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_snowflake_id()"),
+    )
+    project_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    stage_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    entered_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+    exited_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(True))
+    transitioned_by: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+
+
+class ProjectStyleProfile(Base):
+    """Per-project style profile (1 row / project). PK = project_id."""
+
+    __tablename__ = "project_style_profile"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["project_id"],
+            ["public.projects.id"],
+            ondelete="CASCADE",
+            name="project_style_profile_project_id_fkey",
+        ),
+        PrimaryKeyConstraint("project_id", name="project_style_profile_pkey"),
+        {"schema": "public"},
+    )
+
+    project_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    style_md: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''::text")
+    )
+    visual_style: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    reference_links: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
 
 
 class ProjectCharacters(Base):

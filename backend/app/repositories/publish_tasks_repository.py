@@ -1,9 +1,11 @@
 """Distribution 发布任务数据访问层 (publish_tasks / publish_task_accounts).
 
-COMMITTING BOUNDARY —— 与 social_accounts_repository 同范式：每个
-INSERT/UPDATE...RETURNING 走 db_engine.execute_returning_one（eng.begin() 自动
-提交）。绝不 self.fetch_one 写路径（跑在 eng.connect() 无事务，连接关闭静默回滚，
-#498 类，D1 review 抓过两次）。无 RETURNING 的 UPDATE 用基类 self.execute（committing）。
+ORM-model style (read_scope/write_scope + ``PublishTasks`` /
+``PublishTaskAccounts``), converged from the raw db_engine/$N call style.
+Writes run on the committing ``write_scope()`` session (the #498
+silent-rollback class the old docstring warned about is structurally
+impossible here — write_scope always commits). Return dict shapes are
+byte-identical (``_public_*_row`` stringify the snowflake columns).
 
 逐账号业务态 publish_task_accounts.status 由业务代码写（业务态，含 platform 特有的
 'pending_share'），与 DBOS phase 分层（路线 C）。
@@ -11,13 +13,16 @@ INSERT/UPDATE...RETURNING 走 db_engine.execute_returning_one（eng.begin() 自�
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from typing import Any, Optional
 
-from app.db import engine as db_engine
+from sqlalchemy import func, insert, select
+from sqlalchemy import update as sa_update
+
 from app.db.repository_base import AsyncpgRepository
+from app.db.session import read_scope, write_scope
+from app.models import PublishTaskAccounts, PublishTasks, Resources, SocialAccounts
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +33,9 @@ _TASK_BIGINT_COLS = (
     "cover_horizontal_resource_id",
 )
 _ACCOUNT_BIGINT_COLS = ("id", "task_id", "account_id", "resource_id")
+
+_TASK_COLS = tuple(PublishTasks.__table__.columns)
+_ACCOUNT_COLS = tuple(PublishTaskAccounts.__table__.columns)
 
 
 def aggregate_task_status(statuses: list[str]) -> str:
@@ -104,116 +112,124 @@ class PublishTasksRepository(AsyncpgRepository):
     TABLE = "publish_tasks"
 
     async def create_task(self, **f: Any) -> dict:
-        # COMMITTING: INSERT ... RETURNING must use execute_returning_one
-        # (eng.begin auto-commit). self.fetch_one would silently roll back
-        # (#498). resource_ids/topics are jsonb — bind as JSON strings.
-        row = await db_engine.execute_returning_one(
-            """
-            INSERT INTO publish_tasks
-                (user_id, team_id, content_type, resource_ids, title, description,
-                 topics, cover_vertical_resource_id, cover_horizontal_resource_id,
-                 visibility, ai_content, allow_download, distribution_mode)
-            VALUES (:user_id, :team_id, :content_type, CAST(:resource_ids AS jsonb),
-                    :title, :description, CAST(:topics AS jsonb),
-                    :cover_vertical_resource_id, :cover_horizontal_resource_id,
-                    :visibility, :ai_content, :allow_download, :distribution_mode)
-            RETURNING *
-            """,
-            {
-                "user_id": f["user_id"],
-                "team_id": self._bigint(f["team_id"]) if f.get("team_id") else None,
-                "content_type": f.get("content_type", "video"),
-                "resource_ids": json.dumps(f.get("resource_ids") or []),
-                "title": f["title"],
-                "description": f.get("description"),
-                "topics": json.dumps(f.get("topics") or []),
-                "cover_vertical_resource_id": (
+        # jsonb columns (resource_ids/topics) bind native Python lists — the
+        # JSONB type serializes to the same stored value the old
+        # CAST(:x AS jsonb) path wrote.
+        stmt = (
+            insert(PublishTasks)
+            .values(
+                user_id=f["user_id"],
+                team_id=self._bigint(f["team_id"]) if f.get("team_id") else None,
+                content_type=f.get("content_type", "video"),
+                resource_ids=f.get("resource_ids") or [],
+                title=f["title"],
+                description=f.get("description"),
+                topics=f.get("topics") or [],
+                cover_vertical_resource_id=(
                     self._bigint(f["cover_vertical_resource_id"])
                     if f.get("cover_vertical_resource_id")
                     else None
                 ),
-                "cover_horizontal_resource_id": (
+                cover_horizontal_resource_id=(
                     self._bigint(f["cover_horizontal_resource_id"])
                     if f.get("cover_horizontal_resource_id")
                     else None
                 ),
-                "visibility": f.get("visibility", "public"),
-                "ai_content": bool(f.get("ai_content", False)),
-                "allow_download": bool(f.get("allow_download", True)),
-                "distribution_mode": f.get("distribution_mode", "broadcast"),
-            },
+                visibility=f.get("visibility", "public"),
+                ai_content=bool(f.get("ai_content", False)),
+                allow_download=bool(f.get("allow_download", True)),
+                distribution_mode=f.get("distribution_mode", "broadcast"),
+            )
+            .returning(*_TASK_COLS)
         )
-        return _public_task_row(row)
+        async with write_scope() as session:
+            row = (await session.execute(stmt)).mappings().first()
+        return _public_task_row(dict(row))
 
     async def create_task_account(self, **f: Any) -> dict:
-        # COMMITTING path (see create_task).
-        row = await db_engine.execute_returning_one(
-            """
-            INSERT INTO publish_task_accounts
-                (task_id, account_id, resource_id, channel, title, description,
-                 topics, share_id, status)
-            VALUES (:task_id, :account_id, :resource_id, :channel, :title,
-                    :description, CAST(:topics AS jsonb), :share_id, :status)
-            RETURNING *
-            """,
-            {
-                "task_id": self._bigint(f["task_id"]),
-                "account_id": self._bigint(f["account_id"]),
-                "resource_id": (
+        stmt = (
+            insert(PublishTaskAccounts)
+            .values(
+                task_id=self._bigint(f["task_id"]),
+                account_id=self._bigint(f["account_id"]),
+                resource_id=(
                     self._bigint(f["resource_id"]) if f.get("resource_id") else None
                 ),
-                "channel": f.get("channel", "h5"),
-                "title": f.get("title"),
-                "description": f.get("description"),
-                "topics": json.dumps(f["topics"]) if f.get("topics") else None,
-                "share_id": f.get("share_id"),
-                "status": f.get("status", "pending"),
-            },
+                channel=f.get("channel", "h5"),
+                title=f.get("title"),
+                description=f.get("description"),
+                topics=f.get("topics") if f.get("topics") else None,
+                share_id=f.get("share_id"),
+                status=f.get("status", "pending"),
+            )
+            .returning(*_ACCOUNT_COLS)
         )
-        return _public_account_row(row)
+        async with write_scope() as session:
+            row = (await session.execute(stmt)).mappings().first()
+        return _public_account_row(dict(row))
 
     async def set_task_workflow_id(self, task_id: int, wf_id: str) -> None:
-        await self.execute(
-            "UPDATE publish_tasks SET dbos_workflow_id = $1, updated_at = NOW() "
-            "WHERE id = $2",
-            wf_id,
-            self._bigint(task_id),
-        )
+        async with write_scope() as session:
+            await session.execute(
+                sa_update(PublishTasks)
+                .where(PublishTasks.id == self._bigint(task_id))
+                .values(dbos_workflow_id=wf_id, updated_at=func.now())
+            )
 
     async def get_task(self, task_id: int) -> Optional[dict]:
-        row = await self.fetch_one(
-            "SELECT * FROM publish_tasks WHERE id = $1", self._bigint(task_id)
-        )
-        return _public_task_row(row) if row else None
+        async with read_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        select(*_TASK_COLS).where(
+                            PublishTasks.id == self._bigint(task_id)
+                        )
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        return _public_task_row(dict(row)) if row else None
 
     async def list_tasks(self, user_id: str) -> list[dict]:
-        rows = await self.fetch_all(
-            "SELECT * FROM publish_tasks WHERE user_id = $1 "
-            "ORDER BY created_at DESC LIMIT 100",
-            user_id,
-        )
+        async with read_scope() as session:
+            result = await session.execute(
+                select(*_TASK_COLS)
+                .where(PublishTasks.user_id == user_id)
+                .order_by(PublishTasks.created_at.desc())
+                .limit(100)
+            )
+            rows = [dict(m) for m in result.mappings().all()]
         return [_public_task_row(r) for r in rows]
 
     async def get_task_accounts(self, task_id: int) -> list[dict]:
-        rows = await self.fetch_all(
-            """
-            SELECT ta.*, sa.username, sa.avatar_url, sa.platform, sa.platform_user_id
-            FROM publish_task_accounts ta
-            JOIN social_accounts sa ON sa.id = ta.account_id
-            WHERE ta.task_id = $1
-            ORDER BY ta.created_at ASC
-            """,
-            self._bigint(task_id),
-        )
+        async with read_scope() as session:
+            result = await session.execute(
+                select(
+                    *_ACCOUNT_COLS,
+                    SocialAccounts.username,
+                    SocialAccounts.avatar_url,
+                    SocialAccounts.platform,
+                    SocialAccounts.platform_user_id,
+                )
+                .select_from(PublishTaskAccounts)
+                .join(
+                    SocialAccounts,
+                    SocialAccounts.id == PublishTaskAccounts.account_id,
+                )
+                .where(PublishTaskAccounts.task_id == self._bigint(task_id))
+                .order_by(PublishTaskAccounts.created_at.asc())
+            )
+            rows = [dict(m) for m in result.mappings().all()]
         return [_public_account_row(r) for r in rows]
 
     async def set_account_status(
         self, account_row_id: int, status: str, **fields: Any
     ) -> None:
         # Business-state write (publish_task_accounts.status is business, not
-        # DBOS phase). COMMITTING via base self.execute (eng.begin auto-commit).
-        cols = ["status = $1", "updated_at = NOW()"]
-        args: list[Any] = [status]
+        # DBOS phase). Only the provided optional columns are written — the
+        # dynamic column list the old string-assembled UPDATE built by hand.
+        values: dict[str, Any] = {"status": status, "updated_at": func.now()}
         for col in (
             "error_message",
             "published_url",
@@ -222,40 +238,52 @@ class PublishTasksRepository(AsyncpgRepository):
             "share_id",
         ):
             if col in fields:
-                args.append(fields[col])
-                cols.append(f"{col} = ${len(args)}")
-        args.append(self._bigint(account_row_id))
-        await self.execute(
-            f"UPDATE publish_task_accounts SET {', '.join(cols)} "
-            f"WHERE id = ${len(args)}",
-            *args,
-        )
+                values[col] = fields[col]
+        async with write_scope() as session:
+            await session.execute(
+                sa_update(PublishTaskAccounts)
+                .where(PublishTaskAccounts.id == self._bigint(account_row_id))
+                .values(**values)
+            )
 
     async def find_task_account_by_share_id(self, share_id: str) -> Optional[dict]:
-        row = await self.fetch_one(
-            "SELECT * FROM publish_task_accounts WHERE share_id = $1", share_id
-        )
-        return _public_account_row(row) if row else None
+        async with read_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        select(*_ACCOUNT_COLS).where(
+                            PublishTaskAccounts.share_id == share_id
+                        )
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        return _public_account_row(dict(row)) if row else None
 
     async def mark_accounts_cancelled(self, task_id: int) -> None:
-        await self.execute(
-            """
-            UPDATE publish_task_accounts SET status = 'cancelled', updated_at = NOW()
-            WHERE task_id = $1
-              AND status IN ('pending', 'pending_share', 'publishing')
-            """,
-            self._bigint(task_id),
-        )
+        async with write_scope() as session:
+            await session.execute(
+                sa_update(PublishTaskAccounts)
+                .where(
+                    PublishTaskAccounts.task_id == self._bigint(task_id),
+                    PublishTaskAccounts.status.in_(
+                        ["pending", "pending_share", "publishing"]
+                    ),
+                )
+                .values(status="cancelled", updated_at=func.now())
+            )
 
     async def reset_failed_accounts(self, task_id: int) -> None:
-        await self.execute(
-            """
-            UPDATE publish_task_accounts
-            SET status = 'pending', error_message = NULL, updated_at = NOW()
-            WHERE task_id = $1 AND status IN ('failed', 'cancelled')
-            """,
-            self._bigint(task_id),
-        )
+        async with write_scope() as session:
+            await session.execute(
+                sa_update(PublishTaskAccounts)
+                .where(
+                    PublishTaskAccounts.task_id == self._bigint(task_id),
+                    PublishTaskAccounts.status.in_(["failed", "cancelled"]),
+                )
+                .values(status="pending", error_message=None, updated_at=func.now())
+            )
 
     async def get_resource_media_url(self, resource_id: int) -> Optional[str]:
         # resources has NO `url` column (file_path / cover_image_path /
@@ -272,10 +300,18 @@ class PublishTasksRepository(AsyncpgRepository):
         from app.core.config import settings
         from app.services.library.media_storage import ObjectStore, resolve_media_source
 
-        row = await self.fetch_one(
-            "SELECT file_path, creator_id FROM resources WHERE id = $1",
-            self._bigint(resource_id),
-        )
+        async with read_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        select(Resources.file_path, Resources.creator_id).where(
+                            Resources.id == self._bigint(resource_id)
+                        )
+                    )
+                )
+                .mappings()
+                .first()
+            )
         if not row or not row.get("file_path"):
             return None
 
@@ -286,7 +322,7 @@ class PublishTasksRepository(AsyncpgRepository):
 
         return build_filesystem_media_url(
             file_path,
-            row["creator_id"],
+            str(row["creator_id"]),
             media_public_url=settings.MEDIA_PUBLIC_URL,
             download_path=settings.DOWNLOAD_PATH,
             ttl_seconds=3600,

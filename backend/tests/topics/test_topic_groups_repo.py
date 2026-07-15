@@ -1,6 +1,14 @@
+"""TopicGroupRepository — session boundary (converged on the ORM scopes).
+
+The vector-bearing SQL bodies are kept (documented exceptions); these tests
+stub only the read_scope/write_scope session and assert the same shapes the
+old engine-boundary tests asserted.
+"""
+
+from contextlib import asynccontextmanager
+
 import pytest
 
-import app.repositories.topic_groups_repository as mod
 from app.repositories.topic_groups_repository import TopicGroupRepository, _to_int
 
 
@@ -20,65 +28,98 @@ def test_sqlalchemy_binds_vec_with_cast_not_double_colon():
     assert "vec" not in text("SELECT :vec::vector")._bindparams
 
 
+class _Result:
+    def __init__(self, *, row=None, scalar=None):
+        self._row = row
+        self._scalar = scalar
+
+    def mappings(self):
+        return self
+
+    def first(self):
+        return self._row
+
+    def scalar(self):
+        return self._scalar
+
+
+class _Session:
+    def __init__(self, result=None):
+        self.calls: list = []
+        self._result = result if result is not None else _Result()
+
+    async def execute(self, stmt, params=None):
+        self.calls.append({"stmt": stmt, "params": params})
+        return self._result
+
+
+def _patch(monkeypatch, session):
+    from app.repositories import topic_groups_repository as mod
+
+    @asynccontextmanager
+    async def _scope():
+        yield session
+
+    monkeypatch.setattr(mod, "read_scope", _scope)
+    monkeypatch.setattr(mod, "write_scope", _scope)
+    return session
+
+
 @pytest.mark.asyncio
 async def test_nearest_group_passes_vec_and_window(monkeypatch):
-    seen = {}
+    session = _patch(monkeypatch, _Session(_Result(row={"id": "9", "sim": 0.9})))
 
-    async def _fake_fetch_one(sql, params):
-        seen["sql"] = sql
-        seen["params"] = params
-        return {"id": "9", "sim": 0.9}
-
-    monkeypatch.setattr(mod.db_engine, "fetch_one", _fake_fetch_one)
     out = await TopicGroupRepository().nearest_group("[0.1,0.2]", window_hours=48)
+
     assert out == {"id": "9", "sim": 0.9}
-    assert seen["params"] == {"vec": "[0.1,0.2]", "win": 48}
+    call = session.calls[0]
+    assert call["params"] == {"vec": "[0.1,0.2]", "win": 48}
+    sql = str(call["stmt"])
     # CAST(:vec AS vector), NOT :vec::vector — SQLAlchemy text() leaves a bind
     # param unbound when it's immediately followed by the :: cast operator.
-    assert "<=>" in seen["sql"] and "CAST(:vec AS vector)" in seen["sql"]
-    assert ":vec::vector" not in seen["sql"]
+    assert "<=>" in sql and "CAST(:vec AS vector)" in sql
+    assert ":vec::vector" not in sql
 
 
 @pytest.mark.asyncio
 async def test_assign_hotspot_binds_ints(monkeypatch):
-    seen = {}
+    session = _patch(monkeypatch, _Session())
 
-    async def _fake_execute(sql, params):
-        seen["params"] = params
-        return 1
-
-    monkeypatch.setattr(mod.db_engine, "execute", _fake_execute)
     # snowflake ids arrive as strings; must be bound as ints (asyncpg int8 strict)
     await TopicGroupRepository().assign_hotspot("100", "200")
-    assert seen["params"] == {"g": 200, "h": 100}
+
+    stmt = session.calls[0]["stmt"]
+    sql = str(stmt).lower()
+    assert "update public.hotspots" in sql and "topic_group_id" in sql
+    params = stmt.compile().params
+    assert 100 in params.values() and 200 in params.values()
+    assert all(isinstance(v, int) for v in params.values())
 
 
 @pytest.mark.asyncio
 async def test_create_group_returns_id(monkeypatch):
-    async def _fake_ret(sql, params):
-        assert params["label"] == "T"
-        assert params["vec"] == "[1,2]"
-        return 555
+    session = _patch(monkeypatch, _Session(_Result(scalar=555)))
 
-    monkeypatch.setattr(mod.db_engine, "execute_returning_val", _fake_ret)
     gid = await TopicGroupRepository().create_group(label="T", vec="[1,2]")
+
     assert gid == "555"
+    call = session.calls[0]
+    assert call["params"]["label"] == "T"
+    assert call["params"]["vec"] == "[1,2]"
+    assert "RETURNING id::text" in str(call["stmt"])
 
 
 @pytest.mark.asyncio
 async def test_recompute_group_updates_source_count(monkeypatch):
-    seen = {}
+    session = _patch(monkeypatch, _Session())
 
-    async def _fake_execute(sql, params):
-        seen["sql"] = sql
-        seen["params"] = params
-        return 1
-
-    monkeypatch.setattr(mod.db_engine, "execute", _fake_execute)
     await TopicGroupRepository().recompute_group("42")
-    assert seen["params"] == {"g": 42}
-    assert "count(DISTINCT source_id)" in seen["sql"]
+
+    call = session.calls[0]
+    assert call["params"] == {"g": 42}
+    sql = str(call["stmt"])
+    assert "count(DISTINCT source_id)" in sql
     # also persists the distinct member source labels (for the "which
     # platforms" feed tooltip) in the same aggregate pass.
-    assert "source_labels" in seen["sql"]
-    assert "array_agg(DISTINCT source_label" in seen["sql"]
+    assert "source_labels" in sql
+    assert "array_agg(DISTINCT source_label" in sql

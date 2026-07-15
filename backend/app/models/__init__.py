@@ -59,6 +59,18 @@ from app.models.billing import (  # noqa: F401
     PointPricing,
     PointTransactions,
 )
+from app.models.canvas import (  # noqa: F401
+    Canvases,
+    CanvasResourceRefs,
+)
+from app.models.chat import (  # noqa: F401
+    ConversationMemory,
+)
+from app.models.distribution import (  # noqa: F401
+    PublishTaskAccounts,
+    PublishTasks,
+    SocialAccounts,
+)
 from app.models.generated_media import (  # noqa: F401
     GeneratedMedia,
 )
@@ -111,6 +123,9 @@ from app.models.ops import (  # noqa: F401
 from app.models.project_library import (  # noqa: F401
     ProjectCharacters,
     ProjectLibEntities,
+    ProjectStageHistory,
+    ProjectStages,
+    ProjectStyleProfile,
 )
 from app.models.reviews import (  # noqa: F401
     IssueMessages,
@@ -169,6 +184,7 @@ from app.models.topics import (  # noqa: F401
     SignalSources,
     TopicGroups,
     UserHiddenSources,
+    UserTopicInterests,
 )
 from app.models.users import (  # noqa: F401
     UserCookies,
@@ -310,15 +326,28 @@ __all__ = [
     "InspirationApiTokens",
     "InspirationAttachments",
     "InspirationNotes",
+    # canvas
+    "CanvasResourceRefs",
+    "Canvases",
+    # chat / conversations
+    "ConversationMemory",
+    # distribution
+    "PublishTaskAccounts",
+    "PublishTasks",
+    "SocialAccounts",
     # project authored library
     "ProjectCharacters",
     "ProjectLibEntities",
+    "ProjectStageHistory",
+    "ProjectStages",
+    "ProjectStyleProfile",
     # topics / signal feed
     "Hotspots",
     "HotspotUserState",
     "SignalSources",
     "TopicGroups",
     "UserHiddenSources",
+    "UserTopicInterests",
     # users
     "UserCookies",
     "UserMcpServers",

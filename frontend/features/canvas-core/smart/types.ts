@@ -323,7 +323,7 @@ export const SMART_NODE_DEFAULT_WIDTH: Record<SmartNodeType, number> = {
   llm: 300,
   prompt: 280,
   output: 260,
-  loop: 200,
+  loop: 340,
   timeline: 420,
   group: 300,
   character: 280,

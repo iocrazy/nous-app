@@ -1,21 +1,59 @@
-"""Data access for generated_media (Tier-1). Keyset list by (created_at, id) DESC."""
+"""Data access for generated_media (Tier-1). Keyset list by (created_at, id) DESC.
+
+ORM-model style (read_scope/write_scope + select on ``GeneratedMedia``),
+converged from the raw db_engine call style. Return dict shapes are
+byte-identical (native values; ``_normalize`` stringifies the snowflake /
+uuid columns exactly as before).
+"""
 
 from __future__ import annotations
 
 import base64
+import datetime
 import json
 from typing import Optional
 
 from loguru import logger
+from sqlalchemy import Text as SAText
+from sqlalchemy import cast
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import func, select, tuple_
+from sqlalchemy import update as sa_update
 
-from app.db import engine as db_engine
+from app.db.session import read_scope, write_scope
+from app.models import (
+    GeneratedMedia,
+    ScriptProjects,
+    ScriptScenes,
+    ScriptShots,
+)
 from app.services.library.media_storage import ObjectStore, resolve_media_source
 
-_COLS = (
-    "id, scope_id, creator_id, media_kind, mime, file_path, file_size_bytes, "
-    "origin_kind, origin_run_id, agent_id, canvas_id, node_id, prompt, model, "
-    "provider, params, cost_cents, parent_resource_id, derivation_kind, "
-    "promoted_resource_id, conversation_id, created_at"
+# The projection every read returns (matches the legacy _COLS order; the
+# object-store-only content_sha256 stays internal, exactly as before).
+_GM_COLS = (
+    GeneratedMedia.id,
+    GeneratedMedia.scope_id,
+    GeneratedMedia.creator_id,
+    GeneratedMedia.media_kind,
+    GeneratedMedia.mime,
+    GeneratedMedia.file_path,
+    GeneratedMedia.file_size_bytes,
+    GeneratedMedia.origin_kind,
+    GeneratedMedia.origin_run_id,
+    GeneratedMedia.agent_id,
+    GeneratedMedia.canvas_id,
+    GeneratedMedia.node_id,
+    GeneratedMedia.prompt,
+    GeneratedMedia.model,
+    GeneratedMedia.provider,
+    GeneratedMedia.params,
+    GeneratedMedia.cost_cents,
+    GeneratedMedia.parent_resource_id,
+    GeneratedMedia.derivation_kind,
+    GeneratedMedia.promoted_resource_id,
+    GeneratedMedia.conversation_id,
+    GeneratedMedia.created_at,
 )
 
 # Snowflake BIGINT columns: must be str() before reaching the frontend to avoid
@@ -59,12 +97,14 @@ def _decode_cursor(cursor: Optional[str]) -> Optional[tuple[str, int]]:
         return None
 
 
-# Columns for the project-renders join, prefixed so postgres doesn't choke
-# on ambiguous names against script_shots/script_scenes/script_projects
-# (all of which also have an `id`). Row dict keys come back as the bare
-# column name (postgres ignores the qualifier for output naming), so
-# `_normalize` works unchanged.
-_PROJECT_COLS = ", ".join(f"gm.{c.strip()}" for c in _COLS.split(","))
+def _cursor_ts(ts: str) -> datetime.datetime:
+    """Cursor timestamp string → datetime for the asyncpg-strict bind.
+
+    The cursor carries ``str(created_at)`` — ``fromisoformat`` accepts both
+    the space-separated ``str(datetime)`` form and the T-separated ISO form.
+    """
+    return datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+
 
 # origin_kind values that represent a shot's rendered output (image or
 # video) — the only generated_media rows addressable from a project via
@@ -91,32 +131,32 @@ class GeneratedMediaRepository:
         upper bound via a peek-ahead row).
         """
         limit = max(1, min(int(limit), 100))
-        params: dict = {"project_id": int(project_id), "limit": limit + 1}
-        kinds_sql = ", ".join(f"'{k}'" for k in _SHOT_ORIGIN_KINDS)
-        where = [
-            "sp.project_id = :project_id",
-            "sp.status != 'deleted'",
-            f"gm.origin_kind IN ({kinds_sql})",
-        ]
+        stmt = (
+            select(*_GM_COLS)
+            .select_from(GeneratedMedia)
+            .join(ScriptShots, GeneratedMedia.node_id == cast(ScriptShots.id, SAText))
+            .join(ScriptScenes, ScriptScenes.id == ScriptShots.scene_id)
+            .join(ScriptProjects, ScriptProjects.id == ScriptScenes.script_id)
+            .where(
+                ScriptProjects.project_id == int(project_id),
+                ScriptProjects.status != "deleted",
+                GeneratedMedia.origin_kind.in_(_SHOT_ORIGIN_KINDS),
+            )
+        )
         if episode_id is not None:
-            where.append("sp.episode_id = :episode_id")
-            params["episode_id"] = int(episode_id)
+            stmt = stmt.where(ScriptProjects.episode_id == int(episode_id))
         decoded = _decode_cursor(cursor)
         if decoded:
-            params["c_ts"], params["c_id"] = decoded
-            where.append("(gm.created_at, gm.id) < (CAST(:c_ts AS timestamptz), :c_id)")
-        rows = (
-            await db_engine.fetch_all(
-                f"SELECT {_PROJECT_COLS} FROM public.generated_media gm "
-                "JOIN public.script_shots ss ON gm.node_id = CAST(ss.id AS TEXT) "
-                "JOIN public.script_scenes sc ON sc.id = ss.scene_id "
-                "JOIN public.script_projects sp ON sp.id = sc.script_id "
-                f"WHERE {' AND '.join(where)} "
-                "ORDER BY gm.created_at DESC, gm.id DESC LIMIT :limit",
-                params,
+            c_ts, c_id = decoded
+            stmt = stmt.where(
+                tuple_(GeneratedMedia.created_at, GeneratedMedia.id)
+                < tuple_(_cursor_ts(c_ts), c_id)
             )
-            or []
-        )
+        stmt = stmt.order_by(
+            GeneratedMedia.created_at.desc(), GeneratedMedia.id.desc()
+        ).limit(limit + 1)
+        async with read_scope() as session:
+            rows = [dict(m) for m in (await session.execute(stmt)).mappings().all()]
         next_cursor = None
         if len(rows) > limit:
             last = rows[limit - 1]
@@ -135,32 +175,30 @@ class GeneratedMediaRepository:
         limit: int = 30,
     ) -> dict:
         limit = max(1, min(int(limit), 100))
-        params: dict = {"scope_id": scope_id, "limit": limit + 1}
-        where = ["scope_id = :scope_id"]
+        stmt = select(*_GM_COLS).where(GeneratedMedia.scope_id == scope_id)
         if kind:
-            where.append("media_kind = :kind")
-            params["kind"] = kind
+            stmt = stmt.where(GeneratedMedia.media_kind == kind)
         # CC5 asset backlink: generations dispatched from an entity branch
         # carry entity_kind/entity_id in params (stamped by the frontend at
         # dispatch); the library asset strips filter on them (mig 360 index).
         if entity_kind:
-            where.append("params->>'entity_kind' = :entity_kind")
-            params["entity_kind"] = entity_kind
+            stmt = stmt.where(
+                GeneratedMedia.params["entity_kind"].astext == entity_kind
+            )
         if entity_id:
-            where.append("params->>'entity_id' = :entity_id")
-            params["entity_id"] = entity_id
+            stmt = stmt.where(GeneratedMedia.params["entity_id"].astext == entity_id)
         decoded = _decode_cursor(cursor)
         if decoded:
-            params["c_ts"], params["c_id"] = decoded
-            where.append("(created_at, id) < (CAST(:c_ts AS timestamptz), :c_id)")
-        rows = (
-            await db_engine.fetch_all(
-                f"SELECT {_COLS} FROM public.generated_media "
-                f"WHERE {' AND '.join(where)} ORDER BY created_at DESC, id DESC LIMIT :limit",
-                params,
+            c_ts, c_id = decoded
+            stmt = stmt.where(
+                tuple_(GeneratedMedia.created_at, GeneratedMedia.id)
+                < tuple_(_cursor_ts(c_ts), c_id)
             )
-            or []
-        )
+        stmt = stmt.order_by(
+            GeneratedMedia.created_at.desc(), GeneratedMedia.id.desc()
+        ).limit(limit + 1)
+        async with read_scope() as session:
+            rows = [dict(m) for m in (await session.execute(stmt)).mappings().all()]
         next_cursor = None
         if len(rows) > limit:
             last = rows[limit - 1]
@@ -169,36 +207,60 @@ class GeneratedMediaRepository:
         return {"items": [_normalize(r) for r in rows], "next_cursor": next_cursor}
 
     async def get(self, gen_id: int, scope_id: int) -> Optional[dict]:
-        return _normalize(
-            await db_engine.fetch_one(
-                f"SELECT {_COLS} FROM public.generated_media "
-                "WHERE id = :id AND scope_id = :scope_id",
-                {"id": gen_id, "scope_id": scope_id},
+        async with read_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        select(*_GM_COLS).where(
+                            GeneratedMedia.id == gen_id,
+                            GeneratedMedia.scope_id == scope_id,
+                        )
+                    )
+                )
+                .mappings()
+                .first()
             )
-        )
+        return _normalize(dict(row)) if row else None
 
     async def get_by_id(self, gen_id: int) -> Optional[dict]:
         """Fetch a row by id without a scope filter (for public-serve endpoints)."""
-        return _normalize(
-            await db_engine.fetch_one(
-                f"SELECT {_COLS} FROM public.generated_media WHERE id = :id",
-                {"id": gen_id},
+        async with read_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        select(*_GM_COLS).where(GeneratedMedia.id == gen_id)
+                    )
+                )
+                .mappings()
+                .first()
             )
-        )
+        return _normalize(dict(row)) if row else None
 
     async def delete(self, gen_id: int, scope_id: int) -> bool:
         # Capture the location BEFORE deleting so we can clean up an orphaned
         # object-store object afterwards (filesystem cleanup is pre-existing
         # behavior — left as-is; each fs row has a unique uuid path anyway).
-        row = await db_engine.fetch_one(
-            "SELECT file_path FROM public.generated_media "
-            "WHERE id = :id AND scope_id = :scope_id",
-            {"id": gen_id, "scope_id": scope_id},
-        )
-        n = await db_engine.execute(
-            "DELETE FROM public.generated_media WHERE id = :id AND scope_id = :scope_id",
-            {"id": gen_id, "scope_id": scope_id},
-        )
+        async with read_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        select(GeneratedMedia.file_path).where(
+                            GeneratedMedia.id == gen_id,
+                            GeneratedMedia.scope_id == scope_id,
+                        )
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        async with write_scope() as session:
+            result = await session.execute(
+                sa_delete(GeneratedMedia).where(
+                    GeneratedMedia.id == gen_id,
+                    GeneratedMedia.scope_id == scope_id,
+                )
+            )
+            n = result.rowcount
         if n and row:
             await self._maybe_remove_object(row.get("file_path") or "")
         return bool(n)
@@ -217,10 +279,12 @@ class GeneratedMediaRepository:
         loc = resolve_media_source(file_path)
         if not loc.is_object_store:
             return
-        remaining = await db_engine.fetch_val(
-            "SELECT COUNT(*) FROM public.generated_media WHERE file_path = :fp",
-            {"fp": file_path},
-        )
+        async with read_scope() as session:
+            remaining = (
+                await session.execute(
+                    select(func.count()).where(GeneratedMedia.file_path == file_path)
+                )
+            ).scalar()
         if remaining and int(remaining) > 0:
             return  # still referenced — keep the object
         try:
@@ -233,10 +297,17 @@ class GeneratedMediaRepository:
 
     async def mark_promoted(self, gen_id: int, resource_id: int) -> Optional[dict]:
         """Set promoted_resource_id (Tier-1 → Tier-2 link). Returns the row."""
-        return _normalize(
-            await db_engine.execute_returning_one(
-                f"UPDATE public.generated_media SET promoted_resource_id = :rid "
-                f"WHERE id = :id RETURNING {_COLS}",
-                {"id": gen_id, "rid": resource_id},
+        async with write_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        sa_update(GeneratedMedia)
+                        .where(GeneratedMedia.id == gen_id)
+                        .values(promoted_resource_id=resource_id)
+                        .returning(*_GM_COLS)
+                    )
+                )
+                .mappings()
+                .first()
             )
-        )
+        return _normalize(dict(row)) if row else None

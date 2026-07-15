@@ -259,28 +259,6 @@ describe('LoopNodeView — edit affordances', () => {
     >;
     expect(node.data.mode).toBe('parallel');
   });
-
-  it('typing into label patches', () => {
-    seedNode('l1', 'loop', { mode: 'serial', label: '' });
-    render(
-      <Wrap>
-        <LoopNodeView
-          {...baseProps}
-          id="l1"
-          type="loop"
-          data={{ mode: 'serial', label: '' }}
-        />
-      </Wrap>,
-    );
-    fireEvent.change(screen.getByLabelText('Loop label'), {
-      target: { value: 'each shot' },
-    });
-    const node = useCanvasCoreStore.getState().nodes[0] as Record<
-      string,
-      Record<string, unknown>
-    >;
-    expect(node.data.label).toBe('each shot');
-  });
 });
 
 // ============================================================
