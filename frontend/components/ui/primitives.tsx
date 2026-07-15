@@ -16,7 +16,7 @@ import {
   type TextareaHTMLAttributes,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronDown, X } from 'lucide-react';
+import { Check, ChevronDown, Search, X } from 'lucide-react';
 import {
   UI_CONTENT_OVERLAY_INSET_CLASS,
   UI_DIALOG_TRANSITION_MS,
@@ -55,6 +55,12 @@ interface UiSelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
    * appended after, so callers can still tweak layout (width, margins).
    */
   triggerClassName?: string;
+  /**
+   * Show a text search box at the top of the menu that filters options by label.
+   * Defaults to auto (on when there are more than 7 options) — pass `false` to
+   * force it off, or `true` to always show it.
+   */
+  searchable?: boolean;
 }
 
 interface UiSelectOptionItem {
@@ -209,7 +215,13 @@ export const UiCheckbox = forwardRef<HTMLButtonElement, UiCheckboxProps>(
 
 UiCheckbox.displayName = 'UiCheckbox';
 
-export function UiSelect({ className = '', triggerClassName, children, ...props }: UiSelectProps) {
+export function UiSelect({
+  className = '',
+  triggerClassName,
+  searchable,
+  children,
+  ...props
+}: UiSelectProps) {
   const {
     value,
     defaultValue,
@@ -227,6 +239,8 @@ export function UiSelect({ className = '', triggerClassName, children, ...props 
   const listboxIdRef = useRef(`ui-select-${Math.random().toString(36).slice(2, 10)}`);
   const [isOpen, setIsOpen] = useState(false);
   const [onlyLoaded, setOnlyLoaded] = useState(false);
+  const [query, setQuery] = useState('');
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [menuStyle, setMenuStyle] = useState<{ left: number; top: number; width: number }>({
     left: 0,
     top: 0,
@@ -305,15 +319,23 @@ export function UiSelect({ className = '', triggerClassName, children, ...props 
   const richMode = parsedOptions.some(
     (option) => option.description || option.dot || option.loaded !== undefined
   );
+  const showSearch = searchable ?? parsedOptions.length > 7;
   const shownItems = useMemo(() => {
-    if (!(onlyLoaded && hasLoadedInfo)) {
-      return parsedItems;
-    }
-    // Keep the current selection visible even when unloaded, then drop any
-    // group header left without options under it.
-    const kept = parsedItems.filter(
-      (item) => item.kind !== 'option' || item.loaded || item.value === selectedValue
-    );
+    const q = query.trim().toLowerCase();
+    const keepOption = (item: UiSelectOptionItem) => {
+      if (onlyLoaded && hasLoadedInfo && !(item.loaded || item.value === selectedValue)) {
+        return false;
+      }
+      if (q) {
+        const hay = `${typeof item.label === 'string' ? item.label : item.value} ${
+          item.description ?? ''
+        }`.toLowerCase();
+        return hay.includes(q);
+      }
+      return true;
+    };
+    const kept = parsedItems.filter((item) => item.kind !== 'option' || keepOption(item));
+    // Drop group headers left with no options under them.
     return kept.filter((item, index) => {
       if (item.kind !== 'group') {
         return true;
@@ -321,7 +343,7 @@ export function UiSelect({ className = '', triggerClassName, children, ...props 
       const next = kept[index + 1];
       return next != null && next.kind === 'option';
     });
-  }, [onlyLoaded, hasLoadedInfo, parsedItems, selectedValue]);
+  }, [onlyLoaded, hasLoadedInfo, parsedItems, selectedValue, query]);
 
   useEffect(() => {
     if (!isControlled) {
@@ -338,6 +360,18 @@ export function UiSelect({ className = '', triggerClassName, children, ...props 
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Reset the search query when the menu closes; focus the search box on open.
+  useEffect(() => {
+    if (!isOpen) {
+      setQuery('');
+      return;
+    }
+    if (showSearch) {
+      const id = window.setTimeout(() => searchInputRef.current?.focus(), 0);
+      return () => window.clearTimeout(id);
+    }
+  }, [isOpen, showSearch]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -505,11 +539,38 @@ export function UiSelect({ className = '', triggerClassName, children, ...props 
               style={{
                 left: menuStyle.left,
                 top: menuStyle.top,
-                width: menuStyle.width,
-                maxHeight: 240,
+                width: Math.max(menuStyle.width, richMode || showSearch ? 240 : 0),
+                maxHeight: 320,
                 transitionDuration: `${UI_POPOVER_TRANSITION_MS}ms`,
               }}
             >
+              {showSearch ? (
+                <div className="mb-1 flex items-center gap-2 border-b border-ink-700 px-2.5 pb-2 pt-1">
+                  <Search className="h-3.5 w-3.5 shrink-0 text-content-3" />
+                  <input
+                    ref={searchInputRef}
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="Search…"
+                    className="w-full bg-transparent text-sm text-content outline-none placeholder:text-content-3"
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        const first = shownItems.find(
+                          (item) => item.kind === 'option' && !item.disabled
+                        );
+                        if (first && first.kind === 'option') {
+                          commitValue(first.value);
+                          setIsOpen(false);
+                          triggerRef.current?.focus();
+                        }
+                      } else if (event.key === 'Escape') {
+                        setIsOpen(false);
+                        triggerRef.current?.focus();
+                      }
+                    }}
+                  />
+                </div>
+              ) : null}
               <div className="ui-scrollbar max-h-[228px] overflow-y-auto">
                 {hasLoadedInfo ? (
                   <button
