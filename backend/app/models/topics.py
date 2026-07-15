@@ -198,6 +198,26 @@ class SignalSources(Base):
     )
 
 
+class UserTopicInterests(Base):
+    """Per-user interest profile for the "For You" feed (mig 315). PK =
+    user_id; ``embedding`` is the interest vector (pgvector 2048)."""
+
+    __tablename__ = "user_topic_interests"
+    __table_args__ = (
+        PrimaryKeyConstraint("user_id", name="user_topic_interests_pkey"),
+        {"schema": "public"},
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    interest_text: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''::text")
+    )
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(2048))
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+
+
 class UserHiddenSources(Base):
     """Per-user "close/hide" of a signal source (composite PK, mig 316).
 

@@ -59,6 +59,10 @@ from app.models.billing import (  # noqa: F401
     PointPricing,
     PointTransactions,
 )
+from app.models.canvas import (  # noqa: F401
+    Canvases,
+    CanvasResourceRefs,
+)
 from app.models.chat import (  # noqa: F401
     ConversationMemory,
 )
@@ -173,6 +177,7 @@ from app.models.topics import (  # noqa: F401
     SignalSources,
     TopicGroups,
     UserHiddenSources,
+    UserTopicInterests,
 )
 from app.models.users import (  # noqa: F401
     UserCookies,
@@ -314,6 +319,9 @@ __all__ = [
     "InspirationApiTokens",
     "InspirationAttachments",
     "InspirationNotes",
+    # canvas
+    "CanvasResourceRefs",
+    "Canvases",
     # chat / conversations
     "ConversationMemory",
     # project authored library
@@ -326,6 +334,7 @@ __all__ = [
     "SignalSources",
     "TopicGroups",
     "UserHiddenSources",
+    "UserTopicInterests",
     # users
     "UserCookies",
     "UserMcpServers",
