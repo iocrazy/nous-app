@@ -17,6 +17,8 @@ import uuid
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
+    Date,
     DateTime,
     ForeignKeyConstraint,
     Index,
@@ -26,9 +28,48 @@ from sqlalchemy import (
     Uuid,
     text,
 )
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.orm_base import Base
+
+
+class InspirationNotes(Base):
+    """An inspiration note (mig 349). Soft-deleted via ``deleted_at``."""
+
+    __tablename__ = "inspiration_notes"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="inspiration_notes_pkey"),
+        Index("idx_inspiration_notes_user_date", "user_id", "note_date"),
+        Index("idx_inspiration_notes_user_pinned", "user_id", "pinned"),
+        Index("idx_inspiration_notes_tags", "tags", postgresql_using="gin"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_snowflake_id()"),
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    content_md: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''::text")
+    )
+    tags: Mapped[list] = mapped_column(
+        ARRAY(Text), nullable=False, server_default=text("'{}'::text[]")
+    )
+    ref_hotspot: Mapped[dict | None] = mapped_column(JSONB)
+    pinned: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    note_date: Mapped[datetime.date] = mapped_column(Date, nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+    deleted_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(True))
 
 
 class InspirationAttachments(Base):

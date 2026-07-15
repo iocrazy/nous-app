@@ -1,18 +1,28 @@
-"""Repository for inspiration_notes (migration 348).
+"""Repository for inspiration_notes (migration 349).
 
-Pure data access via the service-role supabase client (canvas_repository
-template). Ownership checks live in the service layer — every method here
-trusts its caller. All bigint ids are coerced with _bigint before binding.
+ORM-backed (read_scope/write_scope). Ownership checks live in the service
+layer — every method here trusts its caller. All bigint ids are coerced with
+``_bigint`` before binding. ``InspirationNotes`` carries no scope mixin, so the
+choke point stays inert.
+
+The two aggregate helpers (``activity`` / ``tag_counts``) call the SQL
+table-valued functions (mig 349) via ``text()`` on the read session — the same
+functions the old ``client.rpc`` path invoked.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import datetime
+import uuid
+from datetime import timezone
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
+from sqlalchemy import select, text
+from sqlalchemy import update as sa_update
 
-from app.db.supabase_client import get_async_supabase_admin
+from app.db.session import read_scope, write_scope
+from app.models import InspirationNotes
 
 
 def _bigint(value: Any) -> int:
@@ -21,11 +31,35 @@ def _bigint(value: Any) -> int:
     return int(str(value))
 
 
+def _date(value: Any) -> datetime.date:
+    """Coerce an ISO 'YYYY-MM-DD' string to a date for the DATE column bind
+    (asyncpg's date codec rejects a bare string). Passes a date through."""
+    if isinstance(value, datetime.date) and not isinstance(value, datetime.datetime):
+        return value
+    return datetime.date.fromisoformat(str(value))
+
+
+def _serialize(row: Dict[str, Any]) -> Dict[str, Any]:
+    """REST-shaped dict matching the old PostgREST rendering: uuid → str,
+    datetime/date → ISO str. BIGINT id stays native int; ``tags`` (text[])
+    stays a native list; ``ref_hotspot`` (jsonb) stays a native dict/None."""
+    out: Dict[str, Any] = {}
+    for key, val in row.items():
+        if isinstance(val, uuid.UUID):
+            out[key] = str(val)
+        elif isinstance(val, (datetime.datetime, datetime.date)):
+            out[key] = val.isoformat()
+        else:
+            out[key] = val
+    return out
+
+
+def _row_dict(obj: InspirationNotes) -> Dict[str, Any]:
+    return {col.name: getattr(obj, col.name) for col in obj.__table__.columns}
+
+
 class InspirationNotesRepository:
     TABLE = "inspiration_notes"
-
-    async def _client(self):
-        return await get_async_supabase_admin()
 
     async def create(
         self,
@@ -36,33 +70,41 @@ class InspirationNotesRepository:
         ref_hotspot: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         try:
-            client = await self._client()
-            payload: Dict[str, Any] = {
-                "user_id": user_id,
-                "content_md": content_md,
-                "tags": tags,
-                "note_date": note_date,
-            }
-            if ref_hotspot is not None:
-                payload["ref_hotspot"] = ref_hotspot
-            result = await client.table(self.TABLE).insert(payload).execute()
-            return result.data[0] if result and result.data else None
+            async with write_scope() as session:
+                obj = InspirationNotes(
+                    user_id=user_id,
+                    content_md=content_md,
+                    tags=tags,
+                    note_date=_date(note_date),
+                )
+                if ref_hotspot is not None:
+                    obj.ref_hotspot = ref_hotspot
+                session.add(obj)
+                await session.flush()
+                await session.refresh(obj)  # load server defaults
+                return _serialize(_row_dict(obj))
         except Exception as e:
             logger.error(f"inspiration create failed (user={user_id}): {e}")
             return None
 
     async def get_by_id(self, note_id: Any) -> Optional[Dict[str, Any]]:
         try:
-            client = await self._client()
-            result = (
-                await client.table(self.TABLE)
-                .select("*")
-                .eq("id", _bigint(note_id))
-                .is_("deleted_at", "null")
-                .maybe_single()
-                .execute()
-            )
-            return result.data if result and result.data else None
+            async with read_scope() as session:
+                obj = (
+                    (
+                        await session.execute(
+                            select(InspirationNotes)
+                            .where(
+                                InspirationNotes.id == _bigint(note_id),
+                                InspirationNotes.deleted_at.is_(None),
+                            )
+                            .limit(1)
+                        )
+                    )
+                    .scalars()
+                    .first()
+                )
+            return _serialize(_row_dict(obj)) if obj else None
         except Exception as e:
             logger.error(f"inspiration get_by_id({note_id}) failed: {e}")
             return None
@@ -78,23 +120,23 @@ class InspirationNotesRepository:
         before_id: Optional[Any] = None,
     ) -> List[Dict[str, Any]]:
         try:
-            client = await self._client()
-            query = (
-                client.table(self.TABLE)
-                .select("*")
-                .eq("user_id", user_id)
-                .is_("deleted_at", "null")
+            stmt = select(InspirationNotes).where(
+                InspirationNotes.user_id == user_id,
+                InspirationNotes.deleted_at.is_(None),
             )
             if date:
-                query = query.eq("note_date", date)
+                stmt = stmt.where(InspirationNotes.note_date == _date(date))
             if tag:
-                query = query.contains("tags", [tag])
+                # text[] containment: tags @> ARRAY[:tag]
+                stmt = stmt.where(InspirationNotes.tags.contains([tag]))
             if q:
-                query = query.ilike("content_md", f"%{q}%")
+                stmt = stmt.where(InspirationNotes.content_md.ilike(f"%{q}%"))
             if before_id:
-                query = query.lt("id", _bigint(before_id))
-            result = await query.order("id", desc=True).limit(limit).execute()
-            return result.data or []
+                stmt = stmt.where(InspirationNotes.id < _bigint(before_id))
+            stmt = stmt.order_by(InspirationNotes.id.desc()).limit(limit)
+            async with read_scope() as session:
+                result = await session.execute(stmt)
+                return [_serialize(_row_dict(o)) for o in result.scalars().all()]
         except Exception as e:
             logger.error(f"inspiration list failed (user={user_id}): {e}")
             return []
@@ -108,37 +150,36 @@ class InspirationNotesRepository:
         pinned: Optional[bool] = None,
     ) -> Optional[Dict[str, Any]]:
         try:
-            client = await self._client()
-            payload: Dict[str, Any] = {
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            }
+            values: Dict[str, Any] = {"updated_at": datetime.datetime.now(timezone.utc)}
             if content_md is not None:
-                payload["content_md"] = content_md
+                values["content_md"] = content_md
             if tags is not None:
-                payload["tags"] = tags
+                values["tags"] = tags
             if pinned is not None:
-                payload["pinned"] = pinned
-            result = (
-                await client.table(self.TABLE)
-                .update(payload)
-                .eq("id", _bigint(note_id))
-                .execute()
-            )
-            return result.data[0] if result and result.data else None
+                values["pinned"] = pinned
+            async with write_scope() as session:
+                result = await session.execute(
+                    sa_update(InspirationNotes)
+                    .where(InspirationNotes.id == _bigint(note_id))
+                    .values(**values)
+                    .returning(*InspirationNotes.__table__.columns)
+                )
+                row = result.mappings().first()
+            return _serialize(dict(row)) if row else None
         except Exception as e:
             logger.error(f"inspiration update({note_id}) failed: {e}")
             return None
 
     async def soft_delete(self, note_id: Any) -> bool:
         try:
-            client = await self._client()
-            result = (
-                await client.table(self.TABLE)
-                .update({"deleted_at": datetime.now(timezone.utc).isoformat()})
-                .eq("id", _bigint(note_id))
-                .execute()
-            )
-            return bool(result and result.data)
+            async with write_scope() as session:
+                result = await session.execute(
+                    sa_update(InspirationNotes)
+                    .where(InspirationNotes.id == _bigint(note_id))
+                    .values(deleted_at=datetime.datetime.now(timezone.utc))
+                    .returning(InspirationNotes.id)
+                )
+                return result.first() is not None
         except Exception as e:
             logger.error(f"inspiration soft_delete({note_id}) failed: {e}")
             return False
@@ -147,23 +188,31 @@ class InspirationNotesRepository:
         self, user_id: str, date_from: str, date_to: str
     ) -> List[Dict[str, Any]]:
         try:
-            client = await self._client()
-            result = await client.rpc(
-                "inspiration_activity",
-                {"p_user_id": user_id, "p_from": date_from, "p_to": date_to},
-            ).execute()
-            return result.data or []
+            async with read_scope() as session:
+                result = await session.execute(
+                    text(
+                        "SELECT day, cnt FROM inspiration_activity("
+                        "CAST(:p_user_id AS uuid), CAST(:p_from AS date), "
+                        "CAST(:p_to AS date))"
+                    ),
+                    {"p_user_id": user_id, "p_from": date_from, "p_to": date_to},
+                )
+                return [_serialize(dict(r)) for r in result.mappings().all()]
         except Exception as e:
             logger.error(f"inspiration activity failed (user={user_id}): {e}")
             return []
 
     async def tag_counts(self, user_id: str) -> List[Dict[str, Any]]:
         try:
-            client = await self._client()
-            result = await client.rpc(
-                "inspiration_tag_counts", {"p_user_id": user_id}
-            ).execute()
-            return result.data or []
+            async with read_scope() as session:
+                result = await session.execute(
+                    text(
+                        "SELECT tag, cnt FROM inspiration_tag_counts("
+                        "CAST(:p_user_id AS uuid))"
+                    ),
+                    {"p_user_id": user_id},
+                )
+                return [_serialize(dict(r)) for r in result.mappings().all()]
         except Exception as e:
             logger.error(f"inspiration tag_counts failed (user={user_id}): {e}")
             return []
