@@ -4,20 +4,26 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from loguru import logger
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from app.db.supabase_client import get_async_supabase_admin
+from app.db.session import read_scope, write_scope
+from app.models import HotspotUserState
 
 # The three personal flags a user can toggle on a hotspot.
 STATE_FLAGS = ("is_read", "is_saved", "is_hidden")
 
 
 class HotspotUserStateRepository:
-    """Per-user read/saved/hidden state for global hotspots."""
+    """Per-user read/saved/hidden state for global hotspots.
+
+    ORM-backed (read_scope/write_scope). ``HotspotUserState`` carries no scope
+    mixin: ownership is scoped explicitly by the ``user_id`` predicate in every
+    method (the service-role/RLS-bypass model, unchanged), so the choke point
+    stays inert.
+    """
 
     TABLE = "hotspot_user_state"
-
-    async def _client(self):
-        return await get_async_supabase_admin()
 
     async def get_states(
         self, user_id: str, hotspot_ids: list[str]
@@ -28,32 +34,41 @@ class HotspotUserStateRepository:
         """
         if not hotspot_ids:
             return {}
-        client = await self._client()
-        result = (
-            await client.table(self.TABLE)
-            .select("hotspot_id, is_read, is_saved, is_hidden")
-            .eq("user_id", user_id)
-            .in_("hotspot_id", hotspot_ids)
-            .execute()
-        )
+        async with read_scope() as session:
+            result = await session.execute(
+                select(
+                    HotspotUserState.hotspot_id,
+                    HotspotUserState.is_read,
+                    HotspotUserState.is_saved,
+                    HotspotUserState.is_hidden,
+                ).where(
+                    HotspotUserState.user_id == user_id,
+                    HotspotUserState.hotspot_id.in_([int(h) for h in hotspot_ids]),
+                )
+            )
+            rows = result.all()
         out: dict[str, dict[str, bool]] = {}
-        for row in result.data or []:
-            out[str(row["hotspot_id"])] = {f: bool(row.get(f)) for f in STATE_FLAGS}
+        for hotspot_id, is_read, is_saved, is_hidden in rows:
+            out[str(hotspot_id)] = {
+                "is_read": bool(is_read),
+                "is_saved": bool(is_saved),
+                "is_hidden": bool(is_hidden),
+            }
         return out
 
     async def list_ids_where(self, user_id: str, *, flag: str) -> list[str]:
         """Hotspot ids where ``flag`` is true for this user (saved/hidden views)."""
         if flag not in STATE_FLAGS:
             raise ValueError(f"unknown flag: {flag}")
-        client = await self._client()
-        result = (
-            await client.table(self.TABLE)
-            .select("hotspot_id")
-            .eq("user_id", user_id)
-            .eq(flag, True)
-            .execute()
-        )
-        return [str(r["hotspot_id"]) for r in (result.data or [])]
+        col = getattr(HotspotUserState, flag)
+        async with read_scope() as session:
+            result = await session.execute(
+                select(HotspotUserState.hotspot_id).where(
+                    HotspotUserState.user_id == user_id,
+                    col.is_(True),
+                )
+            )
+            return [str(hid) for hid in result.scalars().all()]
 
     async def set_state(
         self,
@@ -66,25 +81,39 @@ class HotspotUserStateRepository:
     ) -> dict[str, bool]:
         """Upsert the given flags (only the non-None ones). Returns the row's
         resulting flags. Defaults absent flags to false on first insert."""
-        patch: dict[str, Any] = {"user_id": user_id, "hotspot_id": hotspot_id}
         provided = {
             "is_read": is_read,
             "is_saved": is_saved,
             "is_hidden": is_hidden,
         }
-        for key, val in provided.items():
-            if val is not None:
-                patch[key] = val
-        patch["updated_at"] = datetime.now(timezone.utc).isoformat()
-        client = await self._client()
+        set_flags: dict[str, Any] = {k: v for k, v in provided.items() if v is not None}
+        now = datetime.now(timezone.utc)
+        insert_values = {
+            "user_id": user_id,
+            "hotspot_id": int(hotspot_id),
+            "updated_at": now,
+            **set_flags,
+        }
         try:
-            result = (
-                await client.table(self.TABLE)
-                .upsert(patch, on_conflict="user_id,hotspot_id")
-                .execute()
+            stmt = pg_insert(HotspotUserState).values(**insert_values)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["user_id", "hotspot_id"],
+                set_={**set_flags, "updated_at": now},
+            ).returning(
+                HotspotUserState.is_read,
+                HotspotUserState.is_saved,
+                HotspotUserState.is_hidden,
             )
-            row = (result.data or [{}])[0]
-            return {f: bool(row.get(f)) for f in STATE_FLAGS}
+            async with write_scope() as session:
+                result = await session.execute(stmt)
+                row = result.first()
+            if row is None:
+                return {f: bool(insert_values.get(f, False)) for f in STATE_FLAGS}
+            return {
+                "is_read": bool(row[0]),
+                "is_saved": bool(row[1]),
+                "is_hidden": bool(row[2]),
+            }
         except Exception as e:  # noqa: BLE001
             logger.error(f"set_state failed for {user_id}/{hotspot_id}: {e}")
             raise

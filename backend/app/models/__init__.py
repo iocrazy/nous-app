@@ -154,6 +154,10 @@ from app.models.teams import (  # noqa: F401
     TeamQuotas,
     Teams,
 )
+from app.models.topics import (  # noqa: F401
+    HotspotUserState,
+    UserHiddenSources,
+)
 from app.models.users import (  # noqa: F401
     UserCookies,
     UserCredits,
@@ -290,6 +294,9 @@ __all__ = [
     "TeamPlans",
     "TeamQuotas",
     "Teams",
+    # topics / signal feed
+    "HotspotUserState",
+    "UserHiddenSources",
     # users
     "UserCookies",
     "UserMcpServers",
