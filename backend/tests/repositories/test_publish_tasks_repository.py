@@ -94,66 +94,91 @@ def test_build_filesystem_media_url_leaves_already_relative_path_untouched():
     )
 
 
+def _read_scope_returning(row):
+    """A read_scope() stand-in whose session returns ``row`` (the repo runs on
+    the ORM session scopes now)."""
+    from contextlib import asynccontextmanager
+
+    class _Result:
+        def mappings(self):
+            return self
+
+        def first(self):
+            return row
+
+    class _Session:
+        async def execute(self, stmt, params=None):
+            return _Result()
+
+    @asynccontextmanager
+    async def _scope():
+        yield _Session()
+
+    return _scope
+
+
 @pytest.mark.asyncio
-async def test_get_resource_media_url_filesystem_branch():
+async def test_get_resource_media_url_filesystem_branch(monkeypatch):
+    import app.repositories.publish_tasks_repository as mod
     from app.core.config import settings
 
-    repo = PublishTasksRepository()
+    monkeypatch.setattr(
+        mod,
+        "read_scope",
+        _read_scope_returning(
+            {"file_path": "/app/downloads/teams/42/video.mp4", "creator_id": "u1"}
+        ),
+    )
     with (
         patch.object(settings, "MEDIA_TOKEN_SECRET", "test-secret"),
+        # Pin the derivation inputs so the assertion is env-independent (the
+        # old form depended on the container's DOWNLOAD_PATH default and
+        # failed on worktrees with a different download root).
+        patch.object(settings, "DOWNLOAD_PATH", "/app/downloads"),
         patch.object(
-            repo,
-            "fetch_one",
-            new=AsyncMock(
-                return_value={
-                    "file_path": "/app/downloads/teams/42/video.mp4",
-                    "creator_id": "u1",
-                }
-            ),
+            settings, "MEDIA_PUBLIC_URL", "https://mediahubserver.heygo.cn:88"
         ),
     ):
-        url = await repo.get_resource_media_url(123)
+        url = await PublishTasksRepository().get_resource_media_url(123)
     assert url is not None
     assert "/media/teams/42/video.mp4?token=" in url
 
 
 @pytest.mark.asyncio
-async def test_get_resource_media_url_object_store_branch():
-    repo = PublishTasksRepository()
-    with (
-        patch.object(
-            repo,
-            "fetch_one",
-            new=AsyncMock(
-                return_value={
-                    "file_path": "sb://chat-media/t42/ab/cd/hash.png",
-                    "creator_id": "u1",
-                }
-            ),
+async def test_get_resource_media_url_object_store_branch(monkeypatch):
+    import app.repositories.publish_tasks_repository as mod
+
+    monkeypatch.setattr(
+        mod,
+        "read_scope",
+        _read_scope_returning(
+            {"file_path": "sb://chat-media/t42/ab/cd/hash.png", "creator_id": "u1"}
         ),
-        patch(
-            "app.services.library.media_storage.ObjectStore.signed_url",
-            new=AsyncMock(return_value="https://storage.example/signed?x=1"),
-        ) as mock_signed_url,
-    ):
-        url = await repo.get_resource_media_url(123)
+    )
+    with patch(
+        "app.services.library.media_storage.ObjectStore.signed_url",
+        new=AsyncMock(return_value="https://storage.example/signed?x=1"),
+    ) as mock_signed_url:
+        url = await PublishTasksRepository().get_resource_media_url(123)
     assert url == "https://storage.example/signed?x=1"
     mock_signed_url.assert_awaited_once_with("t42/ab/cd/hash.png", ttl_seconds=3600)
 
 
 @pytest.mark.asyncio
-async def test_get_resource_media_url_returns_none_when_no_row():
-    repo = PublishTasksRepository()
-    with patch.object(repo, "fetch_one", new=AsyncMock(return_value=None)):
-        assert await repo.get_resource_media_url(123) is None
+async def test_get_resource_media_url_returns_none_when_no_row(monkeypatch):
+    import app.repositories.publish_tasks_repository as mod
+
+    monkeypatch.setattr(mod, "read_scope", _read_scope_returning(None))
+    assert await PublishTasksRepository().get_resource_media_url(123) is None
 
 
 @pytest.mark.asyncio
-async def test_get_resource_media_url_returns_none_when_no_file_path():
-    repo = PublishTasksRepository()
-    with patch.object(
-        repo,
-        "fetch_one",
-        new=AsyncMock(return_value={"file_path": None, "creator_id": "u1"}),
-    ):
-        assert await repo.get_resource_media_url(123) is None
+async def test_get_resource_media_url_returns_none_when_no_file_path(monkeypatch):
+    import app.repositories.publish_tasks_repository as mod
+
+    monkeypatch.setattr(
+        mod,
+        "read_scope",
+        _read_scope_returning({"file_path": None, "creator_id": "u1"}),
+    )
+    assert await PublishTasksRepository().get_resource_media_url(123) is None

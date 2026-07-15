@@ -63,30 +63,33 @@ class TestSerialize:
 
 @pytest.fixture
 def engine_calls(monkeypatch: pytest.MonkeyPatch) -> dict:
-    """Patch app.db.engine module-level helpers (same pattern as style_profile tests)."""
-    calls: dict = {
-        "fetch_all": [],
-        "fetch_one": [],
-        "execute_returning_one": [],
-    }
+    """Stub the read_scope() session (the repo runs on the ORM session scopes
+    now); capture every statement + params. `fetch_all_result` /
+    `fetch_one_result` seed the canned rows, mirroring the old fixture."""
+    from contextlib import asynccontextmanager
 
-    async def fake_fetch_all(sql: str, params=None):
-        calls["fetch_all"].append({"sql": sql, "params": params})
-        return calls.get("fetch_all_result", [])
+    calls: dict = {"executed": []}
 
-    async def fake_fetch_one(sql: str, params=None):
-        calls["fetch_one"].append({"sql": sql, "params": params})
-        return calls.get("fetch_one_result")
+    class _Result:
+        def mappings(self):
+            return self
 
-    async def fake_execute_returning_one(sql: str, params=None):
-        calls["execute_returning_one"].append({"sql": sql, "params": params})
-        return calls.get("returning_result")
+        def all(self):
+            return list(calls.get("fetch_all_result", []))
 
-    monkeypatch.setattr("app.db.engine.fetch_all", fake_fetch_all)
-    monkeypatch.setattr("app.db.engine.fetch_one", fake_fetch_one)
-    monkeypatch.setattr(
-        "app.db.engine.execute_returning_one", fake_execute_returning_one
-    )
+        def first(self):
+            return calls.get("fetch_one_result")
+
+    class _Session:
+        async def execute(self, stmt, params=None):
+            calls["executed"].append({"stmt": stmt, "params": params})
+            return _Result()
+
+    @asynccontextmanager
+    async def _scope():
+        yield _Session()
+
+    monkeypatch.setattr("app.db.session.read_scope", _scope)
     return calls
 
 
@@ -95,9 +98,9 @@ async def test_list_catalog_calls_fetch_all_ordered(engine_calls: dict) -> None:
     repo = ProjectStagesRepository()
     result = await repo.list_catalog()
     assert isinstance(result, list)
-    call = engine_calls["fetch_all"][0]
-    assert "ORDER BY sort_order" in call["sql"]
-    assert call["params"] is None or call["params"] == {}
+    stmt = engine_calls["executed"][0]["stmt"]
+    assert "ORDER BY" in str(stmt) and "sort_order" in str(stmt)
+    assert stmt.compile().params == {}
 
 
 @pytest.mark.asyncio
@@ -124,10 +127,10 @@ async def test_get_current_returns_none_when_no_stage(engine_calls: dict) -> Non
     repo = ProjectStagesRepository()
     result = await repo.get_current(999)
     assert result is None
-    call = engine_calls["fetch_one"][0]
+    call = engine_calls["executed"][0]
     assert call["params"] == {"pid": 999}
     # Must JOIN projects and project_stages
-    assert "project_stages" in call["sql"]
+    assert "project_stages" in str(call["stmt"])
 
 
 @pytest.mark.asyncio
@@ -135,9 +138,9 @@ async def test_history_passes_project_id(engine_calls: dict) -> None:
     engine_calls["fetch_all_result"] = []
     repo = ProjectStagesRepository()
     await repo.history(42)
-    call = engine_calls["fetch_all"][0]
+    call = engine_calls["executed"][0]
     assert call["params"] == {"pid": 42}
-    assert "project_stage_history" in call["sql"]
+    assert "project_stage_history" in str(call["stmt"])
 
 
 # ============================================================
@@ -187,20 +190,29 @@ class FakeConn:
 
 
 class FakeEngine:
+    """Session-scope stand-in: set_current_stage runs its statement sequence
+    on ONE write_scope() session now (same single-transaction semantics as
+    the old get_engine().begin() block). The ``_conn`` name is retained so
+    the assertions below read unchanged."""
+
     def __init__(self, rows: list) -> None:
         self._conn = FakeConn(rows)
-
-    def begin(self):
-        return self._conn
 
 
 @pytest.fixture
 def fake_engine(monkeypatch: pytest.MonkeyPatch):
-    """Replace get_engine() for transaction tests."""
+    """Replace write_scope() (and the engine-ready guard) for txn tests."""
+    from contextlib import asynccontextmanager
 
     def _make(rows):
         eng = FakeEngine(rows)
-        monkeypatch.setattr("app.db.engine.get_engine", lambda: eng)
+
+        @asynccontextmanager
+        async def _scope():
+            yield eng._conn
+
+        monkeypatch.setattr("app.db.session.write_scope", _scope)
+        monkeypatch.setattr("app.db.engine.get_engine", lambda: object())
         return eng
 
     return _make

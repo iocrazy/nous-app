@@ -5,6 +5,10 @@ SECRET BOUNDARY —— 与 cookies_repository 同范式：
   读边界: 常规读取（list/upsert 返回）经 _public_row **剥掉 token 列**；
           只有 get_with_tokens（发布/刷新链路专用）解密返回明文。
   日志: 只打 account id / platform / column 名，绝不打 token 值。
+
+ORM-model style (read_scope/write_scope + ``SocialAccounts``), converged from
+the raw db_engine/$N call style. The encrypt/decrypt/public-row boundary is
+byte-identical.
 """
 
 from __future__ import annotations
@@ -12,13 +16,21 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
+from sqlalchemy import and_
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import func, or_, select
+from sqlalchemy import update as sa_update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
 from app.core import secret_box
-from app.db import engine as db_engine
-from app.db.repository_base import AsyncpgRepository
+from app.db.session import read_scope, write_scope
+from app.models import SocialAccounts
 
 logger = logging.getLogger(__name__)
 
 _TOKEN_COLS = ("access_token", "refresh_token")
+
+_SA_COLS = tuple(SocialAccounts.__table__.columns)
 
 
 def _encrypt_token_cols(row: dict) -> dict:
@@ -54,81 +66,109 @@ def _public_row(row: dict) -> dict:
     return out
 
 
-class SocialAccountsRepository(AsyncpgRepository):
+def _bigint(v: Any) -> int:
+    return int(str(v))
+
+
+class SocialAccountsRepository:
     TABLE = "social_accounts"
 
     async def list_for_user(self, user_id: str, team_ids: list[str]) -> list[dict]:
-        rows = await self.fetch_all(
-            """
-            SELECT * FROM social_accounts
-            WHERE (scope_type = 'user' AND scope_id = $1)
-               OR (scope_type = 'team' AND scope_id = ANY($2::text[]))
-            ORDER BY created_at DESC
-            """,
-            user_id,
-            team_ids,
-        )
+        async with read_scope() as session:
+            result = await session.execute(
+                select(*_SA_COLS)
+                .where(
+                    or_(
+                        and_(
+                            SocialAccounts.scope_type == "user",
+                            SocialAccounts.scope_id == user_id,
+                        ),
+                        and_(
+                            SocialAccounts.scope_type == "team",
+                            SocialAccounts.scope_id.in_([str(t) for t in team_ids]),
+                        ),
+                    )
+                )
+                .order_by(SocialAccounts.created_at.desc())
+            )
+            rows = [dict(m) for m in result.mappings().all()]
         return [_public_row(r) for r in rows]
 
     async def upsert_account(self, **f: Any) -> dict:
         f = _encrypt_token_cols(f)
-        # COMMITTING path required: this INSERT ... RETURNING writes a row.
-        # self.fetch_one runs on eng.connect() (no transaction) and would
-        # SILENTLY ROLL BACK the write on connection close (the #498
-        # silent-rollback class — see repository_base.py:102-108). Use
-        # db_engine.execute_returning_one (eng.begin(), auto-commit) instead,
-        # matching the generated_media_repository.mark_promoted convention.
-        row = await db_engine.execute_returning_one(
-            """
-            INSERT INTO social_accounts
-                (scope_type, scope_id, platform, platform_user_id, username,
-                 avatar_url, access_token, refresh_token, token_expires_at, created_by)
-            VALUES (:scope_type, :scope_id, :platform, :platform_user_id, :username,
-                    :avatar_url, :access_token, :refresh_token, :token_expires_at, :created_by)
-            ON CONFLICT (scope_type, scope_id, platform, platform_user_id)
-            DO UPDATE SET username = EXCLUDED.username,
-                          avatar_url = EXCLUDED.avatar_url,
-                          access_token = EXCLUDED.access_token,
-                          refresh_token = EXCLUDED.refresh_token,
-                          token_expires_at = EXCLUDED.token_expires_at,
-                          status = 'active', updated_at = NOW()
-            RETURNING *
-            """,
-            {
-                "scope_type": f["scope_type"],
-                "scope_id": f["scope_id"],
-                "platform": f["platform"],
-                "platform_user_id": f["platform_user_id"],
-                "username": f["username"],
-                "avatar_url": f.get("avatar_url"),
-                "access_token": f.get("access_token"),
-                "refresh_token": f.get("refresh_token"),
-                "token_expires_at": f.get("token_expires_at"),
-                "created_by": f["created_by"],
-            },
+        stmt = pg_insert(SocialAccounts).values(
+            scope_type=f["scope_type"],
+            scope_id=f["scope_id"],
+            platform=f["platform"],
+            platform_user_id=f["platform_user_id"],
+            username=f["username"],
+            avatar_url=f.get("avatar_url"),
+            access_token=f.get("access_token"),
+            refresh_token=f.get("refresh_token"),
+            token_expires_at=f.get("token_expires_at"),
+            created_by=f["created_by"],
         )
-        return _public_row(row)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["scope_type", "scope_id", "platform", "platform_user_id"],
+            set_={
+                "username": stmt.excluded.username,
+                "avatar_url": stmt.excluded.avatar_url,
+                "access_token": stmt.excluded.access_token,
+                "refresh_token": stmt.excluded.refresh_token,
+                "token_expires_at": stmt.excluded.token_expires_at,
+                "status": "active",
+                "updated_at": func.now(),
+            },
+        ).returning(*_SA_COLS)
+        async with write_scope() as session:
+            row = (await session.execute(stmt)).mappings().first()
+        return _public_row(dict(row))
 
     async def get_public(self, account_id: int) -> Optional[dict]:
-        row = await self.fetch_one(
-            "SELECT * FROM social_accounts WHERE id = $1", account_id
-        )
-        return _public_row(row) if row else None
+        async with read_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        select(*_SA_COLS).where(
+                            SocialAccounts.id == _bigint(account_id)
+                        )
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        return _public_row(dict(row)) if row else None
 
     async def get_with_tokens(self, account_id: int) -> Optional[dict]:
-        row = await self.fetch_one(
-            "SELECT * FROM social_accounts WHERE id = $1", account_id
-        )
-        return _decrypt_token_cols(row) if row else None
+        async with read_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        select(*_SA_COLS).where(
+                            SocialAccounts.id == _bigint(account_id)
+                        )
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        return _decrypt_token_cols(dict(row)) if row else None
 
     async def mark_expired(self, account_id: int) -> None:
-        await self.execute(
-            "UPDATE social_accounts SET status = 'expired', updated_at = NOW() WHERE id = $1",
-            account_id,
-        )
+        async with write_scope() as session:
+            await session.execute(
+                sa_update(SocialAccounts)
+                .where(SocialAccounts.id == _bigint(account_id))
+                .values(status="expired", updated_at=func.now())
+            )
 
     async def delete(self, account_id: int) -> None:
-        await self.execute("DELETE FROM social_accounts WHERE id = $1", account_id)
+        async with write_scope() as session:
+            await session.execute(
+                sa_delete(SocialAccounts).where(
+                    SocialAccounts.id == _bigint(account_id)
+                )
+            )
 
 
 __all__ = ["SocialAccountsRepository"]

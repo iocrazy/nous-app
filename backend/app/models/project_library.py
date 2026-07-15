@@ -27,6 +27,7 @@ from sqlalchemy import (
     PrimaryKeyConstraint,
     String,
     Text,
+    UniqueConstraint,
     Uuid,
     text,
 )
@@ -34,6 +35,72 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.orm_base import Base
+
+
+class ProjectStages(Base):
+    """Global SOP lifecycle stage catalog (Phase 5b)."""
+
+    __tablename__ = "project_stages"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="project_stages_pkey"),
+        UniqueConstraint("slug", name="project_stages_slug_key"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_snowflake_id()"),
+    )
+    slug: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    tools_recommended: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+
+
+class ProjectStageHistory(Base):
+    """Append-only per-project stage transition history (Phase 5b)."""
+
+    __tablename__ = "project_stage_history"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["project_id"],
+            ["public.projects.id"],
+            ondelete="CASCADE",
+            name="project_stage_history_project_id_fkey",
+        ),
+        ForeignKeyConstraint(
+            ["stage_id"],
+            ["public.project_stages.id"],
+            name="project_stage_history_stage_id_fkey",
+        ),
+        PrimaryKeyConstraint("id", name="project_stage_history_pkey"),
+        Index("idx_project_stage_history_project", "project_id"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_snowflake_id()"),
+    )
+    project_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    stage_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    entered_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+    exited_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(True))
+    transitioned_by: Mapped[uuid.UUID | None] = mapped_column(Uuid)
 
 
 class ProjectStyleProfile(Base):
