@@ -24,21 +24,22 @@ from app.startup.stall_detector import _bg_stall_detector
 async def _bg_schema_probe() -> None:
     """P0-1: warn-only sanity probe for migration drift."""
     try:
-        from app.db import get_async_supabase_admin
+        from sqlalchemy import literal, select
 
-        sb = await get_async_supabase_admin()
-        required_tables = [
-            "agent_commitments",  # mig 186
-            "ai_session_memory",  # mig 187
-            "user_mcp_servers",  # mig 194
-        ]  # extend on each migration that adds a hard-required table
-        for table in required_tables:
-            probe = await sb.table(table).select("*", count="exact").limit(0).execute()
-            if not hasattr(probe, "data"):
-                logger.warning(
-                    f"Schema probe: table '{table}' is unreachable — "
-                    f"check that the corresponding migration was applied"
-                )
+        from app.db.session import read_scope
+        from app.models import AgentCommitments, AiSessionMemory, UserMcpServers
+
+        # extend on each migration that adds a hard-required table
+        required = [
+            AgentCommitments,  # mig 186
+            AiSessionMemory,  # mig 187
+            UserMcpServers,  # mig 194
+        ]
+        # ``SELECT 1 FROM <table> LIMIT 0`` — table-existence probe only (no
+        # column assertion), matching the legacy select("*").limit(0) reach.
+        async with read_scope() as session:
+            for model in required:
+                await session.execute(select(literal(1)).select_from(model).limit(0))
     except Exception as e:
         logger.warning(f"Schema probe failed (likely missing migration): {e}")
 
@@ -79,33 +80,39 @@ async def _bg_deployment_log() -> None:
     sha = info.get("commit_sha")
     if not sha:
         return
-    from app.db import get_async_supabase_admin
+    from sqlalchemy import insert, select
 
-    sb = await get_async_supabase_admin()
-    exists = await (
-        sb.table("deployment_logs")
-        .select("id")
-        .eq("service", "backend")
-        .eq("commit_sha", sha)
-        .limit(1)
-        .execute()
-    )
-    if exists.data:
+    from app.db.session import read_scope, write_scope
+    from app.models import DeploymentLogs
+
+    async with read_scope() as session:
+        exists = (
+            await session.execute(
+                select(DeploymentLogs.id)
+                .where(DeploymentLogs.service == "backend")
+                .where(DeploymentLogs.commit_sha == sha)
+                .limit(1)
+            )
+        ).first()
+    if exists is not None:
         logger.info(f"Deployment {sha} already logged, skip")
         return
-    row = {
-        "service": info.get("service", "backend"),
-        "version": info.get("version") or "latest",
-        "commit_sha": sha,
-        "commit_count": int(info.get("commit_count") or 0),
-        "commits": info.get("commits") or [],
-        "summary": info.get("summary") or "",
-        "deployed_by": info.get("deployed_by") or "ci",
-        "status": "success",
-        "metadata": {"run_id": info.get("run_id")},
-    }
-    await sb.table("deployment_logs").insert(row).execute()
-    logger.success(f"Deployment logged: {sha} ({row['commit_count']} commits)")
+    commit_count = int(info.get("commit_count") or 0)
+    async with write_scope() as session:
+        await session.execute(
+            insert(DeploymentLogs).values(
+                service=info.get("service", "backend"),
+                version=info.get("version") or "latest",
+                commit_sha=sha,
+                commit_count=commit_count,
+                commits=info.get("commits") or [],
+                summary=info.get("summary") or "",
+                deployed_by=info.get("deployed_by") or "ci",
+                status="success",
+                metadata_={"run_id": info.get("run_id")},
+            )
+        )
+    logger.success(f"Deployment logged: {sha} ({commit_count} commits)")
 
 
 async def _bg_liveness_reconcile() -> None:

@@ -2,11 +2,29 @@
 
 from datetime import datetime, timedelta
 from typing import Any, Dict, List
+from uuid import UUID
 
 from loguru import logger
+from sqlalchemy import select
 
-from app.db.supabase_client import get_async_supabase_admin
+from app.db.session import read_scope
+from app.repositories._orm_helpers import _plain
 from app.repositories.collections_repository import get_collections_repository
+
+
+def _serialize_media_row(row: Any) -> Dict[str, Any]:
+    """parsed_media card row → JSON-safe dict (enum→str, ts→iso, uuid→str),
+    matching the PostgREST shape the collection media list returned."""
+    out: Dict[str, Any] = {}
+    for key, value in row.items():
+        value = _plain(value)
+        if hasattr(value, "isoformat"):
+            out[key] = value.isoformat()
+        elif isinstance(value, UUID):
+            out[key] = str(value)
+        else:
+            out[key] = value
+    return out
 
 
 class CollectionsService:
@@ -15,26 +33,24 @@ class CollectionsService:
     def __init__(self):
         self.repo = get_collections_repository()
 
-    async def _get_client(self):
-        """Get async client (loop-aware, safe for Celery workers)."""
-        return await get_async_supabase_admin()
-
     async def _get_user_resource_mapping(self, user_id: str) -> Dict[int, int]:
         """Get user's resource mapping {resource_id: media_id} from resources table.
 
         Since parsed_media is now a global table (no user_id column),
         we identify the user's media through the resources table.
         """
-        client = await self._get_client()
-        result = (
-            await client.table("resources")
-            .select("id, media_id")
-            .eq("creator_id", user_id)
-            .eq("source_type", "web")
-            .eq("is_trashed", False)
-            .execute()
-        )
-        return {r["id"]: r["media_id"] for r in result.data if r.get("media_id")}
+        from app.models import Resources
+
+        async with read_scope() as session:
+            rows = (
+                await session.execute(
+                    select(Resources.id, Resources.media_id)
+                    .where(Resources.creator_id == user_id)
+                    .where(Resources.source_type == "web")
+                    .where(Resources.is_trashed.is_(False))
+                )
+            ).all()
+        return {r[0]: r[1] for r in rows if r[1] is not None}
 
     async def get_collection_media(
         self,
@@ -149,7 +165,7 @@ class CollectionsService:
         resource_map: Dict[int, int],
     ) -> List[int]:
         """Evaluate a single condition and return matching media IDs."""
-        client = await self._get_client()
+        from app.models import ParsedMedia
 
         # Tag-based conditions
         if field == "tag":
@@ -159,9 +175,6 @@ class CollectionsService:
         if field == "date":
             return await self._match_date_condition(operator, value, user_media_ids)
 
-        # Direct field conditions on parsed_media (scoped to user's media)
-        query = client.table("parsed_media").select("id").in_("id", user_media_ids)
-
         field_mapping = {
             "author": "author",
             "title": "title",
@@ -170,29 +183,32 @@ class CollectionsService:
             "view_count": "view_count",
             "media_type": "media_type",
         }
-
         db_field = field_mapping.get(field, field)
+        col = getattr(ParsedMedia, db_field)
 
+        # Direct field conditions on parsed_media (scoped to user's media)
+        stmt = select(ParsedMedia.id).where(ParsedMedia.id.in_(user_media_ids))
         if operator == "equals":
-            query = query.eq(db_field, value)
+            stmt = stmt.where(col == value)
         elif operator == "contains":
-            query = query.ilike(db_field, f"%{value}%")
+            stmt = stmt.where(col.ilike(f"%{value}%"))
         elif operator == "starts_with":
-            query = query.ilike(db_field, f"{value}%")
+            stmt = stmt.where(col.ilike(f"{value}%"))
         elif operator == "gt":
-            query = query.gt(db_field, value)
+            stmt = stmt.where(col > value)
         elif operator == "gte":
-            query = query.gte(db_field, value)
+            stmt = stmt.where(col >= value)
         elif operator == "lt":
-            query = query.lt(db_field, value)
+            stmt = stmt.where(col < value)
         elif operator == "lte":
-            query = query.lte(db_field, value)
+            stmt = stmt.where(col <= value)
         elif operator == "in":
             if isinstance(value, list):
-                query = query.in_(db_field, value)
+                stmt = stmt.where(col.in_(value))
 
-        result = await query.execute()
-        return [r["id"] for r in result.data]
+        async with read_scope() as session:
+            rows = (await session.execute(stmt)).all()
+        return [r[0] for r in rows]
 
     async def _match_tag_condition(
         self, operator: str, value: Any, resource_map: Dict[int, int]
@@ -202,61 +218,46 @@ class CollectionsService:
         resource_tags.resource_id references resources.id,
         so we query by user's resource IDs and map back to media IDs.
         """
-        client = await self._get_client()
+        from app.models import ResourceTags
 
         resource_ids = list(resource_map.keys())
         if not resource_ids:
             return []
 
+        async def _matching_resource_ids(tag_filter) -> List[int]:
+            # resource_tags.tag_id is BIGINT (mig 078 UUID→BIGINT) → bind int.
+            async with read_scope() as session:
+                rows = (
+                    await session.execute(
+                        select(ResourceTags.resource_id)
+                        .where(tag_filter)
+                        .where(ResourceTags.resource_id.in_(resource_ids))
+                    )
+                ).all()
+            return [r[0] for r in rows]
+
         if operator == "has":
             # Media that have a specific tag
-            result = (
-                await client.table("resource_tags")
-                .select("resource_id")
-                .eq("tag_id", value)
-                .in_("resource_id", resource_ids)
-                .execute()
-            )
+            rids = await _matching_resource_ids(ResourceTags.tag_id == int(value))
             # Map resource_id back to media_id
-            return list(
-                set(
-                    resource_map[r["resource_id"]]
-                    for r in result.data
-                    if r["resource_id"] in resource_map
-                )
-            )
+            return list({resource_map[rid] for rid in rids if rid in resource_map})
 
         elif operator == "has_any":
             # Media that have any of the specified tags
             if isinstance(value, list):
-                result = (
-                    await client.table("resource_tags")
-                    .select("resource_id")
-                    .in_("tag_id", value)
-                    .in_("resource_id", resource_ids)
-                    .execute()
+                rids = await _matching_resource_ids(
+                    ResourceTags.tag_id.in_([int(v) for v in value])
                 )
-                return list(
-                    set(
-                        resource_map[r["resource_id"]]
-                        for r in result.data
-                        if r["resource_id"] in resource_map
-                    )
-                )
+                return list({resource_map[rid] for rid in rids if rid in resource_map})
 
         elif operator == "has_all":
             # Media that have all of the specified tags
             if isinstance(value, list):
                 media_tag_counts: Dict[int, int] = {}
-                result = (
-                    await client.table("resource_tags")
-                    .select("resource_id")
-                    .in_("tag_id", value)
-                    .in_("resource_id", resource_ids)
-                    .execute()
+                rids = await _matching_resource_ids(
+                    ResourceTags.tag_id.in_([int(v) for v in value])
                 )
-                for r in result.data:
-                    rid = r["resource_id"]
+                for rid in rids:
                     if rid in resource_map:
                         mid = resource_map[rid]
                         media_tag_counts[mid] = media_tag_counts.get(mid, 0) + 1
@@ -272,12 +273,10 @@ class CollectionsService:
         self, operator: str, value: Any, user_media_ids: List[int]
     ) -> List[int]:
         """Match media by date conditions."""
-        client = await self._get_client()
+        from app.models import ParsedMedia
 
         if not user_media_ids:
             return []
-
-        query = client.table("parsed_media").select("id").in_("id", user_media_ids)
 
         # Handle relative date values
         if isinstance(value, str):
@@ -291,17 +290,24 @@ class CollectionsService:
                 months = int(value.replace("_months_ago", ""))
                 value = (datetime.utcnow() - timedelta(days=months * 30)).isoformat()
 
-        if operator == "gte":
-            query = query.gte("created_at", value)
-        elif operator == "lte":
-            query = query.lte("created_at", value)
-        elif operator == "gt":
-            query = query.gt("created_at", value)
-        elif operator == "lt":
-            query = query.lt("created_at", value)
+        # created_at is timestamptz → bind a native datetime (asyncpg rejects
+        # the ISO string PostgREST used to coerce).
+        if isinstance(value, str):
+            value = datetime.fromisoformat(value)
 
-        result = await query.execute()
-        return [r["id"] for r in result.data]
+        stmt = select(ParsedMedia.id).where(ParsedMedia.id.in_(user_media_ids))
+        if operator == "gte":
+            stmt = stmt.where(ParsedMedia.created_at >= value)
+        elif operator == "lte":
+            stmt = stmt.where(ParsedMedia.created_at <= value)
+        elif operator == "gt":
+            stmt = stmt.where(ParsedMedia.created_at > value)
+        elif operator == "lt":
+            stmt = stmt.where(ParsedMedia.created_at < value)
+
+        async with read_scope() as session:
+            rows = (await session.execute(stmt)).all()
+        return [r[0] for r in rows]
 
     async def _fetch_media_by_ids(
         self, media_ids: List[int], collection: dict
@@ -310,21 +316,37 @@ class CollectionsService:
         if not media_ids:
             return []
 
-        client = await self._get_client()
+        from app.models import ParsedMedia
+
         sort_by = collection.get("sort_by", "created_at")
         sort_order = collection.get("sort_order", "desc")
+        sort_col = getattr(ParsedMedia, sort_by)
+        order = sort_col.desc() if sort_order == "desc" else sort_col.asc()
 
-        result = (
-            await client.table("parsed_media")
-            .select(
-                "id, title, description, author, cover_urls, duration, media_type, created_at, view_count, keep_forever"
+        async with read_scope() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(
+                            ParsedMedia.id,
+                            ParsedMedia.title,
+                            ParsedMedia.description,
+                            ParsedMedia.author,
+                            ParsedMedia.cover_urls,
+                            ParsedMedia.duration,
+                            ParsedMedia.media_type,
+                            ParsedMedia.created_at,
+                            ParsedMedia.view_count,
+                            ParsedMedia.keep_forever,
+                        )
+                        .where(ParsedMedia.id.in_(media_ids))
+                        .order_by(order)
+                    )
+                )
+                .mappings()
+                .all()
             )
-            .in_("id", media_ids)
-            .order(sort_by, desc=(sort_order == "desc"))
-            .execute()
-        )
-
-        return result.data
+        return [_serialize_media_row(r) for r in rows]
 
     async def refresh_collection_cache(self, collection_id: str, user_id: str) -> int:
         """Force refresh a collection's cache."""

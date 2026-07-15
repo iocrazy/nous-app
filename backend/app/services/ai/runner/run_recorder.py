@@ -43,6 +43,7 @@ Design principles:
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -388,23 +389,29 @@ class RunRecorder:
             return
         self._event_seq += 1
         try:
-            from app.db import get_async_supabase_admin
+            from sqlalchemy import text
 
-            client = await get_async_supabase_admin()
-            await (
-                client.table("agent_run_events")
-                .insert(
+            from app.db.session import write_scope
+
+            # agent_run_events is mig-285 (run_id BIGINT + seq/event_type/payload);
+            # the AgentRunEvents ORM model still maps the pre-285 harness columns,
+            # so insert via raw text() (jsonb cast) to hit the real table.
+            async with write_scope() as session:
+                await session.execute(
+                    text(
+                        "INSERT INTO agent_run_events "
+                        "(run_id, seq, event_type, payload) VALUES "
+                        "(:run_id, :seq, :event_type, CAST(:payload AS jsonb))"
+                    ),
                     {
-                        "run_id": str(self.run_id),
+                        "run_id": int(self.run_id),
                         "seq": self._event_seq,
                         "event_type": event_type,
-                        "payload": _truncate_payload(
-                            payload, self.EVENT_VALUE_MAX_CHARS
+                        "payload": json.dumps(
+                            _truncate_payload(payload, self.EVENT_VALUE_MAX_CHARS)
                         ),
-                    }
+                    },
                 )
-                .execute()
-            )
         except Exception as err:
             logger.warning(
                 f"[RunRecorder] record_event failed "
@@ -423,16 +430,22 @@ class RunRecorder:
             return
         self._last_heartbeat_monotonic = now
         try:
-            from app.db import get_async_supabase_admin
+            from datetime import datetime, timezone
 
-            client = await get_async_supabase_admin()
-            await (
-                client.table("agent_runs")
-                .update({"heartbeat_at": "now()"})
-                .eq("id", str(self.run_id))
-                .eq("status", "running")
-                .execute()
-            )
+            from sqlalchemy import update as sa_update
+
+            from app.db.session import write_scope
+            from app.models import AgentRuns
+
+            # agent_runs.id is BIGINT (mig 232) → int; "now()" sentinel → native
+            # datetime (asyncpg rejects the literal string).
+            async with write_scope() as session:
+                await session.execute(
+                    sa_update(AgentRuns)
+                    .where(AgentRuns.id == int(self.run_id))
+                    .where(AgentRuns.status == "running")
+                    .values(heartbeat_at=datetime.now(timezone.utc))
+                )
         except Exception as err:
             logger.warning(f"[RunRecorder] heartbeat failed for {self.run_id}: {err}")
 
@@ -441,17 +454,20 @@ class RunRecorder:
         if self.run_id is None:
             return False
         try:
-            from app.db import get_async_supabase_admin
+            from sqlalchemy import select
 
-            client = await get_async_supabase_admin()
-            result = (
-                await client.table("agent_runs")
-                .select("cancel_requested")
-                .eq("id", str(self.run_id))
-                .maybe_single()
-                .execute()
-            )
-            if result and result.data and result.data.get("cancel_requested"):
+            from app.db.session import read_scope
+            from app.models import AgentRuns
+
+            async with read_scope() as session:
+                row = (
+                    await session.execute(
+                        select(AgentRuns.cancel_requested)
+                        .where(AgentRuns.id == int(self.run_id))
+                        .limit(1)
+                    )
+                ).first()
+            if row is not None and row[0]:
                 self._cancelled = True
                 return True
         except Exception as err:
@@ -463,34 +479,45 @@ class RunRecorder:
     # -------- internal ---------------------------------------------------
 
     async def _pre_flight_check_paused(self) -> None:
-        from app.db import get_async_supabase_admin
+        # ai_agents.max_concurrent_runs (mig 286) is not on the AiAgents ORM
+        # model → referenced via column(); paused_reason is mapped.
+        from sqlalchemy import column, func, select
 
-        client = await get_async_supabase_admin()
-        result = (
-            await client.table("ai_agents")
-            .select("paused_reason,max_concurrent_runs")
-            .eq("id", str(self.agent_id))
-            .maybe_single()
-            .execute()
-        )
-        if result and result.data and result.data.get("paused_reason"):
-            reason = result.data["paused_reason"]
+        from app.db.session import read_scope
+        from app.models import AgentRuns, AiAgents
+
+        async with read_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        select(AiAgents.paused_reason, column("max_concurrent_runs"))
+                        .select_from(AiAgents)
+                        .where(AiAgents.id == str(self.agent_id))
+                        .limit(1)
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        if row and row.get("paused_reason"):
+            reason = row["paused_reason"]
             raise AgentPausedError(f"agent paused (reason={reason})")
 
         # mig 286 (paperclip P4): per-agent concurrency cap. Counted across
         # ALL users — the limit protects the agent/provider, not one caller.
         # Race window between count and insert is accepted (paperclip's is
         # too): the cap is a throttle, not a mutex.
-        limit = (result.data or {}).get("max_concurrent_runs") if result else None
+        limit = row.get("max_concurrent_runs") if row else None
         if limit:
-            running_q = (
-                await client.table("agent_runs")
-                .select("id", count="exact", head=True)
-                .eq("agent_id", str(self.agent_id))
-                .eq("status", "running")
-                .execute()
-            )
-            running = running_q.count or 0
+            async with read_scope() as session:
+                running = (
+                    await session.execute(
+                        select(func.count())
+                        .select_from(AgentRuns)
+                        .where(AgentRuns.agent_id == str(self.agent_id))
+                        .where(AgentRuns.status == "running")
+                    )
+                ).scalar() or 0
             if running >= int(limit):
                 raise AgentBusyError(
                     f"agent at max_concurrent_runs ({running}/{limit}) — "
@@ -506,22 +533,23 @@ class RunRecorder:
         if not self.model:
             return
         try:
-            from app.db import get_async_supabase_admin
+            from sqlalchemy import select
 
-            client = await get_async_supabase_admin()
-            query = (
-                client.table("ai_model_prices")
-                .select(
-                    "prompt_cents_per_1k,completion_cents_per_1k,"
-                    "cached_input_cents_per_1k,effective_at"
-                )
-                .eq("model", self.model)
-            )
+            from app.db.session import read_scope
+            from app.models import AiModelPrices
+
+            stmt = select(
+                AiModelPrices.prompt_cents_per_1k,
+                AiModelPrices.completion_cents_per_1k,
+                AiModelPrices.cached_input_cents_per_1k,
+                AiModelPrices.effective_at,
+            ).where(AiModelPrices.model == self.model)
             if self.provider:
-                query = query.eq("provider", self.provider)
-            result = await query.order("effective_at", desc=True).limit(1).execute()
-            if result.data:
-                row = result.data[0]
+                stmt = stmt.where(AiModelPrices.provider == self.provider)
+            stmt = stmt.order_by(AiModelPrices.effective_at.desc()).limit(1)
+            async with read_scope() as session:
+                row = (await session.execute(stmt)).mappings().first()
+            if row:
                 self._prompt_rate = float(row["prompt_cents_per_1k"])
                 self._completion_rate = float(row["completion_cents_per_1k"])
                 cr = row.get("cached_input_cents_per_1k")
@@ -533,18 +561,24 @@ class RunRecorder:
             )
 
     async def _insert_row(self) -> None:
-        from app.db import get_async_supabase_admin
+        # task_id (mig 282, TEXT) and conversation_id (mig 331, BIGINT) are NOT
+        # on the AgentRuns ORM model → build the INSERT via raw text() so both
+        # drift columns are set in the same statement the legacy path used.
+        # asyncpg strict binds: BIGINT cols → int, uuid cols accept str, jsonb
+        # via CAST(:x AS jsonb) with a json.dumps'd value.
+        from sqlalchemy import text
 
-        client = await get_async_supabase_admin()
-        payload = {
+        from app.db.session import write_scope
+
+        payload: dict[str, Any] = {
             "agent_id": str(self.agent_id),
             "user_id": str(self.user_id),
-            "session_id": str(self.session_id) if self.session_id else None,
+            "session_id": int(self.session_id) if self.session_id else None,
             "conversation_id": (
                 int(self.conversation_id) if self.conversation_id else None
             ),
-            "team_id": self.team_id,
-            "project_id": self.project_id,
+            "team_id": int(self.team_id) if self.team_id is not None else None,
+            "project_id": int(self.project_id) if self.project_id is not None else None,
             "task_id": self.task_id,
             "status": "running",
             "trigger": self.trigger,
@@ -558,16 +592,30 @@ class RunRecorder:
         # Drop None values so DB defaults (e.g., now()) apply.
         payload = {k: v for k, v in payload.items() if v is not None}
         if self.issue_id is not None:
-            payload["issue_id"] = self.issue_id
-        result = await client.table("agent_runs").insert(payload).execute()
-        if result.data:
+            payload["issue_id"] = int(self.issue_id)
+
+        cols = list(payload.keys())
+        placeholders = [
+            f"CAST(:{c} AS jsonb)" if c == "metadata_json" else f":{c}" for c in cols
+        ]
+        params = {
+            k: (json.dumps(v) if k == "metadata_json" else v)
+            for k, v in payload.items()
+        }
+        stmt = text(
+            f"INSERT INTO agent_runs ({', '.join(cols)}) "
+            f"VALUES ({', '.join(placeholders)}) RETURNING id"
+        )
+        async with write_scope() as session:
+            row = (await session.execute(stmt, params)).first()
+        if row is not None:
             # agent_runs.id became a BIGINT Snowflake in migration 232 (was
             # UUID at #57). Keep run_id as the string form of whatever the DB
             # returned — every consumer only str()s it (the .eq("id", …)
             # filters and reconcile_run). Wrapping in UUID() raised ValueError
             # on the bigint, which __aenter__ swallowed as "telemetry disabled"
             # → no agent_runs row was finalised for any run after mig 232.
-            self.run_id = str(result.data[0]["id"])
+            self.run_id = str(row[0])
             self._last_heartbeat_monotonic = time.monotonic()
             await self._link_task()
 
@@ -583,26 +631,36 @@ class RunRecorder:
         if not self.task_id or self.run_id is None:
             return
         try:
-            from app.db import get_async_supabase_admin
+            from sqlalchemy import select
+            from sqlalchemy import update as sa_update
 
-            client = await get_async_supabase_admin()
-            current = (
-                await client.table("task_tracking")
-                .select("metadata")
-                .eq("dbos_workflow_id", self.task_id)
-                .maybe_single()
-                .execute()
-            )
-            if not current or current.data is None:
+            from app.db.session import read_scope, write_scope
+            from app.models import TaskTracking
+
+            async with read_scope() as session:
+                current = (
+                    (
+                        await session.execute(
+                            select(TaskTracking.metadata_.label("metadata"))
+                            .where(TaskTracking.dbos_workflow_id == self.task_id)
+                            .limit(1)
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
+            if current is None:
                 return
-            merged = dict(current.data.get("metadata") or {})
+            merged = dict(current.get("metadata") or {})
             merged["run_id"] = self.run_id
-            await (
-                client.table("task_tracking")
-                .update({"agent_id": str(self.agent_id), "metadata": merged})
-                .eq("dbos_workflow_id", self.task_id)
-                .execute()
-            )
+            # agent_id + metadata are business-decoration columns (route-C rule
+            # 3) — safe to PATCH; phase/status/progress stay trigger-owned.
+            async with write_scope() as session:
+                await session.execute(
+                    sa_update(TaskTracking)
+                    .where(TaskTracking.dbos_workflow_id == self.task_id)
+                    .values(agent_id=str(self.agent_id), metadata_=merged)
+                )
         except Exception as err:
             logger.warning(
                 f"[RunRecorder] task linkage failed "
@@ -616,15 +674,21 @@ class RunRecorder:
         error_code: Optional[str] = None,
         error_message: Optional[str] = None,
     ) -> None:
-        from app.db import get_async_supabase_admin
+        from datetime import datetime, timezone
+
+        from sqlalchemy import update as sa_update
+
+        from app.db.session import write_scope
+        from app.models import AgentRuns
 
         cost_cents: Optional[float] = None
         if self._prompt_rate is not None and self._completion_rate is not None:
             cost_cents = self.compute_cost_cents()
 
+        # "now()" sentinel → native datetime for the asyncpg timestamptz bind.
         updates: dict[str, Any] = {
             "status": status,
-            "ended_at": "now()",
+            "ended_at": datetime.now(timezone.utc),
             "prompt_tokens": self._prompt_tokens,
             "completion_tokens": self._completion_tokens,
             "cached_input_tokens": self._cached_input_tokens,
@@ -639,14 +703,13 @@ class RunRecorder:
         if error_message is not None:
             updates["error_message"] = error_message
 
-        client = await get_async_supabase_admin()
-        await (
-            client.table("agent_runs")
-            .update(updates)
-            .eq("id", str(self.run_id))
-            .eq("status", "running")  # idempotent guard
-            .execute()
-        )
+        async with write_scope() as session:
+            await session.execute(
+                sa_update(AgentRuns)
+                .where(AgentRuns.id == int(self.run_id))
+                .where(AgentRuns.status == "running")  # idempotent guard
+                .values(**updates)
+            )
 
         # Phase 3 Token Billing: reconcile usage on terminal status only.
         # Failure here is logged but never raised — billing must not be
