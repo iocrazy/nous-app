@@ -15,7 +15,6 @@ from loguru import logger
 
 from app.core.deps import AuthDep, get_team_id_for_user
 from app.core.scope_dep import ScopedRequestDep
-from app.db.supabase_client import get_async_supabase_admin as _get_admin
 from app.repositories.ai_repository import get_ai_repository
 from app.repositories.analysis_repository import get_analysis_repository
 from app.repositories.media_repository import MediaRepository
@@ -80,17 +79,22 @@ async def trigger_transcription_by_resource(
     resource, platform_id, media = await _resolve_resource_to_platform_id(resource_id)
 
     # === Dedup: reject if already processing ===
-    _admin = await _get_admin()
-    _active = (
-        await _admin.table("task_tracking")
-        .select("dbos_workflow_id")
-        .eq("resource_id", resource_id)
-        .eq("task_type", "ai_transcription")
-        .in_("status", ["pending", "processing", "running"])
-        .limit(1)
-        .execute()
-    )
-    if _active.data:
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import TaskTracking
+
+    async with read_scope() as session:
+        _active = (
+            await session.execute(
+                select(TaskTracking.dbos_workflow_id)
+                .where(TaskTracking.resource_id == resource_id)
+                .where(TaskTracking.task_type == "ai_transcription")
+                .where(TaskTracking.status.in_(["pending", "processing", "running"]))
+                .limit(1)
+            )
+        ).first()
+    if _active:
         return {
             "message": "Transcription already in progress",
             "resource_id": resource_id,
@@ -263,17 +267,22 @@ async def trigger_summary_by_resource(
     resource, platform_id, media = await _resolve_resource_to_platform_id(resource_id)
 
     # === Dedup: reject if already processing ===
-    _admin = await _get_admin()
-    _active = (
-        await _admin.table("task_tracking")
-        .select("dbos_workflow_id")
-        .eq("resource_id", resource_id)
-        .eq("task_type", "ai_summary")
-        .in_("status", ["pending", "processing", "running"])
-        .limit(1)
-        .execute()
-    )
-    if _active.data:
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import TaskTracking
+
+    async with read_scope() as session:
+        _active = (
+            await session.execute(
+                select(TaskTracking.dbos_workflow_id)
+                .where(TaskTracking.resource_id == resource_id)
+                .where(TaskTracking.task_type == "ai_summary")
+                .where(TaskTracking.status.in_(["pending", "processing", "running"]))
+                .limit(1)
+            )
+        ).first()
+    if _active:
         return {"message": "Summary already in progress", "resource_id": resource_id}
     # === End dedup ===
 
@@ -415,17 +424,22 @@ async def trigger_visual_analysis_by_resource(
     resource, platform_id, media = await _resolve_resource_to_platform_id(resource_id)
 
     # Dedup: skip if a run is already in flight for this resource.
-    _admin = await _get_admin()
-    _active = (
-        await _admin.table("task_tracking")
-        .select("dbos_workflow_id")
-        .eq("resource_id", resource_id)
-        .eq("task_type", "ai_extract")
-        .in_("status", ["pending", "processing", "running"])
-        .limit(1)
-        .execute()
-    )
-    if _active.data:
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import TaskTracking
+
+    async with read_scope() as session:
+        _active = (
+            await session.execute(
+                select(TaskTracking.dbos_workflow_id)
+                .where(TaskTracking.resource_id == resource_id)
+                .where(TaskTracking.task_type == "ai_extract")
+                .where(TaskTracking.status.in_(["pending", "processing", "running"]))
+                .limit(1)
+            )
+        ).first()
+    if _active:
         return {
             "message": "Visual analysis already in progress",
             "resource_id": resource_id,

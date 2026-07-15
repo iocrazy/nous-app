@@ -280,25 +280,41 @@ async def test_legacy_path_reads_issue_messages_when_no_session():
         }
     ]
 
-    legacy_builder = _chain_builder(legacy_rows)
+    # The legacy path reads issue_messages via the ORM session and validates
+    # each row with from_attributes, so hand it ORM-like objects.
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
 
-    def _tables(tbl):
-        if tbl == "issue_messages":
-            return legacy_builder
-        # ai_sessions / ai_messages must NOT be accessed in the legacy path
-        raise AssertionError(f"unexpected table access in legacy path: {tbl}")
+    from sqlalchemy.dialects import postgresql
 
-    sb = _make_sb_client(_tables)
+    objs = [SimpleNamespace(**row) for row in legacy_rows]
+
+    class _Result:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return objs
+
+    captured = {}
+
+    class _Session:
+        async def execute(self, stmt, params=None):
+            captured["stmt"] = stmt
+            return _Result()
+
+    @asynccontextmanager
+    async def _scope():
+        yield _Session()
+
+    import app.db.session as dbs
 
     with (
         patch(
             "app.api.issue_messages_router.issue_repository.get_by_id",
             AsyncMock(return_value=issue_row),
         ),
-        patch(
-            "app.api.issue_messages_router.get_async_supabase_admin",
-            AsyncMock(return_value=sb),
-        ),
+        patch.object(dbs, "read_scope", _scope),
     ):
         auth = _make_auth(user_id=user_id)
         result = await list_issue_messages(issue_id, auth)
@@ -309,4 +325,7 @@ async def test_legacy_path_reads_issue_messages_when_no_session():
     assert msg.kind.value == "comment"
     assert msg.body == "Legacy comment"
     # Verify the legacy table was queried with the right issue_id filter
-    legacy_builder.eq.assert_any_call("issue_id", issue_id)
+    assert (
+        issue_id
+        in captured["stmt"].compile(dialect=postgresql.dialect()).params.values()
+    )

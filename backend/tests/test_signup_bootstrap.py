@@ -5,187 +5,158 @@ The on_auth_user_created DB trigger was dropped from prod once before
 (mig 239 history). When that happens, this helper has to pick up the
 slack so the welcome-bonus path further down has a team to attach to.
 
-Tests focus on the three branches:
-  - happy path: team_members already has the personal team → returns it
-    without touching INSERT paths
+Tests focus on the three branches (now on the ORM session boundary):
+  - happy path: team_members ⋈ teams already has the personal team →
+    returns it without touching INSERT paths
   - cold-start path: auth.users present, no team_members → INSERTs
-    user_profiles + teams (team_members lands via teams_add_owner trigger)
+    user_profiles (upsert) + teams (team_members lands via trigger)
   - missing-user path: auth.users row not found → returns None, no writes
 """
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 import pytest
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.sql.dml import Insert
 
 from app.api.supabase_auth_router import _ensure_personal_team_bootstrap
 
 
-class _FakeTable:
-    """Captures filters + chains for one .schema().table() call."""
+class _Result:
+    """Stands in for a SQLAlchemy Result over the queued value."""
 
-    def __init__(self, table_name: str, owner: "_FakeClient") -> None:
-        self.table_name = table_name
-        self.owner = owner
-        self._method_chain: list[tuple[str, tuple, dict]] = []
-        self._payload = None
+    def __init__(self, value):
+        self._v = value
 
-    def __getattr__(self, name: str):
-        def _capture(*args, **kwargs) -> "_FakeTable":
-            self._method_chain.append((name, args, kwargs))
-            return self
+    def scalar(self):
+        return self._v
 
-        return _capture
-
-    def insert(self, payload):
-        self._method_chain.append(("insert", (payload,), {}))
-        self._payload = payload
-        self.owner.inserts.append((self.table_name, payload))
+    def mappings(self):
         return self
 
-    def upsert(self, payload):
-        self._method_chain.append(("upsert", (payload,), {}))
-        self._payload = payload
-        self.owner.upserts.append((self.table_name, payload))
-        return self
+    def first(self):
+        return self._v
 
-    async def execute(self):
-        return self.owner._respond(self.table_name, self._method_chain)
+    def all(self):
+        return self._v
 
 
-class _FakeSchema:
-    def __init__(self, schema_name: str, owner: "_FakeClient") -> None:
-        self.schema_name = schema_name
-        self.owner = owner
+class _Session:
+    """Returns queued results in call order; classifies INSERT/upsert
+    statements (by on-conflict presence) for payload assertions."""
 
-    def table(self, name: str) -> _FakeTable:
-        return _FakeTable(f"{self.schema_name}.{name}", self.owner)
-
-
-class _FakeClient:
-    """Programmable Supabase client. ``responses`` keyed by qualified
-    table name returns ``.data`` for execute(); ``inserts``/``upserts``
-    are observed for assertion."""
-
-    def __init__(self, responses: dict[str, list]) -> None:
-        self.responses = responses
+    def __init__(self, results):
+        self._results = list(results)
         self.inserts: list = []
         self.upserts: list = []
 
-    def schema(self, name: str) -> _FakeSchema:
-        return _FakeSchema(name, self)
-
-    def _respond(self, table_name: str, _chain) -> object:
-        class _R:
-            pass
-
-        r = _R()
-        r.data = self.responses.get(table_name, [])
-        return r
+    async def execute(self, stmt, params=None):
+        if isinstance(stmt, Insert):
+            table = "public." + stmt.table.name
+            payload = stmt.compile(dialect=postgresql.dialect()).params
+            if getattr(stmt, "_post_values_clause", None) is not None:
+                self.upserts.append((table, payload))
+            else:
+                self.inserts.append((table, payload))
+        return _Result(self._results.pop(0) if self._results else None)
 
 
 @pytest.fixture
-def patch_admin(monkeypatch):
-    def _install(client: _FakeClient) -> _FakeClient:
-        async def _fake_admin():
-            return client
+def patch_scopes(monkeypatch):
+    def _install(results) -> _Session:
+        session = _Session(results)
 
-        monkeypatch.setattr(
-            "app.api.supabase_auth_router.get_async_supabase_admin", _fake_admin
-        )
-        return client
+        @asynccontextmanager
+        async def _scope():
+            yield session
+
+        import app.db.session as dbs
+
+        monkeypatch.setattr(dbs, "read_scope", _scope)
+        monkeypatch.setattr(dbs, "write_scope", _scope)
+        return session
 
     return _install
 
 
 @pytest.mark.asyncio
-async def test_returns_existing_team_id_without_inserts(patch_admin):
-    client = patch_admin(
-        _FakeClient({"public.team_members": [{"team_id": 310812366953241}]})
-    )
+async def test_returns_existing_team_id_without_inserts(patch_scopes):
+    # First (and only) execute: the team_members ⋈ teams probe → scalar id.
+    session = patch_scopes([310812366953241])
 
     result = await _ensure_personal_team_bootstrap(
         "8e1584e3-9c29-4a5b-90fe-125b74259f7f"
     )
 
     assert result == "310812366953241"
-    assert client.inserts == []
-    assert client.upserts == []
+    assert session.inserts == []
+    assert session.upserts == []
 
 
 @pytest.mark.asyncio
-async def test_cold_start_inserts_profile_and_team(patch_admin):
-    """No team_members row → look up auth.users, INSERT user_profiles +
-    teams. The trigger adds team_members.
-    """
-    client = patch_admin(
-        _FakeClient(
+async def test_cold_start_inserts_profile_and_team(patch_scopes):
+    """No team_members row → look up auth.users, upsert user_profiles +
+    INSERT teams. The trigger adds team_members."""
+    # Order: probe(None), auth.users(row), upsert(unused), teams insert(id).
+    session = patch_scopes(
+        [
+            None,
             {
-                "public.team_members": [],
-                "auth.users": [
-                    {
-                        "id": "9f3c0eaa-...",
-                        "email": "newbie@example.com",
-                        "raw_user_meta_data": {"username": "newbie"},
-                    }
-                ],
-                "public.teams": [{"id": 311999999900001}],
-            }
-        )
+                "id": "9f3c0eaa-...",
+                "email": "newbie@example.com",
+                "raw_user_meta_data": {"username": "newbie"},
+            },
+            None,
+            311999999900001,
+        ]
     )
 
     result = await _ensure_personal_team_bootstrap("9f3c0eaa-...")
 
     assert result == "311999999900001"
-    upsert_tables = {t for t, _ in client.upserts}
-    insert_tables = {t for t, _ in client.inserts}
+    upsert_tables = {t for t, _ in session.upserts}
+    insert_tables = {t for t, _ in session.inserts}
     assert "public.user_profiles" in upsert_tables
     assert "public.teams" in insert_tables
-    team_payload = next(p for t, p in client.inserts if t == "public.teams")
+    team_payload = next(p for t, p in session.inserts if t == "public.teams")
     assert team_payload["kind"] == "personal"
     assert team_payload["name"] == "newbie's Workspace"
     assert team_payload["owner_id"] == "9f3c0eaa-..."
 
 
 @pytest.mark.asyncio
-async def test_missing_auth_user_returns_none_no_writes(patch_admin):
-    client = patch_admin(
-        _FakeClient(
-            {
-                "public.team_members": [],
-                "auth.users": [],
-            }
-        )
-    )
+async def test_missing_auth_user_returns_none_no_writes(patch_scopes):
+    # probe(None), auth.users(None) → returns None before any write.
+    session = patch_scopes([None, None])
 
     result = await _ensure_personal_team_bootstrap("ghost-uuid")
 
     assert result is None
-    assert client.inserts == []
-    assert client.upserts == []
+    assert session.inserts == []
+    assert session.upserts == []
 
 
 @pytest.mark.asyncio
-async def test_falls_back_to_email_prefix_when_username_missing(patch_admin):
+async def test_falls_back_to_email_prefix_when_username_missing(patch_scopes):
     """raw_user_meta_data has no username key — use email local-part."""
-    client = patch_admin(
-        _FakeClient(
+    session = patch_scopes(
+        [
+            None,
             {
-                "public.team_members": [],
-                "auth.users": [
-                    {
-                        "id": "abc",
-                        "email": "alice@corp.com",
-                        "raw_user_meta_data": {},
-                    }
-                ],
-                "public.teams": [{"id": 999}],
-            }
-        )
+                "id": "abc",
+                "email": "alice@corp.com",
+                "raw_user_meta_data": {},
+            },
+            None,
+            999,
+        ]
     )
 
     await _ensure_personal_team_bootstrap("abc")
 
-    team_payload = next(p for t, p in client.inserts if t == "public.teams")
+    team_payload = next(p for t, p in session.inserts if t == "public.teams")
     assert team_payload["name"] == "alice's Workspace"
-    upsert_payload = next(p for t, p in client.upserts if t == "public.user_profiles")
+    upsert_payload = next(p for t, p in session.upserts if t == "public.user_profiles")
     assert upsert_payload["username"] == "alice"

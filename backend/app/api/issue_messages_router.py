@@ -37,7 +37,6 @@ from fastapi import APIRouter, HTTPException, status
 from loguru import logger
 
 from app.core.deps import AuthDep
-from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.issue_repository import issue_repository
 from app.schemas.issue_message import (
     IssueMessage,
@@ -188,24 +187,32 @@ async def list_issue_messages(issue_id: int, auth: AuthDep) -> IssueMessageList:
     # Unchanged: read issue_messages table so old issues render correctly.
     # (issue_messages is a distinct, still-live table — not one of the 6
     # dropped by mig 333.)
-    sb = await get_async_supabase_admin()
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import IssueMessages
+
     try:
-        result = (
-            await sb.table("issue_messages")
-            .select("*", count="exact")
-            .eq("issue_id", issue_id)
-            .order("created_at", desc=False)
-            .execute()
-        )
+        async with read_scope() as session:
+            objs = (
+                (
+                    await session.execute(
+                        select(IssueMessages)
+                        .where(IssueMessages.issue_id == issue_id)
+                        .order_by(IssueMessages.created_at.asc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            messages = [
+                IssueMessage.model_validate(o, from_attributes=True) for o in objs
+            ]
     except Exception as exc:
         logger.exception(f"list issue_messages failed (issue_id={issue_id}): {exc}")
         raise HTTPException(500, "failed to list messages")
 
-    rows = result.data or []
-    return IssueMessageList(
-        messages=[IssueMessage.model_validate(r) for r in rows],
-        total=result.count or len(rows),
-    )
+    return IssueMessageList(messages=messages, total=len(messages))
 
 
 @router.post(
@@ -278,7 +285,11 @@ async def post_issue_message(
         return IssueMessagePostResponse(comment=comment, agent_run=None)
 
     # ── Legacy path (no assigned agent) ───────────────────────────────────
-    sb = await get_async_supabase_admin()
+    from sqlalchemy import insert
+
+    from app.db.session import write_scope
+    from app.models import IssueMessages
+
     comment_row = {
         "issue_id": issue_id,
         "kind": IssueMessageKind.COMMENT.value,
@@ -287,15 +298,26 @@ async def post_issue_message(
         "meta": {},
     }
     try:
-        comment_resp = await sb.table("issue_messages").insert(comment_row).execute()
+        async with write_scope() as session:
+            inserted = (
+                (
+                    await session.execute(
+                        insert(IssueMessages)
+                        .values(comment_row)
+                        .returning(*IssueMessages.__table__.columns)
+                    )
+                )
+                .mappings()
+                .first()
+            )
     except Exception as exc:
         logger.exception(f"insert comment failed (issue_id={issue_id}): {exc}")
         raise HTTPException(500, "comment insert failed")
 
-    if not comment_resp.data:
+    if not inserted:
         raise HTTPException(500, "comment insert returned no row")
 
-    comment = IssueMessage.model_validate(comment_resp.data[0])
+    comment = IssueMessage.model_validate(dict(inserted))
     return IssueMessagePostResponse(comment=comment, agent_run=None)
 
 
@@ -321,17 +343,34 @@ async def simulate_agent_run_complete(
 
     await _assert_issue_visible(issue_id, auth)
 
-    sb = await get_async_supabase_admin()
+    from decimal import Decimal
+
+    from sqlalchemy import select, update
+
+    from app.db.session import read_scope, write_scope
+    from app.models import AgentRuns
 
     # Confirm the run belongs to this issue and is still running.
-    pre = (
-        await sb.table("agent_runs")
-        .select("id,status,issue_id,started_at,prompt_tokens,completion_tokens")
-        .eq("id", str(run_id))
-        .maybe_single()
-        .execute()
-    )
-    row = pre.data if pre and pre.data else None
+    # agent_runs.id is BIGINT (mig 232) → bind int, not str.
+    async with read_scope() as session:
+        row = (
+            (
+                await session.execute(
+                    select(
+                        AgentRuns.id,
+                        AgentRuns.status,
+                        AgentRuns.issue_id,
+                        AgentRuns.started_at,
+                        AgentRuns.prompt_tokens,
+                        AgentRuns.completion_tokens,
+                    )
+                    .where(AgentRuns.id == int(run_id))
+                    .limit(1)
+                )
+            )
+            .mappings()
+            .first()
+        )
     if not row:
         raise HTTPException(404, "agent_run not found")
     if row.get("issue_id") != issue_id:
@@ -347,24 +386,24 @@ async def simulate_agent_run_complete(
         "下一步可以让 workforce 创建 agent_runs 时回填 issue_id。"
     )
 
-    now = datetime.now(timezone.utc).isoformat()
+    # ended_at is timestamptz → bind a native datetime (asyncpg rejects ISO
+    # strings); cost_cents is NUMERIC → bind a Decimal.
+    now = datetime.now(timezone.utc)
     try:
-        await (
-            sb.table("agent_runs")
-            .update(
-                {
-                    "status": "completed",
-                    "ended_at": now,
-                    "output_summary": summary,
-                    "cost_cents": 4,
-                    "prompt_tokens": int(row.get("prompt_tokens") or 0) + 240,
-                    "completion_tokens": int(row.get("completion_tokens") or 0) + 180,
-                }
+        async with write_scope() as session:
+            await session.execute(
+                update(AgentRuns)
+                .where(AgentRuns.id == int(run_id))
+                .where(AgentRuns.status == "running")  # CAS guard
+                .values(
+                    status="completed",
+                    ended_at=now,
+                    output_summary=summary,
+                    cost_cents=Decimal(4),
+                    prompt_tokens=int(row.get("prompt_tokens") or 0) + 240,
+                    completion_tokens=int(row.get("completion_tokens") or 0) + 180,
+                )
             )
-            .eq("id", str(run_id))
-            .eq("status", "running")  # CAS guard
-            .execute()
-        )
     except Exception as exc:
         logger.exception(f"simulate-complete update failed (run_id={run_id}): {exc}")
         raise HTTPException(500, "simulate-complete update failed")

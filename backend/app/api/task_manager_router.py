@@ -180,27 +180,45 @@ async def patch_health_override(
     Returns the patched row so the frontend can refresh its local state
     without a follow-up GET.
     """
-    from app.db import get_async_supabase_admin
+    from datetime import datetime
 
-    sb = await get_async_supabase_admin()
+    from sqlalchemy import update
+
+    from app.db.session import write_scope
+    from app.models import TaskTracking
+
     fields = payload.model_dump(exclude_none=True)
     if not fields:
         raise HTTPException(400, "no fields to update")
 
+    # TODO(task-tracking): the pre-ORM path filtered on `id`, a column dropped
+    # by migration 180 — so this endpoint always errored. The row key is the
+    # UI task id = dbos_workflow_id (route C); binding it here revives the
+    # endpoint. Behaviour change flagged for supervisor sign-off (see B4b report).
     try:
-        result = await (
-            sb.table("task_tracking")
-            .update(fields)
-            .eq("id", task_id)
-            .eq("user_id", str(auth.user_id))
-            .execute()
-        )
+        async with write_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        update(TaskTracking)
+                        .where(TaskTracking.dbos_workflow_id == task_id)
+                        .where(TaskTracking.user_id == str(auth.user_id))
+                        .values(**fields)
+                        .returning(*TaskTracking.__table__.columns)
+                    )
+                )
+                .mappings()
+                .first()
+            )
     except Exception as e:
         logger.exception(f"health override patch failed for task {task_id}: {e}")
         raise HTTPException(500, f"update failed: {e}")
-    if not result.data:
+    if row is None:
         raise HTTPException(404, "task not found or not owned by user")
-    return {"success": True, "task": result.data[0]}
+    task = {
+        k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in row.items()
+    }
+    return {"success": True, "task": task}
 
 
 @router.post("/tasks/{task_id}/extend")
@@ -216,18 +234,28 @@ async def extend_task_timeout(task_id: str, auth: AuthDep, minutes: int = 30):
 
     from datetime import datetime, timezone
 
-    from app.db import get_async_supabase_admin
+    from sqlalchemy import select, update
 
-    sb = await get_async_supabase_admin()
-    row_resp = await (
-        sb.table("task_tracking")
-        .select("started_at, max_duration_minutes")
-        .eq("id", task_id)
-        .eq("user_id", str(auth.user_id))
-        .single()
-        .execute()
-    )
-    row = row_resp.data
+    from app.db.session import read_scope, write_scope
+    from app.models import TaskTracking
+
+    # Row key is dbos_workflow_id (the `id` column was dropped in migration 180
+    # — see health-override note above).
+    async with read_scope() as session:
+        row = (
+            (
+                await session.execute(
+                    select(
+                        TaskTracking.started_at,
+                        TaskTracking.max_duration_minutes,
+                    )
+                    .where(TaskTracking.dbos_workflow_id == task_id)
+                    .where(TaskTracking.user_id == str(auth.user_id))
+                )
+            )
+            .mappings()
+            .first()
+        )
     if not row:
         raise HTTPException(404, "task not found")
 
@@ -243,13 +271,13 @@ async def extend_task_timeout(task_id: str, auth: AuthDep, minutes: int = 30):
         except (ValueError, TypeError):
             pass
 
-    await (
-        sb.table("task_tracking")
-        .update({"max_duration_minutes": new_max})
-        .eq("id", task_id)
-        .eq("user_id", str(auth.user_id))
-        .execute()
-    )
+    async with write_scope() as session:
+        await session.execute(
+            update(TaskTracking)
+            .where(TaskTracking.dbos_workflow_id == task_id)
+            .where(TaskTracking.user_id == str(auth.user_id))
+            .values(max_duration_minutes=new_max)
+        )
     return {"success": True, "max_duration_minutes": new_max}
 
 

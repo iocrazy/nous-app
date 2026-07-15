@@ -7,7 +7,6 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from app.core.deps import AuthDep
-from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.tag_preferences_repository import (
     get_tag_preferences_repository,
 )
@@ -53,16 +52,26 @@ class MergeTagsResponse(BaseModel):
 @router.get("/groups", response_model=TagGroupsListResponse)
 async def list_tag_groups(auth: AuthDep):
     """List all tag groups (for frontend tag picker grouping)."""
-    client = await get_async_supabase_admin()
-    result = (
-        await client.table("tag_groups")
-        .select("id, name, sort_order")
-        .order("sort_order")
-        .execute()
-    )
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import TagGroups
+
+    async with read_scope() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(TagGroups.id, TagGroups.name, TagGroups.sort_order).order_by(
+                        TagGroups.sort_order
+                    )
+                )
+            )
+            .mappings()
+            .all()
+        )
     groups = [
         TagGroupItem(id=str(g["id"]), name=g["name"], sort_order=g["sort_order"])
-        for g in (result.data or [])
+        for g in rows
     ]
     return TagGroupsListResponse(groups=groups)
 
@@ -92,29 +101,34 @@ def _validate_group_name(name: str) -> str:
 async def create_tag_group(auth: AuthDep, body: TagGroupCreate):
     """Create a new tag group."""
     body.name = _validate_group_name(body.name)
-    client = await get_async_supabase_admin()
+    from sqlalchemy import insert, select
+
+    from app.db.session import read_scope, write_scope
+    from app.models import TagGroups
+
     # Get max sort_order
-    existing = (
-        await client.table("tag_groups")
-        .select("sort_order")
-        .order("sort_order", desc=True)
-        .limit(1)
-        .execute()
-    )
-    max_order = existing.data[0]["sort_order"] if existing.data else 0
-    result = (
-        await client.table("tag_groups")
-        .insert(
-            {
-                "name": body.name,
-                "sort_order": max_order + 1,
-            }
+    async with read_scope() as session:
+        max_order = (
+            await session.execute(
+                select(TagGroups.sort_order)
+                .order_by(TagGroups.sort_order.desc())
+                .limit(1)
+            )
+        ).scalar() or 0
+    async with write_scope() as session:
+        g = (
+            (
+                await session.execute(
+                    insert(TagGroups)
+                    .values(name=body.name, sort_order=max_order + 1)
+                    .returning(TagGroups.id, TagGroups.name, TagGroups.sort_order)
+                )
+            )
+            .mappings()
+            .first()
         )
-        .execute()
-    )
-    if not result.data:
+    if not g:
         raise HTTPException(status_code=500, detail="Failed to create tag group")
-    g = result.data[0]
     return TagGroupItem(id=str(g["id"]), name=g["name"], sort_order=g["sort_order"])
 
 
@@ -126,29 +140,44 @@ class TagGroupUpdate(BaseModel):
 async def rename_tag_group(auth: AuthDep, group_id: str, body: TagGroupUpdate):
     """Rename a tag group."""
     body.name = _validate_group_name(body.name)
-    client = await get_async_supabase_admin()
-    result = (
-        await client.table("tag_groups")
-        .update({"name": body.name})
-        .eq("id", group_id)
-        .execute()
-    )
-    if not result.data:
+    from sqlalchemy import update
+
+    from app.db.session import write_scope
+    from app.models import TagGroups
+
+    async with write_scope() as session:
+        g = (
+            (
+                await session.execute(
+                    update(TagGroups)
+                    .where(TagGroups.id == int(group_id))
+                    .values(name=body.name)
+                    .returning(TagGroups.id, TagGroups.name, TagGroups.sort_order)
+                )
+            )
+            .mappings()
+            .first()
+        )
+    if not g:
         raise HTTPException(status_code=404, detail="Tag group not found")
-    g = result.data[0]
     return TagGroupItem(id=str(g["id"]), name=g["name"], sort_order=g["sort_order"])
 
 
 @router.delete("/groups/{group_id}", status_code=status.HTTP_200_OK)
 async def delete_tag_group(auth: AuthDep, group_id: str):
     """Delete a tag group. Tags in this group become uncategorized."""
-    client = await get_async_supabase_admin()
-    # Move tags to uncategorized (set group_id to NULL)
-    await client.table("tags").update({"group_id": None}).eq(
-        "group_id", group_id
-    ).execute()
-    # Delete the group
-    await client.table("tag_groups").delete().eq("id", group_id).execute()
+    from sqlalchemy import delete, update
+
+    from app.db.session import write_scope
+    from app.models import TagGroups, Tags
+
+    async with write_scope() as session:
+        # Move tags to uncategorized (set group_id to NULL)
+        await session.execute(
+            update(Tags).where(Tags.group_id == int(group_id)).values(group_id=None)
+        )
+        # Delete the group
+        await session.execute(delete(TagGroups).where(TagGroups.id == int(group_id)))
     return {"success": True}
 
 
@@ -159,11 +188,18 @@ class TagGroupReorderRequest(BaseModel):
 @router.put("/groups/reorder")
 async def reorder_tag_groups(auth: AuthDep, body: TagGroupReorderRequest):
     """Update sort_order for all groups based on the provided order."""
-    client = await get_async_supabase_admin()
-    for idx, group_id in enumerate(body.group_ids):
-        await client.table("tag_groups").update({"sort_order": idx}).eq(
-            "id", group_id
-        ).execute()
+    from sqlalchemy import update
+
+    from app.db.session import write_scope
+    from app.models import TagGroups
+
+    async with write_scope() as session:
+        for idx, group_id in enumerate(body.group_ids):
+            await session.execute(
+                update(TagGroups)
+                .where(TagGroups.id == int(group_id))
+                .values(sort_order=idx)
+            )
     return {"success": True}
 
 

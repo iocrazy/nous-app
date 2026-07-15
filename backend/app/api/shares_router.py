@@ -10,6 +10,7 @@ and delivery share types.
 
 import secrets
 import string
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -18,7 +19,6 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from app.core.deps import AuthDep, OptionalAuthDep
-from app.db.supabase_client import get_async_supabase_admin
 from app.schemas.shares import ShareAccessRequest, ShareCreate, ShareUpdate
 
 
@@ -86,6 +86,20 @@ def _enrich_share(share: dict) -> dict:
     return share
 
 
+def _row_to_dict(row) -> dict:
+    """Row mapping → PostgREST-shaped dict: datetime → ISO str, UUID → str;
+    other columns native (BIGINT ids stay int, matching the old client)."""
+    out = {}
+    for k, v in row.items():
+        if isinstance(v, datetime):
+            out[k] = v.isoformat()
+        elif isinstance(v, uuid.UUID):
+            out[k] = str(v)
+        else:
+            out[k] = v
+    return out
+
+
 # ============================================
 # Authenticated endpoints
 # ============================================
@@ -109,18 +123,23 @@ async def create_share(data: ShareCreate, auth: AuthDep):
         )
 
     try:
-        client = await get_async_supabase_admin()
+        from sqlalchemy import insert, select
+
+        from app.db.session import read_scope, write_scope
+        from app.models import Shares
 
         # Generate a unique share code with retry
         share_code = _generate_share_code()
         for _ in range(5):
-            existing = (
-                await client.table("shares")
-                .select("id")
-                .eq("share_code", share_code)
-                .execute()
-            )
-            if not existing.data:
+            async with read_scope() as session:
+                exists = (
+                    await session.execute(
+                        select(Shares.id)
+                        .where(Shares.share_code == share_code)
+                        .limit(1)
+                    )
+                ).scalar()
+            if exists is None:
                 break
             share_code = _generate_share_code()
         else:
@@ -129,6 +148,8 @@ async def create_share(data: ShareCreate, auth: AuthDep):
                 detail="Failed to generate a unique share code. Please try again.",
             )
 
+        # FK ids are BIGINT columns → coerce the schema's str fields to int;
+        # expires_at is timestamptz → bind the native datetime (not isoformat).
         insert_data = {
             "share_code": share_code,
             "shared_by": auth.user_id,
@@ -139,28 +160,39 @@ async def create_share(data: ShareCreate, auth: AuthDep):
         }
 
         if data.resource_id:
-            insert_data["resource_id"] = data.resource_id
+            insert_data["resource_id"] = int(data.resource_id)
         if data.project_file_id:
-            insert_data["project_file_id"] = data.project_file_id
+            insert_data["project_file_id"] = int(data.project_file_id)
         if data.folder_id:
-            insert_data["folder_id"] = data.folder_id
+            insert_data["folder_id"] = int(data.folder_id)
         if data.version_id:
-            insert_data["version_id"] = data.version_id
+            insert_data["version_id"] = int(data.version_id)
         if data.password:
             insert_data["password"] = data.password
         if data.expires_at:
-            insert_data["expires_at"] = data.expires_at.isoformat()
+            insert_data["expires_at"] = data.expires_at
         if data.max_views is not None:
             insert_data["max_views"] = data.max_views
         if data.team_id:
-            insert_data["team_id"] = data.team_id
+            insert_data["team_id"] = int(data.team_id)
 
-        result = await client.table("shares").insert(insert_data).execute()
+        async with write_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        insert(Shares)
+                        .values(**insert_data)
+                        .returning(*Shares.__table__.columns)
+                    )
+                )
+                .mappings()
+                .first()
+            )
 
-        if not result.data:
+        if not row:
             raise HTTPException(status_code=500, detail="Failed to create share")
 
-        share = _enrich_share(result.data[0])
+        share = _enrich_share(_row_to_dict(row))
         logger.info(f"Share created: {share_code} by user {auth.user_id}")
         return {"success": True, "data": share}
 
@@ -199,29 +231,33 @@ async def list_shares(
     Authentication: Bearer Token or API Key
     """
     try:
-        client = await get_async_supabase_admin()
+        from sqlalchemy import select
 
-        query = (
-            client.table("shares")
-            .select("*")
-            .eq("shared_by", auth.user_id)
-            .order("created_at", desc=True)
+        from app.db.session import read_scope
+        from app.models import Shares
+
+        stmt = (
+            select(*Shares.__table__.columns)
+            .where(Shares.shared_by == auth.user_id)
+            .order_by(Shares.created_at.desc())
         )
 
         if team_id == "personal":
-            query = query.is_("team_id", "null")
+            stmt = stmt.where(Shares.team_id.is_(None))
         elif team_id:
-            query = query.eq("team_id", team_id)
+            stmt = stmt.where(Shares.team_id == int(team_id))
 
         if share_type:
-            query = query.eq("share_type", share_type)
+            stmt = stmt.where(Shares.share_type == share_type)
         if status:
-            query = query.eq("status", status)
+            stmt = stmt.where(Shares.status == status)
 
-        query = query.range(offset, offset + limit - 1)
-        result = await query.execute()
+        stmt = stmt.offset(offset).limit(limit)
 
-        shares = [_enrich_share(s) for s in (result.data or [])]
+        async with read_scope() as session:
+            rows = (await session.execute(stmt)).mappings().all()
+
+        shares = [_enrich_share(_row_to_dict(r)) for r in rows]
 
         return {
             "success": True,
@@ -244,14 +280,28 @@ async def get_share(share_id: str, auth: AuthDep):
     Authentication: Bearer Token or API Key
     """
     try:
-        client = await get_async_supabase_admin()
+        from sqlalchemy import select
 
-        result = await client.table("shares").select("*").eq("id", share_id).execute()
+        from app.db.session import read_scope
+        from app.models import Shares, ShareViews
 
-        if not result.data:
+        async with read_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        select(*Shares.__table__.columns)
+                        .where(Shares.id == int(share_id))
+                        .limit(1)
+                    )
+                )
+                .mappings()
+                .first()
+            )
+
+        if not row:
             raise HTTPException(status_code=404, detail="Share not found")
 
-        share = result.data[0]
+        share = _row_to_dict(row)
 
         if share["shared_by"] != auth.user_id:
             raise HTTPException(
@@ -261,15 +311,20 @@ async def get_share(share_id: str, auth: AuthDep):
         share = _enrich_share(share)
 
         # Fetch recent view records
-        views_result = (
-            await client.table("share_views")
-            .select("*")
-            .eq("share_id", share_id)
-            .order("last_viewed_at", desc=True)
-            .limit(50)
-            .execute()
-        )
-        share["recent_views"] = views_result.data or []
+        async with read_scope() as session:
+            views = (
+                (
+                    await session.execute(
+                        select(*ShareViews.__table__.columns)
+                        .where(ShareViews.share_id == int(share_id))
+                        .order_by(ShareViews.last_viewed_at.desc())
+                        .limit(50)
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        share["recent_views"] = [_row_to_dict(v) for v in views]
 
         return {"success": True, "data": share}
 
@@ -290,27 +345,34 @@ async def update_share(share_id: str, data: ShareUpdate, auth: AuthDep):
     Authentication: Bearer Token or API Key
     """
     try:
-        client = await get_async_supabase_admin()
+        from sqlalchemy import select, update
+
+        from app.db.session import read_scope, write_scope
+        from app.models import Shares
 
         # Verify ownership
-        existing = (
-            await client.table("shares")
-            .select("id, shared_by, status")
-            .eq("id", share_id)
-            .execute()
-        )
+        async with read_scope() as session:
+            existing = (
+                (
+                    await session.execute(
+                        select(Shares.id, Shares.shared_by, Shares.status)
+                        .where(Shares.id == int(share_id))
+                        .limit(1)
+                    )
+                )
+                .mappings()
+                .first()
+            )
 
-        if not existing.data:
+        if not existing:
             raise HTTPException(status_code=404, detail="Share not found")
 
-        share = existing.data[0]
-
-        if share["shared_by"] != auth.user_id:
+        if existing["shared_by"] != auth.user_id:
             raise HTTPException(
                 status_code=403, detail="Not authorized to update this share"
             )
 
-        if share["status"] == "cancelled":
+        if existing["status"] == "cancelled":
             raise HTTPException(
                 status_code=400, detail="Cannot update a cancelled share"
             )
@@ -325,7 +387,7 @@ async def update_share(share_id: str, data: ShareUpdate, auth: AuthDep):
         if data.allow_download is not None:
             update_data["allow_download"] = data.allow_download
         if data.expires_at is not None:
-            update_data["expires_at"] = data.expires_at.isoformat()
+            update_data["expires_at"] = data.expires_at
         if data.max_views is not None:
             update_data["max_views"] = data.max_views
         if data.watermark is not None:
@@ -334,17 +396,24 @@ async def update_share(share_id: str, data: ShareUpdate, auth: AuthDep):
         if not update_data:
             raise HTTPException(status_code=400, detail="No fields to update")
 
-        result = (
-            await client.table("shares")
-            .update(update_data)
-            .eq("id", share_id)
-            .execute()
-        )
+        async with write_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        update(Shares)
+                        .where(Shares.id == int(share_id))
+                        .values(**update_data)
+                        .returning(*Shares.__table__.columns)
+                    )
+                )
+                .mappings()
+                .first()
+            )
 
-        if not result.data:
+        if not row:
             raise HTTPException(status_code=500, detail="Failed to update share")
 
-        updated = _enrich_share(result.data[0])
+        updated = _enrich_share(_row_to_dict(row))
         logger.info(f"Share {share_id} updated by user {auth.user_id}")
         return {"success": True, "data": updated}
 
@@ -363,34 +432,44 @@ async def toggle_share_status(share_id: str, auth: AuthDep):
     Authentication: Bearer Token or API Key
     """
     try:
-        client = await get_async_supabase_admin()
+        from sqlalchemy import select, update
 
-        existing = (
-            await client.table("shares")
-            .select("id, shared_by, status")
-            .eq("id", share_id)
-            .execute()
-        )
+        from app.db.session import read_scope, write_scope
+        from app.models import Shares
 
-        if not existing.data:
+        async with read_scope() as session:
+            existing = (
+                (
+                    await session.execute(
+                        select(Shares.id, Shares.shared_by, Shares.status)
+                        .where(Shares.id == int(share_id))
+                        .limit(1)
+                    )
+                )
+                .mappings()
+                .first()
+            )
+
+        if not existing:
             raise HTTPException(status_code=404, detail="Share not found")
 
-        share = existing.data[0]
-
-        if share["shared_by"] != auth.user_id:
+        if existing["shared_by"] != auth.user_id:
             raise HTTPException(status_code=403, detail="Not authorized")
 
         # Toggle: active → inactive, inactive/cancelled → active
-        new_status = "inactive" if share["status"] == "active" else "active"
+        new_status = "inactive" if existing["status"] == "active" else "active"
 
-        result = (
-            await client.table("shares")
-            .update({"status": new_status})
-            .eq("id", share_id)
-            .execute()
-        )
+        async with write_scope() as session:
+            updated = (
+                await session.execute(
+                    update(Shares)
+                    .where(Shares.id == int(share_id))
+                    .values(status=new_status)
+                    .returning(Shares.id)
+                )
+            ).scalar()
 
-        if not result.data:
+        if updated is None:
             raise HTTPException(status_code=500, detail="Failed to update share status")
 
         logger.info(f"Share {share_id} toggled to {new_status} by user {auth.user_id}")
@@ -411,24 +490,32 @@ async def delete_share_permanent(share_id: str, auth: AuthDep):
     Authentication: Bearer Token or API Key
     """
     try:
-        client = await get_async_supabase_admin()
+        from sqlalchemy import delete, select
 
-        existing = (
-            await client.table("shares")
-            .select("id, shared_by")
-            .eq("id", share_id)
-            .execute()
-        )
+        from app.db.session import read_scope, write_scope
+        from app.models import Shares
 
-        if not existing.data:
+        async with read_scope() as session:
+            existing = (
+                (
+                    await session.execute(
+                        select(Shares.id, Shares.shared_by)
+                        .where(Shares.id == int(share_id))
+                        .limit(1)
+                    )
+                )
+                .mappings()
+                .first()
+            )
+
+        if not existing:
             raise HTTPException(status_code=404, detail="Share not found")
 
-        share = existing.data[0]
-
-        if share["shared_by"] != auth.user_id:
+        if existing["shared_by"] != auth.user_id:
             raise HTTPException(status_code=403, detail="Not authorized")
 
-        await client.table("shares").delete().eq("id", share_id).execute()
+        async with write_scope() as session:
+            await session.execute(delete(Shares).where(Shares.id == int(share_id)))
 
         logger.info(f"Share {share_id} permanently deleted by user {auth.user_id}")
         return {"success": True, "message": "Share deleted"}
@@ -460,20 +547,29 @@ async def access_share_by_code(
     Authentication: Optional (viewer identity is recorded if authenticated)
     """
     try:
-        client = await get_async_supabase_admin()
+        from sqlalchemy import insert, select, update
+
+        from app.db.session import read_scope, write_scope
+        from app.models import Resources, Shares, ShareViews
 
         # Look up the share by code
-        result = (
-            await client.table("shares")
-            .select("*")
-            .eq("share_code", share_code)
-            .execute()
-        )
+        async with read_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        select(*Shares.__table__.columns)
+                        .where(Shares.share_code == share_code)
+                        .limit(1)
+                    )
+                )
+                .mappings()
+                .first()
+            )
 
-        if not result.data:
+        if not row:
             raise HTTPException(status_code=404, detail="Share not found")
 
-        share = result.data[0]
+        share = _row_to_dict(row)
 
         # Check status
         if share["status"] in ("cancelled", "inactive"):
@@ -485,12 +581,12 @@ async def access_share_by_code(
         if _is_expired(share):
             # Auto-update status to expired if it was still active
             if share["status"] == "active":
-                await (
-                    client.table("shares")
-                    .update({"status": "expired"})
-                    .eq("id", share["id"])
-                    .execute()
-                )
+                async with write_scope() as session:
+                    await session.execute(
+                        update(Shares)
+                        .where(Shares.id == share["id"])
+                        .values(status="expired")
+                    )
             raise HTTPException(status_code=410, detail="This share has expired")
 
         # Check password
@@ -506,90 +602,97 @@ async def access_share_by_code(
 
         # Increment view_count on the share
         new_view_count = (share.get("view_count") or 0) + 1
-        await (
-            client.table("shares")
-            .update({"view_count": new_view_count})
-            .eq("id", share["id"])
-            .execute()
-        )
+        async with write_scope() as session:
+            await session.execute(
+                update(Shares)
+                .where(Shares.id == share["id"])
+                .values(view_count=new_view_count)
+            )
 
-        # Record/update share_views
+        # Record/update share_views. last_viewed_at is timestamptz → bind a
+        # native datetime (asyncpg rejects ISO strings).
         viewer_id = auth.user_id if auth else None
+        now_dt = datetime.now(timezone.utc)
 
         if viewer_id:
             # Check if this viewer already has a record
-            existing_view = (
-                await client.table("share_views")
-                .select("id, view_count")
-                .eq("share_id", share["id"])
-                .eq("viewer_id", viewer_id)
-                .execute()
-            )
-
-            if existing_view.data:
-                # Update existing view record
-                view_record = existing_view.data[0]
-                await (
-                    client.table("share_views")
-                    .update(
-                        {
-                            "view_count": view_record["view_count"] + 1,
-                            "last_viewed_at": datetime.now(timezone.utc).isoformat(),
-                        }
+            async with read_scope() as session:
+                view_record = (
+                    (
+                        await session.execute(
+                            select(ShareViews.id, ShareViews.view_count)
+                            .where(ShareViews.share_id == share["id"])
+                            .where(ShareViews.viewer_id == viewer_id)
+                            .limit(1)
+                        )
                     )
-                    .eq("id", view_record["id"])
-                    .execute()
+                    .mappings()
+                    .first()
                 )
+
+            if view_record:
+                # Update existing view record
+                async with write_scope() as session:
+                    await session.execute(
+                        update(ShareViews)
+                        .where(ShareViews.id == view_record["id"])
+                        .values(
+                            view_count=view_record["view_count"] + 1,
+                            last_viewed_at=now_dt,
+                        )
+                    )
             else:
                 # Create new view record
-                await (
-                    client.table("share_views")
-                    .insert(
-                        {
-                            "share_id": share["id"],
-                            "viewer_id": viewer_id,
-                            "last_viewed_at": datetime.now(timezone.utc).isoformat(),
-                        }
+                async with write_scope() as session:
+                    await session.execute(
+                        insert(ShareViews).values(
+                            share_id=share["id"],
+                            viewer_id=viewer_id,
+                            last_viewed_at=now_dt,
+                        )
                     )
-                    .execute()
-                )
         else:
             # Anonymous viewer: create a record without viewer_id
-            await (
-                client.table("share_views")
-                .insert(
-                    {
-                        "share_id": share["id"],
-                        "last_viewed_at": datetime.now(timezone.utc).isoformat(),
-                    }
+            async with write_scope() as session:
+                await session.execute(
+                    insert(ShareViews).values(
+                        share_id=share["id"],
+                        last_viewed_at=now_dt,
+                    )
                 )
-                .execute()
-            )
 
         # Fetch resource metadata for preview (mime_type, filename, cover)
         resource_meta = {}
         if share.get("resource_id"):
             try:
-                res_data = (
-                    await client.table("resources")
-                    .select(
-                        "mime_type, file_type, filename, cover_image_path, thumbnail_path, media_id"
+                async with read_scope() as session:
+                    res = (
+                        (
+                            await session.execute(
+                                select(
+                                    Resources.mime_type,
+                                    Resources.file_type,
+                                    Resources.filename,
+                                    Resources.cover_image_path,
+                                    Resources.thumbnail_path,
+                                    Resources.media_id,
+                                )
+                                .where(Resources.id == share["resource_id"])
+                                .limit(1)
+                            )
+                        )
+                        .mappings()
+                        .first()
                     )
-                    .eq("id", share["resource_id"])
-                    .maybe_single()
-                    .execute()
-                )
-                if res_data.data:
+                if res:
                     resource_meta = {
-                        "mime_type": res_data.data.get("mime_type"),
-                        "file_type": res_data.data.get("file_type"),
-                        "filename": res_data.data.get("filename"),
-                        "cover_image_path": res_data.data.get("cover_image_path"),
-                        "thumbnail_path": res_data.data.get("thumbnail_path"),
+                        "mime_type": res.get("mime_type"),
+                        "file_type": res.get("file_type"),
+                        "filename": res.get("filename"),
+                        "cover_image_path": res.get("cover_image_path"),
+                        "thumbnail_path": res.get("thumbnail_path"),
                         "media_id": (
-                            str(res_data.data["media_id"])
-                            if res_data.data.get("media_id")
-                            else None
+                            str(res["media_id"]) if res.get("media_id") else None
                         ),
                     }
             except Exception as e:
@@ -642,20 +745,32 @@ async def get_share_comments(
     Returns review_comments for the share's resource, ordered by created_at.
     """
     try:
-        client = await get_async_supabase_admin()
+        from sqlalchemy import select
+
+        from app.db.session import read_scope
+        from app.models import ReviewComments, Shares
 
         # Look up share
-        share_result = (
-            await client.table("shares")
-            .select("id, status, share_type, resource_id")
-            .eq("share_code", share_code)
-            .execute()
-        )
+        async with read_scope() as session:
+            share = (
+                (
+                    await session.execute(
+                        select(
+                            Shares.id,
+                            Shares.status,
+                            Shares.share_type,
+                            Shares.resource_id,
+                        )
+                        .where(Shares.share_code == share_code)
+                        .limit(1)
+                    )
+                )
+                .mappings()
+                .first()
+            )
 
-        if not share_result.data:
+        if not share:
             raise HTTPException(status_code=404, detail="Share not found")
-
-        share = share_result.data[0]
 
         if share["status"] == "cancelled":
             raise HTTPException(status_code=410, detail="Share cancelled")
@@ -670,18 +785,29 @@ async def get_share_comments(
             )
 
         # Fetch comments for this share's resource
-        comments_result = (
-            await client.table("review_comments")
-            .select(
-                "id, content, timecode, frame_number, status, "
-                "author_id, parent_id, created_at"
+        async with read_scope() as session:
+            comments = (
+                (
+                    await session.execute(
+                        select(
+                            ReviewComments.id,
+                            ReviewComments.content,
+                            ReviewComments.timecode,
+                            ReviewComments.frame_number,
+                            ReviewComments.status,
+                            ReviewComments.author_id,
+                            ReviewComments.parent_id,
+                            ReviewComments.created_at,
+                        )
+                        .where(ReviewComments.resource_id == share["resource_id"])
+                        .order_by(ReviewComments.created_at.asc())
+                    )
+                )
+                .mappings()
+                .all()
             )
-            .eq("resource_id", share["resource_id"])
-            .order("created_at", desc=False)
-            .execute()
-        )
 
-        return {"success": True, "data": comments_result.data or []}
+        return {"success": True, "data": [_row_to_dict(c) for c in comments]}
 
     except HTTPException:
         raise
@@ -704,20 +830,32 @@ async def create_share_comment(
     Only available for review-type shares.
     """
     try:
-        client = await get_async_supabase_admin()
+        from sqlalchemy import insert, select
+
+        from app.db.session import read_scope, write_scope
+        from app.models import ReviewComments, Shares
 
         # Look up share
-        share_result = (
-            await client.table("shares")
-            .select("id, status, share_type, resource_id")
-            .eq("share_code", share_code)
-            .execute()
-        )
+        async with read_scope() as session:
+            share = (
+                (
+                    await session.execute(
+                        select(
+                            Shares.id,
+                            Shares.status,
+                            Shares.share_type,
+                            Shares.resource_id,
+                        )
+                        .where(Shares.share_code == share_code)
+                        .limit(1)
+                    )
+                )
+                .mappings()
+                .first()
+            )
 
-        if not share_result.data:
+        if not share:
             raise HTTPException(status_code=404, detail="Share not found")
-
-        share = share_result.data[0]
 
         if share["status"] != "active":
             raise HTTPException(status_code=410, detail="Share is not active")
@@ -745,12 +883,23 @@ async def create_share_comment(
             "timecode": body.timecode,
         }
 
-        result = await client.table("review_comments").insert(comment_data).execute()
+        async with write_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        insert(ReviewComments)
+                        .values(**comment_data)
+                        .returning(*ReviewComments.__table__.columns)
+                    )
+                )
+                .mappings()
+                .first()
+            )
 
-        if not result.data:
+        if not row:
             raise HTTPException(status_code=500, detail="Failed to create comment")
 
-        comment = result.data[0]
+        comment = _row_to_dict(row)
         logger.info(
             f"Comment created on share {share_code} by "
             f"{auth.user_id if auth else 'anonymous'}"
