@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   _resetIdCounter,
+  createLoopNode,
   createOutputNode,
   createPromptNode,
   createMediaNode,
@@ -126,5 +127,22 @@ describe('createOutputNode', () => {
     expect(node.data.kind).toBe('image');
     expect(node.data.resource_id).toBe('12345');
     expect(node.data.preview_text).toBe('Caption');
+  });
+});
+
+describe('createLoopNode IC-parity defaults', () => {
+  it('defaults show_prompt on, image_input off, batch 1, serial', () => {
+    const node = createLoopNode();
+    expect(node.data.mode).toBe('serial');
+    expect(node.data.show_prompt).toBe(true);
+    expect(node.data.image_input).toBe(false);
+    expect(node.data.image_batch_size).toBe(1);
+  });
+
+  it('preserves caller overrides', () => {
+    const node = createLoopNode({ image_input: true, image_batch_size: 3, show_prompt: false });
+    expect(node.data.image_input).toBe(true);
+    expect(node.data.image_batch_size).toBe(3);
+    expect(node.data.show_prompt).toBe(false);
   });
 });

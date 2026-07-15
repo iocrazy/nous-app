@@ -12,7 +12,6 @@ import { UiSelect } from '../../../../components/ui';
 const MODE_OPTIONS: ReadonlyArray<{ value: LoopMode; label: string }> = [
   { value: 'serial', label: 'Serial' },
   { value: 'parallel', label: 'Parallel' },
-  { value: 'batch', label: 'Batch' },
 ];
 
 export function LoopNodeView({ id, data, selected }: NodeProps) {

@@ -41,7 +41,7 @@ export type SmartNodeType =
   | 'location'
   | 'prop';
 
-export type LoopMode = 'serial' | 'parallel' | 'batch';
+export type LoopMode = 'serial' | 'parallel';
 
 export interface ShotNodeData {
   title: string;
@@ -202,6 +202,13 @@ export interface LoopNodeData {
   round_start?: number;
   /** Rotating prompt list — round N uses entry (N-1) % length. */
   prompts?: string[];
+  /** IC 图片 toggle — this loop takes an image group as input and slices
+   *  it per round into the downstream generation's source. */
+  image_input?: boolean;
+  /** IC 提示词 toggle — this loop contributes a rotating prompt downstream. */
+  show_prompt?: boolean;
+  /** IC 批次 — images sliced from the upstream group per round, 1..100. */
+  image_batch_size?: number;
 }
 
 export interface SmartNode<T> extends Record<string, unknown> {
@@ -327,7 +334,6 @@ export const SMART_NODE_DEFAULT_WIDTH: Record<SmartNodeType, number> = {
 export const LOOP_MODE_TONE: Record<LoopMode, string> = {
   serial: 'border-canvas-line-strong/50',
   parallel: 'border-violet-500',
-  batch: 'border-cyan-500',
 };
 
 /** Run-status colour token for the prompt node halo + the output badge. */
