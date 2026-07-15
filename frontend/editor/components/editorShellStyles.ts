@@ -1816,4 +1816,63 @@ export const EDITOR_SHELL_STYLES = `
 .mh-diff-rail .mh-diff-scroll{ padding:12px; gap:12px; }
 .mh-diff-rail .mh-diff-text{ font-size:12px; }
 @media (max-width:1180px){ .mh-version-rail{ display:none; } }
+
+/* ==================================================================
+   SCENE / ELEMENT DRAG HANDLES — bigger hit target + steadier reveal
+   (right-click menu is the other, more reliable entry point).
+   ================================================================== */
+/* The 4-dot grips were ~18×16 and hard to grab; enlarge the clickable box to
+   ~24×24 while keeping the 2×2 dots centred. Later rule → wins the cascade. */
+.mh-drag-handle,
+.mh-el-drag{
+  min-width:22px; min-height:22px; padding:5px 6px;
+  align-content:center; justify-content:center;
+}
+/* Keep the scene gutter up while its block is hovered / focused / being dragged /
+   move-armed — so the handle never vanishes the instant the pointer drifts to it. */
+.mh-scene-block:hover .mh-scene-gutter,
+.mh-scene-block:focus-within .mh-scene-gutter,
+.mh-scene-block.dragging .mh-scene-gutter,
+.mh-scene-block.move-armed .mh-scene-gutter{ opacity:1; }
+/* Element grip stays visible during a drag (the source row shouldn't flicker as
+   all rows arm as drop targets). :has matches the row wrapping the dragged grip. */
+.mh-el-row:has(.mh-el-drag.dragging) .mh-el-gutter{ opacity:1; pointer-events:auto; }
+
+/* ==================================================================
+   SCENE CONTEXT MENU (right-click) + whole-scene MOVE overlay
+   ================================================================== */
+/* Light popup DNA (matches .mh-slash-menu / .mh-heading-pop); fixed to the cursor
+   point (SceneContextMenu clamps it inside the viewport). */
+.mh-scene-ctx-menu{
+  position:fixed; z-index:50; min-width:172px;
+  background:#fff; border:1px solid var(--sheet-border);
+  border-radius:8px; box-shadow:0 12px 32px rgba(35,20,90,0.18);
+  padding:4px; font-family:var(--sans);
+}
+.mh-scene-ctx-item{
+  display:block; width:100%; text-align:left;
+  padding:7px 12px; border:none; background:none; border-radius:5px;
+  font-family:var(--sans); font-size:13px; color:var(--sheet-ink);
+  cursor:pointer; white-space:nowrap;
+}
+.mh-scene-ctx-item:hover{ background:var(--surface-2); }
+.mh-scene-ctx-item.danger{ color:#dc2626; }
+.mh-scene-ctx-item.danger:hover{ background:color-mix(in srgb, #dc2626 10%, transparent); }
+.mh-scene-ctx-divider{ height:1px; margin:4px 6px; background:var(--sheet-border); }
+
+/* Whole-scene move mode: a dashed overlay over the block; dragging it anywhere
+   moves the entire scene. Sits above the content but below any open menu. */
+.mh-scene-move-overlay{
+  position:absolute; inset:0; z-index:30;
+  display:flex; align-items:flex-start; justify-content:center; padding-top:6px;
+  border:2px dashed var(--indigo); border-radius:10px;
+  background:color-mix(in srgb, var(--indigo) 8%, transparent);
+  cursor:grab;
+}
+.mh-scene-move-overlay:active{ cursor:grabbing; }
+.mh-scene-move-hint{
+  font-family:var(--sans); font-size:12px; font-weight:600; color:#fff;
+  background:var(--indigo); padding:3px 10px; border-radius:999px;
+  box-shadow:0 4px 12px rgba(35,20,90,0.25); pointer-events:none;
+}
 `;

@@ -1,6 +1,7 @@
-import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, cleanup, fireEvent, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ElementOp, SceneDoc } from '../types';
+import type { SceneReorderApi } from '../components/SceneBlock';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string) => k }),
@@ -62,6 +63,18 @@ const makeScene = (elements: SceneDoc['elements']): SceneDoc => ({
   content_version: 1,
   sort_order: 0,
   elements,
+});
+
+const makeReorder = (over: Partial<SceneReorderApi> = {}): SceneReorderApi => ({
+  draggingId: null,
+  dropTarget: null,
+  onDragStart: vi.fn(),
+  onDragEnd: vi.fn(),
+  onDragOver: vi.fn(),
+  onDrop: vi.fn(),
+  onKeyboardMove: vi.fn(),
+  onDeleteScene: vi.fn(),
+  ...over,
 });
 
 afterEach(() => {
@@ -149,6 +162,52 @@ describe('SceneBlock typographic head row (Task 4.5)', () => {
     expect(container.querySelector('.mh-scene-heading')?.textContent).toBe(
       'INT. Rooftop Access - NIGHT',
     );
+  });
+});
+
+describe('SceneBlock right-click context menu', () => {
+  it('heading right-click opens a scene menu (delete scene / move scene, no delete block)', () => {
+    const onDeleteScene = vi.fn();
+    const { container } = render(
+      <SceneBlock
+        scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])}
+        index={0}
+        reorder={makeReorder({ onDeleteScene })}
+      />,
+    );
+    fireEvent.contextMenu(container.querySelector('.mh-scene-headrow')!);
+    const menu = screen.getByRole('menu');
+    expect(within(menu).getByText('editor.ctxDeleteScene')).toBeInTheDocument();
+    expect(within(menu).getByText('editor.ctxMoveScene')).toBeInTheDocument();
+    // The heading isn't a deletable block — that item is element-row only.
+    expect(within(menu).queryByText('editor.ctxDeleteBlock')).toBeNull();
+
+    fireEvent.click(within(menu).getByText('editor.ctxDeleteScene'));
+    expect(onDeleteScene).toHaveBeenCalledWith('900');
+  });
+
+  it('choosing "move whole scene" arms the drag overlay', () => {
+    const { container } = render(
+      <SceneBlock
+        scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])}
+        index={0}
+        reorder={makeReorder()}
+      />,
+    );
+    expect(container.querySelector('.mh-scene-move-overlay')).toBeNull();
+    fireEvent.contextMenu(container.querySelector('.mh-scene-headrow')!);
+    fireEvent.click(screen.getByText('editor.ctxMoveScene'));
+    expect(container.querySelector('.mh-scene-move-overlay')).toBeInTheDocument();
+  });
+
+  it('with no reorder wiring the scene menu items are hidden', () => {
+    const { container } = render(
+      <SceneBlock scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])} index={0} />,
+    );
+    fireEvent.contextMenu(container.querySelector('.mh-scene-headrow')!);
+    // Heading has no block-delete and no reorder items → nothing to show, so the
+    // menu never opens (no empty popup).
+    expect(screen.queryByRole('menu')).toBeNull();
   });
 
   // ── Windowed-out remote-op refetch (C2 / M1) ────────────────────────────────

@@ -22,6 +22,7 @@ import {
   useState,
   type DragEvent,
   type KeyboardEvent,
+  type MouseEvent,
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { applyLocal, buildInverse } from '../opBuilder';
@@ -45,6 +46,7 @@ import type { SaveState } from '../useSceneSync';
 import { ScenePresenceBadge } from '../collab/ScenePresenceBadge';
 import type { PresenceUser } from '../collab/useScriptPresence';
 import { HeadingSelect } from './HeadingSelect';
+import { SceneContextMenu, type SceneContextMenuItem } from './SceneContextMenu';
 
 /** A scene's save status lifted to the shell for the aggregate SaveIndicator. */
 export interface SceneSyncStatus {
@@ -67,6 +69,8 @@ export interface SceneReorderApi {
   onDragOver: (sceneId: string, edge: 'before' | 'after') => void;
   onDrop: (sceneId: string, edge: 'before' | 'after') => void;
   onKeyboardMove: (sceneId: string, direction: 'up' | 'down') => void;
+  /** Delete a whole scene (heading + all its elements) — from the context menu. */
+  onDeleteScene: (sceneId: string) => void;
 }
 
 /** An open @-mention / character-cue / transition-preset picker anchored to
@@ -256,6 +260,17 @@ export function SceneBlock({
     elementId: string;
     edge: 'top' | 'bottom';
   } | null>(null);
+  // Right-click menu (heading or an element row): viewport point + which row was
+  // clicked (`elementId: null` = the scene heading itself).
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    elementId: string | null;
+  } | null>(null);
+  // "Move whole scene" mode (from the context menu): while armed, an overlay over
+  // the block is draggable and starts a WHOLE-SCENE drag (vs. a single-block drag
+  // from the element grip). Cleared on drop / dragend / Esc / outside click.
+  const [sceneMoveArmed, setSceneMoveArmed] = useState(false);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const headRowRef = useRef<HTMLDivElement | null>(null);
@@ -837,6 +852,79 @@ export function SceneBlock({
     acceptExternalDrop(firstId ? { before_id: firstId } : {});
   }, [externalDrag, acceptExternalDrop]);
 
+  // ── Right-click context menu (delete block / delete scene / move scene) ─────
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+  // Heading right-click: elementId is null (the row IS the scene heading).
+  const openHeadingContextMenu = useCallback((e: MouseEvent) => {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY, elementId: null });
+  }, []);
+  // Element-row right-click, forwarded up from the TipTap NodeView.
+  const handleElementContextMenu = useCallback((elementId: string, x: number, y: number) => {
+    setContextMenu({ x, y, elementId });
+  }, []);
+  // Delete a single element (the right-clicked block). Idempotent delete op; if it
+  // was the scene's last element the scene collapses to the EmptySceneHint.
+  const deleteElement = useCallback(
+    (elementId: string) => {
+      const op: ElementOp = { op: 'delete', element_id: elementId };
+      sync.dispatchOps([op], applyLocal(elementsRef.current, [op]));
+    },
+    [sync],
+  );
+  // Arm whole-scene move mode — the drag overlay (rendered below) takes over.
+  const armSceneMove = useCallback(() => {
+    if (reorder) setSceneMoveArmed(true);
+  }, [reorder]);
+  const disarmSceneMove = useCallback(() => setSceneMoveArmed(false), []);
+
+  // The menu items depend on WHERE it opened: an element row can delete just that
+  // block; the heading can't (a scene must keep its heading). Both can delete the
+  // whole scene and enter move mode. Reorder-dependent items hide when reorder is
+  // unwired (e.g. read-only / storyboard embeds).
+  const contextMenuItems = useMemo<SceneContextMenuItem[]>(() => {
+    if (!contextMenu) return [];
+    const items: SceneContextMenuItem[] = [];
+    const elId = contextMenu.elementId;
+    if (elId) {
+      items.push({
+        key: 'delete-block',
+        label: t('editor.ctxDeleteBlock'),
+        danger: true,
+        onSelect: () => deleteElement(elId),
+      });
+    }
+    if (reorder) {
+      items.push({
+        key: 'delete-scene',
+        label: t('editor.ctxDeleteScene'),
+        danger: true,
+        onSelect: () => reorder.onDeleteScene(scene.id),
+      });
+      items.push({
+        key: 'move-scene',
+        label: t('editor.ctxMoveScene'),
+        dividerBefore: true,
+        onSelect: armSceneMove,
+      });
+    }
+    return items;
+  }, [contextMenu, reorder, scene.id, t, deleteElement, armSceneMove]);
+
+  // Esc / outside-click while move mode is armed cancels it (the overlay itself
+  // disarms on dragend/drop). Armed only ever true when reorder is present.
+  useEffect(() => {
+    if (!sceneMoveArmed) return;
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        disarmSceneMove();
+      }
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [sceneMoveArmed, disarmSceneMove]);
+
   // ── Copilot summon (Task 11) ──────────────────────────────────────────────
   const clearCopilot = useCallback(() => {
     setCopilotSelection([]);
@@ -1009,7 +1097,9 @@ export function SceneBlock({
 
   return (
     <div
-      className={`mh-scene-block${isDragging ? ' dragging' : ''}`}
+      className={`mh-scene-block${isDragging ? ' dragging' : ''}${
+        sceneMoveArmed ? ' move-armed' : ''
+      }`}
       ref={containerRef}
       data-testid="scene-block"
       data-scene-id={scene.id}
@@ -1028,6 +1118,10 @@ export function SceneBlock({
         onFocus={() =>
           onFocusElement?.({ sceneId: scene.id, elementId: null, field: 'heading_int_ext' })
         }
+        // Right-click anywhere on the heading row (including a token chip) → the
+        // scene-level context menu (delete scene / move scene). preventDefault
+        // suppresses the browser menu.
+        onContextMenu={openHeadingContextMenu}
         // Cross-scene drop target: dropping a dragged paragraph on the heading
         // row lands it at the HEAD of this scene (works for empty scenes too).
         onDragOver={externalDrag ? (e) => e.preventDefault() : undefined}
@@ -1152,6 +1246,7 @@ export function SceneBlock({
           onElementDragOver={handleElementDragOver}
           onElementDrop={handleElementDrop}
           onElementDragEnd={handleElementDragEnd}
+          onElementContextMenu={handleElementContextMenu}
           onSlashChange={handleTiptapSlashChange}
           slashMenu={tiptapSlashMenu}
           onMentionOpen={handleTiptapMentionOpen}
@@ -1211,6 +1306,40 @@ export function SceneBlock({
 
       {dropEdge === 'after' && (
         <div className="mh-drop-indicator after" data-testid="drop-indicator" aria-hidden="true" />
+      )}
+
+      {/* Whole-scene move mode: a draggable overlay covers the block so dragging
+          ANYWHERE on it moves the entire scene (not a single block). It reuses the
+          existing scene-drag machinery (reorder.onDragStart + the block-level drop
+          targets). Disarms on dragend/drop; Esc/outside-click handled above. */}
+      {sceneMoveArmed && reorder && (
+        <div
+          className="mh-scene-move-overlay"
+          role="button"
+          aria-label={t('editor.ctxMoveScene')}
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', scene.id);
+            reorder.onDragStart(scene.id);
+          }}
+          onDragEnd={() => {
+            reorder.onDragEnd();
+            disarmSceneMove();
+          }}
+          onClick={disarmSceneMove}
+        >
+          <span className="mh-scene-move-hint">{t('editor.moveSceneHint')}</span>
+        </div>
+      )}
+
+      {contextMenu && contextMenuItems.length > 0 && (
+        <SceneContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenuItems}
+          onClose={closeContextMenu}
+        />
       )}
     </div>
   );
