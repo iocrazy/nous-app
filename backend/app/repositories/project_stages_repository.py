@@ -169,6 +169,33 @@ def _serialize(row: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+# ── Session-scope SQL helpers ────────────────────────────────────────────────
+#
+# The joined/aggregate read bodies below stay SQL (documented exceptions per
+# the convergence doctrine — DISTINCT ON, EXISTS probes, batch ANY lookups);
+# these two helpers run them on the read_scope() session.
+
+
+async def _fetch_all_sql(sql: str, params: dict | None = None) -> list[dict[str, Any]]:
+    from sqlalchemy import text
+
+    from app.db.session import read_scope
+
+    async with read_scope() as session:
+        result = await session.execute(text(sql), params or {})
+        return [dict(m) for m in result.mappings().all()]
+
+
+async def _fetch_one_sql(sql: str, params: dict | None = None) -> Optional[dict]:
+    from sqlalchemy import text
+
+    from app.db.session import read_scope
+
+    async with read_scope() as session:
+        row = (await session.execute(text(sql), params or {})).mappings().first()
+        return dict(row) if row else None
+
+
 # ── Repository ───────────────────────────────────────────────────────────────
 
 
@@ -177,24 +204,34 @@ class ProjectStagesRepository:
 
     async def list_catalog(self) -> list[dict[str, Any]]:
         """All stages ordered by sort_order (global catalog, not per-project)."""
-        from app.db import engine as db_engine
+        from sqlalchemy import select
 
-        rows = await db_engine.fetch_all(_LIST_CATALOG_SQL)
-        return [_serialize(r) for r in rows]
+        from app.db.session import read_scope
+        from app.models import ProjectStages
+
+        async with read_scope() as session:
+            result = await session.execute(
+                select(
+                    ProjectStages.id,
+                    ProjectStages.slug,
+                    ProjectStages.name,
+                    ProjectStages.sort_order,
+                    ProjectStages.tools_recommended,
+                    ProjectStages.created_at,
+                    ProjectStages.updated_at,
+                ).order_by(ProjectStages.sort_order.asc())
+            )
+            return [_serialize(dict(m)) for m in result.mappings().all()]
 
     async def get_current(self, project_id: int) -> Optional[dict[str, Any]]:
         """The project's current stage (joined from project_stages), or None."""
-        from app.db import engine as db_engine
-
-        row = await db_engine.fetch_one(_GET_CURRENT_SQL, {"pid": int(project_id)})
+        row = await _fetch_one_sql(_GET_CURRENT_SQL, {"pid": int(project_id)})
         return _serialize(row) if row else None
 
     async def derive_activity_flags(self, project_id: int) -> dict[str, bool]:
         """Output probes for stage auto-derivation: does the project have any
         scenes / shots / rendered shots (soft-deleted scripts excluded)."""
-        from app.db import engine as db_engine
-
-        row = await db_engine.fetch_one(_DERIVE_ACTIVITY_SQL, {"pid": int(project_id)})
+        row = await _fetch_one_sql(_DERIVE_ACTIVITY_SQL, {"pid": int(project_id)})
         return {
             "has_scenes": bool(row and row["has_scenes"]),
             "has_shots": bool(row and row["has_shots"]),
@@ -203,9 +240,7 @@ class ProjectStagesRepository:
 
     async def history(self, project_id: int) -> list[dict[str, Any]]:
         """Append-only transition history for the project, newest first."""
-        from app.db import engine as db_engine
-
-        rows = await db_engine.fetch_all(_GET_HISTORY_SQL, {"pid": int(project_id)})
+        rows = await _fetch_all_sql(_GET_HISTORY_SQL, {"pid": int(project_id)})
         return [_serialize(r) for r in rows]
 
     async def stages_for_projects(
@@ -219,10 +254,8 @@ class ProjectStagesRepository:
         """
         if not project_ids:
             return {}
-        from app.db import engine as db_engine
-
         try:
-            rows = await db_engine.fetch_all(
+            rows = await _fetch_all_sql(
                 _STAGES_FOR_PROJECTS_SQL,
                 {"pids": [int(p) for p in project_ids]},
             )
@@ -248,10 +281,8 @@ class ProjectStagesRepository:
         """
         if not project_ids:
             return {}
-        from app.db import engine as db_engine
-
         try:
-            rows = await db_engine.fetch_all(
+            rows = await _fetch_all_sql(
                 _LATEST_ACTIVITY_FOR_PROJECTS_SQL,
                 {"pids": [int(p) for p in project_ids]},
             )
@@ -283,10 +314,8 @@ class ProjectStagesRepository:
         """
         if not project_ids:
             return {}
-        from app.db import engine as db_engine
-
         try:
-            rows = await db_engine.fetch_all(
+            rows = await _fetch_all_sql(
                 _LATEST_FILE_ACTIVITY_SQL,
                 {"pids": [int(p) for p in project_ids]},
             )
@@ -330,19 +359,26 @@ class ProjectStagesRepository:
         from sqlalchemy import text
 
         from app.db.engine import get_engine
+        from app.db.session import write_scope
 
         pid = int(project_id)
         sid = int(stage_id)
         params_base = {"pid": pid, "stage_id": sid, "user_id": user_id}
 
+        # Preserve the legacy error contract: engine-unconfigured surfaces as
+        # ValueError (the router maps it to a 4xx), not a bare RuntimeError.
         try:
-            eng = get_engine()
+            get_engine()
         except RuntimeError as exc:
             raise ValueError(f"Database engine not configured: {exc}") from exc
 
-        async with eng.begin() as conn:
+        # write_scope() opens ONE committing transaction — the FOR UPDATE lock
+        # in step 1 is held for the whole statement sequence, exactly as the
+        # old explicit get_engine().begin() block did. SQL bodies kept: the
+        # SELECT ... FOR UPDATE concurrency guard is the semantics.
+        async with write_scope() as session:
             # Step 1 — lock the projects row and read current stage
-            result = await conn.execute(text(_SELECT_FOR_UPDATE_SQL), {"pid": pid})
+            result = await session.execute(text(_SELECT_FOR_UPDATE_SQL), {"pid": pid})
             lock_row = result.mappings().first()
             if lock_row is None:
                 raise ValueError(f"Project {pid} not found")
@@ -357,18 +393,20 @@ class ProjectStagesRepository:
                 return None
 
             # Step 3 — close the currently open history row (if any)
-            await conn.execute(text(_CLOSE_OPEN_HISTORY_SQL), {"pid": pid})
+            await session.execute(text(_CLOSE_OPEN_HISTORY_SQL), {"pid": pid})
 
             # Step 4 — insert new open history row
-            await conn.execute(text(_INSERT_HISTORY_SQL), params_base)
+            await session.execute(text(_INSERT_HISTORY_SQL), params_base)
 
             # Step 5 — update projects.current_stage_id
-            await conn.execute(
+            await session.execute(
                 text(_UPDATE_PROJECT_STAGE_SQL), {"pid": pid, "stage_id": sid}
             )
 
             # Step 6 — fetch the stage row to return
-            stage_result = await conn.execute(text(_GET_STAGE_BY_ID_SQL), {"sid": sid})
+            stage_result = await session.execute(
+                text(_GET_STAGE_BY_ID_SQL), {"sid": sid}
+            )
             stage_row = stage_result.mappings().first()
 
         if stage_row is None:

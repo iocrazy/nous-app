@@ -66,6 +66,11 @@ from app.models.canvas import (  # noqa: F401
 from app.models.chat import (  # noqa: F401
     ConversationMemory,
 )
+from app.models.distribution import (  # noqa: F401
+    PublishTaskAccounts,
+    PublishTasks,
+    SocialAccounts,
+)
 from app.models.generated_media import (  # noqa: F401
     GeneratedMedia,
 )
@@ -118,6 +123,8 @@ from app.models.ops import (  # noqa: F401
 from app.models.project_library import (  # noqa: F401
     ProjectCharacters,
     ProjectLibEntities,
+    ProjectStageHistory,
+    ProjectStages,
     ProjectStyleProfile,
 )
 from app.models.reviews import (  # noqa: F401
@@ -324,9 +331,15 @@ __all__ = [
     "Canvases",
     # chat / conversations
     "ConversationMemory",
+    # distribution
+    "PublishTaskAccounts",
+    "PublishTasks",
+    "SocialAccounts",
     # project authored library
     "ProjectCharacters",
     "ProjectLibEntities",
+    "ProjectStageHistory",
+    "ProjectStages",
     "ProjectStyleProfile",
     # topics / signal feed
     "Hotspots",
