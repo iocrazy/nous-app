@@ -152,6 +152,40 @@ def _supabase_client_for(tables: dict[str, MagicMock]) -> MagicMock:
     return client
 
 
+def _orm_scope(rows: list):
+    """A read_scope()/write_scope() stand-in whose session.execute() returns
+    ``rows`` via .mappings().first()/.all() — the ORM boundary the flows /
+    schedules routers now run their statements against."""
+    from contextlib import asynccontextmanager
+
+    class _M:
+        def __init__(self, d):
+            self._d = d
+
+        def first(self):
+            return self._d[0] if self._d else None
+
+        def all(self):
+            return self._d
+
+    class _R:
+        def __init__(self, d):
+            self._d = d
+
+        def mappings(self):
+            return _M(self._d)
+
+    class _S:
+        async def execute(self, _stmt):
+            return _R(rows)
+
+    @asynccontextmanager
+    async def _scope():
+        yield _S()
+
+    return _scope
+
+
 @pytest.mark.unit
 def test_flows_create_inserts_user_id_and_returns_row() -> None:
     """POST /flows → INSERT into task_flows with auth.user_id stamped."""
@@ -171,13 +205,7 @@ def test_flows_create_inserts_user_id_and_returns_row() -> None:
         "updated_at": "2026-05-04T00:00:00Z",
         "completed_at": None,
     }
-    flows_chain = _supabase_chain([fake_row])
-    sb = _supabase_client_for({"task_flows": flows_chain})
-
-    async def _sb():
-        return sb
-
-    with patch("app.api.flows_router.get_async_supabase_admin", _sb):
+    with patch.object(flows_module, "write_scope", _orm_scope([fake_row])):
         client = TestClient(_app_with(flows_module.router))
         resp = client.post(
             "/api/v1/flows",
@@ -210,13 +238,7 @@ def test_flows_list_filters_by_user() -> None:
         }
         for i in range(3)
     ]
-    flows_chain = _supabase_chain(rows)
-    sb = _supabase_client_for({"task_flows": flows_chain})
-
-    async def _sb():
-        return sb
-
-    with patch("app.api.flows_router.get_async_supabase_admin", _sb):
+    with patch.object(flows_module, "read_scope", _orm_scope(rows)):
         client = TestClient(_app_with(flows_module.router))
         resp = client.get("/api/v1/flows")
         assert resp.status_code == 200
@@ -250,13 +272,7 @@ def test_schedules_create_validates_cron_and_returns_next_fire_at() -> None:
         "created_at": "2026-05-04T00:00:00Z",
         "updated_at": "2026-05-04T00:00:00Z",
     }
-    sched_chain = _supabase_chain([fake_row])
-    sb = _supabase_client_for({"user_schedules": sched_chain})
-
-    async def _sb():
-        return sb
-
-    with patch("app.api.schedules_router.get_async_supabase_admin", _sb):
+    with patch.object(schedules_module, "write_scope", _orm_scope([fake_row])):
         client = TestClient(_app_with(schedules_module.router))
         resp = client.post(
             "/api/v1/schedules",
@@ -277,20 +293,15 @@ def test_schedules_create_validates_cron_and_returns_next_fire_at() -> None:
 def test_schedules_create_rejects_bad_cron() -> None:
     """Bad cron → 400 (croniter raises during validation)."""
 
-    sb = _supabase_client_for({})
-
-    async def _sb():
-        return sb
-
-    with patch("app.api.schedules_router.get_async_supabase_admin", _sb):
-        client = TestClient(_app_with(schedules_module.router))
-        resp = client.post(
-            "/api/v1/schedules",
-            json={
-                "name": "Bad",
-                "cron_expr": "not a cron",
-                "task_type": "ai_summary",
-            },
-        )
-        # 400 from cron validation; some routers wrap as 422.
-        assert resp.status_code in (400, 422), resp.text
+    # Bad cron is rejected during validation, before any DB call.
+    client = TestClient(_app_with(schedules_module.router))
+    resp = client.post(
+        "/api/v1/schedules",
+        json={
+            "name": "Bad",
+            "cron_expr": "not a cron",
+            "task_type": "ai_summary",
+        },
+    )
+    # 400 from cron validation; some routers wrap as 422.
+    assert resp.status_code in (400, 422), resp.text

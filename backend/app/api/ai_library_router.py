@@ -34,7 +34,6 @@ from pydantic import BaseModel, Field
 from app.core.admin_deps import AdminAuthDep
 from app.core.deps import AuthDep
 from app.core.scope_dep import ScopedRequestDep
-from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.agent_repository import (
     AGENT_OVERRIDE_FIELDS,
     AgentRepository,
@@ -109,6 +108,27 @@ def _is_system_skill(skill: Dict[str, Any]) -> bool:
     return bool(skill.get("is_public")) and skill.get("project_id") is None
 
 
+def _serialize_row(row: Any) -> Dict[str, Any]:
+    """Coerce an ORM row mapping to the JSON-safe primitives the PostgREST
+    path returned: enum → bare str, timestamptz → ISO-8601 str, uuid → str.
+    BIGINT/int/Decimal pass through (FastAPI renders them as JSON numbers).
+    jsonb columns come back as dicts/lists and pass through unchanged."""
+    from uuid import UUID as _UUID
+
+    from app.repositories._orm_helpers import _plain
+
+    out: Dict[str, Any] = {}
+    for key, value in row.items():
+        value = _plain(value)
+        if hasattr(value, "isoformat"):
+            out[key] = value.isoformat()
+        elif isinstance(value, _UUID):
+            out[key] = str(value)
+        else:
+            out[key] = value
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Scope membership helpers (Phase 2 PR 2.9)
 # ---------------------------------------------------------------------------
@@ -116,16 +136,21 @@ def _is_system_skill(skill: Dict[str, Any]) -> bool:
 
 async def _user_is_team_member(user_id: UUID, team_id: int) -> bool:
     """Return True iff the user has a ``team_members`` row for this team."""
-    client = await get_async_supabase_admin()
-    result = (
-        await client.table("team_members")
-        .select("team_id")
-        .eq("team_id", team_id)
-        .eq("user_id", str(user_id))
-        .limit(1)
-        .execute()
-    )
-    return bool(result.data)
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import TeamMembers
+
+    async with read_scope() as session:
+        row = (
+            await session.execute(
+                select(TeamMembers.team_id)
+                .where(TeamMembers.team_id == int(team_id))
+                .where(TeamMembers.user_id == str(user_id))
+                .limit(1)
+            )
+        ).first()
+    return row is not None
 
 
 async def _user_can_write_project(user_id: UUID, project_id: int) -> bool:
@@ -135,41 +160,52 @@ async def _user_can_write_project(user_id: UUID, project_id: int) -> bool:
     presence to let the user attach an agent to the project's scope. Finer
     role-based restrictions can layer on later if needed.
     """
-    client = await get_async_supabase_admin()
-    # Owner check
-    proj = (
-        await client.table("projects")
-        .select("owner_id")
-        .eq("id", project_id)
-        .maybe_single()
-        .execute()
-    )
-    if proj and proj.data and str(proj.data.get("owner_id")) == str(user_id):
-        return True
-    # Explicit membership
-    member = (
-        await client.table("project_members")
-        .select("project_id")
-        .eq("project_id", project_id)
-        .eq("user_id", str(user_id))
-        .limit(1)
-        .execute()
-    )
-    return bool(member.data)
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import ProjectMembers, Projects
+
+    async with read_scope() as session:
+        # Owner check
+        owner = (
+            await session.execute(
+                select(Projects.owner_id).where(Projects.id == int(project_id)).limit(1)
+            )
+        ).first()
+        if owner is not None and str(owner[0]) == str(user_id):
+            return True
+        # Explicit membership
+        member = (
+            await session.execute(
+                select(ProjectMembers.project_id)
+                .where(ProjectMembers.project_id == int(project_id))
+                .where(ProjectMembers.user_id == str(user_id))
+                .limit(1)
+            )
+        ).first()
+    return member is not None
 
 
 async def _fetch_user_team_ids(user_id: UUID) -> List[int]:
     """Return BIGINT team ids the user is a member of (empty on miss)."""
-    client = await get_async_supabase_admin()
-    result = (
-        await client.table("team_members")
-        .select("team_id")
-        .eq("user_id", str(user_id))
-        .execute()
-    )
-    return [
-        int(r["team_id"]) for r in (result.data or []) if r.get("team_id") is not None
-    ]
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import TeamMembers
+
+    async with read_scope() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(TeamMembers.team_id).where(
+                        TeamMembers.user_id == str(user_id)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return [int(t) for t in rows if t is not None]
 
 
 def _scoped_team_id(request: Request, user_team_ids: List[int]) -> Optional[int]:
@@ -200,26 +236,39 @@ def _scoped_team_id(request: Request, user_team_ids: List[int]) -> Optional[int]
 
 async def _fetch_user_project_ids(user_id: UUID) -> List[int]:
     """Return BIGINT project ids the user owns or is a member of."""
-    client = await get_async_supabase_admin()
-    owned = (
-        await client.table("projects")
-        .select("id")
-        .eq("owner_id", str(user_id))
-        .execute()
-    )
-    member = (
-        await client.table("project_members")
-        .select("project_id")
-        .eq("user_id", str(user_id))
-        .execute()
-    )
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import ProjectMembers, Projects
+
+    async with read_scope() as session:
+        owned = (
+            (
+                await session.execute(
+                    select(Projects.id).where(Projects.owner_id == str(user_id))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        member = (
+            (
+                await session.execute(
+                    select(ProjectMembers.project_id).where(
+                        ProjectMembers.user_id == str(user_id)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
     ids: set[int] = set()
-    for row in owned.data or []:
-        if row.get("id") is not None:
-            ids.add(int(row["id"]))
-    for row in member.data or []:
-        if row.get("project_id") is not None:
-            ids.add(int(row["project_id"]))
+    for v in owned:
+        if v is not None:
+            ids.add(int(v))
+    for v in member:
+        if v is not None:
+            ids.add(int(v))
     return sorted(ids)
 
 
@@ -227,25 +276,40 @@ async def _fetch_team_names(team_ids: List[int]) -> Dict[int, str]:
     """Return {team_id: name} for the given BIGINT ids ([] → {})."""
     if not team_ids:
         return {}
-    client = await get_async_supabase_admin()
-    result = (
-        await client.table("teams").select("id, name").in_("id", team_ids).execute()
-    )
-    return {int(r["id"]): r["name"] for r in (result.data or [])}
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import Teams
+
+    async with read_scope() as session:
+        rows = (
+            await session.execute(
+                select(Teams.id, Teams.name).where(
+                    Teams.id.in_([int(t) for t in team_ids])
+                )
+            )
+        ).all()
+    return {int(r[0]): r[1] for r in rows}
 
 
 async def _fetch_project_names(project_ids: List[int]) -> Dict[int, str]:
     """Return {project_id: name} for the given BIGINT ids ([] → {})."""
     if not project_ids:
         return {}
-    client = await get_async_supabase_admin()
-    result = (
-        await client.table("projects")
-        .select("id, name")
-        .in_("id", project_ids)
-        .execute()
-    )
-    return {int(r["id"]): r["name"] for r in (result.data or [])}
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import Projects
+
+    async with read_scope() as session:
+        rows = (
+            await session.execute(
+                select(Projects.id, Projects.name).where(
+                    Projects.id.in_([int(p) for p in project_ids])
+                )
+            )
+        ).all()
+    return {int(r[0]): r[1] for r in rows}
 
 
 async def _enrich_rows_with_scope_names(
@@ -854,16 +918,21 @@ async def get_agent_status(slug: str, auth: AuthDep) -> Dict[str, Any]:
         }
 
     user_uuid = _coerce_user_uuid(auth.user_id)
-    client = await get_async_supabase_admin()
-    running_q = (
-        await client.table("agent_runs")
-        .select("id", count="exact", head=True)
-        .eq("agent_id", str(agent["id"]))
-        .eq("user_id", str(user_uuid))
-        .eq("status", "running")
-        .execute()
-    )
-    running = running_q.count or 0
+    from sqlalchemy import func, select
+
+    from app.db.session import read_scope
+    from app.models import AgentRuns
+
+    async with read_scope() as session:
+        running = (
+            await session.execute(
+                select(func.count())
+                .select_from(AgentRuns)
+                .where(AgentRuns.agent_id == str(agent["id"]))
+                .where(AgentRuns.user_id == str(user_uuid))
+                .where(AgentRuns.status == "running")
+            )
+        ).scalar() or 0
     return {
         "status": "running" if running > 0 else "idle",
         "paused_reason": None,
@@ -1105,17 +1174,23 @@ async def _user_is_admin(user_id: UUID) -> bool:
     Mirrors ``AdminAuthDep`` but as an inline check so we can combine
     owner-OR-admin authorization in a single route without double-dep.
     """
-    client = await get_async_supabase_admin()
-    result = (
-        await client.table("user_profiles")
-        .select("role")
-        .eq("id", str(user_id))
-        .maybe_single()
-        .execute()
-    )
-    if not result or not result.data:
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import UserProfiles
+    from app.repositories._orm_helpers import _plain
+
+    async with read_scope() as session:
+        row = (
+            await session.execute(
+                select(UserProfiles.role)
+                .where(UserProfiles.id == str(user_id))
+                .limit(1)
+            )
+        ).first()
+    if row is None:
         return False
-    return result.data.get("role") == "admin"
+    return _plain(row[0]) == "admin"
 
 
 async def _is_team_owner(user_uuid, team_id) -> bool:
@@ -1124,18 +1199,23 @@ async def _is_team_owner(user_uuid, team_id) -> bool:
     Fail closed (False) on any error or missing data.
     """
     try:
-        client = await get_async_supabase_admin()
-        result = (
-            await client.table("team_members")
-            .select("role")
-            .eq("team_id", team_id)
-            .eq("user_id", str(user_uuid))
-            .maybe_single()
-            .execute()
-        )
-        if not result or not result.data:
+        from sqlalchemy import select
+
+        from app.db.session import read_scope
+        from app.models import TeamMembers
+
+        async with read_scope() as session:
+            row = (
+                await session.execute(
+                    select(TeamMembers.role)
+                    .where(TeamMembers.team_id == int(team_id))
+                    .where(TeamMembers.user_id == str(user_uuid))
+                    .limit(1)
+                )
+            ).first()
+        if row is None:
             return False
-        return result.data.get("role") in ("owner", "admin")
+        return row[0] in ("owner", "admin")
     except Exception as exc:
         logger.warning(
             f"_is_team_owner check failed for user={user_uuid} team={team_id}, denying: {exc}"
@@ -1446,7 +1526,11 @@ async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
 
     user_uuid = _coerce_user_uuid(auth.user_id)
     agent_uuid = UUID(str(agent["id"]))
-    client = await get_async_supabase_admin()
+
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import AgentRuns, TaskTracking
 
     now = datetime.now(timezone.utc)
     # 14-day window inclusive of today: midnight of (today - 13 days)
@@ -1455,41 +1539,68 @@ async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
     window_start = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(
         days=13
     )
-    iso_start = window_start.isoformat()
 
     # Pull 14d of runs in one shot. Bounded — even busy agents rarely
     # break a few hundred runs/2wk; bucketing in Python beats issuing
     # 14 + 14 + N PostgREST calls.
-    runs_q = await (
-        client.table("agent_runs")
-        .select(
-            "id,status,trigger,model,started_at,ended_at,"
-            "prompt_tokens,completion_tokens,cost_cents"
+    async with read_scope() as session:
+        run_rows = (
+            (
+                await session.execute(
+                    select(
+                        AgentRuns.id,
+                        AgentRuns.status,
+                        AgentRuns.trigger,
+                        AgentRuns.model,
+                        AgentRuns.started_at,
+                        AgentRuns.ended_at,
+                        AgentRuns.prompt_tokens,
+                        AgentRuns.completion_tokens,
+                        AgentRuns.cost_cents,
+                    )
+                    .where(AgentRuns.agent_id == str(agent_uuid))
+                    .where(AgentRuns.user_id == str(user_uuid))
+                    .where(AgentRuns.started_at >= window_start)
+                    .order_by(AgentRuns.started_at.desc())
+                )
+            )
+            .mappings()
+            .all()
         )
-        .eq("agent_id", str(agent_uuid))
-        .eq("user_id", str(user_uuid))
-        .gte("started_at", iso_start)
-        .order("started_at", desc=True)
-        .execute()
-    )
-    runs_14d: List[Dict[str, Any]] = runs_q.data or []
+    # started_at → ISO str: the daily bucketing below slices ``started[:10]``.
+    runs_14d: List[Dict[str, Any]] = [_serialize_row(r) for r in run_rows]
 
     # Most recent run, regardless of window. The dashboard shows a
     # banner even when the user hasn't run anything in 2 weeks.
-    latest_q = await (
-        client.table("agent_runs")
-        .select(
-            "id,status,trigger,model,started_at,ended_at,"
-            "prompt_tokens,completion_tokens,cost_cents,"
-            "input_summary,output_summary,error_code,error_message"
+    async with read_scope() as session:
+        latest_rows = (
+            (
+                await session.execute(
+                    select(
+                        AgentRuns.id,
+                        AgentRuns.status,
+                        AgentRuns.trigger,
+                        AgentRuns.model,
+                        AgentRuns.started_at,
+                        AgentRuns.ended_at,
+                        AgentRuns.prompt_tokens,
+                        AgentRuns.completion_tokens,
+                        AgentRuns.cost_cents,
+                        AgentRuns.input_summary,
+                        AgentRuns.output_summary,
+                        AgentRuns.error_code,
+                        AgentRuns.error_message,
+                    )
+                    .where(AgentRuns.agent_id == str(agent_uuid))
+                    .where(AgentRuns.user_id == str(user_uuid))
+                    .order_by(AgentRuns.started_at.desc())
+                    .limit(1)
+                )
+            )
+            .mappings()
+            .all()
         )
-        .eq("agent_id", str(agent_uuid))
-        .eq("user_id", str(user_uuid))
-        .order("started_at", desc=True)
-        .limit(1)
-        .execute()
-    )
-    latest_run = latest_q.data[0] if latest_q.data else None
+    latest_run = _serialize_row(latest_rows[0]) if latest_rows else None
     # agent_runs.id is a BIGINT Snowflake (mig 232). This endpoint returns a
     # raw Dict (no response_model), so unlike the run list/detail endpoints —
     # whose RunListItem opts into coerce_numbers_to_str — it would otherwise
@@ -1542,17 +1653,29 @@ async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
     # agent_id back onto the row (mig 282 paperclip-style task↔run linkage).
     # The old task_kind='agent_task' filter hid all service work, so an
     # agent that only ran analyses showed an empty task panel.
-    tasks_q = await (
-        client.table("task_tracking")
-        .select("dbos_workflow_id,phase,created_at,title,metadata")
-        .eq("agent_id", str(agent_uuid))
-        .eq("user_id", str(user_uuid))
-        .gte("created_at", iso_start)
-        .order("created_at", desc=True)
-        .execute()
-    )
-    tasks_14d_raw = tasks_q.data or []
-    tasks_14d: List[Dict[str, Any]] = [tt_row_to_task_shape(r) for r in tasks_14d_raw]
+    async with read_scope() as session:
+        tasks_rows = (
+            (
+                await session.execute(
+                    select(
+                        TaskTracking.dbos_workflow_id,
+                        TaskTracking.phase,
+                        TaskTracking.created_at,
+                        TaskTracking.title,
+                        TaskTracking.metadata_.label("metadata"),
+                    )
+                    .where(TaskTracking.agent_id == str(agent_uuid))
+                    .where(TaskTracking.user_id == str(user_uuid))
+                    .where(TaskTracking.created_at >= window_start)
+                    .order_by(TaskTracking.created_at.desc())
+                )
+            )
+            .mappings()
+            .all()
+        )
+    tasks_14d: List[Dict[str, Any]] = [
+        tt_row_to_task_shape(_serialize_row(r)) for r in tasks_rows
+    ]
     status_counts: Counter[str] = Counter(
         (t.get("lifecycle_status") or "unknown") for t in tasks_14d
     )
@@ -1560,33 +1683,56 @@ async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
     # Recent agent tasks (5) — pulled separately in case the 14d
     # window is empty but older tasks still matter for context.
     # Same agent_id-only scoping as the 14d query above.
-    recent_tasks_q = await (
-        client.table("task_tracking")
-        .select(
-            "dbos_workflow_id,phase,created_at,started_at,completed_at,title,"
-            "error_code,error_msg,metadata"
+    async with read_scope() as session:
+        recent_tasks_rows = (
+            (
+                await session.execute(
+                    select(
+                        TaskTracking.dbos_workflow_id,
+                        TaskTracking.phase,
+                        TaskTracking.created_at,
+                        TaskTracking.started_at,
+                        TaskTracking.completed_at,
+                        TaskTracking.title,
+                        TaskTracking.error_code,
+                        TaskTracking.error_msg,
+                        TaskTracking.metadata_.label("metadata"),
+                    )
+                    .where(TaskTracking.agent_id == str(agent_uuid))
+                    .where(TaskTracking.user_id == str(user_uuid))
+                    .order_by(TaskTracking.created_at.desc())
+                    .limit(5)
+                )
+            )
+            .mappings()
+            .all()
         )
-        .eq("agent_id", str(agent_uuid))
-        .eq("user_id", str(user_uuid))
-        .order("created_at", desc=True)
-        .limit(5)
-        .execute()
-    )
 
-    # Recent runs table (10 slim rows, all-time so an idle agent still
-    # shows history).
-    recent_runs_q = await (
-        client.table("agent_runs")
-        .select(
-            "id,status,trigger,model,started_at,ended_at,"
-            "prompt_tokens,completion_tokens,cost_cents"
+        # Recent runs table (10 slim rows, all-time so an idle agent still
+        # shows history).
+        recent_runs_rows = (
+            (
+                await session.execute(
+                    select(
+                        AgentRuns.id,
+                        AgentRuns.status,
+                        AgentRuns.trigger,
+                        AgentRuns.model,
+                        AgentRuns.started_at,
+                        AgentRuns.ended_at,
+                        AgentRuns.prompt_tokens,
+                        AgentRuns.completion_tokens,
+                        AgentRuns.cost_cents,
+                    )
+                    .where(AgentRuns.agent_id == str(agent_uuid))
+                    .where(AgentRuns.user_id == str(user_uuid))
+                    .order_by(AgentRuns.started_at.desc())
+                    .limit(10)
+                )
+            )
+            .mappings()
+            .all()
         )
-        .eq("agent_id", str(agent_uuid))
-        .eq("user_id", str(user_uuid))
-        .order("started_at", desc=True)
-        .limit(10)
-        .execute()
-    )
 
     return {
         "agent": {
@@ -1609,10 +1755,12 @@ async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
             "total_cost_cents": round(sum_cost_cents, 4),
             "run_count": len(runs_14d),
         },
-        "recent_tasks": [tt_row_to_task_shape(r) for r in (recent_tasks_q.data or [])],
+        "recent_tasks": [
+            tt_row_to_task_shape(_serialize_row(r)) for r in recent_tasks_rows
+        ],
         "recent_runs": [
             {**r, "id": str(r["id"])} if r.get("id") is not None else r
-            for r in (recent_runs_q.data or [])
+            for r in (_serialize_row(row) for row in recent_runs_rows)
         ],
     }
 
@@ -1663,30 +1811,60 @@ async def list_live_runs(auth: AuthDep) -> Dict[str, Any]:
     (paperclip's live-runs dashboard, R4). NOTE: registered BEFORE
     /runs/{run_id} so the literal path wins route matching."""
     user_uuid = _coerce_user_uuid(auth.user_id)
-    client = await get_async_supabase_admin()
-    runs_q = (
-        await client.table("agent_runs")
-        .select(
-            "id,agent_id,status,trigger,model,started_at,"
-            "prompt_tokens,completion_tokens,cost_cents,input_summary,task_id"
+    # NOTE: agent_runs.task_id (mig 282, TEXT → task_tracking.dbos_workflow_id)
+    # is not on the AgentRuns ORM model (drift), so it is referenced via
+    # ``column("task_id")`` — renders the same column the supabase-py select did.
+    from sqlalchemy import column, select
+
+    from app.db.session import read_scope
+    from app.models import AgentRuns, AiAgents
+
+    async with read_scope() as session:
+        run_rows = (
+            (
+                await session.execute(
+                    select(
+                        AgentRuns.id,
+                        AgentRuns.agent_id,
+                        AgentRuns.status,
+                        AgentRuns.trigger,
+                        AgentRuns.model,
+                        AgentRuns.started_at,
+                        AgentRuns.prompt_tokens,
+                        AgentRuns.completion_tokens,
+                        AgentRuns.cost_cents,
+                        AgentRuns.input_summary,
+                        column("task_id"),
+                    )
+                    .where(AgentRuns.user_id == str(user_uuid))
+                    .where(AgentRuns.status == "running")
+                    .order_by(AgentRuns.started_at.desc())
+                    .limit(20)
+                )
+            )
+            .mappings()
+            .all()
         )
-        .eq("user_id", str(user_uuid))
-        .eq("status", "running")
-        .order("started_at", desc=True)
-        .limit(20)
-        .execute()
-    )
-    items = runs_q.data or []
+    items = [_serialize_row(r) for r in run_rows]
     agent_ids = sorted({str(r["agent_id"]) for r in items})
     agents_by_id: Dict[str, Dict[str, Any]] = {}
     if agent_ids:
-        agents_q = (
-            await client.table("ai_agents")
-            .select("id,slug,name,icon")
-            .in_("id", agent_ids)
-            .execute()
-        )
-        agents_by_id = {str(a["id"]): a for a in (agents_q.data or [])}
+        async with read_scope() as session:
+            agent_rows = (
+                (
+                    await session.execute(
+                        select(
+                            AiAgents.id,
+                            AiAgents.slug,
+                            AiAgents.name,
+                            AiAgents.icon,
+                        ).where(AiAgents.id.in_(agent_ids))
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        agents_by_id = {a["id"]: a for a in (_serialize_row(r) for r in agent_rows)}
     for r in items:
         a = agents_by_id.get(str(r["agent_id"])) or {}
         r["id"] = str(r["id"])
@@ -1725,20 +1903,34 @@ async def get_run(run_id: str, auth: AuthDep) -> Dict[str, Any]:
     # the run detail.
     if row.get("task_id"):
         try:
-            client = await get_async_supabase_admin()
-            task_q = (
-                await client.table("task_tracking")
-                .select("dbos_workflow_id,title,phase,task_type")
-                .eq("dbos_workflow_id", str(row["task_id"]))
-                .maybe_single()
-                .execute()
-            )
-            if task_q and task_q.data:
+            from sqlalchemy import select
+
+            from app.db.session import read_scope
+            from app.models import TaskTracking
+
+            async with read_scope() as session:
+                task = (
+                    (
+                        await session.execute(
+                            select(
+                                TaskTracking.dbos_workflow_id,
+                                TaskTracking.title,
+                                TaskTracking.phase,
+                                TaskTracking.task_type,
+                            )
+                            .where(TaskTracking.dbos_workflow_id == str(row["task_id"]))
+                            .limit(1)
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
+            if task:
                 row["task"] = {
-                    "id": task_q.data["dbos_workflow_id"],
-                    "title": task_q.data.get("title"),
-                    "phase": task_q.data.get("phase"),
-                    "task_type": task_q.data.get("task_type"),
+                    "id": task["dbos_workflow_id"],
+                    "title": task.get("title"),
+                    "phase": task.get("phase"),
+                    "task_type": task.get("task_type"),
                 }
         except Exception as e:  # noqa: BLE001 — decoration, never fatal
             logger.warning(f"[runs] task ref lookup failed for run {run_id}: {e}")
@@ -1767,17 +1959,37 @@ async def list_run_events(
     if not row:
         raise HTTPException(status_code=404, detail="run not found")
 
-    client = await get_async_supabase_admin()
-    q = (
-        await client.table("agent_run_events")
-        .select("seq,event_type,payload,created_at")
-        .eq("run_id", str(run_id))
-        .gt("seq", after_seq)
-        .order("seq", desc=False)
-        .limit(max(1, min(limit, 1000)))
-        .execute()
-    )
-    items = q.data or []
+    # NOTE: the ``AgentRunEvents`` ORM model is stale — it still maps the
+    # mig-155 harness columns (iteration / tool_name / …), whereas the live
+    # table is mig-285 (seq / event_type / payload). We reference the drifted
+    # columns via ``column(...)`` so the rendered SQL matches the real table
+    # byte-for-byte; ``run_id`` (BIGINT) is the one mapped column that lines up.
+    from sqlalchemy import column, select
+
+    from app.db.session import read_scope
+    from app.models import AgentRunEvents
+
+    async with read_scope() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(
+                        column("seq"),
+                        column("event_type"),
+                        column("payload"),
+                        column("created_at"),
+                    )
+                    .select_from(AgentRunEvents)
+                    .where(AgentRunEvents.run_id == int(run_id))
+                    .where(column("seq") > after_seq)
+                    .order_by(column("seq").asc())
+                    .limit(max(1, min(limit, 1000)))
+                )
+            )
+            .mappings()
+            .all()
+        )
+    items = [_serialize_row(r) for r in rows]
     return {"items": items, "count": len(items)}
 
 
@@ -2338,20 +2550,37 @@ async def admin_telemetry(
     end = _dt.now(timezone.utc)
     start = end - timedelta(days=days)
 
-    client = await get_async_supabase_admin()
-    result = (
-        await client.table("agent_runs")
-        .select(
-            "agent_id,user_id,status,prompt_tokens,completion_tokens,"
-            "total_tokens,cost_cents,started_at,error_code"
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import AgentRuns
+
+    async with read_scope() as session:
+        run_rows = (
+            (
+                await session.execute(
+                    select(
+                        AgentRuns.agent_id,
+                        AgentRuns.user_id,
+                        AgentRuns.status,
+                        AgentRuns.prompt_tokens,
+                        AgentRuns.completion_tokens,
+                        AgentRuns.total_tokens,
+                        AgentRuns.cost_cents,
+                        AgentRuns.started_at,
+                        AgentRuns.error_code,
+                    )
+                    .where(AgentRuns.started_at >= start)
+                    .where(AgentRuns.started_at <= end)
+                    .order_by(AgentRuns.started_at.desc())
+                    .limit(20000)
+                )
+            )
+            .mappings()
+            .all()
         )
-        .gte("started_at", start.isoformat())
-        .lte("started_at", end.isoformat())
-        .order("started_at", desc=True)
-        .limit(20000)
-        .execute()
-    )
-    rows = result.data or []
+    # started_at → ISO str: the daily bucketing below slices ``ts[:10]``.
+    rows = [_serialize_row(r) for r in run_rows]
 
     # ---- overview rollup ----
     n = len(rows)
@@ -3072,19 +3301,35 @@ async def list_agent_versions(
     if not agent:
         raise HTTPException(status_code=404, detail="agent not found")
 
-    client = await get_async_supabase_admin()
-    result = (
-        await client.table("ai_agent_versions")
-        .select(
-            "id,version_number,model,temperature,max_tokens,notes,created_by,created_at"
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import AiAgentVersions
+
+    async with read_scope() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(
+                        AiAgentVersions.id,
+                        AiAgentVersions.version_number,
+                        AiAgentVersions.model,
+                        AiAgentVersions.temperature,
+                        AiAgentVersions.max_tokens,
+                        AiAgentVersions.notes,
+                        AiAgentVersions.created_by,
+                        AiAgentVersions.created_at,
+                    )
+                    .where(AiAgentVersions.agent_id == str(agent["id"]))
+                    .order_by(AiAgentVersions.version_number.desc())
+                    .limit(limit)
+                )
+            )
+            .mappings()
+            .all()
         )
-        .eq("agent_id", str(agent["id"]))
-        .order("version_number", desc=True)
-        .limit(limit)
-        .execute()
-    )
     return {
-        "items": _serialize_versions(result.data or [], kind="agent"),
+        "items": _serialize_versions(rows, kind="agent"),
         "current_version": agent.get("current_version"),
     }
 
@@ -3102,22 +3347,27 @@ async def get_agent_version(
     agent = await agent_repo.get_by_slug(slug)
     if not agent:
         raise HTTPException(status_code=404, detail="agent not found")
-    client = await get_async_supabase_admin()
-    result = (
-        await client.table("ai_agent_versions")
-        .select("*")
-        .eq("agent_id", str(agent["id"]))
-        .eq("version_number", version_number)
-        .maybe_single()
-        .execute()
-    )
-    if not result or not result.data:
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import AiAgentVersions
+
+    async with read_scope() as session:
+        row = (
+            (
+                await session.execute(
+                    select(*AiAgentVersions.__table__.columns)
+                    .where(AiAgentVersions.agent_id == str(agent["id"]))
+                    .where(AiAgentVersions.version_number == version_number)
+                    .limit(1)
+                )
+            )
+            .mappings()
+            .first()
+        )
+    if not row:
         raise HTTPException(status_code=404, detail="version not found")
-    row = dict(result.data)
-    row["id"] = str(row["id"])
-    if row.get("created_by"):
-        row["created_by"] = str(row["created_by"])
-    return row
+    return _serialize_row(row)
 
 
 @router.post(
@@ -3144,19 +3394,34 @@ async def rollback_agent(
         )
 
     user_uuid = _coerce_user_uuid(auth.user_id)
-    client = await get_async_supabase_admin()
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import AiAgentVersions
+
     # Fetch the snapshot
-    snap_q = (
-        await client.table("ai_agent_versions")
-        .select("identity_md,soul_md,agent_md,model,temperature,max_tokens")
-        .eq("agent_id", str(agent["id"]))
-        .eq("version_number", version_number)
-        .maybe_single()
-        .execute()
-    )
-    if not snap_q or not snap_q.data:
+    async with read_scope() as session:
+        snap = (
+            (
+                await session.execute(
+                    select(
+                        AiAgentVersions.identity_md,
+                        AiAgentVersions.soul_md,
+                        AiAgentVersions.agent_md,
+                        AiAgentVersions.model,
+                        AiAgentVersions.temperature,
+                        AiAgentVersions.max_tokens,
+                    )
+                    .where(AiAgentVersions.agent_id == str(agent["id"]))
+                    .where(AiAgentVersions.version_number == version_number)
+                    .limit(1)
+                )
+            )
+            .mappings()
+            .first()
+        )
+    if not snap:
         raise HTTPException(status_code=404, detail="version not found")
-    snap = snap_q.data
 
     # Use the existing versioned update — it snapshots current then writes new
     notes = f"rollback of v{version_number}"
@@ -3208,17 +3473,32 @@ async def list_skill_versions(
     skill = await skill_repo.get_by_slug(slug)
     if not skill:
         raise HTTPException(status_code=404, detail="skill not found")
-    client = await get_async_supabase_admin()
-    result = (
-        await client.table("skill_versions")
-        .select("id,version_number,notes,created_by,created_at")
-        .eq("skill_id", int(skill["id"]))
-        .order("version_number", desc=True)
-        .limit(limit)
-        .execute()
-    )
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import SkillVersions
+
+    async with read_scope() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(
+                        SkillVersions.id,
+                        SkillVersions.version_number,
+                        SkillVersions.notes,
+                        SkillVersions.created_by,
+                        SkillVersions.created_at,
+                    )
+                    .where(SkillVersions.skill_id == int(skill["id"]))
+                    .order_by(SkillVersions.version_number.desc())
+                    .limit(limit)
+                )
+            )
+            .mappings()
+            .all()
+        )
     return {
-        "items": _serialize_versions(result.data or [], kind="skill"),
+        "items": _serialize_versions(rows, kind="skill"),
         "current_version": skill.get("current_version"),
     }
 
@@ -3239,22 +3519,27 @@ async def get_skill_version(
     skill = await skill_repo.get_by_slug(slug)
     if not skill:
         raise HTTPException(status_code=404, detail="skill not found")
-    client = await get_async_supabase_admin()
-    result = (
-        await client.table("skill_versions")
-        .select("*")
-        .eq("skill_id", int(skill["id"]))
-        .eq("version_number", version_number)
-        .maybe_single()
-        .execute()
-    )
-    if not result or not result.data:
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import SkillVersions
+
+    async with read_scope() as session:
+        row = (
+            (
+                await session.execute(
+                    select(*SkillVersions.__table__.columns)
+                    .where(SkillVersions.skill_id == int(skill["id"]))
+                    .where(SkillVersions.version_number == version_number)
+                    .limit(1)
+                )
+            )
+            .mappings()
+            .first()
+        )
+    if not row:
         raise HTTPException(status_code=404, detail="version not found")
-    row = dict(result.data)
-    row["id"] = str(row["id"])
-    if row.get("created_by"):
-        row["created_by"] = str(row["created_by"])
-    return row
+    return _serialize_row(row)
 
 
 @router.get(
@@ -3273,31 +3558,52 @@ async def list_skill_file_versions(
     skill = await skill_repo.get_by_slug(slug)
     if not skill:
         raise HTTPException(status_code=404, detail="skill not found")
-    client = await get_async_supabase_admin()
-    # Find the file row first
-    file_q = (
-        await client.table("skill_files")
-        .select("id,current_version")
-        .eq("skill_id", int(skill["id"]))
-        .eq("path", path)
-        .maybe_single()
-        .execute()
-    )
-    if not file_q or not file_q.data:
-        raise HTTPException(status_code=404, detail="skill file not found")
-    file_id = file_q.data["id"]
-    cur_v = file_q.data.get("current_version")
+    from sqlalchemy import select
 
-    result = (
-        await client.table("skill_file_versions")
-        .select("id,version_number,path,file_type,notes,created_by,created_at")
-        .eq("skill_file_id", str(file_id))
-        .order("version_number", desc=True)
-        .limit(limit)
-        .execute()
-    )
+    from app.db.session import read_scope
+    from app.models import SkillFiles, SkillFileVersions
+
+    # Find the file row first
+    async with read_scope() as session:
+        file_row = (
+            (
+                await session.execute(
+                    select(SkillFiles.id, SkillFiles.current_version)
+                    .where(SkillFiles.skill_id == int(skill["id"]))
+                    .where(SkillFiles.path == path)
+                    .limit(1)
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if not file_row:
+            raise HTTPException(status_code=404, detail="skill file not found")
+        file_id = file_row["id"]
+        cur_v = file_row.get("current_version")
+
+        rows = (
+            (
+                await session.execute(
+                    select(
+                        SkillFileVersions.id,
+                        SkillFileVersions.version_number,
+                        SkillFileVersions.path,
+                        SkillFileVersions.file_type,
+                        SkillFileVersions.notes,
+                        SkillFileVersions.created_by,
+                        SkillFileVersions.created_at,
+                    )
+                    .where(SkillFileVersions.skill_file_id == str(file_id))
+                    .order_by(SkillFileVersions.version_number.desc())
+                    .limit(limit)
+                )
+            )
+            .mappings()
+            .all()
+        )
     return {
-        "items": _serialize_versions(result.data or [], kind="skill_file"),
+        "items": _serialize_versions(rows, kind="skill_file"),
         "current_version": cur_v,
     }
 
@@ -3327,18 +3633,26 @@ async def rollback_skill(
 
     skill_id = int(skill["id"])
     user_uuid = _coerce_user_uuid(auth.user_id)
-    client = await get_async_supabase_admin()
-    snap_q = (
-        await client.table("skill_versions")
-        .select("body_md,frontmatter_json")
-        .eq("skill_id", skill_id)
-        .eq("version_number", version_number)
-        .maybe_single()
-        .execute()
-    )
-    if not snap_q or not snap_q.data:
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import SkillVersions
+
+    async with read_scope() as session:
+        snap = (
+            (
+                await session.execute(
+                    select(SkillVersions.body_md, SkillVersions.frontmatter_json)
+                    .where(SkillVersions.skill_id == skill_id)
+                    .where(SkillVersions.version_number == version_number)
+                    .limit(1)
+                )
+            )
+            .mappings()
+            .first()
+        )
+    if not snap:
         raise HTTPException(status_code=404, detail="version not found")
-    snap = snap_q.data
 
     notes = f"rollback of v{version_number}"
     updates: Dict[str, Any] = {
