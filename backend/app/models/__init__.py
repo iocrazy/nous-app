@@ -62,6 +62,10 @@ from app.models.billing import (  # noqa: F401
 from app.models.generated_media import (  # noqa: F401
     GeneratedMedia,
 )
+from app.models.inspiration import (  # noqa: F401
+    InspirationApiTokens,
+    InspirationAttachments,
+)
 from app.models.library import (  # noqa: F401
     Authors,
     Collections,
@@ -298,6 +302,9 @@ __all__ = [
     "TeamPlans",
     "TeamQuotas",
     "Teams",
+    # inspiration notes domain
+    "InspirationApiTokens",
+    "InspirationAttachments",
     # project authored library
     "ProjectCharacters",
     "ProjectLibEntities",
