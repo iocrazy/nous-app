@@ -24,22 +24,15 @@ TAGS_MEDIA_CONTENT = ["Media Content"]
 
 async def _get_media_download_path(media_id: str) -> tuple[dict, str]:
     """Resolve media_id to download_path. Returns (media_record, download_path)."""
-    from app.db.supabase_client import get_async_supabase_admin
+    from app.repositories.media_repository import MediaRepository
 
-    supabase = await get_async_supabase_admin()
-    res = (
-        await supabase.table("parsed_media")
-        .select("*")
-        .eq("id", media_id)
-        .maybe_single()
-        .execute()
-    )
-    if not res or not res.data:
+    media = await MediaRepository().get_by_id(media_id)
+    if not media:
         raise HTTPException(status_code=404, detail="Media not found")
-    download_path = res.data.get("download_path")
+    download_path = media.get("download_path")
     if not download_path:
         raise HTTPException(status_code=404, detail="Download path not found")
-    return res.data, download_path
+    return media, download_path
 
 
 async def _get_media_row(media_id: str) -> dict:
@@ -49,19 +42,12 @@ async def _get_media_row(media_id: str) -> dict:
     audio-only media (e.g. qishui music) has music_download_path but no
     download_path, and must still be servable.
     """
-    from app.db.supabase_client import get_async_supabase_admin
+    from app.repositories.media_repository import MediaRepository
 
-    supabase = await get_async_supabase_admin()
-    res = (
-        await supabase.table("parsed_media")
-        .select("*")
-        .eq("id", media_id)
-        .maybe_single()
-        .execute()
-    )
-    if not res or not res.data:
+    media = await MediaRepository().get_by_id(media_id)
+    if not media:
         raise HTTPException(status_code=404, detail="Media not found")
-    return res.data
+    return media
 
 
 def _resolve_audio_file(media: dict, base_path: str) -> Optional[Path]:

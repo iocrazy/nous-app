@@ -7,7 +7,7 @@ place. These tests pin the new behavior in two ways:
 
   * Static: the route function body must not call DBOS.list_workflows_async
     and must reference task_tracking.
-  * Behavioral: hitting the endpoint with a stubbed Supabase chain
+  * Behavioral: hitting the endpoint with a stubbed ORM read_scope session
     returns serialized rows in the expected shape (workflow_id renamed
     from dbos_workflow_id, etc.).
 """
@@ -17,8 +17,8 @@ from __future__ import annotations
 import importlib
 import inspect
 import uuid
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from contextlib import asynccontextmanager
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -30,9 +30,7 @@ from app.core.deps import AuthContext, get_auth
 workflows_module = importlib.import_module("app.api.workflows_router")
 
 
-# ── helpers (mirrored from test_a6_routers; deliberately duplicated to
-# keep this test file self-contained — moving the helpers to a conftest
-# is a separate cleanup, not in scope) ──────────────────────────────────
+# ── helpers ─────────────────────────────────────────────────────────────
 
 
 def _make_auth(user_id: str | None = None) -> AuthContext:
@@ -44,27 +42,30 @@ def _make_auth(user_id: str | None = None) -> AuthContext:
     )
 
 
-def _app_with(router) -> FastAPI:
-    app = FastAPI()
-    app.dependency_overrides[get_auth] = lambda: _make_auth()
-    app.include_router(router, prefix="/api/v1")
-    return app
+def _read_scope_returning(rows, captured):
+    """A ``read_scope()`` stand-in whose session returns ``rows`` from
+    ``result.mappings().all()`` and records each executed statement in
+    ``captured`` so tests can assert on the compiled WHERE bindings — the
+    session boundary the endpoint now runs its ORM SELECT against."""
 
+    class _Mappings:
+        def all(self):
+            return rows
 
-def _supabase_chain(execute_data: Any) -> MagicMock:
-    chain = MagicMock()
-    for op in ("select", "eq", "in_", "order", "limit", "range"):
-        getattr(chain, op).return_value = chain
-    res = MagicMock()
-    res.data = execute_data
-    chain.execute = AsyncMock(return_value=res)
-    return chain
+    class _Result:
+        def mappings(self):
+            return _Mappings()
 
+    class _Session:
+        async def execute(self, stmt):
+            captured.append(stmt)
+            return _Result()
 
-def _supabase_client_for(tables: dict[str, MagicMock]) -> MagicMock:
-    client = MagicMock()
-    client.table.side_effect = lambda name: tables.get(name, _supabase_chain([]))
-    return client
+    @asynccontextmanager
+    async def _scope():
+        yield _Session()
+
+    return _scope
 
 
 # ── tests ───────────────────────────────────────────────────────────────
@@ -93,7 +94,7 @@ def test_list_workflows_reads_task_tracking_not_dbos_workflow_status() -> None:
 def test_list_workflows_returns_serialized_rows() -> None:
     """Behavioral check: the endpoint returns rows with the public
     field shape (workflow_id, not dbos_workflow_id) and filters by
-    the authenticated user via the supabase chain."""
+    the authenticated user via the ORM read_scope session."""
     user_id = str(uuid.uuid4())
     wf_id = str(uuid.uuid4())
     fake_row = {
@@ -114,18 +115,18 @@ def test_list_workflows_returns_serialized_rows() -> None:
         "resource_id": None,
         "group_id": None,
     }
-    chain = _supabase_chain([fake_row])
-    sb = _supabase_client_for({"task_tracking": chain})
-
-    async def _sb():
-        return sb
+    captured: list = []
 
     auth = _make_auth(user_id=user_id)
     app = FastAPI()
     app.dependency_overrides[get_auth] = lambda: auth
     app.include_router(workflows_module.router, prefix="/api/v1")
 
-    with patch("app.db.get_async_supabase_admin", _sb):
+    import app.db.session as db_session_mod
+
+    with patch.object(
+        db_session_mod, "read_scope", _read_scope_returning([fake_row], captured)
+    ):
         client = TestClient(app)
         resp = client.get("/api/v1/workflows")
 
@@ -139,8 +140,9 @@ def test_list_workflows_returns_serialized_rows() -> None:
     assert wf["task_type"] == "download"
     assert wf["status"] == "completed"
     assert wf["phase"] == "completed"
-    # Supabase chain filtered by user_id.
-    chain.eq.assert_any_call("user_id", user_id)
+    # The SELECT filtered by the authenticated user_id.
+    params = captured[0].compile().params
+    assert user_id in params.values()
 
 
 @pytest.mark.unit
@@ -148,19 +150,21 @@ def test_list_workflows_maps_legacy_dbos_status_filter() -> None:
     """Legacy callers passing workflow_status=SUCCESS (DBOS terminology)
     should still work — the endpoint translates to task_tracking's
     lowercase status set so external clients aren't broken."""
-    chain = _supabase_chain([])
-    sb = _supabase_client_for({"task_tracking": chain})
-
-    async def _sb():
-        return sb
+    captured: list = []
 
     app = FastAPI()
     app.dependency_overrides[get_auth] = lambda: _make_auth()
     app.include_router(workflows_module.router, prefix="/api/v1")
 
-    with patch("app.db.get_async_supabase_admin", _sb):
+    import app.db.session as db_session_mod
+
+    with patch.object(
+        db_session_mod, "read_scope", _read_scope_returning([], captured)
+    ):
         client = TestClient(app)
         resp = client.get("/api/v1/workflows?workflow_status=SUCCESS")
 
     assert resp.status_code == 200, resp.text
-    chain.eq.assert_any_call("status", "completed")
+    # SUCCESS (DBOS terminology) maps to task_tracking's lowercase 'completed'.
+    params = captured[0].compile().params
+    assert "completed" in params.values()

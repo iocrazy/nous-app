@@ -305,30 +305,41 @@ async def test_text_search_router_empty_fields_returns_empty(monkeypatch) -> Non
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_hydrate_scopes_via_ownership_rpc(monkeypatch) -> None:
-    # parsed_media fetch returns two rows; user only owns one platform_id.
-    pm_rows = [
-        {"id": 1, "platform_id": "p1"},
-        {"id": 2, "platform_id": "p2"},
-    ]
+    # parsed_media fetch returns two ParsedMedia rows; user only owns one
+    # platform_id. The endpoint now reads via an ORM read_scope() session and
+    # maps each ORM row through _pm_card_dict, so stub that boundary.
+    from contextlib import asynccontextmanager
 
-    class _Q:
-        def select(self, *_a, **_k):
+    class _PMObj:
+        """A ParsedMedia stand-in: id/platform_id set, every other CARD
+        column resolves to None so _pm_card_dict can project the row."""
+
+        def __init__(self, **kw):
+            self.__dict__.update(kw)
+
+        def __getattr__(self, _name):
+            return None
+
+    pm_objs = [_PMObj(id=1, platform_id="p1"), _PMObj(id=2, platform_id="p2")]
+
+    class _Result:
+        def scalars(self):
             return self
 
-        def in_(self, *_a, **_k):
-            return self
+        def all(self):
+            return pm_objs
 
-        async def execute(self):
-            return _FakeRpcResult(pm_rows)
+    class _Session:
+        async def execute(self, _stmt):
+            return _Result()
 
-    class _Client:
-        def table(self, _name):
-            return _Q()
+    @asynccontextmanager
+    async def _read_scope():
+        yield _Session()
 
-    async def _fake_admin():
-        return _Client()
+    import app.db.session as db_session_mod
 
-    monkeypatch.setattr(search_router, "get_async_supabase_admin", _fake_admin)
+    monkeypatch.setattr(db_session_mod, "read_scope", _read_scope)
 
     async def _fake_owned(self, user_id, platform_ids):
         assert platform_ids == ["p1", "p2"]

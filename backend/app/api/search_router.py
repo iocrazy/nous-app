@@ -6,8 +6,6 @@ from fastapi import APIRouter, HTTPException, Query, status
 from loguru import logger
 
 from app.core.deps import AuthDep
-from app.db.supabase_client import get_async_supabase_admin
-from app.repositories.media_repository import MediaRepository
 from app.schemas.search import (
     HybridSearchRequest,
     SearchResponse,
@@ -38,28 +36,37 @@ async def _fetch_user_resources_by_media_id(
     """
     if not media_ids:
         return {}
-    client = await get_async_supabase_admin()
-    result = (
-        await client.table("resources")
-        .select(
-            "id, media_id, transcript_status, summary_status, visual_analysis_status"
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import Resources
+    from app.repositories._orm_helpers import _plain
+
+    async with read_scope() as session:
+        result = await session.execute(
+            select(
+                Resources.id,
+                Resources.media_id,
+                Resources.transcript_status,
+                Resources.summary_status,
+                Resources.visual_analysis_status,
+            )
+            .where(Resources.creator_id == user_id)
+            .where(Resources.source_type == "web")
+            .where(Resources.is_trashed.is_(False))
+            .where(Resources.media_id.in_([int(m) for m in media_ids]))
         )
-        .eq("creator_id", user_id)
-        .eq("source_type", "web")
-        .eq("is_trashed", False)
-        .in_("media_id", media_ids)
-        .execute()
-    )
+        rows = result.mappings().all()
     out: Dict[int, Dict[str, Any]] = {}
-    for row in result.data or []:
+    for row in rows:
         mid = row.get("media_id")
         if mid is None:
             continue
         out[int(mid)] = {
             "resource_id": str(row["id"]) if row.get("id") is not None else None,
-            "transcript_status": row.get("transcript_status"),
-            "summary_status": row.get("summary_status"),
-            "visual_analysis_status": row.get("visual_analysis_status"),
+            "transcript_status": _plain(row.get("transcript_status")),
+            "summary_status": _plain(row.get("summary_status")),
+            "visual_analysis_status": _plain(row.get("visual_analysis_status")),
         }
     return out
 
@@ -90,14 +97,17 @@ async def _hydrate_media_by_platform_ids(
     """
     if not platform_ids:
         return []
-    client = await get_async_supabase_admin()
-    query = (
-        client.table("parsed_media")
-        .select(MediaRepository.CARD_SELECT)
-        .in_("platform_id", platform_ids)
-    )
-    result = await query.execute()
-    rows = result.data or []
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import ParsedMedia
+    from app.repositories.media_repository import _pm_card_dict
+
+    async with read_scope() as session:
+        result = await session.execute(
+            select(ParsedMedia).where(ParsedMedia.platform_id.in_(platform_ids))
+        )
+        rows = [_pm_card_dict(obj) for obj in result.scalars().all()]
     # Scope to rows the user owns. The ranker's ``platform_ids`` is already
     # small, so the ownership intersection is bounded — no full allowlist.
     if user_id:

@@ -484,7 +484,6 @@ try:
             _get_resource_id_for_media,
             _validate_share_token,
         )
-        from app.db.supabase_client import get_async_supabase_admin as _get_admin
 
         # Fast path: share_token validation (never cached)
         if share_token:
@@ -511,16 +510,23 @@ try:
         # Team membership check
         if team_ids:
             try:
-                supabase = await _get_admin()
-                res = (
-                    await supabase.table("team_members")
-                    .select("id")
-                    .eq("user_id", user_id)
-                    .in_("team_id", list(team_ids))
-                    .limit(1)
-                    .execute()
-                )
-                if res.data:
+                from sqlalchemy import select
+
+                from app.db.session import read_scope
+                from app.models import TeamMembers
+
+                async with read_scope() as session:
+                    member = (
+                        await session.execute(
+                            select(TeamMembers.team_id)
+                            .where(TeamMembers.user_id == user_id)
+                            .where(
+                                TeamMembers.team_id.in_([int(str(t)) for t in team_ids])
+                            )
+                            .limit(1)
+                        )
+                    ).first()
+                if member is not None:
                     return
             except Exception as e:
                 logger.error(f"Team membership check failed: {e}")

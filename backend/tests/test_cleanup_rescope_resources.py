@@ -15,6 +15,7 @@ service/repo/clients — no DB / network. They pin the post-model semantics:
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -154,36 +155,71 @@ class _FakeClient:
         return _FakeQuery(self._tables[name])
 
 
+def _storage_read_scope(resources_media_ids, parsed_rows):
+    """A ``read_scope()`` stand-in for get_storage_breakdown's two ORM reads.
+
+    The resources SELECT returns scalar media_ids (``.scalars().all()``); the
+    parsed_media SELECT returns row mappings (``.mappings().all()``). Dispatch
+    is by the table name rendered into the compiled statement."""
+
+    class _List:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def all(self):
+            return self._rows
+
+    class _Result:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def scalars(self):
+            return _List(self._rows)
+
+        def mappings(self):
+            return _List(self._rows)
+
+    class _Session:
+        async def execute(self, stmt):
+            sql = str(stmt).lower()
+            if "resources" in sql:
+                return _Result(resources_media_ids)
+            return _Result(parsed_rows)
+
+    @asynccontextmanager
+    async def _scope():
+        yield _Session()
+
+    return _scope
+
+
 @pytest.mark.asyncio
 async def test_storage_breakdown_scopes_by_owned_media():
     import importlib
 
     cleanup_router = importlib.import_module("app.api.cleanup_router")
+    import app.db.session as db_session_mod
 
     auth = SimpleNamespace(user_id=_USER)
-    client = _FakeClient(
+    parsed_rows = [
         {
-            "resources": [{"media_id": "1"}, {"media_id": "2"}, {"media_id": None}],
-            "parsed_media": [
-                {
-                    "id": "1",
-                    "storage_size": 1000,
-                    "media_type": "video",
-                    "created_at": "2026-01-01T00:00:00Z",
-                },
-                {
-                    "id": "2",
-                    "storage_size": 500,
-                    "media_type": "carousel",
-                    "created_at": "2026-01-02T00:00:00Z",
-                },
-            ],
-        }
-    )
+            "id": 1,
+            "storage_size": 1000,
+            "media_type": "video",
+            "created_at": "2026-01-01T00:00:00Z",
+        },
+        {
+            "id": 2,
+            "storage_size": 500,
+            "media_type": "carousel",
+            "created_at": "2026-01-02T00:00:00Z",
+        },
+    ]
 
-    with patch(
-        "app.db.supabase_client.get_async_supabase_admin",
-        AsyncMock(return_value=client),
+    with patch.object(
+        db_session_mod,
+        "read_scope",
+        _storage_read_scope([1, 2, None], parsed_rows),
     ):
         result = await cleanup_router.get_storage_breakdown(auth=auth)
 
@@ -198,14 +234,11 @@ async def test_storage_breakdown_empty_when_user_owns_nothing():
     import importlib
 
     cleanup_router = importlib.import_module("app.api.cleanup_router")
+    import app.db.session as db_session_mod
 
     auth = SimpleNamespace(user_id=_USER)
-    client = _FakeClient({"resources": [], "parsed_media": []})
 
-    with patch(
-        "app.db.supabase_client.get_async_supabase_admin",
-        AsyncMock(return_value=client),
-    ):
+    with patch.object(db_session_mod, "read_scope", _storage_read_scope([], [])):
         result = await cleanup_router.get_storage_breakdown(auth=auth)
 
     assert result == {

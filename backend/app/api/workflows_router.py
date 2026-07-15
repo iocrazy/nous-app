@@ -391,6 +391,24 @@ def _serialize_task_row(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _jsonable_task_row(row: Any) -> dict[str, Any]:
+    """Coerce a task_tracking ORM mapping's scalars to the JSON-safe
+    primitives PostgREST previously returned: timestamptz → ISO-8601 str,
+    uuid ``group_id`` → str. Everything else (BIGINT/text/int) passes
+    through unchanged so ``_serialize_task_row`` sees the same shape."""
+    import uuid as _uuid
+
+    out: dict[str, Any] = {}
+    for key, value in row.items():
+        if hasattr(value, "isoformat"):
+            out[key] = value.isoformat()
+        elif isinstance(value, _uuid.UUID):
+            out[key] = str(value)
+        else:
+            out[key] = value
+    return out
+
+
 # DBOS status names some legacy callers may still pass on the query
 # string. task_tracking uses lowercase business statuses, so we
 # transparently map the old values across.
@@ -437,35 +455,49 @@ async def list_workflows(
     need execution-engine state (input/output, step list, cancel signals)
     that task_tracking deliberately does NOT carry.
     """
-    from app.db import get_async_supabase_admin
+    from sqlalchemy import select
 
-    sb = await get_async_supabase_admin()
-    q = (
-        sb.table("task_tracking")
-        .select(
-            "dbos_workflow_id, task_type, task_kind, status, phase, "
-            "title, subtitle, progress, error_msg, created_at, "
-            "started_at, completed_at, updated_at, media_id, "
-            "resource_id, group_id"
-        )
-        .eq("user_id", str(auth.user_id))
-    )
+    from app.db.session import read_scope
+    from app.models import TaskTracking
+
+    stmt = select(
+        TaskTracking.dbos_workflow_id,
+        TaskTracking.task_type,
+        TaskTracking.task_kind,
+        TaskTracking.status,
+        TaskTracking.phase,
+        TaskTracking.title,
+        TaskTracking.subtitle,
+        TaskTracking.progress,
+        TaskTracking.error_msg,
+        TaskTracking.created_at,
+        TaskTracking.started_at,
+        TaskTracking.completed_at,
+        TaskTracking.updated_at,
+        TaskTracking.media_id,
+        TaskTracking.resource_id,
+        TaskTracking.group_id,
+    ).where(TaskTracking.user_id == str(auth.user_id))
     if name:
-        q = q.eq("task_type", name)
+        stmt = stmt.where(TaskTracking.task_type == name)
     if workflow_status:
         normalized = _LEGACY_DBOS_STATUS_MAP.get(
             workflow_status, workflow_status.lower()
         )
-        q = q.eq("status", normalized)
-    q = q.order("created_at", desc=sort_desc).range(offset, offset + limit - 1)
+        stmt = stmt.where(TaskTracking.status == normalized)
+    order_col = (
+        TaskTracking.created_at.desc() if sort_desc else TaskTracking.created_at.asc()
+    )
+    stmt = stmt.order_by(order_col).offset(offset).limit(limit)
 
     try:
-        result = await q.execute()
+        async with read_scope() as session:
+            result = await session.execute(stmt)
+            rows = [_jsonable_task_row(m) for m in result.mappings().all()]
     except Exception as e:
         logger.warning(f"[workflows] list({str(auth.user_id)[:8]}): {e}")
         raise HTTPException(500, detail=str(e))
 
-    rows = result.data or []
     return {
         "workflows": [_serialize_task_row(r) for r in rows],
         "total": len(rows),
