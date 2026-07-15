@@ -8,10 +8,11 @@ phase→legacy-status mapping.
 from __future__ import annotations
 
 import uuid
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from contextlib import asynccontextmanager
 
 import pytest
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.sql.dml import Insert
 
 from app.services.infra.unified_task_manager import (
     _PHASE_TO_STATUS,
@@ -224,27 +225,84 @@ class TestBuildRow:
 
 
 # ─── create_many (bulk insert) ─────────────────────────────────────
+#
+# `create_many` now writes through the ORM session boundary
+# (`app.db.session.read_scope` / `write_scope`, imported locally inside the
+# method) instead of a supabase-py `.table().insert().execute()` chain. The
+# fake `_Session` below stands in for the SQLAlchemy `AsyncSession`: it
+# queues one canned result per `execute()` call (a list for the bulk-insert
+# `.scalars().all()` path, a scalar id or a raised exception for the
+# per-row-fallback `.scalar()` path) and records every INSERT statement's
+# row payload(s) so tests can assert on what was actually sent.
 
 
-def _mock_client_with_insert(insert_mock: MagicMock) -> MagicMock:
-    """Build a fake supabase client whose .table(..).insert(..).execute() is wired."""
-    table = MagicMock()
-    table.insert = insert_mock
-    client = MagicMock()
-    client.table = MagicMock(return_value=table)
-    return client
+class _Result:
+    def __init__(self, value):
+        self._v = value
+
+    def scalar(self):
+        return self._v
+
+    def mappings(self):
+        return self
+
+    def scalars(self):
+        return self
+
+    def first(self):
+        return self._v
+
+    def all(self):
+        return self._v
+
+
+class _Session:
+    def __init__(self, results):
+        self._results = list(results)
+        self.call_count = 0
+        # one entry per INSERT execute(): ("bulk", [rows]) or ("single", {row})
+        self.inserts: list[tuple[str, object]] = []
+
+    async def execute(self, stmt, params=None):
+        self.call_count += 1
+        if isinstance(stmt, Insert):
+            multi = getattr(stmt, "_multi_values", None)
+            if multi:
+                self.inserts.append(("bulk", list(multi[0])))
+            else:
+                self.inserts.append(
+                    ("single", stmt.compile(dialect=postgresql.dialect()).params)
+                )
+        result = self._results.pop(0) if self._results else None
+        if isinstance(result, BaseException):
+            raise result
+        return _Result(result)
+
+
+def _patch_scopes(monkeypatch, results):
+    session = _Session(results)
+
+    @asynccontextmanager
+    async def _scope():
+        yield session
+
+    import app.db.session as dbs
+
+    monkeypatch.setattr(dbs, "read_scope", _scope)
+    monkeypatch.setattr(dbs, "write_scope", _scope)
+    return session
 
 
 class TestCreateMany:
     @pytest.mark.asyncio
-    async def test_empty_specs_returns_empty(self) -> None:
+    async def test_empty_specs_returns_empty(self, monkeypatch) -> None:
+        session = _patch_scopes(monkeypatch, [])
         mgr = UnifiedTaskManager()
-        mgr._get_client = AsyncMock()  # must not even be called
         assert await mgr.create_many([]) == []
-        mgr._get_client.assert_not_called()
+        assert session.call_count == 0  # must not even open a scope
 
     @pytest.mark.asyncio
-    async def test_single_bulk_insert_for_small_batch(self) -> None:
+    async def test_single_bulk_insert_for_small_batch(self, monkeypatch) -> None:
         # 5 specs, chunk_size default 100 → ONE insert call (the whole point).
         specs = [
             {
@@ -256,26 +314,22 @@ class TestCreateMany:
             }
             for i in range(5)
         ]
-        execute = AsyncMock(
-            return_value=SimpleNamespace(
-                data=[{"dbos_workflow_id": f"wf-{i}"} for i in range(5)]
-            )
-        )
-        insert = MagicMock(return_value=SimpleNamespace(execute=execute))
-        client = _mock_client_with_insert(insert)
+        session = _patch_scopes(monkeypatch, [[f"wf-{i}" for i in range(5)]])
         mgr = UnifiedTaskManager()
-        mgr._get_client = AsyncMock(return_value=client)
 
         ids = await mgr.create_many(specs)
 
         assert ids == [f"wf-{i}" for i in range(5)]
-        assert insert.call_count == 1  # one bulk INSERT, not five
+        assert session.call_count == 1  # one bulk INSERT, not five
         # The argument was a LIST of rows (batch), not a single dict.
-        (sent_rows,), _ = insert.call_args
-        assert isinstance(sent_rows, list) and len(sent_rows) == 5
+        kind, sent_rows = session.inserts[0]
+        assert kind == "bulk" and len(sent_rows) == 5
+        assert {r["dbos_workflow_id"] for r in sent_rows} == {
+            f"wf-{i}" for i in range(5)
+        }
 
     @pytest.mark.asyncio
-    async def test_chunks_large_batch(self) -> None:
+    async def test_chunks_large_batch(self, monkeypatch) -> None:
         # 185 specs, chunk_size 100 → 2 bulk inserts (100 + 85).
         specs = [
             {
@@ -286,25 +340,20 @@ class TestCreateMany:
             }
             for i in range(185)
         ]
-
-        async def _execute_returns_sent_rows() -> SimpleNamespace:
-            # echo back the rows that were inserted in this call
-            (rows,), _ = insert.call_args
-            return SimpleNamespace(data=list(rows))
-
-        execute = MagicMock(side_effect=_execute_returns_sent_rows)
-        insert = MagicMock(return_value=SimpleNamespace(execute=execute))
-        client = _mock_client_with_insert(insert)
+        chunk1_ids = [f"wf-{i}" for i in range(100)]
+        chunk2_ids = [f"wf-{i}" for i in range(100, 185)]
+        session = _patch_scopes(monkeypatch, [chunk1_ids, chunk2_ids])
         mgr = UnifiedTaskManager()
-        mgr._get_client = AsyncMock(return_value=client)
 
         ids = await mgr.create_many(specs, chunk_size=100)
 
-        assert insert.call_count == 2
+        assert session.call_count == 2
         assert len(ids) == 185
+        assert ids == chunk1_ids + chunk2_ids
+        assert [len(rows) for _, rows in session.inserts] == [100, 85]
 
     @pytest.mark.asyncio
-    async def test_bulk_failure_falls_back_to_per_row(self) -> None:
+    async def test_bulk_failure_falls_back_to_per_row(self, monkeypatch) -> None:
         # Bulk insert raises; per-row path recovers each row, and a duplicate
         # (23505) on one row is treated as idempotent success.
         specs = [
@@ -316,33 +365,21 @@ class TestCreateMany:
             }
             for i in range(3)
         ]
-
-        def _insert(arg):  # type: ignore[no-untyped-def]
-            if isinstance(arg, list):
-                # the bulk call → fail
-                return SimpleNamespace(
-                    execute=AsyncMock(side_effect=Exception("bulk boom"))
-                )
-            # per-row calls
-            wf = arg.get("dbos_workflow_id")
-            if wf == "wf-1":
-                return SimpleNamespace(
-                    execute=AsyncMock(
-                        side_effect=Exception("duplicate key value 23505")
-                    )
-                )
-            return SimpleNamespace(
-                execute=AsyncMock(
-                    return_value=SimpleNamespace(data=[{"dbos_workflow_id": wf}])
-                )
-            )
-
-        insert = MagicMock(side_effect=_insert)
-        client = _mock_client_with_insert(insert)
+        session = _patch_scopes(
+            monkeypatch,
+            [
+                Exception("bulk boom"),  # the bulk INSERT → fails
+                "wf-0",  # per-row: wf-0 → inserted
+                Exception(
+                    "duplicate key value violates unique constraint 23505"
+                ),  # per-row: wf-1 → idempotent dup
+                "wf-2",  # per-row: wf-2 → inserted
+            ],
+        )
         mgr = UnifiedTaskManager()
-        mgr._get_client = AsyncMock(return_value=client)
 
         ids = await mgr.create_many(specs)
 
         # All three accounted for: wf-0 + wf-2 inserted, wf-1 idempotent dup.
         assert sorted(ids) == ["wf-0", "wf-1", "wf-2"]
+        assert session.call_count == 4  # 1 failed bulk + 3 per-row

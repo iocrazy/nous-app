@@ -26,7 +26,6 @@ from uuid import UUID
 
 from loguru import logger
 
-from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.agent_workforce_repository import (
     AgentWorkforceRepository,
     get_agent_workforce_repository,
@@ -242,19 +241,30 @@ class InboxProcessor:
         this is fine; if the inbox grows large, swap in a SQL DISTINCT.
         """
         try:
-            client = await get_async_supabase_admin()
-            result = (
-                await client.table("agent_inbox")
-                .select("recipient_agent_id")
-                .eq("status", "unread")
-                .limit(500)
-                .execute()
-            )
+            from sqlalchemy import select
+
+            from app.db.session import read_scope
+            from app.models import AgentInbox
+
+            async with read_scope() as session:
+                rows = (
+                    (
+                        await session.execute(
+                            select(AgentInbox.recipient_agent_id)
+                            .where(AgentInbox.status == "unread")
+                            .limit(500)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
             seen: List[UUID] = []
             seen_ids = set()
-            for row in result.data or []:
-                rid = row.get("recipient_agent_id")
-                if rid and rid not in seen_ids:
+            for rid in rows:
+                if rid is None:
+                    continue
+                rid = str(rid)
+                if rid not in seen_ids:
                     seen_ids.add(rid)
                     seen.append(UUID(rid))
             return seen
@@ -264,16 +274,19 @@ class InboxProcessor:
 
     async def _lookup_agent_owner(self, agent_id: UUID) -> Optional[str]:
         try:
-            client = await get_async_supabase_admin()
-            result = (
-                await client.table("ai_agents")
-                .select("user_id")
-                .eq("id", str(agent_id))
-                .maybe_single()
-                .execute()
-            )
-            if result and result.data:
-                return result.data.get("user_id")
+            from sqlalchemy import select
+
+            from app.db.session import read_scope
+            from app.models import AiAgents
+
+            async with read_scope() as session:
+                row = (
+                    await session.execute(
+                        select(AiAgents.user_id).where(AiAgents.id == str(agent_id))
+                    )
+                ).first()
+            if row and row[0] is not None:
+                return str(row[0])
             return None
         except Exception as err:
             logger.warning(f"[inbox] agent-owner lookup failed: {err}")

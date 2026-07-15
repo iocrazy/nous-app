@@ -484,19 +484,22 @@ async def serve_resource_file(
             if not file_path:
                 media_id = resource.get("media_id")
                 if media_id:
-                    from app.db.supabase_client import get_async_supabase_admin
+                    from sqlalchemy import select
 
-                    client = await get_async_supabase_admin()
+                    from app.db.session import read_scope
+                    from app.models import ParsedMedia
+
                     try:
-                        pm_res = (
-                            await client.table("parsed_media")
-                            .select("download_path")
-                            .eq("id", media_id)
-                            .maybe_single()
-                            .execute()
-                        )
-                        if pm_res.data and pm_res.data.get("download_path"):
-                            file_path = pm_res.data["download_path"]
+                        async with read_scope() as session:
+                            pm_path = (
+                                await session.execute(
+                                    select(ParsedMedia.download_path)
+                                    .where(ParsedMedia.id == int(media_id))
+                                    .limit(1)
+                                )
+                            ).scalar()
+                        if pm_path:
+                            file_path = pm_path
                     except Exception as e:
                         logger.warning(
                             f"parsed_media file lookup failed for "
@@ -653,19 +656,29 @@ async def serve_resource_cover(resource_id: str, request: Request):
         # not on the resources row. Resolve via the join.
         media_id = resource.get("media_id")
         if media_id:
-            from app.db.supabase_client import get_async_supabase_admin
+            from sqlalchemy import select
 
-            client = await get_async_supabase_admin()
+            from app.db.session import read_scope
+            from app.models import ParsedMedia
+
             try:
-                pm_res = (
-                    await client.table("parsed_media")
-                    .select("cover_download_path,cover_download_status")
-                    .eq("id", media_id)
-                    .maybe_single()
-                    .execute()
-                )
-                if pm_res.data:
-                    pm_path = pm_res.data.get("cover_download_path")
+                async with read_scope() as session:
+                    pm_row = (
+                        (
+                            await session.execute(
+                                select(
+                                    ParsedMedia.cover_download_path,
+                                    ParsedMedia.cover_download_status,
+                                )
+                                .where(ParsedMedia.id == int(media_id))
+                                .limit(1)
+                            )
+                        )
+                        .mappings()
+                        .first()
+                    )
+                if pm_row:
+                    pm_path = pm_row.get("cover_download_path")
                     if pm_path and not pm_path.startswith("http"):
                         full_path = Path(settings.DOWNLOAD_PATH) / pm_path
                         if full_path.exists():
@@ -1120,19 +1133,22 @@ async def unlink_resource_by_platform_id(
         # CALLER owns (authz gate via creator_id) — never touch global
         # parsed_media. Resolve the media_id from platform_id, then the caller's
         # own resource, and unlink its first item (trigger GC handles the rest).
-        from app.db.supabase_client import get_async_supabase_admin
+        from sqlalchemy import select
 
-        client = await get_async_supabase_admin()
-        media_row = await (
-            client.table("parsed_media")
-            .select("id")
-            .eq("platform_id", platform_id)
-            .limit(1)
-            .execute()
-        )
-        if media_row.data:
+        from app.db.session import read_scope
+        from app.models import ParsedMedia
+
+        async with read_scope() as session:
+            media_pk = (
+                await session.execute(
+                    select(ParsedMedia.id)
+                    .where(ParsedMedia.platform_id == platform_id)
+                    .limit(1)
+                )
+            ).scalar()
+        if media_pk is not None:
             owned = await svc.repo.get_resource_by_media_id_and_creator(
-                str(media_row.data[0]["id"]), auth.user_id
+                str(media_pk), auth.user_id
             )
             if owned:
                 item = await svc.repo.get_first_resource_item(str(owned["id"]))

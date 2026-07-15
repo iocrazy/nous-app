@@ -50,29 +50,22 @@ class AttachmentService:
 
     async def _get_limit_mb(self) -> int:
         # system_settings 键 inspiration.max_attachment_mb(mig 349 seeded jsonb 500).
-        #
-        # 核实结论:app/repositories/admin/system_settings_repository.py 确实存在,
-        # 但它是面向 admin 页面的 SQLAlchemy ORM CRUD 层
-        # (list_non_transcode/exists/update/upsert_setting),没有单 key 的取值方法
-        # (get_value 之类),且走 read_scope()/write_scope() session 机制 —— 引入它
-        # 只为读一个数字,反而把这条热路径耦合到 admin ORM 会话管理上。按 brief 的
-        # 备选方案:视为"无匹配取值方法",直接用 service-role postgrest client
-        # 查表(同 Task 3 模板的 client.table(...) 用法),不动现有 admin repo。
-        #
-        # jsonb 值经 postgrest 读出可能是 int 也可能是 str(视驱动/序列化路径而
-        # 定),两种都用 int(raw) 兜底。
+        # jsonb 值读出可能是 int 也可能是 str(视驱动序列化路径而定),两种都用
+        # int(raw) 兜底。
         try:
-            from app.db.supabase_client import get_async_supabase_admin
+            from sqlalchemy import select
 
-            client = await get_async_supabase_admin()
-            result = (
-                await client.table("system_settings")
-                .select("value")
-                .eq("key", _MAX_ATTACHMENT_SETTING_KEY)
-                .maybe_single()
-                .execute()
-            )
-            raw = result.data.get("value") if result and result.data else None
+            from app.db.session import read_scope
+            from app.models import SystemSettings
+
+            async with read_scope() as session:
+                raw = (
+                    await session.execute(
+                        select(SystemSettings.value).where(
+                            SystemSettings.key == _MAX_ATTACHMENT_SETTING_KEY
+                        )
+                    )
+                ).scalar()
             return int(raw) if raw is not None else _DEFAULT_LIMIT_MB
         except Exception as e:
             logger.warning(

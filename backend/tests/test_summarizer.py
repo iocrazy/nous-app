@@ -38,6 +38,26 @@ def _adapter_returning(text: str):
     return fake_adapter
 
 
+def _read_scope_returning_scalar(value):
+    """A read_scope() stand-in whose session.execute().scalar() returns
+    ``value`` — the summarizer reads compaction_provider as a single scalar."""
+    from contextlib import asynccontextmanager
+
+    class _Res:
+        def scalar(self):
+            return value
+
+    class _Session:
+        async def execute(self, *_a, **_kw):
+            return _Res()
+
+    @asynccontextmanager
+    async def _scope():
+        yield _Session()
+
+    return _scope
+
+
 async def test_default_provider_is_maintenance_model():
     """If no env override and no system_settings override, fall back to
     the maintenance-tier catalog default — a name that actually exists in
@@ -74,32 +94,23 @@ async def test_env_override_wins_over_system_settings(monkeypatch):
 
 async def test_system_settings_override_used_when_no_env(monkeypatch):
     """When env is empty, summarizer reads compaction_provider from
-    system_settings. That's the admin-facing config seam."""
+    system_settings via the ORM read_scope() session. That's the
+    admin-facing config seam."""
     monkeypatch.delenv("COMPACTION_PROVIDER", raising=False)
     fake_adapter = _adapter_returning("summary text")
 
-    # The client's query-builder chain is SYNC (only execute() is awaited),
-    # so fake_db must be a MagicMock — an AsyncMock's .table() returns a
-    # coroutine and the chain silently breaks (the pre-2026-07-07 version of
-    # this test passed by accident: the read failed and the fallback default
-    # happened to equal the asserted value).
-    from unittest.mock import MagicMock
+    import app.db.session as db_session_mod
 
-    fake_db = MagicMock()
-    fake_db.table.return_value.select.return_value.eq.return_value.limit.return_value.execute = AsyncMock(
-        return_value=type("R", (), {"data": [{"value": "claude-haiku-4-5"}]})()
+    monkeypatch.setattr(
+        db_session_mod,
+        "read_scope",
+        _read_scope_returning_scalar("claude-haiku-4-5"),
     )
 
-    with (
-        patch(
-            "app.db.supabase_client.get_async_supabase_admin",
-            new=AsyncMock(return_value=fake_db),
-        ),
-        patch(
-            "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
-            new=AsyncMock(return_value=fake_adapter),
-        ) as mock_factory,
-    ):
+    with patch(
+        "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+        new=AsyncMock(return_value=fake_adapter),
+    ) as mock_factory:
         await summarize(_make_msgs())
 
     args, _ = mock_factory.call_args

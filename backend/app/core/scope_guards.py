@@ -17,7 +17,6 @@ Routes consume them as: `_guard: None = Depends(verify_scope_access)`.
 from fastapi import Depends, HTTPException, Query
 
 from app.core.deps import AuthContext, get_auth
-from app.db.supabase_client import get_async_supabase_admin
 
 
 async def verify_scope_access(
@@ -35,16 +34,21 @@ async def verify_scope_access(
     dropped entirely. FastAPI ignores any leftover ``scope_type=`` a stale
     client still sends, so this is backward-compatible.
     """
-    client = await get_async_supabase_admin()
-    result = (
-        await client.table("team_members")
-        .select("team_id")
-        .eq("team_id", scope_id)
-        .eq("user_id", auth.user_id)
-        .limit(1)
-        .execute()
-    )
-    if not result.data:
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import TeamMembers
+
+    async with read_scope() as session:
+        member = (
+            await session.execute(
+                select(TeamMembers.team_id)
+                .where(TeamMembers.team_id == int(str(scope_id)))
+                .where(TeamMembers.user_id == auth.user_id)
+                .limit(1)
+            )
+        ).first()
+    if member is None:
         raise HTTPException(
             status_code=403,
             detail="You are not a member of this scope",
@@ -63,44 +67,51 @@ async def _check_project_access(
     project_members — any role for read, manager/editor for write.
     project_members has a composite PK (project_id, user_id); no id column.
     """
-    client = await get_async_supabase_admin()
-    project_res = (
-        await client.table("projects")
-        .select("owner_id, team_id")
-        .eq("id", project_id)
-        .limit(1)
-        .execute()
-    )
-    if not project_res.data:
-        raise HTTPException(status_code=404, detail="Project not found")
+    from sqlalchemy import select
 
-    project = project_res.data[0]
-    if project.get("owner_id") == auth.user_id:
-        return
+    from app.db.session import read_scope
+    from app.models import ProjectMembers, Projects, TeamMembers
 
-    team_id = project.get("team_id")
-    if team_id:
-        member_res = (
-            await client.table("team_members")
-            .select("team_id")
-            .eq("team_id", team_id)
-            .eq("user_id", auth.user_id)
-            .limit(1)
-            .execute()
-        )
-        if member_res.data:
+    async with read_scope() as session:
+        project = (
+            await session.execute(
+                select(Projects.owner_id, Projects.team_id)
+                .where(Projects.id == int(str(project_id)))
+                .limit(1)
+            )
+        ).first()
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        # owner_id is a uuid column → ORM yields a native UUID; the auth
+        # user_id is a str, so ``==`` would never match without str() (#1006).
+        owner_id, team_id = project
+        if str(owner_id) == auth.user_id:
             return
 
-    pm_res = (
-        await client.table("project_members")
-        .select("role")
-        .eq("project_id", project_id)
-        .eq("user_id", auth.user_id)
-        .limit(1)
-        .execute()
-    )
-    if pm_res.data:
-        role = pm_res.data[0].get("role")
+        if team_id:
+            member = (
+                await session.execute(
+                    select(TeamMembers.team_id)
+                    .where(TeamMembers.team_id == team_id)
+                    .where(TeamMembers.user_id == auth.user_id)
+                    .limit(1)
+                )
+            ).first()
+            if member is not None:
+                return
+
+        pm = (
+            await session.execute(
+                select(ProjectMembers.role)
+                .where(ProjectMembers.project_id == int(str(project_id)))
+                .where(ProjectMembers.user_id == auth.user_id)
+                .limit(1)
+            )
+        ).first()
+
+    if pm is not None:
+        role = pm[0]
         if not write or role in _PROJECT_WRITE_ROLES:
             return
 
@@ -166,16 +177,21 @@ async def _is_team_member(team_id: str, user_id: str) -> bool:
 
     Separate seam so authz wiring tests can stub membership without faking a
     Supabase client."""
-    client = await get_async_supabase_admin()
-    membership = (
-        await client.table("team_members")
-        .select("team_id")
-        .eq("team_id", team_id)
-        .eq("user_id", user_id)
-        .limit(1)
-        .execute()
-    )
-    return bool(membership.data)
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import TeamMembers
+
+    async with read_scope() as session:
+        membership = (
+            await session.execute(
+                select(TeamMembers.team_id)
+                .where(TeamMembers.team_id == int(str(team_id)))
+                .where(TeamMembers.user_id == user_id)
+                .limit(1)
+            )
+        ).first()
+    return membership is not None
 
 
 async def verify_script_access(
@@ -289,18 +305,32 @@ async def verify_resource_write_access(
     client which bypasses RLS, so the check must be enforced here.
     `resource_id` is injected from the route's path parameter by name match.
     """
-    client = await get_async_supabase_admin()
-    result = (
-        await client.table("resources")
-        .select("creator_id")
-        .eq("id", resource_id)
-        .limit(1)
-        .execute()
-    )
-    if not result.data:
+    from sqlalchemy import select
+
+    from app.db.scope import system_request_scope
+    from app.db.session import read_scope
+    from app.models import Resources
+
+    # ``resources`` carries the ``UserScoped`` mixin. This guard deliberately
+    # looks up ANY resource by id (cross-user) then compares creator_id itself,
+    # exactly as the old service-role client did — so it must run under a SYSTEM
+    # scope. Inert today (``SCOPE_ENFORCE_RESOURCES`` off → the choke point is a
+    # no-op), but keeps this cross-tenant read correct if the flag flips on.
+    async with system_request_scope(reason="authz-resource-write-check"):
+        async with read_scope() as session:
+            row = (
+                await session.execute(
+                    select(Resources.creator_id)
+                    .where(Resources.id == int(str(resource_id)))
+                    .limit(1)
+                )
+            ).first()
+    if row is None:
         raise HTTPException(status_code=404, detail="Resource not found")
 
-    if result.data[0].get("creator_id") != auth.user_id:
+    # creator_id is a uuid column → native UUID from the ORM; str() so the
+    # comparison against the str auth.user_id can actually match (#1006).
+    if str(row[0]) != auth.user_id:
         raise HTTPException(
             status_code=403, detail="You do not have access to this resource"
         )

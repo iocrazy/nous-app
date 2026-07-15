@@ -740,17 +740,24 @@ class ResourcesService:
 
         # If last_folder_id references a trashed/deleted folder, clear it
         if folder_id:
-            from app.db.supabase_client import get_async_supabase_admin
+            from sqlalchemy import select
 
-            client = await get_async_supabase_admin()
-            folder_check = await (
-                client.table("folders")
-                .select("id, is_trashed")
-                .eq("id", folder_id)
-                .limit(1)
-                .execute()
-            )
-            if not folder_check.data or folder_check.data[0].get("is_trashed"):
+            from app.db.session import read_scope
+            from app.models import Folders
+
+            async with read_scope() as session:
+                folder_row = (
+                    (
+                        await session.execute(
+                            select(Folders.id, Folders.is_trashed)
+                            .where(Folders.id == int(folder_id))
+                            .limit(1)
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
+            if not folder_row or folder_row.get("is_trashed"):
                 folder_id = None  # Folder gone or trashed -> restore to library root
 
         # Recreate the resource_item
@@ -986,10 +993,15 @@ class ResourcesService:
     async def _delete_media_record(self, media_id: str) -> None:
         """Delete the parsed_media table record (orphaned after resource deletion)."""
         try:
-            from app.db.supabase_client import get_async_supabase_admin
+            from sqlalchemy import delete
 
-            client = await get_async_supabase_admin()
-            await client.table("parsed_media").delete().eq("id", media_id).execute()
+            from app.db.session import write_scope
+            from app.models import ParsedMedia
+
+            async with write_scope() as session:
+                await session.execute(
+                    delete(ParsedMedia).where(ParsedMedia.id == int(media_id))
+                )
             logger.info(f"Deleted media record: {media_id}")
         except Exception as e:
             logger.warning(f"Failed to delete media record {media_id}: {e}")

@@ -1,13 +1,33 @@
 """Cleanup suggestions service - Optimized version using PostgreSQL RPC functions (异步)."""
 
 import asyncio
+import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+from uuid import UUID
 
 from loguru import logger
+from sqlalchemy import select, text
 
-from app.db.supabase_client import get_async_supabase_admin
+from app.db.session import read_scope, write_scope
+from app.repositories._orm_helpers import _plain
+
+
+def _serialize_row(row: Any) -> Dict[str, Any]:
+    """Row mapping → JSON-safe dict (enum→str, timestamptz→ISO str, uuid→str),
+    matching the PostgREST shapes cleanup consumers string-compare against
+    (e.g. ``last_viewed_at < cutoff_iso``) and store on CleanupSuggestion."""
+    out: Dict[str, Any] = {}
+    for key, value in row.items():
+        value = _plain(value)
+        if hasattr(value, "isoformat"):
+            out[key] = value.isoformat()
+        elif isinstance(value, UUID):
+            out[key] = str(value)
+        else:
+            out[key] = value
+    return out
 
 
 @dataclass
@@ -34,10 +54,6 @@ class CleanupService:
     def __init__(self):
         pass
 
-    async def _get_client(self):
-        """Get async client (loop-aware, safe for Celery workers)."""
-        return await get_async_supabase_admin()
-
     async def get_cleanup_data(
         self, user_id: str, limit: int = 50, include_duplicates: bool = True
     ) -> dict:
@@ -47,12 +63,20 @@ class CleanupService:
         Returns dict with suggestions, stats, and categories.
         """
         try:
-            client = await self._get_client()
-            result = await client.rpc(
-                "get_cleanup_data", {"p_user_id": user_id, "p_limit": limit}
-            ).execute()
-
-            data = result.data or {}
+            # get_cleanup_data(...) RETURNS jsonb (scalar). Named-arg notation
+            # matches the PostgREST .rpc() named call (others default).
+            async with read_scope() as session:
+                raw = (
+                    await session.execute(
+                        text(
+                            "SELECT get_cleanup_data("
+                            "p_user_id => :p_user_id, p_limit => :p_limit)"
+                        ),
+                        {"p_user_id": user_id, "p_limit": limit},
+                    )
+                ).scalar()
+            # asyncpg hands raw jsonb back as text for an untyped text() query.
+            data = json.loads(raw) if isinstance(raw, str) else (raw or {})
 
             suggestions = []
             for video in data.get("suggestions", []):
@@ -222,32 +246,55 @@ class CleanupService:
 
     async def _get_suggestions_via_rpc(self, user_id: str, limit: int) -> List[dict]:
         """Get suggestions using PostgreSQL RPC function."""
-        client = await self._get_client()
-        result = await client.rpc(
-            "get_cleanup_suggestions",
-            {
-                "p_user_id": user_id,
-                "p_never_viewed_days": 7,
-                "p_old_unused_days": 30,
-                "p_limit": limit,
-            },
-        ).execute()
-        return result.data or []
+        async with read_scope() as session:
+            rows = (
+                (
+                    await session.execute(
+                        text(
+                            "SELECT * FROM get_cleanup_suggestions("
+                            "p_user_id => :p_user_id, "
+                            "p_never_viewed_days => :p_never_viewed_days, "
+                            "p_old_unused_days => :p_old_unused_days, "
+                            "p_limit => :p_limit)"
+                        ),
+                        {
+                            "p_user_id": user_id,
+                            "p_never_viewed_days": 7,
+                            "p_old_unused_days": 30,
+                            "p_limit": limit,
+                        },
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        return [_serialize_row(r) for r in rows]
 
     async def _get_duplicates_via_rpc(
         self, user_id: str, threshold: float = 0.85
     ) -> List[dict]:
         """Find duplicates using PostgreSQL RPC function with pgvector."""
-        client = await self._get_client()
-        result = await client.rpc(
-            "find_duplicate_videos",
-            {
-                "p_user_id": user_id,
-                "similarity_threshold": threshold,
-                "max_results": 20,
-            },
-        ).execute()
-        return result.data or []
+        async with read_scope() as session:
+            rows = (
+                (
+                    await session.execute(
+                        text(
+                            "SELECT * FROM find_duplicate_videos("
+                            "p_user_id => :p_user_id, "
+                            "similarity_threshold => :similarity_threshold, "
+                            "max_results => :max_results)"
+                        ),
+                        {
+                            "p_user_id": user_id,
+                            "similarity_threshold": threshold,
+                            "max_results": 20,
+                        },
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        return [_serialize_row(r) for r in rows]
 
     async def _get_suggestions_fallback(self, user_id: str, limit: int) -> List[dict]:
         """Fallback method using parallel direct queries if RPC not available."""
@@ -307,59 +354,93 @@ class CleanupService:
 
     async def _get_user_media_ids(self, user_id: str) -> list:
         """Get user's media IDs via resources table."""
-        client = await self._get_client()
-        result = (
-            await client.table("resources")
-            .select("media_id")
-            .eq("creator_id", user_id)
-            .eq("is_trashed", False)
-            .execute()
-        )
-        return [r["media_id"] for r in result.data if r.get("media_id")]
+        from app.models import Resources
+
+        async with read_scope() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(Resources.media_id)
+                        .where(Resources.creator_id == user_id)
+                        .where(Resources.is_trashed.is_(False))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return [m for m in rows if m is not None]
 
     async def _query_never_viewed(self, user_id: str, cutoff: str) -> List[dict]:
         """Query never viewed videos."""
-        client = await self._get_client()
+        from app.models import ParsedMedia
+
         media_ids = await self._get_user_media_ids(user_id)
         if not media_ids:
             return []
-        result = (
-            await client.table("parsed_media")
-            .select(
-                "id, title, cover_urls, author, storage_size, created_at, view_count"
+        cutoff_dt = datetime.fromisoformat(cutoff)
+        async with read_scope() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(
+                            ParsedMedia.id,
+                            ParsedMedia.title,
+                            ParsedMedia.cover_urls,
+                            ParsedMedia.author,
+                            ParsedMedia.storage_size,
+                            ParsedMedia.created_at,
+                            ParsedMedia.view_count,
+                        )
+                        .where(ParsedMedia.id.in_(media_ids))
+                        .where(ParsedMedia.keep_forever.is_(False))
+                        .where(ParsedMedia.view_count == 0)
+                        .where(ParsedMedia.created_at < cutoff_dt)
+                        .limit(50)
+                    )
+                )
+                .mappings()
+                .all()
             )
-            .in_("id", media_ids)
-            .eq("keep_forever", False)
-            .eq("view_count", 0)
-            .lt("created_at", cutoff)
-            .limit(50)
-            .execute()
-        )
-        return result.data
+        return [_serialize_row(r) for r in rows]
 
     async def _query_old_unused(self, user_id: str, cutoff: str) -> List[dict]:
         """Query old unused videos."""
-        client = await self._get_client()
+        from app.models import ParsedMedia
+
         media_ids = await self._get_user_media_ids(user_id)
         if not media_ids:
             return []
-        result = (
-            await client.table("parsed_media")
-            .select(
-                "id, title, cover_urls, author, storage_size, created_at, last_viewed_at, view_count"
+        cutoff_dt = datetime.fromisoformat(cutoff)
+        async with read_scope() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(
+                            ParsedMedia.id,
+                            ParsedMedia.title,
+                            ParsedMedia.cover_urls,
+                            ParsedMedia.author,
+                            ParsedMedia.storage_size,
+                            ParsedMedia.created_at,
+                            ParsedMedia.last_viewed_at,
+                            ParsedMedia.view_count,
+                        )
+                        .where(ParsedMedia.id.in_(media_ids))
+                        .where(ParsedMedia.keep_forever.is_(False))
+                        .where(ParsedMedia.view_count > 0)
+                        .where(ParsedMedia.last_viewed_at < cutoff_dt)
+                        .limit(50)
+                    )
+                )
+                .mappings()
+                .all()
             )
-            .in_("id", media_ids)
-            .eq("keep_forever", False)
-            .gt("view_count", 0)
-            .lt("last_viewed_at", cutoff)
-            .limit(50)
-            .execute()
-        )
-        return result.data
+        return [_serialize_row(r) for r in rows]
 
     async def _query_large_files(self, user_id: str) -> List[dict]:
         """Query large files."""
-        client = await self._get_client()
+        from app.models import ParsedMedia
+
         media_ids = await self._get_user_media_ids(user_id)
         if not media_ids:
             return []
@@ -369,20 +450,31 @@ class CleanupService:
         # Get top N by size
         top_n = max(int(total * 0.1), 5)
 
-        result = (
-            await client.table("parsed_media")
-            .select(
-                "id, title, cover_urls, author, storage_size, created_at, last_viewed_at, view_count"
+        async with read_scope() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(
+                            ParsedMedia.id,
+                            ParsedMedia.title,
+                            ParsedMedia.cover_urls,
+                            ParsedMedia.author,
+                            ParsedMedia.storage_size,
+                            ParsedMedia.created_at,
+                            ParsedMedia.last_viewed_at,
+                            ParsedMedia.view_count,
+                        )
+                        .where(ParsedMedia.id.in_(media_ids))
+                        .where(ParsedMedia.keep_forever.is_(False))
+                        .where(ParsedMedia.storage_size.isnot(None))
+                        .order_by(ParsedMedia.storage_size.desc())
+                        .limit(top_n)
+                    )
+                )
+                .mappings()
+                .all()
             )
-            .in_("id", media_ids)
-            .eq("keep_forever", False)
-            .not_.is_("storage_size", "null")
-            .order("storage_size", desc=True)
-            .limit(top_n)
-            .execute()
-        )
-
-        return result.data
+        return [_serialize_row(r) for r in rows]
 
     async def _get_suggestions_legacy(
         self, user_id: str, limit: int, include_duplicates: bool
@@ -440,14 +532,24 @@ class CleanupService:
     async def get_cleanup_stats(self, user_id: str) -> dict:
         """Get overall cleanup statistics using RPC for better performance."""
         try:
-            client = await self._get_client()
-            # Try RPC first
-            result = await client.rpc(
-                "get_cleanup_stats", {"p_user_id": user_id}
-            ).execute()
+            # Try RPC first (TABLE-returning → one row of counts).
+            async with read_scope() as session:
+                rows = (
+                    (
+                        await session.execute(
+                            text(
+                                "SELECT * FROM get_cleanup_stats("
+                                "p_user_id => :p_user_id)"
+                            ),
+                            {"p_user_id": user_id},
+                        )
+                    )
+                    .mappings()
+                    .all()
+                )
 
-            if result.data and len(result.data) > 0:
-                stats = result.data[0]
+            if rows:
+                stats = rows[0]
                 return {
                     "total_videos": stats.get("total_videos", 0),
                     "total_storage_bytes": stats.get("total_storage_bytes", 0),
@@ -467,7 +569,8 @@ class CleanupService:
 
     async def _get_cleanup_stats_fallback(self, user_id: str) -> dict:
         """Fallback stats calculation."""
-        client = await self._get_client()
+        from app.models import ParsedMedia
+
         media_ids = await self._get_user_media_ids(user_id)
         if not media_ids:
             return {
@@ -479,14 +582,25 @@ class CleanupService:
                 "videos_marked_keep": 0,
                 "reclaimable_bytes": 0,
             }
-        total_result = (
-            await client.table("parsed_media")
-            .select("id, storage_size, view_count, last_viewed_at, keep_forever")
-            .in_("id", media_ids)
-            .execute()
-        )
-
-        videos = total_result.data
+        async with read_scope() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(
+                            ParsedMedia.id,
+                            ParsedMedia.storage_size,
+                            ParsedMedia.view_count,
+                            ParsedMedia.last_viewed_at,
+                            ParsedMedia.keep_forever,
+                        ).where(ParsedMedia.id.in_(media_ids))
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        # last_viewed_at → ISO str so the ``< cutoff_30`` string compares below
+        # stay byte-identical to the PostgREST path.
+        videos = [_serialize_row(r) for r in rows]
         total_videos = len(videos)
         total_storage = sum(v.get("storage_size", 0) or 0 for v in videos)
 
@@ -522,44 +636,58 @@ class CleanupService:
 
     async def mark_keep_forever(self, media_id: int, user_id: str) -> bool:
         """Mark a media item to keep forever (exclude from suggestions)."""
-        client = await self._get_client()
+        from sqlalchemy import update as sa_update
+
+        from app.models import ParsedMedia, Resources
+
         # Verify ownership via resources table
-        resource = (
-            await client.table("resources")
-            .select("id")
-            .eq("media_id", media_id)
-            .eq("creator_id", user_id)
-            .limit(1)
-            .execute()
-        )
-        if not resource.data:
+        async with read_scope() as session:
+            owned = (
+                await session.execute(
+                    select(Resources.id)
+                    .where(Resources.media_id == int(media_id))
+                    .where(Resources.creator_id == user_id)
+                    .limit(1)
+                )
+            ).first()
+        if owned is None:
             return False
-        result = (
-            await client.table("parsed_media")
-            .update({"keep_forever": True})
-            .eq("id", media_id)
-            .execute()
-        )
-        return len(result.data) > 0
+        async with write_scope() as session:
+            updated = (
+                await session.execute(
+                    sa_update(ParsedMedia)
+                    .where(ParsedMedia.id == int(media_id))
+                    .values(keep_forever=True)
+                    .returning(ParsedMedia.id)
+                )
+            ).all()
+        return len(updated) > 0
 
     async def unmark_keep_forever(self, media_id: int, user_id: str) -> bool:
         """Remove keep forever mark from a media item."""
-        client = await self._get_client()
+        from sqlalchemy import update as sa_update
+
+        from app.models import ParsedMedia, Resources
+
         # Verify ownership via resources table
-        resource = (
-            await client.table("resources")
-            .select("id")
-            .eq("media_id", media_id)
-            .eq("creator_id", user_id)
-            .limit(1)
-            .execute()
-        )
-        if not resource.data:
+        async with read_scope() as session:
+            owned = (
+                await session.execute(
+                    select(Resources.id)
+                    .where(Resources.media_id == int(media_id))
+                    .where(Resources.creator_id == user_id)
+                    .limit(1)
+                )
+            ).first()
+        if owned is None:
             return False
-        result = (
-            await client.table("parsed_media")
-            .update({"keep_forever": False})
-            .eq("id", media_id)
-            .execute()
-        )
-        return len(result.data) > 0
+        async with write_scope() as session:
+            updated = (
+                await session.execute(
+                    sa_update(ParsedMedia)
+                    .where(ParsedMedia.id == int(media_id))
+                    .values(keep_forever=False)
+                    .returning(ParsedMedia.id)
+                )
+            ).all()
+        return len(updated) > 0

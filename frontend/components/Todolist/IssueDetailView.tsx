@@ -18,6 +18,7 @@ import {
 import type { UiIssue, AgentRef } from './types';
 import type { IssueMessage } from '../../services/issueMessageService';
 import { IssueStatusIcon, PriorityIcon } from './IssueStatusIcon';
+import { formatElapsed } from './formatElapsed';
 import { IssueChatThread } from './IssueChatThread';
 import { IssueActivityTab } from './IssueActivityTab';
 import { IssueRelatedTab } from './IssueRelatedTab';
@@ -40,6 +41,32 @@ interface IssueDetailViewProps {
 }
 
 type DetailTab = 'chat' | 'activity' | 'related';
+
+/**
+ * Header chip shown while an agent is working the issue. The pulsing amber dot
+ * + live elapsed timer ("the ticking number = it's alive") is the low-cost,
+ * high-signal cue from the multica analysis. Only the timer re-renders each
+ * second; it reads started_at off the issue row (no extra fetch).
+ */
+const AgentWorkingBadge: React.FC<{ startedAt: string | null; agentName?: string }> = ({ startedAt, agentName }) => {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const startMs = startedAt ? new Date(startedAt).getTime() : NaN;
+  const elapsed = Number.isFinite(startMs) ? Math.max(0, Math.floor((nowMs - startMs) / 1000)) : null;
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[12px] text-amber-300 bg-amber-500/10 ring-1 ring-amber-500/30"
+      title={agentName ? `${agentName} is working on this issue` : 'An agent is working on this issue'}
+    >
+      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+      {agentName ? `${agentName} is working` : 'Agent working'}
+      {elapsed != null && <span className="tabular-nums text-amber-400/80">· {formatElapsed(elapsed)}</span>}
+    </span>
+  );
+};
 
 export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents, agentsById, selfUserId, onCreateSubIssue, onIssueDispatched }) => {
   const { teamId } = useParams<{ teamId: string }>();
@@ -225,6 +252,9 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
                 <span className={`w-1.5 h-1.5 rounded-full ${issue.project.color ?? 'bg-ink-500'}`} />
                 {issue.project.name}
               </span>
+            )}
+            {(isAgentWorking || (!!issue.raw.dbos_workflow_id && issue.status !== 'done' && issue.status !== 'cancelled')) && (
+              <AgentWorkingBadge startedAt={issue.raw.started_at} agentName={issue.assignee?.name} />
             )}
             <div className="ml-auto flex items-center gap-1">
               <button className="p-1.5 text-ink-500 hover:text-ink-300 hover:bg-ink-800 rounded" title="Properties">

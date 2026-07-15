@@ -74,8 +74,9 @@ export interface IssueCreatePayload {
   description?: string;
   status?: IssueStatus;
   priority?: IssuePriority;
-  team_id?: number;
-  project_id?: number;
+  // Snowflake BIGINTs — accept string to preserve precision past 2^53.
+  team_id?: number | string;
+  project_id?: number | string;
   parent_id?: number;
   assignee_user_id?: string;
   assignee_agent_id?: string;
@@ -99,8 +100,9 @@ export interface IssueUpdatePayload {
 
 export interface IssueListFilters {
   status?: IssueStatus;
-  project_id?: number;
-  team_id?: number;
+  // Snowflake BIGINTs — accept string to preserve precision past 2^53.
+  project_id?: number | string;
+  team_id?: number | string;
   include_hidden?: boolean;
   limit?: number;
   offset?: number;

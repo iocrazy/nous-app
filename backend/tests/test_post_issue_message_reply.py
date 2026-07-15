@@ -71,36 +71,48 @@ async def test_legacy_issue_still_inserts_issue_messages(monkeypatch):
     issue_row = {"id": 6, "assignee_agent_id": None}
     monkeypatch.setattr(r, "_assert_issue_visible", AsyncMock(return_value=issue_row))
 
-    inserted = {"row": None}
+    # Legacy insert now goes through the ORM write_scope session with a
+    # RETURNING row; the endpoint validates dict(returned) into IssueMessage.
+    from contextlib import asynccontextmanager
 
-    class _Tbl:
-        def insert(self, row):
-            inserted["row"] = row
+    from sqlalchemy.dialects import postgresql
+
+    returned = {
+        "id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        "issue_id": 6,
+        "kind": "comment",
+        "author_user_id": "11111111-1111-1111-1111-111111111111",
+        "body": "hi",
+        "meta": {},
+        "created_at": "2026-05-25T00:00:00+00:00",
+    }
+    captured = {}
+
+    class _Result:
+        def mappings(self):
             return self
 
-        async def execute(self):
-            return SimpleNamespace(
-                data=[
-                    {
-                        "id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
-                        "issue_id": 6,
-                        "kind": "comment",
-                        "author_user_id": "11111111-1111-1111-1111-111111111111",
-                        "body": "hi",
-                        "meta": {},
-                        "created_at": "2026-05-25T00:00:00+00:00",
-                    }
-                ]
-            )
+        def first(self):
+            return returned
 
-    fake_sb = MagicMock()
-    fake_sb.table = MagicMock(return_value=_Tbl())
-    monkeypatch.setattr(r, "get_async_supabase_admin", AsyncMock(return_value=fake_sb))
+    class _Session:
+        async def execute(self, stmt, params=None):
+            captured["stmt"] = stmt
+            return _Result()
+
+    @asynccontextmanager
+    async def _scope():
+        yield _Session()
+
+    import app.db.session as dbs
+
+    monkeypatch.setattr(dbs, "write_scope", _scope)
 
     auth = SimpleNamespace(user_id=UUID("11111111-1111-1111-1111-111111111111"))
     resp = await r.post_issue_message(6, IssueMessagePost(body="hi"), auth)
 
-    assert inserted["row"]["kind"] == "comment"
+    params = captured["stmt"].compile(dialect=postgresql.dialect()).params
+    assert params["kind"] == "comment"
     assert resp.comment.body == "hi"
 
 

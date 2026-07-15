@@ -75,18 +75,21 @@ async def fetch_video(
         if _team_id:
             await points_service.ensure_team_quota(_team_id, user_id=auth.user_id)
 
-            from app.db.supabase_client import get_async_supabase_admin as _get_admin
+            from sqlalchemy import select
 
-            _admin = await _get_admin()
-            _existing = (
-                await _admin.table("parsed_media")
-                .select("id")
-                .eq("original_url", url)
-                .limit(1)
-                .execute()
-            )
+            from app.db.session import read_scope
+            from app.models import ParsedMedia
 
-            if not _existing.data:
+            async with read_scope() as session:
+                _existing = (
+                    await session.execute(
+                        select(ParsedMedia.id)
+                        .where(ParsedMedia.original_url == url)
+                        .limit(1)
+                    )
+                ).first()
+
+            if _existing is None:
                 points_result = await points_service.check_and_consume(
                     team_id=_team_id,
                     user_id=auth.user_id,

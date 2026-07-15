@@ -17,16 +17,36 @@ Endpoints
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 from pydantic import BaseModel, Field
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import insert, select
+from sqlalchemy import update as sa_update
 
 from app.core.deps import AuthDep
-from app.db.supabase_client import get_async_supabase_admin
+from app.db.session import read_scope, write_scope
+from app.models import UserSchedules
 
 router = APIRouter(prefix="/schedules", tags=["Schedules"])
+
+
+def _serialize_schedule(row: Mapping[str, Any]) -> Dict[str, Any]:
+    """Coerce a user_schedules row mapping to the JSON-safe primitives the
+    PostgREST path returned (timestamptz → ISO-8601 str, uuid → str) so
+    ``ScheduleResponse`` (which types ``id`` / timestamps as str) validates."""
+    out: Dict[str, Any] = {}
+    for key, value in row.items():
+        if hasattr(value, "isoformat"):
+            out[key] = value.isoformat()
+        elif isinstance(value, UUID):
+            out[key] = str(value)
+        else:
+            out[key] = value
+    return out
 
 
 _ALLOWED_TASK_TYPES = {
@@ -127,7 +147,6 @@ async def create_schedule(
     if payload.task_type == "agent_routine":
         _validate_agent_routine_payload(payload.payload)
 
-    sb = await get_async_supabase_admin()
     row = {
         "user_id": str(auth.user_id),
         "name": payload.name,
@@ -135,53 +154,72 @@ async def create_schedule(
         "task_type": payload.task_type,
         "payload": payload.payload,
         "enabled": payload.enabled,
-        "next_fire_at": next_at.isoformat(),
+        "next_fire_at": next_at,
     }
     try:
-        result = await sb.table("user_schedules").insert(row).execute()
+        async with write_scope() as session:
+            created = (
+                (
+                    await session.execute(
+                        insert(UserSchedules)
+                        .values(**row)
+                        .returning(*UserSchedules.__table__.columns)
+                    )
+                )
+                .mappings()
+                .first()
+            )
     except Exception as exc:
         logger.exception(f"schedule create failed: {exc}")
         raise HTTPException(500, "create failed")
-    if not result.data:
+    if not created:
         raise HTTPException(500, "create returned no row")
-    return ScheduleResponse(**result.data[0])
+    return ScheduleResponse(**_serialize_schedule(created))
 
 
 @router.get("", response_model=List[ScheduleResponse])
 async def list_schedules(auth: AuthDep) -> List[ScheduleResponse]:
-    sb = await get_async_supabase_admin()
     try:
-        result = (
-            await sb.table("user_schedules")
-            .select("*")
-            .eq("user_id", str(auth.user_id))
-            .order("created_at", desc=True)
-            .execute()
-        )
+        async with read_scope() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(*UserSchedules.__table__.columns)
+                        .where(UserSchedules.user_id == str(auth.user_id))
+                        .order_by(UserSchedules.created_at.desc())
+                    )
+                )
+                .mappings()
+                .all()
+            )
     except Exception as exc:
         logger.exception(f"schedule list failed: {exc}")
         raise HTTPException(500, "list failed")
-    return [ScheduleResponse(**r) for r in (result.data or [])]
+    return [ScheduleResponse(**_serialize_schedule(r)) for r in rows]
 
 
 @router.get("/{schedule_id}", response_model=ScheduleResponse)
 async def get_schedule(schedule_id: str, auth: AuthDep) -> ScheduleResponse:
-    sb = await get_async_supabase_admin()
     try:
-        result = (
-            await sb.table("user_schedules")
-            .select("*")
-            .eq("id", schedule_id)
-            .eq("user_id", str(auth.user_id))
-            .maybe_single()
-            .execute()
-        )
+        async with read_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        select(*UserSchedules.__table__.columns)
+                        .where(UserSchedules.id == schedule_id)
+                        .where(UserSchedules.user_id == str(auth.user_id))
+                        .limit(1)
+                    )
+                )
+                .mappings()
+                .first()
+            )
     except Exception as exc:
         logger.exception(f"schedule get failed: {exc}")
         raise HTTPException(500, "get failed")
-    if not result or not result.data:
+    if not row:
         raise HTTPException(404, "schedule not found")
-    return ScheduleResponse(**result.data)
+    return ScheduleResponse(**_serialize_schedule(row))
 
 
 @router.patch("/{schedule_id}", response_model=ScheduleResponse)
@@ -196,58 +234,61 @@ async def update_schedule(
     # agent_routine payload edits must keep the contract the master
     # scheduler relies on. (task_type itself is immutable on update.)
     if "payload" in fields and isinstance(fields["payload"], dict):
-        existing_q = (
-            await (await get_async_supabase_admin())
-            .table("user_schedules")
-            .select("task_type")
-            .eq("id", schedule_id)
-            .eq("user_id", str(auth.user_id))
-            .maybe_single()
-            .execute()
-        )
-        if (
-            existing_q
-            and existing_q.data
-            and existing_q.data.get("task_type") == "agent_routine"
-        ):
+        async with read_scope() as session:
+            existing = (
+                await session.execute(
+                    select(UserSchedules.task_type)
+                    .where(UserSchedules.id == schedule_id)
+                    .where(UserSchedules.user_id == str(auth.user_id))
+                    .limit(1)
+                )
+            ).first()
+        if existing is not None and existing[0] == "agent_routine":
             _validate_agent_routine_payload(fields["payload"])
 
     if "cron_expr" in fields:
         next_at = _validate_cron(fields["cron_expr"])
-        fields["next_fire_at"] = next_at.isoformat()
+        fields["next_fire_at"] = next_at
 
-    sb = await get_async_supabase_admin()
     try:
-        result = (
-            await sb.table("user_schedules")
-            .update(fields)
-            .eq("id", schedule_id)
-            .eq("user_id", str(auth.user_id))
-            .execute()
-        )
+        async with write_scope() as session:
+            rows = (
+                (
+                    await session.execute(
+                        sa_update(UserSchedules)
+                        .where(UserSchedules.id == schedule_id)
+                        .where(UserSchedules.user_id == str(auth.user_id))
+                        .values(**fields)
+                        .returning(*UserSchedules.__table__.columns)
+                    )
+                )
+                .mappings()
+                .all()
+            )
     except Exception as exc:
         logger.exception(f"schedule update failed: {exc}")
         raise HTTPException(500, "update failed")
-    if not result.data:
+    if not rows:
         raise HTTPException(404, "schedule not found")
-    return ScheduleResponse(**result.data[0])
+    return ScheduleResponse(**_serialize_schedule(rows[0]))
 
 
 @router.delete("/{schedule_id}")
 async def delete_schedule(schedule_id: str, auth: AuthDep) -> Dict[str, Any]:
-    sb = await get_async_supabase_admin()
     try:
-        result = (
-            await sb.table("user_schedules")
-            .delete()
-            .eq("id", schedule_id)
-            .eq("user_id", str(auth.user_id))
-            .execute()
-        )
+        async with write_scope() as session:
+            deleted = (
+                await session.execute(
+                    sa_delete(UserSchedules)
+                    .where(UserSchedules.id == schedule_id)
+                    .where(UserSchedules.user_id == str(auth.user_id))
+                    .returning(UserSchedules.id)
+                )
+            ).all()
     except Exception as exc:
         logger.exception(f"schedule delete failed: {exc}")
         raise HTTPException(500, "delete failed")
-    return {"ok": True, "deleted": len(result.data or [])}
+    return {"ok": True, "deleted": len(deleted)}
 
 
 @router.post("/{schedule_id}/fire-now")
@@ -255,29 +296,28 @@ async def fire_schedule_now(schedule_id: str, auth: AuthDep) -> Dict[str, Any]:
     """Manual one-shot trigger. Bypasses cron, dispatches immediately
     AND advances next_fire_at as if the cron had just fired (so the
     next regular tick still fires on schedule)."""
-    sb = await get_async_supabase_admin()
-    row_resp = (
-        await sb.table("user_schedules")
-        .select("*")
-        .eq("id", schedule_id)
-        .eq("user_id", str(auth.user_id))
-        .maybe_single()
-        .execute()
-    )
-    if not row_resp or not row_resp.data:
+    async with read_scope() as session:
+        row = (
+            await session.execute(
+                select(UserSchedules.id)
+                .where(UserSchedules.id == schedule_id)
+                .where(UserSchedules.user_id == str(auth.user_id))
+                .limit(1)
+            )
+        ).first()
+    if row is None:
         raise HTTPException(404, "schedule not found")
-    row_resp.data
 
     # Force next_fire_at to now so the master scheduler picks it up on
     # next tick (within 1 min). Cleaner than duplicating dispatch logic
     # here; the master_scheduler's _dispatch_one is the single owner of
     # "fire a schedule".
-    await (
-        sb.table("user_schedules")
-        .update({"next_fire_at": datetime.now(timezone.utc).isoformat()})
-        .eq("id", schedule_id)
-        .execute()
-    )
+    async with write_scope() as session:
+        await session.execute(
+            sa_update(UserSchedules)
+            .where(UserSchedules.id == schedule_id)
+            .values(next_fire_at=datetime.now(timezone.utc))
+        )
     return {"ok": True, "queued_for_next_tick": True}
 
 

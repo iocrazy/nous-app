@@ -14,7 +14,6 @@ from loguru import logger
 from app.core.deps import AuthDep
 from app.core.scope_dep import scoped_request
 from app.core.scope_guards import verify_scope_access
-from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.resources_repository import ResourcesRepository
 from app.schemas.resources import (
     FolderCreate,
@@ -249,16 +248,21 @@ async def _verify_folder_ownership_inline(folder: dict, auth: AuthDep) -> None:
     team_members check. PR-E Phase 1: ``scope_type`` is no longer read.
     """
     scope_id = folder.get("scope_id")
-    client = await get_async_supabase_admin()
-    result = (
-        await client.table("team_members")
-        .select("team_id")
-        .eq("team_id", str(scope_id))
-        .eq("user_id", str(auth.user_id))
-        .limit(1)
-        .execute()
-    )
-    if not result.data:
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import TeamMembers
+
+    async with read_scope() as session:
+        member = (
+            await session.execute(
+                select(TeamMembers.team_id)
+                .where(TeamMembers.team_id == int(str(scope_id)))
+                .where(TeamMembers.user_id == str(auth.user_id))
+                .limit(1)
+            )
+        ).first()
+    if member is None:
         raise HTTPException(
             status_code=403,
             detail="You are not a member of this folder's scope",

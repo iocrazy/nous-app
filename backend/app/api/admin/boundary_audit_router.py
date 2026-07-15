@@ -20,6 +20,21 @@ from app.core.admin_deps import AdminAuthDep
 router = APIRouter()
 
 
+def _serialize(row: Any) -> dict[str, Any]:
+    """BoundaryAudit ORM row → PostgREST-shaped dict (datetime → ISO str)."""
+    return {
+        "id": row.id,
+        "blocked_at": row.blocked_at.isoformat() if row.blocked_at else None,
+        "layer": row.layer,
+        "reason": row.reason,
+        "raw_url": row.raw_url,
+        "resolved_ip": row.resolved_ip,
+        "user_id": row.user_id,
+        "request_id": row.request_id,
+        "metadata_json": row.metadata_json,
+    }
+
+
 @router.get("")
 async def list_boundary_audit(
     admin: AdminAuthDep,
@@ -36,19 +51,39 @@ async def list_boundary_audit(
     Pagination via limit/offset. Filters by layer + reason are AND-combined.
     """
     try:
-        from app.db import get_async_supabase_admin
+        from sqlalchemy import func, select
 
-        sb = await get_async_supabase_admin()
-        query = sb.table("boundary_audit").select("*", count="exact")
+        from app.db.session import read_scope
+        from app.models import BoundaryAudit
+
+        conds = []
         if layer:
-            query = query.eq("layer", layer)
+            conds.append(BoundaryAudit.layer == layer)
         if reason:
-            query = query.eq("reason", reason)
-        query = query.order("blocked_at", desc=True).range(offset, offset + limit - 1)
-        result = await query.execute()
+            conds.append(BoundaryAudit.reason == reason)
+
+        async with read_scope() as session:
+            total = (
+                await session.execute(
+                    select(func.count()).select_from(BoundaryAudit).where(*conds)
+                )
+            ).scalar()
+            rows = (
+                (
+                    await session.execute(
+                        select(BoundaryAudit)
+                        .where(*conds)
+                        .order_by(BoundaryAudit.blocked_at.desc())
+                        .offset(offset)
+                        .limit(limit)
+                    )
+                )
+                .scalars()
+                .all()
+            )
         return {
-            "items": result.data or [],
-            "total": getattr(result, "count", None),
+            "items": [_serialize(r) for r in rows],
+            "total": total,
             "limit": limit,
             "offset": offset,
         }
@@ -69,24 +104,36 @@ async def boundary_audit_summary(admin: AdminAuthDep) -> dict[str, Any]:
 
     Used by the admin dashboard to spot surges in attack attempts."""
     try:
-        from app.db import get_async_supabase_admin
+        from datetime import datetime, timedelta, timezone
 
-        sb = await get_async_supabase_admin()
+        from sqlalchemy import select
+
+        from app.db.session import read_scope
+        from app.models import BoundaryAudit
+
         # Read recent rows and aggregate in Python — small enough that we
         # don't need a SQL aggregate function. If the table grows huge a
         # follow-up commit can add a materialized view.
-        result = await (
-            sb.table("boundary_audit")
-            .select("layer, reason, blocked_at")
-            .gte(
-                "blocked_at",
-                "NOW() - INTERVAL '7 days'",
-            )
-            .order("blocked_at", desc=True)
-            .limit(5000)
-            .execute()
-        )
-        rows = result.data or []
+        #
+        # TODO(boundary-audit): the pre-ORM path passed the string
+        # "NOW() - INTERVAL '7 days'" as a PostgREST filter literal, which
+        # Postgres rejected as an invalid timestamptz — so this endpoint
+        # always errored into the empty-summary except branch. The bind below
+        # applies the intended 7-day window; awaiting supervisor sign-off on
+        # this behaviour change (see B2 report).
+        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        async with read_scope() as session:
+            rows = [
+                {"layer": layer, "reason": reason}
+                for layer, reason in (
+                    await session.execute(
+                        select(BoundaryAudit.layer, BoundaryAudit.reason)
+                        .where(BoundaryAudit.blocked_at >= cutoff)
+                        .order_by(BoundaryAudit.blocked_at.desc())
+                        .limit(5000)
+                    )
+                ).all()
+            ]
     except Exception as e:
         logger.error(f"[admin/boundary-audit] summary failed: {e}")
         return {"by_layer": {}, "by_reason": {}, "total_7d": 0, "error": str(e)}

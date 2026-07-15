@@ -17,15 +17,27 @@ This matches the Runs / Usage UIs today.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
 from pydantic import BaseModel
+from sqlalchemy import column, func, select
+from sqlalchemy import update as sa_update
 
 from app.core.deps import get_current_user
-from app.db.supabase_client import get_async_supabase_admin
+from app.db.session import read_scope, write_scope
+from app.models import (
+    AgentInbox,
+    AgentOutbox,
+    AgentRuns,
+    AgentStateHistory,
+    AgentWorkers,
+    AiAgents,
+    TaskTracking,
+)
+from app.repositories._orm_helpers import _plain
 from app.repositories.agent_repository import get_agent_repository
 from app.repositories.agent_workforce_repository import (
     TASK_KIND_AGENT,
@@ -34,6 +46,23 @@ from app.repositories.agent_workforce_repository import (
 )
 
 router = APIRouter(prefix="/workforce", tags=["workforce"])
+
+
+def _serialize_row(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Coerce an ORM row mapping to the JSON-safe primitives the PostgREST
+    path returned: enum → bare str, timestamptz → ISO-8601 str, uuid → str.
+    BIGINT/int/Decimal pass through (FastAPI's encoder renders them as JSON
+    numbers, exactly as PostgREST did)."""
+    out: dict[str, Any] = {}
+    for key, value in row.items():
+        value = _plain(value)
+        if hasattr(value, "isoformat"):
+            out[key] = value.isoformat()
+        elif isinstance(value, UUID):
+            out[key] = str(value)
+        else:
+            out[key] = value
+    return out
 
 
 # Tunables for the healthz overall verdict.
@@ -85,17 +114,28 @@ async def get_workforce_board(
                                      changed_at, task_id}, ...]
         }
     """
-    client = await get_async_supabase_admin()
-
     # 1. All persistent agents.
-    agents_result = (
-        await client.table("ai_agents")
-        .select("id,slug,name,icon,model,persistent,paused_reason")
-        .eq("persistent", True)
-        .order("slug")
-        .execute()
-    )
-    agents = agents_result.data or []
+    async with read_scope() as session:
+        agent_rows = (
+            (
+                await session.execute(
+                    select(
+                        AiAgents.id,
+                        AiAgents.slug,
+                        AiAgents.name,
+                        AiAgents.icon,
+                        AiAgents.model,
+                        AiAgents.persistent,
+                        AiAgents.paused_reason,
+                    )
+                    .where(AiAgents.persistent.is_(True))
+                    .order_by(AiAgents.slug)
+                )
+            )
+            .mappings()
+            .all()
+        )
+    agents = [_serialize_row(a) for a in agent_rows]
     if not agents:
         return {"agents": [], "recent_state_history": []}
 
@@ -103,36 +143,59 @@ async def get_workforce_board(
     agent_id_to_slug = {a["id"]: a["slug"] for a in agents}
 
     # 2. Worker rows for those agents (one shot via .in_).
-    workers_result = (
-        await client.table("agent_workers")
-        .select("agent_id,state,current_task_id,state_changed_at,heartbeat_at")
-        .in_("agent_id", agent_ids)
-        .execute()
-    )
+    async with read_scope() as session:
+        worker_rows = (
+            (
+                await session.execute(
+                    select(
+                        AgentWorkers.agent_id,
+                        AgentWorkers.state,
+                        AgentWorkers.current_task_id,
+                        AgentWorkers.state_changed_at,
+                        AgentWorkers.heartbeat_at,
+                    ).where(AgentWorkers.agent_id.in_(agent_ids))
+                )
+            )
+            .mappings()
+            .all()
+        )
     workers_by_agent: dict[str, dict[str, Any]] = {
-        w["agent_id"]: w for w in (workers_result.data or [])
+        w["agent_id"]: w for w in (_serialize_row(r) for r in worker_rows)
     }
 
     # 3. Queue depths (one query per kind, range-filtered).
-    inbox_unread_by_agent = await _count_inbox(client, agent_ids, "unread")
-    inbox_reading_by_agent = await _count_inbox(client, agent_ids, "reading")
-    outbox_undelivered_by_agent = await _count_outbox_undelivered(client, agent_ids)
+    inbox_unread_by_agent = await _count_inbox(agent_ids, "unread")
+    inbox_reading_by_agent = await _count_inbox(agent_ids, "reading")
+    outbox_undelivered_by_agent = await _count_outbox_undelivered(agent_ids)
 
     # 4. Recent runs per agent (top 5 each, one query — order + filter, then
     #    bucket client-side. Cap to ~50 total rows pulled.)
-    runs_result = (
-        await client.table("agent_runs")
-        .select(
-            "id,agent_id,status,trigger,started_at,ended_at,cost_cents,"
-            "prompt_tokens,completion_tokens,model"
+    async with read_scope() as session:
+        run_rows = (
+            (
+                await session.execute(
+                    select(
+                        AgentRuns.id,
+                        AgentRuns.agent_id,
+                        AgentRuns.status,
+                        AgentRuns.trigger,
+                        AgentRuns.started_at,
+                        AgentRuns.ended_at,
+                        AgentRuns.cost_cents,
+                        AgentRuns.prompt_tokens,
+                        AgentRuns.completion_tokens,
+                        AgentRuns.model,
+                    )
+                    .where(AgentRuns.agent_id.in_(agent_ids))
+                    .order_by(AgentRuns.started_at.desc())
+                    .limit(50)
+                )
+            )
+            .mappings()
+            .all()
         )
-        .in_("agent_id", agent_ids)
-        .order("started_at", desc=True)
-        .limit(50)
-        .execute()
-    )
     runs_by_agent: dict[str, list[dict[str, Any]]] = {aid: [] for aid in agent_ids}
-    for run in runs_result.data or []:
+    for run in (_serialize_row(r) for r in run_rows):
         bucket = runs_by_agent.get(run["agent_id"])
         if bucket is not None and len(bucket) < 5:
             bucket.append(run)
@@ -161,14 +224,26 @@ async def get_workforce_board(
         )
 
     # 6. Recent state transitions (across all persistent agents).
-    history_result = (
-        await client.table("agent_state_history")
-        .select("agent_id,from_state,to_state,trigger,task_id,changed_at")
-        .in_("agent_id", agent_ids)
-        .order("changed_at", desc=True)
-        .limit(20)
-        .execute()
-    )
+    async with read_scope() as session:
+        history_rows = (
+            (
+                await session.execute(
+                    select(
+                        AgentStateHistory.agent_id,
+                        AgentStateHistory.from_state,
+                        AgentStateHistory.to_state,
+                        AgentStateHistory.trigger,
+                        AgentStateHistory.task_id,
+                        AgentStateHistory.changed_at,
+                    )
+                    .where(AgentStateHistory.agent_id.in_(agent_ids))
+                    .order_by(AgentStateHistory.changed_at.desc())
+                    .limit(20)
+                )
+            )
+            .mappings()
+            .all()
+        )
     recent_history = [
         {
             "agent_slug": agent_id_to_slug.get(row["agent_id"], "?"),
@@ -178,7 +253,7 @@ async def get_workforce_board(
             "task_id": row.get("task_id"),
             "changed_at": row["changed_at"],
         }
-        for row in (history_result.data or [])
+        for row in (_serialize_row(r) for r in history_rows)
     ]
 
     return {
@@ -187,33 +262,43 @@ async def get_workforce_board(
     }
 
 
-async def _count_inbox(client, agent_ids: list[str], status: str) -> dict[str, int]:
+async def _count_inbox(agent_ids: list[str], status: str) -> dict[str, int]:
     """Count inbox messages in ``status`` per recipient agent."""
     try:
-        result = (
-            await client.table("agent_inbox")
-            .select("recipient_agent_id", count="exact")
-            .in_("recipient_agent_id", agent_ids)
-            .eq("status", status)
-            .execute()
-        )
-        return _bucket_count(result.data or [], "recipient_agent_id")
+        async with read_scope() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(AgentInbox.recipient_agent_id)
+                        .where(AgentInbox.recipient_agent_id.in_(agent_ids))
+                        .where(AgentInbox.status == status)
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        return _bucket_count([_serialize_row(r) for r in rows], "recipient_agent_id")
     except Exception as err:
         logger.warning(f"[workforce] inbox count failed (status={status}): {err}")
         return {}
 
 
-async def _count_outbox_undelivered(client, agent_ids: list[str]) -> dict[str, int]:
+async def _count_outbox_undelivered(agent_ids: list[str]) -> dict[str, int]:
     """Count undelivered outbox rows per sender agent."""
     try:
-        result = (
-            await client.table("agent_outbox")
-            .select("sender_agent_id")
-            .in_("sender_agent_id", agent_ids)
-            .eq("delivered", False)
-            .execute()
-        )
-        return _bucket_count(result.data or [], "sender_agent_id")
+        async with read_scope() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(AgentOutbox.sender_agent_id)
+                        .where(AgentOutbox.sender_agent_id.in_(agent_ids))
+                        .where(AgentOutbox.delivered.is_(False))
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        return _bucket_count([_serialize_row(r) for r in rows], "sender_agent_id")
     except Exception as err:
         logger.warning(f"[workforce] outbox count failed: {err}")
         return {}
@@ -279,17 +364,17 @@ async def clear_inbox(
     Doesn't touch already-processed rows. Returns the count cleared.
     """
     agent = await _resolve_persistent_agent(slug)
-    client = await get_async_supabase_admin()
     cleared = 0
     try:
-        result = (
-            await client.table("agent_inbox")
-            .update({"status": "dismissed", "processed_at": "now()"})
-            .eq("recipient_agent_id", agent["id"])
-            .in_("status", ["unread", "reading"])
-            .execute()
-        )
-        cleared = len(result.data or [])
+        async with write_scope() as session:
+            result = await session.execute(
+                sa_update(AgentInbox)
+                .where(AgentInbox.recipient_agent_id == agent["id"])
+                .where(AgentInbox.status.in_(["unread", "reading"]))
+                .values(status="dismissed", processed_at=datetime.now(timezone.utc))
+                .returning(AgentInbox.id)
+            )
+            cleared = len(result.all())
     except Exception as err:
         logger.exception(f"[workforce] clear-inbox failed for {slug}: {err}")
         raise HTTPException(status_code=500, detail="clear-inbox failed")
@@ -355,41 +440,36 @@ async def workforce_healthz(request: Request) -> dict[str, Any]:
 
     # 2. DB reachability + recent inbox throughput.
     try:
-        client = await get_async_supabase_admin()
         # Are there any persistent agents? If not, "no recent processing" is
         # not a fault.
-        agents_q = (
-            await client.table("ai_agents")
-            .select("id", count="exact")
-            .eq("persistent", True)
-            .limit(1)
-            .execute()
-        )
-        persistent_agents = agents_q.count or 0
+        since = datetime.now(timezone.utc) - timedelta(seconds=_HEALTH_RECENT_WINDOW_S)
+        async with read_scope() as session:
+            persistent_agents = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(AiAgents)
+                    .where(AiAgents.persistent.is_(True))
+                )
+            ).scalar() or 0
 
-        since = (
-            datetime.now(timezone.utc) - timedelta(seconds=_HEALTH_RECENT_WINDOW_S)
-        ).isoformat()
-        recent_q = (
-            await client.table("agent_inbox")
-            .select("id", count="exact")
-            .gte("processed_at", since)
-            .limit(1)
-            .execute()
-        )
-        recent_processed = recent_q.count or 0
+            recent_processed = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(AgentInbox)
+                    .where(AgentInbox.processed_at >= since)
+                )
+            ).scalar() or 0
 
-        # Pending queue depth (unread + reading) gives us a "stuck queue"
-        # signal: persistent agents + zero recent processing + non-empty
-        # queue → scheduler is alive but not draining.
-        pending_q = (
-            await client.table("agent_inbox")
-            .select("id", count="exact")
-            .in_("status", ["unread", "reading"])
-            .limit(1)
-            .execute()
-        )
-        pending_depth = pending_q.count or 0
+            # Pending queue depth (unread + reading) gives us a "stuck queue"
+            # signal: persistent agents + zero recent processing + non-empty
+            # queue → scheduler is alive but not draining.
+            pending_depth = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(AgentInbox)
+                    .where(AgentInbox.status.in_(["unread", "reading"]))
+                )
+            ).scalar() or 0
 
         response["supabase"] = {
             "reachable": True,
@@ -428,49 +508,89 @@ async def get_agent_detail(
     """
     agent = await _resolve_persistent_agent(slug)
     aid = agent["id"]
-    client = await get_async_supabase_admin()
 
-    # Inbox: most recent 20, all statuses, with payload + sender.
-    inbox_q = await (
-        client.table("agent_inbox")
-        .select(
-            "id,sender_kind,sender_user_id,sender_agent_id,message_type,"
-            "payload,status,priority,created_at,processed_at,reply_to_message_id,"
-            "dedup_key"
+    async with read_scope() as session:
+        # Inbox: most recent 20, all statuses, with payload + sender.
+        inbox_rows = (
+            (
+                await session.execute(
+                    select(
+                        AgentInbox.id,
+                        AgentInbox.sender_kind,
+                        AgentInbox.sender_user_id,
+                        AgentInbox.sender_agent_id,
+                        AgentInbox.message_type,
+                        AgentInbox.payload,
+                        AgentInbox.status,
+                        AgentInbox.priority,
+                        AgentInbox.created_at,
+                        AgentInbox.processed_at,
+                        AgentInbox.reply_to_message_id,
+                        AgentInbox.dedup_key,
+                    )
+                    .where(AgentInbox.recipient_agent_id == aid)
+                    .order_by(AgentInbox.created_at.desc())
+                    .limit(20)
+                )
+            )
+            .mappings()
+            .all()
         )
-        .eq("recipient_agent_id", aid)
-        .order("created_at", desc=True)
-        .limit(20)
-        .execute()
-    )
 
-    # Outbox: most recent 20 SENT by this agent.
-    outbox_q = await (
-        client.table("agent_outbox")
-        .select(
-            "id,recipient_kind,recipient_user_id,recipient_agent_id,"
-            "message_type,payload,task_id,delivered,delivered_at,created_at"
+        # Outbox: most recent 20 SENT by this agent.
+        outbox_rows = (
+            (
+                await session.execute(
+                    select(
+                        AgentOutbox.id,
+                        AgentOutbox.recipient_kind,
+                        AgentOutbox.recipient_user_id,
+                        AgentOutbox.recipient_agent_id,
+                        AgentOutbox.message_type,
+                        AgentOutbox.payload,
+                        AgentOutbox.task_id,
+                        AgentOutbox.delivered,
+                        AgentOutbox.delivered_at,
+                        AgentOutbox.created_at,
+                    )
+                    .where(AgentOutbox.sender_agent_id == aid)
+                    .order_by(AgentOutbox.created_at.desc())
+                    .limit(20)
+                )
+            )
+            .mappings()
+            .all()
         )
-        .eq("sender_agent_id", aid)
-        .order("created_at", desc=True)
-        .limit(20)
-        .execute()
-    )
 
-    # Runs: most recent 20 with full summaries (capped server-side at 500
-    # chars by RunRecorder, so the response stays bounded).
-    runs_q = await (
-        client.table("agent_runs")
-        .select(
-            "id,status,trigger,model,provider,started_at,ended_at,"
-            "prompt_tokens,completion_tokens,cost_cents,input_summary,"
-            "output_summary,error_code,error_message"
+        # Runs: most recent 20 with full summaries (capped server-side at 500
+        # chars by RunRecorder, so the response stays bounded).
+        run_rows = (
+            (
+                await session.execute(
+                    select(
+                        AgentRuns.id,
+                        AgentRuns.status,
+                        AgentRuns.trigger,
+                        AgentRuns.model,
+                        AgentRuns.provider,
+                        AgentRuns.started_at,
+                        AgentRuns.ended_at,
+                        AgentRuns.prompt_tokens,
+                        AgentRuns.completion_tokens,
+                        AgentRuns.cost_cents,
+                        AgentRuns.input_summary,
+                        AgentRuns.output_summary,
+                        AgentRuns.error_code,
+                        AgentRuns.error_message,
+                    )
+                    .where(AgentRuns.agent_id == aid)
+                    .order_by(AgentRuns.started_at.desc())
+                    .limit(20)
+                )
+            )
+            .mappings()
+            .all()
         )
-        .eq("agent_id", aid)
-        .order("started_at", desc=True)
-        .limit(20)
-        .execute()
-    )
 
     return {
         "agent": {
@@ -482,9 +602,9 @@ async def get_agent_detail(
             "persistent": bool(agent.get("persistent")),
             "paused_reason": agent.get("paused_reason"),
         },
-        "inbox": inbox_q.data or [],
-        "outbox": outbox_q.data or [],
-        "runs": runs_q.data or [],
+        "inbox": [_serialize_row(r) for r in inbox_rows],
+        "outbox": [_serialize_row(r) for r in outbox_rows],
+        "runs": [_serialize_row(r) for r in run_rows],
     }
 
 
@@ -556,19 +676,25 @@ async def get_task_by_inbox(
     user_id so chat-triggered Delegates have a sender_user_id we can
     check against.
     """
-    client = await get_async_supabase_admin()
-
-    inbox_q = await (
-        client.table("agent_inbox")
-        .select(
-            "id,recipient_agent_id,sender_kind,sender_user_id,sender_agent_id,"
-            "reply_to_message_id"
+    async with read_scope() as session:
+        inbox = (
+            (
+                await session.execute(
+                    select(
+                        AgentInbox.id,
+                        AgentInbox.recipient_agent_id,
+                        AgentInbox.sender_kind,
+                        AgentInbox.sender_user_id,
+                        AgentInbox.sender_agent_id,
+                        AgentInbox.reply_to_message_id,
+                    )
+                    .where(AgentInbox.id == str(inbox_message_id))
+                    .limit(1)
+                )
+            )
+            .mappings()
+            .first()
         )
-        .eq("id", str(inbox_message_id))
-        .maybe_single()
-        .execute()
-    )
-    inbox = inbox_q.data if inbox_q else None
     if not inbox:
         raise HTTPException(
             status_code=404,
@@ -591,37 +717,67 @@ async def get_task_by_inbox(
     # ticked. Return None rather than 404 so the frontend can show
     # "queued" until the worker picks it up.
     # A4: agent_tasks → task_tracking WHERE task_kind='agent_task'.
-    task_q = await (
-        client.table("task_tracking")
-        .select(
-            "dbos_workflow_id,agent_id,phase,started_at,completed_at,"
-            "error_code,error_msg,created_at,inbox_message_id,metadata"
+    async with read_scope() as session:
+        task_row = (
+            (
+                await session.execute(
+                    select(
+                        TaskTracking.dbos_workflow_id,
+                        TaskTracking.agent_id,
+                        TaskTracking.phase,
+                        TaskTracking.started_at,
+                        TaskTracking.completed_at,
+                        TaskTracking.error_code,
+                        TaskTracking.error_msg,
+                        TaskTracking.created_at,
+                        TaskTracking.inbox_message_id,
+                        TaskTracking.metadata_.label("metadata"),
+                    )
+                    .where(TaskTracking.task_kind == TASK_KIND_AGENT)
+                    .where(TaskTracking.inbox_message_id == str(inbox_message_id))
+                    .limit(1)
+                )
+            )
+            .mappings()
+            .first()
         )
-        .eq("task_kind", TASK_KIND_AGENT)
-        .eq("inbox_message_id", str(inbox_message_id))
-        .maybe_single()
-        .execute()
-    )
-    task = tt_row_to_task_shape(task_q.data if task_q else None)
+    task = tt_row_to_task_shape(_serialize_row(task_row) if task_row else None)
 
     # Sub-agent's reply (if any). The sub-agent writes to outbox with
     # ``reply_to_message_id`` pointing back at our inbox row, so we can
     # find the response without a task→outbox join.
     outbox_response: Optional[dict[str, Any]] = None
     if task and task.get("lifecycle_status") in ("done", "failed"):
-        outbox_q = await (
-            client.table("agent_outbox")
-            .select(
-                "id,sender_agent_id,message_type,payload,created_at,"
-                "delivered,delivered_at"
+        async with read_scope() as session:
+            outbox_rows = (
+                (
+                    await session.execute(
+                        select(
+                            AgentOutbox.id,
+                            AgentOutbox.sender_agent_id,
+                            AgentOutbox.message_type,
+                            AgentOutbox.payload,
+                            AgentOutbox.created_at,
+                            AgentOutbox.delivered,
+                            AgentOutbox.delivered_at,
+                        )
+                        # NOTE: agent_outbox has no reply_to_message_id column
+                        # (it lives on agent_inbox — mig 159). This filter is a
+                        # pre-existing bug preserved byte-for-byte from the
+                        # supabase-py path: ``column(...)`` renders the same
+                        # unqualified predicate the old ``.eq(...)`` did, so the
+                        # runtime outcome is identical (works only if prod has
+                        # the column as drift; errors the same way otherwise).
+                        .where(column("reply_to_message_id") == str(inbox_message_id))
+                        .order_by(AgentOutbox.created_at.desc())
+                        .limit(1)
+                    )
+                )
+                .mappings()
+                .all()
             )
-            .eq("reply_to_message_id", str(inbox_message_id))
-            .order("created_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-        if outbox_q.data:
-            outbox_response = outbox_q.data[0]
+        if outbox_rows:
+            outbox_response = _serialize_row(outbox_rows[0])
 
     return {
         "inbox_message_id": str(inbox_message_id),

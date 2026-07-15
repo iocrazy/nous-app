@@ -231,9 +231,11 @@ async def update_frontend_config(
             config["default_download_path"] = request.default_download_path
 
         # Handle transcode settings — persist to database (system_settings)
-        from app.db import get_async_supabase_admin
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-        supabase_admin = await get_async_supabase_admin()
+        from app.db.session import write_scope
+        from app.models import SystemSettings
+
         transcode_updates = {
             "transcode_enabled": request.transcode_enabled,
             "transcode_tiers": request.transcode_tiers,
@@ -248,14 +250,20 @@ async def update_frontend_config(
             "transcode_preset": "FFMPEG_PRESET",
             "transcode_parallel_tiers": "TRANSCODE_PARALLEL_TIERS",
         }
-        for db_key, value in transcode_updates.items():
-            if value is not None:
-                await supabase_admin.table("system_settings").upsert(
-                    {"key": db_key, "value": value}
-                ).execute()
-                attr = settings_map.get(db_key)
-                if attr:
-                    setattr(settings, attr, value)
+        async with write_scope() as session:
+            for db_key, value in transcode_updates.items():
+                if value is not None:
+                    await session.execute(
+                        pg_insert(SystemSettings)
+                        .values(key=db_key, value=value)
+                        .on_conflict_do_update(
+                            index_elements=["key"],
+                            set_={"value": value},
+                        )
+                    )
+                    attr = settings_map.get(db_key)
+                    if attr:
+                        setattr(settings, attr, value)
 
         # 保存配置
         if not save_config(config):

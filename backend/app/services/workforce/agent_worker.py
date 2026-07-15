@@ -348,17 +348,40 @@ async def _lookup_inbox_message(
     if the row is gone (cascade delete, RLS race), we fall back to the
     task's user_id as the user recipient."""
     try:
-        from app.db.supabase_client import get_async_supabase_admin
+        from sqlalchemy import select
 
-        client = await get_async_supabase_admin()
-        result = (
-            await client.table(workforce.INBOX_TABLE)
-            .select("sender_kind,sender_user_id,sender_agent_id")
-            .eq("id", str(message_id))
-            .maybe_single()
-            .execute()
-        )
-        return result.data if result and result.data else None
+        from app.db.session import read_scope
+        from app.models import AgentInbox
+
+        async with read_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        select(
+                            AgentInbox.sender_kind,
+                            AgentInbox.sender_user_id,
+                            AgentInbox.sender_agent_id,
+                        )
+                        .where(AgentInbox.id == str(message_id))
+                        .limit(1)
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        if not row:
+            return None
+        # uuid → str: the caller feeds sender_*_id into UUID(...), which
+        # rejects a UUID object — PostgREST handed back strings here.
+        return {
+            "sender_kind": row["sender_kind"],
+            "sender_user_id": (
+                str(row["sender_user_id"]) if row["sender_user_id"] else None
+            ),
+            "sender_agent_id": (
+                str(row["sender_agent_id"]) if row["sender_agent_id"] else None
+            ),
+        }
     except Exception as err:
         logger.warning(f"[agent-worker] inbox lookup failed: {err}")
         return None
@@ -380,28 +403,35 @@ async def _attach_to_parent_run(
     """
 
     try:
-        from app.db.supabase_client import get_async_supabase_admin
+        from sqlalchemy import select
+        from sqlalchemy import update as sa_update
 
-        client = await get_async_supabase_admin()
+        from app.db.session import read_scope, write_scope
+        from app.models import AgentRuns
+
         # Read parent's root_run_id (or use parent_run_id as fallback if
-        # parent is itself a root).
-        parent_row = (
-            await client.table("agent_runs")
-            .select("root_run_id")
-            .eq("id", str(parent_run_id))
-            .maybe_single()
-            .execute()
-        )
-        parent_data = parent_row.data if parent_row and parent_row.data else None
-        root_run_id = (parent_data or {}).get("root_run_id") or str(parent_run_id)
+        # parent is itself a root). agent_runs.id/parent_run_id/root_run_id are
+        # BIGINT (mig 232) → bind int.
+        async with read_scope() as session:
+            parent = (
+                await session.execute(
+                    select(AgentRuns.root_run_id)
+                    .where(AgentRuns.id == int(parent_run_id))
+                    .limit(1)
+                )
+            ).first()
+        root_run_id = (parent[0] if parent is not None else None) or int(parent_run_id)
 
-        await client.table("agent_runs").update(
-            {
-                "parent_run_id": str(parent_run_id),
-                "root_run_id": root_run_id,
-                "agent_depth": agent_depth,
-            }
-        ).eq("id", str(run_id)).execute()
+        async with write_scope() as session:
+            await session.execute(
+                sa_update(AgentRuns)
+                .where(AgentRuns.id == int(run_id))
+                .values(
+                    parent_run_id=int(parent_run_id),
+                    root_run_id=int(root_run_id),
+                    agent_depth=agent_depth,
+                )
+            )
     except Exception as err:
         logger.warning(
             f"[agent-worker] failed to attach run {run_id} to parent "

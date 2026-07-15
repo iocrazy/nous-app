@@ -6,14 +6,18 @@ canvas). It now calls ``verify_project_read_access`` so read semantics
 match the rest of the projects surface (owner ∨ team member ∨ any
 project_members role), while write still requires manager/editor.
 
-Runs against a fake Supabase admin client (same style as
+Runs against a fake ORM read session (same style as
 ``test_scope_guards.py``) plus a stubbed ``CanvasService.get_project_id`` —
 no DB, no HTTP layer.
+
+Note: the project id is numeric here — ``_check_project_access`` coerces
+``int(str(project_id))`` for the BIGINT ``projects.id`` column.
 """
 
 from __future__ import annotations
 
 import sys
+from contextlib import asynccontextmanager
 
 import pytest
 from fastapi import HTTPException
@@ -32,43 +36,43 @@ if canvases_router is None:  # pragma: no cover - import guard for direct runs
 
 pytestmark = pytest.mark.unit
 
-FAKE_PROJECT_ID = "p1"
+FAKE_PROJECT_ID = "1"
 
 
-class _FakeQuery:
-    def __init__(self, data: list) -> None:
-        self._data = data
+class _Result:
+    def __init__(self, rows: list) -> None:
+        self._rows = rows
 
-    def __getattr__(self, name: str):
-        def _capture(*args, **kwargs) -> "_FakeQuery":
-            return self
-
-        return _capture
-
-    async def execute(self):
-        class _R:
-            data = self._data
-
-        return _R()
+    def first(self):
+        return self._rows[0] if self._rows else None
 
 
-class _FakeClient:
+class _FakeSession:
+    """Returns per-table canned tuple-rows keyed by table name in the SQL."""
+
+    _TABLES = ("project_members", "team_members", "projects", "teams")
+
     def __init__(self, tables: dict[str, list]) -> None:
         self._tables = tables
 
-    def table(self, name: str) -> _FakeQuery:
-        return _FakeQuery(self._tables.get(name, []))
+    async def execute(self, stmt):
+        sql = str(stmt)
+        for name in self._TABLES:
+            if name in sql:
+                return _Result(self._tables.get(name, []))
+        return _Result([])
 
 
 @pytest.fixture
 def patch_admin(monkeypatch):
     def _install(tables: dict[str, list]) -> None:
-        async def _fake_admin():
-            return _FakeClient(tables)
+        @asynccontextmanager
+        async def _fake_read_scope():
+            yield _FakeSession(tables)
 
-        monkeypatch.setattr(
-            "app.core.scope_guards.get_async_supabase_admin", _fake_admin
-        )
+        import app.db.session as db_session_mod
+
+        monkeypatch.setattr(db_session_mod, "read_scope", _fake_read_scope)
 
     return _install
 
@@ -90,8 +94,8 @@ def _auth(user_id: str = "u1") -> AuthContext:
 async def test_viewer_passes_canvas_read_gate(patch_admin):
     patch_admin(
         {
-            "projects": [{"owner_id": "owner", "team_id": None}],
-            "project_members": [{"role": "viewer"}],
+            "projects": [("owner", None)],
+            "project_members": [("viewer",)],
         }
     )
     project_id = await canvases_router._gate_canvas_read("c1", _auth("u1"))
@@ -101,8 +105,8 @@ async def test_viewer_passes_canvas_read_gate(patch_admin):
 async def test_viewer_fails_canvas_write_gate(patch_admin):
     patch_admin(
         {
-            "projects": [{"owner_id": "owner", "team_id": None}],
-            "project_members": [{"role": "viewer"}],
+            "projects": [("owner", None)],
+            "project_members": [("viewer",)],
         }
     )
     with pytest.raises(HTTPException) as ei:
@@ -113,8 +117,8 @@ async def test_viewer_fails_canvas_write_gate(patch_admin):
 async def test_editor_passes_both_gates(patch_admin):
     patch_admin(
         {
-            "projects": [{"owner_id": "owner", "team_id": None}],
-            "project_members": [{"role": "editor"}],
+            "projects": [("owner", None)],
+            "project_members": [("editor",)],
         }
     )
     await canvases_router._gate_canvas_read("c1", _auth("u1"))
@@ -124,7 +128,7 @@ async def test_editor_passes_both_gates(patch_admin):
 async def test_non_member_fails_canvas_read_gate(patch_admin):
     patch_admin(
         {
-            "projects": [{"owner_id": "owner", "team_id": None}],
+            "projects": [("owner", None)],
             "project_members": [],
         }
     )

@@ -37,36 +37,43 @@ class _FakeRpcResult:
         self.data = data
 
 
-class _FakeRpcCall:
-    def __init__(self, parent: "_FakeRpcClient", name: str, params: Dict[str, Any]):
-        self._parent = parent
-        self._name = name
-        self._params = params
+class _ScalarResult:
+    def __init__(self, value: Any) -> None:
+        self._value = value
 
-    async def execute(self) -> _FakeRpcResult:
-        self._parent.calls.append((self._name, self._params))
-        return _FakeRpcResult(self._parent.responses.get(self._name))
+    def scalar(self) -> Any:
+        return self._value
 
 
-class _FakeRpcClient:
-    """Captures ``client.rpc(name, params).execute()`` invocations."""
+class _FakeSession:
+    """Captures ``session.execute(text(...), params)`` and returns a preset
+    scalar keyed by whichever RPC function name appears in the rendered SQL."""
 
     def __init__(self, responses: Dict[str, Any] | None = None) -> None:
         self.calls: List[tuple[str, Dict[str, Any]]] = []
         self.responses: Dict[str, Any] = responses or {}
 
-    def rpc(self, name: str, params: Dict[str, Any]) -> _FakeRpcCall:
-        return _FakeRpcCall(self, name, params)
+    async def execute(self, statement: Any, params: Any = None) -> _ScalarResult:
+        sql = str(statement)
+        self.calls.append((sql, params or {}))
+        for name, resp in self.responses.items():
+            if name in sql:
+                return _ScalarResult(resp)
+        return _ScalarResult(None)
 
 
-def _service_with_client(client: _FakeRpcClient) -> SearchService:
-    svc = SearchService()
+def _service_with_session(monkeypatch, session: _FakeSession) -> SearchService:
+    from contextlib import asynccontextmanager
 
-    async def _get_client():
-        return client
+    import app.services.library.search_service as search_mod
 
-    svc._get_client = _get_client  # type: ignore[method-assign]
-    return svc
+    @asynccontextmanager
+    async def _scope():
+        yield session
+
+    # search_service imports read_scope at module top level, so patch it there.
+    monkeypatch.setattr(search_mod, "read_scope", _scope)
+    return SearchService()
 
 
 class _Auth:
@@ -78,10 +85,10 @@ class _Auth:
 # search_user_media_text
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
-async def test_search_user_media_text_calls_rpc_and_maps_rows() -> None:
+async def test_search_user_media_text_calls_rpc_and_maps_rows(monkeypatch) -> None:
     rows = [{"id": 1, "platform_id": "p1"}, {"id": 2, "platform_id": "p2"}]
-    client = _FakeRpcClient({"rpc_user_media_text_search": {"rows": rows}})
-    svc = _service_with_client(client)
+    session = _FakeSession({"rpc_user_media_text_search": {"rows": rows}})
+    svc = _service_with_session(monkeypatch, session)
 
     out = await svc.search_user_media_text(
         user_id="u-123",
@@ -95,9 +102,9 @@ async def test_search_user_media_text_calls_rpc_and_maps_rows() -> None:
     )
 
     assert out == rows
-    assert len(client.calls) == 1
-    name, params = client.calls[0]
-    assert name == "rpc_user_media_text_search"
+    assert len(session.calls) == 1
+    sql, params = session.calls[0]
+    assert "rpc_user_media_text_search" in sql
     assert params == {
         "p_user_id": "u-123",
         "p_pattern": "%foo%",
@@ -111,13 +118,15 @@ async def test_search_user_media_text_calls_rpc_and_maps_rows() -> None:
 
 
 @pytest.mark.asyncio
-async def test_search_user_media_text_empty_payload_returns_empty_list() -> None:
-    client = _FakeRpcClient({"rpc_user_media_text_search": None})
-    svc = _service_with_client(client)
+async def test_search_user_media_text_empty_payload_returns_empty_list(
+    monkeypatch,
+) -> None:
+    session = _FakeSession({"rpc_user_media_text_search": None})
+    svc = _service_with_session(monkeypatch, session)
     out = await svc.search_user_media_text(user_id="u", pattern=None, fields=[])
     assert out == []
     # match-all path passes NULL pattern + NULL tag_ids through.
-    _, params = client.calls[0]
+    _, params = session.calls[0]
     assert params["p_pattern"] is None
     assert params["p_tag_ids"] is None
 
@@ -126,23 +135,23 @@ async def test_search_user_media_text_empty_payload_returns_empty_list() -> None
 # user_owned_platform_ids
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
-async def test_user_owned_platform_ids_calls_rpc() -> None:
-    client = _FakeRpcClient({"rpc_user_owned_platform_ids": ["p1", "p3"]})
-    svc = _service_with_client(client)
+async def test_user_owned_platform_ids_calls_rpc(monkeypatch) -> None:
+    session = _FakeSession({"rpc_user_owned_platform_ids": ["p1", "p3"]})
+    svc = _service_with_session(monkeypatch, session)
     out = await svc.user_owned_platform_ids("u-9", ["p1", "p2", "p3"])
     assert out == ["p1", "p3"]
-    name, params = client.calls[0]
-    assert name == "rpc_user_owned_platform_ids"
+    sql, params = session.calls[0]
+    assert "rpc_user_owned_platform_ids" in sql
     assert params == {"p_user_id": "u-9", "p_platform_ids": ["p1", "p2", "p3"]}
 
 
 @pytest.mark.asyncio
-async def test_user_owned_platform_ids_empty_input_short_circuits() -> None:
-    client = _FakeRpcClient()
-    svc = _service_with_client(client)
+async def test_user_owned_platform_ids_empty_input_short_circuits(monkeypatch) -> None:
+    session = _FakeSession()
+    svc = _service_with_session(monkeypatch, session)
     out = await svc.user_owned_platform_ids("u-9", [])
     assert out == []
-    assert client.calls == []  # never hit the RPC
+    assert session.calls == []  # never hit the RPC
 
 
 # ---------------------------------------------------------------------------
@@ -305,30 +314,41 @@ async def test_text_search_router_empty_fields_returns_empty(monkeypatch) -> Non
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_hydrate_scopes_via_ownership_rpc(monkeypatch) -> None:
-    # parsed_media fetch returns two rows; user only owns one platform_id.
-    pm_rows = [
-        {"id": 1, "platform_id": "p1"},
-        {"id": 2, "platform_id": "p2"},
-    ]
+    # parsed_media fetch returns two ParsedMedia rows; user only owns one
+    # platform_id. The endpoint now reads via an ORM read_scope() session and
+    # maps each ORM row through _pm_card_dict, so stub that boundary.
+    from contextlib import asynccontextmanager
 
-    class _Q:
-        def select(self, *_a, **_k):
+    class _PMObj:
+        """A ParsedMedia stand-in: id/platform_id set, every other CARD
+        column resolves to None so _pm_card_dict can project the row."""
+
+        def __init__(self, **kw):
+            self.__dict__.update(kw)
+
+        def __getattr__(self, _name):
+            return None
+
+    pm_objs = [_PMObj(id=1, platform_id="p1"), _PMObj(id=2, platform_id="p2")]
+
+    class _Result:
+        def scalars(self):
             return self
 
-        def in_(self, *_a, **_k):
-            return self
+        def all(self):
+            return pm_objs
 
-        async def execute(self):
-            return _FakeRpcResult(pm_rows)
+    class _Session:
+        async def execute(self, _stmt):
+            return _Result()
 
-    class _Client:
-        def table(self, _name):
-            return _Q()
+    @asynccontextmanager
+    async def _read_scope():
+        yield _Session()
 
-    async def _fake_admin():
-        return _Client()
+    import app.db.session as db_session_mod
 
-    monkeypatch.setattr(search_router, "get_async_supabase_admin", _fake_admin)
+    monkeypatch.setattr(db_session_mod, "read_scope", _read_scope)
 
     async def _fake_owned(self, user_id, platform_ids):
         assert platform_ids == ["p1", "p2"]

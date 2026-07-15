@@ -154,6 +154,20 @@
      bg rgba(--tint,.12) / border rgba(--tint,.4) / color rgb(--tint); hover .2/.6. */
   .btn-tint-cover { background: rgba(var(--tint,99,102,241),.12); border: 1px solid rgba(var(--tint,99,102,241),.4); color: rgb(var(--tint,99,102,241)); }
   .btn-tint-cover:hover:not(:disabled) { background: rgba(var(--tint,99,102,241),.2); border-color: rgba(var(--tint,99,102,241),.6); }
+
+  /* Light-theme overrides — the base rules use a pale, dark-theme text color
+     (e.g. indigo #a5b4fc) that fails contrast on the pale tint-over-white
+     fill. Here each tint keeps its translucent fill but swaps to a saturated
+     700-level text color, clearing WCAG AA on white islands. Dark theme is
+     untouched (these selectors only match under [data-theme="light"]). */
+  [data-theme="light"] .btn-tint-indigo { color: #4338ca; }
+  [data-theme="light"] .btn-tint-amber  { color: #b45309; }
+  [data-theme="light"] .btn-tint-violet { color: #6d28d9; }
+  [data-theme="light"] .btn-tint-green  { color: #047857; }
+  [data-theme="light"] .btn-tint-red    { color: #b91c1c; }
+  /* Cover tint is driven by the runtime --tint var (unknown lightness), so
+     mix it toward ink to guarantee a readable dark text on the pale fill. */
+  [data-theme="light"] .btn-tint-cover  { color: color-mix(in srgb, rgb(var(--tint,99,102,241)) 42%, #18181b); }
 }
 
 /* ── Island app shell — island redesign v2 P1b (docs/design/island-redesign-spec.md §2).

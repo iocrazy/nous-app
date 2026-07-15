@@ -53,12 +53,15 @@ async def _safe_probe(coro):
 
 
 async def _probe_supabase() -> str:
-    from app.db import get_async_supabase_admin
+    from sqlalchemy import select
 
-    sb = await get_async_supabase_admin()
+    from app.db.session import read_scope
+    from app.models import AiAgents
+
     # Trivial table read
-    result = await sb.table("ai_agents").select("id", count="exact").limit(1).execute()
-    return f"reachable, {len(result.data or [])} row sample"
+    async with read_scope() as session:
+        rows = (await session.execute(select(AiAgents.id).limit(1))).all()
+    return f"reachable, {len(rows)} row sample"
 
 
 async def _probe_redis() -> str:

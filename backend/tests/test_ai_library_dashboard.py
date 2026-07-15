@@ -79,6 +79,49 @@ def _client_for(tables: dict[str, list]):
     return client
 
 
+def _orm_read_scope(tables: dict[str, list]):
+    """read_scope() stand-in for the dashboard's 5 ORM reads. Dispatches each
+    statement to agent_runs / task_tracking by the table name in the compiled
+    SQL and yields successive staged entries per table (served via
+    .mappings().all()) — the shared iterators mirror the old per-table chain."""
+    from contextlib import asynccontextmanager
+
+    iters = {name: iter(rows) for name, rows in tables.items()}
+
+    class _M:
+        def __init__(self, d):
+            self._d = d
+
+        def all(self):
+            return self._d
+
+        def first(self):
+            return self._d[0] if self._d else None
+
+    class _R:
+        def __init__(self, d):
+            self._d = d
+
+        def mappings(self):
+            return _M(self._d)
+
+    class _S:
+        async def execute(self, stmt):
+            sql = str(stmt).lower()
+            name = "agent_runs" if "agent_runs" in sql else "task_tracking"
+            try:
+                data = next(iters[name])
+            except (KeyError, StopIteration):
+                data = []
+            return _R(data)
+
+    @asynccontextmanager
+    async def _scope():
+        yield _S()
+
+    return _scope
+
+
 @pytest.mark.asyncio
 async def test_dashboard_404_when_slug_missing(client: AsyncClient) -> None:
     with patch(
@@ -160,7 +203,7 @@ async def test_dashboard_happy_path_buckets_runs_and_tasks(
     recent_tasks = tasks_14d[:5]
     recent_runs = runs_14d[:10]
 
-    fake_client = _client_for(
+    scope = _orm_read_scope(
         {
             "agent_runs": [
                 runs_14d,  # 14d list
@@ -176,10 +219,7 @@ async def test_dashboard_happy_path_buckets_runs_and_tasks(
 
     with (
         patch("app.api.ai_library_router.get_agent_repository") as mock_repo,
-        patch(
-            "app.api.ai_library_router.get_async_supabase_admin",
-            AsyncMock(return_value=fake_client),
-        ),
+        patch("app.db.session.read_scope", scope),
     ):
         mock_repo.return_value.get_by_slug = AsyncMock(
             return_value={**agent_row, "id": agent_id}
@@ -245,7 +285,7 @@ async def test_dashboard_coerces_bigint_run_ids_to_str(client: AsyncClient) -> N
         "completion_tokens": 1,
         "cost_cents": "0.1",
     }
-    fake_client = _client_for(
+    scope = _orm_read_scope(
         {
             "agent_runs": [[run_row], [run_row], [run_row]],  # 14d / latest / recent
             "task_tracking": [[], []],
@@ -254,10 +294,7 @@ async def test_dashboard_coerces_bigint_run_ids_to_str(client: AsyncClient) -> N
 
     with (
         patch("app.api.ai_library_router.get_agent_repository") as mock_repo,
-        patch(
-            "app.api.ai_library_router.get_async_supabase_admin",
-            AsyncMock(return_value=fake_client),
-        ),
+        patch("app.db.session.read_scope", scope),
     ):
         mock_repo.return_value.get_by_slug = AsyncMock(
             return_value={"id": agent_id, "slug": "ceo", "name": "CEO"}
@@ -282,7 +319,7 @@ async def test_dashboard_empty_agent_returns_zero_buckets(
     valid shape (14 zero entries, empty maps) so the chart renders
     flat instead of crashing on undefined."""
     agent_id = str(uuid4())
-    fake_client = _client_for(
+    scope = _orm_read_scope(
         {
             "agent_runs": [[], [], []],  # 14d, latest, recent
             "task_tracking": [[], []],  # A4: was `agent_tasks` before mig 200
@@ -291,10 +328,7 @@ async def test_dashboard_empty_agent_returns_zero_buckets(
 
     with (
         patch("app.api.ai_library_router.get_agent_repository") as mock_repo,
-        patch(
-            "app.api.ai_library_router.get_async_supabase_admin",
-            AsyncMock(return_value=fake_client),
-        ),
+        patch("app.db.session.read_scope", scope),
     ):
         mock_repo.return_value.get_by_slug = AsyncMock(
             return_value={

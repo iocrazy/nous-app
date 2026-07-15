@@ -6,42 +6,78 @@
   * ``extract_audio_workflow`` — success / failure / route-C compliance
     (failures raise instead of returning a failed dict)
 
-All tests mock the supabase client + the extraction function. No DB,
-no DBOS runtime.
+``create_flow``/``create`` now write through the ORM session boundary
+(``app.db.session.read_scope``/``write_scope``, imported locally inside
+each method) instead of a supabase-py ``.table().insert().execute()``
+chain, so the fake session below stands in for the SQLAlchemy
+``AsyncSession`` and records the compiled INSERT payload for assertions.
+No DB, no DBOS runtime.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.sql.dml import Insert
 
 from app.services.infra.unified_task_manager import UnifiedTaskManager
 
 # ─── helpers ──────────────────────────────────────────────────────
 
 
-def _mock_table_insert(returned_row: dict[str, Any]) -> tuple[MagicMock, MagicMock]:
-    """Build a chained-mock chain that mirrors:
-        client.table(NAME).insert(ROW).execute()
-    Returns (client_mock, captured_insert_mock) so the caller can
-    inspect what insert(...) was called with.
-    """
-    captured_insert = MagicMock()
-    execute_mock = AsyncMock()
-    execute_mock.return_value = MagicMock(data=[returned_row])
+class _Result:
+    def __init__(self, value):
+        self._v = value
 
-    insert_mock = MagicMock()
-    insert_mock.execute = execute_mock
-    captured_insert.return_value = insert_mock
+    def scalar(self):
+        return self._v
 
-    table_mock = MagicMock()
-    table_mock.insert = captured_insert
+    def mappings(self):
+        return self
 
-    client_mock = MagicMock()
-    client_mock.table = MagicMock(return_value=table_mock)
-    return client_mock, captured_insert
+    def scalars(self):
+        return self
+
+    def first(self):
+        return self._v
+
+    def all(self):
+        return self._v
+
+
+class _Session:
+    """Records every executed INSERT statement (table name + compiled row
+    payload) and returns one queued result per execute() call, in order.
+    A queued exception is raised instead of returned, so failure paths
+    (e.g. ``create_flow``'s best-effort ``except Exception``) can be
+    exercised the same way as the happy path."""
+
+    def __init__(self, results):
+        self._results = list(results)
+        self.inserts: list[tuple[str, dict]] = []
+
+    async def execute(self, stmt, params=None):
+        if isinstance(stmt, Insert):
+            self.inserts.append(
+                (stmt.table.name, stmt.compile(dialect=postgresql.dialect()).params)
+            )
+        result = self._results.pop(0) if self._results else None
+        if isinstance(result, BaseException):
+            raise result
+        return _Result(result)
+
+
+def _patch_scopes(results):
+    session = _Session(results)
+
+    @asynccontextmanager
+    async def _scope():
+        yield session
+
+    return session, _scope
 
 
 # ─── UnifiedTaskManager.create_flow ───────────────────────────────
@@ -49,56 +85,64 @@ def _mock_table_insert(returned_row: dict[str, Any]) -> tuple[MagicMock, MagicMo
 
 class TestCreateFlow:
     @pytest.mark.asyncio
-    async def test_inserts_row_and_returns_id(self) -> None:
+    async def test_inserts_row_and_returns_id(self, monkeypatch) -> None:
         mgr = UnifiedTaskManager()
         flow_id_returned = "flow-uuid-123"
-        client, captured_insert = _mock_table_insert({"id": flow_id_returned})
+        session, scope = _patch_scopes([flow_id_returned])
+        import app.db.session as dbs
 
-        with patch.object(mgr, "_get_client", AsyncMock(return_value=client)):
-            result = await mgr.create_flow(
-                user_id="user-1",
-                name="Process https://example.com/abc",
-            )
+        monkeypatch.setattr(dbs, "write_scope", scope)
+
+        result = await mgr.create_flow(
+            user_id="user-1",
+            name="Process https://example.com/abc",
+        )
 
         assert result == flow_id_returned
-        client.table.assert_called_once_with("task_flows")
-        row = captured_insert.call_args[0][0]
+        assert len(session.inserts) == 1
+        table_name, row = session.inserts[0]
+        assert table_name == "task_flows"
         assert row["user_id"] == "user-1"
         assert row["name"] == "Process https://example.com/abc"
         assert "metadata" not in row  # not passed → not present
 
     @pytest.mark.asyncio
-    async def test_truncates_long_name(self) -> None:
+    async def test_truncates_long_name(self, monkeypatch) -> None:
         mgr = UnifiedTaskManager()
-        client, captured_insert = _mock_table_insert({"id": "f"})
+        session, scope = _patch_scopes(["f"])
+        import app.db.session as dbs
+
+        monkeypatch.setattr(dbs, "write_scope", scope)
 
         long_name = "x" * 300
-        with patch.object(mgr, "_get_client", AsyncMock(return_value=client)):
-            await mgr.create_flow(user_id="u", name=long_name)
+        await mgr.create_flow(user_id="u", name=long_name)
 
-        row = captured_insert.call_args[0][0]
+        _, row = session.inserts[0]
         assert len(row["name"]) == 200
 
     @pytest.mark.asyncio
-    async def test_includes_metadata_when_provided(self) -> None:
+    async def test_includes_metadata_when_provided(self, monkeypatch) -> None:
         mgr = UnifiedTaskManager()
-        client, captured_insert = _mock_table_insert({"id": "f"})
+        session, scope = _patch_scopes(["f"])
+        import app.db.session as dbs
 
-        with patch.object(mgr, "_get_client", AsyncMock(return_value=client)):
-            await mgr.create_flow(user_id="u", name="n", metadata={"source": "parse"})
+        monkeypatch.setattr(dbs, "write_scope", scope)
 
-        row = captured_insert.call_args[0][0]
+        await mgr.create_flow(user_id="u", name="n", metadata={"source": "parse"})
+
+        _, row = session.inserts[0]
         assert row["metadata"] == {"source": "parse"}
 
     @pytest.mark.asyncio
-    async def test_returns_none_on_failure(self) -> None:
+    async def test_returns_none_on_failure(self, monkeypatch) -> None:
         """Best-effort contract: caller can still dispatch un-grouped."""
         mgr = UnifiedTaskManager()
-        bad_client = MagicMock()
-        bad_client.table.side_effect = RuntimeError("supabase dead")
+        session, scope = _patch_scopes([RuntimeError("supabase dead")])
+        import app.db.session as dbs
 
-        with patch.object(mgr, "_get_client", AsyncMock(return_value=bad_client)):
-            result = await mgr.create_flow(user_id="u", name="n")
+        monkeypatch.setattr(dbs, "write_scope", scope)
+
+        result = await mgr.create_flow(user_id="u", name="n")
 
         assert result is None
 
@@ -108,37 +152,42 @@ class TestCreateFlow:
 
 class TestCreateWithFlowId:
     @pytest.mark.asyncio
-    async def test_flow_id_written_when_provided(self) -> None:
+    async def test_flow_id_written_when_provided(self, monkeypatch) -> None:
         mgr = UnifiedTaskManager()
-        client, captured_insert = _mock_table_insert({"dbos_workflow_id": "wf-1"})
+        session, scope = _patch_scopes(["wf-1"])
+        import app.db.session as dbs
 
-        with patch.object(mgr, "_get_client", AsyncMock(return_value=client)):
-            await mgr.create(
-                user_id="u",
-                task_type="download",
-                title="t",
-                dbos_workflow_id="wf-1",
-                flow_id="flow-abc",
-            )
+        monkeypatch.setattr(dbs, "write_scope", scope)
 
-        client.table.assert_called_once_with("task_tracking")
-        row = captured_insert.call_args[0][0]
+        await mgr.create(
+            user_id="u",
+            task_type="download",
+            title="t",
+            dbos_workflow_id="wf-1",
+            flow_id="flow-abc",
+        )
+
+        assert len(session.inserts) == 1
+        table_name, row = session.inserts[0]
+        assert table_name == "task_tracking"
         assert row["flow_id"] == "flow-abc"
 
     @pytest.mark.asyncio
-    async def test_flow_id_omitted_when_none(self) -> None:
+    async def test_flow_id_omitted_when_none(self, monkeypatch) -> None:
         mgr = UnifiedTaskManager()
-        client, captured_insert = _mock_table_insert({"dbos_workflow_id": "wf-1"})
+        session, scope = _patch_scopes(["wf-1"])
+        import app.db.session as dbs
 
-        with patch.object(mgr, "_get_client", AsyncMock(return_value=client)):
-            await mgr.create(
-                user_id="u",
-                task_type="download",
-                title="t",
-                dbos_workflow_id="wf-1",
-            )
+        monkeypatch.setattr(dbs, "write_scope", scope)
 
-        row = captured_insert.call_args[0][0]
+        await mgr.create(
+            user_id="u",
+            task_type="download",
+            title="t",
+            dbos_workflow_id="wf-1",
+        )
+
+        _, row = session.inserts[0]
         assert "flow_id" not in row
 
 

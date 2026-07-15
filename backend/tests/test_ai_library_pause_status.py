@@ -67,15 +67,56 @@ def _patch_repos(agent: Dict[str, Any] | None):
     return patch("app.api.ai_library_router._repos", return_value=(repo, None)), repo
 
 
-def _running_count_client(count: int):
-    """Fake supabase admin whose agent_runs count query returns `count`."""
-    chain = MagicMock()
-    chain.select.return_value = chain
-    chain.eq.return_value = chain
-    chain.execute = AsyncMock(return_value=MagicMock(count=count))
-    sb = MagicMock()
-    sb.table.return_value = chain
-    return sb
+def _read_scope_scalar(value):
+    """read_scope() stand-in whose session.execute().scalar() returns
+    ``value`` — the shape get_agent_status' ``select(func.count())`` reads."""
+    from contextlib import asynccontextmanager
+
+    class _R:
+        def scalar(self):
+            return value
+
+    class _S:
+        async def execute(self, _stmt):
+            return _R()
+
+    @asynccontextmanager
+    async def _scope():
+        yield _S()
+
+    return _scope
+
+
+def _read_scope_tables(runs: list, agents: list):
+    """read_scope() stand-in for list_live_runs' two ORM reads — dispatches
+    each statement to agent_runs / ai_agents rows by the table name in the
+    compiled SQL, served via .mappings().all()."""
+    from contextlib import asynccontextmanager
+
+    class _M:
+        def __init__(self, d):
+            self._d = d
+
+        def all(self):
+            return self._d
+
+    class _R:
+        def __init__(self, d):
+            self._d = d
+
+        def mappings(self):
+            return _M(self._d)
+
+    class _S:
+        async def execute(self, stmt):
+            sql = str(stmt).lower()
+            return _R(runs if "agent_runs" in sql else agents)
+
+    @asynccontextmanager
+    async def _scope():
+        yield _S()
+
+    return _scope
 
 
 # ─── pause ──────────────────────────────────────────────────────────────────
@@ -140,10 +181,7 @@ def test_status_running_when_live_runs_exist(client: TestClient) -> None:
     repos_patch, _ = _patch_repos(_agent_row())
     with (
         repos_patch,
-        patch(
-            "app.api.ai_library_router.get_async_supabase_admin",
-            AsyncMock(return_value=_running_count_client(2)),
-        ),
+        patch("app.db.session.read_scope", _read_scope_scalar(2)),
     ):
         resp = client.get("/api/v1/ai-library/agents/my-agent/status")
     assert resp.status_code == 200
@@ -156,10 +194,7 @@ def test_status_idle_when_no_live_runs(client: TestClient) -> None:
     repos_patch, _ = _patch_repos(_agent_row())
     with (
         repos_patch,
-        patch(
-            "app.api.ai_library_router.get_async_supabase_admin",
-            AsyncMock(return_value=_running_count_client(0)),
-        ),
+        patch("app.db.session.read_scope", _read_scope_scalar(0)),
     ):
         resp = client.get("/api/v1/ai-library/agents/my-agent/status")
     assert resp.status_code == 200
@@ -209,10 +244,7 @@ def test_live_runs_enriched_with_agent_identity(client: TestClient) -> None:
     agents = [
         {"id": agent_id, "slug": "test-analyze", "name": "Test Analyze", "icon": "bot"}
     ]
-    with patch(
-        "app.api.ai_library_router.get_async_supabase_admin",
-        AsyncMock(return_value=_live_runs_client(runs, agents)),
-    ):
+    with patch("app.db.session.read_scope", _read_scope_tables(runs, agents)):
         resp = client.get("/api/v1/ai-library/runs/live")
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -225,10 +257,7 @@ def test_live_runs_enriched_with_agent_identity(client: TestClient) -> None:
 
 
 def test_live_runs_empty(client: TestClient) -> None:
-    with patch(
-        "app.api.ai_library_router.get_async_supabase_admin",
-        AsyncMock(return_value=_live_runs_client([], [])),
-    ):
+    with patch("app.db.session.read_scope", _read_scope_tables([], [])):
         resp = client.get("/api/v1/ai-library/runs/live")
     assert resp.status_code == 200
     assert resp.json() == {"items": [], "count": 0}

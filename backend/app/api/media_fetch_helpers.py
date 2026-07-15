@@ -69,36 +69,38 @@ class BatchFetchRequest(BaseModel):
 
 async def resolve_team_id(user_id: str, request: Request) -> Optional[str]:
     """Resolve team_id from X-Team-Id header, falling back to personal team."""
-    from app.db.supabase_client import get_async_supabase_admin as _get_admin
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import TeamMembers, Teams
 
     team_id = request.headers.get("X-Team-Id")
     if team_id:
         logger.debug(f"[_resolve_team_id] Using X-Team-Id header: {team_id}")
         return team_id
 
-    admin = await _get_admin()
+    async with read_scope() as session:
+        personal = (
+            await session.execute(
+                select(Teams.id)
+                .where(Teams.owner_id == user_id)
+                .where(Teams.kind == "personal")
+                .limit(1)
+            )
+        ).first()
+        if personal is not None:
+            tid = str(personal[0])
+            logger.debug(f"[_resolve_team_id] Fallback to personal team: {tid}")
+            return tid
 
-    personal = (
-        await admin.table("teams")
-        .select("id")
-        .eq("owner_id", user_id)
-        .eq("kind", "personal")
-        .limit(1)
-        .execute()
-    )
-    if personal.data:
-        tid = str(personal.data[0]["id"])
-        logger.debug(f"[_resolve_team_id] Fallback to personal team: {tid}")
-        return tid
-
-    tm = (
-        await admin.table("team_members")
-        .select("team_id")
-        .eq("user_id", user_id)
-        .limit(1)
-        .execute()
-    )
-    tid = str(tm.data[0]["team_id"]) if tm.data else None
+        tm = (
+            await session.execute(
+                select(TeamMembers.team_id)
+                .where(TeamMembers.user_id == user_id)
+                .limit(1)
+            )
+        ).first()
+    tid = str(tm[0]) if tm is not None else None
     logger.debug(f"[_resolve_team_id] Fallback to first membership: {tid}")
     return tid
 
