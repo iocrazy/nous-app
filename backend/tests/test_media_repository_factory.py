@@ -48,19 +48,20 @@ def test_repository_inherits_asyncpg_base():
     assert issubclass(MediaRepository, AsyncpgRepository)
 
 
-def test_conscious_keep_legacy_methods_are_present():
-    """The owner-map methods NOT ported to the ORM (they run the legacy
-    supabase-py REST bodies) must still exist on the collapsed class so every
-    call site keeps working."""
+def test_owner_map_methods_are_present_and_fully_orm():
+    """The owner-map methods (ported to the ORM in the warm-up pass — the
+    last supabase-py stragglers in this repo) must still exist on the
+    collapsed class so every call site keeps working, and the supabase-py
+    client helper must be gone (this repo is 100% ORM)."""
     from app.repositories.media_repository import MediaRepository
 
     for name in (
         "get_media_owner_map",
         "get_media_resource_owner_map",
-        # uses the async supabase admin client
-        "_get_client",
     ):
         assert callable(getattr(MediaRepository, name)), f"missing {name}"
+
+    assert not hasattr(MediaRepository, "_get_client")
 
 
 def test_bigint_helper_coerces_str_input():
