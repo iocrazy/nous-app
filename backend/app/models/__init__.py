@@ -59,6 +59,9 @@ from app.models.billing import (  # noqa: F401
     PointPricing,
     PointTransactions,
 )
+from app.models.chat import (  # noqa: F401
+    ConversationMemory,
+)
 from app.models.generated_media import (  # noqa: F401
     GeneratedMedia,
 )
@@ -111,6 +114,7 @@ from app.models.ops import (  # noqa: F401
 from app.models.project_library import (  # noqa: F401
     ProjectCharacters,
     ProjectLibEntities,
+    ProjectStyleProfile,
 )
 from app.models.reviews import (  # noqa: F401
     IssueMessages,
@@ -310,9 +314,12 @@ __all__ = [
     "InspirationApiTokens",
     "InspirationAttachments",
     "InspirationNotes",
+    # chat / conversations
+    "ConversationMemory",
     # project authored library
     "ProjectCharacters",
     "ProjectLibEntities",
+    "ProjectStyleProfile",
     # topics / signal feed
     "Hotspots",
     "HotspotUserState",

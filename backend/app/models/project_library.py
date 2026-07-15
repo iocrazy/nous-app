@@ -1,8 +1,10 @@
 """Project authored-library ORM models (character canvas epic).
 
-  * ``ProjectCharacters``  — project_characters   (mig 357)
-  * ``ProjectLibEntities`` — project_lib_entities  (mig 358; locations + props
-    in one table, keyed by ``entity_type``)
+  * ``ProjectCharacters``     — project_characters    (mig 357)
+  * ``ProjectLibEntities``    — project_lib_entities  (mig 358; locations +
+    props in one table, keyed by ``entity_type``)
+  * ``ProjectStyleProfile``   — project_style_profile (Canvas+AI M8; one row
+    per project)
 
 Snowflake BIGINT ids ride as strings at the API boundary (bigIntSafeFetch);
 the repos ``str()`` ``id``/``project_id`` on the way out. No scope mixin:
@@ -13,6 +15,7 @@ method (service-role/RLS-bypass model), so the choke point stays inert.
 from __future__ import annotations
 
 import datetime
+import uuid
 
 from sqlalchemy import (
     BigInteger,
@@ -24,12 +27,47 @@ from sqlalchemy import (
     PrimaryKeyConstraint,
     String,
     Text,
+    Uuid,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.orm_base import Base
+
+
+class ProjectStyleProfile(Base):
+    """Per-project style profile (1 row / project). PK = project_id."""
+
+    __tablename__ = "project_style_profile"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["project_id"],
+            ["public.projects.id"],
+            ondelete="CASCADE",
+            name="project_style_profile_project_id_fkey",
+        ),
+        PrimaryKeyConstraint("project_id", name="project_style_profile_pkey"),
+        {"schema": "public"},
+    )
+
+    project_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    style_md: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''::text")
+    )
+    visual_style: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    reference_links: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
 
 
 class ProjectCharacters(Base):

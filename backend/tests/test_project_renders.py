@@ -3,13 +3,17 @@
 GET /projects/{project_id}/renders — project-wide shot renders (images +
 videos), derived by joining generated_media.node_id (= str(shot_id) for
 shot-origin rows) back through script_shots -> script_scenes ->
-script_projects. Covers GeneratedMediaRepository.list_for_project: SQL
+script_projects. Covers GeneratedMediaRepository.list_for_project: statement
 shape (join chain, kinds filter, episode filter present/absent), cursor
-encode/decode round-trip, and bigint-id stringification — all via a
-monkeypatched db_engine.fetch_all (no live DB).
+encode/decode round-trip, and bigint-id stringification — all via a stubbed
+read_scope() session (the repo runs on the ORM session scopes now; the
+SQLAlchemy statement is built for real).
 """
 
 from __future__ import annotations
+
+import datetime
+from contextlib import asynccontextmanager
 
 import pytest
 
@@ -51,116 +55,112 @@ def _row(gen_id=1, created_at="2026-07-01T00:00:00+00:00", **overrides):
     return base
 
 
+class _Result:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def mappings(self):
+        return self
+
+    def all(self):
+        return self._rows
+
+
+class _Session:
+    def __init__(self, rows=None):
+        self.rows = rows if rows is not None else []
+        self.statements: list = []
+
+    async def execute(self, stmt, params=None):
+        self.statements.append(stmt)
+        return _Result(list(self.rows))
+
+
+def _patch(monkeypatch, session):
+    from app.repositories import generated_media_repository as mod
+
+    @asynccontextmanager
+    async def _scope():
+        yield session
+
+    monkeypatch.setattr(mod, "read_scope", _scope)
+    return session
+
+
+def _sql_and_params(session):
+    stmt = session.statements[0]
+    return str(stmt), stmt.compile().params
+
+
 # --------------------------------------------------------------------------- #
-# list_for_project — SQL shape + params
+# list_for_project — statement shape + binds
 # --------------------------------------------------------------------------- #
 
 
 @pytest.mark.asyncio
 async def test_passes_project_id_and_shot_kinds(monkeypatch):
-    import app.repositories.generated_media_repository as mod
-
-    captured: dict = {}
-
-    async def fake_fetch_all(sql, params):
-        captured["sql"] = sql
-        captured["params"] = params
-        return []
-
-    monkeypatch.setattr(mod.db_engine, "fetch_all", fake_fetch_all)
+    session = _patch(monkeypatch, _Session())
 
     await GeneratedMediaRepository().list_for_project("42")
 
-    assert captured["params"]["project_id"] == 42
-    assert "episode_id" not in captured["params"]
-    assert "script_projects" in captured["sql"]
-    assert "script_scenes" in captured["sql"]
-    assert "script_shots" in captured["sql"]
-    assert "sp.project_id = :project_id" in captured["sql"]
-    assert "sp.status != 'deleted'" in captured["sql"]
-    assert "'shot_generate'" in captured["sql"]
-    assert "'shot_video'" in captured["sql"]
-    assert "gm.node_id = CAST(ss.id AS TEXT)" in captured["sql"]
+    sql, params = _sql_and_params(session)
+    assert 42 in params.values()
+    assert "script_projects" in sql
+    assert "script_scenes" in sql
+    assert "script_shots" in sql
+    assert "status !=" in sql  # sp.status != 'deleted'
+    # the join bridges node_id (text) to shot id via a CAST
+    assert "CAST(public.script_shots.id AS TEXT)" in sql
+    # shot origin kinds travel as an IN bind
+    kind_lists = [v for v in params.values() if isinstance(v, (list, tuple))]
+    assert any(set(v) == {"shot_generate", "shot_video"} for v in kind_lists)
 
 
 @pytest.mark.asyncio
 async def test_episode_filter_present_when_given(monkeypatch):
-    import app.repositories.generated_media_repository as mod
-
-    captured: dict = {}
-
-    async def fake_fetch_all(sql, params):
-        captured["sql"] = sql
-        captured["params"] = params
-        return []
-
-    monkeypatch.setattr(mod.db_engine, "fetch_all", fake_fetch_all)
+    session = _patch(monkeypatch, _Session())
 
     await GeneratedMediaRepository().list_for_project("42", episode_id="7")
 
-    assert captured["params"]["episode_id"] == 7
-    assert "sp.episode_id = :episode_id" in captured["sql"]
+    sql, params = _sql_and_params(session)
+    assert "episode_id" in sql
+    assert 7 in params.values()
 
 
 @pytest.mark.asyncio
 async def test_episode_filter_absent_by_default(monkeypatch):
-    import app.repositories.generated_media_repository as mod
-
-    captured: dict = {}
-
-    async def fake_fetch_all(sql, params):
-        captured["sql"] = sql
-        captured["params"] = params
-        return []
-
-    monkeypatch.setattr(mod.db_engine, "fetch_all", fake_fetch_all)
+    session = _patch(monkeypatch, _Session())
 
     await GeneratedMediaRepository().list_for_project("42")
 
-    assert "episode_id" not in captured["params"]
-    assert "sp.episode_id = :episode_id" not in captured["sql"]
+    sql, _ = _sql_and_params(session)
+    assert "episode_id" not in sql
 
 
 @pytest.mark.asyncio
 async def test_cursor_decoded_and_added_to_where(monkeypatch):
-    import app.repositories.generated_media_repository as mod
-
-    captured: dict = {}
+    session = _patch(monkeypatch, _Session())
     cursor = _encode_cursor("2026-06-01T00:00:00+00:00", 555)
-
-    async def fake_fetch_all(sql, params):
-        captured["sql"] = sql
-        captured["params"] = params
-        return []
-
-    monkeypatch.setattr(mod.db_engine, "fetch_all", fake_fetch_all)
 
     await GeneratedMediaRepository().list_for_project("42", cursor=cursor)
 
-    assert captured["params"]["c_ts"] == "2026-06-01T00:00:00+00:00"
-    assert captured["params"]["c_id"] == 555
-    assert (
-        "(gm.created_at, gm.id) < (CAST(:c_ts AS timestamptz), :c_id)"
-        in captured["sql"]
-    )
+    sql, params = _sql_and_params(session)
+    # keyset row-value comparison on (created_at, id)
+    assert "(public.generated_media.created_at, public.generated_media.id) <" in sql
+    assert 555 in params.values()
+    # cursor ts bound as a real datetime (asyncpg-strict), not a string
+    expected_ts = datetime.datetime.fromisoformat("2026-06-01T00:00:00+00:00")
+    assert expected_ts in params.values()
 
 
 @pytest.mark.asyncio
 async def test_invalid_cursor_ignored(monkeypatch):
-    import app.repositories.generated_media_repository as mod
-
-    captured: dict = {}
-
-    async def fake_fetch_all(sql, params):
-        captured["params"] = params
-        return []
-
-    monkeypatch.setattr(mod.db_engine, "fetch_all", fake_fetch_all)
+    session = _patch(monkeypatch, _Session())
 
     await GeneratedMediaRepository().list_for_project("42", cursor="not-valid-base64!!")
 
-    assert "c_ts" not in captured["params"]
-    assert "c_id" not in captured["params"]
+    sql, _ = _sql_and_params(session)
+    assert ".created_at, public.generated_media.id) <" not in sql
 
 
 # --------------------------------------------------------------------------- #
@@ -170,21 +170,16 @@ async def test_invalid_cursor_ignored(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_limit_plus_one_peek_produces_next_cursor(monkeypatch):
-    import app.repositories.generated_media_repository as mod
-
     rows = [
         _row(gen_id=i, created_at=f"2026-07-01T00:00:0{i}+00:00")
         for i in range(3, 0, -1)
     ]
-
-    async def fake_fetch_all(sql, params):
-        assert params["limit"] == 3  # limit(2) + 1 peek row
-        return rows
-
-    monkeypatch.setattr(mod.db_engine, "fetch_all", fake_fetch_all)
+    session = _patch(monkeypatch, _Session(rows))
 
     out = await GeneratedMediaRepository().list_for_project("42", limit=2)
 
+    _, params = _sql_and_params(session)
+    assert 3 in params.values()  # limit(2) + 1 peek row
     assert len(out["items"]) == 2
     assert out["next_cursor"] is not None
     decoded = _decode_cursor(out["next_cursor"])
@@ -193,38 +188,34 @@ async def test_limit_plus_one_peek_produces_next_cursor(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_no_next_cursor_when_under_limit(monkeypatch):
-    import app.repositories.generated_media_repository as mod
-
-    async def fake_fetch_all(sql, params):
-        return [_row(gen_id=1)]
-
-    monkeypatch.setattr(mod.db_engine, "fetch_all", fake_fetch_all)
+    session = _patch(monkeypatch, _Session([_row(gen_id=1)]))
 
     out = await GeneratedMediaRepository().list_for_project("42", limit=50)
 
+    assert session.statements  # query ran
     assert len(out["items"]) == 1
     assert out["next_cursor"] is None
 
 
 @pytest.mark.asyncio
 async def test_bigint_and_uuid_columns_stringified(monkeypatch):
-    import app.repositories.generated_media_repository as mod
-
-    async def fake_fetch_all(sql, params):
-        return [
-            _row(
-                gen_id=9007199254740993,  # > 2^53, would lose precision as a JS number
-                scope_id=123,
-                canvas_id=456,
-                parent_resource_id=789,
-                promoted_resource_id=101112,
-                conversation_id=131415,
-                creator_id="22222222-2222-2222-2222-222222222222",
-                agent_id="33333333-3333-3333-3333-333333333333",
-            )
-        ]
-
-    monkeypatch.setattr(mod.db_engine, "fetch_all", fake_fetch_all)
+    _patch(
+        monkeypatch,
+        _Session(
+            [
+                _row(
+                    gen_id=9007199254740993,  # > 2^53 — JS precision trap
+                    scope_id=123,
+                    canvas_id=456,
+                    parent_resource_id=789,
+                    promoted_resource_id=101112,
+                    conversation_id=131415,
+                    creator_id="22222222-2222-2222-2222-222222222222",
+                    agent_id="33333333-3333-3333-3333-333333333333",
+                )
+            ]
+        ),
+    )
 
     out = await GeneratedMediaRepository().list_for_project("42")
     item = out["items"][0]
@@ -242,12 +233,7 @@ async def test_bigint_and_uuid_columns_stringified(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_empty_result_when_none_returned(monkeypatch):
-    import app.repositories.generated_media_repository as mod
-
-    async def fake_fetch_all(sql, params):
-        return None
-
-    monkeypatch.setattr(mod.db_engine, "fetch_all", fake_fetch_all)
+    _patch(monkeypatch, _Session([]))
 
     out = await GeneratedMediaRepository().list_for_project("42")
     assert out == {"items": [], "next_cursor": None}
@@ -255,12 +241,9 @@ async def test_empty_result_when_none_returned(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_limit_clamped_to_max_100(monkeypatch):
-    import app.repositories.generated_media_repository as mod
-
-    async def fake_fetch_all(sql, params):
-        assert params["limit"] == 101  # clamp(500) -> 100, +1 peek
-        return []
-
-    monkeypatch.setattr(mod.db_engine, "fetch_all", fake_fetch_all)
+    session = _patch(monkeypatch, _Session())
 
     await GeneratedMediaRepository().list_for_project("42", limit=500)
+
+    _, params = _sql_and_params(session)
+    assert 101 in params.values()  # clamp(500) -> 100, +1 peek

@@ -1,10 +1,9 @@
 """Unit + integration tests for ConversationMemoryRepository (Phase 1.5, Task 3).
 
-Unit tests (default, no DB): capture SQL/params via a small fake-engine
-fixture that patches the module-level ``app.db.engine.fetch_one`` /
-``app.db.engine.execute`` helpers — the same transport
-``conversation_repository`` uses for single-statement reads/writes (see
-``get_conversation`` / ``mark_read``).
+Unit tests (default, no DB): stub only the read_scope/write_scope session
+boundary and capture the real SQLAlchemy statement — the repo converged from
+raw db_engine SQL to the ORM-model style, so the assertions compile the
+statement (postgresql dialect) and check the same shapes.
 
 Integration test (skippable): requires ``INTEGRATION_DATABASE_URL`` env var,
 mirroring the ``conv_for_smoke`` pattern in ``test_conversation_repository.py``.
@@ -16,58 +15,57 @@ ascending, non-deleted slice.
 from __future__ import annotations
 
 import os
-from typing import Any
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
-# ── Fake engine fixture (captures the last fetch_one/execute call) ────────────
+# ── Fake session fixture (captures every executed statement) ─────────────────
 
 
-class _Captured:
-    """Records the SQL + params of the most recent db_engine call."""
+class _EmptyResult:
+    def mappings(self):
+        return self
 
+    def first(self):
+        return None
+
+
+class _FakeSession:
     def __init__(self) -> None:
-        self._sql: str | None = None
-        self._params: dict[str, Any] = {}
+        self.statements: list = []
 
-    def record(self, sql: str, params: dict[str, Any] | None) -> None:
-        self._sql = sql
-        self._params = params or {}
+    async def execute(self, stmt, params=None):
+        self.statements.append(stmt)
+        return _EmptyResult()
 
-    def last_sql(self) -> str:
-        assert self._sql is not None, "no db_engine call was captured"
-        return self._sql
 
-    def last_params(self) -> dict[str, Any]:
-        return self._params
+def _pg_sql(stmt) -> str:
+    return str(stmt.compile(dialect=postgresql.dialect()))
 
 
 @pytest.fixture
-def fake_engine():
-    """Patch app.db.engine.fetch_one/execute to capture SQL instead of hitting a DB."""
-    captured = _Captured()
+def fake_session(monkeypatch):
+    """Patch the repo module's read_scope/write_scope to a capturing session."""
+    from app.repositories import conversation_memory_repository as mod
 
-    async def fake_fetch_one(sql: str, params: dict | None = None) -> None:
-        captured.record(sql, params)
-        return None
+    session = _FakeSession()
 
-    async def fake_execute(sql: str, params: dict | None = None) -> int:
-        captured.record(sql, params)
-        return 1
+    @asynccontextmanager
+    async def _scope():
+        yield session
 
-    with (
-        patch("app.db.engine.fetch_one", fake_fetch_one),
-        patch("app.db.engine.execute", fake_execute),
-    ):
-        yield captured
+    monkeypatch.setattr(mod, "read_scope", _scope)
+    monkeypatch.setattr(mod, "write_scope", _scope)
+    return session
 
 
 # ── upsert ──────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_upsert_uses_on_conflict(fake_engine) -> None:
+async def test_upsert_uses_on_conflict(fake_session) -> None:
     from app.repositories.conversation_memory_repository import (
         ConversationMemoryRepository,
     )
@@ -76,18 +74,17 @@ async def test_upsert_uses_on_conflict(fake_engine) -> None:
     await repo.upsert(
         conversation_id=1, summary_md="S", last_seq_summarized=40, model="qwen-turbo"
     )
-    sql = fake_engine.last_sql()
+    stmt = fake_session.statements[0]
+    sql = _pg_sql(stmt)
     assert "INSERT INTO public.conversation_memory" in sql
     assert "ON CONFLICT (conversation_id) DO UPDATE" in sql
-    assert (
-        "WHERE public.conversation_memory.last_seq_summarized "
-        "< EXCLUDED.last_seq_summarized" in sql
-    )
-    assert fake_engine.last_params()["last_seq"] == 40
+    # Monotonic guard: only advance when the incoming summary covers more.
+    assert "last_seq_summarized < excluded.last_seq_summarized" in sql
+    assert 40 in stmt.compile(dialect=postgresql.dialect()).params.values()
 
 
 @pytest.mark.asyncio
-async def test_upsert_coerces_conversation_id_and_seq_to_int(fake_engine) -> None:
+async def test_upsert_coerces_conversation_id_and_seq_to_int(fake_session) -> None:
     from app.repositories.conversation_memory_repository import (
         ConversationMemoryRepository,
     )
@@ -96,9 +93,10 @@ async def test_upsert_coerces_conversation_id_and_seq_to_int(fake_engine) -> Non
     await repo.upsert(
         conversation_id="1", summary_md="S", last_seq_summarized="40", model=None
     )
-    params = fake_engine.last_params()
-    assert params["cid"] == 1 and isinstance(params["cid"], int)
-    assert params["last_seq"] == 40 and isinstance(params["last_seq"], int)
+    params = fake_session.statements[0].compile(dialect=postgresql.dialect()).params
+    assert params["conversation_id"] == 1 and isinstance(params["conversation_id"], int)
+    assert params["last_seq_summarized"] == 40
+    assert isinstance(params["last_seq_summarized"], int)
     assert params["model"] is None
 
 
@@ -106,17 +104,18 @@ async def test_upsert_coerces_conversation_id_and_seq_to_int(fake_engine) -> Non
 
 
 @pytest.mark.asyncio
-async def test_load_selects_by_conversation(fake_engine) -> None:
+async def test_load_selects_by_conversation(fake_session) -> None:
     from app.repositories.conversation_memory_repository import (
         ConversationMemoryRepository,
     )
 
     repo = ConversationMemoryRepository()
     await repo.load(7)
-    sql = fake_engine.last_sql()
+    stmt = fake_session.statements[0]
+    sql = str(stmt)
     assert "FROM public.conversation_memory" in sql
-    assert "conversation_id = :cid" in sql
-    assert fake_engine.last_params()["cid"] == 7
+    assert "conversation_id =" in sql
+    assert 7 in stmt.compile().params.values()
 
 
 # ── singleton ───────────────────────────────────────────────────────────────
