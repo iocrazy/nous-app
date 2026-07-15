@@ -470,10 +470,16 @@ export const EDITOR_SHELL_STYLES = `
   position:absolute; left:-46px; top:1px; height:1.7em;
   display:flex; align-items:center; justify-content:flex-end; gap:4px;
   width:40px; opacity:0; transition:opacity 0.12s ease;
-  user-select:none; pointer-events:none;
+  user-select:none;
 }
+/* No pointer-events:none on the base: the gutter sits in negative-x space
+   outside the row's box with a small dead-zone gap, so once hover dropped there
+   a pointer-events:none gutter could never be re-hovered to bring itself back
+   (the bug). Keeping it hit-testable + revealing on its OWN hover lets it
+   self-heal, exactly like the working .mh-scene-gutter. */
 .mh-el-row:hover .mh-el-gutter,
-.mh-el-row:focus-within .mh-el-gutter{ opacity:1; pointer-events:auto; }
+.mh-el-row:focus-within .mh-el-gutter,
+.mh-el-gutter:hover{ opacity:1; }
 .mh-el-num{
   font-family:var(--mono); font-size:10.5px; font-weight:600;
   font-variant-numeric:tabular-nums; color:var(--sheet-ink-soft);
@@ -507,13 +513,20 @@ export const EDITOR_SHELL_STYLES = `
 .mh-el-tick.t-comment{ background:var(--tick-comment); }
 .mh-el-tick.t-subtitle{ background:var(--tick-subtitle); }
 .mh-el-editable{
+  position:relative; /* anchor for the absolute ::before placeholder overlay */
   font-size:13.5px; line-height:1.7; flex:1; outline:none;
   font-family:var(--mono); color:var(--sheet-ink);
   white-space:pre-wrap; word-break:break-word; min-height:1.7em;
 }
+/* Placeholder OVERLAYS the first line (absolute) so it reads inline with the
+   caret and vanishes on the first keystroke — instead of sitting on its own line
+   ABOVE the box. @tiptap/react's NodeViewContent wraps the real content in a
+   block <div>, so an inline ::before would be pushed to a line of its own; the
+   absolute overlay sidesteps that. pointer-events:none so clicks reach the caret. */
 .mh-el-editable:empty::before,
 .mh-el-editable:has(br.ProseMirror-trailingBreak)::before{
   content:attr(data-placeholder); color:var(--sheet-ink-soft); font-style:italic;
+  position:absolute; left:0; top:0; pointer-events:none;
 }
 .mh-el-row.focused .mh-el-editable{
   box-shadow:0 0 0 2px color-mix(in srgb, var(--indigo) 32%, transparent);

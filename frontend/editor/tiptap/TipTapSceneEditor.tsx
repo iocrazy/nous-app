@@ -361,7 +361,11 @@ function ScriptElementView({ node, editor, getPos }: NodeViewProps, refs: Script
         aria-label="Drag to reorder"
         title="Move paragraph"
         draggable={dragEnabled}
-        onMouseDown={(e: ReactMouseEvent) => e.preventDefault()}
+        // NOTE: do NOT preventDefault on mousedown here — on a draggable element
+        // that also cancels the browser's native drag gesture, so onDragStart
+        // would never fire and the grip couldn't drag (the scene handle works
+        // precisely because it has no mousedown guard). The grip is
+        // contentEditable=false, so a plain mousedown won't corrupt the doc.
         onDragStart={
           dragEnabled
             ? (e: ReactDragEvent<HTMLButtonElement>) => {

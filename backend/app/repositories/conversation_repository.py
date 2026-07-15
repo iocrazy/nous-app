@@ -37,8 +37,16 @@ asyncpg hazards preserved:
     untyped NULL and raises AmbiguousParameterError.
   - roles TEXT[] → role TEXT (scalar); creator gets role='owner'.
 
-Uses the privileged db_engine (bypasses RLS); the service layer enforces
-membership. RLS guards the separate frontend path via Supabase JS.
+Uses the privileged SQLAlchemy engine (bypasses RLS); the service layer
+enforces membership. RLS guards the separate frontend path via Supabase JS.
+
+ORM-model style (style batch 3b): statements run on the canonical
+read_scope()/write_scope() sessions (app/db/session.py). The SQL bodies are
+kept verbatim — atomic seq allocation, the TOCTOU owner-transfer guard and
+the joined-gate keyset reads ARE the semantics (documented exceptions per
+the convergence doctrine); multi-statement methods run all their statements
+inside ONE committing write_scope() transaction, exactly as the old explicit
+``engine.begin()`` blocks did. Schema models live in app/models/chat.py.
 """
 
 from __future__ import annotations
@@ -48,11 +56,49 @@ from typing import Any, Optional
 
 from sqlalchemy import text
 
-from app.db import engine as db_engine
+from app.db.session import read_scope, write_scope
 
 
 def _bigint(v: Any) -> int:
     return int(v)
+
+
+# ── Session-scope SQL helpers ─────────────────────────────────────────────────
+
+
+async def _fetch_all(sql: str, params: dict | None = None) -> list[dict[str, Any]]:
+    async with read_scope() as session:
+        result = await session.execute(text(sql), params or {})
+        return [dict(m) for m in result.mappings().all()]
+
+
+async def _fetch_one(sql: str, params: dict | None = None) -> Optional[dict[str, Any]]:
+    async with read_scope() as session:
+        row = (await session.execute(text(sql), params or {})).mappings().first()
+        return dict(row) if row else None
+
+
+async def _fetch_val(sql: str, params: dict | None = None) -> Any:
+    async with read_scope() as session:
+        return (await session.execute(text(sql), params or {})).scalar()
+
+
+async def _execute(sql: str, params: dict | None = None) -> int:
+    """Single-statement write on its own committing transaction (rowcount)."""
+    async with write_scope() as session:
+        result = await session.execute(text(sql), params or {})
+        return result.rowcount or 0
+
+
+async def _execute_returning_one(
+    sql: str, params: dict | None = None
+) -> Optional[dict[str, Any]]:
+    """Single write with RETURNING on a committing transaction — the #498
+    silent-rollback class (UPDATE…RETURNING on a non-committing connect())
+    is structurally impossible here."""
+    async with write_scope() as session:
+        row = (await session.execute(text(sql), params or {})).mappings().first()
+        return dict(row) if row else None
 
 
 class ConversationRepository:
@@ -73,11 +119,10 @@ class ConversationRepository:
         `name` is the public interface key; the DB column is `title`.
         RETURNING aliases `title AS name` so the returned dict preserves the key.
         """
-        eng = db_engine.get_engine()
-        async with eng.begin() as conn:
+        async with write_scope() as session:
             row = (
                 (
-                    await conn.execute(
+                    await session.execute(
                         text(
                             """
                             INSERT INTO public.conversations
@@ -103,7 +148,7 @@ class ConversationRepository:
             members = {creator_id, *member_ids}
             for uid in members:
                 role = "owner" if uid == creator_id else "member"
-                await conn.execute(
+                await session.execute(
                     text(
                         """
                         INSERT INTO public.conversation_members
@@ -119,11 +164,10 @@ class ConversationRepository:
     async def add_members(self, *, conversation_id: int, user_ids: list[str]) -> int:
         if not user_ids:
             return 0
-        eng = db_engine.get_engine()
-        async with eng.begin() as conn:
+        async with write_scope() as session:
             n = 0
             for uid in user_ids:
-                res = await conn.execute(
+                res = await session.execute(
                     text(
                         """
                         INSERT INTO public.conversation_members
@@ -140,7 +184,7 @@ class ConversationRepository:
     # ── Membership queries ────────────────────────────────────────────────────
 
     async def is_member(self, *, conversation_id: int, user_id: str) -> bool:
-        v = await db_engine.fetch_val(
+        v = await _fetch_val(
             """
             SELECT EXISTS (
               SELECT 1 FROM public.conversation_members
@@ -154,14 +198,14 @@ class ConversationRepository:
         return bool(v)
 
     async def is_team_member(self, *, team_id: int, user_id: str) -> bool:
-        result = await db_engine.fetch_val(
+        result = await _fetch_val(
             "SELECT EXISTS(SELECT 1 FROM team_members WHERE team_id = :tid AND user_id = :uid)",
             {"tid": _bigint(team_id), "uid": user_id},
         )
         return bool(result)
 
     async def conversation_scope_id(self, *, conversation_id: int) -> int | None:
-        return await db_engine.fetch_val(
+        return await _fetch_val(
             "SELECT scope_id FROM conversations WHERE id = :cid",
             {"cid": _bigint(conversation_id)},
         )
@@ -169,14 +213,14 @@ class ConversationRepository:
     async def conversation_scope_and_type(
         self, *, conversation_id: int
     ) -> dict[str, Any] | None:
-        return await db_engine.fetch_one(
+        return await _fetch_one(
             "SELECT scope_id, type, archived_at FROM conversations WHERE id = :cid",
             {"cid": _bigint(conversation_id)},
         )
 
     async def get_my_conversations(self, user_id: str) -> list[dict[str, Any]]:
         """Return conversations visible to *user_id* (open, not archived), with unread."""
-        rows = await db_engine.fetch_all(
+        rows = await _fetch_all(
             """
             SELECT c.id, c.scope_id, c.type, c.history_mode,
                    c.title AS name, c.topic,
@@ -200,7 +244,7 @@ class ConversationRepository:
 
     async def list_member_ids(self, conversation_id: int) -> list[str]:
         """Return the user_id of every user member of *conversation_id*."""
-        rows = await db_engine.fetch_all(
+        rows = await _fetch_all(
             """
             SELECT user_id
               FROM conversation_members
@@ -220,7 +264,7 @@ class ConversationRepository:
         RLS only exposes the caller's own profile row to the client, so the
         frontend cannot resolve other members' names itself.
         """
-        rows = await db_engine.fetch_all(
+        rows = await _fetch_all(
             """
             SELECT cm.member_type, cm.user_id, cm.agent_id, cm.role,
                    cm.joined_at,
@@ -256,7 +300,7 @@ class ConversationRepository:
     async def get_member_role(
         self, *, conversation_id: int, user_id: str
     ) -> Optional[str]:
-        v = await db_engine.fetch_val(
+        v = await _fetch_val(
             """
             SELECT role FROM public.conversation_members
              WHERE conversation_id = :cid
@@ -272,7 +316,7 @@ class ConversationRepository:
         # a concurrent transfer-owner can promote the target between check and
         # delete (TOCTOU) — deleting the owner then leaves the group permanently
         # ownerless. 0 rows → the service surfaces a conflict error.
-        n = await db_engine.execute(
+        n = await _execute(
             """
             DELETE FROM public.conversation_members
              WHERE conversation_id = :cid
@@ -285,7 +329,7 @@ class ConversationRepository:
         return bool(n)
 
     async def remove_agent_member(self, *, conversation_id: int, agent_id: str) -> bool:
-        n = await db_engine.execute(
+        n = await _execute(
             """
             DELETE FROM public.conversation_members
              WHERE conversation_id = :cid
@@ -299,7 +343,7 @@ class ConversationRepository:
     async def set_member_role(
         self, *, conversation_id: int, user_id: str, role: str
     ) -> bool:
-        n = await db_engine.execute(
+        n = await _execute(
             """
             UPDATE public.conversation_members
                SET role = :role
@@ -323,9 +367,8 @@ class ConversationRepository:
         lock serializes them) and rolls back. A missing target likewise rolls
         the demote back, so the group is never left ownerless.
         """
-        eng = db_engine.get_engine()
-        async with eng.begin() as conn:
-            demoted = await conn.execute(
+        async with write_scope() as session:
+            demoted = await session.execute(
                 text(
                     """
                     UPDATE public.conversation_members
@@ -340,7 +383,7 @@ class ConversationRepository:
             )
             if not demoted.rowcount:
                 raise ValueError("caller is no longer the owner of this conversation")
-            promoted = await conn.execute(
+            promoted = await session.execute(
                 text(
                     """
                     UPDATE public.conversation_members
@@ -365,7 +408,7 @@ class ConversationRepository:
         """Update title and/or type; None means leave unchanged."""
         # execute_returning_one, not fetch_one: fetch_one runs on connect()
         # and never commits, so the UPDATE would silently roll back.
-        row = await db_engine.execute_returning_one(
+        row = await _execute_returning_one(
             """
             UPDATE public.conversations
                SET title = COALESCE(:name, title),
@@ -380,7 +423,7 @@ class ConversationRepository:
         return dict(row) if row else None
 
     async def archive_conversation(self, *, conversation_id: int) -> bool:
-        n = await db_engine.execute(
+        n = await _execute(
             """
             UPDATE public.conversations
                SET archived_at = now()
@@ -409,12 +452,11 @@ class ConversationRepository:
         The seq allocation (UPDATE conversations SET last_seq+1 RETURNING) and
         the message INSERT run in the same transaction for strict ordering.
         """
-        eng = db_engine.get_engine()
-        async with eng.begin() as conn:
+        async with write_scope() as session:
             # archived_at guard: a dissolved group must stop accepting
             # messages; without it "deleted" groups keep chatting forever.
             seq = (
-                await conn.execute(
+                await session.execute(
                     text(
                         """
                         UPDATE public.conversations
@@ -431,7 +473,7 @@ class ConversationRepository:
                 raise ValueError("conversation not found or archived")
             row = (
                 (
-                    await conn.execute(
+                    await session.execute(
                         text(
                             """
                             INSERT INTO public.messages
@@ -462,7 +504,7 @@ class ConversationRepository:
             )
             # advance sender's read cursor so own messages never show as unread
             if sender_type == "user" and sender_id is not None:
-                await conn.execute(
+                await session.execute(
                     text(
                         "UPDATE public.conversation_members"
                         " SET last_read_seq = :seq"
@@ -500,7 +542,7 @@ class ConversationRepository:
         ``for_user_id``, e.g. the agent-turn context builders) are unaffected.
         """
         if for_user_id is None:
-            rows = await db_engine.fetch_all(
+            rows = await _fetch_all(
                 """
                 SELECT id, conversation_id, seq, sender_id, sender_type,
                        type, body, parent_id, edited_at, deleted_at, created_at
@@ -519,7 +561,7 @@ class ConversationRepository:
             )
             return [dict(r) for r in rows]
 
-        rows = await db_engine.fetch_all(
+        rows = await _fetch_all(
             """
             SELECT m.id, m.conversation_id, m.seq, m.sender_id, m.sender_type,
                    m.type, m.body, m.parent_id, m.edited_at, m.deleted_at, m.created_at
@@ -553,7 +595,7 @@ class ConversationRepository:
     async def mark_read(
         self, *, conversation_id: int, user_id: str, last_read_seq: int
     ) -> None:
-        await db_engine.execute(
+        await _execute(
             """
             UPDATE public.conversation_members
                SET last_read_seq = LEAST(
@@ -582,7 +624,7 @@ class ConversationRepository:
         Relies on the `uq_conversation_members` unique index:
           (conversation_id, member_type, COALESCE(user_id, agent_id))
         """
-        await db_engine.execute(
+        await _execute(
             """
             INSERT INTO public.conversation_members
               (conversation_id, member_type, agent_id, added_by)
@@ -597,7 +639,7 @@ class ConversationRepository:
         )
 
     async def is_agent_member(self, *, conversation_id: int, agent_id: str) -> bool:
-        v = await db_engine.fetch_val(
+        v = await _fetch_val(
             """
             SELECT EXISTS (
               SELECT 1 FROM public.conversation_members
@@ -611,7 +653,7 @@ class ConversationRepository:
         return bool(v)
 
     async def list_conversation_agent_ids(self, *, conversation_id: int) -> list[str]:
-        rows = await db_engine.fetch_all(
+        rows = await _fetch_all(
             """
             SELECT agent_id
               FROM public.conversation_members
@@ -632,7 +674,7 @@ class ConversationRepository:
         Fetches DESC then reverses so the caller sees messages oldest-first
         (chronological), as expected by the agent turn context builder.
         """
-        rows = await db_engine.fetch_all(
+        rows = await _fetch_all(
             """
             SELECT id, conversation_id, seq, sender_id, sender_type,
                    type, body, parent_id, from_agent_id, created_at
@@ -658,7 +700,7 @@ class ConversationRepository:
         Compaction feed (Phase 1.5): the caller summarizes this span and
         advances conversation_memory.last_seq_summarized to to_seq.
         """
-        rows = await db_engine.fetch_all(
+        rows = await _fetch_all(
             """
             SELECT seq, sender_type, type, body, created_at
               FROM public.messages
@@ -689,10 +731,9 @@ class ConversationRepository:
         """
         if not user_ids:
             return
-        eng = db_engine.get_engine()
-        async with eng.begin() as conn:
+        async with write_scope() as session:
             for uid in user_ids:
-                await conn.execute(
+                await session.execute(
                     text(
                         """
                         UPDATE public.conversation_members
@@ -720,7 +761,7 @@ class ConversationRepository:
         State guards:   type = 'text' AND deleted_at IS NULL
         Returns the updated row dict, or None when no row matched the gate.
         """
-        row = await db_engine.execute_returning_one(
+        row = await _execute_returning_one(
             """
             UPDATE public.messages
                SET body = CAST(:body AS jsonb), edited_at = now()
@@ -752,7 +793,7 @@ class ConversationRepository:
         State guard:    deleted_at IS NULL  (idempotent no-op if already deleted)
         Returns the updated row dict, or None when no row matched the gate.
         """
-        row = await db_engine.execute_returning_one(
+        row = await _execute_returning_one(
             """
             UPDATE public.messages
                SET deleted_at = now()
@@ -777,7 +818,7 @@ class ConversationRepository:
         self, *, conversation_id: int
     ) -> Optional[dict[str, Any]]:
         """Return id, scope_id, type, history_mode, last_seq or None."""
-        return await db_engine.fetch_one(
+        return await _fetch_one(
             """
             SELECT id, scope_id, type, history_mode, last_seq
               FROM public.conversations
@@ -799,10 +840,9 @@ class ConversationRepository:
         """
         if not generated_media_ids:
             return
-        eng = db_engine.get_engine()
-        async with eng.begin() as conn:
+        async with write_scope() as session:
             for ord_val, gid in enumerate(generated_media_ids):
-                await conn.execute(
+                await session.execute(
                     text(
                         """
                         INSERT INTO public.message_attachments
