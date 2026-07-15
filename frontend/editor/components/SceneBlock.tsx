@@ -245,10 +245,9 @@ export function SceneBlock({
     location_text: scene.location_text ?? '',
     time_of_day: scene.time_of_day ?? '',
   });
-  // Head row is dual-state (Task 4.5): a typographic slug by default, the three
-  // selects only while editing. Entering focuses the INT/EXT select; blur out of
-  // the row (or Esc) drops back to the read-mode slug.
-  const [headingEditing, setHeadingEditing] = useState(false);
+  // Head row (laper parity): the three heading tokens (INT/EXT · location · time)
+  // are ALWAYS rendered inline — there is no read/edit mode swap. Clicking a token
+  // opens only that token's dropdown, so the slug never re-lays-out on click.
   // Element-level drag-to-reorder (hover-gutter 6-dot handle): the element being
   // dragged + the live drop target (which row + edge). Kept within this scene —
   // v1 does not support cross-scene element moves.
@@ -266,7 +265,6 @@ export function SceneBlock({
     const triggers = headRowRef.current?.querySelectorAll<HTMLElement>('.mh-scene-select');
     triggers?.[idx]?.focus();
   }, []);
-  const headingDisplayRef = useRef<HTMLButtonElement | null>(null);
   const tiptapRef = useRef<TipTapSceneEditorHandle>(null);
   const elementsRef = useRef<ScriptElement[]>(sync.elements);
   const inputTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -714,26 +712,6 @@ export function SceneBlock({
     [scene.id],
   );
 
-  const enterHeadingEdit = useCallback(() => setHeadingEditing(true), []);
-
-  // Leaving the head row entirely (focus moved outside it) returns to read mode.
-  const handleHeadRowBlur = useCallback((e: React.FocusEvent<HTMLDivElement>) => {
-    // A window/tab switch blurs the control without leaving the row — keep the
-    // edit state so the writer returns to the same selects, not a collapsed slug.
-    if (!document.hasFocus()) return;
-    const next = e.relatedTarget as Node | null;
-    if (next && headRowRef.current?.contains(next)) return;
-    setHeadingEditing(false);
-  }, []);
-
-  // Esc abandons heading editing and returns focus to the read-mode slug.
-  const handleHeadRowKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== 'Escape') return;
-    e.stopPropagation();
-    setHeadingEditing(false);
-    requestAnimationFrame(() => headingDisplayRef.current?.focus());
-  }, []);
-
   // ── Reorder wiring (Task 10) ──────────────────────────────────────────────
   const isDragging = reorder?.draggingId === scene.id;
   const dropEdge =
@@ -1044,11 +1022,9 @@ export function SceneBlock({
       <div
         className={`mh-scene-headrow${format === 'asian' ? ' asian' : ''}`}
         ref={headRowRef}
-        onBlur={headingEditing ? handleHeadRowBlur : undefined}
-        onKeyDown={headingEditing ? handleHeadRowKeyDown : undefined}
-        // Focus anywhere in the heading row (read-mode slug button, the
-        // int/ext + time selects, the location input — focus bubbles) reports
-        // a HEADING cursor so the toolbar's active pill switches to Scene.
+        // Focus anywhere in the heading row (any of the three token selects —
+        // focus bubbles) reports a HEADING cursor so the toolbar's active pill
+        // switches to Scene.
         onFocus={() =>
           onFocusElement?.({ sceneId: scene.id, elementId: null, field: 'heading_int_ext' })
         }
@@ -1103,77 +1079,48 @@ export function SceneBlock({
             ))}
           </button>
         </span>
-        {headingEditing ? (
-          <>
-            <HeadingSelect
-              autoFocus
-              value={meta.heading_int_ext}
-              options={INT_EXT_OPTIONS}
-              placeholder="INT/EXT"
-              ariaLabel={t('editor.intExt')}
-              tabHint={t('editor.headingTabLocation')}
-              onChange={(v) => commitMeta({ heading_int_ext: v })}
-              onTabNext={() => focusHeadField(1)}
-            />
-            <HeadingSelect
-              searchable
-              candidates={locationCandidates}
-              value={meta.location_text}
-              placeholder={t('editor.locationPlaceholder')}
-              ariaLabel={t('editor.location')}
-              tabHint={t('editor.headingTabTime')}
-              onChange={(v) => commitMeta({ location_text: v })}
-              onTabNext={() => focusHeadField(2)}
-            />
-            <HeadingSelect
-              value={meta.time_of_day}
-              options={TIME_OPTIONS}
-              placeholder="DAY/NIGHT"
-              ariaLabel={t('editor.timeOfDay')}
-              onChange={(v) => commitMeta({ time_of_day: v })}
-            />
-          </>
-        ) : (
-          <button
-            type="button"
-            ref={headingDisplayRef}
-            className={`mh-scene-heading-display${format === 'asian' ? ' asian' : ''}`}
-            aria-label={t('editor.editSceneHeading')}
-            onClick={enterHeadingEdit}
-          >
-            {(() => {
-              // Structured read heading: each part renders as clean slug text
-              // when set, or a muted placeholder chip when unset — so a
-              // partially-filled heading (e.g. only a location) still reads as a
-              // proper scene heading (INT/EXT · <loc> · DAY/NIGHT), never a bare
-              // location string. A fully-filled Hollywood heading is exactly the
-              // slug "INT. LOCATION - DAY" (tests assert this textContent).
-              const ie = meta.heading_int_ext.trim();
-              const loc = meta.location_text.trim();
-              const time = meta.time_of_day.trim();
-              const chip = (label: string) => <span className="mh-heading-chip">{label}</span>;
-              if (format === 'asian') {
-                return (
-                  <>
-                    {ie ? ie : chip('INT/EXT')}
-                    {' · '}
-                    {loc ? loc : chip('LOCATION')}
-                    {' · '}
-                    {time ? time : chip('DAY/NIGHT')}
-                  </>
-                );
-              }
-              return (
-                <>
-                  {ie ? `${ie}.` : chip('INT/EXT')}{' '}
-                  {loc ? loc.toUpperCase() : chip('LOCATION')}
-                  {' - '}
-                  {time ? time : chip('DAY/NIGHT')}
-                </>
-              );
-            })()}
-          </button>
-        )}
+        {/* laper parity: the heading is ALWAYS three inline token dropdowns with
+         *  STATIC separators between them — no read/edit mode swap. Clicking a
+         *  token opens only that token's own dropdown; the slug never re-lays-out
+         *  on click. A filled token reads as plain uppercase slug text, an unset
+         *  one as a muted chip (see .mh-scene-select in editorShellStyles.ts) —
+         *  so a partially-filled heading still reads INT. LOCATION - DAY. The
+         *  separators (.·-) are decorative, so a fully-filled Hollywood heading
+         *  still reads as the slug "INT. LOCATION - DAY". */}
+        <span className={`mh-scene-heading${format === 'asian' ? ' asian' : ''}`}>
+          <HeadingSelect
+            value={meta.heading_int_ext}
+            options={INT_EXT_OPTIONS}
+            placeholder="INT/EXT"
+            ariaLabel={t('editor.intExt')}
+            tabHint={t('editor.headingTabLocation')}
+            onChange={(v) => commitMeta({ heading_int_ext: v })}
+            onTabNext={() => focusHeadField(1)}
+          />
+          <span className="mh-heading-sep" aria-hidden="true">
+            {format === 'asian' ? ' · ' : '. '}
+          </span>
+          <HeadingSelect
+            searchable
+            candidates={locationCandidates}
+            value={meta.location_text}
+            placeholder={t('editor.locationPlaceholder')}
+            ariaLabel={t('editor.location')}
+            tabHint={t('editor.headingTabTime')}
+            onChange={(v) => commitMeta({ location_text: v })}
+            onTabNext={() => focusHeadField(2)}
+          />
+          <span className="mh-heading-sep" aria-hidden="true">
+            {format === 'asian' ? ' · ' : ' - '}
+          </span>
+          <HeadingSelect
+            value={meta.time_of_day}
+            options={TIME_OPTIONS}
+            placeholder="DAY/NIGHT"
+            ariaLabel={t('editor.timeOfDay')}
+            onChange={(v) => commitMeta({ time_of_day: v })}
+          />
+        </span>
         <ScenePresenceBadge users={focusPresence ?? []} />
       </div>
 

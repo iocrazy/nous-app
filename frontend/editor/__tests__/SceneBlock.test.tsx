@@ -83,10 +83,8 @@ describe('SceneBlock head row + structure', () => {
   it('writes scene meta through updateSceneMeta after the debounce', () => {
     vi.useFakeTimers();
     render(<SceneBlock scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])} index={0} />);
-    // Head row starts as a typographic slug — click it to reveal the fields.
-    fireEvent.click(screen.getByRole('button', { name: 'editor.editSceneHeading' }));
-    // The location field is a search-or-create combobox: open it, type a new
-    // location, and Enter creates/commits it.
+    // The location token is always present (no read/edit mode swap): open its
+    // search-or-create combobox, type a new location, and Enter creates/commits it.
     fireEvent.click(screen.getByLabelText('editor.location'));
     const search = screen.getByLabelText('editor.locationSearchPlaceholder');
     fireEvent.change(search, { target: { value: 'Rooftop Access' } });
@@ -111,43 +109,45 @@ describe('SceneBlock head row + structure', () => {
 // toolbar-follow assertions in `EditorShell.test.tsx`.
 
 describe('SceneBlock typographic head row (Task 4.5)', () => {
-  it('renders a read-mode heading slug by default, not the selects', () => {
-    render(<SceneBlock scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])} index={0} />);
-    // Hollywood slug from INT / Blank Studio / NIGHT.
-    expect(screen.getByRole('button', { name: 'editor.editSceneHeading' })).toHaveTextContent(
-      'INT. BLANK STUDIO - NIGHT',
+  it('renders the three heading tokens as an inline slug (no read/edit swap)', () => {
+    const { container } = render(
+      <SceneBlock scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])} index={0} />,
     );
-    expect(screen.queryByLabelText('editor.location')).toBeNull();
-    expect(screen.queryByLabelText('editor.intExt')).toBeNull();
-  });
-
-  it('reveals the three selects on click and returns to read mode on blur', () => {
-    render(<SceneBlock scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])} index={0} />);
-    fireEvent.click(screen.getByRole('button', { name: 'editor.editSceneHeading' }));
-
+    // The tokens are ALWAYS present — there is no click-to-reveal read button.
+    expect(screen.queryByRole('button', { name: 'editor.editSceneHeading' })).toBeNull();
     expect(screen.getByLabelText('editor.intExt')).toBeInTheDocument();
     expect(screen.getByLabelText('editor.location')).toBeInTheDocument();
     expect(screen.getByLabelText('editor.timeOfDay')).toBeInTheDocument();
-
-    // Blur to somewhere outside the head row → read mode returns.
-    fireEvent.blur(screen.getByLabelText('editor.location'), { relatedTarget: document.body });
-    expect(screen.queryByLabelText('editor.location')).toBeNull();
-    expect(screen.getByRole('button', { name: 'editor.editSceneHeading' })).toBeInTheDocument();
+    // Joined by static separators they read as the Hollywood slug (CSS upper-cases
+    // the location visually; the DOM keeps the stored casing).
+    expect(container.querySelector('.mh-scene-heading')?.textContent).toBe(
+      'INT. Blank Studio - NIGHT',
+    );
   });
 
-  it('reflects edited meta in the read-mode slug', () => {
+  it('opens a token dropdown on click without a mode swap (tokens stay in place)', () => {
     render(<SceneBlock scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])} index={0} />);
-    fireEvent.click(screen.getByRole('button', { name: 'editor.editSceneHeading' }));
+    // Clicking the time token opens ONLY its own listbox…
+    fireEvent.click(screen.getByRole('button', { name: 'editor.timeOfDay' }));
+    expect(screen.getByRole('listbox', { name: 'editor.timeOfDay' })).toBeInTheDocument();
+    // …and all three trigger tokens are still mounted (nothing was swapped out).
+    expect(screen.getByRole('button', { name: 'editor.intExt' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'editor.location' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'editor.timeOfDay' })).toBeInTheDocument();
+  });
+
+  it('reflects an edited location in the inline slug', () => {
+    const { container } = render(
+      <SceneBlock scene={makeScene([{ id: 'el_a', type: 'action', text: 'A' }])} index={0} />,
+    );
     // Open the search-or-create location combobox, type + Enter to commit.
     fireEvent.click(screen.getByLabelText('editor.location'));
     const search = screen.getByLabelText('editor.locationSearchPlaceholder');
     fireEvent.change(search, { target: { value: 'Rooftop Access' } });
     fireEvent.keyDown(search, { key: 'Enter' });
-    // Leaving the head row returns to the read-mode slug.
-    fireEvent.blur(screen.getByLabelText('editor.location'), { relatedTarget: document.body });
 
-    expect(screen.getByRole('button', { name: 'editor.editSceneHeading' })).toHaveTextContent(
-      'INT. ROOFTOP ACCESS - NIGHT',
+    expect(container.querySelector('.mh-scene-heading')?.textContent).toBe(
+      'INT. Rooftop Access - NIGHT',
     );
   });
 
