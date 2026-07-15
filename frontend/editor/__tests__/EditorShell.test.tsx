@@ -238,6 +238,26 @@ describe('EditorShell', () => {
     await waitFor(() => expect(scrollSpy).toHaveBeenCalled());
   });
 
+  it('toolbar "Scene" inserts the new scene AFTER the active scene, not at the tail', async () => {
+    svc.listScenes.mockResolvedValue(twoScenes);
+    svc.createScene.mockReset().mockResolvedValue(scene({ id: '999', sort_order: 2 }));
+    svc.moveScene.mockReset().mockResolvedValue(undefined);
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+    render(<EditorShell scriptId="1" />);
+
+    // Focus the SECOND scene by clicking its rail row → activeSceneId = '222'.
+    const sceneRail = await screen.findByTestId('scene-rail');
+    fireEvent.click(await within(sceneRail).findByText('Rooftop Access'));
+
+    // Click the toolbar "Scene" button — should create + move next to the cursor.
+    fireEvent.click(screen.getByRole('button', { name: 'editor.toolbarScene' }));
+
+    await waitFor(() => expect(svc.createScene).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(svc.moveScene).toHaveBeenCalledWith('999', { after_scene_id: '222' }),
+    );
+  });
+
   it('orders the rail: modules nav, then Characters, then the Scenes list', async () => {
     svc.listScenes.mockResolvedValue(twoScenes);
     render(<EditorShell scriptId="1" />);
