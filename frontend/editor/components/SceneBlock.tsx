@@ -96,27 +96,6 @@ export interface TypeCommand {
 const INT_EXT_OPTIONS = ['INT', 'EXT', 'INT/EXT'];
 const TIME_OPTIONS = ['DAY', 'NIGHT', 'DAWN', 'DUSK', 'CONTINUOUS'];
 
-/**
- * Compose the read-mode scene heading from the meta fields, per layout engine:
- *  - Hollywood: a slug line `INT. BLANK STUDIO - NIGHT` (uppercase location,
- *    dot after INT/EXT, dash before the time).
- *  - Asian: a middot-joined manuscript heading `内景 · 地点 · 夜` (no forced
- *    uppercasing — CJK has no case), sitting after the numbered badge.
- * Missing parts drop out cleanly; an all-empty heading returns '' so the caller
- * can render the "set heading" placeholder instead.
- */
-function formatSceneHeading(meta: SceneMeta, format: EditorFormat): string {
-  const ie = meta.heading_int_ext.trim();
-  const loc = meta.location_text.trim();
-  const time = meta.time_of_day.trim();
-  if (format === 'asian') {
-    return [ie, loc, time].filter((p) => p.length > 0).join(' · ');
-  }
-  const head = ie ? `${ie}.` : '';
-  const locTime = [loc.toUpperCase(), time].filter((p) => p.length > 0).join(' - ');
-  return [head, locTime].filter((p) => p.length > 0).join(' ');
-}
-
 const INPUT_DEBOUNCE_MS = 500;
 const META_DEBOUNCE_MS = 600;
 
@@ -755,8 +734,6 @@ export function SceneBlock({
     requestAnimationFrame(() => headingDisplayRef.current?.focus());
   }, []);
 
-  const displayHeading = formatSceneHeading(meta, format);
-
   // ── Reorder wiring (Task 10) ──────────────────────────────────────────────
   const isDragging = reorder?.draggingId === scene.id;
   const dropEdge =
@@ -1164,18 +1141,37 @@ export function SceneBlock({
             aria-label={t('editor.editSceneHeading')}
             onClick={enterHeadingEdit}
           >
-            {displayHeading || (
-              // laper-parity: an unset heading renders as the slug's chip
-              // tokens (INT/EXT LOCATION - DAY/NIGHT), not a prose placeholder.
-              // Screplay tokens are English by convention; the button's
-              // aria-label above still announces the editable purpose.
-              <span className="mh-scene-heading-empty">
-                <span className="mh-heading-chip">INT/EXT</span>{' '}
-                <span className="mh-heading-chip">LOCATION</span>
-                {' - '}
-                <span className="mh-heading-chip">DAY/NIGHT</span>
-              </span>
-            )}
+            {(() => {
+              // Structured read heading: each part renders as clean slug text
+              // when set, or a muted placeholder chip when unset — so a
+              // partially-filled heading (e.g. only a location) still reads as a
+              // proper scene heading (INT/EXT · <loc> · DAY/NIGHT), never a bare
+              // location string. A fully-filled Hollywood heading is exactly the
+              // slug "INT. LOCATION - DAY" (tests assert this textContent).
+              const ie = meta.heading_int_ext.trim();
+              const loc = meta.location_text.trim();
+              const time = meta.time_of_day.trim();
+              const chip = (label: string) => <span className="mh-heading-chip">{label}</span>;
+              if (format === 'asian') {
+                return (
+                  <>
+                    {ie ? ie : chip('INT/EXT')}
+                    {' · '}
+                    {loc ? loc : chip('LOCATION')}
+                    {' · '}
+                    {time ? time : chip('DAY/NIGHT')}
+                  </>
+                );
+              }
+              return (
+                <>
+                  {ie ? `${ie}.` : chip('INT/EXT')}{' '}
+                  {loc ? loc.toUpperCase() : chip('LOCATION')}
+                  {' - '}
+                  {time ? time : chip('DAY/NIGHT')}
+                </>
+              );
+            })()}
           </button>
         )}
         <ScenePresenceBadge users={focusPresence ?? []} />
