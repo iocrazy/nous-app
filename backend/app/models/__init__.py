@@ -65,6 +65,7 @@ from app.models.generated_media import (  # noqa: F401
 from app.models.inspiration import (  # noqa: F401
     InspirationApiTokens,
     InspirationAttachments,
+    InspirationNotes,
 )
 from app.models.library import (  # noqa: F401
     Authors,
@@ -305,6 +306,7 @@ __all__ = [
     # inspiration notes domain
     "InspirationApiTokens",
     "InspirationAttachments",
+    "InspirationNotes",
     # project authored library
     "ProjectCharacters",
     "ProjectLibEntities",
