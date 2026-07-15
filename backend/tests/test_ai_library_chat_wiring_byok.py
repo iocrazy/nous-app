@@ -6,7 +6,8 @@ its own ``reveal_byok_providers`` chokepoint (secret-at-rest Phase 2).
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from contextlib import asynccontextmanager
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -17,17 +18,23 @@ from app.services.ai.chat.ai_library_chat_wiring import _load_user_provider_conf
 pytestmark = pytest.mark.asyncio
 
 
-def _fake_client(settings_json: dict):
-    chain = MagicMock()
-    chain.select.return_value = chain
-    chain.eq.return_value = chain
-    chain.maybe_single.return_value = chain
-    chain.execute = AsyncMock(
-        return_value=MagicMock(data={"settings_json": settings_json})
-    )
-    client = MagicMock()
-    client.table.return_value = chain
-    return client
+def _read_scope_returning_scalar(value):
+    """read_scope() stand-in whose session.execute().scalar() returns
+    ``value`` — the loader reads settings_json as a single scalar column."""
+
+    class _Res:
+        def scalar(self):
+            return value
+
+    class _Session:
+        async def execute(self, *_a, **_kw):
+            return _Res()
+
+    @asynccontextmanager
+    async def _scope():
+        yield _Session()
+
+    return _scope
 
 
 @pytest.fixture
@@ -50,8 +57,8 @@ async def test_reveals_encrypted_api_key(real_key):
         }
     }
     with patch(
-        "app.db.supabase_client.get_async_supabase_admin",
-        AsyncMock(return_value=_fake_client(settings_json)),
+        "app.db.session.read_scope",
+        new=_read_scope_returning_scalar(settings_json),
     ):
         providers = await _load_user_provider_config(owner)
 
@@ -69,8 +76,8 @@ async def test_cross_user_replay_blocked(real_key):
         "ai_settings": {"ai_providers": {"openai": {"api_key": victim_ct}}}
     }
     with patch(
-        "app.db.supabase_client.get_async_supabase_admin",
-        AsyncMock(return_value=_fake_client(settings_json)),
+        "app.db.session.read_scope",
+        new=_read_scope_returning_scalar(settings_json),
     ):
         providers = await _load_user_provider_config(uuid4())
 
@@ -82,8 +89,8 @@ async def test_passthrough_legacy_plaintext(real_key):
         "ai_settings": {"ai_providers": {"openai": {"api_key": "sk-legacy-plain"}}}
     }
     with patch(
-        "app.db.supabase_client.get_async_supabase_admin",
-        AsyncMock(return_value=_fake_client(settings_json)),
+        "app.db.session.read_scope",
+        new=_read_scope_returning_scalar(settings_json),
     ):
         providers = await _load_user_provider_config(uuid4())
 
@@ -91,17 +98,9 @@ async def test_passthrough_legacy_plaintext(real_key):
 
 
 async def test_empty_when_no_row():
-    chain = MagicMock()
-    chain.select.return_value = chain
-    chain.eq.return_value = chain
-    chain.maybe_single.return_value = chain
-    chain.execute = AsyncMock(return_value=MagicMock(data=None))
-    client = MagicMock()
-    client.table.return_value = chain
-
     with patch(
-        "app.db.supabase_client.get_async_supabase_admin",
-        AsyncMock(return_value=client),
+        "app.db.session.read_scope",
+        new=_read_scope_returning_scalar(None),
     ):
         providers = await _load_user_provider_config(uuid4())
 

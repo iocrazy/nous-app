@@ -44,16 +44,24 @@ def _coerce_flag(value: Any) -> bool:
 
 
 async def _read_method_flag_rows() -> list[dict]:
-    from app.db.supabase_client import get_async_supabase_admin
+    from sqlalchemy import select
 
-    client = await get_async_supabase_admin()
-    result = await (
-        client.table("system_settings")
-        .select("key, value")
-        .in_("key", list(_METHOD_FLAG_KEYS.keys()))
-        .execute()
-    )
-    return result.data or []
+    from app.db.session import read_scope
+    from app.models import SystemSettings
+
+    async with read_scope() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(SystemSettings.key, SystemSettings.value).where(
+                        SystemSettings.key.in_(list(_METHOD_FLAG_KEYS.keys()))
+                    )
+                )
+            )
+            .mappings()
+            .all()
+        )
+    return [dict(r) for r in rows]
 
 
 async def get_douyin_method_flags() -> dict[str, bool]:

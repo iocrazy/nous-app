@@ -156,10 +156,18 @@ class DatabaseLogSink:
 
     @staticmethod
     async def _insert_entries(entries: list[dict[str, Any]]) -> None:
-        from app.db import get_async_supabase_admin
+        from sqlalchemy import insert
 
-        supabase = await get_async_supabase_admin()
-        await supabase.table("application_logs").insert(entries).execute()
+        from app.db.pg_coerce import coerce_datetime_strings
+        from app.db.session import write_scope
+        from app.models import ApplicationLogs
+
+        # ``logged_at`` is serialized as an ISO string (legacy PostgREST habit);
+        # asyncpg refuses ISO strings for timestamptz binds, so parse to native
+        # datetimes at the boundary. jsonb ``extra`` is already a dict.
+        rows = [coerce_datetime_strings(ApplicationLogs, e) for e in entries]
+        async with write_scope() as session:
+            await session.execute(insert(ApplicationLogs).values(rows))
 
 
 # Module-level singleton

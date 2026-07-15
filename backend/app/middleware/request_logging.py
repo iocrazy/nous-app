@@ -12,8 +12,6 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
-from app.db import get_async_supabase_admin
-
 # Paths that should NOT be logged
 EXCLUDED_PATHS = {
     "/health",
@@ -225,22 +223,29 @@ async def _write_log(
 ) -> None:
     """Write request log to database (fire-and-forget)."""
     try:
-        supabase = await get_async_supabase_admin()
-        await supabase.table("api_request_logs").insert(
-            {
-                "request_id": request_id,
-                "user_id": user_id,
-                "auth_type": auth_type,
-                "method": method,
-                "path": path,
-                "query_params": query_params,
-                "request_body": request_body,
-                "status_code": status_code,
-                "response_time_ms": response_time_ms,
-                "ip_address": ip_address,
-                "user_agent": user_agent,
-                "error_detail": error_detail,
-            }
-        ).execute()
+        from sqlalchemy import insert
+
+        from app.db.session import write_scope
+        from app.models import ApiRequestLogs
+
+        async with write_scope() as session:
+            await session.execute(
+                insert(ApiRequestLogs).values(
+                    {
+                        "request_id": request_id,
+                        "user_id": user_id,
+                        "auth_type": auth_type,
+                        "method": method,
+                        "path": path,
+                        "query_params": query_params,
+                        "request_body": request_body,
+                        "status_code": status_code,
+                        "response_time_ms": response_time_ms,
+                        "ip_address": ip_address,
+                        "user_agent": user_agent,
+                        "error_detail": error_detail,
+                    }
+                )
+            )
     except Exception as e:
         logger.warning(f"Failed to write request log: {e}")

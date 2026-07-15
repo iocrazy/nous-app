@@ -25,8 +25,6 @@ from typing import Any, Callable, Optional
 
 from loguru import logger
 
-from app.db import get_async_supabase_admin
-
 # DBOS instance — set by `init_dbos`; None until lifespan startup runs.
 _dbos = None
 # DBOSClient — gateway-only enqueue handle, set by `init_dbos_client`; None
@@ -50,13 +48,15 @@ async def _refresh_routing_cache() -> None:
     """Reload dbos_workflow_routing into the in-process cache."""
     global _routing_cache, _routing_loaded_at
     try:
-        client = await get_async_supabase_admin()
-        result = (
-            await client.table("dbos_workflow_routing")
-            .select("task_type, mode")
-            .execute()
-        )
-        rows = result.data or []
+        from sqlalchemy import text
+
+        from app.db.session import read_scope
+
+        async with read_scope() as session:
+            result = await session.execute(
+                text("SELECT task_type, mode FROM public.dbos_workflow_routing")
+            )
+            rows = result.mappings().all()
         _routing_cache = {row["task_type"]: row["mode"] for row in rows}
         _routing_loaded_at = asyncio.get_event_loop().time()
         logger.info(f"[dbos] routing cache refreshed: {len(_routing_cache)} entries")

@@ -110,13 +110,16 @@ class CostAuditorHook:
         tool_result: dict[str, Any],
     ) -> None:
         """Insert a single agent_run_events row. Failures are logged + swallowed."""
-        # Defer import so test paths that don't init Supabase still work.
+        # Defer imports so test paths that don't init the DB still work.
         try:
-            from app.db import get_async_supabase_admin
+            from decimal import Decimal
+
+            from sqlalchemy import insert
+
+            from app.db.session import write_scope
+            from app.models import AgentRunEvents
         except ImportError:
-            logger.warning(
-                "[CostAuditor] supabase admin unavailable; skipping event write"
-            )
+            logger.warning("[CostAuditor] DB layer unavailable; skipping event write")
             return
 
         # Skip the placeholder run_id used in test paths without a real
@@ -127,21 +130,21 @@ class CostAuditorHook:
             return
 
         payload = {
-            "run_id": str(run_id),
+            "run_id": int(run_id),
             "iteration": iteration,
             "tool_name": tool_name,
             "tool_args_summary": tool_args_summary,
             "prompt_tokens_delta": prompt_tokens_delta,
             "completion_tokens_delta": completion_tokens_delta,
-            "cost_cents_delta": cost_cents_delta,
+            "cost_cents_delta": Decimal(str(cost_cents_delta)),
             "metadata_json": {
                 "tool_result_keys": sorted(list(tool_result.keys())),
             },
         }
 
         try:
-            client = await get_async_supabase_admin()
-            await client.table("agent_run_events").insert(payload).execute()
+            async with write_scope() as session:
+                await session.execute(insert(AgentRunEvents).values(payload))
         except Exception:  # noqa: BLE001
             logger.exception(
                 "[CostAuditor] insert failed for run %s iter %d; run continues",

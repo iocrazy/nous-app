@@ -645,20 +645,26 @@ async def _load_user_provider_config(user_id: UUID) -> dict[str, Any]:
     "use global env keys only" rather than crashing the chat turn.
     """
     try:
-        from app.db.supabase_client import get_async_supabase_admin
+        import json
 
-        client = await get_async_supabase_admin()
-        result = (
-            await client.table("user_settings")
-            .select("settings_json")
-            .eq("user_id", str(user_id))
-            .maybe_single()
-            .execute()
-        )
-        if not result or not result.data:
+        from sqlalchemy import select
+
+        from app.db.session import read_scope
+        from app.models import UserSettings
+
+        async with read_scope() as session:
+            settings_json = (
+                await session.execute(
+                    select(UserSettings.settings_json).where(
+                        UserSettings.user_id == str(user_id)
+                    )
+                )
+            ).scalar()
+        if settings_json is None:
             return {}
-        settings_json = result.data.get("settings_json") or {}
-        ai_settings = settings_json.get("ai_settings") or {}
+        if isinstance(settings_json, str):
+            settings_json = json.loads(settings_json)
+        ai_settings = (settings_json or {}).get("ai_settings") or {}
         # Stored api_key values may carry the enc:v1: marker (secret-at-rest
         # Phase 2) — reveal here so get_adapter_for_user (and every other
         # chat-turn consumer) receives plaintext credentials. user_id is the

@@ -76,18 +76,21 @@ class StoryboardService:
                 status_code=403, detail="Project has no team association"
             )
 
-        from app.db.supabase_client import get_async_supabase_admin
+        from sqlalchemy import select
 
-        client = await get_async_supabase_admin()
-        result = (
-            await client.table("team_members")
-            .select("team_id")
-            .eq("team_id", team_id)
-            .eq("user_id", user_id)
-            .limit(1)
-            .execute()
-        )
-        if not result.data:
+        from app.db.session import read_scope
+        from app.models import TeamMembers
+
+        async with read_scope() as session:
+            member = (
+                await session.execute(
+                    select(TeamMembers.team_id)
+                    .where(TeamMembers.team_id == int(team_id))
+                    .where(TeamMembers.user_id == user_id)
+                    .limit(1)
+                )
+            ).first()
+        if not member:
             raise HTTPException(
                 status_code=403,
                 detail="You do not have access to this project",
