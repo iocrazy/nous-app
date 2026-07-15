@@ -36,11 +36,11 @@ async def admin_health():
 
     checks: dict = {"status": "ok"}
 
-    # Check Supabase admin client
+    # Check Supabase admin client initializes (auth/storage still use it)
     try:
         from app.db import get_async_supabase_admin
 
-        supabase = await get_async_supabase_admin()
+        await get_async_supabase_admin()
         checks["supabase_admin"] = "ok"
     except Exception as e:
         checks["supabase_admin"] = f"error: {type(e).__name__}: {e}"
@@ -48,26 +48,32 @@ async def admin_health():
 
     # Check user_profiles table access
     try:
-        result = (
-            await supabase.table("user_profiles")
-            .select("id", count="exact")
-            .limit(1)
-            .execute()
-        )
-        checks["user_profiles"] = f"ok (count={result.count})"
+        from sqlalchemy import func, select
+
+        from app.db.session import read_scope
+        from app.models import UserProfiles
+
+        async with read_scope() as session:
+            count = (
+                await session.execute(select(func.count(UserProfiles.id)))
+            ).scalar()
+        checks["user_profiles"] = f"ok (count={count})"
     except Exception as e:
         checks["user_profiles"] = f"error: {type(e).__name__}: {e}"
         checks["status"] = "degraded"
 
     # Check resource_versions table access
     try:
-        result = (
-            await supabase.table("resource_versions")
-            .select("id", count="exact")
-            .limit(1)
-            .execute()
-        )
-        checks["resource_versions"] = f"ok (count={result.count})"
+        from sqlalchemy import func, select
+
+        from app.db.session import read_scope
+        from app.models import ResourceVersions
+
+        async with read_scope() as session:
+            count = (
+                await session.execute(select(func.count(ResourceVersions.id)))
+            ).scalar()
+        checks["resource_versions"] = f"ok (count={count})"
     except Exception as e:
         checks["resource_versions"] = f"error: {type(e).__name__}: {e}"
         checks["status"] = "degraded"

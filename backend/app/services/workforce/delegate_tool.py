@@ -420,19 +420,33 @@ class DelegateToolService:
         ``lifecycle_status`` / ``result`` / ``error_code`` / ``error_message``
         as before."""
         try:
-            from app.db.supabase_client import get_async_supabase_admin
+            from sqlalchemy import select
 
-            client = await get_async_supabase_admin()
-            result = (
-                await client.table("task_tracking")
-                .select("dbos_workflow_id,phase,error_code,error_msg,metadata")
-                .eq("task_kind", TASK_KIND_AGENT)
-                .eq("inbox_message_id", str(caller_inbox_id))
-                .maybe_single()
-                .execute()
-            )
-            raw = result.data if result and result.data else None
-            return tt_row_to_task_shape(raw)
+            from app.db.session import read_scope
+            from app.models import TaskTracking
+
+            async with read_scope() as session:
+                row = (
+                    (
+                        await session.execute(
+                            select(
+                                TaskTracking.dbos_workflow_id,
+                                TaskTracking.phase,
+                                TaskTracking.error_code,
+                                TaskTracking.error_msg,
+                                TaskTracking.metadata_.label("metadata"),
+                            )
+                            .where(TaskTracking.task_kind == TASK_KIND_AGENT)
+                            .where(
+                                TaskTracking.inbox_message_id == str(caller_inbox_id)
+                            )
+                            .limit(1)
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
+            return tt_row_to_task_shape(dict(row) if row else None)
         except Exception as err:
             logger.debug(f"[delegate] task lookup transient: {err}")
             return None
@@ -461,26 +475,34 @@ class DelegateToolService:
         if self.parent_run_id is None:
             return None
 
-        try:
-            from app.db.supabase_client import get_async_supabase_admin
+        from sqlalchemy import select
 
-            client = await get_async_supabase_admin()
-        except Exception as err:
-            logger.warning(f"[delegate] cycle-walk: admin client unavailable ({err})")
-            return None
+        from app.db.session import read_scope
+        from app.models import AgentRuns
 
         current = self.parent_run_id
         for _ in range(self.MAX_CHAIN_WALK_DEPTH):
             if current is None:
                 return None
             try:
-                row = (
-                    await client.table("agent_runs")
-                    .select("id,agent_id,parent_run_id")
-                    .eq("id", str(current))
-                    .maybe_single()
-                    .execute()
-                )
+                # agent_runs.id is BIGINT (migration 232) — bind int, not str
+                # (asyncpg is strict). ``current`` is the numeric snowflake id.
+                async with read_scope() as session:
+                    row = (
+                        (
+                            await session.execute(
+                                select(
+                                    AgentRuns.id,
+                                    AgentRuns.agent_id,
+                                    AgentRuns.parent_run_id,
+                                )
+                                .where(AgentRuns.id == int(current))
+                                .limit(1)
+                            )
+                        )
+                        .mappings()
+                        .first()
+                    )
             except Exception as err:
                 # Best-effort: if the lookup fails, fall through and
                 # let the rest of the dispatch continue. The depth cap
@@ -490,7 +512,7 @@ class DelegateToolService:
                 )
                 return None
 
-            data = row.data if row and row.data else None
+            data = dict(row) if row else None
             if not data:
                 return None
 

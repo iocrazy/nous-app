@@ -34,10 +34,13 @@ async def _write_row(payload: dict[str, Any]) -> None:
     so the boundary package stays a leaf module at import time."""
     try:
         # Deferred import — boundary package is otherwise stdlib-only.
-        from app.db import get_async_supabase_admin
+        from sqlalchemy import insert
 
-        sb = await get_async_supabase_admin()
-        await sb.table("boundary_audit").insert(payload).execute()
+        from app.db.session import write_scope
+        from app.models import BoundaryAudit
+
+        async with write_scope() as session:
+            await session.execute(insert(BoundaryAudit).values(payload))
     except Exception as exc:
         # Audit failures are diagnostic, not load-bearing. Loguru will
         # carry this so we know if the audit pipeline is itself broken.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -14,27 +15,65 @@ from app.services.ai.billing import token_billing as tb
 
 
 def _row(model="qwen-max", tokens=100, cost=1.5, days_ago=0):
+    # The ORM read yields a native datetime; summarize serializes it to ISO.
     return {
         "model": model,
         "total_tokens": tokens,
         "cost_points": cost,
-        "created_at": (
-            datetime.now(timezone.utc) - timedelta(days=days_ago)
-        ).isoformat(),
+        "created_at": datetime.now(timezone.utc) - timedelta(days=days_ago),
     }
 
 
-def _fake_client_returning(rows):
-    client = MagicMock()
-    table_q = MagicMock()
-    table_q.select.return_value = table_q
-    table_q.eq.return_value = table_q
-    table_q.gte.return_value = table_q
-    table_q.lte.return_value = table_q
-    table_q.limit.return_value = table_q
-    table_q.execute = AsyncMock(return_value=MagicMock(data=rows))
-    client.table = MagicMock(return_value=table_q)
-    return client
+def _read_scope_returning(rows):
+    """read_scope() stand-in whose session.execute().mappings().all()
+    returns ``rows`` (the ai_usage_logs row mappings)."""
+
+    class _Res:
+        def mappings(self):
+            return self
+
+        def all(self):
+            return rows
+
+    class _Session:
+        async def execute(self, *_a, **_kw):
+            return _Res()
+
+    @asynccontextmanager
+    async def _scope():
+        yield _Session()
+
+    return _scope
+
+
+def _read_scope_raising():
+    """read_scope() stand-in whose session.execute() raises — the DB-down path."""
+
+    class _Session:
+        async def execute(self, *_a, **_kw):
+            raise RuntimeError("supabase down")
+
+    @asynccontextmanager
+    async def _scope():
+        yield _Session()
+
+    return _scope
+
+
+def _write_scope(ok: bool = True):
+    """write_scope() stand-in; execute() succeeds or raises per ``ok``."""
+
+    class _Session:
+        async def execute(self, *_a, **_kw):
+            if not ok:
+                raise RuntimeError("no table")
+            return MagicMock()
+
+    @asynccontextmanager
+    async def _scope():
+        yield _Session()
+
+    return _scope
 
 
 @pytest.mark.unit
@@ -45,11 +84,7 @@ async def test_summary_aggregates_by_model_and_day():
         _row("qwen-max", tokens=200, cost=2.0, days_ago=0),
         _row("claude-sonnet", tokens=300, cost=5.0, days_ago=1),
     ]
-    client = _fake_client_returning(rows)
-    with patch(
-        "app.services.ai.billing.token_billing.get_async_supabase_admin",
-        AsyncMock(return_value=client),
-    ):
+    with patch("app.db.session.read_scope", new=_read_scope_returning(rows)):
         s = await tb.summarize_user_usage(uuid4(), days=7)
 
     assert s.overall_total_tokens == 600
@@ -68,11 +103,7 @@ async def test_summary_aggregates_by_model_and_day():
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_summary_handles_empty_rows():
-    client = _fake_client_returning([])
-    with patch(
-        "app.services.ai.billing.token_billing.get_async_supabase_admin",
-        AsyncMock(return_value=client),
-    ):
+    with patch("app.db.session.read_scope", new=_read_scope_returning([])):
         s = await tb.summarize_user_usage(uuid4(), days=7)
     assert s.overall_total_tokens == 0
     assert s.overall_cost_points == 0.0
@@ -84,20 +115,7 @@ async def test_summary_handles_empty_rows():
 @pytest.mark.asyncio
 async def test_summary_swallows_db_error():
     """DB failure → empty summary, not crash."""
-    client = MagicMock()
-    table_q = MagicMock()
-    table_q.select.return_value = table_q
-    table_q.eq.return_value = table_q
-    table_q.gte.return_value = table_q
-    table_q.lte.return_value = table_q
-    table_q.limit.return_value = table_q
-    table_q.execute = AsyncMock(side_effect=RuntimeError("supabase down"))
-    client.table = MagicMock(return_value=table_q)
-
-    with patch(
-        "app.services.ai.billing.token_billing.get_async_supabase_admin",
-        AsyncMock(return_value=client),
-    ):
+    with patch("app.db.session.read_scope", new=_read_scope_raising()):
         s = await tb.summarize_user_usage(uuid4(), days=7)
     assert s.overall_run_count == 0
 
@@ -105,25 +123,11 @@ async def test_summary_swallows_db_error():
 # ─── reconcile_run ───────────────────────────────────────────────────
 
 
-def _ok_insert_client():
-    """Build a client whose table().insert().execute() succeeds."""
-    client = MagicMock()
-    table_q = MagicMock()
-    insert_q = MagicMock()
-    insert_q.execute = AsyncMock(return_value=MagicMock(data=[]))
-    table_q.insert = MagicMock(return_value=insert_q)
-    client.table = MagicMock(return_value=table_q)
-    return client
-
-
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_reconcile_byo_key_skips_points():
     """BYO-key runs log usage but never charge points."""
-    with patch(
-        "app.services.ai.billing.token_billing.get_async_supabase_admin",
-        AsyncMock(return_value=_ok_insert_client()),
-    ):
+    with patch("app.db.session.write_scope", new=_write_scope(ok=True)):
         result = await tb.reconcile_run(
             run_id=uuid4(),
             user_id=uuid4(),
@@ -147,10 +151,7 @@ async def test_reconcile_byo_key_skips_points():
 @pytest.mark.asyncio
 async def test_reconcile_no_team_skips_points():
     """Personal-scope run (no team_id) just logs."""
-    with patch(
-        "app.services.ai.billing.token_billing.get_async_supabase_admin",
-        AsyncMock(return_value=_ok_insert_client()),
-    ):
+    with patch("app.db.session.write_scope", new=_write_scope(ok=True)):
         result = await tb.reconcile_run(
             run_id=uuid4(),
             user_id=uuid4(),
@@ -172,10 +173,7 @@ async def test_reconcile_no_team_skips_points():
 @pytest.mark.asyncio
 async def test_reconcile_zero_cost_skips_points():
     """Free run (cost_points=0) doesn't try to charge."""
-    with patch(
-        "app.services.ai.billing.token_billing.get_async_supabase_admin",
-        AsyncMock(return_value=_ok_insert_client()),
-    ):
+    with patch("app.db.session.write_scope", new=_write_scope(ok=True)):
         result = await tb.reconcile_run(
             run_id=uuid4(),
             user_id=uuid4(),
@@ -201,10 +199,7 @@ async def test_reconcile_platform_run_calls_points_service():
     fake_ps.check_and_consume = AsyncMock(return_value=True)
 
     with (
-        patch(
-            "app.services.ai.billing.token_billing.get_async_supabase_admin",
-            AsyncMock(return_value=_ok_insert_client()),
-        ),
+        patch("app.db.session.write_scope", new=_write_scope(ok=True)),
         patch(
             "app.services.billing.points_service.PointsService", return_value=fake_ps
         ),
@@ -241,10 +236,7 @@ async def test_reconcile_points_failure_does_not_raise():
     )
 
     with (
-        patch(
-            "app.services.ai.billing.token_billing.get_async_supabase_admin",
-            AsyncMock(return_value=_ok_insert_client()),
-        ),
+        patch("app.db.session.write_scope", new=_write_scope(ok=True)),
         patch(
             "app.services.billing.points_service.PointsService", return_value=fake_ps
         ),
@@ -272,17 +264,7 @@ async def test_reconcile_points_failure_does_not_raise():
 async def test_reconcile_log_failure_still_returns():
     """ai_usage_logs insert failing → usage_logged=False, but caller still
     gets a ReconcileResult (no exception)."""
-    bad_client = MagicMock()
-    bad_table = MagicMock()
-    bad_insert = MagicMock()
-    bad_insert.execute = AsyncMock(side_effect=RuntimeError("no table"))
-    bad_table.insert = MagicMock(return_value=bad_insert)
-    bad_client.table = MagicMock(return_value=bad_table)
-
-    with patch(
-        "app.services.ai.billing.token_billing.get_async_supabase_admin",
-        AsyncMock(return_value=bad_client),
-    ):
+    with patch("app.db.session.write_scope", new=_write_scope(ok=False)):
         result = await tb.reconcile_run(
             run_id=uuid4(),
             user_id=uuid4(),

@@ -20,16 +20,24 @@ _TRANSCODE_KEY_MAP = {
 
 async def load_persisted_transcode_settings() -> None:
     try:
-        from app.db import get_async_supabase_admin
+        from sqlalchemy import select
 
-        supabase = await get_async_supabase_admin()
-        result = await (
-            supabase.table("system_settings")
-            .select("key, value")
-            .like("key", "transcode_%")
-            .execute()
-        )
-        db_map = {row["key"]: row["value"] for row in (result.data or [])}
+        from app.db.session import read_scope
+        from app.models import SystemSettings
+
+        async with read_scope() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(SystemSettings.key, SystemSettings.value).where(
+                            SystemSettings.key.like("transcode_%")
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        db_map = {row["key"]: row["value"] for row in rows}
         for db_key, settings_attr in _TRANSCODE_KEY_MAP.items():
             if db_key in db_map:
                 setattr(settings, settings_attr, db_map[db_key])

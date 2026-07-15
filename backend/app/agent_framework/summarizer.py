@@ -81,25 +81,25 @@ async def _read_provider_setting() -> str:
         return env_override
 
     try:
-        from app.db.supabase_client import get_async_supabase_admin
+        from sqlalchemy import select
 
-        client = await get_async_supabase_admin()
-        result = await (
-            client.table("system_settings")
-            .select("value")
-            .eq("key", "compaction_provider")
-            .limit(1)
-            .execute()
-        )
-        rows = result.data or []
-        if rows:
-            # We only honor string values; admin who stores a JSON object /
-            # bool here will silently fall through to the default. Keeps
-            # the failure mode "use the safe default" rather than "crash
-            # the agent loop" if a future migration changes value type.
-            value = rows[0].get("value")
-            if isinstance(value, str) and value.strip():
-                return value.strip()
+        from app.db.session import read_scope
+        from app.models import SystemSettings
+
+        async with read_scope() as session:
+            value = (
+                await session.execute(
+                    select(SystemSettings.value)
+                    .where(SystemSettings.key == "compaction_provider")
+                    .limit(1)
+                )
+            ).scalar()
+        # We only honor string values; admin who stores a JSON object /
+        # bool here will silently fall through to the default. Keeps
+        # the failure mode "use the safe default" rather than "crash
+        # the agent loop" if a future migration changes value type.
+        if isinstance(value, str) and value.strip():
+            return value.strip()
     except Exception as exc:
         logger.warning(
             "[summarizer] failed to read compaction_provider from "

@@ -1,11 +1,13 @@
 """Semantic search service using vector embeddings (async optimized)."""
 
+import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
+from sqlalchemy import text
 
-from app.db.supabase_client import get_async_supabase_admin
+from app.db.session import read_scope
 from app.repositories.analysis_repository import get_analysis_repository
 from app.services.ai.providers.embedding_service import EmbeddingService
 
@@ -43,10 +45,6 @@ class SearchService:
         self.embedding_service = EmbeddingService()
         self.analysis_repo = get_analysis_repository()
 
-    async def _get_client(self):
-        """Get async client (loop-aware, safe for Celery workers)."""
-        return await get_async_supabase_admin()
-
     async def search_user_media_text(
         self,
         user_id: str,
@@ -74,21 +72,33 @@ class SearchService:
         participate (title / description / author / hashtags / transcript /
         notes / tags / analysis).
         """
-        client = await self._get_client()
-        result = await client.rpc(
-            "rpc_user_media_text_search",
-            {
-                "p_user_id": str(user_id),
-                "p_pattern": pattern,
-                "p_fields": fields,
-                "p_author": author,
-                "p_date_from": date_from,
-                "p_date_to": date_to,
-                "p_tag_ids": [str(t) for t in tag_ids] if tag_ids else None,
-                "p_limit": limit,
-            },
-        ).execute()
-        payload = result.data or {}
+        # p_date_from / p_date_to are TEXT params in the RPC (migration 274),
+        # so date strings pass through as-is — no timestamptz coercion. The
+        # function returns a single jsonb object ({"rows": [...]}); asyncpg
+        # may hand jsonb back as a str, so json.loads defensively.
+        async with read_scope() as session:
+            raw = (
+                await session.execute(
+                    text(
+                        "SELECT public.rpc_user_media_text_search("
+                        "CAST(:p_user_id AS uuid), :p_pattern, "
+                        "CAST(:p_fields AS text[]), :p_author, "
+                        ":p_date_from, :p_date_to, "
+                        "CAST(:p_tag_ids AS text[]), :p_limit)"
+                    ),
+                    {
+                        "p_user_id": str(user_id),
+                        "p_pattern": pattern,
+                        "p_fields": fields,
+                        "p_author": author,
+                        "p_date_from": date_from,
+                        "p_date_to": date_to,
+                        "p_tag_ids": [str(t) for t in tag_ids] if tag_ids else None,
+                        "p_limit": limit,
+                    },
+                )
+            ).scalar()
+        payload = json.loads(raw) if isinstance(raw, str) else (raw or {})
         return payload.get("rows") or []
 
     async def user_owned_platform_ids(
@@ -103,15 +113,22 @@ class SearchService:
         """
         if not platform_ids:
             return []
-        client = await self._get_client()
-        result = await client.rpc(
-            "rpc_user_owned_platform_ids",
-            {
-                "p_user_id": str(user_id),
-                "p_platform_ids": [str(p) for p in platform_ids],
-            },
-        ).execute()
-        return list(result.data or [])
+        # Returns a jsonb array; asyncpg may return it as a str → json.loads.
+        async with read_scope() as session:
+            raw = (
+                await session.execute(
+                    text(
+                        "SELECT public.rpc_user_owned_platform_ids("
+                        "CAST(:p_user_id AS uuid), CAST(:p_platform_ids AS text[]))"
+                    ),
+                    {
+                        "p_user_id": str(user_id),
+                        "p_platform_ids": [str(p) for p in platform_ids],
+                    },
+                )
+            ).scalar()
+        data = json.loads(raw) if isinstance(raw, str) else raw
+        return list(data or [])
 
     async def semantic_search(
         self,

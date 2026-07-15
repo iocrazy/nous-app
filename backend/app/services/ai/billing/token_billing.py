@@ -32,8 +32,6 @@ from uuid import UUID
 
 from loguru import logger
 
-from app.db.supabase_client import get_async_supabase_admin
-
 
 @dataclass(frozen=True)
 class UsageSummaryRow:
@@ -88,18 +86,45 @@ async def summarize_user_usage(
     end = end or datetime.now(timezone.utc)
     start = start or (end - timedelta(days=days))
 
-    client = await get_async_supabase_admin()
     try:
-        result = (
-            await client.table("ai_usage_logs")
-            .select("model,total_tokens,cost_points,created_at")
-            .eq("user_id", str(user_id))
-            .gte("created_at", start.isoformat())
-            .lte("created_at", end.isoformat())
-            .limit(20000)
-            .execute()
-        )
-        rows = result.data or []
+        from sqlalchemy import select
+
+        from app.db.session import read_scope
+        from app.models import AiUsageLogs
+
+        # Bind native tz-aware datetimes for the timestamptz range (asyncpg
+        # is strict — no ISO strings). created_at is serialized back to an ISO
+        # string below because the day-bucket consumer slices it as ``[:10]``.
+        async with read_scope() as session:
+            raw_rows = (
+                (
+                    await session.execute(
+                        select(
+                            AiUsageLogs.model,
+                            AiUsageLogs.total_tokens,
+                            AiUsageLogs.cost_points,
+                            AiUsageLogs.created_at,
+                        )
+                        .where(AiUsageLogs.user_id == str(user_id))
+                        .where(AiUsageLogs.created_at >= start)
+                        .where(AiUsageLogs.created_at <= end)
+                        .limit(20000)
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        rows = [
+            {
+                "model": r["model"],
+                "total_tokens": r["total_tokens"],
+                "cost_points": r["cost_points"],
+                "created_at": (
+                    r["created_at"].isoformat() if r["created_at"] else None
+                ),
+            }
+            for r in raw_rows
+        ]
     except Exception as exc:
         logger.warning(f"[token_billing] summarize failed: {exc}")
         rows = []
@@ -206,29 +231,34 @@ async def reconcile_run(
     this exactly once per run. Repeated calls would double-charge.
     """
     total_tokens = prompt_tokens + completion_tokens
-    client = await get_async_supabase_admin()
 
     # 1. Audit row
     try:
-        await (
-            client.table("ai_usage_logs")
-            .insert(
-                {
-                    "user_id": str(user_id),
-                    "team_id": team_id,
-                    "project_id": project_id,
-                    "session_id": str(session_id) if session_id else None,
-                    "agent_id": str(agent_id) if agent_id else None,
-                    "action": action,
-                    "model": model,
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": completion_tokens,
-                    "total_tokens": total_tokens,
-                    "cost_points": cost_points,
-                }
+        from sqlalchemy import insert
+
+        from app.db.session import write_scope
+        from app.models import AiUsageLogs
+
+        # total_tokens is a GENERATED ALWAYS column (prompt + completion) — the
+        # DB computes it, so it must NOT be in the insert values. cost_points is
+        # DECIMAL → bind a Decimal (asyncpg is strict on numeric).
+        async with write_scope() as session:
+            await session.execute(
+                insert(AiUsageLogs).values(
+                    {
+                        "user_id": str(user_id),
+                        "team_id": team_id,
+                        "project_id": project_id,
+                        "session_id": str(session_id) if session_id else None,
+                        "agent_id": str(agent_id) if agent_id else None,
+                        "action": action,
+                        "model": model,
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "cost_points": Decimal(str(cost_points)),
+                    }
+                )
             )
-            .execute()
-        )
         usage_logged = True
     except Exception as exc:
         logger.warning(f"[token_billing] ai_usage_logs insert failed: {exc}")
