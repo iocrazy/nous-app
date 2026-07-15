@@ -211,38 +211,5 @@ export async function deleteIssue(issueId: number): Promise<void> {
   await _json<void>(res);
 }
 
-// ── UI helpers ─────────────────────────────────────────────────────
-
-export const STATUS_LABEL: Record<IssueStatus, string> = {
-  backlog: 'Backlog',
-  todo: 'Todo',
-  in_progress: 'In Progress',
-  in_review: 'In Review',
-  blocked: 'Blocked',
-  done: 'Done',
-  cancelled: 'Cancelled',
-};
-
-export const PRIORITY_LABEL: Record<IssuePriority, string> = {
-  critical: 'Critical',
-  high: 'High',
-  medium: 'Medium',
-  low: 'Low',
-};
-
-export const STATUS_ORDER: IssueStatus[] = [
-  'backlog',
-  'todo',
-  'in_progress',
-  'in_review',
-  'blocked',
-  'done',
-  'cancelled',
-];
-
-export const PRIORITY_ORDER: IssuePriority[] = [
-  'critical',
-  'high',
-  'medium',
-  'low',
-];
+// UI label/order/color maps live in components/Todolist/issueConfig.ts
+// (single source of truth). The service layer stays presentation-free.
