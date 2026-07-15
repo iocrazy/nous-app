@@ -20,6 +20,7 @@ from __future__ import annotations
 import datetime
 import uuid
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -28,16 +29,121 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    Numeric,
     PrimaryKeyConstraint,
     SmallInteger,
     Text,
     Uuid,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.orm_base import Base
+
+
+class TopicGroups(Base):
+    """A cluster of related hotspots (mig 304 + 323 source_labels). Referenced
+    by hotspots.topic_group_id; the feed embeds ``source_count`` /
+    ``source_labels`` from here."""
+
+    __tablename__ = "topic_groups"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="topic_groups_pkey"),
+        Index("idx_topic_groups_user", "user_id"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_snowflake_id()"),
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    source_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("1")
+    )
+    heat: Mapped[float] = mapped_column(
+        Numeric, nullable=False, server_default=text("0")
+    )
+    first_seen: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+    last_seen: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(1536))
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+    source_labels: Mapped[list] = mapped_column(
+        ARRAY(Text), nullable=False, server_default=text("'{}'::text[]")
+    )
+
+
+class Hotspots(Base):
+    """A single topic-inspiration hotspot (mig 304 + 308 heat + 313 embedding +
+    318 score_dims). ``user_id`` NULL = global (Phase 1)."""
+
+    __tablename__ = "hotspots"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["source_id"],
+            ["public.signal_sources.id"],
+            ondelete="SET NULL",
+            name="hotspots_source_id_fkey",
+        ),
+        ForeignKeyConstraint(
+            ["topic_group_id"],
+            ["public.topic_groups.id"],
+            ondelete="SET NULL",
+            name="hotspots_topic_group_id_fkey",
+        ),
+        PrimaryKeyConstraint("id", name="hotspots_pkey"),
+        Index("idx_hotspots_dedup", "dedup_key", unique=True),
+        Index("idx_hotspots_captured", "captured_at"),
+        Index("idx_hotspots_heat", "heat"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_snowflake_id()"),
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    source_id: Mapped[int | None] = mapped_column(BigInteger)
+    source_label: Mapped[str | None] = mapped_column(Text)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    url: Mapped[str | None] = mapped_column(Text)
+    origin_url: Mapped[str | None] = mapped_column(Text)
+    content_original: Mapped[str | None] = mapped_column(Text)
+    content_translated: Mapped[str | None] = mapped_column(Text)
+    summary: Mapped[str | None] = mapped_column(Text)
+    ai_summary: Mapped[str | None] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text)
+    score: Mapped[float | None] = mapped_column(Numeric)
+    tags: Mapped[list] = mapped_column(
+        ARRAY(Text), nullable=False, server_default=text("'{}'::text[]")
+    )
+    category: Mapped[str | None] = mapped_column(Text)
+    topic_group_id: Mapped[int | None] = mapped_column(BigInteger)
+    media_url: Mapped[str | None] = mapped_column(Text)
+    cover_url: Mapped[str | None] = mapped_column(Text)
+    captured_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+    rank_timeline: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    dedup_key: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+    heat: Mapped[float | None] = mapped_column(Numeric)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(2048))
+    score_dims: Mapped[dict | None] = mapped_column(JSONB)
 
 
 class SignalSources(Base):
