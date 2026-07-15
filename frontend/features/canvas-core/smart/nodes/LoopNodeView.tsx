@@ -38,7 +38,7 @@ export function LoopNodeView({ id, data, selected }: NodeProps) {
   const patchPrompt = (index: number, value: string) =>
     patch({ prompts: safePrompts.map((p, i) => (i === index ? value : p)) });
   const insertCounter = (index: number) =>
-    patch({ prompts: safePrompts.map((p, i) => (i === index ? `${p}《计数》` : p)) });
+    patch({ prompts: safePrompts.map((p, i) => (i === index ? `${p}{{计数}}` : p)) });
 
   return (
     <div

@@ -451,7 +451,7 @@ describe('LoopNodeView IC card', () => {
     expect(screen.queryByText('canvas.loopImageEmpty')).toBeNull();
   });
 
-  it('inserts the literal 《计数》 counter token into the last prompt', () => {
+  it('inserts the {{计数}} counter placeholder into the last prompt', () => {
     seedNode('l1', 'loop', FULL);
     render(
       <Wrap>
@@ -459,7 +459,7 @@ describe('LoopNodeView IC card', () => {
       </Wrap>,
     );
     fireEvent.click(screen.getByLabelText('Insert count token'));
-    expect((nodeData().prompts as string[])[0]).toBe('《计数》');
+    expect((nodeData().prompts as string[])[0]).toBe('{{计数}}');
   });
 });
 

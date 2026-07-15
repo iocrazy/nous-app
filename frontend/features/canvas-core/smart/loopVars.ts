@@ -28,10 +28,16 @@ export function injectLoopVariables(
   ctx: { index: number; total: number },
 ): string {
   return String(text ?? '')
+    // {{…}} is the canonical placeholder (Mustache/Handlebars style); the
+    // 《…》/[…] forms are kept for backward compatibility with prompts saved
+    // before the switch.
+    .replaceAll('{{计数}}', String(ctx.index))
     .replaceAll('《计数》', String(ctx.index))
     .replaceAll('[计数]', String(ctx.index))
+    .replaceAll('{{总数}}', String(ctx.total))
     .replaceAll('《总数》', String(ctx.total))
     .replaceAll('[总数]', String(ctx.total))
+    .replaceAll('{{进度}}', `${ctx.index}/${ctx.total}`)
     .replaceAll('《进度》', `${ctx.index}/${ctx.total}`)
     .replaceAll('[进度]', `${ctx.index}/${ctx.total}`)
     .trim();
