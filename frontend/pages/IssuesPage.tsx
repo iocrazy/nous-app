@@ -16,10 +16,6 @@ import { useNavigate, useParams } from 'react-router-dom';
 import {
   Issue,
   IssueStatus,
-  PRIORITY_LABEL,
-  PRIORITY_ORDER,
-  STATUS_LABEL,
-  STATUS_ORDER,
   createIssue,
   deleteIssue,
   dispatchIssue,
@@ -27,18 +23,20 @@ import {
   listIssues,
   transitionIssueStatus,
 } from '../services/issuesService';
+import {
+  PRIORITY_LABEL, PRIORITY_ORDER, STATUS_LABEL, STATUS_ORDER,
+} from '../components/Todolist/issueConfig';
 import { useDbosWorkflowStatus } from '../hooks/useDbosWorkflowStatus';
 import { UiSelect } from '../components/ui';
 
 // Tinted status chips — low-alpha semantic hues that read on both themes.
-// Hue meaning matches the canonical text-only scheme in
-// components/Todolist/IssueStatusIcon.tsx (todo=blue, in_progress=amber,
-// in_review=purple, blocked=rose, done=emerald, backlog/cancelled=neutral).
+// Hue meaning matches the canonical text-only scheme in issueConfig.
 const STATUS_COLOR: Record<IssueStatus, string> = {
   backlog: 'bg-ink-700/60 text-ink-300',
   todo: 'bg-blue-500/15 text-blue-300 border border-blue-500/30',
   in_progress: 'bg-amber-500/15 text-amber-300 border border-amber-500/30',
   in_review: 'bg-purple-500/15 text-purple-300 border border-purple-500/30',
+  needs_followup: 'bg-orange-500/15 text-orange-300 border border-orange-500/30',
   blocked: 'bg-rose-500/15 text-rose-300 border border-rose-500/30',
   done: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30',
   cancelled: 'bg-ink-700/60 text-ink-400',

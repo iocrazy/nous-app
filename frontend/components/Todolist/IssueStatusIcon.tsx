@@ -1,71 +1,111 @@
 /**
- * Paperclip-style status & priority icons (A8). Aligns with mediahub's
- * issues table enums (services/issuesService.ts).
+ * Issue status & priority icons — progress-pie glyphs that encode workflow
+ * position (backlog → done), replacing the earlier generic lucide circles
+ * where in_progress and in_review were indistinguishable.
  *
- * Status: backlog / todo / in_progress / in_review / blocked / done / cancelled
- * Priority: critical / high / medium / low
+ * All labels/orders/colors live in ./issueConfig (single source of truth);
+ * this module re-exports them so existing imports keep working and owns only
+ * the SVG rendering.
  */
 
 import React from 'react';
-import { Circle, CircleDashed, AlertCircle, CircleDot, CheckCircle2, MinusCircle, XCircle, HelpCircle } from 'lucide-react';
 import type { IssueStatus, IssuePriority } from '../../services/issuesService';
+import { STATUS_CONFIG, PRIORITY_CONFIG, type StatusGlyph } from './issueConfig';
 
-export const STATUS_ORDER: IssueStatus[] = [
-  'backlog', 'todo', 'in_progress', 'in_review', 'needs_followup', 'blocked', 'done', 'cancelled',
-];
+export {
+  STATUS_ORDER, STATUS_LABEL, STATUS_COLOR, STATUS_CONFIG,
+  PRIORITY_LABEL, PRIORITY_ORDER, PRIORITY_CONFIG,
+} from './issueConfig';
 
-export const STATUS_LABEL: Record<IssueStatus, string> = {
-  backlog: 'Backlog',
-  todo: 'Todo',
-  in_progress: 'In Progress',
-  in_review: 'In Review',
-  needs_followup: 'Needs Follow-up',
-  blocked: 'Blocked',
-  done: 'Done',
-  cancelled: 'Cancelled',
-};
-
-export const STATUS_COLOR: Record<IssueStatus, string> = {
-  backlog: 'text-ink-500',
-  todo: 'text-blue-400',
-  in_progress: 'text-amber-400',
-  in_review: 'text-purple-400',
-  needs_followup: 'text-orange-400',
-  blocked: 'text-rose-400',
-  done: 'text-emerald-500',
-  cancelled: 'text-ink-500',
-};
+/** Draw the pie glyph for a status. Uses currentColor so the wrapping
+ *  className (status iconColor) tints it; the done tick punches through with
+ *  the island background token for contrast on the filled disc. */
+function Glyph({ glyph, size }: { glyph: StatusGlyph; size: number }) {
+  const common = { width: size, height: size, viewBox: '0 0 16 16' as const };
+  switch (glyph) {
+    case 'dashed':
+      return (
+        <svg {...common} fill="none" stroke="currentColor" strokeWidth={1.7}>
+          <circle cx="8" cy="8" r="5.6" strokeDasharray="2.4 2.6" />
+        </svg>
+      );
+    case 'circle':
+      return (
+        <svg {...common} fill="none" stroke="currentColor" strokeWidth={1.7}>
+          <circle cx="8" cy="8" r="5.6" />
+        </svg>
+      );
+    case 'half':
+      return (
+        <svg {...common}>
+          <circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" strokeWidth={1.7} />
+          <path d="M8 4.6a3.4 3.4 0 0 1 0 6.8z" fill="currentColor" />
+        </svg>
+      );
+    case 'threeQuarter':
+      return (
+        <svg {...common}>
+          <circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" strokeWidth={1.7} />
+          <path d="M8 4.6a3.4 3.4 0 1 1-3.4 3.4H8z" fill="currentColor" />
+        </svg>
+      );
+    case 'dot':
+      return (
+        <svg {...common}>
+          <circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" strokeWidth={1.7} />
+          <circle cx="8" cy="8" r="2" fill="currentColor" />
+        </svg>
+      );
+    case 'alert':
+      return (
+        <svg {...common} fill="none" stroke="currentColor" strokeWidth={1.7}>
+          <circle cx="8" cy="8" r="5.6" />
+          <path d="M8 5.2v3.2M8 10.8h.01" strokeLinecap="round" />
+        </svg>
+      );
+    case 'check':
+      return (
+        <svg {...common}>
+          <circle cx="8" cy="8" r="6.2" fill="currentColor" />
+          <path d="m5.4 8.2 1.8 1.8 3.4-3.8" fill="none" stroke="var(--island)" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    case 'cancel':
+      return (
+        <svg {...common} fill="none" stroke="currentColor" strokeWidth={1.7}>
+          <circle cx="8" cy="8" r="5.6" />
+          <path d="M5.4 8h5.2" strokeLinecap="round" />
+        </svg>
+      );
+  }
+}
 
 export const IssueStatusIcon: React.FC<{ status: IssueStatus; size?: number }> = ({ status, size = 14 }) => {
-  const cls = STATUS_COLOR[status];
-  switch (status) {
-    case 'backlog':        return <CircleDashed size={size} className={cls} />;
-    case 'todo':           return <Circle size={size} className={cls} />;
-    case 'in_progress':    return <CircleDot size={size} className={cls} />;
-    case 'in_review':      return <CircleDot size={size} className={cls} />;
-    case 'needs_followup': return <HelpCircle size={size} className={cls} />;
-    case 'blocked':        return <AlertCircle size={size} className={cls} />;
-    case 'done':           return <CheckCircle2 size={size} className={cls} />;
-    case 'cancelled':      return <MinusCircle size={size} className={cls} />;
-    default:               return <XCircle size={size} className="text-ink-500" />;
-  }
+  const meta = STATUS_CONFIG[status];
+  return (
+    <span className={meta.iconColor} style={{ display: 'inline-flex' }}>
+      <Glyph glyph={meta.glyph} size={size} />
+    </span>
+  );
 };
 
-export const PRIORITY_LABEL: Record<IssuePriority, string> = {
-  critical: 'Critical',
-  high: 'High',
-  medium: 'Medium',
-  low: 'Low',
-};
-
-export const PRIORITY_ORDER: IssuePriority[] = ['critical', 'high', 'medium', 'low'];
-
-export const PriorityIcon: React.FC<{ priority: IssuePriority }> = ({ priority }) => {
-  switch (priority) {
-    case 'critical': return <span className="text-rose-400 font-bold text-[11px]" title="Critical">⚠</span>;
-    case 'high':     return <span className="text-orange-400 font-bold text-[11px]" title="High">↑</span>;
-    case 'medium':   return <span className="text-ink-400 text-[11px]" title="Medium">—</span>;
-    case 'low':      return <span className="text-ink-500 text-[11px]" title="Low">↓</span>;
-    default:         return <span className="text-ink-700 text-[11px]">—</span>;
+/** Priority signal — three ascending bars, or an urgent badge for critical.
+ *  bars 1–3 light the low→high columns; bars 4 (critical) renders the badge. */
+export const PriorityIcon: React.FC<{ priority: IssuePriority; size?: number }> = ({ priority, size = 13 }) => {
+  const { bars, color, label } = PRIORITY_CONFIG[priority];
+  if (bars >= 4) {
+    return (
+      <svg width={size} height={size} viewBox="0 0 12 12" className={color} aria-label={label}>
+        <rect x="1" y="1" width="10" height="10" rx="2.5" fill="currentColor" />
+        <path d="M6 3.4v3.4M6 8.9h.01" stroke="var(--island)" strokeWidth={1.5} strokeLinecap="round" />
+      </svg>
+    );
   }
+  return (
+    <svg width={size} height={size} viewBox="0 0 12 12" fill="currentColor" className={color} aria-label={label}>
+      <rect x="1" y="7" width="2.4" height="4" rx="0.7" />
+      <rect x="4.8" y="4.5" width="2.4" height="6.5" rx="0.7" opacity={bars >= 2 ? 1 : 0.28} />
+      <rect x="8.6" y="2" width="2.4" height="9" rx="0.7" opacity={bars >= 3 ? 1 : 0.28} />
+    </svg>
+  );
 };
