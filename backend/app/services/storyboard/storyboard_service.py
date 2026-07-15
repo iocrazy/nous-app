@@ -892,25 +892,16 @@ class StoryboardService:
         """
         Fetch a single asset by ID.
 
+        Delegates to the ORM-backed repo read (this used to reach into the
+        repo's raw supabase-py client — the last such reach-in, retired).
+
         Args:
             asset_id: Snowflake ID of the asset.
 
         Returns:
             Asset row dict, or None if not found.
         """
-        try:
-            client = await self.asset_repo._get_client()
-            result = (
-                await client.table("storyboard_assets")
-                .select("*")
-                .eq("id", asset_id)
-                .limit(1)
-                .execute()
-            )
-            return result.data[0] if result.data else None
-        except Exception as exc:
-            logger.error(f"Failed to get asset {asset_id}: {exc}")
-            return None
+        return await self.asset_repo.get_by_id(asset_id)
 
 
 # ---------------------------------------------------------------------------
