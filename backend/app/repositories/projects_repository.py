@@ -318,8 +318,12 @@ class ProjectsRepository:
     async def _get_client(self):
         """Get async supabase client (loop-aware, safe for Celery workers).
 
-        Retained for the conscious-keep methods only (auth-admin +
-        review_comments) — see the module docstring."""
+        THE ONE deliberate supabase-py remnant in the repositories layer
+        (ORM-migration exception bucket): ``enrich_members_with_email`` /
+        ``get_user_email`` call the GoTrue **auth admin** API
+        (``client.auth.admin.*``) against Supabase-managed ``auth.users`` —
+        an HTTP auth API, not a PostgREST data path, so it has no SQLAlchemy
+        successor by design. Do NOT add ``.table()`` data calls here."""
         return await get_async_supabase_admin()
 
     # ------------------------------------------------------------------ #

@@ -62,6 +62,11 @@ from app.models.billing import (  # noqa: F401
 from app.models.generated_media import (  # noqa: F401
     GeneratedMedia,
 )
+from app.models.inspiration import (  # noqa: F401
+    InspirationApiTokens,
+    InspirationAttachments,
+    InspirationNotes,
+)
 from app.models.library import (  # noqa: F401
     Authors,
     Collections,
@@ -102,6 +107,10 @@ from app.models.ops import (  # noqa: F401
     SystemSettings,
     SystemStatus,
     TaskTracking,
+)
+from app.models.project_library import (  # noqa: F401
+    ProjectCharacters,
+    ProjectLibEntities,
 )
 from app.models.reviews import (  # noqa: F401
     IssueMessages,
@@ -153,6 +162,13 @@ from app.models.teams import (  # noqa: F401
     TeamPlans,
     TeamQuotas,
     Teams,
+)
+from app.models.topics import (  # noqa: F401
+    Hotspots,
+    HotspotUserState,
+    SignalSources,
+    TopicGroups,
+    UserHiddenSources,
 )
 from app.models.users import (  # noqa: F401
     UserCookies,
@@ -290,6 +306,19 @@ __all__ = [
     "TeamPlans",
     "TeamQuotas",
     "Teams",
+    # inspiration notes domain
+    "InspirationApiTokens",
+    "InspirationAttachments",
+    "InspirationNotes",
+    # project authored library
+    "ProjectCharacters",
+    "ProjectLibEntities",
+    # topics / signal feed
+    "Hotspots",
+    "HotspotUserState",
+    "SignalSources",
+    "TopicGroups",
+    "UserHiddenSources",
     # users
     "UserCookies",
     "UserMcpServers",

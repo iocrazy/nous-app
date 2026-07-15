@@ -1,55 +1,68 @@
 """Data access for the project character library (mig 357).
 
-Snowflake BIGINT ids ride as strings at the API boundary (bigIntSafeFetch
-discipline); everything here passes ids through ``str()`` on the way out.
+ORM-backed (read_scope/write_scope). Snowflake BIGINT ids ride as strings at
+the API boundary (bigIntSafeFetch discipline); ``_serialize`` renders ``id`` /
+``project_id`` as str and timestamps as ISO strings, matching what the old
+PostgREST path returned. ``ProjectCharacters`` carries no scope mixin —
+ownership is scoped by the explicit ``project_id`` predicate in every method
+(service-role/RLS-bypass model), so the choke point stays inert.
 """
 
 from __future__ import annotations
 
+import datetime
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from app.db.supabase_client import get_async_supabase_admin
+from app.db.session import read_scope, write_scope
+from app.models import ProjectCharacters
+
+
+def _row_dict(obj: ProjectCharacters) -> Dict[str, Any]:
+    """Flatten an ORM row to a plain column→value dict."""
+    return {col.name: getattr(obj, col.name) for col in obj.__table__.columns}
 
 
 def _serialize(row: Dict[str, Any]) -> Dict[str, Any]:
-    """BIGINT ids → str so JS never sees a >2^53 number."""
-    out = dict(row)
-    for key in ("id", "project_id"):
-        if out.get(key) is not None:
-            out[key] = str(out[key])
+    """REST-shaped dict: BIGINT ids → str, datetime → ISO str, so the value
+    types match the PostgREST baseline the frontend expects. ``tags`` (jsonb)
+    stays a native dict as PostgREST returned it."""
+    out: Dict[str, Any] = {}
+    for key, val in row.items():
+        if key in ("id", "project_id") and val is not None:
+            out[key] = str(val)
+        elif isinstance(val, datetime.datetime):
+            out[key] = val.isoformat()
+        else:
+            out[key] = val
     return out
 
 
 class ProjectCharacterRepository:
     TABLE = "project_characters"
 
-    async def _client(self):
-        return await get_async_supabase_admin()
-
     async def list_by_project(self, project_id: str) -> List[Dict[str, Any]]:
-        client = await self._client()
-        result = (
-            await client.table(self.TABLE)
-            .select("*")
-            .eq("project_id", project_id)
-            .order("sort_order")
-            .order("created_at")
-            .execute()
-        )
-        return [_serialize(r) for r in (result.data or [])]
+        async with read_scope() as session:
+            result = await session.execute(
+                select(ProjectCharacters)
+                .where(ProjectCharacters.project_id == int(project_id))
+                .order_by(
+                    ProjectCharacters.sort_order,
+                    ProjectCharacters.created_at,
+                )
+            )
+            return [_serialize(_row_dict(o)) for o in result.scalars().all()]
 
     async def create(self, project_id: str, fields: Dict[str, Any]) -> Dict[str, Any]:
-        client = await self._client()
-        result = (
-            await client.table(self.TABLE)
-            .insert({**fields, "project_id": project_id})
-            .execute()
-        )
-        if not result.data:
-            raise RuntimeError("project character insert returned no row")
-        return _serialize(result.data[0])
+        async with write_scope() as session:
+            obj = ProjectCharacters(**fields, project_id=int(project_id))
+            session.add(obj)
+            await session.flush()
+            await session.refresh(obj)  # load server defaults (id, created_at, …)
+            return _serialize(_row_dict(obj))
 
     async def update(
         self, project_id: str, character_id: str, fields: Dict[str, Any]
@@ -57,26 +70,49 @@ class ProjectCharacterRepository:
         """Patch one character; None when the row isn't in this project."""
         if not fields:
             return await self._get(project_id, character_id)
-        client = await self._client()
-        result = (
-            await client.table(self.TABLE)
-            .update(fields)
-            .eq("id", character_id)
-            .eq("project_id", project_id)
-            .execute()
-        )
-        return _serialize(result.data[0]) if result.data else None
+        async with write_scope() as session:
+            obj = (
+                (
+                    await session.execute(
+                        select(ProjectCharacters)
+                        .where(
+                            ProjectCharacters.id == int(character_id),
+                            ProjectCharacters.project_id == int(project_id),
+                        )
+                        .limit(1)
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if obj is None:
+                return None
+            for key, value in fields.items():
+                setattr(obj, key, value)
+            await session.flush()
+            await session.refresh(obj)
+            return _serialize(_row_dict(obj))
 
     async def delete(self, project_id: str, character_id: str) -> bool:
-        client = await self._client()
-        result = (
-            await client.table(self.TABLE)
-            .delete()
-            .eq("id", character_id)
-            .eq("project_id", project_id)
-            .execute()
-        )
-        return bool(result.data)
+        async with write_scope() as session:
+            obj = (
+                (
+                    await session.execute(
+                        select(ProjectCharacters)
+                        .where(
+                            ProjectCharacters.id == int(character_id),
+                            ProjectCharacters.project_id == int(project_id),
+                        )
+                        .limit(1)
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if obj is None:
+                return False
+            await session.delete(obj)
+            return True
 
     async def upsert_by_name(
         self, project_id: str, names: List[str]
@@ -84,22 +120,29 @@ class ProjectCharacterRepository:
         """Extract-from-script: materialize derived character names as rows.
 
         Idempotent on (project_id, name) — existing rows (including manually
-        edited ones) are left untouched (ignore_duplicates), so re-running
+        edited ones) are left untouched (ON CONFLICT DO NOTHING), so re-running
         Extract never clobbers curation.
         """
         cleaned = [n.strip() for n in names if n and n.strip()]
         if not cleaned:
             return []
-        client = await self._client()
         try:
-            await client.table(self.TABLE).upsert(
-                [
-                    {"project_id": project_id, "name": name, "source": "script"}
-                    for name in cleaned
-                ],
-                on_conflict="project_id,name",
-                ignore_duplicates=True,
-            ).execute()
+            stmt = (
+                pg_insert(ProjectCharacters)
+                .values(
+                    [
+                        {
+                            "project_id": int(project_id),
+                            "name": name,
+                            "source": "script",
+                        }
+                        for name in cleaned
+                    ]
+                )
+                .on_conflict_do_nothing(index_elements=["project_id", "name"])
+            )
+            async with write_scope() as session:
+                await session.execute(stmt)
         except Exception as e:  # noqa: BLE001
             logger.error(f"character extract upsert failed for {project_id}: {e}")
             raise
@@ -108,15 +151,22 @@ class ProjectCharacterRepository:
     async def _get(
         self, project_id: str, character_id: str
     ) -> Optional[Dict[str, Any]]:
-        client = await self._client()
-        result = (
-            await client.table(self.TABLE)
-            .select("*")
-            .eq("id", character_id)
-            .eq("project_id", project_id)
-            .execute()
-        )
-        return _serialize(result.data[0]) if result.data else None
+        async with read_scope() as session:
+            obj = (
+                (
+                    await session.execute(
+                        select(ProjectCharacters)
+                        .where(
+                            ProjectCharacters.id == int(character_id),
+                            ProjectCharacters.project_id == int(project_id),
+                        )
+                        .limit(1)
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            return _serialize(_row_dict(obj)) if obj else None
 
 
 def get_project_character_repository() -> ProjectCharacterRepository:

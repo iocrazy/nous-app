@@ -10,7 +10,7 @@
  */
 import { useRef, useState } from 'react';
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { render, cleanup, waitFor, fireEvent } from '@testing-library/react';
+import { render, cleanup, waitFor, fireEvent, screen, within } from '@testing-library/react';
 import type { ElementOp, SceneDoc } from '../types';
 
 vi.mock('react-i18next', () => ({
@@ -136,6 +136,19 @@ describe('TipTap M2 — same-scene element drag', () => {
     expect(handles).toHaveLength(3);
     expect(handles[0].querySelectorAll('.mh-el-dot')).toHaveLength(4);
     expect(handles[0]).toHaveAttribute('draggable', 'true');
+  });
+
+  it('right-clicking a row opens a context menu that deletes THAT block', async () => {
+    await mountTiptap(threeElements());
+    fireEvent.contextMenu(rowOf('el_b'), { clientX: 10, clientY: 10 });
+    const menu = screen.getByRole('menu');
+    expect(within(menu).getByText('editor.ctxDeleteBlock')).toBeInTheDocument();
+
+    fireEvent.click(within(menu).getByText('editor.ctxDeleteBlock'));
+    expect(sync.dispatch).toHaveBeenCalledWith(
+      [{ op: 'delete', element_id: 'el_b' }],
+      expect.anything(),
+    );
   });
 
   it('dragging C onto A\'s top edge dispatches EXACTLY ONE move op { before_id: A } (golden law)', async () => {

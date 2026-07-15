@@ -15,7 +15,8 @@ overrode 12 data-access methods and inherited the 9 wrapper methods
 12 ORM bodies onto this class directly; the 9 wrappers still call
 ``self.get_by_platform_id`` / ``self.update`` and now resolve to the ORM
 overrides on THIS class (no MRO indirection, identical behaviour). The two
-owner-map helpers stay on the legacy supabase-py client (conscious-keep).
+owner-map helpers are ORM reads too (the last supabase-py stragglers,
+migrated in the ORM warm-up pass) — this repo is 100% ORM.
 
 THE P0 FIX (preserved): ``update`` commits via ``write_scope()`` (which does
 ``session.begin()``), fixing the silent-rollback the asyncpg
@@ -36,6 +37,7 @@ Fidelity contract (invisible swap):
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -46,8 +48,8 @@ from sqlalchemy import func, insert, or_, select, update
 from app.core.enums import DownloadStatus
 from app.db.pg_coerce import coerce_datetime_strings
 from app.db.repository_base import AsyncpgRepository
+from app.db.scope import is_enforced, system_request_scope
 from app.db.session import read_scope, write_scope
-from app.db.supabase_client import get_async_supabase_admin
 from app.models import ParsedMedia, Resources
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict, _plain
 
@@ -137,8 +139,9 @@ class MediaRepository(AsyncpgRepository):
     The 12 data-access methods run on the ORM session scopes. The 9 wrapper
     methods (check_* / mark_* / get_music_data) call ``self.get_by_platform_id``
     / ``self.update`` and resolve to the ORM methods on this class. The two
-    owner-map helpers are conscious-kept legacy supabase-py bodies — they still
-    use ``self._get_client()``. ``_bigint`` comes from ``AsyncpgRepository``."""
+    owner-map helpers are ORM reads on ``resources`` (see their docstrings for
+    the enforcement-gated scope wrap). ``_bigint`` comes from
+    ``AsyncpgRepository``."""
 
     TABLE = "parsed_media"
     TABLE_NAME = "parsed_media"
@@ -174,13 +177,6 @@ class MediaRepository(AsyncpgRepository):
 
     def __init__(self):
         pass
-
-    async def _get_client(self):
-        """Get async client (loop-aware, safe for Celery workers).
-
-        Retained for the two owner-map helpers below, which stay on the legacy
-        supabase-py REST path (conscious-keep)."""
-        return await get_async_supabase_admin()
 
     # ── Core CRUD ───────────────────────────────────────────────────
 
@@ -682,7 +678,23 @@ class MediaRepository(AsyncpgRepository):
             {status_field: DownloadStatus.FAILED.value, "error_message": error_message},
         )
 
-    # ── Owner maps (conscious-keep legacy supabase-py REST bodies) ───
+    # ── Owner maps (ORM reads on resources) ──────────────────────────
+
+    def _owner_map_scope_cm(self):
+        """Scope wrap for the owner-map reads.
+
+        ``Resources`` carries ``UserScoped``; these lookups run from system
+        contexts (scheduled retry / Celery recovery) with no ambient user
+        scope and are deliberately cross-user — the whole point is finding
+        each download's owner. When enforcement is ON the read must open
+        ``system_request_scope`` or the choke point fail-closes; flag-off it
+        must NOT (byte-for-byte legacy path, no spurious audit rows) — the
+        same enforcement-gated idiom as resources_repository."""
+        return (
+            system_request_scope(reason="owner-map-cross-user-read")
+            if is_enforced("resources")
+            else nullcontext()
+        )
 
     async def get_media_owner_map(self, media_ids: List[Any]) -> Dict[str, str]:
         """Map parsed_media.id -> resources.creator_id (the download owner).
@@ -697,18 +709,17 @@ class MediaRepository(AsyncpgRepository):
         if not media_ids:
             return {}
         try:
-            client = await self._get_client()
-            res = (
-                await client.table("resources")
-                .select("media_id, creator_id")
-                .in_("media_id", [str(m) for m in media_ids])
-                .eq("is_trashed", False)
-                .execute()
-            )
+            async with self._owner_map_scope_cm():
+                async with read_scope() as session:
+                    result = await session.execute(
+                        select(Resources.media_id, Resources.creator_id).where(
+                            Resources.media_id.in_(self._bigint_list(media_ids)),
+                            Resources.is_trashed.is_(False),
+                        )
+                    )
+                    rows = result.all()
             owner_map: Dict[str, str] = {}
-            for row in res.data or []:
-                mid = row.get("media_id")
-                cid = row.get("creator_id")
+            for mid, cid in rows:
                 if mid is not None and cid and str(mid) not in owner_map:
                     owner_map[str(mid)] = str(cid)
             return owner_map
@@ -732,19 +743,19 @@ class MediaRepository(AsyncpgRepository):
         if not media_ids:
             return {}
         try:
-            client = await self._get_client()
-            res = (
-                await client.table("resources")
-                .select("id, media_id, creator_id")
-                .in_("media_id", [str(m) for m in media_ids])
-                .eq("is_trashed", False)
-                .execute()
-            )
+            async with self._owner_map_scope_cm():
+                async with read_scope() as session:
+                    result = await session.execute(
+                        select(
+                            Resources.id, Resources.media_id, Resources.creator_id
+                        ).where(
+                            Resources.media_id.in_(self._bigint_list(media_ids)),
+                            Resources.is_trashed.is_(False),
+                        )
+                    )
+                    rows = result.all()
             out: Dict[str, Dict[str, str]] = {}
-            for row in res.data or []:
-                mid = row.get("media_id")
-                cid = row.get("creator_id")
-                rid = row.get("id")
+            for rid, mid, cid in rows:
                 if mid is not None and cid and str(mid) not in out:
                     out[str(mid)] = {
                         "user_id": str(cid),

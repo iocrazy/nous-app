@@ -72,7 +72,6 @@ from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.session import read_scope, write_scope
-from app.db.supabase_client import get_async_supabase_admin
 from app.models import Resources, ResourceTags, TagGroups, Tags
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
 
@@ -113,14 +112,6 @@ class TagsRepository:
 
     def __init__(self):
         pass
-
-    async def _get_client(self):
-        """Get async client (loop-aware, safe for Celery workers).
-
-        Kept for ``merge_tags``, which has no ORM successor and stays on the
-        supabase-py RPC path.
-        """
-        return await get_async_supabase_admin()
 
     async def get_all_tags(
         self, user_id: Optional[str] = None, enabled_only: bool = False
@@ -364,27 +355,32 @@ class TagsRepository:
     async def merge_tags(
         self, target_id: str, source_ids: list[str], user_id: str
     ) -> int:
-        """Merge source tags into target via the atomic merge_tags RPC.
+        """Merge source tags into target via the atomic merge_tags SQL proc.
 
         Re-points every resource_tags row from the sources onto the target
         (deduped) and deletes the source tags, all in one transaction.
         Returns the target's resulting resource count.
 
-        No ORM successor — kept on the supabase-py RPC path (conscious keep).
+        Same SECURITY DEFINER function (migration 267) the old supabase-py
+        ``client.rpc`` path called, now a ``text()`` SELECT on the committing
+        ``write_scope()`` session — the function writes, so it must not run
+        on a bare read connection. Ownership stays enforced inside the proc
+        via ``p_user``; failures raise (unchanged contract).
         """
-        client = await self._get_client()
-        result = await client.rpc(
-            "merge_tags",
-            {
-                "p_target": str(target_id),
-                "p_sources": [str(s) for s in source_ids],
-                "p_user": user_id,
-            },
-        ).execute()
-        data = result.data
-        if isinstance(data, list):
-            return int(data[0]) if data else 0
-        return int(data or 0)
+        async with write_scope() as session:
+            result = await session.execute(
+                text(
+                    "SELECT merge_tags(:p_target, "
+                    "CAST(:p_sources AS text[]), CAST(:p_user AS uuid))"
+                ),
+                {
+                    "p_target": str(target_id),
+                    "p_sources": [str(s) for s in source_ids],
+                    "p_user": user_id,
+                },
+            )
+            value = result.scalar()
+        return int(value or 0)
 
     async def update_tag_admin(self, tag_id: str, **kwargs) -> Optional[dict]:
         """Update any tag (no user_id check). Used for toggling enabled on

@@ -16,7 +16,7 @@ import {
   type TextareaHTMLAttributes,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronDown, X } from 'lucide-react';
+import { Check, ChevronDown, Search, X } from 'lucide-react';
 import {
   UI_CONTENT_OVERLAY_INSET_CLASS,
   UI_DIALOG_TRANSITION_MS,
@@ -55,6 +55,12 @@ interface UiSelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
    * appended after, so callers can still tweak layout (width, margins).
    */
   triggerClassName?: string;
+  /**
+   * Show a text search box at the top of the menu that filters options by label.
+   * Defaults to auto (on when there are more than 7 options) — pass `false` to
+   * force it off, or `true` to always show it.
+   */
+  searchable?: boolean;
 }
 
 interface UiSelectOptionItem {
@@ -62,6 +68,13 @@ interface UiSelectOptionItem {
   value: string;
   label: ReactNode;
   disabled: boolean;
+  /** Muted second line under the label (nous-style two-line rows). */
+  description?: string;
+  /** Colored status dot on the leading edge (e.g. per-provider hue). */
+  dot?: string;
+  /** Tri-state: undefined = no load semantics; true/false → green "loaded"
+   *  dot + enables the "Only loaded" filter at the top of the menu. */
+  loaded?: boolean;
 }
 
 interface UiSelectGroupItem {
@@ -202,7 +215,13 @@ export const UiCheckbox = forwardRef<HTMLButtonElement, UiCheckboxProps>(
 
 UiCheckbox.displayName = 'UiCheckbox';
 
-export function UiSelect({ className = '', triggerClassName, children, ...props }: UiSelectProps) {
+export function UiSelect({
+  className = '',
+  triggerClassName,
+  searchable,
+  children,
+  ...props
+}: UiSelectProps) {
   const {
     value,
     defaultValue,
@@ -219,6 +238,9 @@ export function UiSelect({ className = '', triggerClassName, children, ...props 
   const hiddenSelectRef = useRef<HTMLSelectElement | null>(null);
   const listboxIdRef = useRef(`ui-select-${Math.random().toString(36).slice(2, 10)}`);
   const [isOpen, setIsOpen] = useState(false);
+  const [onlyLoaded, setOnlyLoaded] = useState(false);
+  const [query, setQuery] = useState('');
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [menuStyle, setMenuStyle] = useState<{ left: number; top: number; width: number }>({
     left: 0,
     top: 0,
@@ -235,11 +257,16 @@ export function UiSelect({ className = '', triggerClassName, children, ...props 
       }
 
       const optionValue = child.props.value ?? child.props.children;
+      const rawLoaded = child.props['data-loaded'];
       return {
         kind: 'option',
         value: String(optionValue ?? ''),
         label: child.props.children,
         disabled: Boolean(child.props.disabled),
+        description: child.props['data-description'] || undefined,
+        dot: child.props['data-dot'] || undefined,
+        loaded:
+          rawLoaded === undefined ? undefined : rawLoaded === true || rawLoaded === 'true',
       };
     };
 
@@ -285,6 +312,38 @@ export function UiSelect({ className = '', triggerClassName, children, ...props 
     parsedOptions.find((option) => option.value === selectedValue) ??
     parsedOptions.find((option) => !option.disabled) ??
     null;
+  // Rich mode (nous parity): any option carrying a description / dot / load
+  // state promotes the whole menu to two-line rows with a leading indicator.
+  const hasLoadedInfo = parsedOptions.some((option) => option.loaded !== undefined);
+  const loadedCount = parsedOptions.filter((option) => option.loaded).length;
+  const richMode = parsedOptions.some(
+    (option) => option.description || option.dot || option.loaded !== undefined
+  );
+  const showSearch = searchable ?? parsedOptions.length > 7;
+  const shownItems = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const keepOption = (item: UiSelectOptionItem) => {
+      if (onlyLoaded && hasLoadedInfo && !(item.loaded || item.value === selectedValue)) {
+        return false;
+      }
+      if (q) {
+        const hay = `${typeof item.label === 'string' ? item.label : item.value} ${
+          item.description ?? ''
+        }`.toLowerCase();
+        return hay.includes(q);
+      }
+      return true;
+    };
+    const kept = parsedItems.filter((item) => item.kind !== 'option' || keepOption(item));
+    // Drop group headers left with no options under them.
+    return kept.filter((item, index) => {
+      if (item.kind !== 'group') {
+        return true;
+      }
+      const next = kept[index + 1];
+      return next != null && next.kind === 'option';
+    });
+  }, [onlyLoaded, hasLoadedInfo, parsedItems, selectedValue, query]);
 
   useEffect(() => {
     if (!isControlled) {
@@ -301,6 +360,18 @@ export function UiSelect({ className = '', triggerClassName, children, ...props 
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Reset the search query when the menu closes; focus the search box on open.
+  useEffect(() => {
+    if (!isOpen) {
+      setQuery('');
+      return;
+    }
+    if (showSearch) {
+      const id = window.setTimeout(() => searchInputRef.current?.focus(), 0);
+      return () => window.clearTimeout(id);
+    }
+  }, [isOpen, showSearch]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -468,19 +539,66 @@ export function UiSelect({ className = '', triggerClassName, children, ...props 
               style={{
                 left: menuStyle.left,
                 top: menuStyle.top,
-                width: menuStyle.width,
-                maxHeight: 240,
+                width: Math.max(menuStyle.width, richMode || showSearch ? 240 : 0),
+                maxHeight: 320,
                 transitionDuration: `${UI_POPOVER_TRANSITION_MS}ms`,
               }}
             >
+              {showSearch ? (
+                <div className="mb-1 flex items-center gap-2 border-b border-ink-700 px-2.5 pb-2 pt-1">
+                  <Search className="h-3.5 w-3.5 shrink-0 text-content-3" />
+                  <input
+                    ref={searchInputRef}
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="Search…"
+                    className="w-full bg-transparent text-sm text-content outline-none placeholder:text-content-3"
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        const first = shownItems.find(
+                          (item) => item.kind === 'option' && !item.disabled
+                        );
+                        if (first && first.kind === 'option') {
+                          commitValue(first.value);
+                          setIsOpen(false);
+                          triggerRef.current?.focus();
+                        }
+                      } else if (event.key === 'Escape') {
+                        setIsOpen(false);
+                        triggerRef.current?.focus();
+                      }
+                    }}
+                  />
+                </div>
+              ) : null}
               <div className="ui-scrollbar max-h-[228px] overflow-y-auto">
-                {parsedItems.map((item) => {
+                {hasLoadedInfo ? (
+                  <button
+                    type="button"
+                    className="mb-1 flex w-full items-center gap-2 rounded-[6px] border border-ink-700 px-2.5 py-1.5 text-xs text-content transition-colors hover:bg-ink-700"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setOnlyLoaded((current) => !current);
+                    }}
+                  >
+                    <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
+                    <span className="flex-1 text-left">Only loaded</span>
+                    <span className="tabular-nums text-content-3">{loadedCount}</span>
+                    {onlyLoaded ? (
+                      <Check className="h-3.5 w-3.5 shrink-0 text-[color:var(--accent-text)]" />
+                    ) : null}
+                  </button>
+                ) : null}
+                {shownItems.length === 0 ? (
+                  <div className="px-3 py-6 text-center text-xs text-content-3">No matches</div>
+                ) : null}
+                {shownItems.map((item) => {
                   if (item.kind === 'group') {
                     return (
                       <div
                         key={item.key}
                         role="presentation"
-                        className="truncate px-3 pt-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-content-3 first:pt-1"
+                        className="truncate px-2.5 pt-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-content-3 first:pt-1"
                       >
                         {item.label}
                       </div>
@@ -495,11 +613,11 @@ export function UiSelect({ className = '', triggerClassName, children, ...props 
                       role="option"
                       aria-selected={isSelected}
                       disabled={item.disabled}
-                      className={`flex w-full items-center justify-between rounded-[6px] px-3 py-2 text-sm transition-colors ${
+                      className={`flex w-full items-start gap-2.5 rounded-[6px] px-2.5 py-2 text-left text-sm transition-colors ${
                         item.disabled
                           ? 'cursor-not-allowed opacity-40'
                           : isSelected
-                            ? 'bg-[color-mix(in_srgb,var(--accent)_13%,transparent)] text-content'
+                            ? 'bg-ink-700 font-medium text-content'
                             : 'text-content hover:bg-ink-700'
                       }`}
                       onClick={() => {
@@ -511,9 +629,30 @@ export function UiSelect({ className = '', triggerClassName, children, ...props 
                         triggerRef.current?.focus();
                       }}
                     >
-                      <span className="truncate">{item.label}</span>
-                      {isSelected ? (
-                        <Check className="ml-3 h-3.5 w-3.5 shrink-0 text-[color:var(--accent-text)]" />
+                      {richMode ? (
+                        <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">
+                          {isSelected ? (
+                            <Check className="h-3.5 w-3.5 text-[color:var(--accent-text)]" />
+                          ) : item.loaded ? (
+                            <span className="h-2 w-2 rounded-full bg-emerald-500" title="Loaded" />
+                          ) : item.dot ? (
+                            <span className="h-2 w-2 rounded-full" style={{ background: item.dot }} />
+                          ) : null}
+                        </span>
+                      ) : null}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate">{item.label}</span>
+                        {item.description ? (
+                          <span
+                            aria-hidden="true"
+                            className="mt-0.5 block truncate text-[11px] font-normal text-content-3"
+                          >
+                            {item.description}
+                          </span>
+                        ) : null}
+                      </span>
+                      {!richMode && isSelected ? (
+                        <Check className="ml-3 mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--accent-text)]" />
                       ) : null}
                     </button>
                   );

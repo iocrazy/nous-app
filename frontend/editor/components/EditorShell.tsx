@@ -29,6 +29,7 @@ import {
   applyOps,
   convertToScenes,
   createScene,
+  deleteScene,
   listEpisodes,
   listScenes,
   moveScene,
@@ -492,6 +493,19 @@ export function EditorShell({
     [dragging, moveSceneRelative],
   );
 
+  // Delete a whole scene (heading + all its elements) from the context menu.
+  const handleDeleteScene = useCallback(
+    async (sceneId: string) => {
+      try {
+        await deleteScene(sceneId);
+        await reload();
+      } catch (err) {
+        console.error('[EditorShell] deleteScene failed', err);
+      }
+    },
+    [reload],
+  );
+
   // Keyboard reorder: Alt+Arrow moves the scene past its neighbour (spec §3.5).
   const handleKeyboardMove = useCallback(
     (sceneId: string, direction: 'up' | 'down') => {
@@ -522,8 +536,9 @@ export function EditorShell({
         ),
       onDrop: handleReorderDrop,
       onKeyboardMove: handleKeyboardMove,
+      onDeleteScene: handleDeleteScene,
     }),
-    [dragging, dropTarget, handleReorderDrop, handleKeyboardMove],
+    [dragging, dropTarget, handleReorderDrop, handleKeyboardMove, handleDeleteScene],
   );
 
   // ── Legacy chapter → scenes conversion (Task 10) ──────────────────────────
