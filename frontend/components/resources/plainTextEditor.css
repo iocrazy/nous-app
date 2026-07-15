@@ -1,0 +1,80 @@
+/* Code-panel styling for PlainTextResourceEditor (spec 2026-07-14).
+ * The component mounts a bare single-code-block TipTap editor; TipTap ships no
+ * CSS, so without this the ProseMirror <pre> falls back to browser defaults:
+ * no line wrapping → long lines (e.g. JWT values in a .env) overflow and the
+ * container scrolls horizontally, hiding short lines and making the file look
+ * scattered. We wrap long lines and give the block tight, monospace, readable
+ * layout. */
+
+.mh-code-editor .ProseMirror,
+.mh-code-editor .tiptap {
+  outline: none;
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono",
+    monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--content, #e7e7ea);
+  /* Wrap long lines instead of horizontal-scrolling — readability over exact
+     column fidelity (this is a content platform viewer, not an IDE). */
+  white-space: pre-wrap;
+  word-break: break-word;
+  tab-size: 4;
+}
+
+.mh-code-editor .ProseMirror pre {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  overflow: visible;
+}
+
+.mh-code-editor .ProseMirror pre code {
+  display: block;
+  padding: 0;
+  background: transparent;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: inherit;
+  word-break: inherit;
+  color: inherit;
+}
+
+/* lowlight (highlight.js) token colors — muted palette that reads on the dark
+   island surface. Without these the syntax highlight emits classed spans with
+   no color; harmless but pointless. */
+.mh-code-editor .hljs-comment,
+.mh-code-editor .hljs-quote {
+  color: #7d8590;
+  font-style: italic;
+}
+.mh-code-editor .hljs-keyword,
+.mh-code-editor .hljs-selector-tag,
+.mh-code-editor .hljs-literal {
+  color: #ff7b72;
+}
+.mh-code-editor .hljs-string,
+.mh-code-editor .hljs-attr,
+.mh-code-editor .hljs-template-string {
+  color: #a5d6ff;
+}
+.mh-code-editor .hljs-number,
+.mh-code-editor .hljs-built_in,
+.mh-code-editor .hljs-type {
+  color: #79c0ff;
+}
+.mh-code-editor .hljs-title,
+.mh-code-editor .hljs-name,
+.mh-code-editor .hljs-attribute {
+  color: #d2a8ff;
+}
+.mh-code-editor .hljs-meta {
+  color: #ffa657;
+}

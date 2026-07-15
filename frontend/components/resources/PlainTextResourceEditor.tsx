@@ -10,6 +10,7 @@ import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { common, createLowlight } from 'lowlight';
 import { plainTextToDoc, docToPlainText } from '../../utils/tiptapPlainText';
 import { codeLangForExtension } from '../../utils/textResourceMode';
+import './plainTextEditor.css';
 
 const lowlight = createLowlight(common);
 
@@ -44,8 +45,8 @@ export function PlainTextResourceEditor({ value, ext, readOnly, onChange }: Prop
 
   if (!editor) return null;
   return (
-    <div className="w-full max-h-[calc(100vh-13rem)] overflow-auto rounded-lg bg-island-2 text-sm">
-      <EditorContent editor={editor} className="p-3 font-mono" />
+    <div className="mh-code-editor w-full max-h-[calc(100vh-13rem)] overflow-auto rounded-lg bg-island-2 text-sm">
+      <EditorContent editor={editor} className="p-3" />
     </div>
   );
 }
