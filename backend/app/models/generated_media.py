@@ -56,6 +56,9 @@ class GeneratedMedia(Base):
     parent_resource_id: Mapped[int | None] = mapped_column(BigInteger)
     derivation_kind: Mapped[str | None] = mapped_column(Text)
     promoted_resource_id: Mapped[int | None] = mapped_column(BigInteger)
+    # Chat provenance (mig 327 renamed channel_id → conversation_id). Was
+    # missing from this model (drift) — added when the repo moved to select().
+    conversation_id: Mapped[int | None] = mapped_column(BigInteger)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True), nullable=False, server_default=text("now()")
     )

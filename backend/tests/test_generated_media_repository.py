@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 import pytest
 
 from app.repositories.generated_media_repository import (
@@ -5,6 +7,52 @@ from app.repositories.generated_media_repository import (
     _decode_cursor,
     _encode_cursor,
 )
+
+# ── Session-boundary fakes (the repo runs on read_scope/write_scope now) ────
+
+
+class _Result:
+    def __init__(self, *, rows=None, row=None, rowcount=0, scalar=None):
+        self._rows = rows or []
+        self._row = row
+        self.rowcount = rowcount
+        self._scalar = scalar
+
+    def mappings(self):
+        return self
+
+    def all(self):
+        return self._rows
+
+    def first(self):
+        return self._row
+
+    def scalar(self):
+        return self._scalar
+
+
+class _QueueSession:
+    """Pops one canned result per execute() call, capturing statements."""
+
+    def __init__(self, results):
+        self._results = list(results)
+        self.statements: list = []
+
+    async def execute(self, stmt, params=None):
+        self.statements.append(stmt)
+        return self._results.pop(0)
+
+
+def _patch_scopes(monkeypatch, session):
+    from app.repositories import generated_media_repository as mod
+
+    @asynccontextmanager
+    async def _scope():
+        yield session
+
+    monkeypatch.setattr(mod, "read_scope", _scope)
+    monkeypatch.setattr(mod, "write_scope", _scope)
+    return session
 
 
 def test_cursor_roundtrip():
@@ -28,35 +76,30 @@ LARGE_ID = 318252341326512  # > 2^53 — would lose precision as JS number
 @pytest.mark.asyncio
 async def test_get_stringifies_bigint_id(monkeypatch):
     """get() must return id and scope_id as str, not raw int."""
-
-    async def _fake_fetch_one(sql, params):
-        return {
-            "id": LARGE_ID,
-            "scope_id": 99,
-            "creator_id": "00000000-0000-0000-0000-000000000001",
-            "agent_id": None,
-            "canvas_id": None,
-            "parent_resource_id": None,
-            "promoted_resource_id": None,
-            "media_kind": "image",
-            "mime": "image/png",
-            "file_path": "generations/x.png",
-            "file_size_bytes": 1024,
-            "origin_kind": "canvas_run",
-            "origin_run_id": None,
-            "node_id": None,
-            "prompt": None,
-            "model": None,
-            "provider": None,
-            "params": None,
-            "cost_cents": None,
-            "derivation_kind": None,
-            "created_at": "2026-06-21T00:00:00+00:00",
-        }
-
-    import app.db.engine as _engine
-
-    monkeypatch.setattr(_engine, "fetch_one", _fake_fetch_one)
+    fake_row = {
+        "id": LARGE_ID,
+        "scope_id": 99,
+        "creator_id": "00000000-0000-0000-0000-000000000001",
+        "agent_id": None,
+        "canvas_id": None,
+        "parent_resource_id": None,
+        "promoted_resource_id": None,
+        "media_kind": "image",
+        "mime": "image/png",
+        "file_path": "generations/x.png",
+        "file_size_bytes": 1024,
+        "origin_kind": "canvas_run",
+        "origin_run_id": None,
+        "node_id": None,
+        "prompt": None,
+        "model": None,
+        "provider": None,
+        "params": None,
+        "cost_cents": None,
+        "derivation_kind": None,
+        "created_at": "2026-06-21T00:00:00+00:00",
+    }
+    _patch_scopes(monkeypatch, _QueueSession([_Result(row=fake_row)]))
 
     row = await GeneratedMediaRepository().get(LARGE_ID, 99)
     assert isinstance(row["id"], str), "id must be a str"
@@ -149,15 +192,9 @@ _FAKE_ROWS = [
 
 @pytest.mark.asyncio
 async def test_list_for_scope_returns_next_cursor_when_more_rows(monkeypatch):
-    """When fetch_all returns limit+1 rows, items has exactly limit entries
+    """When the query returns limit+1 rows, items has exactly limit entries
     and next_cursor is a non-None str."""
-    import app.db.engine as _engine
-
-    async def _fake_fetch_all(sql, params):
-        # Returns 3 rows (limit+1 when limit=2)
-        return list(_FAKE_ROWS)
-
-    monkeypatch.setattr(_engine, "fetch_all", _fake_fetch_all)
+    _patch_scopes(monkeypatch, _QueueSession([_Result(rows=list(_FAKE_ROWS))]))
 
     result = await GeneratedMediaRepository().list_for_scope(42, limit=2)
 
@@ -173,14 +210,8 @@ async def test_list_for_scope_returns_next_cursor_when_more_rows(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_list_for_scope_no_next_cursor_when_last_page(monkeypatch):
-    """When fetch_all returns <= limit rows, next_cursor is None."""
-    import app.db.engine as _engine
-
-    async def _fake_fetch_all(sql, params):
-        # Returns only 2 rows (exactly limit, no overflow)
-        return list(_FAKE_ROWS[:2])
-
-    monkeypatch.setattr(_engine, "fetch_all", _fake_fetch_all)
+    """When the query returns <= limit rows, next_cursor is None."""
+    _patch_scopes(monkeypatch, _QueueSession([_Result(rows=list(_FAKE_ROWS[:2]))]))
 
     result = await GeneratedMediaRepository().list_for_scope(42, limit=2)
 
@@ -191,43 +222,33 @@ async def test_list_for_scope_no_next_cursor_when_last_page(monkeypatch):
 @pytest.mark.asyncio
 async def test_list_for_scope_entity_filter_hits_params_jsonb(monkeypatch):
     """CC5: entity_kind/entity_id filter on the params jsonb columns."""
-    import app.db.engine as _engine
-
-    captured = {}
-
-    async def _fake_fetch_all(sql, params):
-        captured["sql"] = sql
-        captured["params"] = params
-        return list(_FAKE_ROWS[:1])
-
-    monkeypatch.setattr(_engine, "fetch_all", _fake_fetch_all)
+    session = _patch_scopes(
+        monkeypatch, _QueueSession([_Result(rows=list(_FAKE_ROWS[:1]))])
+    )
 
     result = await GeneratedMediaRepository().list_for_scope(
         42, entity_kind="character", entity_id="123456789", limit=12
     )
 
     assert len(result["items"]) == 1
-    assert "params->>'entity_kind'" in captured["sql"]
-    assert "params->>'entity_id'" in captured["sql"]
-    assert captured["params"]["entity_kind"] == "character"
-    assert captured["params"]["entity_id"] == "123456789"
+    stmt = session.statements[0]
+    sql = str(stmt)
+    # jsonb ->> text extraction on params, with the key + value as binds.
+    assert sql.count("->>") == 2
+    params = stmt.compile().params
+    assert "entity_kind" in params.values() and "character" in params.values()
+    assert "entity_id" in params.values() and "123456789" in params.values()
 
 
 @pytest.mark.asyncio
 async def test_list_for_scope_no_entity_filter_by_default(monkeypatch):
-    """Without entity args the SQL must not mention the params jsonb."""
-    import app.db.engine as _engine
-
-    captured = {}
-
-    async def _fake_fetch_all(sql, params):
-        captured["sql"] = sql
-        return list(_FAKE_ROWS[:1])
-
-    monkeypatch.setattr(_engine, "fetch_all", _fake_fetch_all)
+    """Without entity args the SQL must not touch the params jsonb."""
+    session = _patch_scopes(
+        monkeypatch, _QueueSession([_Result(rows=list(_FAKE_ROWS[:1]))])
+    )
 
     await GeneratedMediaRepository().list_for_scope(42, limit=2)
-    assert "entity_kind" not in captured["sql"]
+    assert "->>" not in str(session.statements[0])
 
 
 # ---------------------------------------------------------------------------
@@ -240,13 +261,16 @@ async def test_delete_filesystem_row_does_not_touch_object_store(monkeypatch):
     """A legacy filesystem row deletes without any object-store call."""
     import app.repositories.generated_media_repository as mod
 
-    repo = GeneratedMediaRepository()
-    monkeypatch.setattr(
-        mod.db_engine,
-        "fetch_one",
-        _amock(return_value={"file_path": "teams/1/chat/2026/07/05/x/a.png"}),
+    # Call order: read file_path → write DELETE. Filesystem path → no refcount.
+    _patch_scopes(
+        monkeypatch,
+        _QueueSession(
+            [
+                _Result(row={"file_path": "teams/1/chat/2026/07/05/x/a.png"}),
+                _Result(rowcount=1),
+            ]
+        ),
     )
-    monkeypatch.setattr(mod.db_engine, "execute", _amock(return_value=1))
     remove_called = {"n": 0}
 
     class _Store:
@@ -257,7 +281,7 @@ async def test_delete_filesystem_row_does_not_touch_object_store(monkeypatch):
             remove_called["n"] += 1
 
     monkeypatch.setattr(mod, "ObjectStore", _Store)
-    assert await repo.delete(1, 1) is True
+    assert await GeneratedMediaRepository().delete(1, 1) is True
     assert remove_called["n"] == 0
 
 
@@ -265,15 +289,17 @@ async def test_delete_filesystem_row_does_not_touch_object_store(monkeypatch):
 async def test_delete_object_store_row_removes_when_unreferenced(monkeypatch):
     import app.repositories.generated_media_repository as mod
 
-    repo = GeneratedMediaRepository()
-    monkeypatch.setattr(
-        mod.db_engine,
-        "fetch_one",
-        _amock(return_value={"file_path": "sb://chat-media/t1/ab/cd/h.png"}),
+    # read file_path → write DELETE → read refcount (0 → remove).
+    _patch_scopes(
+        monkeypatch,
+        _QueueSession(
+            [
+                _Result(row={"file_path": "sb://chat-media/t1/ab/cd/h.png"}),
+                _Result(rowcount=1),
+                _Result(scalar=0),
+            ]
+        ),
     )
-    monkeypatch.setattr(mod.db_engine, "execute", _amock(return_value=1))
-    # No sibling rows reference the object → refcount 0 → remove.
-    monkeypatch.setattr(mod.db_engine, "fetch_val", _amock(return_value=0))
     removed = {"key": None}
 
     class _Store:
@@ -284,7 +310,7 @@ async def test_delete_object_store_row_removes_when_unreferenced(monkeypatch):
             removed["key"] = key
 
     monkeypatch.setattr(mod, "ObjectStore", _Store)
-    assert await repo.delete(1, 1) is True
+    assert await GeneratedMediaRepository().delete(1, 1) is True
     assert removed["key"] == "t1/ab/cd/h.png"
 
 
@@ -293,14 +319,16 @@ async def test_delete_object_store_row_keeps_object_when_still_referenced(monkey
     """Dedup: a sibling row shares the object → must NOT remove it."""
     import app.repositories.generated_media_repository as mod
 
-    repo = GeneratedMediaRepository()
-    monkeypatch.setattr(
-        mod.db_engine,
-        "fetch_one",
-        _amock(return_value={"file_path": "sb://chat-media/t1/ab/cd/h.png"}),
+    _patch_scopes(
+        monkeypatch,
+        _QueueSession(
+            [
+                _Result(row={"file_path": "sb://chat-media/t1/ab/cd/h.png"}),
+                _Result(rowcount=1),
+                _Result(scalar=1),  # sibling still references the object
+            ]
+        ),
     )
-    monkeypatch.setattr(mod.db_engine, "execute", _amock(return_value=1))
-    monkeypatch.setattr(mod.db_engine, "fetch_val", _amock(return_value=1))  # sibling
     remove_called = {"n": 0}
 
     class _Store:
@@ -311,7 +339,7 @@ async def test_delete_object_store_row_keeps_object_when_still_referenced(monkey
             remove_called["n"] += 1
 
     monkeypatch.setattr(mod, "ObjectStore", _Store)
-    assert await repo.delete(1, 1) is True
+    assert await GeneratedMediaRepository().delete(1, 1) is True
     assert remove_called["n"] == 0  # kept — still referenced
 
 
@@ -320,14 +348,16 @@ async def test_delete_object_cleanup_failure_still_succeeds(monkeypatch):
     """A remove() failure must NOT fail the delete (object leak is acceptable)."""
     import app.repositories.generated_media_repository as mod
 
-    repo = GeneratedMediaRepository()
-    monkeypatch.setattr(
-        mod.db_engine,
-        "fetch_one",
-        _amock(return_value={"file_path": "sb://chat-media/t1/ab/cd/h.png"}),
+    _patch_scopes(
+        monkeypatch,
+        _QueueSession(
+            [
+                _Result(row={"file_path": "sb://chat-media/t1/ab/cd/h.png"}),
+                _Result(rowcount=1),
+                _Result(scalar=0),
+            ]
+        ),
     )
-    monkeypatch.setattr(mod.db_engine, "execute", _amock(return_value=1))
-    monkeypatch.setattr(mod.db_engine, "fetch_val", _amock(return_value=0))
 
     class _Store:
         def __init__(self, *a):
@@ -337,20 +367,14 @@ async def test_delete_object_cleanup_failure_still_succeeds(monkeypatch):
             raise RuntimeError("storage down")
 
     monkeypatch.setattr(mod, "ObjectStore", _Store)
-    assert await repo.delete(1, 1) is True  # still True despite cleanup failure
+    # still True despite cleanup failure
+    assert await GeneratedMediaRepository().delete(1, 1) is True
 
 
 @pytest.mark.asyncio
 async def test_delete_missing_row_returns_false(monkeypatch):
-    import app.repositories.generated_media_repository as mod
-
-    repo = GeneratedMediaRepository()
-    monkeypatch.setattr(mod.db_engine, "fetch_one", _amock(return_value=None))
-    monkeypatch.setattr(mod.db_engine, "execute", _amock(return_value=0))
-    assert await repo.delete(1, 1) is False
-
-
-def _amock(return_value):
-    from unittest.mock import AsyncMock
-
-    return AsyncMock(return_value=return_value)
+    _patch_scopes(
+        monkeypatch,
+        _QueueSession([_Result(row=None), _Result(rowcount=0)]),
+    )
+    assert await GeneratedMediaRepository().delete(1, 1) is False
