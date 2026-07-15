@@ -22,16 +22,36 @@ ships the flow surface + cascade cancel only.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 from pydantic import BaseModel, Field
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import insert, select
+from sqlalchemy import update as sa_update
 
 from app.core.deps import AuthDep
-from app.db.supabase_client import get_async_supabase_admin
+from app.db.session import read_scope, write_scope
+from app.models import TaskFlows, TaskTracking
 
 router = APIRouter(prefix="/flows", tags=["Task Flows"])
+
+
+def _serialize_row(row: Mapping[str, Any]) -> Dict[str, Any]:
+    """Coerce a task_flows / task_tracking row mapping to the JSON-safe
+    primitives the PostgREST path returned (timestamptz → ISO-8601 str,
+    uuid → str) so the pydantic response models validate."""
+    out: Dict[str, Any] = {}
+    for key, value in row.items():
+        if hasattr(value, "isoformat"):
+            out[key] = value.isoformat()
+        elif isinstance(value, UUID):
+            out[key] = str(value)
+        else:
+            out[key] = value
+    return out
 
 
 class FlowCreatePayload(BaseModel):
@@ -64,21 +84,30 @@ class FlowDetailResponse(FlowResponse):
 async def create_flow(payload: FlowCreatePayload, auth: AuthDep) -> FlowResponse:
     """Create a new flow row. Children are added by writing
     ``task_tracking.flow_id`` at task creation time."""
-    sb = await get_async_supabase_admin()
-    row = {
-        "user_id": str(auth.user_id),
-        "name": payload.name,
-        "cascade_cancel": payload.cascade_cancel,
-        "metadata": payload.metadata,
-    }
     try:
-        result = await sb.table("task_flows").insert(row).execute()
+        async with write_scope() as session:
+            created = (
+                (
+                    await session.execute(
+                        insert(TaskFlows)
+                        .values(
+                            user_id=str(auth.user_id),
+                            name=payload.name,
+                            cascade_cancel=payload.cascade_cancel,
+                            metadata_=payload.metadata,
+                        )
+                        .returning(*TaskFlows.__table__.columns)
+                    )
+                )
+                .mappings()
+                .first()
+            )
     except Exception as exc:
         logger.exception(f"flow create failed: {exc}")
         raise HTTPException(500, "create failed")
-    if not result.data:
+    if not created:
         raise HTTPException(500, "create returned no row")
-    return FlowResponse(**result.data[0])
+    return FlowResponse(**_serialize_row(created))
 
 
 @router.get("", response_model=List[FlowResponse])
@@ -89,53 +118,59 @@ async def list_flows(
     offset: int = Query(0, ge=0),
 ) -> List[FlowResponse]:
     """List the caller's flows. Optionally filter by state."""
-    sb = await get_async_supabase_admin()
-    q = (
-        sb.table("task_flows")
-        .select("*")
-        .eq("user_id", str(auth.user_id))
-        .order("created_at", desc=True)
-        .range(offset, offset + limit - 1)
+    stmt = select(*TaskFlows.__table__.columns).where(
+        TaskFlows.user_id == str(auth.user_id)
     )
     if state:
-        q = q.eq("state", state)
+        stmt = stmt.where(TaskFlows.state == state)
+    stmt = stmt.order_by(TaskFlows.created_at.desc()).offset(offset).limit(limit)
     try:
-        result = await q.execute()
+        async with read_scope() as session:
+            rows = (await session.execute(stmt)).mappings().all()
     except Exception as exc:
         logger.exception(f"flow list failed: {exc}")
         raise HTTPException(500, "list failed")
-    return [FlowResponse(**r) for r in (result.data or [])]
+    return [FlowResponse(**_serialize_row(r)) for r in rows]
 
 
 @router.get("/{flow_id}", response_model=FlowDetailResponse)
 async def get_flow(flow_id: str, auth: AuthDep) -> FlowDetailResponse:
     """Return the flow + its child tasks (joined inline)."""
-    sb = await get_async_supabase_admin()
     try:
-        flow_result = (
-            await sb.table("task_flows")
-            .select("*")
-            .eq("id", flow_id)
-            .eq("user_id", str(auth.user_id))
-            .maybe_single()
-            .execute()
-        )
+        async with read_scope() as session:
+            flow = (
+                (
+                    await session.execute(
+                        select(*TaskFlows.__table__.columns)
+                        .where(TaskFlows.id == flow_id)
+                        .where(TaskFlows.user_id == str(auth.user_id))
+                        .limit(1)
+                    )
+                )
+                .mappings()
+                .first()
+            )
     except Exception as exc:
         logger.exception(f"flow get failed: {exc}")
         raise HTTPException(500, "get failed")
-    if not flow_result or not flow_result.data:
+    if not flow:
         raise HTTPException(404, "flow not found")
 
-    tasks_result = (
-        await sb.table("task_tracking")
-        .select("*")
-        .eq("flow_id", flow_id)
-        .order("created_at", desc=False)
-        .execute()
-    )
+    async with read_scope() as session:
+        tasks = (
+            (
+                await session.execute(
+                    select(*TaskTracking.__table__.columns)
+                    .where(TaskTracking.flow_id == flow_id)
+                    .order_by(TaskTracking.created_at.asc())
+                )
+            )
+            .mappings()
+            .all()
+        )
     return FlowDetailResponse(
-        **flow_result.data,
-        tasks=tasks_result.data or [],
+        **_serialize_row(flow),
+        tasks=[_serialize_row(t) for t in tasks],
     )
 
 
@@ -153,47 +188,58 @@ async def cancel_flow(flow_id: str, auth: AuthDep) -> Dict[str, Any]:
          lifecycle bus per A10) AND mark its task_tracking row cancelled
          so UI reflects immediately
     """
-    sb = await get_async_supabase_admin()
-
     # Verify ownership + read flow.
     try:
-        flow_result = (
-            await sb.table("task_flows")
-            .select("id, state, cascade_cancel")
-            .eq("id", flow_id)
-            .eq("user_id", str(auth.user_id))
-            .maybe_single()
-            .execute()
-        )
+        async with read_scope() as session:
+            flow = (
+                (
+                    await session.execute(
+                        select(
+                            TaskFlows.id,
+                            TaskFlows.state,
+                            TaskFlows.cascade_cancel,
+                        )
+                        .where(TaskFlows.id == flow_id)
+                        .where(TaskFlows.user_id == str(auth.user_id))
+                        .limit(1)
+                    )
+                )
+                .mappings()
+                .first()
+            )
     except Exception as exc:
         logger.exception(f"flow cancel lookup failed: {exc}")
         raise HTTPException(500, "lookup failed")
-    if not flow_result or not flow_result.data:
+    if not flow:
         raise HTTPException(404, "flow not found")
-    flow = flow_result.data
     if flow["state"] in ("completed", "failed", "cancelled", "partial"):
         return {"ok": True, "noop": True, "reason": f"already {flow['state']}"}
 
     # Mark the flow cancelled first so the aggregate trigger doesn't flip
     # back to running between us reading children and them transitioning.
-    await (
-        sb.table("task_flows")
-        .update({"state": "cancelled"})
-        .eq("id", flow_id)
-        .execute()
-    )
+    async with write_scope() as session:
+        await session.execute(
+            sa_update(TaskFlows)
+            .where(TaskFlows.id == flow_id)
+            .values(state="cancelled")
+        )
 
     if not flow.get("cascade_cancel", True):
         return {"ok": True, "cascaded": 0, "reason": "cascade_cancel=false"}
 
     # Find non-terminal children.
-    children = (
-        await sb.table("task_tracking")
-        .select("dbos_workflow_id, phase")
-        .eq("flow_id", flow_id)
-        .in_("phase", ["queued", "in_progress"])
-        .execute()
-    ).data or []
+    async with read_scope() as session:
+        children = (
+            (
+                await session.execute(
+                    select(TaskTracking.dbos_workflow_id, TaskTracking.phase)
+                    .where(TaskTracking.flow_id == flow_id)
+                    .where(TaskTracking.phase.in_(["queued", "in_progress"]))
+                )
+            )
+            .mappings()
+            .all()
+        )
 
     # Signal abort + mark cancelled.
     from app.services.abort_registry import get_registry
@@ -206,19 +252,17 @@ async def cancel_flow(flow_id: str, auth: AuthDep) -> Dict[str, Any]:
             continue
         try:
             await registry.signal(wf_id, broadcast=True)
-            await (
-                sb.table("task_tracking")
-                .update(
-                    {
-                        "phase": "cancelled",
-                        "status": "cancelled",
-                        "error_code": "flow_cascade_cancel",
-                        "error_msg": f"flow {flow_id} cancelled",
-                    }
+            async with write_scope() as session:
+                await session.execute(
+                    sa_update(TaskTracking)
+                    .where(TaskTracking.dbos_workflow_id == wf_id)
+                    .values(
+                        phase="cancelled",
+                        status="cancelled",
+                        error_code="flow_cascade_cancel",
+                        error_msg=f"flow {flow_id} cancelled",
+                    )
                 )
-                .eq("dbos_workflow_id", wf_id)
-                .execute()
-            )
             cancelled += 1
         except Exception as exc:
             logger.opt(exception=True).warning(
@@ -232,19 +276,20 @@ async def cancel_flow(flow_id: str, auth: AuthDep) -> Dict[str, Any]:
 async def delete_flow(flow_id: str, auth: AuthDep) -> Dict[str, Any]:
     """Hard delete a flow row. Child task_tracking rows survive (FK is
     ON DELETE SET NULL) so historical task records aren't lost."""
-    sb = await get_async_supabase_admin()
     try:
-        result = (
-            await sb.table("task_flows")
-            .delete()
-            .eq("id", flow_id)
-            .eq("user_id", str(auth.user_id))
-            .execute()
-        )
+        async with write_scope() as session:
+            deleted = (
+                await session.execute(
+                    sa_delete(TaskFlows)
+                    .where(TaskFlows.id == flow_id)
+                    .where(TaskFlows.user_id == str(auth.user_id))
+                    .returning(TaskFlows.id)
+                )
+            ).all()
     except Exception as exc:
         logger.exception(f"flow delete failed: {exc}")
         raise HTTPException(500, "delete failed")
-    return {"ok": True, "deleted": len(result.data or [])}
+    return {"ok": True, "deleted": len(deleted)}
 
 
 __all__ = ["router"]

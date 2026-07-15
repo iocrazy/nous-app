@@ -400,34 +400,32 @@ async def test_get_script_ai_id_is_uuid(client: AsyncClient) -> None:
 # ---------------------------------------------------------------------------
 
 
-class _FakeVersionsChain:
-    """Minimal stand-in for the supabase select chain used by rollback_skill:
-    .table(..).select(..).eq(..).eq(..).maybe_single().execute() → data."""
+def _read_scope_first(row: Any):
+    """read_scope() stand-in whose session.execute().mappings().first()
+    returns ``row`` (None → not found) — the ORM boundary rollback_skill /
+    get_skill_version now run their skill_versions SELECT against."""
+    from contextlib import asynccontextmanager
 
-    def __init__(self, data: Any) -> None:
-        self._data = data
+    class _M:
+        def first(self) -> Any:
+            return row
 
-    def select(self, *a: Any, **k: Any) -> "_FakeVersionsChain":
-        return self
+        def all(self) -> Any:
+            return [row] if row is not None else []
 
-    def eq(self, *a: Any, **k: Any) -> "_FakeVersionsChain":
-        return self
+    class _R:
+        def mappings(self) -> "_M":
+            return _M()
 
-    def maybe_single(self) -> "_FakeVersionsChain":
-        return self
+    class _S:
+        async def execute(self, _stmt: Any) -> "_R":
+            return _R()
 
-    async def execute(self) -> Any:
-        from types import SimpleNamespace
+    @asynccontextmanager
+    async def _scope():
+        yield _S()
 
-        return SimpleNamespace(data=self._data)
-
-
-class _FakeAdminClient:
-    def __init__(self, snapshot: Any) -> None:
-        self._snapshot = snapshot
-
-    def table(self, _name: str) -> _FakeVersionsChain:
-        return _FakeVersionsChain(self._snapshot)
+    return _scope
 
 
 @pytest.mark.asyncio
@@ -445,10 +443,7 @@ async def test_rollback_skill_writes_old_content_as_new_version(
         update_fields_versioned=update_mock,
     )
     snapshot = {"body_md": "OLD body", "frontmatter_json": {"k": "v"}}
-    admin_patch = patch(
-        "app.api.ai_library_router.get_async_supabase_admin",
-        AsyncMock(return_value=_FakeAdminClient(snapshot)),
-    )
+    admin_patch = patch("app.db.session.read_scope", _read_scope_first(snapshot))
     _apply(skill_patches)
     admin_patch.__enter__()
     try:
@@ -478,10 +473,7 @@ async def test_rollback_skill_version_not_found(client: AsyncClient) -> None:
     """Unknown version_number → 404."""
     skill = _skill_row(slug="my-skill", is_public=False, project_id=42)
     skill_patches = _patch_skill_repo(get_by_slug=AsyncMock(return_value=skill))
-    admin_patch = patch(
-        "app.api.ai_library_router.get_async_supabase_admin",
-        AsyncMock(return_value=_FakeAdminClient(None)),  # no snapshot row
-    )
+    admin_patch = patch("app.db.session.read_scope", _read_scope_first(None))
     _apply(skill_patches)
     admin_patch.__enter__()
     try:
@@ -520,10 +512,7 @@ async def test_get_skill_version_returns_body(client: AsyncClient) -> None:
         "notes": None,
         "created_by": None,
     }
-    admin_patch = patch(
-        "app.api.ai_library_router.get_async_supabase_admin",
-        AsyncMock(return_value=_FakeAdminClient(snapshot)),
-    )
+    admin_patch = patch("app.db.session.read_scope", _read_scope_first(snapshot))
     _apply(skill_patches)
     admin_patch.__enter__()
     try:
@@ -540,10 +529,7 @@ async def test_get_skill_version_returns_body(client: AsyncClient) -> None:
 async def test_get_skill_version_not_found(client: AsyncClient) -> None:
     skill = _skill_row(slug="my-skill", is_public=False, project_id=42)
     skill_patches = _patch_skill_repo(get_by_slug=AsyncMock(return_value=skill))
-    admin_patch = patch(
-        "app.api.ai_library_router.get_async_supabase_admin",
-        AsyncMock(return_value=_FakeAdminClient(None)),
-    )
+    admin_patch = patch("app.db.session.read_scope", _read_scope_first(None))
     _apply(skill_patches)
     admin_patch.__enter__()
     try:

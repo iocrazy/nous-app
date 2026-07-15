@@ -12,46 +12,73 @@ admin-only via the workforce drawer.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
 
 
-def _chain(data):
-    """Build a chainable supabase mock that resolves to ``data``."""
-    chain = MagicMock()
-    chain.select.return_value = chain
-    chain.eq.return_value = chain
-    chain.order.return_value = chain
-    chain.limit.return_value = chain
-    chain.maybe_single.return_value = chain
-    chain.execute = AsyncMock(return_value=MagicMock(data=data))
-    return chain
+class _Mappings:
+    """Result-mappings stand-in serving both .first() (single-row lookups)
+    and .all() (multi-row queries) from one staged entry."""
+
+    def __init__(self, data):
+        self._data = data
+
+    def first(self):
+        if isinstance(self._data, list):
+            return self._data[0] if self._data else None
+        return self._data
+
+    def all(self):
+        if isinstance(self._data, list):
+            return self._data
+        return [self._data] if self._data is not None else []
 
 
-def _client_for(tables: dict[str, list]):
-    """Build a fake supabase client whose ``table(name)`` returns a chain
-    that yields the next entry from ``tables[name]`` per call.
+class _Result:
+    def __init__(self, data):
+        self._data = data
 
-    Each entry can be either a single row dict (maybe_single) or a list
-    (multi-row queries). Using a list lets one test stage multiple
-    queries on the same table in order.
-    """
-    client = MagicMock()
+    def mappings(self):
+        return _Mappings(self._data)
+
+
+def _read_scope_for(tables: dict[str, list], executed: list):
+    """A ``read_scope()`` stand-in for get_task_by_inbox's ORM reads.
+
+    Dispatches each executed statement to the staged rows for its table
+    (matched by the table name rendered into the compiled SQL) and records
+    the table name in ``executed`` so a test can assert how many queries ran
+    (replacing the old ``client.table.call_count`` assertion)."""
     iters = {name: iter(rows) for name, rows in tables.items()}
 
-    def _table(name: str):
-        try:
-            data = next(iters[name])
-        except (KeyError, StopIteration):
-            data = None
-        return _chain(data)
+    class _Session:
+        async def execute(self, stmt):
+            sql = str(stmt).lower()
+            if "agent_inbox" in sql:
+                name = "agent_inbox"
+            elif "task_tracking" in sql:
+                name = "task_tracking"
+            elif "agent_outbox" in sql:
+                name = "agent_outbox"
+            else:  # pragma: no cover - defensive
+                name = None
+            executed.append(name)
+            try:
+                data = next(iters[name])
+            except (KeyError, StopIteration):
+                data = None
+            return _Result(data)
 
-    client.table.side_effect = _table
-    return client
+    @asynccontextmanager
+    async def _scope():
+        yield _Session()
+
+    return _scope
 
 
 @pytest.mark.asyncio
@@ -86,7 +113,8 @@ async def test_returns_task_and_outbox_when_done() -> None:
         "delivered": True,
         "delivered_at": "2026-04-26T10:00:24Z",
     }
-    client = _client_for(
+    executed: list = []
+    scope = _read_scope_for(
         {
             "agent_inbox": [
                 # First call: lookup inbox row
@@ -101,14 +129,16 @@ async def test_returns_task_and_outbox_when_done() -> None:
             ],
             "task_tracking": [task_row],
             "agent_outbox": [[outbox_row]],
-        }
+        },
+        executed,
     )
 
     fake_user = SimpleNamespace(id=user_id)
-    with patch(
-        "app.api.workforce_router.get_async_supabase_admin",
-        AsyncMock(return_value=client),
-    ):
+    import importlib
+
+    wf_mod = importlib.import_module("app.api.workforce_router")
+
+    with patch.object(wf_mod, "read_scope", scope):
         out = await get_task_by_inbox(inbox_message_id=inbox_id, user=fake_user)
 
     assert out["inbox_message_id"] == str(inbox_id)
@@ -125,7 +155,8 @@ async def test_no_task_yet_when_recipient_hasnt_ticked() -> None:
 
     user_id = uuid4()
     inbox_id = uuid4()
-    client = _client_for(
+    executed: list = []
+    scope = _read_scope_for(
         {
             "agent_inbox": [
                 {
@@ -139,14 +170,16 @@ async def test_no_task_yet_when_recipient_hasnt_ticked() -> None:
             ],
             # A4: task_tracking lookup returns None
             "task_tracking": [None],
-        }
+        },
+        executed,
     )
 
     fake_user = SimpleNamespace(id=user_id)
-    with patch(
-        "app.api.workforce_router.get_async_supabase_admin",
-        AsyncMock(return_value=client),
-    ):
+    import importlib
+
+    wf_mod = importlib.import_module("app.api.workforce_router")
+
+    with patch.object(wf_mod, "read_scope", scope):
         out = await get_task_by_inbox(inbox_message_id=inbox_id, user=fake_user)
 
     assert out["task"] is None
@@ -173,7 +206,8 @@ async def test_outbox_skipped_when_task_in_progress() -> None:
         "inbox_message_id": str(inbox_id),
         "metadata": {},
     }
-    client = _client_for(
+    executed: list = []
+    scope = _read_scope_for(
         {
             "agent_inbox": [
                 {
@@ -186,21 +220,22 @@ async def test_outbox_skipped_when_task_in_progress() -> None:
                 },
             ],
             "task_tracking": [task_row],
-        }
+        },
+        executed,
     )
 
     fake_user = SimpleNamespace(id=user_id)
-    with patch(
-        "app.api.workforce_router.get_async_supabase_admin",
-        AsyncMock(return_value=client),
-    ):
+    import importlib
+
+    wf_mod = importlib.import_module("app.api.workforce_router")
+
+    with patch.object(wf_mod, "read_scope", scope):
         out = await get_task_by_inbox(inbox_message_id=inbox_id, user=fake_user)
 
     assert out["task"]["lifecycle_status"] == "in_progress"
     assert out["outbox_response"] is None
-    # agent_outbox table was never touched — table iterator only
-    # consumed agent_inbox + agent_tasks.
-    assert client.table.call_count == 2
+    # agent_outbox was never queried — only agent_inbox + task_tracking ran.
+    assert executed == ["agent_inbox", "task_tracking"]
 
 
 @pytest.mark.asyncio
@@ -212,7 +247,8 @@ async def test_403_when_caller_not_sender() -> None:
     user_id = uuid4()
     other_user = uuid4()
     inbox_id = uuid4()
-    client = _client_for(
+    executed: list = []
+    scope = _read_scope_for(
         {
             "agent_inbox": [
                 {
@@ -224,14 +260,16 @@ async def test_403_when_caller_not_sender() -> None:
                     "reply_to_message_id": None,
                 },
             ],
-        }
+        },
+        executed,
     )
 
     fake_user = SimpleNamespace(id=user_id)
-    with patch(
-        "app.api.workforce_router.get_async_supabase_admin",
-        AsyncMock(return_value=client),
-    ):
+    import importlib
+
+    wf_mod = importlib.import_module("app.api.workforce_router")
+
+    with patch.object(wf_mod, "read_scope", scope):
         with pytest.raises(HTTPException) as exc:
             await get_task_by_inbox(inbox_message_id=inbox_id, user=fake_user)
     assert exc.value.status_code == 403
@@ -245,7 +283,8 @@ async def test_403_when_agent_to_agent_delegate() -> None:
 
     user_id = uuid4()
     inbox_id = uuid4()
-    client = _client_for(
+    executed: list = []
+    scope = _read_scope_for(
         {
             "agent_inbox": [
                 {
@@ -257,14 +296,16 @@ async def test_403_when_agent_to_agent_delegate() -> None:
                     "reply_to_message_id": None,
                 },
             ],
-        }
+        },
+        executed,
     )
 
     fake_user = SimpleNamespace(id=user_id)
-    with patch(
-        "app.api.workforce_router.get_async_supabase_admin",
-        AsyncMock(return_value=client),
-    ):
+    import importlib
+
+    wf_mod = importlib.import_module("app.api.workforce_router")
+
+    with patch.object(wf_mod, "read_scope", scope):
         with pytest.raises(HTTPException) as exc:
             await get_task_by_inbox(inbox_message_id=inbox_id, user=fake_user)
     assert exc.value.status_code == 403
@@ -275,13 +316,15 @@ async def test_404_when_inbox_message_does_not_exist() -> None:
     from app.api.workforce_router import get_task_by_inbox
 
     inbox_id = uuid4()
-    client = _client_for({"agent_inbox": [None]})
+    executed: list = []
+    scope = _read_scope_for({"agent_inbox": [None]}, executed)
 
     fake_user = SimpleNamespace(id=uuid4())
-    with patch(
-        "app.api.workforce_router.get_async_supabase_admin",
-        AsyncMock(return_value=client),
-    ):
+    import importlib
+
+    wf_mod = importlib.import_module("app.api.workforce_router")
+
+    with patch.object(wf_mod, "read_scope", scope):
         with pytest.raises(HTTPException) as exc:
             await get_task_by_inbox(inbox_message_id=inbox_id, user=fake_user)
     assert exc.value.status_code == 404
