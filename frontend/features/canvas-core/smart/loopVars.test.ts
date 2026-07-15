@@ -6,11 +6,13 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  clampBatchSize,
   clampRoundStart,
   clampRounds,
   injectLoopVariables,
   loopRoundIndexes,
   pickRotatingPrompt,
+  sliceLoopImages,
 } from './loopVars';
 
 describe('injectLoopVariables', () => {
@@ -71,5 +73,30 @@ describe('clamps', () => {
     expect(clampRoundStart(-3)).toBe(1);
     expect(clampRoundStart(7)).toBe(7);
     expect(clampRoundStart(Number.NaN)).toBe(1);
+  });
+});
+
+describe('clampBatchSize', () => {
+  it('clamps to 1..100 and floors', () => {
+    expect(clampBatchSize(0)).toBe(1);
+    expect(clampBatchSize(3.9)).toBe(3);
+    expect(clampBatchSize(500)).toBe(100);
+    expect(clampBatchSize(NaN)).toBe(1);
+  });
+});
+
+describe('sliceLoopImages', () => {
+  it('windows by round index (IC slice(N-1, N-1+batch))', () => {
+    const imgs = ['a', 'b', 'c', 'd'];
+    expect(sliceLoopImages(imgs, 1, 1)).toEqual(['a']);
+    expect(sliceLoopImages(imgs, 2, 1)).toEqual(['b']);
+    expect(sliceLoopImages(imgs, 1, 2)).toEqual(['a', 'b']);
+    expect(sliceLoopImages(imgs, 3, 2)).toEqual(['c', 'd']);
+  });
+
+  it('over-run yields empty, empty in yields empty', () => {
+    const imgs = ['a', 'b', 'c', 'd'];
+    expect(sliceLoopImages(imgs, 9, 1)).toEqual([]);
+    expect(sliceLoopImages([], 1, 3)).toEqual([]);
   });
 });
