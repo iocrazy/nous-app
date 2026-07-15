@@ -615,6 +615,21 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
       editable: true,
       editorProps: {
         attributes: { class: 'mh-tiptap-scene-editor' },
+        // Element reorder is driven by the NodeView's OWN React DnD (grip →
+        // onDragStart, row → onDragOver/onDrop on .mh-el-row). ProseMirror's
+        // built-in DnD otherwise fights it and wins: its dragstart sets
+        // `view.dragging` for the grabbed node and its drop then moves that
+        // slice, eating our move op / corrupting the doc. Tell PM to ignore
+        // drags that originate from our grip or land on our rows. Returning true
+        // only makes PM skip ITS handler — it does NOT preventDefault (see
+        // prosemirror-view runCustomHandler), so the native drag + our React
+        // handlers still run.
+        handleDOMEvents: {
+          dragstart: (_view, event) =>
+            !!(event.target as HTMLElement | null)?.closest?.('.mh-el-drag'),
+          drop: (_view, event) =>
+            !!(event.target as HTMLElement | null)?.closest?.('.mh-el-row'),
+        },
       },
       onUpdate: ({ editor: ed, transaction }) => {
         // Our own applyExternalElements/retypeElement/replaceElementText

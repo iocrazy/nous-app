@@ -631,7 +631,12 @@ export function EditorShell({
       // at the writer's position, not at the tail. Falls back to the tail when no
       // scene is focused (createScene already put it there).
       const created = await createScene(scriptId, { sort_order: scenes.length });
-      const anchor = state.activeSceneId;
+      // Anchor to the scene the CURSOR is in — state.cursor.sceneId tracks the
+      // focused element and survives the toolbar button's transient focus steal
+      // (blur only relaxes the editing flag, it never clears the cursor).
+      // activeSceneId only follows scroll / rail-click, so it is often stale or
+      // null when the writer clicks the Scene button (the v0.25.341 bug).
+      const anchor = state.cursor?.sceneId ?? state.activeSceneId;
       if (anchor && anchor !== created.id) {
         await moveScene(created.id, { after_scene_id: anchor });
       }
@@ -639,7 +644,7 @@ export function EditorShell({
     } catch (err) {
       console.error('[EditorShell] createScene failed', err);
     }
-  }, [scriptId, scenes.length, state.activeSceneId, reload]);
+  }, [scriptId, scenes.length, state.cursor?.sceneId, state.activeSceneId, reload]);
 
   // Cold start: create the first scene AND seed an empty action row (via the
   // documented ops endpoint — createScene does not accept initial elements), so
