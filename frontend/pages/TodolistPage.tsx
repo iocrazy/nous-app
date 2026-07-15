@@ -19,51 +19,12 @@ import {
   listIssues, getIssueByIdentifier, createIssue, type Issue, type IssueCreatePayload,
 } from '../services/issuesService';
 import { aiLibraryService } from '../services/aiLibraryService';
-import type { AILibraryAgent } from '../types';
+import { toAgentRef, toUiIssue, type ProjectNameMap } from '../components/Todolist/uiIssue';
+import { fetchProjects } from '../services/projectsService';
 import { useToast } from '../components/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { getSupabaseClient } from '../supabaseClient';
 // useAuth gives currentUserId via context; UserProfile shape doesn't carry id.
-
-const AGENT_PALETTE = [
-  'bg-amber-500', 'bg-emerald-500', 'bg-blue-500', 'bg-purple-500',
-  'bg-pink-500', 'bg-cyan-500', 'bg-orange-500', 'bg-indigo-500',
-];
-
-function colorForAgent(slug: string): string {
-  let h = 0;
-  for (const ch of slug) h = (h * 31 + ch.charCodeAt(0)) & 0xfffff;
-  return AGENT_PALETTE[h % AGENT_PALETTE.length];
-}
-
-function toAgentRef(a: AILibraryAgent): AgentRef {
-  return {
-    id: a.id,
-    slug: a.slug,
-    name: a.name,
-    avatar_color: colorForAgent(a.slug),
-  };
-}
-
-function toUiIssue(raw: Issue, agentsById: Record<string, AgentRef>): UiIssue {
-  const lastActivity = raw.updated_at ?? raw.created_at;
-  return {
-    id: raw.id,
-    identifier: raw.identifier,
-    title: raw.title,
-    description: raw.description,
-    status: raw.status,
-    priority: raw.priority,
-    assignee: raw.assignee_agent_id ? agentsById[raw.assignee_agent_id] : undefined,
-    assignee_user_label: raw.assignee_user_id ? `User ${raw.assignee_user_id.slice(0, 6)}` : undefined,
-    project: raw.project_id ? { id: raw.project_id, name: `Project ${raw.project_id}` } : undefined,
-    parent_id: raw.parent_id ?? null,
-    created_at: raw.created_at,
-    updated_at: raw.updated_at ?? raw.created_at,
-    last_activity_at: lastActivity,
-    raw,
-  };
-}
 
 export function TodolistPage() {
   const { identifier, teamId } = useParams<{ identifier?: string; teamId: string }>();
@@ -77,6 +38,7 @@ export function TodolistPage() {
 
   const [agents, setAgents] = useState<AgentRef[]>([]);
   const [agentsById, setAgentsById] = useState<Record<string, AgentRef>>({});
+  const [projectsById, setProjectsById] = useState<ProjectNameMap>({});
 
   const [selectedIssue, setSelectedIssue] = useState<UiIssue | null>(null);
   const [selectedLoading, setSelectedLoading] = useState(false);
@@ -92,13 +54,21 @@ export function TodolistPage() {
     return Number.isFinite(n) ? n : null;
   }, [teamId]);
 
-  const refreshIssues = useCallback(async (agentMap: Record<string, AgentRef>) => {
+  const projectOptions = useMemo(
+    () => Object.entries(projectsById).map(([id, v]) => ({ id, name: v.name })),
+    [projectsById],
+  );
+
+  const refreshIssues = useCallback(async (
+    agentMap: Record<string, AgentRef>,
+    projectMap: ProjectNameMap,
+  ) => {
     setIssuesLoading(true);
     setIssuesError(null);
     try {
       const filters = teamIdNum ? { team_id: teamIdNum, limit: 200 } : { limit: 200 };
       const resp = await listIssues(filters);
-      setIssues(resp.items.map((r) => toUiIssue(r, agentMap)));
+      setIssues(resp.items.map((r) => toUiIssue(r, agentMap, projectMap)));
     } catch (err) {
       setIssuesError(err instanceof Error ? err.message : 'Failed to load issues');
     } finally {
@@ -111,23 +81,29 @@ export function TodolistPage() {
     let cancelled = false;
     const load = async () => {
       try {
-        const list = await aiLibraryService.listAgents();
+        const [list, projects] = await Promise.all([
+          aiLibraryService.listAgents(),
+          fetchProjects(teamId ? { teamId } : undefined).catch(() => []),
+        ]);
         if (cancelled) return;
         const refs = list.map(toAgentRef);
         const map: Record<string, AgentRef> = {};
         for (const r of refs) map[r.id] = r;
+        const projMap: ProjectNameMap = {};
+        for (const p of projects) projMap[String(p.id)] = { name: p.name };
         setAgents(refs);
         setAgentsById(map);
-        await refreshIssues(map);
+        setProjectsById(projMap);
+        await refreshIssues(map, projMap);
       } catch (err) {
         if (cancelled) return;
         addToast(err instanceof Error ? err.message : 'Failed to load agents', 'error');
-        await refreshIssues({});
+        await refreshIssues({}, {});
       }
     };
     void load();
     return () => { cancelled = true; };
-  }, [refreshIssues, addToast]);
+  }, [refreshIssues, addToast, teamId]);
 
   // Fetch single issue when :identifier set
   useEffect(() => {
@@ -142,7 +118,7 @@ export function TodolistPage() {
       try {
         const raw = await getIssueByIdentifier(identifier);
         if (cancelled) return;
-        setSelectedIssue(toUiIssue(raw, agentsById));
+        setSelectedIssue(toUiIssue(raw, agentsById, projectsById));
       } catch (err) {
         if (cancelled) return;
         setSelectedError(err instanceof Error ? err.message : 'Failed to load issue');
@@ -151,7 +127,7 @@ export function TodolistPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [identifier, agentsById]);
+  }, [identifier, agentsById, projectsById]);
 
   // Realtime: keep the issues list in sync without a manual refresh.
   // `issues` is in the supabase_realtime publication — subscribe so status
@@ -182,7 +158,7 @@ export function TodolistPage() {
           }
           const raw = payload.new as Issue;
           if (!raw?.id) return;
-          const ui = toUiIssue(raw, agentsById);
+          const ui = toUiIssue(raw, agentsById, projectsById);
           setIssues((prev) => {
             const idx = prev.findIndex((i) => i.id === ui.id);
             if (idx < 0) return [ui, ...prev]; // INSERT
@@ -196,12 +172,12 @@ export function TodolistPage() {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [teamIdNum, agentsById]);
+  }, [teamIdNum, agentsById, projectsById]);
 
   const handleCreate = async (payload: IssueCreatePayload) => {
     try {
       const created = await createIssue(payload);
-      const ui = toUiIssue(created, agentsById);
+      const ui = toUiIssue(created, agentsById, projectsById);
       setIssues((prev) => [ui, ...prev]);
       setNewIssueOpen(false);
       navigate(`/team/${teamId}/todolist/${created.identifier}`);
@@ -249,7 +225,7 @@ export function TodolistPage() {
           onIssueDispatched={() => {
             if (identifier) {
               getIssueByIdentifier(identifier).then((raw) => {
-                setSelectedIssue(toUiIssue(raw, agentsById));
+                setSelectedIssue(toUiIssue(raw, agentsById, projectsById));
               }).catch(() => { /* ignore — Realtime will sync eventually */ });
             }
           }}
@@ -259,6 +235,7 @@ export function TodolistPage() {
             agents={agents}
             teamId={teamIdNum}
             parentId={newIssueParentId}
+            projects={projectOptions}
             onClose={() => { setNewIssueOpen(false); setNewIssueParentId(null); }}
             onSubmit={handleCreate}
           />
@@ -276,7 +253,7 @@ export function TodolistPage() {
         viewMode={viewMode}
         onViewModeChange={setViewMode}
         onNewIssue={() => setNewIssueOpen(true)}
-        onRefresh={() => { void refreshIssues(agentsById); }}
+        onRefresh={() => { void refreshIssues(agentsById, projectsById); }}
         agents={agents}
         currentUserId={currentUserId ?? undefined}
       />
@@ -285,6 +262,7 @@ export function TodolistPage() {
           agents={agents}
           teamId={teamIdNum}
           parentId={newIssueParentId}
+          projects={projectOptions}
           onClose={() => { setNewIssueOpen(false); setNewIssueParentId(null); }}
           onSubmit={handleCreate}
         />

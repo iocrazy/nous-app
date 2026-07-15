@@ -3,7 +3,7 @@
  */
 
 import React, { useState } from 'react';
-import { X, Send } from 'lucide-react';
+import { X, Send, FolderKanban } from 'lucide-react';
 import type { AgentRef } from './types';
 import type { IssuePriority, IssueCreatePayload } from '../../services/issuesService';
 import { PRIORITY_LABEL, PRIORITY_ORDER, PriorityIcon } from './IssueStatusIcon';
@@ -16,17 +16,23 @@ interface NewIssueDialogProps {
   parentId?: number | null;
   /** Preselect the assignee (paperclip "Assign Task" from an agent page). */
   defaultAgentId?: string | null;
+  /** Workspace mode — pin the issue to this project (shown read-only, not a picker). */
+  lockedProjectId?: string | null;
+  lockedProjectName?: string;
+  /** Team mode — offer a project picker. Ignored when lockedProjectId is set. */
+  projects?: { id: string; name: string }[];
   onClose: () => void;
   onSubmit: (payload: IssueCreatePayload) => Promise<void>;
 }
 
 export const NewIssueDialog: React.FC<NewIssueDialogProps> = ({
-  agents, teamId, parentId, defaultAgentId, onClose, onSubmit,
+  agents, teamId, parentId, defaultAgentId, lockedProjectId, lockedProjectName, projects, onClose, onSubmit,
 }) => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [agentId, setAgentId] = useState<string | null>(defaultAgentId ?? null);
   const [priority, setPriority] = useState<IssuePriority>('medium');
+  const [projectId, setProjectId] = useState<string | null>(lockedProjectId ?? null);
   const [submitting, setSubmitting] = useState(false);
 
   const submit = async () => {
@@ -39,6 +45,7 @@ export const NewIssueDialog: React.FC<NewIssueDialogProps> = ({
         description: description || undefined,
         priority,
         team_id: teamId ?? undefined,
+        project_id: (lockedProjectId ?? projectId) ?? undefined,
         assignee_agent_id: agentId ?? undefined,
         parent_id: parentId ?? undefined,
       });
@@ -105,6 +112,23 @@ export const NewIssueDialog: React.FC<NewIssueDialogProps> = ({
               ))}
             </UiSelect>
             <span className="ml-1"><PriorityIcon priority={priority} /></span>
+            {lockedProjectId ? (
+              <span className="ml-auto inline-flex items-center gap-1.5 px-2 py-1 text-xs rounded bg-ink-800/80 text-ink-300">
+                <FolderKanban size={12} className="text-ink-500" />
+                {lockedProjectName ?? 'Project'}
+              </span>
+            ) : projects && projects.length > 0 ? (
+              <UiSelect
+                value={projectId ?? ''}
+                onChange={(e) => setProjectId(e.target.value || null)}
+                className="ml-auto h-8 text-xs"
+              >
+                <option value="">No project</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </UiSelect>
+            ) : null}
           </div>
         </div>
         <footer className="flex items-center justify-end gap-2 px-4 py-2.5 border-t border-ink-800">
