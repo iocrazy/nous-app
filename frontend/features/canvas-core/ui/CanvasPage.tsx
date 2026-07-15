@@ -27,6 +27,7 @@ import { useCanvasRealtime } from '../realtime/useCanvasRealtime';
 import { CanvasConflictDialog } from './CanvasConflictDialog';
 import { CanvasSurface } from './CanvasSurface';
 import { TopNodeBar } from './TopNodeBar';
+import { ArrangeSelectedButton } from './ArrangeSelectedButton';
 import { ShortcutHelpPanel } from './ShortcutHelpPanel';
 import { useCanvasShortcuts } from './useCanvasShortcuts';
 
@@ -191,6 +192,7 @@ export default function CanvasPage() {
       )}
       {/* IC 普通画布's top node strip — Standard canvases only. */}
       {kind === 'smart' && <TopNodeBar surfaceRef={surfaceRef} />}
+      {isSmartFamily(kind) && <ArrangeSelectedButton />}
       {isSmartFamily(kind) && <CanvasComposer surfaceRef={surfaceRef} teamId={teamId} />}
       <CanvasConflictDialog />
       <SaveBadge status={saveStatus} error={saveError} />

@@ -1780,7 +1780,8 @@
     "groupNode": {
       "title": "Group",
       "dropHint": "Drop images to auto-collect"
-    }
+    },
+    "arrangeSelected": "Arrange selected"
   },
   "modelParams": {
     "otherParams": "Parameters",
