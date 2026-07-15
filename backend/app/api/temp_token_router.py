@@ -204,25 +204,32 @@ async def create_tag_by_token(token: str, request: CreateTagRequest):
 
     # Set group_id: use provided value, or default to "Uncategorized" group
     if created:
-        from app.db.supabase_client import get_async_supabase_admin
+        from sqlalchemy import select
+        from sqlalchemy import update as sa_update
 
-        client = await get_async_supabase_admin()
+        from app.db.session import read_scope, write_scope
+        from app.models import TagGroups, Tags
+
         group_id = request.group_id
         if not group_id:
             # Find the Uncategorized group
-            result = (
-                await client.table("tag_groups")
-                .select("id")
-                .eq("name", "Uncategorized")
-                .limit(1)
-                .execute()
-            )
-            if result.data:
-                group_id = str(result.data[0]["id"])
+            async with read_scope() as session:
+                row = (
+                    await session.execute(
+                        select(TagGroups.id)
+                        .where(TagGroups.name == "Uncategorized")
+                        .limit(1)
+                    )
+                ).first()
+            if row is not None:
+                group_id = str(row[0])
         if group_id:
-            await client.table("tags").update({"group_id": group_id}).eq(
-                "id", created["id"]
-            ).execute()
+            async with write_scope() as session:
+                await session.execute(
+                    sa_update(Tags)
+                    .where(Tags.id == int(str(created["id"])))
+                    .values(group_id=int(str(group_id)))
+                )
             created["group_id"] = group_id
 
     return {"success": True, "data": created}

@@ -16,7 +16,6 @@ from pydantic import BaseModel, Field
 
 from app.core.admin_deps import AdminAuthDep
 from app.core.deps import AuthDep
-from app.db.supabase_client import get_async_supabase_admin
 from app.services.infra.system_monitor_service import (
     get_network_status,
     get_queue_breakdown,
@@ -65,9 +64,7 @@ class SystemStatusResponse(BaseModel):
     timestamp: float
 
 
-@router.get(
-    "/queue-breakdown", tags=TAGS, response_model=list[QueueBreakdownRow]
-)
+@router.get("/queue-breakdown", tags=TAGS, response_model=list[QueueBreakdownRow])
 async def get_system_queue_breakdown(auth: AuthDep):
     """Per-task_type queue depth + oldest queued age (ops/admin visibility).
     Reads task_tracking only (route-C)."""
@@ -153,10 +150,13 @@ async def _check_database() -> List[HealthCheck]:
     """DB connectivity probe (count = exact, head request)."""
     checks: List[HealthCheck] = []
     try:
-        client = await get_async_supabase_admin()
-        await client.table("parsed_media").select("id", head=True, count="exact").limit(
-            1
-        ).execute()
+        from sqlalchemy import select
+
+        from app.db.session import read_scope
+        from app.models import ParsedMedia
+
+        async with read_scope() as session:
+            await session.execute(select(ParsedMedia.id).limit(1))
         checks.append(
             HealthCheck(
                 name="Supabase / Postgres", status="healthy", detail="Connected"
@@ -182,11 +182,18 @@ async def _check_trigram_via_latency() -> HealthCheck:
     100ms; a Seq Scan on the same set is 500ms+.
     """
     try:
-        client = await get_async_supabase_admin()
-        t0 = time.time()
-        await client.table("parsed_media").select("id").ilike(
-            "title", "*__healthcheck_no_match__*"
-        ).limit(1).execute()
+        from sqlalchemy import select
+
+        from app.db.session import read_scope
+        from app.models import ParsedMedia
+
+        async with read_scope() as session:
+            t0 = time.time()
+            await session.execute(
+                select(ParsedMedia.id)
+                .where(ParsedMedia.title.ilike("%__healthcheck_no_match__%"))
+                .limit(1)
+            )
         elapsed_ms = int((time.time() - t0) * 1000)
         status = "healthy" if elapsed_ms < 250 else "degraded"
         return HealthCheck(

@@ -286,22 +286,28 @@ async def get_storage_breakdown(auth: AuthDep):
 
     Shows storage usage by type, month, and tag.
     """
-    from app.db.supabase_client import get_async_supabase_admin
+    from sqlalchemy import select
 
-    supabase = await get_async_supabase_admin()
+    from app.db.session import read_scope
+    from app.models import ParsedMedia, Resources
 
     # parsed_media lost its user_id (mig 083) — per-user ownership now lives on
     # resources.creator_id. Scope to the media the user actually owns via their
     # non-trashed resources, then pull storage info from the (global) parsed_media
     # rows for those media_ids.
-    owned = (
-        await supabase.table("resources")
-        .select("media_id")
-        .eq("creator_id", auth.user_id)
-        .eq("is_trashed", False)
-        .execute()
-    )
-    media_ids = list({r["media_id"] for r in (owned.data or []) if r.get("media_id")})
+    async with read_scope() as session:
+        owned = (
+            (
+                await session.execute(
+                    select(Resources.media_id)
+                    .where(Resources.creator_id == auth.user_id)
+                    .where(Resources.is_trashed.is_(False))
+                )
+            )
+            .scalars()
+            .all()
+        )
+    media_ids = list({m for m in owned if m})
 
     if not media_ids:
         return {
@@ -313,14 +319,37 @@ async def get_storage_breakdown(auth: AuthDep):
         }
 
     # Get all owned media with storage info
-    result = (
-        await supabase.table("parsed_media")
-        .select("id, storage_size, media_type, created_at")
-        .in_("id", media_ids)
-        .execute()
-    )
+    async with read_scope() as session:
+        pm_rows = (
+            (
+                await session.execute(
+                    select(
+                        ParsedMedia.id,
+                        ParsedMedia.storage_size,
+                        ParsedMedia.media_type,
+                        ParsedMedia.created_at,
+                    ).where(ParsedMedia.id.in_(media_ids))
+                )
+            )
+            .mappings()
+            .all()
+        )
 
-    videos = result.data
+    # Serialize created_at → ISO-8601 str: the by-month bucketing below slices
+    # ``created_at[:7]`` (YYYY-MM), which requires a string, not a datetime.
+    videos = [
+        {
+            "id": r["id"],
+            "storage_size": r["storage_size"],
+            "media_type": r["media_type"],
+            "created_at": (
+                r["created_at"].isoformat()
+                if hasattr(r["created_at"], "isoformat")
+                else r["created_at"]
+            ),
+        }
+        for r in pm_rows
+    ]
 
     # By type
     by_type = {"video": 0, "image": 0, "other": 0}

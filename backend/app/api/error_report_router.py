@@ -7,7 +7,6 @@ from loguru import logger
 from pydantic import BaseModel
 
 from app.core.deps import OptionalAuthDep
-from app.db import get_async_supabase_admin
 
 router = APIRouter(prefix="/errors", tags=["Error Reporting"])
 
@@ -30,19 +29,24 @@ async def report_frontend_error(
 ):
     """Accept frontend error reports. Always returns 204 — error reporting should never fail."""
     try:
-        supabase = await get_async_supabase_admin()
-        await supabase.table("frontend_error_logs").insert(
-            {
-                "user_id": auth.user_id if auth else None,
-                "session_id": report.session_id,
-                "error_type": report.error_type,
-                "message": report.message,
-                "stack": report.stack,
-                "url": report.url,
-                "component": report.component,
-                "user_agent": report.user_agent,
-                "metadata": report.metadata,
-            }
-        ).execute()
+        from sqlalchemy import insert
+
+        from app.db.session import write_scope
+        from app.models import FrontendErrorLogs
+
+        async with write_scope() as session:
+            await session.execute(
+                insert(FrontendErrorLogs).values(
+                    user_id=auth.user_id if auth else None,
+                    session_id=report.session_id,
+                    error_type=report.error_type,
+                    message=report.message,
+                    stack=report.stack,
+                    url=report.url,
+                    component=report.component,
+                    user_agent=report.user_agent,
+                    metadata_=report.metadata,
+                )
+            )
     except Exception as e:
         logger.warning(f"Failed to write frontend error log: {e}")

@@ -288,18 +288,21 @@ async def cancel_canvas_generation(task_id: str, auth: AuthDep) -> dict:
 
 async def _is_team_member(team_id: str, user_id: str) -> bool:
     """Same membership check as scope_guards.verify_scope_access."""
-    from app.db import get_async_supabase_admin
+    from sqlalchemy import select
 
-    client = await get_async_supabase_admin()
-    result = (
-        await client.table("team_members")
-        .select("team_id")
-        .eq("team_id", team_id)
-        .eq("user_id", user_id)
-        .limit(1)
-        .execute()
-    )
-    return bool(result.data)
+    from app.db.session import read_scope
+    from app.models import TeamMembers
+
+    async with read_scope() as session:
+        member = (
+            await session.execute(
+                select(TeamMembers.team_id)
+                .where(TeamMembers.team_id == int(str(team_id)))
+                .where(TeamMembers.user_id == user_id)
+                .limit(1)
+            )
+        ).first()
+    return member is not None
 
 
 @router.get("/canvases/team/{team_id}")
