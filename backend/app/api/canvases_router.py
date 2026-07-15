@@ -229,18 +229,32 @@ async def list_text_models(auth: AuthDep) -> dict:
 async def get_canvas_generation(task_id: str, auth: AuthDep) -> dict:
     """Poll one generation task. Reads task_tracking (the UI's single source
     of truth — route C); the durable result lands in metadata.result_url."""
-    client = await get_task_manager()._get_client()
-    result = await (
-        client.table("task_tracking")
-        .select("dbos_workflow_id, phase, status, error_msg, metadata")
-        .eq("dbos_workflow_id", task_id)
-        .eq("user_id", auth.user_id)
-        .single()
-        .execute()
-    )
-    if not result.data:
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import TaskTracking
+
+    async with read_scope() as session:
+        row = (
+            (
+                await session.execute(
+                    select(
+                        TaskTracking.dbos_workflow_id,
+                        TaskTracking.phase,
+                        TaskTracking.status,
+                        TaskTracking.error_msg,
+                        TaskTracking.metadata_.label("metadata"),
+                    )
+                    .where(TaskTracking.dbos_workflow_id == task_id)
+                    .where(TaskTracking.user_id == auth.user_id)
+                )
+            )
+            .mappings()
+            .first()
+        )
+    if row is None:
         raise HTTPException(status_code=404, detail="Task not found")
-    return {"success": True, "data": result.data}
+    return {"success": True, "data": dict(row)}
 
 
 @router.delete("/canvases/generations/{task_id}")
@@ -252,18 +266,21 @@ async def cancel_canvas_generation(task_id: str, auth: AuthDep) -> dict:
     the ``mirror_dbos_lifecycle_to_tracking`` trigger reflects
     phase='cancelled' once the engine flips the workflow to CANCELLED.
     Idempotent: cancelling an already-terminal task is a harmless no-op."""
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import TaskTracking
     from app.services.infra import dbos_orchestrator
 
-    client = await get_task_manager()._get_client()
-    result = await (
-        client.table("task_tracking")
-        .select("dbos_workflow_id")
-        .eq("dbos_workflow_id", task_id)
-        .eq("user_id", auth.user_id)
-        .single()
-        .execute()
-    )
-    if not result.data:
+    async with read_scope() as session:
+        owned = (
+            await session.execute(
+                select(TaskTracking.dbos_workflow_id)
+                .where(TaskTracking.dbos_workflow_id == task_id)
+                .where(TaskTracking.user_id == auth.user_id)
+            )
+        ).scalar()
+    if owned is None:
         raise HTTPException(status_code=404, detail="Task not found")
     await dbos_orchestrator.cancel_workflow(task_id)
     return {"success": True}

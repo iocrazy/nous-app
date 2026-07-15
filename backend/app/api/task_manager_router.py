@@ -446,22 +446,37 @@ async def get_task_progress(task_id: str, auth: AuthDep):
     """
     import json
 
-    tracker = get_task_manager()
-    client = await tracker._get_client()
+    from sqlalchemy import select
 
-    # Look up the task by dbos_workflow_id (PK after migration 180).
-    result = await (
-        client.table("task_tracking")
-        .select("dbos_workflow_id, progress, status, speed, total_bytes, error_msg")
-        .eq("dbos_workflow_id", task_id)
-        .eq("user_id", auth.user_id)
-        .single()
-        .execute()
-    )
-    if not result.data:
+    from app.db.session import read_scope
+    from app.models import TaskTracking
+
+    # Look up the task by dbos_workflow_id (PK after migration 180) on the
+    # canonical ORM read session — no reaching into the task manager's
+    # private client anymore.
+    async with read_scope() as session:
+        row = (
+            (
+                await session.execute(
+                    select(
+                        TaskTracking.dbos_workflow_id,
+                        TaskTracking.progress,
+                        TaskTracking.status,
+                        TaskTracking.speed,
+                        TaskTracking.total_bytes,
+                        TaskTracking.error_msg,
+                    )
+                    .where(TaskTracking.dbos_workflow_id == task_id)
+                    .where(TaskTracking.user_id == auth.user_id)
+                )
+            )
+            .mappings()
+            .first()
+        )
+    if row is None:
         raise HTTPException(404, "Task not found")
 
-    task_row = result.data
+    task_row = dict(row)
     celery_id = task_row.get("dbos_workflow_id")
 
     # Try Redis first for real-time progress
