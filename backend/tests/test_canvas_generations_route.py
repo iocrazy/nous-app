@@ -207,6 +207,38 @@ class TestTextModels:
         list_enabled.assert_awaited_once_with("llm")
 
 
+def _read_scope_returning(row, *, forbid_writes: bool = False):
+    """A read_scope() stand-in whose session returns ``row``; the endpoints
+    run their real ORM statement construction against it. With
+    ``forbid_writes`` the session explodes on any UPDATE/INSERT/DELETE —
+    proving the cancel endpoint never PATCHes task_tracking (route C)."""
+    from contextlib import asynccontextmanager
+
+    class _Res:
+        def mappings(self):
+            return self
+
+        def first(self):
+            return row
+
+        def scalar(self):
+            return row.get("dbos_workflow_id") if row else None
+
+    class _Session:
+        async def execute(self, stmt):
+            if forbid_writes and not str(stmt).lstrip().upper().startswith("SELECT"):
+                raise AssertionError(
+                    "cancel endpoint must not PATCH task_tracking"
+                )  # pragma: no cover - must never run
+            return _Res()
+
+    @asynccontextmanager
+    async def _scope():
+        yield _Session()
+
+    return _scope
+
+
 class TestGetGenerationStatus:
     @pytest.mark.asyncio
     async def test_returns_task_row_fields(self, client, monkeypatch):
@@ -220,25 +252,9 @@ class TestGetGenerationStatus:
                 "kind": "image",
             },
         }
+        import app.db.session as db_session_mod
 
-        class _Q:
-            def table(self, *_a):
-                return self
-
-            def select(self, *_a):
-                return self
-
-            def eq(self, *_a):
-                return self
-
-            def single(self):
-                return self
-
-            async def execute(self):
-                return SimpleNamespace(data=row)
-
-        mgr = SimpleNamespace(_get_client=AsyncMock(return_value=_Q()))
-        monkeypatch.setattr(canvases_router, "get_task_manager", lambda: mgr)
+        monkeypatch.setattr(db_session_mod, "read_scope", _read_scope_returning(row))
 
         resp = await client.get("/api/v1/canvases/generations/task-1")
         assert resp.status_code == 200
@@ -256,38 +272,18 @@ class TestCancelGeneration:
     endpoint MUST NOT write phase itself.
     """
 
-    def _owned_row_client(self, *, row):
-        """A task-manager client whose task_tracking query returns ``row`` and
-        whose ``update`` path explodes — proving the endpoint never PATCHes."""
-
-        class _Q:
-            def table(self, *_a):
-                return self
-
-            def select(self, *_a):
-                return self
-
-            def eq(self, *_a):
-                return self
-
-            def single(self):
-                return self
-
-            async def execute(self):
-                return SimpleNamespace(data=row)
-
-            def update(self, *_a, **_k):  # pragma: no cover - must never run
-                raise AssertionError("cancel endpoint must not PATCH task_tracking")
-
-        return SimpleNamespace(_get_client=AsyncMock(return_value=_Q()))
-
     @pytest.mark.asyncio
     async def test_owner_cancel_calls_dbos_engine_and_skips_phase_patch(
         self, client, monkeypatch
     ):
         row = {"dbos_workflow_id": "task-1", "phase": "processing"}
-        mgr = self._owned_row_client(row=row)
-        monkeypatch.setattr(canvases_router, "get_task_manager", lambda: mgr)
+        import app.db.session as db_session_mod
+
+        monkeypatch.setattr(
+            db_session_mod,
+            "read_scope",
+            _read_scope_returning(row, forbid_writes=True),
+        )
 
         cancel = AsyncMock()
         import app.services.infra.dbos_orchestrator as dbos_orch
@@ -301,8 +297,9 @@ class TestCancelGeneration:
 
     @pytest.mark.asyncio
     async def test_unknown_or_unowned_task_is_404(self, client, monkeypatch):
-        mgr = self._owned_row_client(row=None)
-        monkeypatch.setattr(canvases_router, "get_task_manager", lambda: mgr)
+        import app.db.session as db_session_mod
+
+        monkeypatch.setattr(db_session_mod, "read_scope", _read_scope_returning(None))
 
         cancel = AsyncMock()
         import app.services.infra.dbos_orchestrator as dbos_orch
