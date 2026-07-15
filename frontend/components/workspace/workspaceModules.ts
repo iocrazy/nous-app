@@ -6,13 +6,14 @@
  */
 
 import type { ComponentType } from 'react';
-import { LayoutDashboard, Frame, ListVideo, Users, MapPin,
+import { LayoutDashboard, Frame, ListVideo, ListTodo, Users, MapPin,
   Package, FolderOpen, Trash2, Settings } from 'lucide-react';
 
 export type WorkspaceModule =
   | 'overview'
   | 'canvas'
   | 'episodes'
+  | 'tasks'
   | 'script'
   | 'characters'
   | 'locations'
@@ -32,6 +33,7 @@ export const TOP_MODULES: WorkspaceModuleDef[] = [
   { key: 'overview', labelKey: 'projects.workspace.modules.overview', icon: LayoutDashboard },
   { key: 'canvas', labelKey: 'projects.workspace.modules.canvas', icon: Frame },
   { key: 'episodes', labelKey: 'projects.workspace.modules.episodes', icon: ListVideo },
+  { key: 'tasks', labelKey: 'projects.workspace.modules.tasks', icon: ListTodo },
 ];
 
 /** ASSETS group — project-level entities (spec G13: main-library + appearances). */

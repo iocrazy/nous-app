@@ -64,6 +64,9 @@ const WorkspaceFiles = lazy(() =>
 const WorkspaceCanvas = lazy(() =>
   import('./WorkspaceCanvas').then((m) => ({ default: m.WorkspaceCanvas })),
 );
+const WorkspaceTasks = lazy(() =>
+  import('./WorkspaceTasks').then((m) => ({ default: m.WorkspaceTasks })),
+);
 const ProjectTrashView = lazy(() =>
   import('../ProjectTrashView').then((m) => ({ default: m.ProjectTrashView })),
 );
@@ -104,7 +107,7 @@ export function ProjectWorkspace({
   const initialModule = ((): WorkspaceModule => {
     const q = searchParams.get('module');
     const valid: WorkspaceModule[] = [
-      'overview', 'canvas', 'episodes', 'script', 'characters',
+      'overview', 'canvas', 'episodes', 'tasks', 'script', 'characters',
       'locations', 'props', 'files', 'trash', 'settings',
     ];
     return valid.includes(q as WorkspaceModule) ? (q as WorkspaceModule) : 'overview';
@@ -469,6 +472,9 @@ export function ProjectWorkspace({
             )}
             {activeModule === 'canvas' && (
               <WorkspaceCanvas projectId={project.id} teamId={teamId} />
+            )}
+            {activeModule === 'tasks' && (
+              <WorkspaceTasks projectId={project.id} projectName={project.name} teamId={teamId} />
             )}
           </div>
         )}
