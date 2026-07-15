@@ -15,14 +15,15 @@ Tests cover:
     broadcast_watermark_channel_{id} key. Unchanged by Phase 3 (system_settings
     has no FK to channels; the key is an opaque string built from an id).
 
-Mocking follows the pattern in test_chat_edit_delete.py and test_chat_user_mention.py:
-patch("app.db.engine.<method>", fake_async_fn).
+Mocking: the repo runs on the read_scope/write_scope session scopes now —
+tests stub only the session (capturing the real statement + params).
 """
 
 from __future__ import annotations
 
 import inspect
 import json
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -35,6 +36,45 @@ from app.services.chat.agent_broadcast import (
 )
 
 _REPO = ChatBroadcastRepository()
+
+
+class _FakeResult:
+    def __init__(self, *, rows=None, scalar=None):
+        self._rows = rows or []
+        self._scalar = scalar
+
+    def mappings(self):
+        return self
+
+    def all(self):
+        return self._rows
+
+    def scalar(self):
+        return self._scalar
+
+
+class _FakeSession:
+    def __init__(self, result=None):
+        self.calls: list = []
+        self._result = result if result is not None else _FakeResult()
+
+    async def execute(self, stmt, params=None):
+        self.calls.append({"stmt": stmt, "params": params})
+        return self._result
+
+
+@asynccontextmanager
+async def _scope_of(session):
+    yield session
+
+
+def _patch_scopes(monkeypatch, session):
+    from app.repositories import chat_broadcast_repository as mod
+
+    monkeypatch.setattr(mod, "read_scope", lambda: _scope_of(session))
+    monkeypatch.setattr(mod, "write_scope", lambda: _scope_of(session))
+    return session
+
 
 _CHAN_ID = 1234567890123456789
 _TEAM_ID = 9876543210987654321
@@ -50,27 +90,31 @@ _SINCE = datetime(2026, 6, 26, 12, 0, 0, tzinfo=timezone.utc)
 
 
 @pytest.mark.asyncio
-async def test_candidate_channels_sql_joins_conversation_members_and_conversations():
+async def test_candidate_channels_sql_joins_conversation_members_and_conversations(
+    monkeypatch,
+):
     """SQL must JOIN conversation_members with conversations, filter on
     member_type='agent', archived_at IS NULL, exclude type='direct_agent'
     (1:1 agent DMs never broadcast into), and aggregate agent_ids per
     conversation. Legacy agent_channels/channels tables must NOT appear."""
-    captured: dict = {}
+    session = _patch_scopes(
+        monkeypatch,
+        _FakeSession(
+            _FakeResult(
+                rows=[
+                    {
+                        "channel_id": _CHAN_ID,
+                        "team_id": _TEAM_ID,
+                        "agent_ids": [_AGENT_ID_1, _AGENT_ID_2],
+                    }
+                ]
+            )
+        ),
+    )
 
-    async def fake_fetch_all(sql, params=None):
-        captured["sql"] = sql
-        return [
-            {
-                "channel_id": _CHAN_ID,
-                "team_id": _TEAM_ID,
-                "agent_ids": [_AGENT_ID_1, _AGENT_ID_2],
-            }
-        ]
+    result = await _REPO.list_broadcast_candidate_channels()
 
-    with patch("app.db.engine.fetch_all", fake_fetch_all):
-        result = await _REPO.list_broadcast_candidate_channels()
-
-    sql = captured["sql"]
+    sql = str(session.calls[0]["stmt"])
     assert "conversation_members" in sql, "SQL must reference conversation_members"
     assert "conversations" in sql, "SQL must JOIN conversations"
     assert "member_type" in sql, "SQL must filter on member_type='agent'"
@@ -91,30 +135,34 @@ async def test_candidate_channels_sql_joins_conversation_members_and_conversatio
 
 
 @pytest.mark.asyncio
-async def test_candidate_channels_returns_empty_list_when_no_rows():
+async def test_candidate_channels_returns_empty_list_when_no_rows(monkeypatch):
     """Returns [] when no non-archived agent-bound channels exist."""
+    _patch_scopes(monkeypatch, _FakeSession(_FakeResult(rows=[])))
 
-    async def fake_fetch_all(sql, params=None):
-        return []
-
-    with patch("app.db.engine.fetch_all", fake_fetch_all):
-        result = await _REPO.list_broadcast_candidate_channels()
+    result = await _REPO.list_broadcast_candidate_channels()
 
     assert result == []
 
 
 @pytest.mark.asyncio
-async def test_candidate_channels_coerces_ids_to_int():
+async def test_candidate_channels_coerces_ids_to_int(monkeypatch):
     """channel_id and team_id in the returned dicts must be Python ints."""
+    _patch_scopes(
+        monkeypatch,
+        _FakeSession(
+            _FakeResult(
+                rows=[
+                    {
+                        "channel_id": _CHAN_ID,
+                        "team_id": _TEAM_ID,
+                        "agent_ids": [_AGENT_ID_1],
+                    }
+                ]
+            )
+        ),
+    )
 
-    async def fake_fetch_all(sql, params=None):
-        # Return string-keyed ints (simulating some driver edge cases)
-        return [
-            {"channel_id": _CHAN_ID, "team_id": _TEAM_ID, "agent_ids": [_AGENT_ID_1]}
-        ]
-
-    with patch("app.db.engine.fetch_all", fake_fetch_all):
-        result = await _REPO.list_broadcast_candidate_channels()
+    result = await _REPO.list_broadcast_candidate_channels()
 
     assert isinstance(result[0]["channel_id"], int)
     assert isinstance(result[0]["team_id"], int)
@@ -124,19 +172,20 @@ async def test_candidate_channels_coerces_ids_to_int():
 
 
 @pytest.mark.asyncio
-async def test_counts_since_sql_filters_status_and_task_kind():
+async def test_counts_since_sql_filters_status_and_task_kind(monkeypatch):
     """SQL must JOIN team_members, filter on status='completed' and task_kind='workflow'."""
-    captured: dict = {}
+    session = _patch_scopes(
+        monkeypatch,
+        _FakeSession(
+            _FakeResult(
+                rows=[{"task_kind": "workflow", "cnt": 3, "max_completed_at": _NOW}]
+            )
+        ),
+    )
 
-    async def fake_fetch_all(sql, params=None):
-        captured["sql"] = sql
-        captured["params"] = params
-        return [{"task_kind": "workflow", "cnt": 3, "max_completed_at": _NOW}]
+    result = await _REPO.completed_workflow_counts_since(_TEAM_ID, _SINCE)
 
-    with patch("app.db.engine.fetch_all", fake_fetch_all):
-        result = await _REPO.completed_workflow_counts_since(_TEAM_ID, _SINCE)
-
-    sql = captured["sql"]
+    sql = str(session.calls[0]["stmt"])
     assert "task_tracking" in sql, "SQL must query task_tracking table"
     assert "team_members" in sql, "SQL must JOIN team_members"
     assert "JOIN" in sql.upper(), "SQL must use JOIN"
@@ -155,18 +204,20 @@ async def test_counts_since_sql_filters_status_and_task_kind():
 
 
 @pytest.mark.asyncio
-async def test_counts_since_aggregates_multiple_rows():
+async def test_counts_since_aggregates_multiple_rows(monkeypatch):
     """When query returns multiple kind rows, total = sum, by_kind populated."""
     # In practice only 'workflow' rows are returned (filtered), but test the
     # aggregation logic is correct.
+    _patch_scopes(
+        monkeypatch,
+        _FakeSession(
+            _FakeResult(
+                rows=[{"task_kind": "workflow", "cnt": 7, "max_completed_at": _NOW}]
+            )
+        ),
+    )
 
-    async def fake_fetch_all(sql, params=None):
-        return [
-            {"task_kind": "workflow", "cnt": 7, "max_completed_at": _NOW},
-        ]
-
-    with patch("app.db.engine.fetch_all", fake_fetch_all):
-        result = await _REPO.completed_workflow_counts_since(_TEAM_ID, _SINCE)
+    result = await _REPO.completed_workflow_counts_since(_TEAM_ID, _SINCE)
 
     assert result["total"] == 7
     assert result["by_kind"]["workflow"] == 7
@@ -174,66 +225,48 @@ async def test_counts_since_aggregates_multiple_rows():
 
 
 @pytest.mark.asyncio
-async def test_counts_since_zero_rows_returns_zero_dict():
+async def test_counts_since_zero_rows_returns_zero_dict(monkeypatch):
     """When no completed workflows found, returns all-zero dict."""
+    _patch_scopes(monkeypatch, _FakeSession(_FakeResult(rows=[])))
 
-    async def fake_fetch_all(sql, params=None):
-        return []
-
-    with patch("app.db.engine.fetch_all", fake_fetch_all):
-        result = await _REPO.completed_workflow_counts_since(_TEAM_ID, _SINCE)
+    result = await _REPO.completed_workflow_counts_since(_TEAM_ID, _SINCE)
 
     assert result == {"total": 0, "by_kind": {}, "max_completed_at": None}
 
 
 @pytest.mark.asyncio
-async def test_counts_since_empty_team_returns_zero_dict():
+async def test_counts_since_empty_team_returns_zero_dict(monkeypatch):
     """A team with no members yields zero rows (JOIN produces nothing); returns zero dict."""
+    # The JOIN on team_members simply produces no rows for an empty team.
+    _patch_scopes(monkeypatch, _FakeSession(_FakeResult(rows=[])))
 
-    async def fake_fetch_all(sql, params=None):
-        # The JOIN on team_members simply produces no rows for an empty team.
-        return []
-
-    with patch("app.db.engine.fetch_all", fake_fetch_all):
-        result = await _REPO.completed_workflow_counts_since(_TEAM_ID, _SINCE)
+    result = await _REPO.completed_workflow_counts_since(_TEAM_ID, _SINCE)
 
     assert result == {"total": 0, "by_kind": {}, "max_completed_at": None}
 
 
 @pytest.mark.asyncio
-async def test_counts_since_none_since_no_time_filter_in_sql():
+async def test_counts_since_none_since_no_time_filter_in_sql(monkeypatch):
     """When since=None, the SQL must NOT include a completed_at > filter."""
-    captured: dict = {}
+    session = _patch_scopes(monkeypatch, _FakeSession(_FakeResult(rows=[])))
 
-    async def fake_fetch_all(sql, params=None):
-        captured["sql"] = sql
-        captured["params"] = params
-        return []
-
-    with patch("app.db.engine.fetch_all", fake_fetch_all):
-        result = await _REPO.completed_workflow_counts_since(_TEAM_ID, since=None)
+    result = await _REPO.completed_workflow_counts_since(_TEAM_ID, since=None)
 
     # :since must NOT appear in params when since=None
     assert "since" not in (
-        captured.get("params") or {}
+        session.calls[0]["params"] or {}
     ), ":since param must be absent when since=None"
     assert result == {"total": 0, "by_kind": {}, "max_completed_at": None}
 
 
 @pytest.mark.asyncio
-async def test_counts_since_team_id_param_present():
+async def test_counts_since_team_id_param_present(monkeypatch):
     """The team_id must be passed as :tid parameter; no uids/array param must exist."""
-    captured: dict = {}
+    session = _patch_scopes(monkeypatch, _FakeSession(_FakeResult(rows=[])))
 
-    async def fake_fetch_all(sql, params=None):
-        captured["sql"] = sql
-        captured["params"] = params
-        return []
+    await _REPO.completed_workflow_counts_since(_TEAM_ID, _SINCE)
 
-    with patch("app.db.engine.fetch_all", fake_fetch_all):
-        await _REPO.completed_workflow_counts_since(_TEAM_ID, _SINCE)
-
-    params = captured.get("params") or {}
+    params = session.calls[0]["params"] or {}
     assert "tid" in params, "team_id must be bound as :tid query parameter"
     assert params["tid"] == int(_TEAM_ID), ":tid value must match the provided team_id"
     assert "uids" not in params, ":uids must NOT be present (array-bind removed)"
@@ -245,26 +278,19 @@ async def test_counts_since_team_id_param_present():
 
 
 @pytest.mark.asyncio
-async def test_get_watermark_reads_system_settings_with_correct_key():
+async def test_get_watermark_reads_system_settings_with_correct_key(monkeypatch):
     """get_watermark queries system_settings using broadcast_watermark_channel_{id} key."""
-    captured: dict = {}
-    ts_str = _NOW.isoformat()  # asyncpg returns JSONB string value as Python str
+    ts_str = _NOW.isoformat()  # stored as a JSON string inside the JSONB column
+    session = _patch_scopes(monkeypatch, _FakeSession(_FakeResult(scalar=ts_str)))
 
-    async def fake_fetch_one(sql, params=None):
-        captured["sql"] = sql
-        captured["params"] = params
-        return {"value": ts_str}
+    result = await _REPO.get_watermark(_CHAN_ID)
 
-    with patch("app.db.engine.fetch_one", fake_fetch_one):
-        result = await _REPO.get_watermark(_CHAN_ID)
-
-    sql = captured["sql"]
-    assert "system_settings" in sql, "SQL must query system_settings"
+    stmt = session.calls[0]["stmt"]
+    assert "system_settings" in str(stmt), "SQL must query system_settings"
 
     expected_key = f"broadcast_watermark_channel_{_CHAN_ID}"
-    params_values = list((captured.get("params") or {}).values())
     assert (
-        expected_key in params_values
+        expected_key in stmt.compile().params.values()
     ), f"Expected key '{expected_key}' in query params"
 
     assert isinstance(result, datetime), "Must return a datetime"
@@ -272,28 +298,22 @@ async def test_get_watermark_reads_system_settings_with_correct_key():
 
 
 @pytest.mark.asyncio
-async def test_get_watermark_returns_none_when_key_missing():
+async def test_get_watermark_returns_none_when_key_missing(monkeypatch):
     """get_watermark returns None when system_settings has no row for the key."""
+    _patch_scopes(monkeypatch, _FakeSession(_FakeResult(scalar=None)))
 
-    async def fake_fetch_one(sql, params=None):
-        return None
-
-    with patch("app.db.engine.fetch_one", fake_fetch_one):
-        result = await _REPO.get_watermark(_CHAN_ID)
+    result = await _REPO.get_watermark(_CHAN_ID)
 
     assert result is None
 
 
 @pytest.mark.asyncio
-async def test_get_watermark_result_is_timezone_aware():
+async def test_get_watermark_result_is_timezone_aware(monkeypatch):
     """Even if stored ISO string lacks timezone, get_watermark must return UTC-aware dt."""
     naive_str = "2026-06-27T12:00:00"  # no tz info
+    _patch_scopes(monkeypatch, _FakeSession(_FakeResult(scalar=naive_str)))
 
-    async def fake_fetch_one(sql, params=None):
-        return {"value": naive_str}
-
-    with patch("app.db.engine.fetch_one", fake_fetch_one):
-        result = await _REPO.get_watermark(_CHAN_ID)
+    result = await _REPO.get_watermark(_CHAN_ID)
 
     assert result is not None
     assert result.tzinfo is not None, "Must attach UTC tzinfo to naive timestamps"
@@ -303,47 +323,38 @@ async def test_get_watermark_result_is_timezone_aware():
 
 
 @pytest.mark.asyncio
-async def test_set_watermark_upserts_system_settings_with_correct_key():
+async def test_set_watermark_upserts_system_settings_with_correct_key(monkeypatch):
     """set_watermark upserts to system_settings under broadcast_watermark_channel_{id}."""
-    captured: dict = {}
+    from sqlalchemy.dialects import postgresql
 
-    async def fake_execute(sql, params=None):
-        captured["sql"] = sql
-        captured["params"] = params
-        return 1
+    session = _patch_scopes(monkeypatch, _FakeSession())
 
-    with patch("app.db.engine.execute", fake_execute):
-        await _REPO.set_watermark(_CHAN_ID, _NOW)
+    await _REPO.set_watermark(_CHAN_ID, _NOW)
 
-    sql = captured["sql"]
+    stmt = session.calls[0]["stmt"]
+    compiled = stmt.compile(dialect=postgresql.dialect())
+    sql = str(compiled)
     assert "system_settings" in sql, "SQL must target system_settings"
-    # Must be an upsert (INSERT ... ON CONFLICT or similar)
-    assert (
-        "INSERT" in sql.upper() or "UPSERT" in sql.upper()
-    ), "SQL must be an INSERT/UPSERT"
-    assert (
-        "ON CONFLICT" in sql.upper() or "UPDATE" in sql.upper()
-    ), "SQL must handle conflicts (upsert)"
+    assert "INSERT" in sql.upper(), "SQL must be an INSERT/UPSERT"
+    assert "ON CONFLICT" in sql.upper(), "SQL must handle conflicts (upsert)"
 
-    params = captured.get("params") or {}
     expected_key = f"broadcast_watermark_channel_{_CHAN_ID}"
-    params_str = str(params)
-    assert expected_key in params_str, f"Key '{expected_key}' must be in params"
+    assert expected_key in str(
+        compiled.params
+    ), f"Key '{expected_key}' must be in params"
 
 
 @pytest.mark.asyncio
-async def test_set_watermark_stores_iso_timestamp():
+async def test_set_watermark_stores_iso_timestamp(monkeypatch):
     """set_watermark encodes the datetime as an ISO-8601 string in the params."""
-    captured: dict = {}
+    from sqlalchemy.dialects import postgresql
 
-    async def fake_execute(sql, params=None):
-        captured["params"] = params
-        return 1
+    session = _patch_scopes(monkeypatch, _FakeSession())
 
-    with patch("app.db.engine.execute", fake_execute):
-        await _REPO.set_watermark(_CHAN_ID, _NOW)
+    await _REPO.set_watermark(_CHAN_ID, _NOW)
 
-    params_str = str(captured.get("params") or {})
+    compiled = session.calls[0]["stmt"].compile(dialect=postgresql.dialect())
+    params_str = str(compiled.params)
     # The ISO timestamp must appear somewhere in the params (as string or json-encoded)
     assert (
         _NOW.isoformat() in params_str or "2026-06-27" in params_str
