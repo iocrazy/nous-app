@@ -363,22 +363,35 @@ export const EDITOR_SHELL_STYLES = `
 .mh-scene-block:hover .mh-drag-handle,
 .mh-scene-block:focus-within .mh-drag-handle{ opacity:1; }
 .mh-scene-headrow{ display:flex; align-items:center; gap:8px; margin-bottom:13px; flex-wrap:wrap; }
-/* laper parity: the edit-mode heading fields read as FLAT chips (same token as
-   the read-mode .mh-heading-chip), not bordered white form boxes — so
-   entering edit mode never jars the heading's look. Hover/focus lift the tint
-   so it's clearly interactive. */
+/* laper parity: entering edit mode must NOT resize the heading. The edit-mode
+   fields therefore share the read-mode slug's exact typographic metrics
+   (--script-mono / 13.5px / weight 400 / uppercase) — see .mh-scene-heading-display
+   at ~440 + the weight/ls override at ~1548. A FILLED token renders as plain
+   slug text (no pill); only an UNSET token gets the subtle chip tint, byte-for-
+   byte the same as the read-mode .mh-heading-chip — so a partially-filled
+   heading looks identical whether you're reading it or editing it. */
 .mh-scene-select{
-  font-family:var(--mono); font-size:12px; font-weight:700; letter-spacing:0.03em;
-  padding:2px 8px; border-radius:4px; border:1px solid transparent;
-  background:color-mix(in srgb, var(--sheet-ink) 7%, transparent);
-  color:var(--sheet-ink); cursor:pointer; white-space:nowrap;
+  font-family:var(--script-mono); font-size:13.5px; font-weight:400; letter-spacing:0.01em;
+  text-transform:uppercase;
+  padding:0 3px; border-radius:4px; border:1px solid transparent;
+  background:transparent;
+  color:var(--sheet-ink); cursor:pointer; white-space:nowrap; line-height:1.5;
 }
-.mh-scene-select[data-placeholder]{ color:var(--sheet-ink-soft); }
+/* Unset token = laper's subtle chip (identical to the read-mode .mh-heading-chip). */
+.mh-scene-select[data-placeholder]{
+  padding:0 7px;
+  background:color-mix(in srgb, var(--sheet-ink) 7%, transparent);
+  color:var(--sheet-ink-soft);
+}
 .mh-scene-select:hover,
 .mh-scene-select[aria-expanded='true']{
   background:color-mix(in srgb, var(--sheet-ink) 12%, transparent);
 }
 .mh-scene-select:focus-visible{ outline:2px solid var(--indigo); outline-offset:1px; }
+/* Asian layout keeps its own script face + case, matching .mh-scene-heading-display.asian. */
+.mh-scene-headrow.asian .mh-scene-select{
+  font-family:var(--script-hei); font-size:14px; letter-spacing:0.02em; text-transform:none;
+}
 /* HeadingSelect: a chip trigger over a LIGHT popup (the .mh-mention-pop DNA) so
    the INT/EXT + time menus size to their OWN content and never clip labels the
    way UiSelect's trigger-width menu did on the short heading triggers. */
