@@ -140,25 +140,32 @@ async def get_queue_status() -> dict:
                 ).scalar()
             active_count, pending_count = int(active or 0), int(pending or 0)
         else:
-            from app.db import get_async_supabase_admin
+            from sqlalchemy import func, select
 
-            client = await get_async_supabase_admin()
-            active_resp = (
-                await client.table("task_tracking")
-                .select("dbos_workflow_id", head=True, count="exact")
-                .eq("phase", "processing")
-                .execute()
-            )
-            pending_resp = (
-                await client.table("task_tracking")
-                .select("dbos_workflow_id", head=True, count="exact")
-                .eq("phase", "queued")
-                .execute()
-            )
-            active_count, pending_count = (
-                int(active_resp.count or 0),
-                int(pending_resp.count or 0),
-            )
+            from app.db.session import read_scope
+            from app.models import TaskTracking
+
+            async with read_scope() as session:
+                active_count = int(
+                    (
+                        await session.execute(
+                            select(func.count())
+                            .select_from(TaskTracking)
+                            .where(TaskTracking.phase == "processing")
+                        )
+                    ).scalar()
+                    or 0
+                )
+                pending_count = int(
+                    (
+                        await session.execute(
+                            select(func.count())
+                            .select_from(TaskTracking)
+                            .where(TaskTracking.phase == "queued")
+                        )
+                    ).scalar()
+                    or 0
+                )
         result = {
             "active": active_count,
             "pending": pending_count,
@@ -250,16 +257,26 @@ async def get_queue_breakdown() -> list[dict]:
                 )
                 rows = [dict(m) for m in res.mappings().all()]
         else:
-            from app.db import get_async_supabase_admin
+            from sqlalchemy import select
 
-            client = await get_async_supabase_admin()
-            resp = (
-                await client.table("task_tracking")
-                .select("task_type, phase, created_at")
-                .in_("phase", ["processing", "queued"])
-                .execute()
-            )
-            rows = resp.data or []
+            from app.db.session import read_scope
+            from app.models import TaskTracking
+
+            async with read_scope() as session:
+                rows = [
+                    dict(m)
+                    for m in (
+                        await session.execute(
+                            select(
+                                TaskTracking.task_type,
+                                TaskTracking.phase,
+                                TaskTracking.created_at,
+                            ).where(TaskTracking.phase.in_(["processing", "queued"]))
+                        )
+                    )
+                    .mappings()
+                    .all()
+                ]
 
         result = _aggregate_breakdown(rows, datetime.now(timezone.utc))
         _breakdown_cache.update(data=result, timestamp=current_time)
