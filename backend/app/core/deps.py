@@ -317,29 +317,33 @@ OptionalAuthDep = Annotated[Optional[AuthContext], Depends(get_optional_auth)]
 
 async def get_team_id_for_user(user_id: str) -> Optional[str]:
     """Return the personal team_id for a user, falling back to any team."""
-    admin = await _get_async_supabase_admin()
+    from sqlalchemy import select
 
-    # Prefer personal team (downloads always go to personal team)
-    personal = (
-        await admin.table("teams")
-        .select("id")
-        .eq("owner_id", user_id)
-        .eq("kind", "personal")
-        .limit(1)
-        .execute()
-    )
-    if personal.data:
-        return str(personal.data[0]["id"])
+    from app.db.session import read_scope
+    from app.models import TeamMembers, Teams
 
-    # Fallback: any team membership
-    result = (
-        await admin.table("team_members")
-        .select("team_id")
-        .eq("user_id", user_id)
-        .limit(1)
-        .execute()
-    )
-    return str(result.data[0]["team_id"]) if result.data else None
+    async with read_scope() as session:
+        # Prefer personal team (downloads always go to personal team)
+        personal = (
+            await session.execute(
+                select(Teams.id)
+                .where(Teams.owner_id == user_id)
+                .where(Teams.kind == "personal")
+                .limit(1)
+            )
+        ).first()
+        if personal is not None:
+            return str(personal[0])
+
+        # Fallback: any team membership
+        result = (
+            await session.execute(
+                select(TeamMembers.team_id)
+                .where(TeamMembers.user_id == user_id)
+                .limit(1)
+            )
+        ).first()
+    return str(result[0]) if result is not None else None
 
 
 async def require_team_id(user_id: str) -> str:

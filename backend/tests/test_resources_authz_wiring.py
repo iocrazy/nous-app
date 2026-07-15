@@ -14,10 +14,18 @@ this on the read path once; this prevents the next time.
 Approach: TestClient + dependency_overrides on get_auth so we can run
 the actual FastAPI request pipeline (including dependency resolution)
 without needing real Supabase or JWTs. The team-membership branch of
-verify_scope_access is also patched so the tests are pure-process.
+verify_scope_access is also patched (its ORM read session is stubbed) so
+the tests are pure-process.
+
+After the supabase-py → SQLAlchemy ORM transport swap the guard coerces
+``int(str(scope_id))`` for the BIGINT ``team_members.team_id`` column, so
+scope_ids here are numeric snowflake stand-ins (the caller's own team is
+999; foreign ids are non-members).
 """
 
 from __future__ import annotations
+
+from contextlib import asynccontextmanager
 
 import pytest
 from fastapi.testclient import TestClient
@@ -26,64 +34,50 @@ from app.core.deps import AuthContext, get_auth
 
 pytestmark = pytest.mark.integration
 
+# user-A's personal-team snowflake stand-in (numeric — the guard binds an int).
+MEMBER_TEAM_ID = 999
+
 
 # ─── Fixtures ─────────────────────────────────────────────────────────
 
 
 @pytest.fixture
 def client(monkeypatch):
-    """TestClient with auth + supabase admin stubbed.
+    """TestClient with auth + the guard's ORM read session stubbed.
 
-    auth always resolves to user-A. The fake team_members table records
-    user-A as a member of one team whose id == "user-a" (a stand-in for
-    their personal-team snowflake). After Spec 1 PR-C unified the guard
-    on team_members, this membership is what lets the personal-scope
-    test pass while foreign scope_ids ("user-b-not-me", "12345") still
-    400.
+    auth always resolves to user-A, a member of team ``MEMBER_TEAM_ID``
+    only. After Spec 1 PR-C unified the guard on team_members, this
+    membership is what lets the personal-scope test pass while foreign
+    scope_ids (888, 12345) still 403.
     """
 
-    # Stub the admin client used inside verify_scope_access so its
-    # PostgREST call doesn't try to reach a real Supabase. The fake
-    # records the last `.eq("team_id", X)` filter so we can decide
-    # whether the requested team_id matches the test caller's membership.
-    class _FakeQuery:
-        def __init__(self) -> None:
-            self._team_id_filter: str | None = None
+    # Stub the read session used inside verify_scope_access so its query
+    # doesn't reach a real DB. Membership is decided by inspecting the
+    # statement's bound parameters for MEMBER_TEAM_ID (the guard binds the
+    # requested scope_id as team_members.team_id).
+    class _Result:
+        def __init__(self, rows: list) -> None:
+            self._rows = rows
 
-        def eq(self, col: str, val: str) -> "_FakeQuery":
-            if col == "team_id":
-                self._team_id_filter = val
-            return self
+        def first(self):
+            return self._rows[0] if self._rows else None
 
-        def __getattr__(self, _name: str):
-            def _capture(*_a, **_kw) -> "_FakeQuery":
-                return self
+    class _FakeSession:
+        async def execute(self, stmt):
+            try:
+                bound = stmt.compile().params.values()
+            except Exception:
+                bound = ()
+            is_member = MEMBER_TEAM_ID in bound
+            return _Result([(MEMBER_TEAM_ID,)] if is_member else [])
 
-            return _capture
+    @asynccontextmanager
+    async def _fake_read_scope():
+        yield _FakeSession()
 
-        async def execute(self):
-            # Membership: user-a is a member of team "user-a" only.
-            data = (
-                [{"team_id": self._team_id_filter}]
-                if self._team_id_filter == "user-a"
-                else []
-            )
+    import app.db.session as db_session_mod
 
-            class _R:
-                pass
-
-            r = _R()
-            r.data = data
-            return r
-
-    class _FakeClient:
-        def table(self, _name: str) -> _FakeQuery:
-            return _FakeQuery()
-
-    async def _fake_admin():
-        return _FakeClient()
-
-    monkeypatch.setattr("app.core.scope_guards.get_async_supabase_admin", _fake_admin)
+    monkeypatch.setattr(db_session_mod, "read_scope", _fake_read_scope)
 
     from app.main import app
 
@@ -109,7 +103,7 @@ def _expect_403_on_foreign_scope(client: TestClient, path: str, method: str = "G
     resp = client.request(
         method,
         path,
-        params={"scope_type": "personal", "scope_id": "user-b-not-me"},
+        params={"scope_type": "personal", "scope_id": "888"},
     )
     assert resp.status_code == 403, (
         f"{method} {path} did not 403 on foreign personal scope_id "
@@ -157,7 +151,7 @@ def test_personal_scope_own_user_passes_guard(client: TestClient):
     """
     resp = client.get(
         "/api/v1/resources",
-        params={"scope_type": "personal", "scope_id": "user-a"},
+        params={"scope_type": "personal", "scope_id": str(MEMBER_TEAM_ID)},
     )
     assert resp.status_code != 403, (
         f"Guard blocked legitimate own-scope caller (got {resp.status_code}). "
