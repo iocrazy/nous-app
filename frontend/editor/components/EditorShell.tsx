@@ -624,11 +624,22 @@ export function EditorShell({
     [setNextInsertType],
   );
 
-  const handleInsertScene = useCallback(() => {
-    createScene(scriptId, { sort_order: scenes.length })
-      .then(() => reload())
-      .catch((err) => console.error('[EditorShell] createScene failed', err));
-  }, [scriptId, scenes.length, reload]);
+  const handleInsertScene = useCallback(async () => {
+    try {
+      // createScene only positions by sort_order (appends), so create then move
+      // the new scene to sit right AFTER the scene the cursor is in — inserting
+      // at the writer's position, not at the tail. Falls back to the tail when no
+      // scene is focused (createScene already put it there).
+      const created = await createScene(scriptId, { sort_order: scenes.length });
+      const anchor = state.activeSceneId;
+      if (anchor && anchor !== created.id) {
+        await moveScene(created.id, { after_scene_id: anchor });
+      }
+      await reload();
+    } catch (err) {
+      console.error('[EditorShell] createScene failed', err);
+    }
+  }, [scriptId, scenes.length, state.activeSceneId, reload]);
 
   // Cold start: create the first scene AND seed an empty action row (via the
   // documented ops endpoint — createScene does not accept initial elements), so
