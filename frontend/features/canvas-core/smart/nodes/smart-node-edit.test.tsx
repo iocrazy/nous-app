@@ -238,7 +238,7 @@ describe('PromptNodeView — edit affordances', () => {
 // ============================================================
 
 describe('LoopNodeView — edit affordances', () => {
-  it('changing mode dropdown patches mode', () => {
+  it('clicking the segmented control patches mode', () => {
     seedNode('l1', 'loop', { mode: 'serial', label: '' });
     render(
       <Wrap>
@@ -250,10 +250,9 @@ describe('LoopNodeView — edit affordances', () => {
         />
       </Wrap>,
     );
-    // UiSelect: open the trigger, then pick the option (its onChange fires from
-    // the portal option click, not a native <select> change event).
-    fireEvent.click(screen.getByLabelText('Loop mode'));
-    fireEvent.click(screen.getByRole('option', { name: 'Parallel' }));
+    // The IC card replaced the mode dropdown with a segmented control —
+    // "Serial"/"Parallel" are stable (untranslated) aria-labels.
+    fireEvent.click(screen.getByLabelText('Parallel'));
     const node = useCanvasCoreStore.getState().nodes[0] as Record<
       string,
       Record<string, unknown>
@@ -307,8 +306,10 @@ describe('LoopNodeView — batch fields', () => {
         <LoopNodeView {...baseProps} id="l1" type="loop" data={LEGACY} />
       </Wrap>,
     );
-    expect((screen.getByLabelText('Loop rounds') as HTMLInputElement).value).toBe('1');
-    expect((screen.getByLabelText('Start index') as HTMLInputElement).value).toBe('1');
+    // The i18n mock returns the key itself, so the (now-translated)
+    // Rounds/Start aria-labels render as their i18n keys.
+    expect((screen.getByLabelText('canvas.loopRounds') as HTMLInputElement).value).toBe('1');
+    expect((screen.getByLabelText('canvas.loopStart') as HTMLInputElement).value).toBe('1');
   });
 
   it('editing rounds patches a clamped value', () => {
@@ -318,7 +319,7 @@ describe('LoopNodeView — batch fields', () => {
         <LoopNodeView {...baseProps} id="l1" type="loop" data={FULL} />
       </Wrap>,
     );
-    fireEvent.change(screen.getByLabelText('Loop rounds'), { target: { value: '500' } });
+    fireEvent.change(screen.getByLabelText('canvas.loopRounds'), { target: { value: '500' } });
     expect(nodeData().rounds).toBe(100);
   });
 
@@ -329,7 +330,7 @@ describe('LoopNodeView — batch fields', () => {
         <LoopNodeView {...baseProps} id="l1" type="loop" data={FULL} />
       </Wrap>,
     );
-    fireEvent.change(screen.getByLabelText('Start index'), { target: { value: '0' } });
+    fireEvent.change(screen.getByLabelText('canvas.loopStart'), { target: { value: '0' } });
     expect(nodeData().round_start).toBe(1);
   });
 
@@ -378,6 +379,109 @@ describe('LoopNodeView — batch fields', () => {
       </Wrap>,
     );
     expect(screen.getByLabelText('Remove prompt 1')).toBeDisabled();
+  });
+});
+
+// ============================================================
+// Loop node IC card (segmented mode, image/prompt toggles)
+// ============================================================
+
+describe('LoopNodeView IC card', () => {
+  const FULL = {
+    mode: 'serial',
+    label: '',
+    show_prompt: true,
+    image_input: false,
+    image_batch_size: 1,
+    rounds: 1,
+    round_start: 1,
+    prompts: [''],
+  };
+
+  function nodeData(): Record<string, unknown> {
+    const node = useCanvasCoreStore.getState().nodes[0] as Record<
+      string,
+      Record<string, unknown>
+    >;
+    return node.data;
+  }
+
+  it('toggles image_input and shows the image panel note', () => {
+    seedNode('l1', 'loop', FULL);
+    render(
+      <Wrap>
+        <LoopNodeView {...baseProps} id="l1" type="loop" data={FULL} />
+      </Wrap>,
+    );
+    // image panel hidden until toggled (image_input: false)
+    expect(screen.queryByText('canvas.loopImageEmpty')).toBeNull();
+    fireEvent.click(screen.getByLabelText('Toggle image input'));
+    expect(nodeData().image_input).toBe(true);
+  });
+
+  it('switches run mode via the segmented control', () => {
+    seedNode('l1', 'loop', FULL);
+    render(
+      <Wrap>
+        <LoopNodeView {...baseProps} id="l1" type="loop" data={FULL} />
+      </Wrap>,
+    );
+    fireEvent.click(screen.getByLabelText('Parallel'));
+    expect(nodeData().mode).toBe('parallel');
+  });
+
+  it('toggles show_prompt off via the prompt toggle pill', () => {
+    seedNode('l1', 'loop', FULL);
+    render(
+      <Wrap>
+        <LoopNodeView {...baseProps} id="l1" type="loop" data={FULL} />
+      </Wrap>,
+    );
+    expect(screen.getByLabelText('Loop prompt 1')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Toggle prompt input'));
+    expect(nodeData().show_prompt).toBe(false);
+  });
+
+  it('shows the "will output N" note once an upstream media node feeds the loop with image_input on', () => {
+    // Only /api/v1/generated-media/ URLs qualify as durable i2i sources
+    // (resolveSourceUrls / durableImagesOf) — see promptInputs.ts.
+    useCanvasCoreStore.setState({
+      nodes: [
+        {
+          id: 'm1',
+          type: 'media',
+          data: {
+            title: 'Media',
+            items: [{ url: '/api/v1/generated-media/1.png', kind: 'image' }],
+          },
+          position: { x: 0, y: 0 },
+        },
+        { id: 'l1', type: 'loop', data: { ...FULL, image_input: true }, position: { x: 0, y: 0 } },
+      ],
+      connections: [{ id: 'c1', source: 'm1', target: 'l1' }],
+    });
+    render(
+      <Wrap>
+        <LoopNodeView {...baseProps} id="l1" type="loop" data={{ ...FULL, image_input: true }} />
+      </Wrap>,
+    );
+    // The i18n mock ignores interpolation args, so it renders the raw key —
+    // this still proves the "has upstream images" branch (not the empty-state
+    // "loopImageEmpty" copy) was chosen, which is what resolveSourceUrls wiring
+    // is being tested for here.
+    expect(screen.getByText('canvas.loopImageWillOutput')).toBeInTheDocument();
+    expect(screen.queryByText('canvas.loopImageEmpty')).toBeNull();
+  });
+
+  it('inserts the literal 《计数》 counter token into the last prompt', () => {
+    seedNode('l1', 'loop', FULL);
+    render(
+      <Wrap>
+        <LoopNodeView {...baseProps} id="l1" type="loop" data={FULL} />
+      </Wrap>,
+    );
+    fireEvent.click(screen.getByLabelText('Insert count token'));
+    expect((nodeData().prompts as string[])[0]).toBe('《计数》');
   });
 });
 

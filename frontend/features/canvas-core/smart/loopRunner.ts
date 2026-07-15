@@ -21,11 +21,13 @@
 
 import type { CanvasConnection, CanvasNode } from '../types';
 import { resolveEntityRef } from './entityRef';
-import { resolveSourceUrl } from './promptInputs';
+import { resolveSourceUrl, resolveSourceUrls } from './promptInputs';
 import {
+  clampBatchSize,
   injectLoopVariables,
   loopRoundIndexes,
   pickRotatingPrompt,
+  sliceLoopImages,
 } from './loopVars';
 import {
   runPrompts,
@@ -114,10 +116,26 @@ export async function runLoopCascade(opts: LoopRunOptions): Promise<LoopRunSumma
     return { ...empty, rounds: indexes.length };
   }
 
+  // IC image-input (smartLoopInputImages): the loop resolves ITS OWN upstream
+  // durable images once, then feeds a per-round slice as the downstream
+  // generation's source. A `loop` node is not a durableImagesOf provider, so
+  // this must be injected into the downstream contexts (not resolved by them).
+  const loopImages = data.image_input
+    ? resolveSourceUrls(opts.loopId, opts.nodes, opts.connections)
+    : [];
+  const batchSize = clampBatchSize(data.image_batch_size ?? 1);
+
   const roundContexts = (index: number): RunnerContext[] => {
     const loopPrompt = pickRotatingPrompt(loopPrompts, index);
+    // Per-round image window; [0] is our single-source i2i pick (batch>1 =
+    // follow-up). Falls back to each prompt's own source when the loop
+    // supplies none — regression-safe for text-only loops.
+    const sliced = loopImages.length
+      ? sliceLoopImages(loopImages, index, batchSize)[0] ?? null
+      : null;
     return baseContexts.map((ctx) => ({
       ...ctx,
+      source_url: sliced ?? ctx.source_url,
       body: injectLoopVariables(
         loopPrompt ? `${loopPrompt}\n\n${ctx.body}` : ctx.body,
         { index, total },

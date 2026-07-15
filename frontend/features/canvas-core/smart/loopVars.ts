@@ -54,3 +54,24 @@ export function pickRotatingPrompt(prompts: readonly string[], index: number): s
   const i = Math.max(1, Math.floor(index) || 1);
   return values[(i - 1) % values.length];
 }
+
+/** IC imageBatchSize clamp — 1..100, floored. */
+export function clampBatchSize(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  return Math.max(1, Math.min(100, Math.floor(value)));
+}
+
+/**
+ * Per-round image window (IC smartLoopInputImages, :12332): for a round
+ * whose 《计数》 = index, take items[index-1 .. index-1+batchSize]. A sliding
+ * window stepping by 1 per round. Over-run / empty input → empty window.
+ */
+export function sliceLoopImages<T>(
+  items: readonly T[],
+  index: number,
+  batchSize: number,
+): T[] {
+  const start = Math.max(0, Math.floor(index) - 1);
+  const size = clampBatchSize(batchSize);
+  return items.slice(start, start + size);
+}

@@ -857,6 +857,92 @@ body {
   color: var(--canvas-muted);
 }
 
+/* ── Loop node IC card (parity with Infinite .loop-smart-*) ─────────── */
+.mh-loop-node { padding: 0; }
+.mh-loop-card { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
+.mh-loop-row { display: flex; align-items: center; gap: 7px; }
+
+.mh-loop-seg {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 2px; padding: 2px;
+  border-radius: 10px; border: 1px solid var(--canvas-line);
+  background: color-mix(in srgb, var(--canvas-panel) 60%, transparent);
+}
+.mh-loop-seg-btn {
+  height: 25px; border-radius: 9px; background: transparent;
+  color: var(--canvas-line-strong); font-size: 11px; font-weight: 700;
+  transition: background .14s ease, color .14s ease;
+}
+.mh-loop-seg-btn:hover { color: var(--canvas-strong); }
+.mh-loop-seg-btn.active { background: var(--canvas-strong); color: var(--canvas-panel); }
+
+.mh-loop-toggle {
+  flex: 1 1 0; height: 30px; border-radius: 11px; padding: 0 9px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  border: 1px solid var(--canvas-line); background: transparent;
+  color: var(--canvas-line-strong); font-size: 11px; font-weight: 700;
+  transition: border-color .14s ease, color .14s ease, background .14s ease;
+}
+.mh-loop-toggle:hover { border-color: var(--canvas-line-strong); color: var(--canvas-strong); }
+.mh-loop-toggle.active {
+  color: var(--canvas-strong); border-color: var(--canvas-strong);
+  background: color-mix(in srgb, var(--canvas-strong) 8%, transparent);
+}
+
+.mh-loop-panel {
+  display: flex; flex-direction: column; gap: 6px; padding: 8px;
+  border-radius: 12px; border: 1px solid var(--canvas-line);
+  background: color-mix(in srgb, var(--canvas-panel) 40%, transparent);
+}
+.mh-loop-mini {
+  display: inline-flex; align-items: center; gap: 5px;
+  color: var(--canvas-line-strong); font-size: 10.5px; font-weight: 700;
+}
+.mh-loop-mini input {
+  width: 46px; height: 24px; text-align: center; border-radius: 8px;
+  border: 1px solid var(--canvas-line); background: transparent;
+  color: var(--canvas-strong); font-size: 11px; font-weight: 800; outline: none;
+}
+.mh-loop-note { color: var(--canvas-line-strong); font-size: 10px; line-height: 1.35; }
+
+.mh-loop-prompt-list { display: flex; flex-direction: column; gap: 6px; }
+.mh-loop-prompt-item { display: flex; align-items: flex-start; gap: 5px; }
+.mh-loop-prompt-index { padding-top: 6px; font-size: 10px; color: var(--canvas-line-strong); }
+.mh-loop-text {
+  flex: 1; min-height: 34px; resize: vertical; border-radius: 10px;
+  border: 1px solid var(--canvas-line); background: transparent; padding: 6px 8px;
+  color: var(--canvas-strong); font-size: 12px; outline: none;
+}
+.mh-loop-text::placeholder { color: var(--canvas-line-strong); }
+.mh-loop-prompt-actions { display: flex; align-items: center; gap: 6px; }
+.mh-loop-token {
+  height: 24px; padding: 0 8px; border-radius: 8px;
+  border: 1px solid var(--canvas-line); background: color-mix(in srgb, var(--canvas-strong) 6%, transparent);
+  color: var(--canvas-strong); font-size: 11px; font-weight: 700;
+}
+.mh-loop-add, .mh-loop-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 24px; width: 24px; border-radius: 8px; color: var(--canvas-line-strong);
+}
+.mh-loop-add:hover, .mh-loop-icon-btn:hover:not(:disabled) { color: var(--canvas-strong); }
+.mh-loop-icon-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+.mh-loop-footer { display: flex; align-items: center; gap: 7px; }
+.mh-loop-run {
+  margin-left: auto; height: 30px; padding: 0 12px; border-radius: 11px;
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--canvas-strong); color: var(--canvas-panel);
+  font-size: 11px; font-weight: 800;
+}
+.mh-loop-run:disabled { opacity: .5; cursor: not-allowed; }
+.mh-loop-run.is-stop { background: #e11d48; color: #fff; }
+
+/* Loop node label input (transparent bg, --canvas-strong text, small font) */
+.mh-loop-label {
+  background: transparent; border: none; outline: none; padding: 0;
+  color: var(--canvas-strong); font-size: 12px; font-weight: 600;
+}
+.mh-loop-label::placeholder { color: var(--canvas-line-strong); }
+
 /* Floating canvas chrome: the Infinite glass island (panel glass + blur +
    island radius + soft wide shadow). Use on toolbars, palettes, menus that
    float over the canvas. */

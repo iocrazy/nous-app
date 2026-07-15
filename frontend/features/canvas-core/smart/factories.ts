@@ -199,6 +199,9 @@ export function createLoopNode(
       rounds: data.rounds ?? 1,
       round_start: data.round_start ?? 1,
       prompts: data.prompts ?? [''],
+      show_prompt: data.show_prompt ?? true,
+      image_input: data.image_input ?? false,
+      image_batch_size: data.image_batch_size ?? 1,
     },
   };
 }

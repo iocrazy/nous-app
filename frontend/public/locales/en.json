@@ -1781,7 +1781,20 @@
       "title": "Group",
       "dropHint": "Drop images to auto-collect"
     },
-    "arrangeSelected": "Arrange selected"
+    "arrangeSelected": "Arrange selected",
+    "loopModeSerial": "Serial",
+    "loopModeParallel": "Parallel",
+    "loopToggleImage": "Image",
+    "loopTogglePrompt": "Prompt",
+    "loopBatch": "Batch",
+    "loopStart": "Start",
+    "loopRounds": "Rounds",
+    "loopRunAll": "Run all",
+    "loopCounterToken": "《Count》",
+    "loopLabelPlaceholder": "Loop label (optional)",
+    "loopPromptPlaceholder": "Prompt for this round — 《Count》 = round index",
+    "loopImageWillOutput": "Will output {{n}} image(s)",
+    "loopImageEmpty": "Connect an image or image group to the left port"
   },
   "modelParams": {
     "otherParams": "Parameters",
